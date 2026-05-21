@@ -1,18 +1,14 @@
-'use client'
+"use client";
 
-import {
-  PlusIcon,
-  PencilSquareIcon,
-  TrashIcon,
-} from '@heroicons/react/24/outline'
-import type { PromoCodeItem } from '@/services/settings'
+import { PlusIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
+import type { PromoCodeItem } from "@/services/settings";
 
 interface PromoCodesTabProps {
-  promoCodes: PromoCodeItem[]
-  deletingId: string | null
-  openCreateModal: () => void
-  openEditModal: (promo: PromoCodeItem) => void
-  handleDeletePromoCode: (id: string) => void
+  promoCodes: PromoCodeItem[];
+  deletingId: string | null;
+  openCreateModal: () => void;
+  openEditModal: (promo: PromoCodeItem) => void;
+  handleDeletePromoCode: (id: string) => void;
 }
 
 export default function PromoCodesTab({
@@ -28,7 +24,9 @@ export default function PromoCodesTab({
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-[14px] font-semibold text-gray-900">Promo Codes</h2>
-            <p className="text-[12px] text-gray-500 mt-0.5">Create discount codes guests can apply during booking</p>
+            <p className="text-[12px] text-gray-500 mt-0.5">
+              Create discount codes guests can apply during booking
+            </p>
           </div>
           <button
             onClick={openCreateModal}
@@ -42,12 +40,24 @@ export default function PromoCodesTab({
         {promoCodes.length === 0 ? (
           <div className="bg-gray-50 rounded-lg border border-dashed border-gray-300 p-6 text-center">
             <div className="w-10 h-10 bg-gray-200 rounded-full mx-auto flex items-center justify-center mb-2">
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              <svg
+                className="w-5 h-5 text-gray-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                />
               </svg>
             </div>
             <p className="text-[13px] font-medium text-gray-600">No promo codes yet</p>
-            <p className="text-[12px] text-gray-400 mt-0.5">Create your first promo code to offer discounts to guests</p>
+            <p className="text-[12px] text-gray-400 mt-0.5">
+              Create your first promo code to offer discounts to guests
+            </p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -66,21 +76,25 @@ export default function PromoCodesTab({
                 {/* Discount info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                      promo.discountType === 'percentage'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-green-100 text-green-700'
-                    }`}>
-                      {promo.discountType === 'percentage'
+                    <span
+                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                        promo.discountType === "percentage"
+                          ? "bg-blue-100 text-blue-700"
+                          : "bg-green-100 text-green-700"
+                      }`}
+                    >
+                      {promo.discountType === "percentage"
                         ? `${promo.discountValue}% off`
                         : `${promo.discountValue} fixed`}
                     </span>
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-                      promo.isActive
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {promo.isActive ? 'Active' : 'Inactive'}
+                    <span
+                      className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+                        promo.isActive
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-gray-100 text-gray-500"
+                      }`}
+                    >
+                      {promo.isActive ? "Active" : "Inactive"}
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-1">
@@ -99,9 +113,7 @@ export default function PromoCodesTab({
                       </span>
                     )}
                     {promo.maxUses == null && promo.useCount > 0 && (
-                      <span className="text-[11px] text-gray-400">
-                        {promo.useCount} uses
-                      </span>
+                      <span className="text-[11px] text-gray-400">{promo.useCount} uses</span>
                     )}
                   </div>
                 </div>
@@ -128,5 +140,5 @@ export default function PromoCodesTab({
         )}
       </div>
     </div>
-  )
+  );
 }

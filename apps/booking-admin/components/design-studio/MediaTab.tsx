@@ -1,21 +1,27 @@
-'use client'
+"use client";
 
-import { type RefObject } from 'react'
-import { PhotoIcon, XMarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
+import { type RefObject } from "react";
+import { PhotoIcon, XMarkIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 
 interface MediaTabProps {
-  heroImage: string; setHeroImage: (v: string) => void
-  heroHeading: string; setHeroHeading: (v: string) => void
-  heroSubtext: string; setHeroSubtext: (v: string) => void
-  fileInputRef: RefObject<HTMLInputElement>
-  handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
-  removeHeroImage: () => void
-  resetContent: () => void
+  heroImage: string;
+  setHeroImage: (v: string) => void;
+  heroHeading: string;
+  setHeroHeading: (v: string) => void;
+  heroSubtext: string;
+  setHeroSubtext: (v: string) => void;
+  fileInputRef: RefObject<HTMLInputElement>;
+  handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  removeHeroImage: () => void;
+  resetContent: () => void;
 }
 
 export default function MediaTab({
-  heroImage, setHeroHeading, setHeroSubtext,
-  heroHeading, heroSubtext,
+  heroImage,
+  setHeroHeading,
+  setHeroSubtext,
+  heroHeading,
+  heroSubtext,
   fileInputRef,
   handleImageUpload,
   removeHeroImage,
@@ -25,12 +31,21 @@ export default function MediaTab({
     <>
       {/* Hero Image */}
       <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-[13px] font-semibold text-gray-900">Hero Image <span className="text-red-500">*</span></h2>
+        <h2 className="text-[13px] font-semibold text-gray-900">
+          Hero Image <span className="text-red-500">*</span>
+        </h2>
         <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">1920x1080 recommended</p>
 
         {heroImage ? (
           <div className="relative rounded-lg overflow-hidden bg-gray-200">
-            <img src={heroImage} alt="Hero" className="w-full h-36 object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+            <img
+              src={heroImage}
+              alt="Hero"
+              className="w-full h-36 object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
             <button
               onClick={removeHeroImage}
               className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors"
@@ -48,7 +63,13 @@ export default function MediaTab({
           </button>
         )}
 
-        <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImageUpload}
+          className="hidden"
+        />
 
         {heroImage && (
           <button
@@ -80,7 +101,9 @@ export default function MediaTab({
             <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Subtext</label>
             <textarea
               value={heroSubtext}
-              onChange={(e) => { if (e.target.value.length <= 200) setHeroSubtext(e.target.value) }}
+              onChange={(e) => {
+                if (e.target.value.length <= 200) setHeroSubtext(e.target.value);
+              }}
               rows={3}
               className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
               placeholder="Enter hero subtext"
@@ -97,5 +120,5 @@ export default function MediaTab({
         </div>
       </div>
     </>
-  )
+  );
 }

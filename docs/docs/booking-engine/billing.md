@@ -11,11 +11,13 @@ Each hotel on the vayada booking engine is on a billing plan that determines how
 There are two types of billing plans:
 
 ### Commission-based
+
 - vayada takes a **percentage** of each booking
 - Example: 5% commission on every booking made through the booking engine
 - Best for: hotels that want to start with no upfront cost
 
 ### Fixed fee
+
 - The hotel pays a **fixed monthly fee** to use the booking engine
 - No per-booking commission
 - Best for: hotels with high booking volume

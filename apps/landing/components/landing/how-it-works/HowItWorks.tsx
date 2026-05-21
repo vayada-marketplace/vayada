@@ -1,16 +1,14 @@
-import { HOW_IT_WORKS_STEPS } from '@/lib/constants'
-import { SECTIONS } from '@/lib/constants/sections'
-import { ROUTES } from '@/lib/constants/routes'
-import { Button } from '@/components/ui'
+import { HOW_IT_WORKS_STEPS } from "@/lib/constants";
+import { SECTIONS } from "@/lib/constants/sections";
+import { ROUTES } from "@/lib/constants/routes";
+import { Button } from "@/components/ui";
 
 export default function HowItWorks() {
   return (
     <section id={SECTIONS.HOW_IT_WORKS} className="py-20 px-4 sm:px-6 lg:px-8 bg-white">
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-16">
-          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-            How vayada Works
-          </h2>
+          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">How vayada Works</h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
             A simple, transparent process from discovery to collaboration
           </p>
@@ -35,12 +33,20 @@ export default function HowItWorks() {
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <a href={`${ROUTES.SIGNUP}?type=hotel`}>
-              <Button variant="secondary" size="lg" className="bg-white text-primary-600 hover:bg-gray-100">
+              <Button
+                variant="secondary"
+                size="lg"
+                className="bg-white text-primary-600 hover:bg-gray-100"
+              >
                 Sign Up as Hotel
               </Button>
             </a>
             <a href={`${ROUTES.SIGNUP}?type=creator`}>
-              <Button variant="outline" size="lg" className="border-white text-white hover:bg-white/10">
+              <Button
+                variant="outline"
+                size="lg"
+                className="border-white text-white hover:bg-white/10"
+              >
                 Sign Up as Creator
               </Button>
             </a>
@@ -48,6 +54,5 @@ export default function HowItWorks() {
         </div>
       </div>
     </section>
-  )
+  );
 }
-

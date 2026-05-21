@@ -1,7 +1,7 @@
-import Image from 'next/image'
-import Link from 'next/link'
-import type { Metadata } from 'next'
-import type { ReactNode } from 'react'
+import Image from "next/image";
+import Link from "next/link";
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import {
   ArrowRightIcon,
   ChartBarIcon,
@@ -13,105 +13,105 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
   UserGroupIcon,
-} from '@heroicons/react/24/outline'
-import { LandingFooter } from '@/components/landing'
-import { Navigation } from '@/components/layout'
-import { PlatformIcon } from '@/components/ui/icons/SocialIcons'
-import { ROUTES } from '@/lib/constants/routes'
-import { creatorService } from '@/services/api/creators'
-import { hotelService } from '@/services/api/hotels'
+} from "@heroicons/react/24/outline";
+import { LandingFooter } from "@/components/landing";
+import { Navigation } from "@/components/layout";
+import { PlatformIcon } from "@/components/ui/icons/SocialIcons";
+import { ROUTES } from "@/lib/constants/routes";
+import { creatorService } from "@/services/api/creators";
+import { hotelService } from "@/services/api/hotels";
 
 export const metadata: Metadata = {
-  title: 'Hotel-Creator-Network - vayada',
+  title: "Hotel-Creator-Network - vayada",
   description:
-    'Vayada matches independent hotels with vetted creators and turns word of mouth into measurable, attributable direct bookings.',
-}
+    "Vayada matches independent hotels with vetted creators and turns word of mouth into measurable, attributable direct bookings.",
+};
 
-export const dynamic = 'force-dynamic'
+export const dynamic = "force-dynamic";
 
 const problemCards = [
   {
-    title: 'Untracked recommendations',
-    body: 'Hotels cannot measure which creators and guest conversations actually drive demand.',
+    title: "Untracked recommendations",
+    body: "Hotels cannot measure which creators and guest conversations actually drive demand.",
   },
   {
-    title: 'Manual collaboration chaos',
-    body: 'Applications, dates, terms and deliverables get scattered across DMs and emails.',
+    title: "Manual collaboration chaos",
+    body: "Applications, dates, terms and deliverables get scattered across DMs and emails.",
   },
   {
-    title: 'Bookings leak to OTAs',
-    body: 'Inspired travelers still search on marketplaces, where hotels lose margin and guest data.',
+    title: "Bookings leak to OTAs",
+    body: "Inspired travelers still search on marketplaces, where hotels lose margin and guest data.",
   },
-]
+];
 
 const hotelFeatures = [
-  'Verified creator data',
-  'Centralized dashboard',
-  'Two-way reviews',
-  'Affiliate tracking',
-]
+  "Verified creator data",
+  "Centralized dashboard",
+  "Two-way reviews",
+  "Affiliate tracking",
+];
 
 const creatorFeatures = [
-  'Verified creator profile',
-  'Open hotel offers',
-  'Structured applications',
-  'Future affiliate revenue',
-]
+  "Verified creator profile",
+  "Open hotel offers",
+  "Structured applications",
+  "Future affiliate revenue",
+];
 
 const workflowSteps = [
   {
-    title: 'Discover',
-    body: 'Hotels find creators. Creators find hotel offers.',
+    title: "Discover",
+    body: "Hotels find creators. Creators find hotel offers.",
   },
   {
-    title: 'Match',
-    body: 'Both sides agree on dates, deliverables and collaboration terms.',
+    title: "Match",
+    body: "Both sides agree on dates, deliverables and collaboration terms.",
   },
   {
-    title: 'Create',
-    body: 'Creators produce content and trusted recommendations for the property.',
+    title: "Create",
+    body: "Creators produce content and trusted recommendations for the property.",
   },
   {
-    title: 'Track',
-    body: 'Referral links turn creator trust into measurable direct bookings.',
+    title: "Track",
+    body: "Referral links turn creator trust into measurable direct bookings.",
   },
-]
+];
 
 const affiliatePoints = [
   {
-    title: 'Unique creator links',
-    body: 'Track every creator, property and campaign individually.',
+    title: "Unique creator links",
+    body: "Track every creator, property and campaign individually.",
   },
   {
-    title: 'Commission on confirmed stays',
-    body: 'Pay for results instead of vague exposure.',
+    title: "Commission on confirmed stays",
+    body: "Pay for results instead of vague exposure.",
   },
   {
-    title: 'Guest data stays direct',
+    title: "Guest data stays direct",
     body: "Bookings land in the hotel's own flow, not on an OTA.",
   },
-]
+];
 
 type NetworkStats = {
-  networkMembers: string
-  combinedReach: string
-  propertiesOnboarded: string
-}
+  networkMembers: string;
+  combinedReach: string;
+  propertiesOnboarded: string;
+};
 
 function formatCount(value: number) {
   if (value >= 1_000_000) {
-    return `${Math.floor(value / 1_000_000)}M+`
+    return `${Math.floor(value / 1_000_000)}M+`;
   }
 
   if (value >= 1000) {
-    return `${Math.floor(value / 1000)}K+`
+    return `${Math.floor(value / 1000)}K+`;
   }
 
   if (value >= 100) {
-    return `${Math.floor(value / 10) * 10}+`
+    return `${Math.floor(value / 10) * 10}+`;
   }
 
-  return value.toLocaleString('en-US')
+  return value.toLocaleString("en-US");
 }
 
 async function getNetworkStats(): Promise<NetworkStats | null> {
@@ -119,31 +119,31 @@ async function getNetworkStats(): Promise<NetworkStats | null> {
     const [creatorsResponse, hotelsResponse] = await Promise.all([
       creatorService.getAll(),
       hotelService.getAll(),
-    ])
+    ]);
 
-    const creators = creatorsResponse.data
-    const hotels = hotelsResponse.data
+    const creators = creatorsResponse.data;
+    const hotels = hotelsResponse.data;
     const combinedReach = creators.reduce((total, creator) => {
       const audienceSize =
         creator.audienceSize ||
-        creator.platforms.reduce((sum, platform) => sum + (platform.followers || 0), 0)
+        creator.platforms.reduce((sum, platform) => sum + (platform.followers || 0), 0);
 
-      return total + audienceSize
-    }, 0)
+      return total + audienceSize;
+    }, 0);
 
     return {
       networkMembers: formatCount(creators.length + hotels.length),
       combinedReach: formatCount(combinedReach),
       propertiesOnboarded: formatCount(hotels.length),
-    }
+    };
   } catch (error) {
-    console.error('Failed to load Hotel-Creator-Network stats:', error)
-    return null
+    console.error("Failed to load Hotel-Creator-Network stats:", error);
+    return null;
   }
 }
 
 export default async function HotelCreatorNetworkPage() {
-  const stats = await getNetworkStats()
+  const stats = await getNetworkStats();
 
   return (
     <main className="min-h-screen bg-white text-ink">
@@ -157,13 +157,11 @@ export default async function HotelCreatorNetworkPage() {
               Hotel-Creator-Network
             </p>
             <h1 className="mt-4 font-display text-4xl font-semibold leading-tight text-ink md:text-6xl">
-              Turn creator trust into{' '}
-              <span className="text-primary-500">direct bookings</span>
+              Turn creator trust into <span className="text-primary-500">direct bookings</span>
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-gray-500">
-              Vayada connects independent hotels with verified creators,
-              manages collaborations in one place and turns referrals into
-              measurable direct bookings.
+              Vayada connects independent hotels with verified creators, manages collaborations in
+              one place and turns referrals into measurable direct bookings.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
@@ -183,23 +181,17 @@ export default async function HotelCreatorNetworkPage() {
             {stats && (
               <div className="mt-8 flex flex-wrap items-center justify-center gap-x-7 gap-y-2 text-sm text-gray-500">
                 <span>
-                  <strong className="font-semibold text-ink">
-                    {stats.networkMembers}
-                  </strong>{' '}
-                  network members
+                  <strong className="font-semibold text-ink">{stats.networkMembers}</strong> network
+                  members
                 </span>
                 <span className="hidden text-border-strong sm:inline">/</span>
                 <span>
-                  <strong className="font-semibold text-ink">
-                    {stats.combinedReach}
-                  </strong>{' '}
-                  combined reach
+                  <strong className="font-semibold text-ink">{stats.combinedReach}</strong> combined
+                  reach
                 </span>
                 <span className="hidden text-border-strong sm:inline">/</span>
                 <span>
-                  <strong className="font-semibold text-ink">
-                    {stats.propertiesOnboarded}
-                  </strong>{' '}
+                  <strong className="font-semibold text-ink">{stats.propertiesOnboarded}</strong>{" "}
                   properties onboarded
                 </span>
               </div>
@@ -237,7 +229,7 @@ export default async function HotelCreatorNetworkPage() {
           <SectionIntro
             title={
               <>
-                Travel decisions start with trust, but bookings still leak to{' '}
+                Travel decisions start with trust, but bookings still leak to{" "}
                 <span className="text-primary-500">OTAs</span>
               </>
             }
@@ -249,9 +241,7 @@ export default async function HotelCreatorNetworkPage() {
                 key={card.title}
                 className="rounded-2xl border border-border bg-white p-7 shadow-soft"
               >
-                <h3 className="font-display text-xl font-semibold text-ink">
-                  {card.title}
-                </h3>
+                <h3 className="font-display text-xl font-semibold text-ink">{card.title}</h3>
                 <p className="mt-3 leading-relaxed text-gray-500">{card.body}</p>
               </div>
             ))}
@@ -292,7 +282,7 @@ export default async function HotelCreatorNetworkPage() {
             eyebrow="How it works"
             title={
               <>
-                From collaboration to{' '}
+                From collaboration to{" "}
                 <span className="text-primary-500">direct booking demand</span>
               </>
             }
@@ -306,12 +296,8 @@ export default async function HotelCreatorNetworkPage() {
                 <div className="grid h-9 w-9 place-items-center rounded-full bg-primary-50 font-display text-sm font-semibold text-primary-500">
                   {index + 1}
                 </div>
-                <h3 className="mt-4 font-display text-lg font-semibold text-ink">
-                  {step.title}
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-gray-500">
-                  {step.body}
-                </p>
+                <h3 className="mt-4 font-display text-lg font-semibold text-ink">{step.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-gray-500">{step.body}</p>
               </div>
             ))}
           </div>
@@ -325,13 +311,12 @@ export default async function HotelCreatorNetworkPage() {
               Affiliate tracking
             </p>
             <h2 className="mt-4 font-display text-3xl font-semibold leading-tight text-ink md:text-5xl">
-              Turn recommendations into{' '}
-              <span className="text-primary-500">measurable revenue</span>
+              Turn recommendations into <span className="text-primary-500">measurable revenue</span>
             </h2>
             <p className="mt-5 text-lg leading-relaxed text-gray-500">
-              Every creator can receive a unique referral link connected to the
-              hotel's direct booking engine. Hotels track clicks, bookings and
-              revenue while creators can earn commission on confirmed stays.
+              Every creator can receive a unique referral link connected to the hotel's direct
+              booking engine. Hotels track clicks, bookings and revenue while creators can earn
+              commission on confirmed stays.
             </p>
             <ul className="mt-7 space-y-4">
               {affiliatePoints.map((point) => (
@@ -340,9 +325,7 @@ export default async function HotelCreatorNetworkPage() {
                     <CheckIcon className="h-3 w-3" strokeWidth={3} />
                   </span>
                   <span>
-                    <span className="block font-medium text-ink">
-                      {point.title}
-                    </span>
+                    <span className="block font-medium text-ink">{point.title}</span>
                     <span className="block text-sm leading-relaxed text-gray-500">
                       {point.body}
                     </span>
@@ -371,13 +354,11 @@ export default async function HotelCreatorNetworkPage() {
           <div className="pointer-events-none absolute inset-0 bg-[var(--gradient-hero)]" />
           <div className="relative mx-auto max-w-2xl">
             <h2 className="font-display text-4xl font-semibold leading-tight text-ink md:text-6xl">
-              Ready to turn trust into{' '}
-              <span className="text-primary-500">direct bookings</span>?
+              Ready to turn trust into <span className="text-primary-500">direct bookings</span>?
             </h2>
             <p className="mt-5 text-lg leading-relaxed text-gray-500">
-              Whether you are a hotel looking for creator-led demand or a
-              creator looking for better collaborations, Vayada gives you the
-              infrastructure to work together and grow.
+              Whether you are a hotel looking for creator-led demand or a creator looking for better
+              collaborations, Vayada gives you the infrastructure to work together and grow.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
@@ -400,7 +381,7 @@ export default async function HotelCreatorNetworkPage() {
 
       <LandingFooter />
     </main>
-  )
+  );
 }
 
 function SectionIntro({
@@ -408,27 +389,21 @@ function SectionIntro({
   title,
   body,
 }: {
-  eyebrow?: string
-  title: ReactNode
-  body?: string
+  eyebrow?: string;
+  title: ReactNode;
+  body?: string;
 }) {
   return (
     <div className="mx-auto max-w-3xl text-center">
-      {eyebrow && (
-        <p className="text-xs uppercase tracking-[0.2em] text-primary-500">
-          {eyebrow}
-        </p>
-      )}
+      {eyebrow && <p className="text-xs uppercase tracking-[0.2em] text-primary-500">{eyebrow}</p>}
       <h2 className="font-display text-3xl font-semibold leading-tight text-ink md:text-5xl">
         {title}
       </h2>
       {body && (
-        <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-gray-500">
-          {body}
-        </p>
+        <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-gray-500">{body}</p>
       )}
     </div>
-  )
+  );
 }
 
 function ProductFrame({ children }: { children: ReactNode }) {
@@ -436,7 +411,7 @@ function ProductFrame({ children }: { children: ReactNode }) {
     <div className="overflow-hidden rounded-3xl border border-border-strong bg-white shadow-elevated">
       {children}
     </div>
-  )
+  );
 }
 
 function CreatorMarketplacePreview() {
@@ -482,9 +457,7 @@ function CreatorMarketplacePreview() {
               </div>
 
               <div className="min-w-0 pb-1 text-white">
-                <h3 className="truncate text-2xl font-extrabold tracking-tight">
-                  Dario Explore
-                </h3>
+                <h3 className="truncate text-2xl font-extrabold tracking-tight">Dario Explore</h3>
                 <div className="mt-1 flex items-center text-sm font-semibold text-white/80">
                   <MapPinIcon className="mr-1.5 h-4 w-4 flex-shrink-0 text-white/65" />
                   <span className="truncate">Osaka, Japan</span>
@@ -510,9 +483,7 @@ function CreatorMarketplacePreview() {
                 <ChartBarIcon className="h-4 w-4 text-primary-500" />
                 <span>Engagement</span>
               </div>
-              <p className="truncate text-2xl font-extrabold tracking-tight text-gray-950">
-                4.9%
-              </p>
+              <p className="truncate text-2xl font-extrabold tracking-tight text-gray-950">4.9%</p>
             </div>
           </div>
 
@@ -521,7 +492,7 @@ function CreatorMarketplacePreview() {
               Audience
             </div>
             <div className="flex flex-wrap gap-2">
-              {['Japan', 'USA', 'UK'].map((country) => (
+              {["Japan", "USA", "UK"].map((country) => (
                 <span
                   key={country}
                   className="inline-flex items-center rounded-full bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 ring-1 ring-gray-200"
@@ -537,7 +508,7 @@ function CreatorMarketplacePreview() {
               Platforms
             </div>
             <div className="flex flex-wrap gap-2">
-              {['Instagram', 'TikTok'].map((platform) => (
+              {["Instagram", "TikTok"].map((platform) => (
                 <span
                   key={platform}
                   className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-gray-700 shadow-sm ring-1 ring-gray-200"
@@ -556,7 +527,7 @@ function CreatorMarketplacePreview() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function AudienceSection({
@@ -572,26 +543,24 @@ function AudienceSection({
   reverse = false,
   icon,
 }: {
-  id: string
-  eyebrow: string
-  title: string
-  body: string
-  ctaLabel: string
-  ctaHref: string
-  image: string
-  imageAlt: string
-  features: string[]
-  reverse?: boolean
-  icon: 'hotel' | 'creator'
+  id: string;
+  eyebrow: string;
+  title: string;
+  body: string;
+  ctaLabel: string;
+  ctaHref: string;
+  image: string;
+  imageAlt: string;
+  features: string[];
+  reverse?: boolean;
+  icon: "hotel" | "creator";
 }) {
   return (
     <section id={id} className="border-b border-border py-16 md:py-24">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="grid items-center gap-12 md:grid-cols-2">
-          <div className={reverse ? 'md:order-2' : ''}>
-            <p className="text-xs uppercase tracking-[0.2em] text-primary-500">
-              {eyebrow}
-            </p>
+          <div className={reverse ? "md:order-2" : ""}>
+            <p className="text-xs uppercase tracking-[0.2em] text-primary-500">{eyebrow}</p>
             <h2 className="mt-4 font-display text-3xl font-semibold leading-tight text-ink md:text-5xl">
               {title}
             </h2>
@@ -604,7 +573,7 @@ function AudienceSection({
               <ArrowRightIcon className="h-4 w-4" />
             </Link>
           </div>
-          <div className={`relative ${reverse ? 'md:order-1' : ''}`}>
+          <div className={`relative ${reverse ? "md:order-1" : ""}`}>
             <div className="absolute inset-0 rounded-[2rem] bg-primary-50 blur-3xl" />
             <div className="relative overflow-hidden rounded-3xl border border-border-strong bg-white shadow-elevated">
               <Image
@@ -622,9 +591,7 @@ function AudienceSection({
           {features.map((feature) => (
             <li key={feature} className="border-t border-border pt-5">
               <FeatureIcon icon={icon} label={feature} />
-              <p className="mt-3 font-display text-lg font-semibold text-ink">
-                {feature}
-              </p>
+              <p className="mt-3 font-display text-lg font-semibold text-ink">{feature}</p>
               <p className="mt-2 text-sm leading-relaxed text-gray-500">
                 {getFeatureBody(feature)}
               </p>
@@ -633,52 +600,44 @@ function AudienceSection({
         </ul>
       </div>
     </section>
-  )
+  );
 }
 
-function FeatureIcon({
-  icon,
-  label,
-}: {
-  icon: 'hotel' | 'creator'
-  label: string
-}) {
+function FeatureIcon({ icon, label }: { icon: "hotel" | "creator"; label: string }) {
   const Icon =
-    label.includes('tracking') || label.includes('affiliate')
+    label.includes("tracking") || label.includes("affiliate")
       ? LinkIcon
-      : label.includes('data') || label.includes('profile')
+      : label.includes("data") || label.includes("profile")
         ? ShieldCheckIcon
-        : label.includes('dashboard') || label.includes('applications')
+        : label.includes("dashboard") || label.includes("applications")
           ? ChartBarIcon
-          : SparklesIcon
+          : SparklesIcon;
 
   return (
     <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary-50 text-primary-500">
       <Icon className="h-5 w-5" aria-hidden="true" />
       <span className="sr-only">{`${icon} ${label}`}</span>
     </span>
-  )
+  );
 }
 
 function getFeatureBody(feature: string) {
   const descriptions: Record<string, string> = {
-    'Verified creator data':
-      'Review reach, engagement, audience countries and platform performance before approving a collaboration.',
-    'Centralized dashboard':
-      'Manage applications, messages, terms and deliverables in one organized workspace.',
-    'Two-way reviews':
-      'Build trust with creators and reduce risk before future collaborations.',
-    'Affiliate tracking':
-      'Give creators tracked referral links so every recommendation can become a measurable booking.',
-    'Verified creator profile':
-      'Show hotels your reach, engagement, audience data and platforms in one professional profile.',
-    'Open hotel offers':
-      'Browse properties offering free stays, packages or paid collaborations.',
-    'Structured applications':
-      'Apply with preferred dates, platforms and deliverables in one simple flow.',
-    'Future affiliate revenue':
-      'Build your track record now and get ready to earn commission from tracked bookings.',
-  }
+    "Verified creator data":
+      "Review reach, engagement, audience countries and platform performance before approving a collaboration.",
+    "Centralized dashboard":
+      "Manage applications, messages, terms and deliverables in one organized workspace.",
+    "Two-way reviews": "Build trust with creators and reduce risk before future collaborations.",
+    "Affiliate tracking":
+      "Give creators tracked referral links so every recommendation can become a measurable booking.",
+    "Verified creator profile":
+      "Show hotels your reach, engagement, audience data and platforms in one professional profile.",
+    "Open hotel offers": "Browse properties offering free stays, packages or paid collaborations.",
+    "Structured applications":
+      "Apply with preferred dates, platforms and deliverables in one simple flow.",
+    "Future affiliate revenue":
+      "Build your track record now and get ready to earn commission from tracked bookings.",
+  };
 
-  return descriptions[feature]
+  return descriptions[feature];
 }

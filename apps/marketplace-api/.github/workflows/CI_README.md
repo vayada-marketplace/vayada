@@ -11,6 +11,7 @@ This repository uses GitHub Actions to automatically run tests and deploy code. 
 ## Workflow Files
 
 ### 1. `test.yml` - Test Workflow
+
 - **Triggers**: Push to `main`/`develop` branches, Pull Requests
 - **Purpose**: Run the full test suite
 - **Steps**:
@@ -22,6 +23,7 @@ This repository uses GitHub Actions to automatically run tests and deploy code. 
   6. Executes all tests
 
 ### 2. `deploy-to-ecr.yml` - Deployment Workflow
+
 - **Triggers**: Push to `main` branch
 - **Purpose**: Build and push Docker image to AWS ECR
 - **Dependencies**: Requires `test` job to pass first
@@ -84,6 +86,7 @@ PYTHONPATH=. pytest tests/ -v
 ## Environment Variables
 
 The test workflow uses these environment variables (set in the workflow file):
+
 - `DATABASE_URL`: Test database connection string
 - `EMAIL_ENABLED`: "true" (emails are mocked in tests)
 - `JWT_SECRET_KEY`: Test secret key
@@ -103,6 +106,7 @@ The test workflow uses these environment variables (set in the workflow file):
 ### Deployment Blocked
 
 If deployment is blocked, it means tests failed. Check:
+
 1. GitHub Actions → Latest workflow run
 2. Review test failures
 3. Fix issues locally
@@ -118,9 +122,8 @@ If deployment is blocked, it means tests failed. Check:
 ## Adding New Tests
 
 When you add new tests:
+
 1. Write the test in `tests/` directory
 2. Follow existing test patterns
 3. Ensure tests are independent and can run in any order
 4. Tests will automatically run in CI
-
-

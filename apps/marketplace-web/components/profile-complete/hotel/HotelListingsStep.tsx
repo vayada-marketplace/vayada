@@ -1,24 +1,28 @@
-'use client'
+"use client";
 
-import { MutableRefObject } from 'react'
-import { HotelBadgeIcon } from '@/components/ui'
-import { PlusIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
-import type { ListingFormData } from '@/lib/types'
-import { ListingCard } from './ListingCard'
+import { MutableRefObject } from "react";
+import { HotelBadgeIcon } from "@/components/ui";
+import { PlusIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import type { ListingFormData } from "@/lib/types";
+import { ListingCard } from "./ListingCard";
 
 interface HotelListingsStepProps {
-  listings: ListingFormData[]
-  collapsedCards: Set<number>
-  countryInputs: Record<number, string>
-  countries: string[]
-  imageInputRefs: MutableRefObject<(HTMLInputElement | null)[]>
-  onAddListing: () => void
-  onRemoveListing: (index: number) => void
-  onToggleCollapse: (index: number) => void
-  onUpdateListing: (index: number, field: keyof ListingFormData, value: ListingFormData[keyof ListingFormData]) => void
-  onImageChange: (listingIndex: number, e: React.ChangeEvent<HTMLInputElement>) => void
-  onRemoveImage: (listingIndex: number, imageIndex: number) => void
-  onCountryInputChange: (index: number, value: string) => void
+  listings: ListingFormData[];
+  collapsedCards: Set<number>;
+  countryInputs: Record<number, string>;
+  countries: string[];
+  imageInputRefs: MutableRefObject<(HTMLInputElement | null)[]>;
+  onAddListing: () => void;
+  onRemoveListing: (index: number) => void;
+  onToggleCollapse: (index: number) => void;
+  onUpdateListing: (
+    index: number,
+    field: keyof ListingFormData,
+    value: ListingFormData[keyof ListingFormData],
+  ) => void;
+  onImageChange: (listingIndex: number, e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemoveImage: (listingIndex: number, imageIndex: number) => void;
+  onCountryInputChange: (index: number, value: string) => void;
 }
 
 export function HotelListingsStep({
@@ -43,11 +47,12 @@ export function HotelListingsStep({
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-gray-900">Property Listings</h3>
             <span className="px-2 py-0.5 bg-red-50 text-red-700 rounded-full text-xs font-semibold">
-              {listings.length} listing{listings.length !== 1 ? 's' : ''}
+              {listings.length} listing{listings.length !== 1 ? "s" : ""}
             </span>
           </div>
           <p className="text-xs text-gray-500">
-            Add at least one property listing <span className="font-semibold text-red-600">(required)</span>
+            Add at least one property listing{" "}
+            <span className="font-semibold text-red-600">(required)</span>
           </p>
         </div>
       </div>
@@ -58,7 +63,9 @@ export function HotelListingsStep({
             <HotelBadgeIcon />
           </div>
           <p className="text-primary-800 font-semibold mb-1 text-sm">No listings added yet</p>
-          <p className="text-xs text-gray-600">Add at least one property listing to complete your profile.</p>
+          <p className="text-xs text-gray-600">
+            Add at least one property listing to complete your profile.
+          </p>
         </div>
       )}
 
@@ -68,7 +75,7 @@ export function HotelListingsStep({
           listing={listing}
           index={index}
           isCollapsed={collapsedCards.has(index)}
-          countryInput={countryInputs[index] || ''}
+          countryInput={countryInputs[index] || ""}
           countries={countries}
           imageInputRef={{ current: imageInputRefs.current[index] } as any}
           canRemove={listings.length > 1}
@@ -97,5 +104,5 @@ export function HotelListingsStep({
         </p>
       </div>
     </div>
-  )
+  );
 }

@@ -1,9 +1,9 @@
-"use client"
+"use client";
 
-import Link from "next/link"
-import { Navigation, Footer } from "@/components/layout"
-import { Button } from "@/components/ui"
-import { ROUTES } from "@/lib/constants/routes"
+import Link from "next/link";
+import { Navigation, Footer } from "@/components/layout";
+import { Button } from "@/components/ui";
+import { ROUTES } from "@/lib/constants/routes";
 import {
   CheckIcon,
   FolderIcon,
@@ -16,8 +16,8 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
   ArrowRightIcon,
-} from "@heroicons/react/24/outline"
-import { useState } from "react"
+} from "@heroicons/react/24/outline";
+import { useState } from "react";
 
 export default function HotelBenefitsPage() {
   return (
@@ -36,8 +36,9 @@ export default function HotelBenefitsPage() {
                   Start driving <span className="text-primary-600">direct bookings.</span>
                 </h1>
                 <p className="text-base md:text-lg text-gray-600 leading-relaxed max-w-2xl">
-                  Join the free marketplace where you discover, vet, and manage creator partnerships in one centralized hub.
-                  End the inbox chaos and find verified creators who match your target audience.
+                  Join the free marketplace where you discover, vet, and manage creator partnerships
+                  in one centralized hub. End the inbox chaos and find verified creators who match
+                  your target audience.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <Link href={`${ROUTES.SIGNUP}?type=hotel`}>
@@ -63,7 +64,11 @@ export default function HotelBenefitsPage() {
 
               <div className="relative flex justify-center">
                 <div className="rounded-2xl overflow-hidden shadow-xl bg-white max-w-md w-full">
-                  <img src="/hotel-hero.JPG" alt="Hotel with pool and sea view" className="w-full h-full object-cover" />
+                  <img
+                    src="/hotel-hero.JPG"
+                    alt="Hotel with pool and sea view"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               </div>
             </div>
@@ -74,7 +79,12 @@ export default function HotelBenefitsPage() {
         <section className="bg-[#f5f5f7] border-t border-b border-gray-200/80">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-gray-700 text-sm md:text-base">
-              {["100% Free to Join", "Verified Creator Data", "Centralized Dashboard", "Two-Way Reviews"].map((item) => (
+              {[
+                "100% Free to Join",
+                "Verified Creator Data",
+                "Centralized Dashboard",
+                "Two-Way Reviews",
+              ].map((item) => (
                 <div key={item} className="flex items-center gap-2">
                   <CheckIcon className="w-4 h-4 text-primary-600" />
                   <span>{item}</span>
@@ -93,8 +103,12 @@ export default function HotelBenefitsPage() {
 
           <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">The vayada hotel advantage</h2>
-              <p className="text-base md:text-lg text-gray-600 mt-3">Three pillars that transform how you manage creator partnerships</p>
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+                The vayada hotel advantage
+              </h2>
+              <p className="text-base md:text-lg text-gray-600 mt-3">
+                Three pillars that transform how you manage creator partnerships
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
@@ -102,21 +116,26 @@ export default function HotelBenefitsPage() {
                 {
                   title: "Operational Control",
                   tag: "Efficiency",
-                  description: "Gain full control over your creator partnerships. All inquiries, applications, and messages are centralized in one dashboard.",
-                  footnote: "Stop drowning in fragmented DMs and scattered requests across platforms.",
+                  description:
+                    "Gain full control over your creator partnerships. All inquiries, applications, and messages are centralized in one dashboard.",
+                  footnote:
+                    "Stop drowning in fragmented DMs and scattered requests across platforms.",
                   Icon: FolderIcon,
                 },
                 {
                   title: "Data-Driven Vetting",
                   tag: "Risk Reduction",
-                  description: "Access verified creator profiles with audience demographics, engagement rates, and platform metrics. Make informed decisions instantly.",
-                  footnote: "Eliminate manual work chasing portfolio links and unverified stat screenshots.",
+                  description:
+                    "Access verified creator profiles with audience demographics, engagement rates, and platform metrics. Make informed decisions instantly.",
+                  footnote:
+                    "Eliminate manual work chasing portfolio links and unverified stat screenshots.",
                   Icon: ShieldCheckIcon,
                 },
                 {
                   title: "Future Revenue Stream",
                   tag: "Future Hook",
-                  description: "Build your reputation now to access the 2026 affiliate system. Cut OTA commissions and drive performance-based direct bookings.",
+                  description:
+                    "Build your reputation now to access the 2026 affiliate system. Cut OTA commissions and drive performance-based direct bookings.",
                   footnote: "Position for 5–6% total booking cost vs 15–20% OTA fees.",
                   Icon: ArrowTrendingUpIcon,
                 },
@@ -132,7 +151,9 @@ export default function HotelBenefitsPage() {
                     <h3 className="text-xl md:text-2xl font-semibold text-gray-900">{title}</h3>
                     <p className="text-sm font-semibold text-primary-600 mt-1">{tag}</p>
                   </div>
-                  <p className="text-gray-700 leading-relaxed text-sm md:text-base">{description}</p>
+                  <p className="text-gray-700 leading-relaxed text-sm md:text-base">
+                    {description}
+                  </p>
                   <p className="text-gray-800 font-semibold text-sm md:text-base">→ {footnote}</p>
                 </div>
               ))}
@@ -161,29 +182,42 @@ export default function HotelBenefitsPage() {
                 <span className="inline-flex items-center gap-2 rounded-full bg-primary-50 text-primary-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
                   Verified operations
                 </span>
-                <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mt-3">Data Replaces DM Chaos</h2>
-                <p className="text-base md:text-lg text-gray-600 mt-2">Your professional hotel dashboard works for you 24/7</p>
+                <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mt-3">
+                  Data Replaces DM Chaos
+                </h2>
+                <p className="text-base md:text-lg text-gray-600 mt-2">
+                  Your professional hotel dashboard works for you 24/7
+                </p>
               </div>
 
               <div className="space-y-8 relative">
                 {[
                   {
                     title: "Centralized Request Management",
-                    description: "All creator stay inquiries are routed to a single, organized dashboard. Review, accept, or decline applications without sifting through cluttered email inboxes or scattered DMs.",
-                    problem: "Drowning in Fragmented Requests: Creator inquiries arrive across email, Instagram DMs, website forms, and more.",
-                    value: "Save hours weekly by managing all creator communications in one professional hub.",
+                    description:
+                      "All creator stay inquiries are routed to a single, organized dashboard. Review, accept, or decline applications without sifting through cluttered email inboxes or scattered DMs.",
+                    problem:
+                      "Drowning in Fragmented Requests: Creator inquiries arrive across email, Instagram DMs, website forms, and more.",
+                    value:
+                      "Save hours weekly by managing all creator communications in one professional hub.",
                   },
                   {
                     title: "Transparent Creator Metrics",
-                    description: "Access structured data including engagement rate, total reach, audience demographics, and platform breakdown. Verify creator quality at a glance.",
-                    problem: "Inefficient Selection & Risk: Manually chasing portfolio links and unverified stat screenshots wastes time and increases risk.",
-                    value: "Make data-driven decisions instantly. Find creators who genuinely match your target audience.",
+                    description:
+                      "Access structured data including engagement rate, total reach, audience demographics, and platform breakdown. Verify creator quality at a glance.",
+                    problem:
+                      "Inefficient Selection & Risk: Manually chasing portfolio links and unverified stat screenshots wastes time and increases risk.",
+                    value:
+                      "Make data-driven decisions instantly. Find creators who genuinely match your target audience.",
                   },
                   {
                     title: "Creator Review System",
-                    description: "Every completed collaboration results in a two-way review. Build a track record of successful partnerships that attracts higher-quality creators.",
-                    problem: "Lack of Accountability: No way to verify if a creator will deliver on promises or behave professionally.",
-                    value: "Reduce risk by partnering with creators who have verified positive reviews from other hotels.",
+                    description:
+                      "Every completed collaboration results in a two-way review. Build a track record of successful partnerships that attracts higher-quality creators.",
+                    problem:
+                      "Lack of Accountability: No way to verify if a creator will deliver on promises or behave professionally.",
+                    value:
+                      "Reduce risk by partnering with creators who have verified positive reviews from other hotels.",
                   },
                 ].map(({ title, description, problem, value }) => (
                   <div
@@ -192,7 +226,9 @@ export default function HotelBenefitsPage() {
                   >
                     <div className="flex-1 space-y-2">
                       <h3 className="text-xl md:text-2xl font-semibold text-gray-900">{title}</h3>
-                      <p className="text-gray-700 leading-relaxed text-sm md:text-base">{description}</p>
+                      <p className="text-gray-700 leading-relaxed text-sm md:text-base">
+                        {description}
+                      </p>
                     </div>
                     <div className="flex flex-col gap-4 lg:w-80">
                       <div className="bg-red-50 border border-red-100 rounded-xl p-4 shadow-[0_6px_18px_-12px_rgba(248,113,113,0.9)]">
@@ -215,8 +251,12 @@ export default function HotelBenefitsPage() {
         <section className="bg-[#f8f8fb] py-16 md:py-20">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">The Simple 4-Step Journey</h2>
-              <p className="text-base md:text-lg text-gray-600 mt-2">From discovery to successful partnership</p>
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+                The Simple 4-Step Journey
+              </h2>
+              <p className="text-base md:text-lg text-gray-600 mt-2">
+                From discovery to successful partnership
+              </p>
             </div>
 
             <div className="flex flex-col divide-y divide-gray-200">
@@ -258,7 +298,10 @@ export default function HotelBenefitsPage() {
                   Icon: StarIcon,
                 },
               ].map(({ number, title, badge, linkText, description, Icon }) => (
-                <div key={number} className="py-7 md:py-8 flex flex-col md:flex-row md:items-center gap-6 md:gap-10">
+                <div
+                  key={number}
+                  className="py-7 md:py-8 flex flex-col md:flex-row md:items-center gap-6 md:gap-10"
+                >
                   <div className="flex items-center gap-3 md:gap-4 min-w-[90px]">
                     <span className="text-3xl md:text-4xl font-bold text-[#c7cdf6]">{number}</span>
                     <div className="h-12 w-12 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
@@ -273,7 +316,9 @@ export default function HotelBenefitsPage() {
                       </span>
                     </div>
                     <p className="text-sm font-semibold text-primary-700">{linkText}</p>
-                    <p className="text-gray-700 text-sm md:text-base leading-relaxed">{description}</p>
+                    <p className="text-gray-700 text-sm md:text-base leading-relaxed">
+                      {description}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -285,9 +330,12 @@ export default function HotelBenefitsPage() {
         <section className="bg-white pt-20 md:pt-24 pb-24 md:pb-28">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="rounded-3xl border border-primary-100 bg-[#f4f5ff] px-6 py-10 md:px-12 md:py-14 shadow-[0_20px_60px_-40px_rgba(59,130,246,0.35)] text-center space-y-4">
-              <h3 className="text-2xl md:text-3xl font-bold text-gray-900">Ready to streamline your creator partnerships?</h3>
+              <h3 className="text-2xl md:text-3xl font-bold text-gray-900">
+                Ready to streamline your creator partnerships?
+              </h3>
               <p className="text-base md:text-lg text-gray-600">
-                Join hotels who have centralized their creator management and reduced operational chaos.
+                Join hotels who have centralized their creator management and reduced operational
+                chaos.
               </p>
               <div className="pt-2">
                 <Link href={`${ROUTES.SIGNUP}?type=hotel`}>
@@ -311,19 +359,37 @@ export default function HotelBenefitsPage() {
               <span className="inline-flex items-center rounded-full bg-primary-600/20 text-primary-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
                 Coming 2026
               </span>
-              <h2 className="text-3xl md:text-4xl font-bold">Cut OTA Commissions. Drive Performance Revenue.</h2>
+              <h2 className="text-3xl md:text-4xl font-bold">
+                Cut OTA Commissions. Drive Performance Revenue.
+              </h2>
               <p className="text-base md:text-lg text-slate-200">
-                Build your marketplace reputation now and gain early access to the 2026 affiliate tracking system. Replace expensive OTA fees with performance-based direct bookings.
+                Build your marketplace reputation now and gain early access to the 2026 affiliate
+                tracking system. Replace expensive OTA fees with performance-based direct bookings.
               </p>
             </div>
 
             <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               {[
-                { label: "Lower Commission Cost", value: "70%", sub: "Compared to traditional 15–20% OTA fees" },
-                { label: "Total Booking Cost", value: "5–6%", sub: "Creator payout + vayada fee combined" },
-                { label: "Guest Data Ownership", value: "100%", sub: "Build direct relationships, remarket commission-free" },
+                {
+                  label: "Lower Commission Cost",
+                  value: "70%",
+                  sub: "Compared to traditional 15–20% OTA fees",
+                },
+                {
+                  label: "Total Booking Cost",
+                  value: "5–6%",
+                  sub: "Creator payout + vayada fee combined",
+                },
+                {
+                  label: "Guest Data Ownership",
+                  value: "100%",
+                  sub: "Build direct relationships, remarket commission-free",
+                },
               ].map(({ label, value, sub }) => (
-                <div key={label} className="rounded-2xl bg-white/5 border border-white/10 px-6 py-5 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)]">
+                <div
+                  key={label}
+                  className="rounded-2xl bg-white/5 border border-white/10 px-6 py-5 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)]"
+                >
                   <div className="text-3xl font-bold text-primary-100">{value}</div>
                   <div className="mt-1 text-sm font-semibold text-white">{label}</div>
                   <p className="text-sm text-slate-200 mt-2">{sub}</p>
@@ -337,25 +403,43 @@ export default function HotelBenefitsPage() {
                   title: "Zero Risk Payouts",
                   body: "Commission is only paid after the guest has checked out. Cancellation or no-show? You pay nothing. Only pay for completed, profitable stays.",
                   highlights: [
-                    { label: "Problem Solved", text: "Upfront marketing costs for bookings that cancel or no-show." },
-                    { label: "Financial Impact", text: "Eliminate risk entirely. Every commission paid represents actual revenue earned." },
+                    {
+                      label: "Problem Solved",
+                      text: "Upfront marketing costs for bookings that cancel or no-show.",
+                    },
+                    {
+                      label: "Financial Impact",
+                      text: "Eliminate risk entirely. Every commission paid represents actual revenue earned.",
+                    },
                   ],
                 },
                 {
                   title: "Transparent Tracking",
                   body: "Every creator receives a unique, trackable link. We handle all technical tracking for accurate attribution and automated commission calculation.",
                   highlights: [
-                    { label: "Problem Solved", text: "Manual tracking, disputed commissions, and complex spreadsheet management." },
-                    { label: "Financial Impact", text: "Single monthly overview of all commissions. Hassle-free, automated payments." },
+                    {
+                      label: "Problem Solved",
+                      text: "Manual tracking, disputed commissions, and complex spreadsheet management.",
+                    },
+                    {
+                      label: "Financial Impact",
+                      text: "Single monthly overview of all commissions. Hassle-free, automated payments.",
+                    },
                   ],
                 },
               ].map(({ title, body, highlights }) => (
-                <div key={title} className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)] space-y-4">
+                <div
+                  key={title}
+                  className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)] space-y-4"
+                >
                   <h3 className="text-xl font-semibold text-white">{title}</h3>
                   <p className="text-sm md:text-base text-slate-100 leading-relaxed">{body}</p>
                   <div className="space-y-3">
                     {highlights.map(({ label, text }) => (
-                      <div key={label} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
+                      <div
+                        key={label}
+                        className="rounded-xl bg-white/5 border border-white/10 px-4 py-3"
+                      >
                         <p className="text-xs font-semibold text-primary-100">{label}</p>
                         <p className="text-sm text-slate-100 mt-1 leading-relaxed">{text}</p>
                       </div>
@@ -367,7 +451,9 @@ export default function HotelBenefitsPage() {
 
             <div className="mt-8">
               <div className="rounded-2xl bg-white/5 border border-white/10 px-6 py-5 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)]">
-                <div className="text-sm font-semibold text-white mb-3">OTA vs vayada comparison</div>
+                <div className="text-sm font-semibold text-white mb-3">
+                  OTA vs vayada comparison
+                </div>
                 <div className="space-y-3 text-sm text-slate-100">
                   <div className="flex items-center justify-between border-b border-white/10 pb-3">
                     <span>Traditional OTA commission</span>
@@ -388,7 +474,8 @@ export default function HotelBenefitsPage() {
                 </div>
               </div>
               <p className="text-sm text-slate-200 mt-4">
-                Register your hotel now and complete successful collaborations to build your reputation, guaranteeing your place in the 2026 affiliate program.
+                Register your hotel now and complete successful collaborations to build your
+                reputation, guaranteeing your place in the 2026 affiliate program.
               </p>
             </div>
           </div>
@@ -398,8 +485,12 @@ export default function HotelBenefitsPage() {
         <section className="bg-white py-16 md:py-20">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">Frequently Asked Questions</h2>
-              <p className="text-base md:text-lg text-gray-600 mt-2">Everything you need to know about joining vayada</p>
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+                Frequently Asked Questions
+              </h2>
+              <p className="text-base md:text-lg text-gray-600 mt-2">
+                Everything you need to know about joining vayada
+              </p>
             </div>
 
             <FAQAccordion />
@@ -409,9 +500,12 @@ export default function HotelBenefitsPage() {
         {/* Final CTA */}
         <section className="bg-[#f8f8fb] py-16 md:py-20">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-6">
-            <h2 className="text-3xl md:text-4xl font-bold text-gray-900">Ready to take control of your creator partnerships?</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+              Ready to take control of your creator partnerships?
+            </h2>
             <p className="text-base md:text-lg text-gray-600">
-              Join the marketplace where verified data replaces inbox chaos and professional partnerships drive direct bookings.
+              Join the marketplace where verified data replaces inbox chaos and professional
+              partnerships drive direct bookings.
             </p>
             <div className="pt-2">
               <Link href={`${ROUTES.SIGNUP}?type=hotel`}>
@@ -430,11 +524,11 @@ export default function HotelBenefitsPage() {
       </main>
       <Footer />
     </div>
-  )
+  );
 }
 
 function FAQAccordion() {
-  const [openIndex, setOpenIndex] = useState<number | null>(0)
+  const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   const faqs = [
     {
@@ -457,12 +551,12 @@ function FAQAccordion() {
       answer:
         "In 2026, we're launching an optional affiliate tracking system where you can offer creators a commission on direct bookings they generate. You can decide the amount, the average will be around 5%. This is far lower than the 15-20% OTA fees, and you only pay after a completed stay.",
     },
-  ]
+  ];
 
   return (
     <div className="space-y-0">
       {faqs.map((faq, index) => {
-        const isOpen = openIndex === index
+        const isOpen = openIndex === index;
         return (
           <div key={index} className="border-b border-gray-200">
             <button
@@ -482,8 +576,8 @@ function FAQAccordion() {
               </div>
             )}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }

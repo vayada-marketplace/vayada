@@ -1,35 +1,49 @@
-import { useState } from 'react'
-import Image from 'next/image'
-import { Creator } from '@/lib/types'
-import { Button, StarRating, PlatformIcon } from '@/components/ui'
-import { MapPinIcon, CheckBadgeIcon, UserGroupIcon, SparklesIcon, PaperAirplaneIcon, ChartBarIcon, ArrowRightIcon } from '@heroicons/react/24/outline'
-import { formatNumber } from '@/lib/utils'
-import { CreatorDetailModal } from './CreatorDetailModal'
+import { useState } from "react";
+import Image from "next/image";
+import { Creator } from "@/lib/types";
+import { Button, StarRating, PlatformIcon } from "@/components/ui";
+import {
+  MapPinIcon,
+  CheckBadgeIcon,
+  UserGroupIcon,
+  SparklesIcon,
+  PaperAirplaneIcon,
+  ChartBarIcon,
+  ArrowRightIcon,
+} from "@heroicons/react/24/outline";
+import { formatNumber } from "@/lib/utils";
+import { CreatorDetailModal } from "./CreatorDetailModal";
 
 interface CreatorCardProps {
-  creator: Creator
-  isPublic?: boolean
+  creator: Creator;
+  isPublic?: boolean;
 }
 
 export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [imageError, setImageError] = useState(false)
-  const totalFollowers = creator.platforms.reduce(
-    (sum, platform) => sum + platform.followers,
-    0
-  )
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const totalFollowers = creator.platforms.reduce((sum, platform) => sum + platform.followers, 0);
   // Weighted average engagement rate (proportional to follower count)
-  const avgEngagementRate = totalFollowers > 0
-    ? creator.platforms.reduce((sum, platform) => sum + (platform.followers * (typeof platform.engagementRate === 'number' ? platform.engagementRate : 0)), 0) / totalFollowers
-    : 0
-  const primaryPlatform = creator.platforms[0]
+  const avgEngagementRate =
+    totalFollowers > 0
+      ? creator.platforms.reduce(
+          (sum, platform) =>
+            sum +
+            platform.followers *
+              (typeof platform.engagementRate === "number" ? platform.engagementRate : 0),
+          0,
+        ) / totalFollowers
+      : 0;
+  const primaryPlatform = creator.platforms[0];
   const topCountries = Array.from(
     new Set(
       creator.platforms
-        .flatMap((platform) => platform.topCountries?.slice(0, 2).map((country) => country.country) || [])
-        .filter(Boolean)
-    )
-  ).slice(0, 3)
+        .flatMap(
+          (platform) => platform.topCountries?.slice(0, 2).map((country) => country.country) || [],
+        )
+        .filter(Boolean),
+    ),
+  ).slice(0, 3);
 
   return (
     <>
@@ -52,12 +66,14 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
 
           <div className="absolute inset-x-0 top-0 flex items-start justify-between p-5">
             {creator.creatorType && (
-              <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold shadow-sm backdrop-blur-md ${
-                creator.creatorType === 'Lifestyle'
-                  ? 'border-blue-200/70 bg-white/90 text-blue-700'
-                  : 'border-amber-200/70 bg-white/90 text-amber-700'
-              }`}>
-                {creator.creatorType === 'Lifestyle' ? (
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold shadow-sm backdrop-blur-md ${
+                  creator.creatorType === "Lifestyle"
+                    ? "border-blue-200/70 bg-white/90 text-blue-700"
+                    : "border-amber-200/70 bg-white/90 text-amber-700"
+                }`}
+              >
+                {creator.creatorType === "Lifestyle" ? (
                   <SparklesIcon className="h-3.5 w-3.5" />
                 ) : (
                   <PaperAirplaneIcon className="h-3.5 w-3.5" />
@@ -69,7 +85,7 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
             {primaryPlatform && (
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-full border border-white/40 bg-white/90 text-gray-800 shadow-sm backdrop-blur-md"
-                title={primaryPlatform.name === 'YT' ? 'YouTube' : primaryPlatform.name}
+                title={primaryPlatform.name === "YT" ? "YouTube" : primaryPlatform.name}
               >
                 <PlatformIcon platform={primaryPlatform.name} className="h-[18px] w-[18px]" />
               </div>
@@ -80,23 +96,23 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
             <div className="flex items-end gap-4">
               <div className="relative flex-shrink-0">
                 <div className="h-24 w-24 overflow-hidden rounded-full border-4 border-white bg-white shadow-xl ring-1 ring-white/40">
-                {creator.profilePicture && !imageError ? (
-                  <Image
-                    src={creator.profilePicture}
-                    alt={creator.name}
-                    width={96}
-                    height={96}
-                    className="object-cover w-full h-full"
-                    onError={() => setImageError(true)}
-                    unoptimized
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-bold text-2xl">
-                    {creator.name.charAt(0)}
-                  </div>
-                )}
+                  {creator.profilePicture && !imageError ? (
+                    <Image
+                      src={creator.profilePicture}
+                      alt={creator.name}
+                      width={96}
+                      height={96}
+                      className="object-cover w-full h-full"
+                      onError={() => setImageError(true)}
+                      unoptimized
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-bold text-2xl">
+                      {creator.name.charAt(0)}
+                    </div>
+                  )}
                 </div>
-                {creator.status === 'verified' && (
+                {creator.status === "verified" && (
                   <div className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-primary-600 shadow-md ring-4 ring-white">
                     <CheckBadgeIcon className="h-5 w-5 text-white" />
                   </div>
@@ -104,7 +120,10 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
               </div>
 
               <div className="min-w-0 pb-1 text-white">
-                <h3 className="truncate text-2xl font-extrabold tracking-tight" title={creator.name}>
+                <h3
+                  className="truncate text-2xl font-extrabold tracking-tight"
+                  title={creator.name}
+                >
                   {creator.name}
                 </h3>
                 <div className="mt-1 flex items-center text-sm font-semibold text-white/80">
@@ -149,7 +168,9 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
 
           {topCountries.length > 0 && (
             <div className="mt-5">
-              <div className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">Audience</div>
+              <div className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">
+                Audience
+              </div>
               <div className="flex flex-wrap gap-2">
                 {topCountries.map((country) => (
                   <span
@@ -165,7 +186,9 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
 
           {/* Platforms */}
           <div className="mt-5">
-            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">Platforms</div>
+            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-500">
+              Platforms
+            </div>
             <div className="flex flex-wrap gap-2">
               {creator.platforms.map((platform, index) => (
                 <div
@@ -173,7 +196,7 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
                   className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-xs font-bold text-gray-700 shadow-sm ring-1 ring-gray-200 transition-colors group-hover:ring-primary-200"
                 >
                   <PlatformIcon platform={platform.name} className="h-3.5 w-3.5 text-gray-500" />
-                  <span>{platform.name === 'YT' ? 'YouTube' : platform.name}</span>
+                  <span>{platform.name === "YT" ? "YouTube" : platform.name}</span>
                 </div>
               ))}
             </div>
@@ -206,5 +229,5 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
         isPublic={isPublic}
       />
     </>
-  )
+  );
 }

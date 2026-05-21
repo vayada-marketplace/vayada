@@ -6,4 +6,4 @@
  * public chrome (e.g. /choose-product).
  */
 
-export { LandingFooter } from './footer'
+export { LandingFooter } from "./footer";

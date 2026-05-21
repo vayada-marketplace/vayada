@@ -1,63 +1,66 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { authService } from '@/services/auth'
-import { ApiErrorResponse } from '@/services/api/client'
-import RegisterForm from '@/components/auth/RegisterForm'
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
+import RegisterForm from "@/components/auth/RegisterForm";
 
 export default function RegisterPage() {
-  const router = useRouter()
-  const [submitError, setSubmitError] = useState('')
+  const router = useRouter();
+  const [submitError, setSubmitError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
-    name?: string; email?: string; password?: string; confirmPassword?: string
-  }>({})
-  const [isSubmitting, setIsSubmitting] = useState(false)
+    name?: string;
+    email?: string;
+    password?: string;
+    confirmPassword?: string;
+  }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleRegister = async (data: { name: string; email: string; password: string }) => {
-    setSubmitError('')
-    setFieldErrors({})
-    setIsSubmitting(true)
+    setSubmitError("");
+    setFieldErrors({});
+    setIsSubmitting(true);
 
     try {
-      await authService.register(data)
-      router.push('/login?registered=true')
+      await authService.register(data);
+      router.push("/login?registered=true");
     } catch (error) {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
 
       if (error instanceof ApiErrorResponse) {
         if (error.status === 422) {
-          const detail = error.data.detail
+          const detail = error.data.detail;
           if (Array.isArray(detail)) {
-            const newFieldErrors: typeof fieldErrors = {}
+            const newFieldErrors: typeof fieldErrors = {};
             detail.forEach((err) => {
-              const field = err.loc[err.loc.length - 1] as string
-              if (field === 'email') {
-                newFieldErrors.email = err.msg
-              } else if (field === 'password') {
-                newFieldErrors.password = err.msg
-              } else if (field === 'name') {
-                newFieldErrors.name = err.msg
+              const field = err.loc[err.loc.length - 1] as string;
+              if (field === "email") {
+                newFieldErrors.email = err.msg;
+              } else if (field === "password") {
+                newFieldErrors.password = err.msg;
+              } else if (field === "name") {
+                newFieldErrors.name = err.msg;
               } else {
-                setSubmitError(err.msg)
+                setSubmitError(err.msg);
               }
-            })
-            setFieldErrors(newFieldErrors)
+            });
+            setFieldErrors(newFieldErrors);
           } else {
-            setSubmitError(detail as string || 'Validation error')
+            setSubmitError((detail as string) || "Validation error");
           }
         } else if (error.status === 409) {
-          setFieldErrors({ email: 'This email is already registered' })
+          setFieldErrors({ email: "This email is already registered" });
         } else {
-          setSubmitError(error.data.detail as string || 'Registration failed. Please try again.')
+          setSubmitError((error.data.detail as string) || "Registration failed. Please try again.");
         }
       } else if (error instanceof Error) {
-        setSubmitError(error.message)
+        setSubmitError(error.message);
       } else {
-        setSubmitError('Network error. Please check your connection and try again.')
+        setSubmitError("Network error. Please check your connection and try again.");
       }
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -76,9 +79,12 @@ export default function RegisterPage() {
           isSubmitting={isSubmitting}
           submitError={submitError}
           fieldErrors={fieldErrors}
-          onErrorClear={() => { setSubmitError(''); setFieldErrors({}) }}
+          onErrorClear={() => {
+            setSubmitError("");
+            setFieldErrors({});
+          }}
         />
       </div>
     </div>
-  )
+  );
 }

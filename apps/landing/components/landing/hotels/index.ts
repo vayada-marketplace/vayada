@@ -1,2 +1,1 @@
-export { default as HotelsSection } from './HotelsSection'
-
+export { default as HotelsSection } from "./HotelsSection";

@@ -1,65 +1,65 @@
-'use client'
+"use client";
 
-import { Suspense, useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { authService } from '@/services/auth'
-import { ApiErrorResponse } from '@/services/api/client'
-import LoginForm from '@/components/auth/LoginForm'
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
+import LoginForm from "@/components/auth/LoginForm";
 
 function LoginContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [sessionExpired, setSessionExpired] = useState(false)
-  const [submitError, setSubmitError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get('expired') === 'true') {
-      setSessionExpired(true)
+    if (searchParams.get("expired") === "true") {
+      setSessionExpired(true);
     }
-  }, [searchParams])
+  }, [searchParams]);
 
   const handleLogin = async (email: string, password: string) => {
-    setSubmitError('')
-    setIsSubmitting(true)
+    setSubmitError("");
+    setIsSubmitting(true);
 
     try {
-      const response = await authService.login({ email, password })
+      const response = await authService.login({ email, password });
 
       // Verify admin type
-      if (response.type !== 'admin') {
-        setSubmitError('Access denied. Admin account required.')
-        setIsSubmitting(false)
-        authService.logout()
-        return
+      if (response.type !== "admin") {
+        setSubmitError("Access denied. Admin account required.");
+        setIsSubmitting(false);
+        authService.logout();
+        return;
       }
 
-      router.push('/dashboard')
+      router.push("/dashboard");
     } catch (error) {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
 
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
-          setSubmitError('Invalid email or password')
+          setSubmitError("Invalid email or password");
         } else if (error.status === 403) {
-          setSubmitError('Your account has been suspended. Please contact support.')
+          setSubmitError("Your account has been suspended. Please contact support.");
         } else if (error.status === 422) {
-          const detail = error.data.detail
+          const detail = error.data.detail;
           if (Array.isArray(detail)) {
-            setSubmitError(detail.map(e => e.msg).join('. '))
+            setSubmitError(detail.map((e) => e.msg).join(". "));
           } else {
-            setSubmitError(detail as string || 'Validation error')
+            setSubmitError((detail as string) || "Validation error");
           }
         } else {
-          setSubmitError(error.data.detail as string || 'Login failed. Please try again.')
+          setSubmitError((error.data.detail as string) || "Login failed. Please try again.");
         }
       } else if (error instanceof Error) {
-        setSubmitError(error.message)
+        setSubmitError(error.message);
       } else {
-        setSubmitError('Network error. Please check your connection and try again.')
+        setSubmitError("Network error. Please check your connection and try again.");
       }
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -77,12 +77,12 @@ function LoginContent() {
           onSubmit={handleLogin}
           isSubmitting={isSubmitting}
           submitError={submitError}
-          onErrorClear={() => setSubmitError('')}
+          onErrorClear={() => setSubmitError("")}
           sessionExpired={sessionExpired}
         />
       </div>
     </div>
-  )
+  );
 }
 
 export default function LoginPage() {
@@ -90,5 +90,5 @@ export default function LoginPage() {
     <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <LoginContent />
     </Suspense>
-  )
+  );
 }

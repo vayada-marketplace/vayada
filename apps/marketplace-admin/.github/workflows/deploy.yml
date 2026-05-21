@@ -5,14 +5,14 @@ on:
     branches:
       - main
     paths:
-      - 'app/**'
-      - 'components/**'
-      - 'lib/**'
-      - 'services/**'
-      - 'Dockerfile'
-      - 'package.json'
-      - 'next.config.js'
-      - '.github/workflows/deploy.yml'
+      - "app/**"
+      - "components/**"
+      - "lib/**"
+      - "services/**"
+      - "Dockerfile"
+      - "package.json"
+      - "next.config.js"
+      - ".github/workflows/deploy.yml"
 
 concurrency:
   group: deploy-${{ github.workflow }}-${{ github.ref }}
@@ -113,4 +113,3 @@ jobs:
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
-

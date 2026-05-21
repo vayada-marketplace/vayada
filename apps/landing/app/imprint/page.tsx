@@ -1,4 +1,4 @@
-import { Navigation, Footer } from '@/components/layout'
+import { Navigation, Footer } from "@/components/layout";
 
 export default function ImprintPage() {
   return (
@@ -6,8 +6,10 @@ export default function ImprintPage() {
       <Navigation />
       <main className="flex-1 pt-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-          <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-12">Imprint (Impressum)</h1>
-          
+          <h1 className="text-4xl md:text-5xl font-bold text-primary-800 mb-12">
+            Imprint (Impressum)
+          </h1>
+
           <div className="space-y-10">
             <section>
               <h2 className="text-2xl font-bold text-primary-800 mb-4">Company Information</h2>
@@ -27,9 +29,9 @@ export default function ImprintPage() {
             <section>
               <h2 className="text-2xl font-bold text-primary-800 mb-4">Contact</h2>
               <p className="text-gray-600">
-                E-Mail:{' '}
-                <a 
-                  href="mailto:t.schreyer@vayada.com" 
+                E-Mail:{" "}
+                <a
+                  href="mailto:t.schreyer@vayada.com"
                   className="text-primary-600 hover:text-primary-700 underline"
                 >
                   t.schreyer@vayada.com
@@ -49,6 +51,5 @@ export default function ImprintPage() {
       </main>
       <Footer />
     </div>
-  )
+  );
 }
-

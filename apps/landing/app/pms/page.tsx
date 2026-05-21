@@ -1,5 +1,5 @@
-import type { Metadata } from 'next'
-import Image from 'next/image'
+import type { Metadata } from "next";
+import Image from "next/image";
 import {
   ArrowRightIcon,
   ArrowTrendingUpIcon,
@@ -9,74 +9,74 @@ import {
   AdjustmentsHorizontalIcon,
   ShieldCheckIcon,
   UsersIcon,
-} from '@heroicons/react/24/outline'
-import { Navigation } from '@/components/layout'
-import { FinalCTA, LandingFooter } from '@/components/landing'
+} from "@heroicons/react/24/outline";
+import { Navigation } from "@/components/layout";
+import { FinalCTA, LandingFooter } from "@/components/landing";
 
 export const metadata: Metadata = {
-  title: 'PMS + Channel Manager | vayada',
+  title: "PMS + Channel Manager | vayada",
   description:
     "vayada's PMS helps independent properties manage operations, reservations and distribution in one place with a built-in channel manager.",
-}
+};
 
 const HERO_BULLETS = [
-  'Smarter daily operations',
-  'Synchronized inventory across OTAs',
-  'Less manual work',
-]
+  "Smarter daily operations",
+  "Synchronized inventory across OTAs",
+  "Less manual work",
+];
 
 const FEATURES = [
   {
-    title: 'Centralized property management',
+    title: "Centralized property management",
     description:
-      'Keep your front desk aligned and track daily operations from one dashboard: arrivals, departures, occupancy forecast and revenue.',
-    image: '/pms-dashboard.png',
-    alt: 'Vayada PMS dashboard showing reservations and property operations',
+      "Keep your front desk aligned and track daily operations from one dashboard: arrivals, departures, occupancy forecast and revenue.",
+    image: "/pms-dashboard.png",
+    alt: "Vayada PMS dashboard showing reservations and property operations",
   },
   {
-    title: 'Live calendar and inventory control',
+    title: "Live calendar and inventory control",
     description:
-      'Plan your operations and keep bookings, room blocks and availability organized in one simple calendar view.',
-    image: '/pms-calendar.png',
-    alt: 'Vayada PMS calendar showing booking inventory across rooms',
+      "Plan your operations and keep bookings, room blocks and availability organized in one simple calendar view.",
+    image: "/pms-calendar.png",
+    alt: "Vayada PMS calendar showing booking inventory across rooms",
     reverse: true,
   },
   {
-    title: 'Built-in channel manager',
+    title: "Built-in channel manager",
     description:
-      'Connect to Booking.com, Airbnb, Expedia and 50+ OTAs while syncing rates, availability and bookings in real time.',
-    image: '/pms-channel.png',
-    alt: 'Vayada PMS channel manager for OTA synchronization',
+      "Connect to Booking.com, Airbnb, Expedia and 50+ OTAs while syncing rates, availability and bookings in real time.",
+    image: "/pms-channel.png",
+    alt: "Vayada PMS channel manager for OTA synchronization",
   },
-]
+];
 
 const OUTCOMES = [
   {
-    title: 'Less manual work',
-    description: 'Automate tasks and reduce time spent on repetitive operations.',
+    title: "Less manual work",
+    description: "Automate tasks and reduce time spent on repetitive operations.",
     Icon: ClockIcon,
   },
   {
-    title: 'Fewer overbookings',
-    description: 'Keep inventory and bookings synchronized across all channels.',
+    title: "Fewer overbookings",
+    description: "Keep inventory and bookings synchronized across all channels.",
     Icon: ShieldCheckIcon,
   },
   {
-    title: 'Better team coordination',
-    description: 'Everyone stays aligned with real-time updates and centralized data.',
+    title: "Better team coordination",
+    description: "Everyone stays aligned with real-time updates and centralized data.",
     Icon: UsersIcon,
   },
   {
-    title: 'More distribution control',
-    description: 'Manage rates, availability and promotions from one powerful system.',
+    title: "More distribution control",
+    description: "Manage rates, availability and promotions from one powerful system.",
     Icon: AdjustmentsHorizontalIcon,
   },
   {
-    title: 'Ready to scale',
-    description: 'Built for independent hospitality today and ready for your growth tomorrow.',
+    title: "Ready to scale",
+    description: "Built for independent hospitality today and ready for your growth tomorrow.",
     Icon: ArrowTrendingUpIcon,
   },
-]
+];
 
 function ProductPanel() {
   return (
@@ -99,7 +99,7 @@ function ProductPanel() {
         />
       </div>
     </div>
-  )
+  );
 }
 
 export default function PmsPage() {
@@ -123,8 +123,8 @@ export default function PmsPage() {
                 The PMS built for modern independent hospitality
               </h1>
               <p className="mt-6 max-w-xl text-lg leading-relaxed text-gray-500">
-                Manage reservations, availability, rates and OTA channels from one
-                simple system built for independent properties.
+                Manage reservations, availability, rates and OTA channels from one simple system
+                built for independent properties.
               </p>
 
               <ul className="mt-8 space-y-3">
@@ -171,7 +171,7 @@ export default function PmsPage() {
                 key={feature.title}
                 className="grid items-center gap-10 overflow-hidden rounded-3xl border border-border bg-primary-50/40 p-8 md:grid-cols-2 md:p-12"
               >
-                <div className={feature.reverse ? 'md:order-2' : ''}>
+                <div className={feature.reverse ? "md:order-2" : ""}>
                   <div className="overflow-hidden rounded-2xl border border-border-strong bg-white shadow-soft">
                     <Image
                       src={feature.image}
@@ -182,7 +182,7 @@ export default function PmsPage() {
                     />
                   </div>
                 </div>
-                <div className={feature.reverse ? 'md:order-1' : ''}>
+                <div className={feature.reverse ? "md:order-1" : ""}>
                   <div className="flex items-center gap-3">
                     <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-500 font-display text-sm font-semibold text-white">
                       {index + 1}
@@ -213,12 +213,8 @@ export default function PmsPage() {
                   <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-white text-primary-500 shadow-soft">
                     <Icon className="h-6 w-6" />
                   </div>
-                  <h3 className="mt-4 font-display text-base font-semibold text-ink">
-                    {title}
-                  </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-gray-500">
-                    {description}
-                  </p>
+                  <h3 className="mt-4 font-display text-base font-semibold text-ink">{title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-gray-500">{description}</p>
                 </div>
               ))}
             </div>
@@ -229,5 +225,5 @@ export default function PmsPage() {
       <FinalCTA />
       <LandingFooter />
     </main>
-  )
+  );
 }

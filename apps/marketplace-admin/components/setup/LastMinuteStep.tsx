@@ -1,39 +1,39 @@
-'use client'
+"use client";
 
-import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 export interface LastMinuteTier {
-  daysBeforeMin: number
-  daysBeforeMax: number | null
-  discountPercent: number
+  daysBeforeMin: number;
+  daysBeforeMax: number | null;
+  discountPercent: number;
 }
 
 export interface LastMinuteConfig {
-  enabled: boolean
-  stackWithPromo: boolean
-  tiers: LastMinuteTier[]
+  enabled: boolean;
+  stackWithPromo: boolean;
+  tiers: LastMinuteTier[];
 }
 
 export const DEFAULT_LAST_MINUTE_TIERS: LastMinuteTier[] = [
   { daysBeforeMin: 7, daysBeforeMax: 13, discountPercent: 10 },
   { daysBeforeMin: 3, daysBeforeMax: 6, discountPercent: 20 },
   { daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 },
-]
+];
 
 export const createEmptyLastMinuteConfig = (): LastMinuteConfig => ({
   enabled: false,
   stackWithPromo: false,
   tiers: [],
-})
+});
 
 interface LastMinuteStepProps {
-  config: LastMinuteConfig
-  setConfig: (v: LastMinuteConfig) => void
-  error: string
-  canProceed: boolean
-  onBack: () => void
-  onContinue: () => void
-  stepIndicators: React.ReactNode
+  config: LastMinuteConfig;
+  setConfig: (v: LastMinuteConfig) => void;
+  error: string;
+  canProceed: boolean;
+  onBack: () => void;
+  onContinue: () => void;
+  stepIndicators: React.ReactNode;
 }
 
 export default function LastMinuteStep({
@@ -48,26 +48,26 @@ export default function LastMinuteStep({
     setConfig({
       ...config,
       tiers: [...config.tiers, { daysBeforeMin: 0, daysBeforeMax: null, discountPercent: 10 }],
-    })
-  }
+    });
+  };
 
   const removeTier = (index: number) => {
     setConfig({
       ...config,
       tiers: config.tiers.filter((_, i) => i !== index),
-    })
-  }
+    });
+  };
 
   const updateTier = (index: number, field: keyof LastMinuteTier, value: number | null) => {
     setConfig({
       ...config,
       tiers: config.tiers.map((t, i) => (i === index ? { ...t, [field]: value } : t)),
-    })
-  }
+    });
+  };
 
   const applyPreset = () => {
-    setConfig({ ...config, tiers: [...DEFAULT_LAST_MINUTE_TIERS] })
-  }
+    setConfig({ ...config, tiers: [...DEFAULT_LAST_MINUTE_TIERS] });
+  };
 
   return (
     <div className="mx-auto max-w-2xl px-4 sm:px-6 py-6">
@@ -75,7 +75,8 @@ export default function LastMinuteStep({
 
       <h1 className="text-xl font-bold text-gray-900 mb-1">Last-Minute Discounts</h1>
       <p className="text-[13px] text-gray-500 mb-6">
-        Automatically reduce prices when check-in is approaching to fill empty rooms. The hotel can change these anytime from Booking Flow settings.
+        Automatically reduce prices when check-in is approaching to fill empty rooms. The hotel can
+        change these anytime from Booking Flow settings.
       </p>
 
       <div className="space-y-4">
@@ -91,9 +92,11 @@ export default function LastMinuteStep({
             <button
               type="button"
               onClick={() => setConfig({ ...config, enabled: !config.enabled })}
-              className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${config.enabled ? 'bg-primary-500' : 'bg-gray-300'}`}
+              className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${config.enabled ? "bg-primary-500" : "bg-gray-300"}`}
             >
-              <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${config.enabled ? 'left-[20px]' : 'left-[2px]'}`} />
+              <div
+                className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${config.enabled ? "left-[20px]" : "left-[2px]"}`}
+              />
             </button>
           </div>
         </div>
@@ -112,9 +115,11 @@ export default function LastMinuteStep({
                 <button
                   type="button"
                   onClick={() => setConfig({ ...config, stackWithPromo: !config.stackWithPromo })}
-                  className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${config.stackWithPromo ? 'bg-primary-500' : 'bg-gray-300'}`}
+                  className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${config.stackWithPromo ? "bg-primary-500" : "bg-gray-300"}`}
                 >
-                  <div className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${config.stackWithPromo ? 'left-[20px]' : 'left-[2px]'}`} />
+                  <div
+                    className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${config.stackWithPromo ? "left-[20px]" : "left-[2px]"}`}
+                  />
                 </button>
               </div>
             </div>
@@ -154,39 +159,58 @@ export default function LastMinuteStep({
                     .slice()
                     .sort((a, b) => b.daysBeforeMin - a.daysBeforeMin)
                     .map((tier) => {
-                      const idx = config.tiers.indexOf(tier)
+                      const idx = config.tiers.indexOf(tier);
                       return (
-                        <div key={idx} className="flex items-center gap-2 md:gap-3 bg-gray-50 rounded-lg p-3">
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 md:gap-3 bg-gray-50 rounded-lg p-3"
+                        >
                           <div className="flex-1 grid grid-cols-3 gap-2 md:gap-3">
                             <div>
-                              <label className="block text-[10px] text-gray-400 mb-0.5">From (days)</label>
+                              <label className="block text-[10px] text-gray-400 mb-0.5">
+                                From (days)
+                              </label>
                               <input
                                 type="number"
                                 min={0}
                                 value={tier.daysBeforeMin}
-                                onChange={(e) => updateTier(idx, 'daysBeforeMin', parseInt(e.target.value) || 0)}
+                                onChange={(e) =>
+                                  updateTier(idx, "daysBeforeMin", parseInt(e.target.value) || 0)
+                                }
                                 className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[10px] text-gray-400 mb-0.5">To (days)</label>
+                              <label className="block text-[10px] text-gray-400 mb-0.5">
+                                To (days)
+                              </label>
                               <input
                                 type="number"
                                 min={0}
-                                value={tier.daysBeforeMax ?? ''}
-                                onChange={(e) => updateTier(idx, 'daysBeforeMax', e.target.value ? parseInt(e.target.value) : null)}
+                                value={tier.daysBeforeMax ?? ""}
+                                onChange={(e) =>
+                                  updateTier(
+                                    idx,
+                                    "daysBeforeMax",
+                                    e.target.value ? parseInt(e.target.value) : null,
+                                  )
+                                }
                                 placeholder="∞"
                                 className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
                               />
                             </div>
                             <div>
-                              <label className="block text-[10px] text-gray-400 mb-0.5">Discount %</label>
+                              <label className="block text-[10px] text-gray-400 mb-0.5">
+                                Discount %
+                              </label>
                               <input
                                 type="number"
                                 min={1}
                                 max={90}
                                 value={tier.discountPercent}
-                                onChange={(e) => updateTier(idx, 'discountPercent', parseInt(e.target.value) || 0)}
+                                onChange={(e) =>
+                                  updateTier(idx, "discountPercent", parseInt(e.target.value) || 0)
+                                }
                                 className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[13px] font-semibold focus:outline-none focus:ring-2 focus:ring-primary-500"
                               />
                             </div>
@@ -199,7 +223,7 @@ export default function LastMinuteStep({
                             <XMarkIcon className="w-4 h-4" />
                           </button>
                         </div>
-                      )
+                      );
                     })}
 
                   <button
@@ -214,7 +238,9 @@ export default function LastMinuteStep({
 
               {config.tiers.length > 0 && (
                 <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider mb-2">How it works</p>
+                  <p className="text-[11px] font-semibold text-amber-800 uppercase tracking-wider mb-2">
+                    How it works
+                  </p>
                   <div className="space-y-1">
                     {config.tiers
                       .filter((t) => t.discountPercent > 0)
@@ -225,7 +251,7 @@ export default function LastMinuteStep({
                           {tier.daysBeforeMax != null
                             ? `${tier.daysBeforeMin}–${tier.daysBeforeMax} days before check-in`
                             : `${tier.daysBeforeMin}+ days before check-in`}
-                          {' → '}
+                          {" → "}
                           <span className="font-semibold">{tier.discountPercent}% off</span>
                         </p>
                       ))}
@@ -258,5 +284,5 @@ export default function LastMinuteStep({
         </button>
       </div>
     </div>
-  )
+  );
 }

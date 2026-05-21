@@ -6,9 +6,9 @@ on:
     branches:
       - main
     paths:
-      - 'apps/booking-web/**'
-      - 'packages/**'
-      - '.github/workflows/deploy-booking-web.yml'
+      - "apps/booking-web/**"
+      - "packages/**"
+      - ".github/workflows/deploy-booking-web.yml"
 
 permissions:
   id-token: write

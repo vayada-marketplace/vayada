@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
 interface PaginationProps {
-  total: number
-  limit: number
-  offset: number
-  onOffsetChange: (offset: number) => void
+  total: number;
+  limit: number;
+  offset: number;
+  onOffsetChange: (offset: number) => void;
 }
 
 export default function Pagination({ total, limit, offset, onOffsetChange }: PaginationProps) {
-  if (total <= limit) return null
+  if (total <= limit) return null;
 
   return (
     <div className="flex items-center justify-between mt-4">
@@ -32,5 +32,5 @@ export default function Pagination({ total, limit, offset, onOffsetChange }: Pag
         </button>
       </div>
     </div>
-  )
+  );
 }

@@ -4,12 +4,12 @@
  * with style: 'currency'.
  */
 export const CURRENCY_SYMBOLS: Record<string, string> = {
-  EUR: '€',
-  USD: '$',
-  GBP: '£',
-  IDR: 'IDR ',
-}
+  EUR: "€",
+  USD: "$",
+  GBP: "£",
+  IDR: "IDR ",
+};
 
 export function currencySymbol(currencyCode: string): string {
-  return CURRENCY_SYMBOLS[currencyCode] || `${currencyCode} `
+  return CURRENCY_SYMBOLS[currencyCode] || `${currencyCode} `;
 }

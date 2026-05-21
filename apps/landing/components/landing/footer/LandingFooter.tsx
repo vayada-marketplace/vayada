@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import { ROUTES } from '@/lib/constants/routes'
+import Link from "next/link";
+import { ROUTES } from "@/lib/constants/routes";
 
 export default function LandingFooter() {
   return (
@@ -9,7 +9,8 @@ export default function LandingFooter() {
           vayada
         </Link>
         <p className="text-xs text-gray-500">
-          © {new Date().getFullYear()} vayada. AI-powered and trust-based direct distribution for independent hospitality.
+          © {new Date().getFullYear()} vayada. AI-powered and trust-based direct distribution for
+          independent hospitality.
         </p>
         <div className="flex items-center gap-6 text-xs text-gray-500">
           <Link href={ROUTES.IMPRINT} className="transition-colors hover:text-ink">
@@ -24,5 +25,5 @@ export default function LandingFooter() {
         </div>
       </div>
     </footer>
-  )
+  );
 }

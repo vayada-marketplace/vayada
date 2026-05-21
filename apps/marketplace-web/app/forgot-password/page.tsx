@@ -1,23 +1,23 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import Link from 'next/link'
-import { ROUTES } from '@/lib/constants/routes'
-import { authService } from '@/services/auth'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
-import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm'
+import { useState } from "react";
+import Link from "next/link";
+import { ROUTES } from "@/lib/constants/routes";
+import { authService } from "@/services/auth";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import ForgotPasswordForm from "@/components/auth/ForgotPasswordForm";
 
 export default function ForgotPasswordPage() {
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleForgotPassword = async (email: string) => {
-    setIsSubmitting(true)
+    setIsSubmitting(true);
     try {
-      await authService.forgotPassword(email)
+      await authService.forgotPassword(email);
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex">
@@ -35,17 +35,14 @@ export default function ForgotPasswordPage() {
         <div className="w-full max-w-md">
           {/* Logo */}
           <div className="mb-6">
-            <img
-              src="/vayada-logo.png"
-              alt="vayada"
-              className="h-10 mb-4"
-            />
+            <img src="/vayada-logo.png" alt="vayada" className="h-10 mb-4" />
           </div>
 
           {/* Title */}
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Forgot password?</h1>
           <p className="text-gray-600 mb-8">
-            No worries! Enter your email address and we&apos;ll send you a link to reset your password.
+            No worries! Enter your email address and we&apos;ll send you a link to reset your
+            password.
           </p>
 
           <ForgotPasswordForm
@@ -67,5 +64,5 @@ export default function ForgotPasswordPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

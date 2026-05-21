@@ -1,4 +1,4 @@
-import { Navigation } from '@/components/layout'
+import { Navigation } from "@/components/layout";
 import {
   Hero,
   TrustedBy,
@@ -9,7 +9,7 @@ import {
   PartnerProgram,
   FinalCTA,
   LandingFooter,
-} from '@/components/landing'
+} from "@/components/landing";
 
 export default function Home() {
   return (
@@ -25,5 +25,5 @@ export default function Home() {
       <FinalCTA />
       <LandingFooter />
     </main>
-  )
+  );
 }

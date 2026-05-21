@@ -1,19 +1,19 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { HotelBadgeIcon } from '@/components/ui'
-import { ROUTES } from '@/lib/constants/routes'
-import { STORAGE_KEYS } from '@/lib/constants'
-import { checkProfileStatus, isProfileComplete } from '@/lib/utils'
-import type { UserType, CreatorProfileStatus, HotelProfileStatus, Creator } from '@/lib/types'
-import { creatorService } from '@/services/api/creators'
-import { hotelService } from '@/services/api/hotels'
-import { ApiErrorResponse } from '@/services/api/client'
-import { UserIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
-import { useCreatorProfileForm } from '@/hooks/useCreatorProfileForm'
-import { useHotelProfileForm } from '@/hooks/useHotelProfileForm'
-import { formatErrorDetail } from '@/hooks/useErrorModal'
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { HotelBadgeIcon } from "@/components/ui";
+import { ROUTES } from "@/lib/constants/routes";
+import { STORAGE_KEYS } from "@/lib/constants";
+import { checkProfileStatus, isProfileComplete } from "@/lib/utils";
+import type { UserType, CreatorProfileStatus, HotelProfileStatus, Creator } from "@/lib/types";
+import { creatorService } from "@/services/api/creators";
+import { hotelService } from "@/services/api/hotels";
+import { ApiErrorResponse } from "@/services/api/client";
+import { UserIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
+import { useCreatorProfileForm } from "@/hooks/useCreatorProfileForm";
+import { useHotelProfileForm } from "@/hooks/useHotelProfileForm";
+import { formatErrorDetail } from "@/hooks/useErrorModal";
 import {
   LoadingScreen,
   ProfileCompletionScreen,
@@ -21,100 +21,107 @@ import {
   StepIndicators,
   CreatorProfileForm,
   HotelProfileForm,
-} from '@/components/profile-complete'
+} from "@/components/profile-complete";
 
 export default function ProfileCompletePage() {
-  const router = useRouter()
-  const [userType, setUserType] = useState<UserType | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
-  const [profileStatus, setProfileStatus] = useState<CreatorProfileStatus | HotelProfileStatus | null>(null)
-  const [error, setError] = useState('')
-  const [profileCompleted, setProfileCompleted] = useState(false)
-  const [currentStep, setCurrentStep] = useState<number>(1)
+  const router = useRouter();
+  const [userType, setUserType] = useState<UserType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [profileStatus, setProfileStatus] = useState<
+    CreatorProfileStatus | HotelProfileStatus | null
+  >(null);
+  const [error, setError] = useState("");
+  const [profileCompleted, setProfileCompleted] = useState(false);
+  const [currentStep, setCurrentStep] = useState<number>(1);
 
-  const creatorSteps = ['Creator Type', 'Basic Information', 'Social Media Platforms']
-  const hotelSteps = ['Basic Information', 'Property Listings']
+  const creatorSteps = ["Creator Type", "Basic Information", "Social Media Platforms"];
+  const hotelSteps = ["Basic Information", "Property Listings"];
 
   // Initialize hooks with error handler
-  const creatorForm = useCreatorProfileForm({ onError: setError })
-  const hotelForm = useHotelProfileForm({ onError: setError })
+  const creatorForm = useCreatorProfileForm({ onError: setError });
+  const hotelForm = useHotelProfileForm({ onError: setError });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null
-      setUserType(storedUserType)
+    if (typeof window !== "undefined") {
+      const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
+      setUserType(storedUserType);
 
-      const userName = localStorage.getItem(STORAGE_KEYS.USER_NAME) || ''
+      const userName = localStorage.getItem(STORAGE_KEYS.USER_NAME) || "";
 
-      if (storedUserType === 'hotel') {
-        hotelForm.setForm(prev => ({ ...prev, name: userName }))
-      } else if (storedUserType === 'creator') {
-        creatorForm.setForm(prev => ({ ...prev, name: userName }))
+      if (storedUserType === "hotel") {
+        hotelForm.setForm((prev) => ({ ...prev, name: userName }));
+      } else if (storedUserType === "creator") {
+        creatorForm.setForm((prev) => ({ ...prev, name: userName }));
       }
 
       if (storedUserType) {
-        loadProfileStatus(storedUserType, true)
+        loadProfileStatus(storedUserType, true);
       } else {
-        router.push(ROUTES.LOGIN)
+        router.push(ROUTES.LOGIN);
       }
     }
-  }, [router])
+  }, [router]);
 
-  const loadProfileStatus = async (type: UserType, skipRedirect = false): Promise<CreatorProfileStatus | HotelProfileStatus | null> => {
-    setLoading(true)
+  const loadProfileStatus = async (
+    type: UserType,
+    skipRedirect = false,
+  ): Promise<CreatorProfileStatus | HotelProfileStatus | null> => {
+    setLoading(true);
     try {
-      const status = await checkProfileStatus(type)
-      setProfileStatus(status)
+      const status = await checkProfileStatus(type);
+      setProfileStatus(status);
       if (status?.profile_complete && !skipRedirect && !profileCompleted) {
-        setProfileCompleted(true)
+        setProfileCompleted(true);
       }
-      return status
+      return status;
     } catch (err) {
-      console.error('Failed to load profile status:', err)
-      return null
+      console.error("Failed to load profile status:", err);
+      return null;
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const nextStep = () => {
-    const steps = userType === 'creator' ? creatorSteps : hotelSteps
+    const steps = userType === "creator" ? creatorSteps : hotelSteps;
     if (currentStep < steps.length) {
-      setCurrentStep(currentStep + 1)
-      setError('')
+      setCurrentStep(currentStep + 1);
+      setError("");
     }
-  }
+  };
 
   const prevStep = () => {
     if (currentStep > 1) {
-      setCurrentStep(currentStep - 1)
-      setError('')
+      setCurrentStep(currentStep - 1);
+      setError("");
     }
-  }
+  };
 
   const canProceedToNextStep = (): boolean => {
-    if (userType === 'creator') {
-      if (currentStep === 1) return creatorForm.canProceedCreatorType()
-      if (currentStep === 2) return creatorForm.canProceedStep1()
-      return true
+    if (userType === "creator") {
+      if (currentStep === 1) return creatorForm.canProceedCreatorType();
+      if (currentStep === 2) return creatorForm.canProceedStep1();
+      return true;
     }
-    if (userType === 'hotel') {
-      return currentStep === 1 ? hotelForm.canProceedStep1() : true
+    if (userType === "hotel") {
+      return currentStep === 1 ? hotelForm.canProceedStep1() : true;
     }
-    return false
-  }
+    return false;
+  };
 
   const handleCreatorSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    if (!creatorForm.validateForm()) return
+    e.preventDefault();
+    setError("");
+    if (!creatorForm.validateForm()) return;
 
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      const platforms = creatorForm.platforms.map(p => {
-        const validAgeGroups = p.top_age_groups?.filter(tag => tag.ageRange?.trim())
-          .map(tag => ({ ageRange: tag.ageRange.trim(), percentage: tag.percentage })) || []
+      const platforms = creatorForm.platforms.map((p) => {
+        const validAgeGroups =
+          p.top_age_groups
+            ?.filter((tag) => tag.ageRange?.trim())
+            .map((tag) => ({ ageRange: tag.ageRange.trim(), percentage: tag.percentage })) || [];
 
         return {
           name: p.name,
@@ -122,30 +129,36 @@ export default function ProfileCompletePage() {
           followers: Number(p.followers),
           engagementRate: Number(p.engagement_rate),
           ...(p.top_countries?.length && {
-            topCountries: p.top_countries.map(tc => ({ country: tc.country, percentage: tc.percentage })),
+            topCountries: p.top_countries.map((tc) => ({
+              country: tc.country,
+              percentage: tc.percentage,
+            })),
           }),
           ...(validAgeGroups.length && { topAgeGroups: validAgeGroups }),
-          ...(p.gender_split && (p.gender_split.male > 0 || p.gender_split.female > 0) && {
-            genderSplit: { male: p.gender_split.male, female: p.gender_split.female },
-          }),
-        }
-      })
+          ...(p.gender_split &&
+            (p.gender_split.male > 0 || p.gender_split.female > 0) && {
+              genderSplit: { male: p.gender_split.male, female: p.gender_split.female },
+            }),
+        };
+      });
 
-      const audienceSize = platforms.reduce((sum, p) => sum + p.followers, 0)
+      const audienceSize = platforms.reduce((sum, p) => sum + p.followers, 0);
 
-      let profilePictureUrl: string | undefined
+      let profilePictureUrl: string | undefined;
       if (creatorForm.profilePictureFile) {
         try {
-          const uploadResponse = await creatorService.uploadProfilePicture(creatorForm.profilePictureFile)
-          profilePictureUrl = uploadResponse.url
+          const uploadResponse = await creatorService.uploadProfilePicture(
+            creatorForm.profilePictureFile,
+          );
+          profilePictureUrl = uploadResponse.url;
         } catch (err) {
           if (err instanceof ApiErrorResponse) {
-            setError(formatErrorDetail(err.data.detail) || 'Failed to upload profile picture')
+            setError(formatErrorDetail(err.data.detail) || "Failed to upload profile picture");
           } else {
-            setError('Failed to upload profile picture. Please try again.')
+            setError("Failed to upload profile picture. Please try again.");
           }
-          setSubmitting(false)
-          return
+          setSubmitting(false);
+          return;
         }
       }
 
@@ -155,65 +168,71 @@ export default function ProfileCompletePage() {
         platforms,
         audienceSize,
         creatorType: creatorForm.form.creator_type,
-        ...(creatorForm.form.portfolio_link?.trim() && { portfolioLink: creatorForm.form.portfolio_link.trim() }),
-        ...(creatorForm.form.short_description?.trim() && { shortDescription: creatorForm.form.short_description.trim() }),
+        ...(creatorForm.form.portfolio_link?.trim() && {
+          portfolioLink: creatorForm.form.portfolio_link.trim(),
+        }),
+        ...(creatorForm.form.short_description?.trim() && {
+          shortDescription: creatorForm.form.short_description.trim(),
+        }),
         ...(creatorForm.form.phone?.trim() && { phone: creatorForm.form.phone.trim() }),
         ...(profilePictureUrl && { profilePicture: profilePictureUrl }),
-      }
+      };
 
-      const updatedProfile = await creatorService.updateMyProfile(updatePayload)
-      const responseWithSnakeCase = updatedProfile as Creator & { profile_picture?: string | null }
-      const pictureUrl = updatedProfile.profilePicture || responseWithSnakeCase.profile_picture
+      const updatedProfile = await creatorService.updateMyProfile(updatePayload);
+      const responseWithSnakeCase = updatedProfile as Creator & { profile_picture?: string | null };
+      const pictureUrl = updatedProfile.profilePicture || responseWithSnakeCase.profile_picture;
       if (pictureUrl?.trim()) {
-        creatorForm.setForm(prev => ({ ...prev, profile_image: pictureUrl }))
+        creatorForm.setForm((prev) => ({ ...prev, profile_image: pictureUrl }));
       }
 
-      const complete = await isProfileComplete('creator')
+      const complete = await isProfileComplete("creator");
       if (complete) {
-        setProfileCompleted(true)
-        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, 'true')
+        setProfileCompleted(true);
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
       } else {
-        const updatedStatus = await loadProfileStatus('creator', true)
-        handleIncompleteProfile(updatedStatus as CreatorProfileStatus)
+        const updatedStatus = await loadProfileStatus("creator", true);
+        handleIncompleteProfile(updatedStatus as CreatorProfileStatus);
       }
     } catch (err) {
       if (err instanceof ApiErrorResponse) {
-        setError(formatErrorDetail(err.data.detail) || 'Failed to update profile')
+        setError(formatErrorDetail(err.data.detail) || "Failed to update profile");
       } else {
-        setError('Failed to update profile. Please try again.')
+        setError("Failed to update profile. Please try again.");
       }
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   const handleHotelSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    if (!hotelForm.validateForm()) return
+    e.preventDefault();
+    setError("");
+    if (!hotelForm.validateForm()) return;
 
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      const userEmail = localStorage.getItem(STORAGE_KEYS.USER_EMAIL)
+      const userEmail = localStorage.getItem(STORAGE_KEYS.USER_EMAIL);
       if (!userEmail) {
-        setError('Email is required. Please log in again.')
-        setSubmitting(false)
-        return
+        setError("Email is required. Please log in again.");
+        setSubmitting(false);
+        return;
       }
 
-      let profilePictureUrl: string | undefined
+      let profilePictureUrl: string | undefined;
       if (hotelForm.profilePictureFile) {
         try {
-          const uploadResponse = await hotelService.uploadProfileImage(hotelForm.profilePictureFile)
-          profilePictureUrl = uploadResponse.url
+          const uploadResponse = await hotelService.uploadProfileImage(
+            hotelForm.profilePictureFile,
+          );
+          profilePictureUrl = uploadResponse.url;
         } catch (err) {
           if (err instanceof ApiErrorResponse) {
-            setError(formatErrorDetail(err.data.detail) || 'Failed to upload profile picture')
+            setError(formatErrorDetail(err.data.detail) || "Failed to upload profile picture");
           } else {
-            setError('Failed to upload profile picture. Please try again.')
+            setError("Failed to upload profile picture. Please try again.");
           }
-          setSubmitting(false)
-          return
+          setSubmitting(false);
+          return;
         }
       }
 
@@ -225,37 +244,40 @@ export default function ProfileCompletePage() {
         phone: hotelForm.form.phone.trim(),
         email: userEmail,
         ...(profilePictureUrl && { picture: profilePictureUrl }),
-      }
+      };
 
-      const updatedProfile = await hotelService.updateMyProfile(updatePayload)
+      const updatedProfile = await hotelService.updateMyProfile(updatePayload);
       if (updatedProfile?.picture) {
-        hotelForm.setForm(prev => ({ ...prev, picture: updatedProfile.picture || '' }))
+        hotelForm.setForm((prev) => ({ ...prev, picture: updatedProfile.picture || "" }));
       }
 
       // Create listings
       for (const listing of hotelForm.listings) {
-        const offerings = buildListingOfferings(listing)
-        let imageUrls = listing.images.filter(img => !img.startsWith('data:'))
+        const offerings = buildListingOfferings(listing);
+        let imageUrls = listing.images.filter((img) => !img.startsWith("data:"));
 
         if (listing.imageFiles?.length) {
           try {
-            const uploadResponse = await hotelService.uploadListingImages(listing.imageFiles)
-            imageUrls = [...imageUrls, ...uploadResponse.images.map(img => img.url)]
+            const uploadResponse = await hotelService.uploadListingImages(listing.imageFiles);
+            imageUrls = [...imageUrls, ...uploadResponse.images.map((img) => img.url)];
           } catch (err) {
             if (err instanceof ApiErrorResponse) {
-              setError(formatErrorDetail(err.data.detail) || `Failed to upload images for listing "${listing.name}"`)
+              setError(
+                formatErrorDetail(err.data.detail) ||
+                  `Failed to upload images for listing "${listing.name}"`,
+              );
             } else {
-              setError(`Failed to upload images for listing "${listing.name}". Please try again.`)
+              setError(`Failed to upload images for listing "${listing.name}". Please try again.`);
             }
-            setSubmitting(false)
-            return
+            setSubmitting(false);
+            return;
           }
         }
 
         if (imageUrls.length === 0) {
-          setError(`Listing "${listing.name}": At least one image is required`)
-          setSubmitting(false)
-          return
+          setError(`Listing "${listing.name}": At least one image is required`);
+          setSubmitting(false);
+          return;
         }
 
         await hotelService.createListing({
@@ -266,117 +288,136 @@ export default function ProfileCompletePage() {
           images: imageUrls,
           collaboration_offerings: offerings,
           creator_requirements: buildCreatorRequirements(listing),
-        })
+        });
       }
 
-      const complete = await isProfileComplete('hotel')
+      const complete = await isProfileComplete("hotel");
       if (complete) {
-        setProfileCompleted(true)
-        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, 'true')
+        setProfileCompleted(true);
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
       } else {
-        const updatedStatus = await loadProfileStatus('hotel', true)
-        handleIncompleteProfile(updatedStatus as HotelProfileStatus)
+        const updatedStatus = await loadProfileStatus("hotel", true);
+        handleIncompleteProfile(updatedStatus as HotelProfileStatus);
       }
     } catch (err) {
       if (err instanceof ApiErrorResponse) {
-        setError(formatErrorDetail(err.data.detail) || 'Failed to update profile')
+        setError(formatErrorDetail(err.data.detail) || "Failed to update profile");
       } else {
-        setError('Failed to update profile. Please try again.')
+        setError("Failed to update profile. Please try again.");
       }
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   const handleIncompleteProfile = (status: CreatorProfileStatus | HotelProfileStatus | null) => {
     if (!status || status.profile_complete) {
-      setError('Profile updated, but some fields may still be missing. Please check the requirements.')
-      return
+      setError(
+        "Profile updated, but some fields may still be missing. Please check the requirements.",
+      );
+      return;
     }
-    const { missing_fields = [], completion_steps = [] } = status
-    let errorMessage = 'Profile updated successfully, but some required information is still missing:\n\n'
+    const { missing_fields = [], completion_steps = [] } = status;
+    let errorMessage =
+      "Profile updated successfully, but some required information is still missing:\n\n";
     if (completion_steps.length > 0) {
-      errorMessage += completion_steps.slice(0, 5).map((step, idx) => `${idx + 1}. ${step}`).join('\n')
+      errorMessage += completion_steps
+        .slice(0, 5)
+        .map((step, idx) => `${idx + 1}. ${step}`)
+        .join("\n");
       if (completion_steps.length > 5) {
-        errorMessage += `\n...and ${completion_steps.length - 5} more requirement${completion_steps.length - 5 > 1 ? 's' : ''}`
+        errorMessage += `\n...and ${completion_steps.length - 5} more requirement${completion_steps.length - 5 > 1 ? "s" : ""}`;
       }
     } else if (missing_fields.length > 0) {
-      errorMessage += 'Missing fields: ' + missing_fields.join(', ')
+      errorMessage += "Missing fields: " + missing_fields.join(", ");
     } else {
-      errorMessage += 'Please review all sections and ensure all required fields are completed.'
+      errorMessage += "Please review all sections and ensure all required fields are completed.";
     }
-    setError(errorMessage)
-  }
+    setError(errorMessage);
+  };
 
-  const buildListingOfferings = (listing: typeof hotelForm.listings[0]) => {
+  const buildListingOfferings = (listing: (typeof hotelForm.listings)[0]) => {
     const offerings: Array<{
-      collaboration_type: 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
-      availability_months: string[]
-      platforms: string[]
-      free_stay_min_nights?: number
-      free_stay_max_nights?: number
-      paid_max_amount?: number
-      currency?: string
-      discount_percentage?: number
-      commission_percentage?: number
-    }> = []
+      collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate";
+      availability_months: string[];
+      platforms: string[];
+      free_stay_min_nights?: number;
+      free_stay_max_nights?: number;
+      paid_max_amount?: number;
+      currency?: string;
+      discount_percentage?: number;
+      commission_percentage?: number;
+    }> = [];
 
-    if (listing.collaborationTypes.includes('Free Stay')) {
+    if (listing.collaborationTypes.includes("Free Stay")) {
       offerings.push({
-        collaboration_type: 'Free Stay',
+        collaboration_type: "Free Stay",
         availability_months: listing.availability,
         platforms: listing.platforms,
         free_stay_min_nights: listing.freeStayMinNights,
         free_stay_max_nights: listing.freeStayMaxNights,
-      })
+      });
     }
-    if (listing.collaborationTypes.includes('Paid')) {
+    if (listing.collaborationTypes.includes("Paid")) {
       offerings.push({
-        collaboration_type: 'Paid',
+        collaboration_type: "Paid",
         availability_months: listing.availability,
         platforms: listing.platforms,
         paid_max_amount: listing.paidMaxAmount,
-        currency: listing.currency || 'USD',
-      })
+        currency: listing.currency || "USD",
+      });
     }
-    if (listing.collaborationTypes.includes('Discount')) {
+    if (listing.collaborationTypes.includes("Discount")) {
       offerings.push({
-        collaboration_type: 'Discount',
+        collaboration_type: "Discount",
         availability_months: listing.availability,
         platforms: listing.platforms,
         discount_percentage: listing.discountPercentage,
-      })
+      });
     }
-    if (listing.collaborationTypes.includes('Affiliate')) {
+    if (listing.collaborationTypes.includes("Affiliate")) {
       offerings.push({
-        collaboration_type: 'Affiliate',
+        collaboration_type: "Affiliate",
         availability_months: listing.availability,
         platforms: listing.platforms,
         commission_percentage: listing.commissionPercentage,
-      })
+      });
     }
-    return offerings
-  }
+    return offerings;
+  };
 
-  const buildCreatorRequirements = (listing: typeof hotelForm.listings[0]) => {
-    const ageGroups = listing.targetGroupAgeGroups || []
-    let targetAgeMin: number | undefined
-    let targetAgeMax: number | undefined
+  const buildCreatorRequirements = (listing: (typeof hotelForm.listings)[0]) => {
+    const ageGroups = listing.targetGroupAgeGroups || [];
+    let targetAgeMin: number | undefined;
+    let targetAgeMax: number | undefined;
 
     if (ageGroups.length > 0) {
-      let min = Infinity, max = -Infinity, has55Plus = false
-      ageGroups.forEach(g => {
-        if (g === '18-24') { min = Math.min(min, 18); max = Math.max(max, 24) }
-        else if (g === '25-34') { min = Math.min(min, 25); max = Math.max(max, 34) }
-        else if (g === '35-44') { min = Math.min(min, 35); max = Math.max(max, 44) }
-        else if (g === '45-54') { min = Math.min(min, 45); max = Math.max(max, 54) }
-        else if (g === '55+') { min = Math.min(min, 55); has55Plus = true }
-      })
-      targetAgeMin = min === Infinity ? undefined : min
-      targetAgeMax = has55Plus ? undefined : (max === -Infinity ? undefined : max)
+      let min = Infinity,
+        max = -Infinity,
+        has55Plus = false;
+      ageGroups.forEach((g) => {
+        if (g === "18-24") {
+          min = Math.min(min, 18);
+          max = Math.max(max, 24);
+        } else if (g === "25-34") {
+          min = Math.min(min, 25);
+          max = Math.max(max, 34);
+        } else if (g === "35-44") {
+          min = Math.min(min, 35);
+          max = Math.max(max, 44);
+        } else if (g === "45-54") {
+          min = Math.min(min, 45);
+          max = Math.max(max, 54);
+        } else if (g === "55+") {
+          min = Math.min(min, 55);
+          has55Plus = true;
+        }
+      });
+      targetAgeMin = min === Infinity ? undefined : min;
+      targetAgeMax = has55Plus ? undefined : max === -Infinity ? undefined : max;
     } else {
-      targetAgeMin = listing.targetGroupAgeMin
-      targetAgeMax = listing.targetGroupAgeMax
+      targetAgeMin = listing.targetGroupAgeMin;
+      targetAgeMax = listing.targetGroupAgeMax;
     }
 
     return {
@@ -384,11 +425,11 @@ export default function ProfileCompletePage() {
       target_countries: listing.targetGroupCountries,
       target_age_min: targetAgeMin,
       target_age_max: targetAgeMax,
-    }
-  }
+    };
+  };
 
-  if (loading) return <LoadingScreen />
-  if (!userType || !profileStatus) return null
+  if (loading) return <LoadingScreen />;
+  if (!userType || !profileStatus) return null;
 
   if (profileCompleted || profileStatus.profile_complete) {
     return (
@@ -397,16 +438,16 @@ export default function ProfileCompletePage() {
         onGoHome={() => router.push(ROUTES.HOME)}
         onEditProfile={() => router.push(ROUTES.PROFILE)}
       />
-    )
+    );
   }
 
-  const steps = userType === 'creator' ? creatorSteps : hotelSteps
-  const totalSteps = steps.length
+  const steps = userType === "creator" ? creatorSteps : hotelSteps;
+  const totalSteps = steps.length;
   const completionPercentage = profileStatus?.profile_complete
     ? 100
-    : userType === 'creator'
+    : userType === "creator"
       ? creatorForm.calculateProgress()
-      : hotelForm.calculateProgress()
+      : hotelForm.calculateProgress();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-primary-50 relative overflow-hidden">
@@ -420,7 +461,11 @@ export default function ProfileCompletePage() {
       {/* Header */}
       <div className="relative bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-6 py-4 shadow-sm">
         <div className="max-w-4xl mx-auto flex items-center justify-center relative">
-          <a href="/" className="absolute left-0 p-2 -ml-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-all" title="Back to Home">
+          <a
+            href="/"
+            className="absolute left-0 p-2 -ml-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-all"
+            title="Back to Home"
+          >
             <ArrowLeftIcon className="w-5 h-5" />
           </a>
           <div className="flex items-center gap-2">
@@ -435,7 +480,7 @@ export default function ProfileCompletePage() {
         {/* Header Card with Steps */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-center md:text-left">
-            {userType === 'creator' ? (
+            {userType === "creator" ? (
               <div className="flex-shrink-0 w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center shadow-sm">
                 <UserIcon className="w-5 h-5 text-white" />
               </div>
@@ -443,9 +488,13 @@ export default function ProfileCompletePage() {
               <HotelBadgeIcon active />
             )}
             <div>
-              <h1 className="text-lg font-bold text-gray-900 leading-tight">Complete Your Profile</h1>
+              <h1 className="text-lg font-bold text-gray-900 leading-tight">
+                Complete Your Profile
+              </h1>
               <p className="text-xs text-gray-500 max-w-xs">
-                {userType === 'creator' ? 'Add info to connect with hotels' : 'Update info to collaborate'}
+                {userType === "creator"
+                  ? "Add info to connect with hotels"
+                  : "Update info to collaborate"}
               </p>
             </div>
           </div>
@@ -453,7 +502,7 @@ export default function ProfileCompletePage() {
         </div>
 
         {/* Forms */}
-        {userType === 'creator' && (
+        {userType === "creator" && (
           <CreatorProfileForm
             form={creatorForm.form}
             platforms={creatorForm.platforms}
@@ -484,7 +533,7 @@ export default function ProfileCompletePage() {
           />
         )}
 
-        {userType === 'hotel' && (
+        {userType === "hotel" && (
           <HotelProfileForm
             form={hotelForm.form}
             listings={hotelForm.listings}
@@ -512,5 +561,5 @@ export default function ProfileCompletePage() {
         )}
       </div>
     </div>
-  )
+  );
 }

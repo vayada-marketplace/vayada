@@ -1,58 +1,54 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import {
-  financialsService,
-  InvoiceDetail,
-  ManualPaymentMethod,
-} from '@/services/financials'
-import { formatCurrency } from '@/lib/formatCurrency'
-import { useTranslation } from '@/lib/i18n'
+import { useState } from "react";
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import { financialsService, InvoiceDetail, ManualPaymentMethod } from "@/services/financials";
+import { formatCurrency } from "@/lib/formatCurrency";
+import { useTranslation } from "@/lib/i18n";
 
 interface Props {
-  invoice: InvoiceDetail
-  onClose: () => void
-  onSuccess: (updated: InvoiceDetail) => void
+  invoice: InvoiceDetail;
+  onClose: () => void;
+  onSuccess: (updated: InvoiceDetail) => void;
 }
 
 const METHODS: { value: ManualPaymentMethod; labelKey: string }[] = [
-  { value: 'cash', labelKey: 'financials.recordMethodCash' },
-  { value: 'bank_transfer', labelKey: 'financials.recordMethodBankTransfer' },
-  { value: 'manual_card', labelKey: 'financials.recordMethodManualCard' },
-  { value: 'other', labelKey: 'financials.recordMethodOther' },
-]
+  { value: "cash", labelKey: "financials.recordMethodCash" },
+  { value: "bank_transfer", labelKey: "financials.recordMethodBankTransfer" },
+  { value: "manual_card", labelKey: "financials.recordMethodManualCard" },
+  { value: "other", labelKey: "financials.recordMethodOther" },
+];
 
 export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Props) {
-  const { t } = useTranslation()
-  const [amount, setAmount] = useState<string>(invoice.balanceDue.toFixed(2))
-  const [method, setMethod] = useState<ManualPaymentMethod>('cash')
-  const [reference, setReference] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
+  const { t } = useTranslation();
+  const [amount, setAmount] = useState<string>(invoice.balanceDue.toFixed(2));
+  const [method, setMethod] = useState<ManualPaymentMethod>("cash");
+  const [reference, setReference] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const parsed = parseFloat(amount)
+    e.preventDefault();
+    const parsed = parseFloat(amount);
     if (!parsed || parsed <= 0) {
-      setError(t('financials.recordError'))
-      return
+      setError(t("financials.recordError"));
+      return;
     }
-    setSubmitting(true)
-    setError('')
+    setSubmitting(true);
+    setError("");
     try {
       const updated = await financialsService.recordPayment(invoice.bookingId, {
         amount: parsed,
         paymentMethod: method,
         reference: reference.trim() || undefined,
-      })
-      onSuccess(updated)
+      });
+      onSuccess(updated);
     } catch (err: any) {
-      setError(err?.message || t('financials.recordError'))
+      setError(err?.message || t("financials.recordError"));
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -64,7 +60,7 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
             <span className="inline-flex w-6 h-6 items-center justify-center rounded bg-emerald-100">
               <span className="w-3 h-3 rounded-sm bg-emerald-600" />
             </span>
-            {t('financials.recordPayment')}
+            {t("financials.recordPayment")}
           </h3>
           <button
             type="button"
@@ -79,12 +75,14 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
         {/* Invoice summary */}
         <div className="rounded-lg border border-gray-200 px-3 py-2.5 mb-4 text-sm space-y-1">
           <div className="flex justify-between">
-            <span className="text-gray-500">{t('financials.recordInvoiceLabel')}</span>
+            <span className="text-gray-500">{t("financials.recordInvoiceLabel")}</span>
             <span className="font-mono text-gray-700">{invoice.invoiceNumber}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-500">{t('financials.recordBalanceLabel')}</span>
-            <span className="font-bold text-rose-600 tabular-nums">{formatCurrency(invoice.balanceDue, invoice.currency)}</span>
+            <span className="text-gray-500">{t("financials.recordBalanceLabel")}</span>
+            <span className="font-bold text-rose-600 tabular-nums">
+              {formatCurrency(invoice.balanceDue, invoice.currency)}
+            </span>
           </div>
         </div>
 
@@ -92,7 +90,7 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
           {/* Amount */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              {t('financials.recordAmountLabel', { currency: invoice.currency })}
+              {t("financials.recordAmountLabel", { currency: invoice.currency })}
             </label>
             <input
               type="number"
@@ -110,14 +108,14 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
               onClick={() => setAmount(invoice.balanceDue.toFixed(2))}
               className="text-xs text-primary-600 hover:underline mt-1"
             >
-              {t('financials.recordPayFullBalance')}
+              {t("financials.recordPayFullBalance")}
             </button>
           </div>
 
           {/* Method */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              {t('financials.recordMethodLabel')}
+              {t("financials.recordMethodLabel")}
             </label>
             <select
               value={method}
@@ -125,7 +123,9 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
               className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
             >
               {METHODS.map((m) => (
-                <option key={m.value} value={m.value}>{t(m.labelKey)}</option>
+                <option key={m.value} value={m.value}>
+                  {t(m.labelKey)}
+                </option>
               ))}
             </select>
           </div>
@@ -133,20 +133,18 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
           {/* Reference */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              {t('financials.recordReferenceLabel')}
+              {t("financials.recordReferenceLabel")}
             </label>
             <input
               type="text"
               value={reference}
               onChange={(e) => setReference(e.target.value)}
-              placeholder={t('financials.recordReferencePlaceholder')}
+              placeholder={t("financials.recordReferencePlaceholder")}
               className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
             />
           </div>
 
-          {error && (
-            <p className="text-sm text-rose-600">{error}</p>
-          )}
+          {error && <p className="text-sm text-rose-600">{error}</p>}
 
           {/* Actions */}
           <div className="flex justify-end gap-2 pt-2">
@@ -156,18 +154,18 @@ export default function RecordPaymentModal({ invoice, onClose, onSuccess }: Prop
               disabled={submitting}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
             >
-              {t('common.cancel')}
+              {t("common.cancel")}
             </button>
             <button
               type="submit"
               disabled={submitting}
               className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50"
             >
-              {submitting ? t('financials.recordSubmitting') : t('financials.recordSubmit')}
+              {submitting ? t("financials.recordSubmitting") : t("financials.recordSubmit")}
             </button>
           </div>
         </form>
       </div>
     </div>
-  )
+  );
 }

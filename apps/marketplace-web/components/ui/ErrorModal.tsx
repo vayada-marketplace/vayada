@@ -1,27 +1,27 @@
-'use client'
+"use client";
 
-import { XMarkIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline'
-import Button from './Button'
-import { Modal } from './Modal'
+import { XMarkIcon, ExclamationCircleIcon } from "@heroicons/react/24/outline";
+import Button from "./Button";
+import { Modal } from "./Modal";
 
 interface ErrorModalProps {
-  isOpen: boolean
-  onClose: () => void
-  title?: string
-  message: string | string[]
-  details?: string
+  isOpen: boolean;
+  onClose: () => void;
+  title?: string;
+  message: string | string[];
+  details?: string;
 }
 
 export function ErrorModal({
   isOpen,
   onClose,
-  title = 'Error',
+  title = "Error",
   message,
-  details
+  details,
 }: ErrorModalProps) {
   // Handle array of messages (validation errors)
-  const messages = Array.isArray(message) ? message : [message]
-  const hasMultipleErrors = messages.length > 1
+  const messages = Array.isArray(message) ? message : [message];
+  const hasMultipleErrors = messages.length > 1;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="lg">
@@ -43,9 +43,7 @@ export function ErrorModal({
           </div>
 
           {/* Title */}
-          <h3 className="text-2xl font-bold text-gray-900 mb-4 text-center">
-            {title}
-          </h3>
+          <h3 className="text-2xl font-bold text-gray-900 mb-4 text-center">{title}</h3>
 
           {/* Error Messages */}
           <div className="mb-6">
@@ -64,9 +62,7 @@ export function ErrorModal({
                 </ul>
               </div>
             ) : (
-              <p className="text-gray-700 text-center leading-relaxed">
-                {messages[0]}
-              </p>
+              <p className="text-gray-700 text-center leading-relaxed">{messages[0]}</p>
             )}
           </div>
 
@@ -80,16 +76,11 @@ export function ErrorModal({
           )}
 
           {/* Button */}
-          <Button
-            variant="primary"
-            onClick={onClose}
-            size="lg"
-            className="w-full"
-          >
+          <Button variant="primary" onClick={onClose} size="lg" className="w-full">
             OK
           </Button>
         </div>
       </div>
     </Modal>
-  )
+  );
 }

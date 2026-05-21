@@ -1,80 +1,80 @@
-'use client'
+"use client";
 
-import { Suspense, useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import Link from 'next/link'
-import { ROUTES, STORAGE_KEYS } from '@/lib/constants'
-import { authService } from '@/services/auth'
-import { ApiErrorResponse } from '@/services/api/client'
-import { checkProfileStatus } from '@/lib/utils'
-import type { UserType } from '@/lib/types'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
-import LoginForm from '@/components/auth/LoginForm'
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
+import { authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
+import { checkProfileStatus } from "@/lib/utils";
+import type { UserType } from "@/lib/types";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import LoginForm from "@/components/auth/LoginForm";
 
 function LoginContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [sessionExpired, setSessionExpired] = useState(false)
-  const [submitError, setSubmitError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (searchParams.get('expired') === 'true') {
-      setSessionExpired(true)
+    if (searchParams.get("expired") === "true") {
+      setSessionExpired(true);
     }
-  }, [searchParams])
+  }, [searchParams]);
 
   const handleLogin = async (email: string, password: string) => {
-    setSubmitError('')
-    setIsSubmitting(true)
+    setSubmitError("");
+    setIsSubmitting(true);
 
     try {
-      const response = await authService.login({ email, password })
+      const response = await authService.login({ email, password });
 
       // Check profile status after login
-      const userType = response.type as UserType
-      if (userType === 'creator' || userType === 'hotel') {
+      const userType = response.type as UserType;
+      if (userType === "creator" || userType === "hotel") {
         try {
-          const profileStatus = await checkProfileStatus(userType)
+          const profileStatus = await checkProfileStatus(userType);
           if (profileStatus && profileStatus.profile_complete) {
-            localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, 'true')
+            localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
           } else {
             // Treat missing/incomplete status the same: send to completion.
-            localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, 'false')
-            router.push(ROUTES.PROFILE_COMPLETE)
-            return
+            localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
+            router.push(ROUTES.PROFILE_COMPLETE);
+            return;
           }
         } catch (error) {
-          console.error('Failed to check profile status:', error)
+          console.error("Failed to check profile status:", error);
         }
       }
 
-      router.push(ROUTES.MARKETPLACE)
+      router.push(ROUTES.MARKETPLACE);
     } catch (error) {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
 
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
-          setSubmitError('Invalid email or password')
+          setSubmitError("Invalid email or password");
         } else if (error.status === 403) {
-          setSubmitError('Your account has been suspended. Please contact support.')
+          setSubmitError("Your account has been suspended. Please contact support.");
         } else if (error.status === 422) {
-          const detail = error.data.detail
+          const detail = error.data.detail;
           if (Array.isArray(detail)) {
-            setSubmitError(detail.map(e => e.msg).join('. '))
+            setSubmitError(detail.map((e) => e.msg).join(". "));
           } else {
-            setSubmitError(detail as string || 'Validation error')
+            setSubmitError((detail as string) || "Validation error");
           }
         } else if (error.status === 500) {
-          setSubmitError('Server error. Please try again later.')
+          setSubmitError("Server error. Please try again later.");
         } else {
-          setSubmitError(error.data.detail as string || 'Login failed. Please try again.')
+          setSubmitError((error.data.detail as string) || "Login failed. Please try again.");
         }
       } else {
-        setSubmitError('Network error. Please check your connection and try again.')
+        setSubmitError("Network error. Please check your connection and try again.");
       }
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex">
@@ -92,18 +92,14 @@ function LoginContent() {
         <div className="w-full max-w-md">
           {/* Logo */}
           <div className="mb-8">
-            <img
-              src="/vayada-logo.png"
-              alt="vayada"
-              className="h-12 mb-6"
-            />
+            <img src="/vayada-logo.png" alt="vayada" className="h-12 mb-6" />
           </div>
 
           {/* Title */}
           <h1 className="text-4xl font-bold text-gray-900 mb-2">Sign in</h1>
           <p className="text-gray-600 mb-2">Enter your credentials to access your account</p>
           <p className="text-sm text-gray-500 mb-8">
-            Looking for the PMS & Booking Engine?{' '}
+            Looking for the PMS & Booking Engine?{" "}
             <Link
               href={`${ROUTES.CHOOSE_PRODUCT}?choose=1`}
               className="font-medium text-primary-600 hover:text-primary-700"
@@ -116,7 +112,7 @@ function LoginContent() {
             onSubmit={handleLogin}
             isSubmitting={isSubmitting}
             submitError={submitError}
-            onErrorClear={() => setSubmitError('')}
+            onErrorClear={() => setSubmitError("")}
             sessionExpired={sessionExpired}
             registerHref={ROUTES.SIGNUP}
             registerLabel="Sign up"
@@ -136,7 +132,7 @@ function LoginContent() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 export default function LoginPage() {
@@ -144,5 +140,5 @@ export default function LoginPage() {
     <Suspense fallback={<div className="min-h-screen flex" />}>
       <LoginContent />
     </Suspense>
-  )
+  );
 }

@@ -1,31 +1,31 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { getStatusClasses } from '@/lib/constants'
-import { AvatarSimple } from '@/components/ui'
-import type { ConversationResponse } from '@/services/api/collaborations'
+import { useState } from "react";
+import { getStatusClasses } from "@/lib/constants";
+import { AvatarSimple } from "@/components/ui";
+import type { ConversationResponse } from "@/services/api/collaborations";
 
 interface ConversationsListProps {
-  conversations: ConversationResponse[]
-  selectedChatId: string | null
-  isLoading: boolean
-  onSelectChat: (id: string) => void
+  conversations: ConversationResponse[];
+  selectedChatId: string | null;
+  isLoading: boolean;
+  onSelectChat: (id: string) => void;
 }
 
 // Format relative time for messages
 function formatTime(dateStr: string | null) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60))
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
 
   if (diffInHours < 24) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
   if (diffInHours < 168) {
-    return date.toLocaleDateString([], { weekday: 'short' })
+    return date.toLocaleDateString([], { weekday: "short" });
   }
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 export function ConversationsList({
@@ -34,37 +34,37 @@ export function ConversationsList({
   isLoading,
   onSelectChat,
 }: ConversationsListProps) {
-  const [activeTab, setActiveTab] = useState<'Active' | 'Archived'>('Active')
+  const [activeTab, setActiveTab] = useState<"Active" | "Archived">("Active");
 
-  const archivedStatuses = ['completed', 'cancelled', 'declined']
+  const archivedStatuses = ["completed", "cancelled", "declined"];
   const filteredConversations = conversations.filter((chat) => {
-    const isArchived = archivedStatuses.includes(chat.collaboration_status.toLowerCase())
-    return activeTab === 'Archived' ? isArchived : !isArchived
-  })
+    const isArchived = archivedStatuses.includes(chat.collaboration_status.toLowerCase());
+    return activeTab === "Archived" ? isArchived : !isArchived;
+  });
 
   return (
     <>
       {/* Tabs */}
       <div className="flex items-center border-b border-gray-200 sticky top-0 bg-white z-10">
         <button
-          onClick={() => setActiveTab('Active')}
+          onClick={() => setActiveTab("Active")}
           className={`flex-1 py-3 text-sm font-medium text-center relative ${
-            activeTab === 'Active' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800'
+            activeTab === "Active" ? "text-blue-600" : "text-gray-500 hover:text-gray-800"
           }`}
         >
           Active
-          {activeTab === 'Active' && (
+          {activeTab === "Active" && (
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
           )}
         </button>
         <button
-          onClick={() => setActiveTab('Archived')}
+          onClick={() => setActiveTab("Archived")}
           className={`flex-1 py-3 text-sm font-medium text-center relative ${
-            activeTab === 'Archived' ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800'
+            activeTab === "Archived" ? "text-blue-600" : "text-gray-500 hover:text-gray-800"
           }`}
         >
           Archived
-          {activeTab === 'Archived' && (
+          {activeTab === "Archived" && (
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
           )}
         </button>
@@ -78,7 +78,7 @@ export function ConversationsList({
           </div>
         ) : filteredConversations.length === 0 ? (
           <div className="p-8 text-center text-sm text-gray-500">
-            {activeTab === 'Active' ? 'No active conversations.' : 'No archived conversations.'}
+            {activeTab === "Active" ? "No active conversations." : "No archived conversations."}
           </div>
         ) : (
           filteredConversations.map((chat) => (
@@ -87,8 +87,8 @@ export function ConversationsList({
               onClick={() => onSelectChat(chat.collaboration_id)}
               className={`p-4 hover:bg-blue-50/50 cursor-pointer transition-colors relative ${
                 selectedChatId === chat.collaboration_id
-                  ? 'bg-blue-50/80 border-r-2 border-blue-600'
-                  : ''
+                  ? "bg-blue-50/80 border-r-2 border-blue-600"
+                  : ""
               }`}
             >
               <div className="flex gap-3">
@@ -109,14 +109,12 @@ export function ConversationsList({
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="truncate">
                       <h4 className="text-sm font-semibold text-gray-900 truncate">
-                        {chat.my_role === 'creator' && chat.listing_name
+                        {chat.my_role === "creator" && chat.listing_name
                           ? chat.listing_name
                           : chat.partner_name}
                       </h4>
-                      {chat.my_role === 'creator' && chat.listing_name && (
-                        <p className="text-[10px] text-gray-400 truncate">
-                          {chat.partner_name}
-                        </p>
+                      {chat.my_role === "creator" && chat.listing_name && (
+                        <p className="text-[10px] text-gray-400 truncate">{chat.partner_name}</p>
                       )}
                     </div>
                     <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">
@@ -135,10 +133,10 @@ export function ConversationsList({
                   </div>
                   <p
                     className={`text-sm truncate ${
-                      chat.unread_count > 0 ? 'font-medium text-gray-900' : 'text-gray-500'
+                      chat.unread_count > 0 ? "font-medium text-gray-900" : "text-gray-500"
                     }`}
                   >
-                    {chat.last_message_content || 'No messages yet'}
+                    {chat.last_message_content || "No messages yet"}
                   </p>
                 </div>
               </div>
@@ -147,5 +145,5 @@ export function ConversationsList({
         )}
       </div>
     </>
-  )
+  );
 }

@@ -1,2 +1,2 @@
-export { CookieBanner } from './CookieBanner'
-export { CookieSettingsModal } from './CookieSettingsModal'
+export { CookieBanner } from "./CookieBanner";
+export { CookieSettingsModal } from "./CookieSettingsModal";

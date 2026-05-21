@@ -1,91 +1,86 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { AuthenticatedNavigation, ProfileWarningBanner } from '@/components/layout'
-import { useSidebar } from '@/components/layout/AuthenticatedNavigation'
-import { ROUTES } from '@/lib/constants'
-import { newsletterService, NewsletterPreferences } from '@/services/api/newsletter'
-import {
-  EnvelopeIcon,
-  GlobeAltIcon,
-  XMarkIcon,
-  ArrowLeftIcon,
-} from '@heroicons/react/24/outline'
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { AuthenticatedNavigation, ProfileWarningBanner } from "@/components/layout";
+import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
+import { ROUTES } from "@/lib/constants";
+import { newsletterService, NewsletterPreferences } from "@/services/api/newsletter";
+import { EnvelopeIcon, GlobeAltIcon, XMarkIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 
 export default function NewsletterSettingsPage() {
-  const { isCollapsed } = useSidebar()
-  const [prefs, setPrefs] = useState<NewsletterPreferences | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [countryInput, setCountryInput] = useState('')
+  const { isCollapsed } = useSidebar();
+  const [prefs, setPrefs] = useState<NewsletterPreferences | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [countryInput, setCountryInput] = useState("");
 
   useEffect(() => {
     const load = async () => {
       try {
-        setIsLoading(true)
-        const data = await newsletterService.getPreferences()
-        setPrefs(data)
+        setIsLoading(true);
+        const data = await newsletterService.getPreferences();
+        setPrefs(data);
       } catch {
-        setError('Failed to load newsletter preferences.')
+        setError("Failed to load newsletter preferences.");
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
-    load()
-  }, [])
+    };
+    load();
+  }, []);
 
   const save = async (updates: Partial<NewsletterPreferences>) => {
-    if (isSaving) return
+    if (isSaving) return;
     try {
-      setIsSaving(true)
-      setError(null)
-      setSuccess(null)
-      const updated = await newsletterService.updatePreferences(updates)
-      setPrefs(updated)
-      setSuccess('Preferences saved.')
+      setIsSaving(true);
+      setError(null);
+      setSuccess(null);
+      const updated = await newsletterService.updatePreferences(updates);
+      setPrefs(updated);
+      setSuccess("Preferences saved.");
     } catch {
-      setError('Failed to save preferences.')
+      setError("Failed to save preferences.");
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
   const handleToggleEnabled = () => {
-    if (!prefs) return
-    save({ enabled: !prefs.enabled })
-  }
+    if (!prefs) return;
+    save({ enabled: !prefs.enabled });
+  };
 
   const addCountry = () => {
-    const trimmed = countryInput.trim()
-    if (!trimmed || !prefs) return
-    const current = prefs.country_filter || []
-    if (current.map(c => c.toLowerCase()).includes(trimmed.toLowerCase())) {
-      setCountryInput('')
-      return
+    const trimmed = countryInput.trim();
+    if (!trimmed || !prefs) return;
+    const current = prefs.country_filter || [];
+    if (current.map((c) => c.toLowerCase()).includes(trimmed.toLowerCase())) {
+      setCountryInput("");
+      return;
     }
-    const updated = [...current, trimmed]
-    save({ country_filter: updated })
-    setCountryInput('')
-  }
+    const updated = [...current, trimmed];
+    save({ country_filter: updated });
+    setCountryInput("");
+  };
 
   const removeCountry = (country: string) => {
-    if (!prefs) return
-    const current = prefs.country_filter || []
-    const updated = current.filter(c => c !== country)
-    save({ country_filter: updated.length > 0 ? updated : [] })
-  }
+    if (!prefs) return;
+    const current = prefs.country_filter || [];
+    const updated = current.filter((c) => c !== country);
+    save({ country_filter: updated.length > 0 ? updated : [] });
+  };
 
   const clearCountryFilter = () => {
-    save({ country_filter: [] })
-  }
+    save({ country_filter: [] });
+  };
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: '#f9f8f6' }}>
+    <main className="min-h-screen" style={{ backgroundColor: "#f9f8f6" }}>
       <AuthenticatedNavigation />
-      <div className={`transition-all duration-300 ${isCollapsed ? 'md:pl-20' : 'md:pl-64'} pt-16`}>
+      <div className={`transition-all duration-300 ${isCollapsed ? "md:pl-20" : "md:pl-64"} pt-16`}>
         <div className="pt-4">
           <ProfileWarningBanner />
         </div>
@@ -102,9 +97,7 @@ export default function NewsletterSettingsPage() {
 
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-4xl font-extrabold text-gray-900 mb-3">
-              Newsletter Preferences
-            </h1>
+            <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Newsletter Preferences</h1>
             <p className="text-lg text-gray-600">
               Get weekly recommendations for hotels or creators tailored to you
             </p>
@@ -150,14 +143,14 @@ export default function NewsletterSettingsPage() {
                     disabled={isSaving}
                     className={`
                       relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
-                      ${prefs.enabled ? 'bg-primary-600' : 'bg-gray-200'}
-                      ${isSaving ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+                      ${prefs.enabled ? "bg-primary-600" : "bg-gray-200"}
+                      ${isSaving ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
                     `}
                   >
                     <span
                       className={`
                         pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out
-                        ${prefs.enabled ? 'translate-x-5' : 'translate-x-0'}
+                        ${prefs.enabled ? "translate-x-5" : "translate-x-0"}
                       `}
                     />
                   </button>
@@ -173,7 +166,8 @@ export default function NewsletterSettingsPage() {
                       <div>
                         <h2 className="text-lg font-semibold text-gray-900">Country Filter</h2>
                         <p className="text-sm text-gray-500">
-                          Only receive recommendations from specific countries. Leave empty to get recommendations from everywhere.
+                          Only receive recommendations from specific countries. Leave empty to get
+                          recommendations from everywhere.
                         </p>
                       </div>
                     </div>
@@ -213,9 +207,9 @@ export default function NewsletterSettingsPage() {
                         value={countryInput}
                         onChange={(e) => setCountryInput(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
-                            addCountry()
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addCountry();
                           }
                         }}
                         placeholder="e.g. Spain, Thailand, Italy..."
@@ -253,5 +247,5 @@ export default function NewsletterSettingsPage() {
         </div>
       </div>
     </main>
-  )
+  );
 }

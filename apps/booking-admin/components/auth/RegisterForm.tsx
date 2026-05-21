@@ -1,16 +1,16 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
-import { useTranslation } from '@/lib/i18n'
+import { useState } from "react";
+import { EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
+import { useTranslation } from "@/lib/i18n";
 
 interface RegisterFormProps {
-  onSubmit: (data: { name: string; email: string; password: string }) => Promise<void>
-  isSubmitting: boolean
-  submitError: string
-  fieldErrors?: { name?: string; email?: string; password?: string; confirmPassword?: string }
-  onErrorClear: () => void
-  loginHref?: string
+  onSubmit: (data: { name: string; email: string; password: string }) => Promise<void>;
+  isSubmitting: boolean;
+  submitError: string;
+  fieldErrors?: { name?: string; email?: string; password?: string; confirmPassword?: string };
+  onErrorClear: () => void;
+  loginHref?: string;
 }
 
 export default function RegisterForm({
@@ -19,73 +19,76 @@ export default function RegisterForm({
   submitError,
   fieldErrors = {},
   onErrorClear,
-  loginHref = '/login',
+  loginHref = "/login",
 }: RegisterFormProps) {
-  const { t } = useTranslation()
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const { t } = useTranslation();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [localErrors, setLocalErrors] = useState<{
-    name?: string; email?: string; password?: string; confirmPassword?: string
-  }>({})
+    name?: string;
+    email?: string;
+    password?: string;
+    confirmPassword?: string;
+  }>({});
 
-  const errors = { ...localErrors, ...fieldErrors }
+  const errors = { ...localErrors, ...fieldErrors };
 
   const clearFieldError = (field: string) => {
     if (localErrors[field as keyof typeof localErrors]) {
-      setLocalErrors(prev => ({ ...prev, [field]: undefined }))
+      setLocalErrors((prev) => ({ ...prev, [field]: undefined }));
     }
-    onErrorClear()
-  }
+    onErrorClear();
+  };
 
   const validateForm = (): boolean => {
-    const newErrors: typeof localErrors = {}
+    const newErrors: typeof localErrors = {};
 
     if (!name.trim()) {
-      newErrors.name = t('auth.register.errorNameRequired')
+      newErrors.name = t("auth.register.errorNameRequired");
     }
 
     if (!email.trim()) {
-      newErrors.email = t('auth.register.errorEmailRequired')
+      newErrors.email = t("auth.register.errorEmailRequired");
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = t('auth.register.errorEmailInvalid')
+      newErrors.email = t("auth.register.errorEmailInvalid");
     }
 
     if (!password) {
-      newErrors.password = t('auth.register.errorPasswordRequired')
+      newErrors.password = t("auth.register.errorPasswordRequired");
     } else if (password.length < 8) {
-      newErrors.password = t('auth.register.errorPasswordLength')
+      newErrors.password = t("auth.register.errorPasswordLength");
     }
 
     if (!confirmPassword) {
-      newErrors.confirmPassword = t('auth.register.errorConfirmRequired')
+      newErrors.confirmPassword = t("auth.register.errorConfirmRequired");
     } else if (password !== confirmPassword) {
-      newErrors.confirmPassword = t('auth.register.errorPasswordMismatch')
+      newErrors.confirmPassword = t("auth.register.errorPasswordMismatch");
     }
 
-    setLocalErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
+    setLocalErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
 
     if (!validateForm()) {
-      return
+      return;
     }
 
-    await onSubmit({ name, email, password })
-  }
+    await onSubmit({ name, email, password });
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {/* Name Field */}
       <div>
         <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1.5">
-          {t('auth.register.fullNameLabel')}
+          {t("auth.register.fullNameLabel")}
         </label>
         <input
           id="name"
@@ -93,25 +96,23 @@ export default function RegisterForm({
           name="name"
           value={name}
           onChange={(e) => {
-            setName(e.target.value)
-            clearFieldError('name')
+            setName(e.target.value);
+            clearFieldError("name");
           }}
           required
-          placeholder={t('auth.register.fullNamePlaceholder')}
+          placeholder={t("auth.register.fullNamePlaceholder")}
           autoComplete="name"
           className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
-            errors.name ? 'border-red-300 ring-1 ring-red-300' : 'border-gray-300'
+            errors.name ? "border-red-300 ring-1 ring-red-300" : "border-gray-300"
           }`}
         />
-        {errors.name && (
-          <p className="mt-1 text-sm text-red-600">{errors.name}</p>
-        )}
+        {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name}</p>}
       </div>
 
       {/* Email Field */}
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
-          {t('auth.register.emailLabel')}
+          {t("auth.register.emailLabel")}
         </label>
         <input
           id="email"
@@ -119,38 +120,36 @@ export default function RegisterForm({
           name="email"
           value={email}
           onChange={(e) => {
-            setEmail(e.target.value)
-            clearFieldError('email')
+            setEmail(e.target.value);
+            clearFieldError("email");
           }}
           required
-          placeholder={t('auth.register.emailPlaceholder')}
+          placeholder={t("auth.register.emailPlaceholder")}
           autoComplete="email"
           className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
-            errors.email ? 'border-red-300 ring-1 ring-red-300' : 'border-gray-300'
+            errors.email ? "border-red-300 ring-1 ring-red-300" : "border-gray-300"
           }`}
         />
-        {errors.email && (
-          <p className="mt-1 text-sm text-red-600">{errors.email}</p>
-        )}
+        {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
       </div>
 
       {/* Password Field */}
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
-          {t('auth.register.passwordLabel')}
+          {t("auth.register.passwordLabel")}
         </label>
         <div className="relative">
           <input
             id="password"
-            type={showPassword ? 'text' : 'password'}
+            type={showPassword ? "text" : "password"}
             name="password"
             value={password}
             onChange={(e) => {
-              setPassword(e.target.value)
-              clearFieldError('password')
+              setPassword(e.target.value);
+              clearFieldError("password");
             }}
             required
-            placeholder={t('auth.register.passwordPlaceholder')}
+            placeholder={t("auth.register.passwordPlaceholder")}
             autoComplete="new-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -159,35 +158,29 @@ export default function RegisterForm({
             onClick={() => setShowPassword(!showPassword)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
           >
-            {showPassword ? (
-              <EyeSlashIcon className="w-5 h-5" />
-            ) : (
-              <EyeIcon className="w-5 h-5" />
-            )}
+            {showPassword ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
           </button>
         </div>
-        {errors.password && (
-          <p className="mt-1 text-sm text-red-600">{errors.password}</p>
-        )}
+        {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password}</p>}
       </div>
 
       {/* Confirm Password Field */}
       <div>
         <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1.5">
-          {t('auth.register.confirmPasswordLabel')}
+          {t("auth.register.confirmPasswordLabel")}
         </label>
         <div className="relative">
           <input
             id="confirmPassword"
-            type={showConfirmPassword ? 'text' : 'password'}
+            type={showConfirmPassword ? "text" : "password"}
             name="confirmPassword"
             value={confirmPassword}
             onChange={(e) => {
-              setConfirmPassword(e.target.value)
-              clearFieldError('confirmPassword')
+              setConfirmPassword(e.target.value);
+              clearFieldError("confirmPassword");
             }}
             required
-            placeholder={t('auth.register.confirmPasswordPlaceholder')}
+            placeholder={t("auth.register.confirmPasswordPlaceholder")}
             autoComplete="new-password"
             className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12 text-sm text-gray-900"
           />
@@ -221,18 +214,18 @@ export default function RegisterForm({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? t('auth.register.submitting') : t('auth.register.submit')}
+        {isSubmitting ? t("auth.register.submitting") : t("auth.register.submit")}
       </button>
 
       {/* Login Link */}
       <div className="text-center">
         <p className="text-sm text-gray-600">
-          {t('auth.register.hasAccount')}{' '}
+          {t("auth.register.hasAccount")}{" "}
           <a href={loginHref} className="text-primary-600 hover:text-primary-700 font-medium">
-            {t('auth.register.signIn')}
+            {t("auth.register.signIn")}
           </a>
         </p>
       </div>
     </form>
-  )
+  );
 }

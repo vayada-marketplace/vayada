@@ -21,12 +21,12 @@ Populate local databases with mock data for development. All seed scripts
 default to `localhost` Postgres URLs; override via `DATABASE_URL`,
 `AUTH_DATABASE_URL`, `PMS_DATABASE_URL` env vars.
 
-| Script | Purpose |
-| --- | --- |
-| `seed_users.py` | Seeds the shared auth DB with the admin user and mock hotel/creator accounts. **Run this first.** |
-| `seed_marketplace.py` | Seeds the marketplace DB with profiles, listings, collaborations, chats, and reviews. |
-| `seed_booking.py` | Seeds the booking-engine DB (hotel properties, translations) and the PMS DB (hotels, room types, sample bookings). |
-| `seed_all.py` | Runs the three above in order (`users → marketplace → booking`) and prints credentials at the end. |
+| Script                | Purpose                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `seed_users.py`       | Seeds the shared auth DB with the admin user and mock hotel/creator accounts. **Run this first.**                  |
+| `seed_marketplace.py` | Seeds the marketplace DB with profiles, listings, collaborations, chats, and reviews.                              |
+| `seed_booking.py`     | Seeds the booking-engine DB (hotel properties, translations) and the PMS DB (hotels, room types, sample bookings). |
+| `seed_all.py`         | Runs the three above in order (`users → marketplace → booking`) and prints credentials at the end.                 |
 
 ```sh
 python scripts/seed_all.py

@@ -1,15 +1,15 @@
-'use client'
+"use client";
 
-import { StarIcon } from '@heroicons/react/24/solid'
-import { StarRating } from '@/components/ui'
-import type { CreatorRating } from '@/lib/types'
+import { StarIcon } from "@heroicons/react/24/solid";
+import { StarRating } from "@/components/ui";
+import type { CreatorRating } from "@/lib/types";
 
 interface CreatorReviewsTabProps {
-  rating?: CreatorRating
+  rating?: CreatorRating;
 }
 
 export function CreatorReviewsTab({ rating }: CreatorReviewsTabProps) {
-  const hasReviews = rating && rating.totalReviews > 0
+  const hasReviews = rating && rating.totalReviews > 0;
 
   return (
     <div>
@@ -54,14 +54,12 @@ export function CreatorReviewsTab({ rating }: CreatorReviewsTabProps) {
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
-                        <h4 className="font-semibold text-gray-900 mb-1">
-                          {review.hotelName}
-                        </h4>
+                        <h4 className="font-semibold text-gray-900 mb-1">{review.hotelName}</h4>
                         <p className="text-sm text-gray-500">
-                          {new Date(review.createdAt).toLocaleDateString('en-US', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
+                          {new Date(review.createdAt).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "long",
+                            day: "numeric",
                           })}
                         </p>
                       </div>
@@ -73,9 +71,7 @@ export function CreatorReviewsTab({ rating }: CreatorReviewsTabProps) {
                       />
                     </div>
                     {review.comment && (
-                      <p className="text-gray-700 leading-relaxed mt-3">
-                        {review.comment}
-                      </p>
+                      <p className="text-gray-700 leading-relaxed mt-3">{review.comment}</p>
                     )}
                   </div>
                 ))}
@@ -89,7 +85,7 @@ export function CreatorReviewsTab({ rating }: CreatorReviewsTabProps) {
         <EmptyReviewsState />
       )}
     </div>
-  )
+  );
 }
 
 function EmptyReviewsState() {
@@ -101,5 +97,5 @@ function EmptyReviewsState() {
         Reviews from hotels will appear here after collaborations
       </p>
     </div>
-  )
+  );
 }

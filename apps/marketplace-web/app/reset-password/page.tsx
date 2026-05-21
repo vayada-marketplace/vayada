@@ -1,38 +1,38 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { ROUTES } from '@/lib/constants/routes'
-import { authService } from '@/services/auth'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
-import ResetPasswordForm from '@/components/auth/ResetPasswordForm'
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ROUTES } from "@/lib/constants/routes";
+import { authService } from "@/services/auth";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import ResetPasswordForm from "@/components/auth/ResetPasswordForm";
 
 export default function ResetPasswordPage() {
-  const router = useRouter()
-  const [submitError, setSubmitError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const router = useRouter();
+  const [submitError, setSubmitError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleResetPassword = async (token: string, password: string) => {
-    setSubmitError('')
-    setIsSubmitting(true)
+    setSubmitError("");
+    setIsSubmitting(true);
 
     try {
-      await authService.resetPassword(token, password)
+      await authService.resetPassword(token, password);
     } catch (error) {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
 
       if (error instanceof Error) {
-        setSubmitError(error.message)
+        setSubmitError(error.message);
       } else {
-        setSubmitError('Something went wrong. Please try again or request a new reset link.')
+        setSubmitError("Something went wrong. Please try again or request a new reset link.");
       }
 
-      throw error
+      throw error;
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex">
@@ -50,11 +50,7 @@ export default function ResetPasswordPage() {
         <div className="w-full max-w-md">
           {/* Logo */}
           <div className="mb-6">
-            <img
-              src="/vayada-logo.png"
-              alt="vayada"
-              className="h-10 mb-4"
-            />
+            <img src="/vayada-logo.png" alt="vayada" className="h-10 mb-4" />
           </div>
 
           {/* Title */}
@@ -67,7 +63,7 @@ export default function ResetPasswordPage() {
             onSubmit={handleResetPassword}
             isSubmitting={isSubmitting}
             submitError={submitError}
-            onErrorClear={() => setSubmitError('')}
+            onErrorClear={() => setSubmitError("")}
             loginHref={ROUTES.LOGIN}
             forgotPasswordHref={ROUTES.FORGOT_PASSWORD}
             onSuccess={() => router.push(ROUTES.LOGIN)}
@@ -86,5 +82,5 @@ export default function ResetPasswordPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

@@ -21,14 +21,14 @@ The full operating model — projects, label semantics, status transitions, prio
 
 ## Decision tree — what kind of issue is this?
 
-| Input shape | Issue type |
-| --- | --- |
-| New product capability, user-facing | `Feature` |
-| Enhancement to something that already exists | `Improvement` |
-| Behavior diverges from spec or expected | `Bug` |
-| Cleanup, dependency bump, no behavior change | `Chore` |
+| Input shape                                    | Issue type                                  |
+| ---------------------------------------------- | ------------------------------------------- |
+| New product capability, user-facing            | `Feature`                                   |
+| Enhancement to something that already exists   | `Improvement`                               |
+| Behavior diverges from spec or expected        | `Bug`                                       |
+| Cleanup, dependency bump, no behavior change   | `Chore`                                     |
 | "We should investigate / compare / figure out" | `Spike` (output = recommendation, not code) |
-| "We need to decide between X and Y" | `Decision` (often paired with `Spike`) |
+| "We need to decide between X and Y"            | `Decision` (often paired with `Spike`)      |
 
 If unsure between Improvement and Feature, pick the smaller one — `Improvement`.
 
@@ -59,20 +59,25 @@ Use Markdown. Omit any section that doesn't apply rather than padding it.
 
 ```markdown
 ## Context
+
 Why this exists. What triggered it. What problem it solves. One short paragraph — assume the reader has not been in the conversation.
 
 ## Scope
+
 - What is in scope, as bullets.
 - Be concrete about files, services, or behaviors.
 
 ## Out of scope (optional)
+
 - Things deliberately excluded, so reviewers don't expect them.
 
 ## Acceptance criteria
+
 - Testable statements of "done", as bullets.
 - "X happens when Y" or "Z is documented at <path>".
 
 ## Notes / References (optional)
+
 - Related issues: VAY-NNN.
 - Code paths: apps/<app>/path/to/file.py.
 - Links to plans, docs, decisions.
@@ -82,6 +87,7 @@ For `Spike`/`Decision` issues, swap `Acceptance criteria` for:
 
 ```markdown
 ## Expected output
+
 - A written recommendation covering <bulleted points>.
 - Saved to <path or Linear doc>.
 ```

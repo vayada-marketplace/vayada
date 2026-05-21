@@ -13,11 +13,11 @@ This is the bootstrap skill: it encodes the decision made in VAY-442 (repository
 
 Agent guidance for Vayada is split across three layers. Pick the right layer **before** writing anything.
 
-| Layer | Lives in | Use for |
-| --- | --- | --- |
-| **Shared skill** | `.claude/skills/<name>/SKILL.md` in this monorepo | Durable workflows that apply across the codebase and across agent tools: writing Linear issues, deployment workflow, validation workflow, coding conventions, Vayada product context. |
-| **Repo-local instructions** | Root `AGENTS.md` (tool-neutral) + root `CLAUDE.md` (thin Claude wrapper). | Exact commands, app paths, layout, local setup, workflow scripts, gotchas, shipping rules. |
-| **Linear issue context** | The Linear ticket itself | Task-specific scope, acceptance criteria, decisions made during the ticket. |
+| Layer                       | Lives in                                                                  | Use for                                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Shared skill**            | `.claude/skills/<name>/SKILL.md` in this monorepo                         | Durable workflows that apply across the codebase and across agent tools: writing Linear issues, deployment workflow, validation workflow, coding conventions, Vayada product context. |
+| **Repo-local instructions** | Root `AGENTS.md` (tool-neutral) + root `CLAUDE.md` (thin Claude wrapper). | Exact commands, app paths, layout, local setup, workflow scripts, gotchas, shipping rules.                                                                                            |
+| **Linear issue context**    | The Linear ticket itself                                                  | Task-specific scope, acceptance criteria, decisions made during the ticket.                                                                                                           |
 
 Decision rule:
 

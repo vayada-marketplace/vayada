@@ -1,20 +1,20 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { authService } from '@/services/auth'
-import ForgotPasswordForm from '@/components/auth/ForgotPasswordForm'
+import { useState } from "react";
+import { authService } from "@/services/auth";
+import ForgotPasswordForm from "@/components/auth/ForgotPasswordForm";
 
 export default function ForgotPasswordPage() {
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleForgotPassword = async (email: string) => {
-    setIsSubmitting(true)
+    setIsSubmitting(true);
     try {
-      await authService.forgotPassword(email)
+      await authService.forgotPassword(email);
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -28,11 +28,8 @@ export default function ForgotPasswordPage() {
           <p className="text-[13px] text-gray-500 mt-1">Reset your password</p>
         </div>
 
-        <ForgotPasswordForm
-          onSubmit={handleForgotPassword}
-          isSubmitting={isSubmitting}
-        />
+        <ForgotPasswordForm onSubmit={handleForgotPassword} isSubmitting={isSubmitting} />
       </div>
     </div>
-  )
+  );
 }

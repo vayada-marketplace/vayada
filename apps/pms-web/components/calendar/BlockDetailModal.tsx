@@ -1,15 +1,15 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { CalendarBlock, CalendarRoomType } from '@/services/calendar'
-import Modal from '@/components/Modal'
+import { useState } from "react";
+import { CalendarBlock, CalendarRoomType } from "@/services/calendar";
+import Modal from "@/components/Modal";
 
 interface BlockDetailModalProps {
-  block: CalendarBlock
-  roomTypes: CalendarRoomType[]
-  onSave: (updates: { startDate: string; endDate: string; reason: string }) => Promise<void>
-  onDelete: () => Promise<void>
-  onClose: () => void
+  block: CalendarBlock;
+  roomTypes: CalendarRoomType[];
+  onSave: (updates: { startDate: string; endDate: string; reason: string }) => Promise<void>;
+  onDelete: () => Promise<void>;
+  onClose: () => void;
 }
 
 export default function BlockDetailModal({
@@ -19,53 +19,53 @@ export default function BlockDetailModal({
   onDelete,
   onClose,
 }: BlockDetailModalProps) {
-  const [editing, setEditing] = useState(false)
-  const [startDate, setStartDate] = useState(block.startDate)
-  const [endDate, setEndDate] = useState(block.endDate)
-  const [reason, setReason] = useState(block.reason || '')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState('')
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editing, setEditing] = useState(false);
+  const [startDate, setStartDate] = useState(block.startDate);
+  const [endDate, setEndDate] = useState(block.endDate);
+  const [reason, setReason] = useState(block.reason || "");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const roomType = roomTypes.find((rt) => rt.id === block.roomTypeId)
+  const roomType = roomTypes.find((rt) => rt.id === block.roomTypeId);
 
   const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
+    e.preventDefault();
+    setError("");
     if (!startDate || !endDate) {
-      setError('Please select both dates')
-      return
+      setError("Please select both dates");
+      return;
     }
     if (endDate <= startDate) {
-      setError('End date must be after start date')
-      return
+      setError("End date must be after start date");
+      return;
     }
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      await onSave({ startDate, endDate, reason })
-      setEditing(false)
+      await onSave({ startDate, endDate, reason });
+      setEditing(false);
     } catch (err: any) {
-      setError(err?.message || 'Failed to update block')
+      setError(err?.message || "Failed to update block");
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   const handleDelete = async () => {
-    setSubmitting(true)
+    setSubmitting(true);
     try {
-      await onDelete()
+      await onDelete();
     } catch (err: any) {
-      setError(err?.message || 'Failed to unblock')
-      setSubmitting(false)
+      setError(err?.message || "Failed to unblock");
+      setSubmitting(false);
     }
-  }
+  };
 
   return (
     <Modal onClose={onClose}>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-bold text-gray-900">
-          {editing ? 'Edit Block' : 'Blocked Room'}
+          {editing ? "Edit Block" : "Blocked Room"}
         </h2>
         <span className="text-[11px] font-medium px-2 py-1 rounded bg-red-100 text-red-700 border border-red-200">
           Blocked
@@ -75,35 +75,45 @@ export default function BlockDetailModal({
       {!editing ? (
         <div className="space-y-3">
           <div>
-            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Room Type</div>
-            <div className="text-sm text-gray-900 mt-0.5">{roomType?.name || 'Unknown'}</div>
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+              Room Type
+            </div>
+            <div className="text-sm text-gray-900 mt-0.5">{roomType?.name || "Unknown"}</div>
           </div>
 
           <div>
             <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
-              {block.roomId ? 'Room' : 'Rooms Blocked'}
+              {block.roomId ? "Room" : "Rooms Blocked"}
             </div>
             <div className="text-sm text-gray-900 mt-0.5">
               {block.roomId
-                ? `#${block.roomNumber ?? ''}`
-                : `${block.blockedCount} room${block.blockedCount !== 1 ? 's' : ''}`}
+                ? `#${block.roomNumber ?? ""}`
+                : `${block.blockedCount} room${block.blockedCount !== 1 ? "s" : ""}`}
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Start</div>
+              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                Start
+              </div>
               <div className="text-sm text-gray-900 mt-0.5">{block.startDate}</div>
             </div>
             <div>
-              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">End</div>
+              <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+                End
+              </div>
               <div className="text-sm text-gray-900 mt-0.5">{block.endDate}</div>
             </div>
           </div>
 
           <div>
-            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">Reason</div>
-            <div className="text-sm text-gray-900 mt-0.5">{block.reason || <span className="text-gray-400">No reason given</span>}</div>
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wide">
+              Reason
+            </div>
+            <div className="text-sm text-gray-900 mt-0.5">
+              {block.reason || <span className="text-gray-400">No reason given</span>}
+            </div>
           </div>
 
           {error && <p className="text-sm text-red-600">{error}</p>}
@@ -125,7 +135,7 @@ export default function BlockDetailModal({
                     disabled={submitting}
                     className="px-3 py-1.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
                   >
-                    {submitting ? 'Unblocking...' : 'Unblock'}
+                    {submitting ? "Unblocking..." : "Unblock"}
                   </button>
                 </div>
               </>
@@ -160,7 +170,7 @@ export default function BlockDetailModal({
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Room Type</label>
             <div className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-500 bg-gray-50">
-              {roomType?.name || 'Unknown'}
+              {roomType?.name || "Unknown"}
               {block.roomId && block.roomNumber && (
                 <span className="text-gray-400"> &middot; #{block.roomNumber}</span>
               )}
@@ -206,7 +216,10 @@ export default function BlockDetailModal({
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={() => { setEditing(false); setError('') }}
+              onClick={() => {
+                setEditing(false);
+                setError("");
+              }}
               className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
             >
               Cancel
@@ -216,11 +229,11 @@ export default function BlockDetailModal({
               disabled={submitting}
               className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50"
             >
-              {submitting ? 'Saving...' : 'Save Changes'}
+              {submitting ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </form>
       )}
     </Modal>
-  )
+  );
 }

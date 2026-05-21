@@ -1,1 +1,1 @@
-export { default as PartnerProgram } from './PartnerProgram'
+export { default as PartnerProgram } from "./PartnerProgram";

@@ -6,9 +6,9 @@ on:
     branches:
       - main
     paths:
-      - 'apps/pms-web/**'
-      - 'packages/**'
-      - '.github/workflows/deploy-pms-web.yml'
+      - "apps/pms-web/**"
+      - "packages/**"
+      - ".github/workflows/deploy-pms-web.yml"
 
 permissions:
   id-token: write

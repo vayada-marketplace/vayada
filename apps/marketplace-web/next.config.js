@@ -1,32 +1,31 @@
 /** @type {import('next').NextConfig} */
-const path = require('path')
+const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  output: "standalone",
   turbopack: {
-    root: path.join(__dirname, '../..'),
+    root: path.join(__dirname, "../.."),
   },
   images: {
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: 'api.vayada.com',
+        protocol: "https",
+        hostname: "api.vayada.com",
       },
       {
-        protocol: 'https',
-        hostname: '**.amazonaws.com',
+        protocol: "https",
+        hostname: "**.amazonaws.com",
       },
       {
-        protocol: 'https',
-        hostname: 'images.unsplash.com',
+        protocol: "https",
+        hostname: "images.unsplash.com",
       },
       {
-        protocol: 'http',
-        hostname: 'localhost',
+        protocol: "http",
+        hostname: "localhost",
       },
     ],
   },
-}
+};
 
-module.exports = nextConfig
-
+module.exports = nextConfig;

@@ -6,9 +6,9 @@ on:
     branches:
       - main
     paths:
-      - 'apps/booking-admin/**'
-      - 'packages/**'
-      - '.github/workflows/deploy-booking-admin.yml'
+      - "apps/booking-admin/**"
+      - "packages/**"
+      - ".github/workflows/deploy-booking-admin.yml"
 
 permissions:
   id-token: write

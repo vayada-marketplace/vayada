@@ -8,18 +8,18 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path | Stack | Port |
-|---|---|---|
-| `apps/marketplace-api` | FastAPI | 8000 |
-| `apps/marketplace-web` | Next.js 14 | 3000 |
-| `apps/marketplace-admin` | Next.js 14 | 3001 |
-| `apps/booking-api` | FastAPI | 8001 |
-| `apps/booking-web` | Next.js 14 | 3002 |
-| `apps/booking-admin` | Next.js 14 | 3003 |
-| `apps/pms-api` | FastAPI | 8002 |
-| `apps/pms-web` | Next.js 14 | 3004 |
+| Path                       | Stack      | Port |
+| -------------------------- | ---------- | ---- |
+| `apps/marketplace-api`     | FastAPI    | 8000 |
+| `apps/marketplace-web`     | Next.js 14 | 3000 |
+| `apps/marketplace-admin`   | Next.js 14 | 3001 |
+| `apps/booking-api`         | FastAPI    | 8001 |
+| `apps/booking-web`         | Next.js 14 | 3002 |
+| `apps/booking-admin`       | Next.js 14 | 3003 |
+| `apps/pms-api`             | FastAPI    | 8002 |
+| `apps/pms-web`             | Next.js 14 | 3004 |
 | `apps/affiliate-dashboard` | Next.js 14 | 3005 |
-| `apps/landing` | Next.js 14 | 3006 |
+| `apps/landing`             | Next.js 14 | 3006 |
 
 `apps/landing` is the **public marketing/landing site**, split out of `apps/marketplace-web`. The marketplace frontend is the authenticated app only; its `/` redirects to `/login`. The marketing pages (home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing`, about/contact/benefits, legal) live in `apps/landing`; `/hotel-creator-network` there fetches live creators/hotels from the marketplace API cross-origin. `/choose-product` stays in the marketplace frontend (auth-flow router off `/login`). The public chrome (`Navigation` / `Footer` / `LandingFooter`) is intentionally duplicated in both apps because app pages (`/hotels/[id]`, `/choose-product`, `/creators`, `/properties`) still use it. Deferred to a domain cutover: infra (ECR `vayada-landing` + service + DNS), domain topology, the app-root redirect target, the marketing `Navigation` links (still point at moved routes), and contact/HCN CORS on the marketplace backend.
 
@@ -72,7 +72,7 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 ## Shipping conventions
 
-- **Direct to `main`, no PRs.** Applies to small fixes *and* ticket work. Never `gh pr create` / `gh pr merge` unless the user explicitly asks.
+- **Direct to `main`, no PRs.** Applies to small fixes _and_ ticket work. Never `gh pr create` / `gh pr merge` unless the user explicitly asks.
 - Commit with a descriptive message that explains what changed and why.
 - Push the working branch for review unless the user explicitly asks to ship to `main`.
 - Do not reintroduce app submodules or submodule pointer commits.

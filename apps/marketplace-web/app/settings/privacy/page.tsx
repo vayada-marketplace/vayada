@@ -1,12 +1,12 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { AuthenticatedNavigation, ProfileWarningBanner } from '@/components/layout'
-import { useSidebar } from '@/components/layout/AuthenticatedNavigation'
-import { ROUTES } from '@/lib/constants'
-import { consentService, ConsentStatusResponse, ConsentHistoryItem } from '@/services/api/consent'
-import { useCookieConsent } from '@/context/CookieConsentContext'
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { AuthenticatedNavigation, ProfileWarningBanner } from "@/components/layout";
+import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
+import { ROUTES } from "@/lib/constants";
+import { consentService, ConsentStatusResponse, ConsentHistoryItem } from "@/services/api/consent";
+import { useCookieConsent } from "@/context/CookieConsentContext";
 import {
   ShieldCheckIcon,
   DocumentTextIcon,
@@ -16,87 +16,87 @@ import {
   TrashIcon,
   CheckCircleIcon,
   XCircleIcon,
-} from '@heroicons/react/24/outline'
+} from "@heroicons/react/24/outline";
 
 export default function PrivacySettingsPage() {
-  const { isCollapsed } = useSidebar()
-  const { consent, openSettings } = useCookieConsent()
-  const [consentStatus, setConsentStatus] = useState<ConsentStatusResponse | null>(null)
-  const [consentHistory, setConsentHistory] = useState<ConsentHistoryItem[]>([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [isUpdating, setIsUpdating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const { isCollapsed } = useSidebar();
+  const { consent, openSettings } = useCookieConsent();
+  const [consentStatus, setConsentStatus] = useState<ConsentStatusResponse | null>(null);
+  const [consentHistory, setConsentHistory] = useState<ConsentHistoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Load consent status
   useEffect(() => {
     const loadConsentData = async () => {
       try {
-        setIsLoading(true)
+        setIsLoading(true);
         const [status, history] = await Promise.all([
           consentService.getConsentStatus(),
           consentService.getConsentHistory(10),
-        ])
-        setConsentStatus(status)
-        setConsentHistory(history.history)
+        ]);
+        setConsentStatus(status);
+        setConsentHistory(history.history);
       } catch (err) {
-        console.error('Failed to load consent data:', err)
-        setError('Failed to load your consent settings. Please try again.')
+        console.error("Failed to load consent data:", err);
+        setError("Failed to load your consent settings. Please try again.");
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
+    };
 
-    loadConsentData()
-  }, [])
+    loadConsentData();
+  }, []);
 
   const handleMarketingConsentToggle = async () => {
-    if (!consentStatus || isUpdating) return
+    if (!consentStatus || isUpdating) return;
 
     try {
-      setIsUpdating(true)
-      setError(null)
-      setSuccessMessage(null)
+      setIsUpdating(true);
+      setError(null);
+      setSuccessMessage(null);
 
-      const newConsent = !consentStatus.marketing_consent
+      const newConsent = !consentStatus.marketing_consent;
       const result = await consentService.updateMarketingConsent({
         marketing_consent: newConsent,
-      })
+      });
 
       setConsentStatus({
         ...consentStatus,
         marketing_consent: result.marketing_consent,
         marketing_consent_at: result.marketing_consent_at,
-      })
+      });
 
-      setSuccessMessage(result.message)
+      setSuccessMessage(result.message);
 
       // Refresh history
-      const history = await consentService.getConsentHistory(10)
-      setConsentHistory(history.history)
+      const history = await consentService.getConsentHistory(10);
+      setConsentHistory(history.history);
     } catch (err) {
-      console.error('Failed to update marketing consent:', err)
-      setError('Failed to update your marketing preferences. Please try again.')
+      console.error("Failed to update marketing consent:", err);
+      setError("Failed to update your marketing preferences. Please try again.");
     } finally {
-      setIsUpdating(false)
+      setIsUpdating(false);
     }
-  }
+  };
 
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return 'Not set'
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
+    if (!dateString) return "Not set";
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: '#f9f8f6' }}>
+    <main className="min-h-screen" style={{ backgroundColor: "#f9f8f6" }}>
       <AuthenticatedNavigation />
-      <div className={`transition-all duration-300 ${isCollapsed ? 'md:pl-20' : 'md:pl-64'} pt-16`}>
+      <div className={`transition-all duration-300 ${isCollapsed ? "md:pl-20" : "md:pl-64"} pt-16`}>
         <div className="pt-4">
           <ProfileWarningBanner />
         </div>
@@ -104,9 +104,7 @@ export default function PrivacySettingsPage() {
         <div className="max-w-4xl mx-auto pt-4 pb-8 px-4 sm:px-6 lg:px-8">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-4xl font-extrabold text-gray-900 mb-3">
-              Privacy Settings
-            </h1>
+            <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Privacy Settings</h1>
             <p className="text-lg text-gray-600">
               Manage your privacy preferences and data rights under GDPR
             </p>
@@ -154,7 +152,7 @@ export default function PrivacySettingsPage() {
                         <p className="text-sm text-gray-500">
                           {consentStatus?.terms_accepted
                             ? `Accepted on ${formatDate(consentStatus.terms_accepted_at)}`
-                            : 'Not accepted'}
+                            : "Not accepted"}
                         </p>
                       </div>
                     </div>
@@ -174,7 +172,7 @@ export default function PrivacySettingsPage() {
                         <p className="text-sm text-gray-500">
                           {consentStatus?.privacy_accepted
                             ? `Accepted on ${formatDate(consentStatus.privacy_accepted_at)}`
-                            : 'Not accepted'}
+                            : "Not accepted"}
                         </p>
                       </div>
                     </div>
@@ -190,7 +188,9 @@ export default function PrivacySettingsPage() {
                     <div className="flex items-center gap-4">
                       <EnvelopeIcon className="h-5 w-5 text-gray-400" />
                       <div>
-                        <h3 className="text-sm font-medium text-gray-900">Marketing Communications</h3>
+                        <h3 className="text-sm font-medium text-gray-900">
+                          Marketing Communications
+                        </h3>
                         <p className="text-sm text-gray-500">
                           Receive updates, offers, and marketing emails
                         </p>
@@ -201,14 +201,14 @@ export default function PrivacySettingsPage() {
                       disabled={isUpdating}
                       className={`
                         relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
-                        ${consentStatus?.marketing_consent ? 'bg-primary-600' : 'bg-gray-200'}
-                        ${isUpdating ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+                        ${consentStatus?.marketing_consent ? "bg-primary-600" : "bg-gray-200"}
+                        ${isUpdating ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
                       `}
                     >
                       <span
                         className={`
                           pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out
-                          ${consentStatus?.marketing_consent ? 'translate-x-5' : 'translate-x-0'}
+                          ${consentStatus?.marketing_consent ? "translate-x-5" : "translate-x-0"}
                         `}
                       />
                     </button>
@@ -224,7 +224,8 @@ export default function PrivacySettingsPage() {
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900">Weekly Newsletter</h3>
                       <p className="text-sm text-gray-500">
-                        Get weekly recommendations for hotels or creators, plus new members on vayada
+                        Get weekly recommendations for hotels or creators, plus new members on
+                        vayada
                       </p>
                     </div>
                   </div>
@@ -247,13 +248,12 @@ export default function PrivacySettingsPage() {
                       <p className="text-sm text-gray-500">
                         {consent ? (
                           <>
-                            Necessary: On |{' '}
-                            Functional: {consent.functional ? 'On' : 'Off'} |{' '}
-                            Analytics: {consent.analytics ? 'On' : 'Off'} |{' '}
-                            Marketing: {consent.marketing ? 'On' : 'Off'}
+                            Necessary: On | Functional: {consent.functional ? "On" : "Off"} |{" "}
+                            Analytics: {consent.analytics ? "On" : "Off"} | Marketing:{" "}
+                            {consent.marketing ? "On" : "Off"}
                           </>
                         ) : (
-                          'Not configured'
+                          "Not configured"
                         )}
                       </p>
                     </div>
@@ -323,20 +323,18 @@ export default function PrivacySettingsPage() {
                       <div key={item.id} className="p-4 flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium text-gray-900 capitalize">
-                            {item.consent_type.replace('_', ' ')}
+                            {item.consent_type.replace("_", " ")}
                           </p>
-                          <p className="text-xs text-gray-500">
-                            {formatDate(item.created_at)}
-                          </p>
+                          <p className="text-xs text-gray-500">{formatDate(item.created_at)}</p>
                         </div>
                         <span
                           className={`px-2 py-1 text-xs font-medium rounded ${
                             item.consent_given
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
+                              ? "bg-green-100 text-green-800"
+                              : "bg-red-100 text-red-800"
                           }`}
                         >
-                          {item.consent_given ? 'Given' : 'Withdrawn'}
+                          {item.consent_given ? "Given" : "Withdrawn"}
                         </span>
                       </div>
                     ))}
@@ -348,5 +346,5 @@ export default function PrivacySettingsPage() {
         </div>
       </div>
     </main>
-  )
+  );
 }

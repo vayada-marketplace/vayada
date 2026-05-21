@@ -1,14 +1,19 @@
-'use client'
+"use client";
 
-import { useState, useRef } from 'react'
-import { useClickOutside } from '@/hooks'
-import { MagnifyingGlassIcon, ChevronDownIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
-import { ALL_COUNTRIES } from '@/lib/constants'
+import { useState, useRef } from "react";
+import { useClickOutside } from "@/hooks";
+import {
+  MagnifyingGlassIcon,
+  ChevronDownIcon,
+  XMarkIcon,
+  CheckIcon,
+} from "@heroicons/react/24/outline";
+import { ALL_COUNTRIES } from "@/lib/constants";
 
 interface SearchableCountrySelectProps {
-  selected: string[]
-  onToggle: (country: string) => void
-  onClearAll: () => void
+  selected: string[];
+  onToggle: (country: string) => void;
+  onClearAll: () => void;
 }
 
 export function SearchableCountrySelect({
@@ -16,27 +21,25 @@ export function SearchableCountrySelect({
   onToggle,
   onClearAll,
 }: SearchableCountrySelectProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useClickOutside(
     [buttonRef, dropdownRef],
     () => {
-      setIsOpen(false)
-      setSearch('')
+      setIsOpen(false);
+      setSearch("");
     },
-    isOpen
-  )
+    isOpen,
+  );
 
   const filteredCountries = ALL_COUNTRIES.filter((c) =>
-    c.toLowerCase().includes(search.toLowerCase())
-  )
+    c.toLowerCase().includes(search.toLowerCase()),
+  );
 
-  const unselectedFilteredCountries = filteredCountries.filter(
-    (c) => !selected.includes(c)
-  )
+  const unselectedFilteredCountries = filteredCountries.filter((c) => !selected.includes(c));
 
   return (
     <div className="relative">
@@ -45,8 +48,8 @@ export function SearchableCountrySelect({
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border rounded-xl transition-all duration-200 ${
           isOpen || selected.length > 0
-            ? 'border-primary-500 bg-primary-50/30 text-primary-700 shadow-sm'
-            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50'
+            ? "border-primary-500 bg-primary-50/30 text-primary-700 shadow-sm"
+            : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
         }`}
       >
         <span>Top Countries</span>
@@ -56,7 +59,7 @@ export function SearchableCountrySelect({
           </span>
         )}
         <ChevronDownIcon
-          className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+          className={`w-4 h-4 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
         />
       </button>
 
@@ -79,7 +82,7 @@ export function SearchableCountrySelect({
               />
               {search && (
                 <button
-                  onClick={() => setSearch('')}
+                  onClick={() => setSearch("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-all"
                 >
                   <XMarkIcon className="w-4 h-4" />
@@ -114,23 +117,23 @@ export function SearchableCountrySelect({
             {/* All/Filtered Countries */}
             <div className="px-2 space-y-0.5">
               {(search ? filteredCountries : unselectedFilteredCountries).map((country) => {
-                const isSelected = selected.includes(country)
+                const isSelected = selected.includes(country);
                 return (
                   <div
                     key={country}
                     onClick={() => onToggle(country)}
                     className={`flex items-center px-3 py-2.5 rounded-xl cursor-pointer transition-all group ${
                       isSelected
-                        ? 'bg-primary-50 text-primary-700'
-                        : 'hover:bg-gray-50 text-gray-700'
+                        ? "bg-primary-50 text-primary-700"
+                        : "hover:bg-gray-50 text-gray-700"
                     }`}
                   >
                     <div className="relative flex items-center justify-center">
                       <div
                         className={`w-5 h-5 rounded-md border-2 transition-all flex items-center justify-center ${
                           isSelected
-                            ? 'bg-primary-600 border-primary-600'
-                            : 'bg-white border-gray-200 group-hover:border-primary-300'
+                            ? "bg-primary-600 border-primary-600"
+                            : "bg-white border-gray-200 group-hover:border-primary-300"
                         }`}
                       >
                         {isSelected && <CheckIcon className="w-3.5 h-3.5 text-white stroke-[3]" />}
@@ -138,13 +141,13 @@ export function SearchableCountrySelect({
                     </div>
                     <span
                       className={`ml-3 text-sm transition-colors ${
-                        isSelected ? 'font-semibold' : 'group-hover:text-gray-900 font-medium'
+                        isSelected ? "font-semibold" : "group-hover:text-gray-900 font-medium"
                       }`}
                     >
                       {country}
                     </span>
                   </div>
-                )
+                );
               })}
             </div>
 
@@ -168,8 +171,8 @@ export function SearchableCountrySelect({
               </p>
               <button
                 onClick={(e) => {
-                  e.stopPropagation()
-                  onClearAll()
+                  e.stopPropagation();
+                  onClearAll();
                 }}
                 className="text-[10px] font-bold text-primary-600 hover:text-primary-700 uppercase tracking-wider"
               >
@@ -180,5 +183,5 @@ export function SearchableCountrySelect({
         </div>
       )}
     </div>
-  )
+  );
 }

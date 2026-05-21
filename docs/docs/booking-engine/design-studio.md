@@ -9,20 +9,24 @@ The Design Studio lets hotels customize the look and feel of their booking page.
 ## What can be customized
 
 ### Hero Image
+
 - The large banner image at the top of the booking page
 - Hotels can upload their own image
 - Recommended size: 1920x800px or similar wide format
 
 ### Colors
+
 - **Primary color** — used for buttons, links, and highlights
 - **Secondary color** — used for accents
 - Changes are reflected across the entire booking page
 
 ### Font Pairing
+
 - Hotels can choose from a selection of font combinations
 - Affects headings and body text on the booking page
 
 ### Live Preview
+
 - All changes show up in a live preview panel
 - Hotels can see exactly how their booking page will look before saving
 

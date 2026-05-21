@@ -1,32 +1,33 @@
-'use client'
+"use client";
 
-import useSWR from 'swr'
-import Navbar from '@/components/Navbar'
-import StatsCard from '@/components/StatsCard'
-import PropertyCard from '@/components/PropertyCard'
-import EarningsChart from '@/components/EarningsChart'
-import PayoutHistory from '@/components/PayoutHistory'
-import RecentActivity from '@/components/RecentActivity'
-import PerformanceTips from '@/components/PerformanceTips'
-import { authService } from '@/services/auth'
-import { affiliateLink } from '@/services/constants/site'
-import type { DashboardStats, PropertiesResponse } from '@/services/types'
+import useSWR from "swr";
+import Navbar from "@/components/Navbar";
+import StatsCard from "@/components/StatsCard";
+import PropertyCard from "@/components/PropertyCard";
+import EarningsChart from "@/components/EarningsChart";
+import PayoutHistory from "@/components/PayoutHistory";
+import RecentActivity from "@/components/RecentActivity";
+import PerformanceTips from "@/components/PerformanceTips";
+import { authService } from "@/services/auth";
+import { affiliateLink } from "@/services/constants/site";
+import type { DashboardStats, PropertiesResponse } from "@/services/types";
 
-const PROPERTY_COLORS = ['#0f766e', '#1e3a5f', '#6b21a8', '#b45309', '#be123c', '#047857']
+const PROPERTY_COLORS = ["#0f766e", "#1e3a5f", "#6b21a8", "#b45309", "#be123c", "#047857"];
 
 export default function DashboardPage() {
-  const { data: stats, error: statsError } = useSWR<DashboardStats>('/affiliate/dashboard')
-  const { data: propertiesData, error: propertiesError } = useSWR<PropertiesResponse>('/affiliate/properties')
+  const { data: stats, error: statsError } = useSWR<DashboardStats>("/affiliate/dashboard");
+  const { data: propertiesData, error: propertiesError } =
+    useSWR<PropertiesResponse>("/affiliate/properties");
 
-  const userName = authService.getUserName()
-  const userInitials = authService.getUserInitials()
+  const userName = authService.getUserName();
+  const userInitials = authService.getUserInitials();
 
   if (statsError || propertiesError) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-red-600 text-sm">Failed to load dashboard data.</div>
       </div>
-    )
+    );
   }
 
   if (!stats || !propertiesData) {
@@ -34,13 +35,12 @@ export default function DashboardPage() {
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-gray-500 text-sm">Loading dashboard...</div>
       </div>
-    )
+    );
   }
 
-  const properties = propertiesData.properties
-  const avgPerBooking = stats.totalBookings > 0
-    ? Math.round(stats.totalEarned / stats.totalBookings)
-    : 0
+  const properties = propertiesData.properties;
+  const avgPerBooking =
+    stats.totalBookings > 0 ? Math.round(stats.totalEarned / stats.totalBookings) : 0;
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -50,10 +50,11 @@ export default function DashboardPage() {
         {/* Greeting */}
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-            Hey {userName.split(' ')[0]}
+            Hey {userName.split(" ")[0]}
           </h1>
           <p className="text-muted mt-1">
-            You&apos;re an affiliate at {stats.propertyCount} propert{stats.propertyCount === 1 ? 'y' : 'ies'}
+            You&apos;re an affiliate at {stats.propertyCount} propert
+            {stats.propertyCount === 1 ? "y" : "ies"}
           </p>
         </div>
 
@@ -92,7 +93,7 @@ export default function DashboardPage() {
                   key={property.affiliateId}
                   name={property.hotelName}
                   commission={property.commissionPct}
-                  status={property.status === 'approved' ? 'active' : 'pending'}
+                  status={property.status === "approved" ? "active" : "pending"}
                   affiliateLink={affiliateLink(property.hotelSlug, property.referralCode)}
                   bookings={property.bookingCount}
                   outstanding={property.totalCommission}
@@ -126,5 +127,5 @@ export default function DashboardPage() {
         </div>
       </footer>
     </div>
-  )
+  );
 }

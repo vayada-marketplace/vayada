@@ -1,31 +1,31 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { ArrowLeftIcon } from '@heroicons/react/24/outline'
-import Link from 'next/link'
-import { roomsService, RoomTypeCreate } from '@/services/rooms'
-import { bookingsService } from '@/services/bookings'
-import { importService } from '@/services/import'
-import RoomTypeForm from '@/components/rooms/RoomTypeForm'
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
+import { roomsService, RoomTypeCreate } from "@/services/rooms";
+import { bookingsService } from "@/services/bookings";
+import { importService } from "@/services/import";
+import RoomTypeForm from "@/components/rooms/RoomTypeForm";
 
 export default function NewRoomPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [initialCurrency, setInitialCurrency] = useState('EUR')
-  const [sourceImageUrls, setSourceImageUrls] = useState<string[]>([])
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [initialCurrency, setInitialCurrency] = useState("EUR");
+  const [sourceImageUrls, setSourceImageUrls] = useState<string[]>([]);
   const [form, setForm] = useState<RoomTypeCreate>({
-    name: '',
-    description: '',
-    shortDescription: '',
+    name: "",
+    description: "",
+    shortDescription: "",
     maxOccupancy: 2,
     size: 0,
     baseRate: 0,
     nonRefundableRate: null,
-    currency: 'EUR',
-    bedType: '',
+    currency: "EUR",
+    bedType: "",
     totalRooms: 2,
     amenities: [],
     features: [],
@@ -34,90 +34,102 @@ export default function NewRoomPage() {
     sortOrder: 0,
     monthlyRates: {},
     dailyRates: {},
-  })
+  });
 
   // Load prefill data from listing import
   useEffect(() => {
-    if (searchParams.get('from') === 'import') {
+    if (searchParams.get("from") === "import") {
       try {
-        const raw = sessionStorage.getItem('importRoomType')
+        const raw = sessionStorage.getItem("importRoomType");
         if (raw) {
-          const imported = JSON.parse(raw)
-          const rate = imported.baseRate || 0
-          setForm(prev => ({
+          const imported = JSON.parse(raw);
+          const rate = imported.baseRate || 0;
+          setForm((prev) => ({
             ...prev,
-            name: imported.name || '',
-            description: imported.description || '',
-            shortDescription: imported.shortDescription || '',
+            name: imported.name || "",
+            description: imported.description || "",
+            shortDescription: imported.shortDescription || "",
             maxOccupancy: imported.maxOccupancy || 2,
             size: imported.size || 0,
             baseRate: rate,
             currency: imported.currency || prev.currency,
-            bedType: imported.bedType || '',
+            bedType: imported.bedType || "",
             amenities: imported.amenities || [],
             features: imported.features || [],
-            seasons: rate > 0 ? [
-              { name: 'Default', tier: 'mid', from: '01-01', to: '12-31', rate: String(rate), minStay: 1 },
-            ] : [],
+            seasons:
+              rate > 0
+                ? [
+                    {
+                      name: "Default",
+                      tier: "mid",
+                      from: "01-01",
+                      to: "12-31",
+                      rate: String(rate),
+                      minStay: 1,
+                    },
+                  ]
+                : [],
             cancellationPolicy: imported.cancellationPolicy || prev.cancellationPolicy,
-          }))
+          }));
           if (imported.sourceImageUrls?.length) {
-            setSourceImageUrls(imported.sourceImageUrls)
+            setSourceImageUrls(imported.sourceImageUrls);
           }
-          sessionStorage.removeItem('importRoomType')
+          sessionStorage.removeItem("importRoomType");
         }
       } catch {}
     }
-  }, [searchParams])
+  }, [searchParams]);
 
   // Inherit currency from payment settings (authoritative source)
   useEffect(() => {
-    bookingsService.getPaymentSettings()
+    bookingsService
+      .getPaymentSettings()
       .then((res) => {
-        const c = res.paymentSettings.defaultCurrency
+        const c = res.paymentSettings.defaultCurrency;
         if (c) {
-          setInitialCurrency(c)
+          setInitialCurrency(c);
           // Only set currency if not already set by import
-          setForm((prev) => prev.currency && searchParams.get('from') === 'import' && prev.currency !== 'EUR'
-            ? prev
-            : { ...prev, currency: c }
-          )
+          setForm((prev) =>
+            prev.currency && searchParams.get("from") === "import" && prev.currency !== "EUR"
+              ? prev
+              : { ...prev, currency: c },
+          );
         }
       })
-      .catch(console.error)
-  }, [])
+      .catch(console.error);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (!form.name) {
-      setError('Name is required')
-      return
+      setError("Name is required");
+      return;
     }
-    if (!form.seasons?.length || !form.seasons.some(s => s.rate && Number(s.rate) > 0)) {
-      setError('At least one season with a rate greater than 0 is required')
-      return
+    if (!form.seasons?.length || !form.seasons.some((s) => s.rate && Number(s.rate) > 0)) {
+      setError("At least one season with a rate greater than 0 is required");
+      return;
     }
-    if (form.seasons.some(s => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
-      setError('Every season must have a rate greater than 0')
-      return
+    if (form.seasons.some((s) => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
+      setError("Every season must have a rate greater than 0");
+      return;
     }
-    setSaving(true)
-    setError('')
+    setSaving(true);
+    setError("");
     try {
       if (form.currency && form.currency !== initialCurrency) {
-        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency })
+        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency });
       }
-      const created = await roomsService.create(form)
+      const created = await roomsService.create(form);
       if (sourceImageUrls.length > 0 && created.id) {
-        importService.importImages(created.id, sourceImageUrls).catch(console.error)
+        importService.importImages(created.id, sourceImageUrls).catch(console.error);
       }
-      router.push('/rooms')
+      router.push("/rooms");
     } catch (err: any) {
-      setError(err.message || 'Failed to create room type')
+      setError(err.message || "Failed to create room type");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   return (
     <div className="p-4 md:p-6 max-w-5xl">
@@ -139,5 +151,5 @@ export default function NewRoomPage() {
         mode="create"
       />
     </div>
-  )
+  );
 }

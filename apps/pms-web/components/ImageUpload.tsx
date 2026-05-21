@@ -1,22 +1,22 @@
-'use client'
+"use client";
 
-import { useState, useRef, useCallback } from 'react'
-import { XMarkIcon, PhotoIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline'
-import { uploadService, UploadedImage } from '@/services/upload'
+import { useState, useRef, useCallback } from "react";
+import { XMarkIcon, PhotoIcon, ArrowUpTrayIcon } from "@heroicons/react/24/outline";
+import { uploadService, UploadedImage } from "@/services/upload";
 
 interface ImageUploadProps {
   /** Already-uploaded image URLs (from the server) */
-  images: string[]
+  images: string[];
   /** Called when images change (URLs array) */
-  onChange: (urls: string[]) => void
+  onChange: (urls: string[]) => void;
   /** Max number of images */
-  maxImages?: number
+  maxImages?: number;
   /** Max file size in MB */
-  maxSizeMB?: number
+  maxSizeMB?: number;
   /** Label text */
-  label?: string
+  label?: string;
   /** Whether to show compact style (for wizards) */
-  compact?: boolean
+  compact?: boolean;
 }
 
 export default function ImageUpload({
@@ -24,95 +24,104 @@ export default function ImageUpload({
   onChange,
   maxImages = 10,
   maxSizeMB = 20,
-  label = 'Room Images',
+  label = "Room Images",
   compact = false,
 }: ImageUploadProps) {
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
-  const [dragIndex, setDragIndex] = useState<number | null>(null)
-  const [overIndex, setOverIndex] = useState<number | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+  const handleFileSelect = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
 
-    setError('')
+      setError("");
 
-    const fileArray = Array.from(files)
+      const fileArray = Array.from(files);
 
-    // Validate count
-    if (images.length + fileArray.length > maxImages) {
-      setError(`Maximum ${maxImages} images allowed`)
-      e.target.value = ''
-      return
-    }
-
-    // Validate each file
-    for (const file of fileArray) {
-      if (!file.type.startsWith('image/')) {
-        setError('Only image files are allowed (JPG, PNG, WebP)')
-        e.target.value = ''
-        return
+      // Validate count
+      if (images.length + fileArray.length > maxImages) {
+        setError(`Maximum ${maxImages} images allowed`);
+        e.target.value = "";
+        return;
       }
-      if (file.size > maxSizeMB * 1024 * 1024) {
-        setError(`Each image must be under ${maxSizeMB}MB`)
-        e.target.value = ''
-        return
+
+      // Validate each file
+      for (const file of fileArray) {
+        if (!file.type.startsWith("image/")) {
+          setError("Only image files are allowed (JPG, PNG, WebP)");
+          e.target.value = "";
+          return;
+        }
+        if (file.size > maxSizeMB * 1024 * 1024) {
+          setError(`Each image must be under ${maxSizeMB}MB`);
+          e.target.value = "";
+          return;
+        }
       }
-    }
 
-    setUploading(true)
-    try {
-      const result = await uploadService.uploadImages(fileArray)
-      const newUrls = result.images.map((img: UploadedImage) => img.url)
-      onChange([...images, ...newUrls])
-    } catch (err: any) {
-      setError(err.message || 'Upload failed')
-    } finally {
-      setUploading(false)
-      e.target.value = ''
-    }
-  }, [images, onChange, maxImages, maxSizeMB])
+      setUploading(true);
+      try {
+        const result = await uploadService.uploadImages(fileArray);
+        const newUrls = result.images.map((img: UploadedImage) => img.url);
+        onChange([...images, ...newUrls]);
+      } catch (err: any) {
+        setError(err.message || "Upload failed");
+      } finally {
+        setUploading(false);
+        e.target.value = "";
+      }
+    },
+    [images, onChange, maxImages, maxSizeMB],
+  );
 
-  const removeImage = useCallback((index: number) => {
-    const updated = images.filter((_, i) => i !== index)
-    onChange(updated)
-  }, [images, onChange])
+  const removeImage = useCallback(
+    (index: number) => {
+      const updated = images.filter((_, i) => i !== index);
+      onChange(updated);
+    },
+    [images, onChange],
+  );
 
   const handleDragStart = useCallback((index: number) => {
-    setDragIndex(index)
-  }, [])
+    setDragIndex(index);
+  }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault()
-    setOverIndex(index)
-  }, [])
+    e.preventDefault();
+    setOverIndex(index);
+  }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault()
-    if (dragIndex === null || dragIndex === dropIndex) {
-      setDragIndex(null)
-      setOverIndex(null)
-      return
-    }
-    const reordered = [...images]
-    const [moved] = reordered.splice(dragIndex, 1)
-    reordered.splice(dropIndex, 0, moved)
-    onChange(reordered)
-    setDragIndex(null)
-    setOverIndex(null)
-  }, [dragIndex, images, onChange])
+  const handleDrop = useCallback(
+    (e: React.DragEvent, dropIndex: number) => {
+      e.preventDefault();
+      if (dragIndex === null || dragIndex === dropIndex) {
+        setDragIndex(null);
+        setOverIndex(null);
+        return;
+      }
+      const reordered = [...images];
+      const [moved] = reordered.splice(dragIndex, 1);
+      reordered.splice(dropIndex, 0, moved);
+      onChange(reordered);
+      setDragIndex(null);
+      setOverIndex(null);
+    },
+    [dragIndex, images, onChange],
+  );
 
   const handleDragEnd = useCallback(() => {
-    setDragIndex(null)
-    setOverIndex(null)
-  }, [])
+    setDragIndex(null);
+    setOverIndex(null);
+  }, []);
 
   return (
     <div className="space-y-3">
       {label && (
-        <label className={`block font-medium text-gray-700 ${compact ? 'text-[13px]' : 'text-sm'}`}>
+        <label className={`block font-medium text-gray-700 ${compact ? "text-[13px]" : "text-sm"}`}>
           {label}
         </label>
       )}
@@ -130,10 +139,10 @@ export default function ImageUpload({
               onDragEnd={handleDragEnd}
               className={`relative group aspect-square rounded-lg overflow-hidden border-2 bg-gray-50 cursor-grab active:cursor-grabbing transition-all ${
                 dragIndex === i
-                  ? 'opacity-40 border-primary-300'
+                  ? "opacity-40 border-primary-300"
                   : overIndex === i && dragIndex !== null
-                    ? 'border-primary-500 scale-[1.03]'
-                    : 'border-gray-200'
+                    ? "border-primary-500 scale-[1.03]"
+                    : "border-gray-200"
               }`}
             >
               <img
@@ -164,14 +173,14 @@ export default function ImageUpload({
           onClick={() => !uploading && fileInputRef.current?.click()}
           className={`
             border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors
-            ${uploading ? 'border-primary-300 bg-primary-50 cursor-wait' : 'border-gray-300 hover:border-primary-400 hover:bg-gray-50'}
-            ${compact ? 'py-4 px-3' : 'py-6 px-4'}
+            ${uploading ? "border-primary-300 bg-primary-50 cursor-wait" : "border-gray-300 hover:border-primary-400 hover:bg-gray-50"}
+            ${compact ? "py-4 px-3" : "py-6 px-4"}
           `}
         >
           {uploading ? (
             <>
               <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mb-2" />
-              <p className={`text-primary-600 font-medium ${compact ? 'text-[12px]' : 'text-sm'}`}>
+              <p className={`text-primary-600 font-medium ${compact ? "text-[12px]" : "text-sm"}`}>
                 Uploading...
               </p>
             </>
@@ -184,10 +193,10 @@ export default function ImageUpload({
                   <ArrowUpTrayIcon className="w-5 h-5 text-gray-400" />
                 )}
               </div>
-              <p className={`text-gray-700 font-medium ${compact ? 'text-[12px]' : 'text-sm'}`}>
-                {images.length === 0 ? 'Upload room images' : 'Add more images'}
+              <p className={`text-gray-700 font-medium ${compact ? "text-[12px]" : "text-sm"}`}>
+                {images.length === 0 ? "Upload room images" : "Add more images"}
               </p>
-              <p className={`text-gray-400 mt-0.5 ${compact ? 'text-[11px]' : 'text-xs'}`}>
+              <p className={`text-gray-400 mt-0.5 ${compact ? "text-[11px]" : "text-xs"}`}>
                 JPG, PNG, WebP up to {maxSizeMB}MB ({images.length}/{maxImages})
               </p>
             </>
@@ -205,8 +214,8 @@ export default function ImageUpload({
       )}
 
       {error && (
-        <p className={`text-red-600 font-medium ${compact ? 'text-[11px]' : 'text-xs'}`}>{error}</p>
+        <p className={`text-red-600 font-medium ${compact ? "text-[11px]" : "text-xs"}`}>{error}</p>
       )}
     </div>
-  )
+  );
 }

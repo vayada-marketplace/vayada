@@ -1,47 +1,46 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Button, Textarea } from '@/components/ui'
-import { getMonthAbbr } from '@/lib/utils'
-import { CURRENCY_OPTIONS } from '@/lib/utils/getCurrencySymbol'
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import { usePlatformDeliverables } from '@/hooks/usePlatformDeliverables'
-import { PlatformDeliverablesSelector } from './PlatformDeliverablesSelector'
-import { DateMonthPicker } from './DateMonthPicker'
-import type { PlatformDeliverable } from './types'
-
+import { useState, useEffect } from "react";
+import { Button, Textarea } from "@/components/ui";
+import { getMonthAbbr } from "@/lib/utils";
+import { CURRENCY_OPTIONS } from "@/lib/utils/getCurrencySymbol";
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import { usePlatformDeliverables } from "@/hooks/usePlatformDeliverables";
+import { PlatformDeliverablesSelector } from "./PlatformDeliverablesSelector";
+import { DateMonthPicker } from "./DateMonthPicker";
+import type { PlatformDeliverable } from "./types";
 
 interface HotelListing {
-  id: string
-  name: string
-  location: string
-  availableMonths: string[]
-  offerings: Array<{ type: string; availability: string[] }>
+  id: string;
+  name: string;
+  location: string;
+  availableMonths: string[];
+  offerings: Array<{ type: string; availability: string[] }>;
 }
 
 interface HotelInvitationModalProps {
-  isOpen: boolean
-  onClose: () => void
-  onSubmit: (data: HotelInvitationData) => void
-  creatorName: string
-  listings: HotelListing[]
-  creatorPlatforms?: string[]
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: HotelInvitationData) => void;
+  creatorName: string;
+  listings: HotelListing[];
+  creatorPlatforms?: string[];
 }
 
 export interface HotelInvitationData {
-  listingId: string
-  collaborationType: 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
-  freeStayMinNights?: number
-  freeStayMaxNights?: number
-  paidAmount?: number
-  currency?: string
-  discountPercentage?: number
-  creatorFee?: number
-  preferredDateFrom?: string
-  preferredDateTo?: string
-  preferredMonths: string[]
-  platformDeliverables: PlatformDeliverable[]
-  message?: string
+  listingId: string;
+  collaborationType: "Free Stay" | "Paid" | "Discount" | "Affiliate";
+  freeStayMinNights?: number;
+  freeStayMaxNights?: number;
+  paidAmount?: number;
+  currency?: string;
+  discountPercentage?: number;
+  creatorFee?: number;
+  preferredDateFrom?: string;
+  preferredDateTo?: string;
+  preferredMonths: string[];
+  platformDeliverables: PlatformDeliverable[];
+  message?: string;
 }
 
 export function HotelInvitationModal({
@@ -52,19 +51,21 @@ export function HotelInvitationModal({
   listings,
   creatorPlatforms = [],
 }: HotelInvitationModalProps) {
-  const [listingId, setListingId] = useState('')
-  const [collaborationType, setCollaborationType] = useState<'Free Stay' | 'Paid' | 'Discount' | 'Affiliate' | ''>('')
-  const [freeStayMinNights, setFreeStayMinNights] = useState<number | undefined>(undefined)
-  const [freeStayMaxNights, setFreeStayMaxNights] = useState<number | undefined>(undefined)
-  const [paidAmount, setPaidAmount] = useState<number | undefined>(undefined)
-  const [currency, setCurrency] = useState<string>('USD')
-  const [discountPercentage, setDiscountPercentage] = useState<number | undefined>(undefined)
-  const [creatorFee, setCreatorFee] = useState<number | undefined>(undefined)
-  const [preferredDateFrom, setPreferredDateFrom] = useState('')
-  const [preferredDateTo, setPreferredDateTo] = useState('')
-  const [preferredMonths, setPreferredMonths] = useState<string[]>([])
-  const [message, setMessage] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [listingId, setListingId] = useState("");
+  const [collaborationType, setCollaborationType] = useState<
+    "Free Stay" | "Paid" | "Discount" | "Affiliate" | ""
+  >("");
+  const [freeStayMinNights, setFreeStayMinNights] = useState<number | undefined>(undefined);
+  const [freeStayMaxNights, setFreeStayMaxNights] = useState<number | undefined>(undefined);
+  const [paidAmount, setPaidAmount] = useState<number | undefined>(undefined);
+  const [currency, setCurrency] = useState<string>("USD");
+  const [discountPercentage, setDiscountPercentage] = useState<number | undefined>(undefined);
+  const [creatorFee, setCreatorFee] = useState<number | undefined>(undefined);
+  const [preferredDateFrom, setPreferredDateFrom] = useState("");
+  const [preferredDateTo, setPreferredDateTo] = useState("");
+  const [preferredMonths, setPreferredMonths] = useState<string[]>([]);
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const {
     platformDeliverables,
@@ -77,127 +78,126 @@ export function HotelInvitationModal({
     isPlatformSelected,
     getPlatformDeliverables,
     resetDeliverables,
-  } = usePlatformDeliverables()
+  } = usePlatformDeliverables();
 
   // Clear preferred months that are no longer available when listing or type changes
   useEffect(() => {
     if (!listingId) {
-      setPreferredMonths([])
-      return
+      setPreferredMonths([]);
+      return;
     }
 
-    const selectedListing = listings.find(l => l.id === listingId)
-    if (!selectedListing) return
+    const selectedListing = listings.find((l) => l.id === listingId);
+    if (!selectedListing) return;
 
-    let currentAvailable: string[] = []
+    let currentAvailable: string[] = [];
     if (collaborationType) {
-      const offering = selectedListing.offerings.find(o => o.type === collaborationType)
+      const offering = selectedListing.offerings.find((o) => o.type === collaborationType);
       if (offering) {
-        currentAvailable = offering.availability.map(getMonthAbbr)
+        currentAvailable = offering.availability.map(getMonthAbbr);
       }
     } else {
-      currentAvailable = selectedListing.availableMonths.map(getMonthAbbr)
+      currentAvailable = selectedListing.availableMonths.map(getMonthAbbr);
     }
 
     if (currentAvailable.length > 0) {
-      setPreferredMonths(prev => prev.filter(m => currentAvailable.includes(m)))
+      setPreferredMonths((prev) => prev.filter((m) => currentAvailable.includes(m)));
     }
-  }, [listingId, collaborationType, listings])
+  }, [listingId, collaborationType, listings]);
 
-
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   const handleMonthToggle = (month: string) => {
     setPreferredMonths((prev) =>
-      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month]
-    )
-  }
+      prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month],
+    );
+  };
 
   const isMonthAvailable = (month: string): boolean => {
-    const selectedListing = listings.find(l => l.id === listingId)
-    if (!selectedListing || selectedListing.availableMonths.length === 0) return true
+    const selectedListing = listings.find((l) => l.id === listingId);
+    if (!selectedListing || selectedListing.availableMonths.length === 0) return true;
 
     if (collaborationType) {
-      const offering = selectedListing.offerings.find(o => o.type === collaborationType)
+      const offering = selectedListing.offerings.find((o) => o.type === collaborationType);
       if (offering) {
-        return offering.availability.some(am => getMonthAbbr(am) === month)
+        return offering.availability.some((am) => getMonthAbbr(am) === month);
       }
     }
-    return selectedListing.availableMonths.some(am => getMonthAbbr(am) === month)
-  }
+    return selectedListing.availableMonths.some((am) => getMonthAbbr(am) === month);
+  };
 
   const filterPlatforms = (p: string): boolean => {
-    if (p === 'Content Package') return true
+    if (p === "Content Package") return true;
     const platformMatch = (list: string[], key: string) =>
-      list.some(item =>
-        item.toLowerCase() === key.toLowerCase() ||
-        (key === 'YouTube' && item.toUpperCase() === 'YT') ||
-        (key === 'YouTube' && item.toLowerCase() === 'youtube')
-      )
-    return creatorPlatforms.length === 0 || platformMatch(creatorPlatforms, p)
-  }
+      list.some(
+        (item) =>
+          item.toLowerCase() === key.toLowerCase() ||
+          (key === "YouTube" && item.toUpperCase() === "YT") ||
+          (key === "YouTube" && item.toLowerCase() === "youtube"),
+      );
+    return creatorPlatforms.length === 0 || platformMatch(creatorPlatforms, p);
+  };
 
   const handleSubmit = () => {
     const validPlatformDeliverables = platformDeliverables.filter(
-      (pd) => pd.deliverables.length > 0
-    )
+      (pd) => pd.deliverables.length > 0,
+    );
 
     if (!listingId || !collaborationType || validPlatformDeliverables.length === 0) {
-      return
+      return;
     }
 
-    setIsSubmitting(true)
+    setIsSubmitting(true);
     setTimeout(() => {
       onSubmit({
         listingId,
-        collaborationType: collaborationType as 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate',
+        collaborationType: collaborationType as "Free Stay" | "Paid" | "Discount" | "Affiliate",
         freeStayMinNights,
         freeStayMaxNights,
         paidAmount,
-        currency: collaborationType === 'Paid' ? currency : undefined,
+        currency: collaborationType === "Paid" ? currency : undefined,
         discountPercentage,
-        creatorFee: collaborationType === 'Affiliate' ? creatorFee : undefined,
+        creatorFee: collaborationType === "Affiliate" ? creatorFee : undefined,
         preferredDateFrom: preferredDateFrom || undefined,
         preferredDateTo: preferredDateTo || undefined,
         preferredMonths,
         platformDeliverables: validPlatformDeliverables,
         message: message.trim() || undefined,
-      })
+      });
       // Reset form
-      setListingId('')
-      setCollaborationType('')
-      setFreeStayMinNights(undefined)
-      setFreeStayMaxNights(undefined)
-      setPaidAmount(undefined)
-      setCurrency('USD')
-      setDiscountPercentage(undefined)
-      setCreatorFee(undefined)
-      setPreferredDateFrom('')
-      setPreferredDateTo('')
-      setPreferredMonths([])
-      resetDeliverables()
-      setMessage('')
-      setIsSubmitting(false)
-      onClose()
-    }, 500)
-  }
+      setListingId("");
+      setCollaborationType("");
+      setFreeStayMinNights(undefined);
+      setFreeStayMaxNights(undefined);
+      setPaidAmount(undefined);
+      setCurrency("USD");
+      setDiscountPercentage(undefined);
+      setCreatorFee(undefined);
+      setPreferredDateFrom("");
+      setPreferredDateTo("");
+      setPreferredMonths([]);
+      resetDeliverables();
+      setMessage("");
+      setIsSubmitting(false);
+      onClose();
+    }, 500);
+  };
 
   const handleCancel = () => {
-    setListingId('')
-    setCollaborationType('')
-    setFreeStayMinNights(undefined)
-    setFreeStayMaxNights(undefined)
-    setPaidAmount(undefined)
-    setDiscountPercentage(undefined)
-    setCreatorFee(undefined)
-    setPreferredDateFrom('')
-    setPreferredDateTo('')
-    setPreferredMonths([])
-    resetDeliverables()
-    setMessage('')
-    onClose()
-  }
-
+    setListingId("");
+    setCollaborationType("");
+    setFreeStayMinNights(undefined);
+    setFreeStayMaxNights(undefined);
+    setPaidAmount(undefined);
+    setDiscountPercentage(undefined);
+    setCreatorFee(undefined);
+    setPreferredDateFrom("");
+    setPreferredDateTo("");
+    setPreferredMonths([]);
+    resetDeliverables();
+    setMessage("");
+    onClose();
+  };
 
   return (
     <div
@@ -252,8 +252,8 @@ export function HotelInvitationModal({
                   type="radio"
                   name="collaborationType"
                   value="Free Stay"
-                  checked={collaborationType === 'Free Stay'}
-                  onChange={(e) => setCollaborationType(e.target.value as 'Free Stay')}
+                  checked={collaborationType === "Free Stay"}
+                  onChange={(e) => setCollaborationType(e.target.value as "Free Stay")}
                   className="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500"
                 />
                 <span className="ml-2 text-gray-700">Free Stay</span>
@@ -263,8 +263,8 @@ export function HotelInvitationModal({
                   type="radio"
                   name="collaborationType"
                   value="Paid"
-                  checked={collaborationType === 'Paid'}
-                  onChange={(e) => setCollaborationType(e.target.value as 'Paid')}
+                  checked={collaborationType === "Paid"}
+                  onChange={(e) => setCollaborationType(e.target.value as "Paid")}
                   className="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500"
                 />
                 <span className="ml-2 text-gray-700">Paid</span>
@@ -274,8 +274,8 @@ export function HotelInvitationModal({
                   type="radio"
                   name="collaborationType"
                   value="Discount"
-                  checked={collaborationType === 'Discount'}
-                  onChange={(e) => setCollaborationType(e.target.value as 'Discount')}
+                  checked={collaborationType === "Discount"}
+                  onChange={(e) => setCollaborationType(e.target.value as "Discount")}
                   className="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500"
                 />
                 <span className="ml-2 text-gray-700">Discount</span>
@@ -285,8 +285,8 @@ export function HotelInvitationModal({
                   type="radio"
                   name="collaborationType"
                   value="Affiliate"
-                  checked={collaborationType === 'Affiliate'}
-                  onChange={(e) => setCollaborationType(e.target.value as 'Affiliate')}
+                  checked={collaborationType === "Affiliate"}
+                  onChange={(e) => setCollaborationType(e.target.value as "Affiliate")}
                   className="w-4 h-4 text-primary-600 border-gray-300 focus:ring-primary-500"
                 />
                 <span className="ml-2 text-gray-700">Affiliate</span>
@@ -295,15 +295,17 @@ export function HotelInvitationModal({
           </div>
 
           {/* Offer Details - Conditional */}
-          {collaborationType === 'Free Stay' && (
+          {collaborationType === "Free Stay" && (
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <h4 className="font-semibold text-gray-900 mb-4">Free Stay Details</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Min. Nights</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Min. Nights
+                  </label>
                   <input
                     type="number"
-                    value={freeStayMinNights || ''}
+                    value={freeStayMinNights || ""}
                     onChange={(e) => setFreeStayMinNights(parseInt(e.target.value) || undefined)}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     placeholder="2"
@@ -311,10 +313,12 @@ export function HotelInvitationModal({
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Max. Nights</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Max. Nights
+                  </label>
                   <input
                     type="number"
-                    value={freeStayMaxNights || ''}
+                    value={freeStayMaxNights || ""}
                     onChange={(e) => setFreeStayMaxNights(parseInt(e.target.value) || undefined)}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     placeholder="5"
@@ -325,7 +329,7 @@ export function HotelInvitationModal({
             </div>
           )}
 
-          {collaborationType === 'Paid' && (
+          {collaborationType === "Paid" && (
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <h4 className="font-semibold text-gray-900 mb-4">Paid Details</h4>
               <div className="flex gap-3">
@@ -336,16 +340,20 @@ export function HotelInvitationModal({
                     onChange={(e) => setCurrency(e.target.value)}
                     className="w-full px-3 py-3 rounded-lg border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   >
-                    {CURRENCY_OPTIONS.map(c => (
-                      <option key={c.code} value={c.code}>{c.code}</option>
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount Offered</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Amount Offered
+                  </label>
                   <input
                     type="number"
-                    value={paidAmount || ''}
+                    value={paidAmount || ""}
                     onChange={(e) => setPaidAmount(parseInt(e.target.value) || undefined)}
                     className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                     placeholder="5000"
@@ -356,14 +364,16 @@ export function HotelInvitationModal({
             </div>
           )}
 
-          {collaborationType === 'Discount' && (
+          {collaborationType === "Discount" && (
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <h4 className="font-semibold text-gray-900 mb-4">Discount Details</h4>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Discount Percentage (%)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Discount Percentage (%)
+                </label>
                 <input
                   type="number"
-                  value={discountPercentage || ''}
+                  value={discountPercentage || ""}
                   onChange={(e) => setDiscountPercentage(parseInt(e.target.value) || undefined)}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   placeholder="30"
@@ -374,21 +384,25 @@ export function HotelInvitationModal({
             </div>
           )}
 
-          {collaborationType === 'Affiliate' && (
+          {collaborationType === "Affiliate" && (
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <h4 className="font-semibold text-gray-900 mb-4">Affiliate Details</h4>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Commission Percentage (%)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Commission Percentage (%)
+                </label>
                 <input
                   type="number"
-                  value={creatorFee || ''}
+                  value={creatorFee || ""}
                   onChange={(e) => setCreatorFee(parseInt(e.target.value) || undefined)}
                   className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                   placeholder="10"
                   min="1"
                   max="100"
                 />
-                <p className="mt-2 text-xs text-gray-500">Creator earns this percentage on bookings driven by their affiliate link.</p>
+                <p className="mt-2 text-xs text-gray-500">
+                  Creator earns this percentage on bookings driven by their affiliate link.
+                </p>
               </div>
             </div>
           )}
@@ -437,11 +451,7 @@ export function HotelInvitationModal({
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-200">
-            <Button
-              variant="outline"
-              onClick={handleCancel}
-              disabled={isSubmitting}
-            >
+            <Button variant="outline" onClick={handleCancel} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button
@@ -460,5 +470,5 @@ export function HotelInvitationModal({
         </div>
       </div>
     </div>
-  )
+  );
 }

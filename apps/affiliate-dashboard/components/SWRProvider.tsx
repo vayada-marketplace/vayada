@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-import type { ReactNode } from 'react'
-import { SWRConfig } from 'swr'
-import { fetcher } from '@/services/api/fetcher'
+import type { ReactNode } from "react";
+import { SWRConfig } from "swr";
+import { fetcher } from "@/services/api/fetcher";
 
 export default function SWRProvider({ children }: { children: ReactNode }) {
   return (
@@ -15,5 +15,5 @@ export default function SWRProvider({ children }: { children: ReactNode }) {
     >
       {children}
     </SWRConfig>
-  )
+  );
 }

@@ -1,22 +1,22 @@
-'use client'
+"use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
-import { useHotel, useSlug } from '@/contexts/HotelContext'
-import { bookingEngine } from '@/services/api/client'
+import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { bookingEngine } from "@/services/api/client";
 
 interface CurrencyContextValue {
-  selectedCurrency: string
-  setSelectedCurrency: (currency: string) => void
-  rates: Record<string, number>
-  loading: boolean
-  convertPrice: (amount: number, fromCurrency: string) => number
-  convertBetween: (amount: number, fromCurrency: string, toCurrency: string) => number
-  convertAndRound: (amount: number, fromCurrency: string) => number
-  formatPrice: (amount: number, fromCurrency: string) => string
+  selectedCurrency: string;
+  setSelectedCurrency: (currency: string) => void;
+  rates: Record<string, number>;
+  loading: boolean;
+  convertPrice: (amount: number, fromCurrency: string) => number;
+  convertBetween: (amount: number, fromCurrency: string, toCurrency: string) => number;
+  convertAndRound: (amount: number, fromCurrency: string) => number;
+  formatPrice: (amount: number, fromCurrency: string) => string;
 }
 
 const CurrencyContext = createContext<CurrencyContextValue>({
-  selectedCurrency: 'EUR',
+  selectedCurrency: "EUR",
   setSelectedCurrency: () => {},
   rates: {},
   loading: true,
@@ -24,104 +24,109 @@ const CurrencyContext = createContext<CurrencyContextValue>({
   convertBetween: (amount) => amount,
   convertAndRound: (amount) => Math.round(amount),
   formatPrice: (amount) => String(amount),
-})
+});
 
-const STORAGE_KEY_PREFIX = 'vayada-selected-currency'
+const STORAGE_KEY_PREFIX = "vayada-selected-currency";
 
 function getStorageKey(slug: string) {
-  return `${STORAGE_KEY_PREFIX}-${slug}`
+  return `${STORAGE_KEY_PREFIX}-${slug}`;
 }
 
 export function CurrencyProvider({ children }: { children: ReactNode }) {
-  const { hotel } = useHotel()
-  const { slug } = useSlug()
-  const baseCurrency = hotel?.currency || 'EUR'
+  const { hotel } = useHotel();
+  const { slug } = useSlug();
+  const baseCurrency = hotel?.currency || "EUR";
 
   // Always start with the hotel's base currency so SSR and the first client
   // render agree. The effect below replaces it with the persisted choice once
   // we're definitively on the client and the slug has been resolved.
-  const [selectedCurrency, setSelectedCurrencyState] = useState<string>(baseCurrency)
-  const [rates, setRates] = useState<Record<string, number>>({})
-  const [loading, setLoading] = useState(true)
+  const [selectedCurrency, setSelectedCurrencyState] = useState<string>(baseCurrency);
+  const [rates, setRates] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!hotel || !slug) return
-    const stored = localStorage.getItem(getStorageKey(slug))
-    setSelectedCurrencyState(stored || hotel.currency)
-  }, [hotel, slug])
+    if (!hotel || !slug) return;
+    const stored = localStorage.getItem(getStorageKey(slug));
+    setSelectedCurrencyState(stored || hotel.currency);
+  }, [hotel, slug]);
 
   // Fetch exchange rates with retry
   useEffect(() => {
-    if (!baseCurrency) return
-    let cancelled = false
+    if (!baseCurrency) return;
+    let cancelled = false;
 
     const fetchRates = async () => {
-      setLoading(true)
-      const maxRetries = 3
+      setLoading(true);
+      const maxRetries = 3;
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
           const data = await bookingEngine.get<{ base: string; rates: Record<string, number> }>(
-            `/api/exchange-rates?base=${baseCurrency}`
-          )
+            `/api/exchange-rates?base=${baseCurrency}`,
+          );
           if (!cancelled) {
-            setRates(data.rates)
-            setLoading(false)
+            setRates(data.rates);
+            setLoading(false);
           }
-          return
+          return;
         } catch {
           if (attempt < maxRetries - 1) {
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
           }
         }
       }
-      if (!cancelled) setLoading(false)
-    }
+      if (!cancelled) setLoading(false);
+    };
 
-    fetchRates()
-    return () => { cancelled = true }
-  }, [baseCurrency])
+    fetchRates();
+    return () => {
+      cancelled = true;
+    };
+  }, [baseCurrency]);
 
-  const setSelectedCurrency = useCallback((currency: string) => {
-    setSelectedCurrencyState(currency)
-    if (typeof window !== 'undefined' && slug) {
-      localStorage.setItem(getStorageKey(slug), currency)
-    }
-  }, [slug])
+  const setSelectedCurrency = useCallback(
+    (currency: string) => {
+      setSelectedCurrencyState(currency);
+      if (typeof window !== "undefined" && slug) {
+        localStorage.setItem(getStorageKey(slug), currency);
+      }
+    },
+    [slug],
+  );
 
   const convertPrice = useCallback(
     (amount: number, fromCurrency: string): number => {
-      if (fromCurrency === selectedCurrency) return amount
+      if (fromCurrency === selectedCurrency) return amount;
       // fromCurrency -> baseCurrency -> selectedCurrency
-      let amountInBase = amount
+      let amountInBase = amount;
       if (fromCurrency !== baseCurrency) {
-        const fromRate = rates[fromCurrency]
-        if (!fromRate) return amount
-        amountInBase = amount / fromRate
+        const fromRate = rates[fromCurrency];
+        if (!fromRate) return amount;
+        amountInBase = amount / fromRate;
       }
-      if (selectedCurrency === baseCurrency) return amountInBase
-      const toRate = rates[selectedCurrency]
-      if (!toRate) return amount
-      return amountInBase * toRate
+      if (selectedCurrency === baseCurrency) return amountInBase;
+      const toRate = rates[selectedCurrency];
+      if (!toRate) return amount;
+      return amountInBase * toRate;
     },
-    [selectedCurrency, baseCurrency, rates]
-  )
+    [selectedCurrency, baseCurrency, rates],
+  );
 
   const convertBetween = useCallback(
     (amount: number, fromCurrency: string, toCurrency: string): number => {
-      if (fromCurrency === toCurrency) return amount
-      let amountInBase = amount
+      if (fromCurrency === toCurrency) return amount;
+      let amountInBase = amount;
       if (fromCurrency !== baseCurrency) {
-        const fromRate = rates[fromCurrency]
-        if (!fromRate) return amount
-        amountInBase = amount / fromRate
+        const fromRate = rates[fromCurrency];
+        if (!fromRate) return amount;
+        amountInBase = amount / fromRate;
       }
-      if (toCurrency === baseCurrency) return amountInBase
-      const toRate = rates[toCurrency]
-      if (!toRate) return amount
-      return amountInBase * toRate
+      if (toCurrency === baseCurrency) return amountInBase;
+      const toRate = rates[toCurrency];
+      if (!toRate) return amount;
+      return amountInBase * toRate;
     },
-    [baseCurrency, rates]
-  )
+    [baseCurrency, rates],
+  );
 
   // Convert an amount to the selected display currency and round to a whole unit,
   // matching formatPrice's display rounding. Use this when computing totals that
@@ -129,38 +134,38 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
   // rounding mismatch when converting from a different base currency).
   const convertAndRound = useCallback(
     (amount: number, fromCurrency: string): number => {
-      let canConvert = true
+      let canConvert = true;
       if (fromCurrency !== selectedCurrency) {
-        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false
-        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false
+        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false;
+        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false;
       }
-      const converted = canConvert ? convertPrice(amount, fromCurrency) : amount
-      return Math.round(converted)
+      const converted = canConvert ? convertPrice(amount, fromCurrency) : amount;
+      return Math.round(converted);
     },
-    [convertPrice, selectedCurrency, baseCurrency, rates]
-  )
+    [convertPrice, selectedCurrency, baseCurrency, rates],
+  );
 
   const formatPrice = useCallback(
     (amount: number, fromCurrency: string): string => {
       // Check if we can actually perform the conversion
-      let canConvert = true
+      let canConvert = true;
       if (fromCurrency !== selectedCurrency) {
-        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false
-        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false
+        if (fromCurrency !== baseCurrency && !rates[fromCurrency]) canConvert = false;
+        if (selectedCurrency !== baseCurrency && !rates[selectedCurrency]) canConvert = false;
       }
 
-      const displayCurrency = canConvert ? selectedCurrency : fromCurrency
-      const displayAmount = canConvert ? convertPrice(amount, fromCurrency) : amount
+      const displayCurrency = canConvert ? selectedCurrency : fromCurrency;
+      const displayAmount = canConvert ? convertPrice(amount, fromCurrency) : amount;
 
-      return new Intl.NumberFormat('en-GB', {
-        style: 'currency',
+      return new Intl.NumberFormat("en-GB", {
+        style: "currency",
         currency: displayCurrency,
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-      }).format(displayAmount)
+      }).format(displayAmount);
     },
-    [convertPrice, selectedCurrency, baseCurrency, rates]
-  )
+    [convertPrice, selectedCurrency, baseCurrency, rates],
+  );
 
   return (
     <CurrencyContext.Provider
@@ -177,9 +182,9 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     >
       {children}
     </CurrencyContext.Provider>
-  )
+  );
 }
 
 export function useCurrency() {
-  return useContext(CurrencyContext)
+  return useContext(CurrencyContext);
 }

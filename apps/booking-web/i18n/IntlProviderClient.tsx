@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-import { ReactNode } from 'react'
-import { NextIntlClientProvider, IntlErrorCode } from 'next-intl'
-import type { AbstractIntlMessages, IntlError } from 'next-intl'
+import { ReactNode } from "react";
+import { NextIntlClientProvider, IntlErrorCode } from "next-intl";
+import type { AbstractIntlMessages, IntlError } from "next-intl";
 
 // Wraps NextIntlClientProvider with safe defaults: a missing translation key
 // must never crash the page. Components rely on the `t('key') || 'fallback'`
@@ -12,26 +12,26 @@ export default function IntlProviderClient({
   messages,
   children,
 }: {
-  locale: string
-  messages: AbstractIntlMessages
-  children: ReactNode
+  locale: string;
+  messages: AbstractIntlMessages;
+  children: ReactNode;
 }) {
   return (
     <NextIntlClientProvider
       locale={locale}
       messages={messages}
-      getMessageFallback={() => ''}
+      getMessageFallback={() => ""}
       onError={(error: IntlError) => {
         if (error.code === IntlErrorCode.MISSING_MESSAGE) {
-          if (process.env.NODE_ENV !== 'production') {
-            console.warn(error.message)
+          if (process.env.NODE_ENV !== "production") {
+            console.warn(error.message);
           }
-          return
+          return;
         }
-        console.error(error)
+        console.error(error);
       }}
     >
       {children}
     </NextIntlClientProvider>
-  )
+  );
 }

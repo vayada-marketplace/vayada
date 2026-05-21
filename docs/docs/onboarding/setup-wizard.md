@@ -9,27 +9,32 @@ When a hotel signs up for the Booking Admin (with or without an invite code), th
 ## The 5 steps
 
 ### Step 1: Property Information
+
 - Hotel name and description
 - Address and location
 - Contact details (email, phone)
 - Star rating
 
 ### Step 2: Branding
+
 - Upload logo
 - Choose primary and secondary colors
 - Upload hero image for the booking page
 
 ### Step 3: Room Types
+
 - Add room types (name, description, max guests, base price)
 - Upload room photos
 - Set amenities per room type
 
 ### Step 4: Policies
+
 - Check-in and check-out times
 - Cancellation policy
 - Payment terms
 
 ### Step 5: Review & Go Live
+
 - Preview the booking page
 - Confirm all details
 - Activate the booking engine

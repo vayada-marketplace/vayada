@@ -16,18 +16,18 @@ Docs-only changes should not deploy apps.
 
 ## Workflow Map
 
-| App | Workflow | Trigger paths |
-|---|---|---|
-| `apps/marketplace-api` | `.github/workflows/deploy-marketplace-api.yml` | `apps/marketplace-api/**`, `packages/**`, workflow file |
-| `apps/marketplace-web` | `.github/workflows/deploy-marketplace-web.yml` | `apps/marketplace-web/**`, `packages/**`, workflow file |
-| `apps/marketplace-admin` | `.github/workflows/deploy-marketplace-admin.yml` | `apps/marketplace-admin/**`, `packages/**`, workflow file |
-| `apps/booking-api` | `.github/workflows/deploy-booking-api.yml` | `apps/booking-api/**`, `packages/**`, workflow file |
-| `apps/booking-web` | `.github/workflows/deploy-booking-web.yml` | `apps/booking-web/**`, `packages/**`, workflow file |
-| `apps/booking-admin` | `.github/workflows/deploy-booking-admin.yml` | `apps/booking-admin/**`, `packages/**`, workflow file |
-| `apps/pms-api` | `.github/workflows/deploy-pms-api.yml` | `apps/pms-api/**`, `packages/**`, workflow file |
-| `apps/pms-web` | `.github/workflows/deploy-pms-web.yml` | `apps/pms-web/**`, `packages/**`, workflow file |
+| App                        | Workflow                                           | Trigger paths                                               |
+| -------------------------- | -------------------------------------------------- | ----------------------------------------------------------- |
+| `apps/marketplace-api`     | `.github/workflows/deploy-marketplace-api.yml`     | `apps/marketplace-api/**`, `packages/**`, workflow file     |
+| `apps/marketplace-web`     | `.github/workflows/deploy-marketplace-web.yml`     | `apps/marketplace-web/**`, `packages/**`, workflow file     |
+| `apps/marketplace-admin`   | `.github/workflows/deploy-marketplace-admin.yml`   | `apps/marketplace-admin/**`, `packages/**`, workflow file   |
+| `apps/booking-api`         | `.github/workflows/deploy-booking-api.yml`         | `apps/booking-api/**`, `packages/**`, workflow file         |
+| `apps/booking-web`         | `.github/workflows/deploy-booking-web.yml`         | `apps/booking-web/**`, `packages/**`, workflow file         |
+| `apps/booking-admin`       | `.github/workflows/deploy-booking-admin.yml`       | `apps/booking-admin/**`, `packages/**`, workflow file       |
+| `apps/pms-api`             | `.github/workflows/deploy-pms-api.yml`             | `apps/pms-api/**`, `packages/**`, workflow file             |
+| `apps/pms-web`             | `.github/workflows/deploy-pms-web.yml`             | `apps/pms-web/**`, `packages/**`, workflow file             |
 | `apps/affiliate-dashboard` | `.github/workflows/deploy-affiliate-dashboard.yml` | `apps/affiliate-dashboard/**`, `packages/**`, workflow file |
-| `apps/landing` | `.github/workflows/deploy-landing.yml` | `apps/landing/**`, `packages/**`, workflow file |
+| `apps/landing`             | `.github/workflows/deploy-landing.yml`             | `apps/landing/**`, `packages/**`, workflow file             |
 
 ## Preserved Deployment Behavior
 

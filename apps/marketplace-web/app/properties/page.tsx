@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useMemo } from 'react'
-import Link from 'next/link'
-import Navigation from '@/components/layout/Navigation'
-import Footer from '@/components/layout/Footer'
-import { HotelCard } from '@/components/marketplace/HotelCard'
-import { Button } from '@/components/ui'
-import { ROUTES } from '@/lib/constants/routes'
-import type { Hotel } from '@/lib/types'
-import { hotelService } from '@/services/api/hotels'
+import { useState, useEffect, useMemo } from "react";
+import Link from "next/link";
+import Navigation from "@/components/layout/Navigation";
+import Footer from "@/components/layout/Footer";
+import { HotelCard } from "@/components/marketplace/HotelCard";
+import { Button } from "@/components/ui";
+import { ROUTES } from "@/lib/constants/routes";
+import type { Hotel } from "@/lib/types";
+import { hotelService } from "@/services/api/hotels";
 import {
   CheckBadgeIcon,
   GlobeAltIcon,
@@ -16,50 +16,50 @@ import {
   SparklesIcon,
   LockClosedIcon,
   UserGroupIcon,
-} from '@heroicons/react/24/outline'
+} from "@heroicons/react/24/outline";
 
 // Number of hotels to show before the blur overlay (first row only)
-const VISIBLE_HOTELS_COUNT = 3
+const VISIBLE_HOTELS_COUNT = 3;
 
 export default function PublicPropertiesPage() {
-  const [hotels, setHotels] = useState<Hotel[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [hotels, setHotels] = useState<Hotel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadHotels()
-  }, [])
+    loadHotels();
+  }, []);
 
   const loadHotels = async () => {
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
     try {
-      const response = await hotelService.getAll()
-      setHotels(response.data)
+      const response = await hotelService.getAll();
+      setHotels(response.data);
     } catch (err) {
-      console.error('Error loading hotels:', err)
-      setError('Failed to load properties. Please try again.')
-      setHotels([])
+      console.error("Error loading hotels:", err);
+      setError("Failed to load properties. Please try again.");
+      setHotels([]);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   // Calculate stats from hotels
   const stats = useMemo(() => {
-    const uniqueCountries = new Set(hotels.map(h => h.location.split(',').pop()?.trim())).size
-    const uniqueTypes = new Set(hotels.map(h => h.accommodationType).filter(Boolean)).size
+    const uniqueCountries = new Set(hotels.map((h) => h.location.split(",").pop()?.trim())).size;
+    const uniqueTypes = new Set(hotels.map((h) => h.accommodationType).filter(Boolean)).size;
     return {
       totalHotels: hotels.length,
       countries: uniqueCountries,
       propertyTypes: uniqueTypes,
-    }
-  }, [hotels])
+    };
+  }, [hotels]);
 
   // Split into visible and hidden
-  const visibleHotels = hotels.slice(0, VISIBLE_HOTELS_COUNT)
-  const hiddenHotels = hotels.slice(VISIBLE_HOTELS_COUNT)
-  const hiddenCount = hiddenHotels.length
+  const visibleHotels = hotels.slice(0, VISIBLE_HOTELS_COUNT);
+  const hiddenHotels = hotels.slice(VISIBLE_HOTELS_COUNT);
+  const hiddenCount = hiddenHotels.length;
 
   return (
     <main className="min-h-screen flex flex-col bg-white">
@@ -78,8 +78,8 @@ export default function PublicPropertiesPage() {
               <span className="text-primary-600"> Seeking Creators</span>
             </h1>
             <p className="text-lg md:text-xl text-gray-600 mb-8 leading-relaxed">
-              Browse verified hotels actively looking for creator collaborations.
-              Find your next dream stay and build your professional portfolio.
+              Browse verified hotels actively looking for creator collaborations. Find your next
+              dream stay and build your professional portfolio.
             </p>
           </div>
         </div>
@@ -148,7 +148,10 @@ export default function PublicPropertiesPage() {
               {hiddenCount > 0 && (
                 <div className="relative mt-6">
                   {/* Blurred preview cards - 2 rows */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 blur-[6px] opacity-40 pointer-events-none select-none" aria-hidden="true">
+                  <div
+                    className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 blur-[6px] opacity-40 pointer-events-none select-none"
+                    aria-hidden="true"
+                  >
                     {hiddenHotels.slice(0, 6).map((hotel) => (
                       <HotelCard key={hotel.id} hotel={hotel} isPublic />
                     ))}
@@ -167,7 +170,8 @@ export default function PublicPropertiesPage() {
                         {hiddenCount}+ More Properties
                       </h3>
                       <p className="text-gray-600 mb-6 leading-relaxed">
-                        Sign up for free to access all open collaborations, apply to hotels, and build your professional portfolio.
+                        Sign up for free to access all open collaborations, apply to hotels, and
+                        build your professional portfolio.
                       </p>
                       <div className="space-y-3">
                         <Link href={`${ROUTES.SIGNUP}?type=creator`} className="block">
@@ -203,18 +207,21 @@ export default function PublicPropertiesPage() {
             {[
               {
                 icon: CheckBadgeIcon,
-                title: 'Verified Hotels',
-                description: 'All properties are verified. No scams, no fake listings, only real opportunities.',
+                title: "Verified Hotels",
+                description:
+                  "All properties are verified. No scams, no fake listings, only real opportunities.",
               },
               {
                 icon: UserGroupIcon,
-                title: 'Direct Access',
-                description: 'Apply directly to hotels. No agencies, no middlemen, just you and the property.',
+                title: "Direct Access",
+                description:
+                  "Apply directly to hotels. No agencies, no middlemen, just you and the property.",
               },
               {
                 icon: SparklesIcon,
-                title: 'Build Your Portfolio',
-                description: 'Complete collaborations, earn reviews, and grow your professional reputation.',
+                title: "Build Your Portfolio",
+                description:
+                  "Complete collaborations, earn reviews, and grow your professional reputation.",
               },
             ].map(({ icon: Icon, title, description }) => (
               <div key={title} className="text-center">
@@ -236,7 +243,8 @@ export default function PublicPropertiesPage() {
             Ready to land your dream collaboration?
           </h2>
           <p className="text-primary-100 text-lg mb-8 max-w-2xl mx-auto">
-            Join vayada for free and get instant access to all {stats.totalHotels} open hotel listings.
+            Join vayada for free and get instant access to all {stats.totalHotels} open hotel
+            listings.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link href={`${ROUTES.SIGNUP}?type=creator`}>
@@ -263,5 +271,5 @@ export default function PublicPropertiesPage() {
 
       <Footer />
     </main>
-  )
+  );
 }

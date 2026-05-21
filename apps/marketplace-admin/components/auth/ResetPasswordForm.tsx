@@ -1,17 +1,17 @@
-'use client'
+"use client";
 
-import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
-import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline'
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 
 interface ResetPasswordFormProps {
-  onSubmit: (token: string, password: string) => Promise<void>
-  isSubmitting: boolean
-  submitError: string
-  onErrorClear: () => void
-  loginHref?: string
-  forgotPasswordHref?: string
-  onSuccess?: () => void
+  onSubmit: (token: string, password: string) => Promise<void>;
+  isSubmitting: boolean;
+  submitError: string;
+  onErrorClear: () => void;
+  loginHref?: string;
+  forgotPasswordHref?: string;
+  onSuccess?: () => void;
 }
 
 function ResetPasswordFormInner({
@@ -19,28 +19,30 @@ function ResetPasswordFormInner({
   isSubmitting,
   submitError,
   onErrorClear,
-  loginHref = '/login',
-  forgotPasswordHref = '/forgot-password',
+  loginHref = "/login",
+  forgotPasswordHref = "/forgot-password",
   onSuccess,
 }: ResetPasswordFormProps) {
-  const searchParams = useSearchParams()
-  const token = searchParams.get('token')
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token");
 
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [localErrors, setLocalErrors] = useState<{ password?: string; confirmPassword?: string }>({})
-  const [isSuccess, setIsSuccess] = useState(false)
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [localErrors, setLocalErrors] = useState<{ password?: string; confirmPassword?: string }>(
+    {},
+  );
+  const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
     if (isSuccess && onSuccess) {
       const timer = setTimeout(() => {
-        onSuccess()
-      }, 3000)
-      return () => clearTimeout(timer)
+        onSuccess();
+      }, 3000);
+      return () => clearTimeout(timer);
     }
-  }, [isSuccess, onSuccess])
+  }, [isSuccess, onSuccess]);
 
   if (!token) {
     return (
@@ -57,7 +59,7 @@ function ResetPasswordFormInner({
           Request New Reset Link
         </a>
       </div>
-    )
+    );
   }
 
   if (isSuccess) {
@@ -75,40 +77,40 @@ function ResetPasswordFormInner({
           Back to Sign In
         </a>
       </div>
-    )
+    );
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const newErrors: typeof localErrors = {}
-    onErrorClear()
+    e.preventDefault();
+    const newErrors: typeof localErrors = {};
+    onErrorClear();
 
     if (!password) {
-      newErrors.password = 'Password is required'
+      newErrors.password = "Password is required";
     } else if (password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters'
+      newErrors.password = "Password must be at least 8 characters";
     }
 
     if (!confirmPassword) {
-      newErrors.confirmPassword = 'Please confirm your password'
+      newErrors.confirmPassword = "Please confirm your password";
     } else if (password !== confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match'
+      newErrors.confirmPassword = "Passwords do not match";
     }
 
     if (Object.keys(newErrors).length > 0) {
-      setLocalErrors(newErrors)
-      return
+      setLocalErrors(newErrors);
+      return;
     }
 
-    setLocalErrors({})
+    setLocalErrors({});
 
     try {
-      await onSubmit(token, password)
-      setIsSuccess(true)
+      await onSubmit(token, password);
+      setIsSuccess(true);
     } catch {
       // Error handled by parent via submitError prop
     }
-  }
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -120,11 +122,12 @@ function ResetPasswordFormInner({
         <div className="relative">
           <input
             id="password"
-            type={showPassword ? 'text' : 'password'}
+            type={showPassword ? "text" : "password"}
             value={password}
             onChange={(e) => {
-              setPassword(e.target.value)
-              if (localErrors.password) setLocalErrors(prev => ({ ...prev, password: undefined }))
+              setPassword(e.target.value);
+              if (localErrors.password)
+                setLocalErrors((prev) => ({ ...prev, password: undefined }));
             }}
             required
             placeholder="At least 8 characters"
@@ -136,11 +139,7 @@ function ResetPasswordFormInner({
             onClick={() => setShowPassword(!showPassword)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
           >
-            {showPassword ? (
-              <EyeSlashIcon className="w-5 h-5" />
-            ) : (
-              <EyeIcon className="w-5 h-5" />
-            )}
+            {showPassword ? <EyeSlashIcon className="w-5 h-5" /> : <EyeIcon className="w-5 h-5" />}
           </button>
         </div>
         {localErrors.password && (
@@ -156,11 +155,12 @@ function ResetPasswordFormInner({
         <div className="relative">
           <input
             id="confirmPassword"
-            type={showConfirmPassword ? 'text' : 'password'}
+            type={showConfirmPassword ? "text" : "password"}
             value={confirmPassword}
             onChange={(e) => {
-              setConfirmPassword(e.target.value)
-              if (localErrors.confirmPassword) setLocalErrors(prev => ({ ...prev, confirmPassword: undefined }))
+              setConfirmPassword(e.target.value);
+              if (localErrors.confirmPassword)
+                setLocalErrors((prev) => ({ ...prev, confirmPassword: undefined }));
             }}
             required
             placeholder="Confirm your password"
@@ -197,28 +197,26 @@ function ResetPasswordFormInner({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? 'Resetting...' : 'Reset Password'}
+        {isSubmitting ? "Resetting..." : "Reset Password"}
       </button>
 
       {/* Login Link */}
       <div className="text-center">
         <p className="text-sm text-gray-600">
-          Remember your password?{' '}
+          Remember your password?{" "}
           <a href={loginHref} className="text-primary-600 hover:text-primary-700 font-medium">
             Sign in
           </a>
         </p>
       </div>
     </form>
-  )
+  );
 }
 
 export default function ResetPasswordForm(props: ResetPasswordFormProps) {
   return (
-    <Suspense fallback={
-      <div className="text-center text-sm text-gray-500">Loading...</div>
-    }>
+    <Suspense fallback={<div className="text-center text-sm text-gray-500">Loading...</div>}>
       <ResetPasswordFormInner {...props} />
     </Suspense>
-  )
+  );
 }

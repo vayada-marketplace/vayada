@@ -5,31 +5,31 @@
  * editor consume subsets of it.
  */
 export interface AffiliateProperty {
-  affiliateId: string
-  hotelId: string
-  hotelName: string
-  hotelSlug: string
-  referralCode: string
-  commissionPct: number
-  status: string
-  bookingCount: number
-  totalRevenue: number
-  totalCommission: number
-  clickCount: number
-  conversionRate: number
-  paymentMethod: string
-  stripeConnectOnboarded: boolean
-  paypalEmail: string
-  bankIban: string
-  bankAccountHolder: string
-  bankSwiftBic: string
-  bankName: string
-  bankCountry: string
-  xenditChannelCode: string | null
-  xenditAccountNumber: string | null
-  xenditAccountHolderName: string | null
+  affiliateId: string;
+  hotelId: string;
+  hotelName: string;
+  hotelSlug: string;
+  referralCode: string;
+  commissionPct: number;
+  status: string;
+  bookingCount: number;
+  totalRevenue: number;
+  totalCommission: number;
+  clickCount: number;
+  conversionRate: number;
+  paymentMethod: string;
+  stripeConnectOnboarded: boolean;
+  paypalEmail: string;
+  bankIban: string;
+  bankAccountHolder: string;
+  bankSwiftBic: string;
+  bankName: string;
+  bankCountry: string;
+  xenditChannelCode: string | null;
+  xenditAccountNumber: string | null;
+  xenditAccountHolderName: string | null;
 }
 
 export interface PropertiesResponse {
-  properties: AffiliateProperty[]
+  properties: AffiliateProperty[];
 }

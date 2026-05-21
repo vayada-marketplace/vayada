@@ -1,21 +1,21 @@
-'use client'
+"use client";
 
-import { useState, useRef, useEffect } from 'react'
-import { useClickOutside } from '@/hooks'
+import { useState, useRef, useEffect } from "react";
+import { useClickOutside } from "@/hooks";
 
 interface RangeSliderDropdownProps {
-  label: string
-  title: string
-  min: number
-  max: number
-  step: number
-  value: number
-  defaultValue: number
-  onChange: (value: number) => void
-  formatValue: (value: number) => string
-  formatMin?: string
-  formatMax?: string
-  showCurrentValue?: boolean
+  label: string;
+  title: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  defaultValue: number;
+  onChange: (value: number) => void;
+  formatValue: (value: number) => string;
+  formatMin?: string;
+  formatMax?: string;
+  showCurrentValue?: boolean;
 }
 
 export function RangeSliderDropdown({
@@ -32,28 +32,28 @@ export function RangeSliderDropdown({
   formatMax,
   showCurrentValue = false,
 }: RangeSliderDropdownProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [localValue, setLocalValue] = useState(value)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [isOpen, setIsOpen] = useState(false);
+  const [localValue, setLocalValue] = useState(value);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  useClickOutside([buttonRef, dropdownRef], () => setIsOpen(false), isOpen)
+  useClickOutside([buttonRef, dropdownRef], () => setIsOpen(false), isOpen);
 
   useEffect(() => {
-    setLocalValue(value)
-  }, [value])
+    setLocalValue(value);
+  }, [value]);
 
   // Only update local value during drag (for visual feedback)
   const handleSliderChange = (newValue: number) => {
-    setLocalValue(newValue)
-  }
+    setLocalValue(newValue);
+  };
 
   // Only commit to parent when user releases slider
   const handleSliderCommit = () => {
-    onChange(localValue)
-  }
+    onChange(localValue);
+  };
 
-  const percentage = ((localValue - min) / (max - min)) * 100
+  const percentage = ((localValue - min) / (max - min)) * 100;
 
   return (
     <div className="relative">
@@ -69,9 +69,7 @@ export function RangeSliderDropdown({
           ref={dropdownRef}
           className="absolute top-full left-0 mt-1 bg-white rounded-b-xl shadow-xl z-50 min-w-[320px] overflow-hidden"
         >
-          <div className="px-5 py-3 text-gray-900 text-sm font-bold text-center">
-            {title}
-          </div>
+          <div className="px-5 py-3 text-gray-900 text-sm font-bold text-center">{title}</div>
           {/* Current value display */}
           <div className="px-5 pb-2">
             <div className="text-center text-2xl font-bold text-primary-600">
@@ -91,7 +89,7 @@ export function RangeSliderDropdown({
                 onTouchEnd={handleSliderCommit}
                 className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, rgb(14, 165, 233) 0%, rgb(14, 165, 233) ${percentage}%, rgb(229, 231, 235) ${percentage}%, rgb(229, 231, 235) 100%)`
+                  background: `linear-gradient(to right, rgb(14, 165, 233) 0%, rgb(14, 165, 233) ${percentage}%, rgb(229, 231, 235) ${percentage}%, rgb(229, 231, 235) 100%)`,
                 }}
               />
             </div>
@@ -103,5 +101,5 @@ export function RangeSliderDropdown({
         </div>
       )}
     </div>
-  )
+  );
 }

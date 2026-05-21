@@ -1,18 +1,20 @@
-import { countries } from 'countries-list'
+import { countries } from "countries-list";
 import type {
   ProfilePlatform,
   PlatformCountry,
   PlatformAgeGroup,
   PlatformGenderSplit,
-} from '@/components/profile/types'
+} from "@/components/profile/types";
 
-const COUNTRIES = Object.values(countries).map(country => country.name).sort()
+const COUNTRIES = Object.values(countries)
+  .map((country) => country.name)
+  .sort();
 
 // Generic type for form data that includes platforms
 type FormDataWithPlatforms = {
-  platforms: ProfilePlatform[]
-  [key: string]: unknown
-}
+  platforms: ProfilePlatform[];
+  [key: string]: unknown;
+};
 
 export function usePlatformManagement<T extends FormDataWithPlatforms>(
   editFormData: T,
@@ -23,154 +25,172 @@ export function usePlatformManagement<T extends FormDataWithPlatforms>(
   setPlatformCountryInputs: React.Dispatch<React.SetStateAction<Record<number, string>>>,
 ) {
   const addPlatform = () => {
-    setEditFormData(prev => ({
+    setEditFormData((prev) => ({
       ...prev,
-      platforms: [...prev.platforms, {
-        name: '',
-        handle: '',
-        followers: 0,
-        engagementRate: 0,
-        topCountries: [],
-        topAgeGroups: [],
-        genderSplit: { male: 0, female: 0 },
-      }],
-    }))
-  }
+      platforms: [
+        ...prev.platforms,
+        {
+          name: "",
+          handle: "",
+          followers: 0,
+          engagementRate: 0,
+          topCountries: [],
+          topAgeGroups: [],
+          genderSplit: { male: 0, female: 0 },
+        },
+      ],
+    }));
+  };
 
   const removePlatform = (index: number) => {
-    setEditFormData(prev => ({
+    setEditFormData((prev) => ({
       ...prev,
       platforms: prev.platforms.filter((_, i) => i !== index),
-    }))
-  }
+    }));
+  };
 
-  const updatePlatform = (index: number, field: keyof ProfilePlatform, value: string | number | PlatformCountry[] | PlatformAgeGroup[] | PlatformGenderSplit) => {
-    setEditFormData(prev => ({
+  const updatePlatform = (
+    index: number,
+    field: keyof ProfilePlatform,
+    value: string | number | PlatformCountry[] | PlatformAgeGroup[] | PlatformGenderSplit,
+  ) => {
+    setEditFormData((prev) => ({
       ...prev,
       platforms: prev.platforms.map((platform, i) =>
-        i === index ? { ...platform, [field]: value } : platform
+        i === index ? { ...platform, [field]: value } : platform,
       ),
-    }))
-  }
+    }));
+  };
 
   const addTopCountry = (platformIndex: number) => {
-    const platform = editFormData.platforms[platformIndex]
-    const newCountries = [...(platform.topCountries || []), { country: '', percentage: 0 }]
-    updatePlatform(platformIndex, 'topCountries', newCountries)
-  }
+    const platform = editFormData.platforms[platformIndex];
+    const newCountries = [...(platform.topCountries || []), { country: "", percentage: 0 }];
+    updatePlatform(platformIndex, "topCountries", newCountries);
+  };
 
   const removeTopCountry = (platformIndex: number, countryIndex: number) => {
-    const platform = editFormData.platforms[platformIndex]
-    const newCountries = (platform.topCountries || []).filter((_, i) => i !== countryIndex)
-    updatePlatform(platformIndex, 'topCountries', newCountries)
-  }
+    const platform = editFormData.platforms[platformIndex];
+    const newCountries = (platform.topCountries || []).filter((_, i) => i !== countryIndex);
+    updatePlatform(platformIndex, "topCountries", newCountries);
+  };
 
-  const updateTopCountry = (platformIndex: number, countryIndex: number, field: 'country' | 'percentage', value: string | number) => {
-    const platform = editFormData.platforms[platformIndex]
+  const updateTopCountry = (
+    platformIndex: number,
+    countryIndex: number,
+    field: "country" | "percentage",
+    value: string | number,
+  ) => {
+    const platform = editFormData.platforms[platformIndex];
     const newCountries = (platform.topCountries || []).map((country, i) => {
-      if (i !== countryIndex) return country
+      if (i !== countryIndex) return country;
       const nextValue =
-        field === 'percentage'
+        field === "percentage"
           ? (() => {
-            const parsed = typeof value === 'number' ? value : parseFloat(String(value))
-            const safeValue = Number.isNaN(parsed) ? 0 : parsed
-            return Math.max(0, Math.min(100, safeValue))
-          })()
-          : value
-      return { ...country, [field]: nextValue }
-    })
-    updatePlatform(platformIndex, 'topCountries', newCountries)
-  }
+              const parsed = typeof value === "number" ? value : parseFloat(String(value));
+              const safeValue = Number.isNaN(parsed) ? 0 : parsed;
+              return Math.max(0, Math.min(100, safeValue));
+            })()
+          : value;
+      return { ...country, [field]: nextValue };
+    });
+    updatePlatform(platformIndex, "topCountries", newCountries);
+  };
 
   const addTopAgeGroup = (platformIndex: number) => {
-    const platform = editFormData.platforms[platformIndex]
-    const newAgeGroups = [...(platform.topAgeGroups || []), { ageRange: '', percentage: 0 }]
-    updatePlatform(platformIndex, 'topAgeGroups', newAgeGroups)
-  }
+    const platform = editFormData.platforms[platformIndex];
+    const newAgeGroups = [...(platform.topAgeGroups || []), { ageRange: "", percentage: 0 }];
+    updatePlatform(platformIndex, "topAgeGroups", newAgeGroups);
+  };
 
   const removeTopAgeGroup = (platformIndex: number, ageGroupIndex: number) => {
-    const platform = editFormData.platforms[platformIndex]
-    const newAgeGroups = (platform.topAgeGroups || []).filter((_, i) => i !== ageGroupIndex)
-    updatePlatform(platformIndex, 'topAgeGroups', newAgeGroups)
-  }
+    const platform = editFormData.platforms[platformIndex];
+    const newAgeGroups = (platform.topAgeGroups || []).filter((_, i) => i !== ageGroupIndex);
+    updatePlatform(platformIndex, "topAgeGroups", newAgeGroups);
+  };
 
-  const updateTopAgeGroup = (platformIndex: number, ageGroupIndex: number, field: 'ageRange' | 'percentage', value: string | number) => {
-    const platform = editFormData.platforms[platformIndex]
+  const updateTopAgeGroup = (
+    platformIndex: number,
+    ageGroupIndex: number,
+    field: "ageRange" | "percentage",
+    value: string | number,
+  ) => {
+    const platform = editFormData.platforms[platformIndex];
     const newAgeGroups = (platform.topAgeGroups || []).map((ageGroup, i) =>
-      i === ageGroupIndex ? { ...ageGroup, [field]: value } : ageGroup
-    )
-    updatePlatform(platformIndex, 'topAgeGroups', newAgeGroups)
-  }
+      i === ageGroupIndex ? { ...ageGroup, [field]: value } : ageGroup,
+    );
+    updatePlatform(platformIndex, "topAgeGroups", newAgeGroups);
+  };
 
-  const updateGenderSplit = (platformIndex: number, field: 'male' | 'female', value: number) => {
-    const platform = editFormData.platforms[platformIndex]
-    const newGenderSplit = { ...(platform.genderSplit || { male: 0, female: 0 }), [field]: value }
-    updatePlatform(platformIndex, 'genderSplit', newGenderSplit)
-  }
+  const updateGenderSplit = (platformIndex: number, field: "male" | "female", value: number) => {
+    const platform = editFormData.platforms[platformIndex];
+    const newGenderSplit = { ...(platform.genderSplit || { male: 0, female: 0 }), [field]: value };
+    updatePlatform(platformIndex, "genderSplit", newGenderSplit);
+  };
 
   const togglePlatformExpanded = (platformIndex: number) => {
-    const newExpanded = new Set(expandedPlatforms)
+    const newExpanded = new Set(expandedPlatforms);
     if (newExpanded.has(platformIndex)) {
-      newExpanded.delete(platformIndex)
+      newExpanded.delete(platformIndex);
     } else {
-      newExpanded.add(platformIndex)
+      newExpanded.add(platformIndex);
     }
-    setExpandedPlatforms(newExpanded)
-  }
+    setExpandedPlatforms(newExpanded);
+  };
 
   const handleCountryInputChange = (platformIndex: number, value: string) => {
-    setPlatformCountryInputs((prev) => ({ ...prev, [platformIndex]: value }))
-  }
+    setPlatformCountryInputs((prev) => ({ ...prev, [platformIndex]: value }));
+  };
 
   const addCountryFromInput = (platformIndex: number, overrideValue?: string) => {
-    const value = (overrideValue ?? platformCountryInputs[platformIndex])?.trim()
-    if (!value) return
-    const platform = editFormData.platforms[platformIndex]
+    const value = (overrideValue ?? platformCountryInputs[platformIndex])?.trim();
+    if (!value) return;
+    const platform = editFormData.platforms[platformIndex];
     if (!platform.topCountries) {
-      updatePlatform(platformIndex, 'topCountries', [])
+      updatePlatform(platformIndex, "topCountries", []);
     }
-    if ((platform.topCountries || []).length >= 3) return
+    if ((platform.topCountries || []).length >= 3) return;
     const exists = (platform.topCountries || []).some(
-      (c) => c.country.toLowerCase() === value.toLowerCase()
-    )
+      (c) => c.country.toLowerCase() === value.toLowerCase(),
+    );
     if (exists) {
-      setPlatformCountryInputs((prev) => ({ ...prev, [platformIndex]: '' }))
-      return
+      setPlatformCountryInputs((prev) => ({ ...prev, [platformIndex]: "" }));
+      return;
     }
-    const newCountries = [...(platform.topCountries || []), { country: value, percentage: 0 }]
-    updatePlatform(platformIndex, 'topCountries', newCountries)
-    setPlatformCountryInputs((prev) => ({ ...prev, [platformIndex]: '' }))
-  }
+    const newCountries = [...(platform.topCountries || []), { country: value, percentage: 0 }];
+    updatePlatform(platformIndex, "topCountries", newCountries);
+    setPlatformCountryInputs((prev) => ({ ...prev, [platformIndex]: "" }));
+  };
 
   const removeCountryTag = (platformIndex: number, countryIndex: number) => {
-    removeTopCountry(platformIndex, countryIndex)
-  }
+    removeTopCountry(platformIndex, countryIndex);
+  };
 
   const toggleAgeGroupTag = (platformIndex: number, ageRange: string) => {
-    const platform = editFormData.platforms[platformIndex]
+    const platform = editFormData.platforms[platformIndex];
     if (!platform.topAgeGroups) {
-      updatePlatform(platformIndex, 'topAgeGroups', [])
+      updatePlatform(platformIndex, "topAgeGroups", []);
     }
-    const existingIndex = (platform.topAgeGroups || []).findIndex((a) => a.ageRange === ageRange)
+    const existingIndex = (platform.topAgeGroups || []).findIndex((a) => a.ageRange === ageRange);
     if (existingIndex >= 0) {
-      const newAgeGroups = (platform.topAgeGroups || []).filter((_, i) => i !== existingIndex)
-      updatePlatform(platformIndex, 'topAgeGroups', newAgeGroups)
+      const newAgeGroups = (platform.topAgeGroups || []).filter((_, i) => i !== existingIndex);
+      updatePlatform(platformIndex, "topAgeGroups", newAgeGroups);
     } else {
-      if ((platform.topAgeGroups || []).length >= 3) return
-      const newAgeGroups = [...(platform.topAgeGroups || []), { ageRange, percentage: 0 }]
-      updatePlatform(platformIndex, 'topAgeGroups', newAgeGroups)
+      if ((platform.topAgeGroups || []).length >= 3) return;
+      const newAgeGroups = [...(platform.topAgeGroups || []), { ageRange, percentage: 0 }];
+      updatePlatform(platformIndex, "topAgeGroups", newAgeGroups);
     }
-  }
+  };
 
   const getAvailableCountries = (platformIndex: number) => {
-    const platform = editFormData.platforms[platformIndex]
-    const selected = (platform.topCountries || []).map((c) => c.country)
-    const query = (platformCountryInputs[platformIndex] || '').toLowerCase()
-    if (!query.trim()) return []
-    return COUNTRIES.filter(
-      (c) => !selected.includes(c) && c.toLowerCase().includes(query)
-    ).slice(0, 8)
-  }
+    const platform = editFormData.platforms[platformIndex];
+    const selected = (platform.topCountries || []).map((c) => c.country);
+    const query = (platformCountryInputs[platformIndex] || "").toLowerCase();
+    if (!query.trim()) return [];
+    return COUNTRIES.filter((c) => !selected.includes(c) && c.toLowerCase().includes(query)).slice(
+      0,
+      8,
+    );
+  };
 
   return {
     addPlatform,
@@ -189,5 +209,5 @@ export function usePlatformManagement<T extends FormDataWithPlatforms>(
     removeCountryTag,
     toggleAgeGroupTag,
     getAvailableCountries,
-  }
+  };
 }

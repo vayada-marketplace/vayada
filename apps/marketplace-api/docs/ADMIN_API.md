@@ -1,10 +1,13 @@
 # Admin API Documentation
 
 ## Overview
+
 Admin endpoints for managing users in the vayada platform. All endpoints require admin authentication.
 
 ## Authentication
+
 All admin endpoints require:
+
 - Valid JWT token in `Authorization: Bearer <token>` header
 - User must have `type = 'admin'` in the users table
 - Admin account must not be suspended
@@ -12,11 +15,13 @@ All admin endpoints require:
 ## Endpoints
 
 ### 1. List Users
+
 **GET** `/admin/users`
 
 List all users with pagination and filtering.
 
 **Query Parameters:**
+
 - `page` (int, default: 1) - Page number (starts at 1)
 - `page_size` (int, default: 20, max: 100) - Items per page
 - `type` (optional) - Filter by user type: `creator`, `hotel`, or `admin`
@@ -24,11 +29,13 @@ List all users with pagination and filtering.
 - `search` (optional) - Search by name or email (case-insensitive)
 
 **Example Request:**
+
 ```
 GET /admin/users?page=1&page_size=20&type=creator&status=pending&search=john
 ```
 
 **Response:**
+
 ```json
 {
   "users": [
@@ -53,14 +60,17 @@ GET /admin/users?page=1&page_size=20&type=creator&status=pending&search=john
 ---
 
 ### 2. Get User Details
+
 **GET** `/admin/users/{user_id}`
 
 Get detailed information about a specific user, including profile data.
 
 **Path Parameters:**
+
 - `user_id` (string, UUID) - User ID
 
 **Response:**
+
 ```json
 {
   "id": "uuid",
@@ -98,6 +108,7 @@ Get detailed information about a specific user, including profile data.
 ```
 
 **For hotel users**, `hotel_profile` will contain:
+
 ```json
 {
   "id": "uuid",
@@ -118,23 +129,27 @@ Get detailed information about a specific user, including profile data.
 ---
 
 ### 3. Update User
+
 **PUT** `/admin/users/{user_id}`
 
 Update user information (name, email, status).
 
 **Path Parameters:**
+
 - `user_id` (string, UUID) - User ID
 
 **Request Body:**
+
 ```json
 {
-  "name": "John Doe Updated",  // optional
-  "email": "newemail@example.com",  // optional
-  "status": "verified"  // optional: "pending", "verified", "rejected", "suspended"
+  "name": "John Doe Updated", // optional
+  "email": "newemail@example.com", // optional
+  "status": "verified" // optional: "pending", "verified", "rejected", "suspended"
 }
 ```
 
 **Response:**
+
 ```json
 {
   "message": "User updated successfully",
@@ -145,6 +160,7 @@ Update user information (name, email, status).
 ```
 
 **Errors:**
+
 - `400 Bad Request` - Email already in use by another user
 - `400 Bad Request` - No fields to update
 - `404 Not Found` - User not found
@@ -152,22 +168,26 @@ Update user information (name, email, status).
 ---
 
 ### 4. Update User Status
+
 **PATCH** `/admin/users/{user_id}/status`
 
 Convenience endpoint specifically for status changes (approve, deny, suspend).
 
 **Path Parameters:**
+
 - `user_id` (string, UUID) - User ID
 
 **Request Body:**
+
 ```json
 {
-  "status": "verified",  // required: "pending", "verified", "rejected", "suspended"
-  "reason": "Profile approved after review"  // optional, for logging
+  "status": "verified", // required: "pending", "verified", "rejected", "suspended"
+  "reason": "Profile approved after review" // optional, for logging
 }
 ```
 
 **Response:**
+
 ```json
 {
   "message": "User status updated from pending to verified",
@@ -191,6 +211,7 @@ All endpoints return standard HTTP status codes:
 - `500 Internal Server Error` - Server error
 
 **Error Response Format:**
+
 ```json
 {
   "detail": "Error message here"
@@ -213,6 +234,7 @@ All endpoints return standard HTTP status codes:
 To create the first admin user, you can:
 
 1. **Via SQL (recommended for first admin):**
+
 ```sql
 INSERT INTO users (email, password_hash, name, type, status)
 VALUES (
@@ -225,8 +247,9 @@ VALUES (
 ```
 
 2. **Via existing user (update type):**
+
 ```sql
-UPDATE users 
+UPDATE users
 SET type = 'admin', status = 'verified'
 WHERE email = 'existing@email.com';
 ```
@@ -251,4 +274,3 @@ WHERE email = 'existing@email.com';
 4. Admin clicks on user → `GET /admin/users/{user_id}`
 5. Admin approves user → `PATCH /admin/users/{user_id}/status` with `{"status": "verified"}`
 6. Admin edits user info → `PUT /admin/users/{user_id}` with updated fields
-

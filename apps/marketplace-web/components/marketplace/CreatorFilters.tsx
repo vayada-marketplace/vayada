@@ -1,33 +1,33 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect } from "react";
 import {
   FilterChip,
   MultiSelectDropdown,
   RangeSliderDropdown,
   SearchableCountrySelect,
-} from '@/components/common'
+} from "@/components/common";
 import {
   PLATFORM_OPTIONS,
   FOLLOWERS_RANGE,
   ENGAGEMENT_RATE_RANGE,
   CREATOR_TYPE_OPTIONS,
-} from '@/lib/constants'
-import { formatFollowers, formatEngagementRate } from '@/lib/utils'
+} from "@/lib/constants";
+import { formatFollowers, formatEngagementRate } from "@/lib/utils";
 
 export interface CreatorFiltersState {
-  minFollowers?: number
-  minEngagementRate?: number
-  creatorPlatforms?: string | string[]
-  topCountries?: string | string[]
-  creatorTypes?: string | string[]
+  minFollowers?: number;
+  minEngagementRate?: number;
+  creatorPlatforms?: string | string[];
+  topCountries?: string | string[];
+  creatorTypes?: string | string[];
 }
 
 interface CreatorFiltersProps {
-  filters: CreatorFiltersState
-  onFiltersChange: (filters: CreatorFiltersState) => void
-  onClearAll?: () => void
-  showClearAll?: boolean
+  filters: CreatorFiltersState;
+  onFiltersChange: (filters: CreatorFiltersState) => void;
+  onClearAll?: () => void;
+  showClearAll?: boolean;
 }
 
 export function CreatorFilters({
@@ -36,83 +36,90 @@ export function CreatorFilters({
   onClearAll,
   showClearAll = true,
 }: CreatorFiltersProps) {
-  const [minFollowersValue, setMinFollowersValue] = useState(filters.minFollowers ?? FOLLOWERS_RANGE.min)
-  const [minEngagementRateValue, setMinEngagementRateValue] = useState(filters.minEngagementRate ?? ENGAGEMENT_RATE_RANGE.min)
+  const [minFollowersValue, setMinFollowersValue] = useState(
+    filters.minFollowers ?? FOLLOWERS_RANGE.min,
+  );
+  const [minEngagementRateValue, setMinEngagementRateValue] = useState(
+    filters.minEngagementRate ?? ENGAGEMENT_RATE_RANGE.min,
+  );
 
   useEffect(() => {
-    if (filters.minFollowers !== undefined) setMinFollowersValue(filters.minFollowers)
-  }, [filters.minFollowers])
+    if (filters.minFollowers !== undefined) setMinFollowersValue(filters.minFollowers);
+  }, [filters.minFollowers]);
 
   useEffect(() => {
-    if (filters.minEngagementRate !== undefined) setMinEngagementRateValue(filters.minEngagementRate)
-  }, [filters.minEngagementRate])
+    if (filters.minEngagementRate !== undefined)
+      setMinEngagementRateValue(filters.minEngagementRate);
+  }, [filters.minEngagementRate]);
 
   // Helper to normalize string | string[] to string[]
   const toArray = (value: string | string[] | undefined): string[] => {
-    if (!value) return []
-    return Array.isArray(value) ? value : [value]
-  }
+    if (!value) return [];
+    return Array.isArray(value) ? value : [value];
+  };
 
-  const selectedCreatorPlatforms = toArray(filters.creatorPlatforms)
-  const selectedTopCountries = toArray(filters.topCountries)
-  const selectedCreatorTypes = toArray(filters.creatorTypes)
+  const selectedCreatorPlatforms = toArray(filters.creatorPlatforms);
+  const selectedTopCountries = toArray(filters.topCountries);
+  const selectedCreatorTypes = toArray(filters.creatorTypes);
 
-  const createToggleHandler = (key: 'creatorPlatforms' | 'topCountries' | 'creatorTypes') => (value: string) => {
-    const current = toArray(filters[key])
-    const updated = current.includes(value)
-      ? current.filter((v) => v !== value)
-      : [...current, value]
+  const createToggleHandler =
+    (key: "creatorPlatforms" | "topCountries" | "creatorTypes") => (value: string) => {
+      const current = toArray(filters[key]);
+      const updated = current.includes(value)
+        ? current.filter((v) => v !== value)
+        : [...current, value];
 
-    const newFilters = { ...filters }
-    if (updated.length === 0) {
-      delete newFilters[key]
-    } else {
-      newFilters[key] = updated
-    }
-    onFiltersChange(newFilters)
-  }
+      const newFilters = { ...filters };
+      if (updated.length === 0) {
+        delete newFilters[key];
+      } else {
+        newFilters[key] = updated;
+      }
+      onFiltersChange(newFilters);
+    };
 
   const handleMinFollowersChange = (value: number) => {
-    setMinFollowersValue(value)
-    const newFilters = { ...filters }
+    setMinFollowersValue(value);
+    const newFilters = { ...filters };
     if (value === FOLLOWERS_RANGE.min) {
-      delete newFilters.minFollowers
+      delete newFilters.minFollowers;
     } else {
-      newFilters.minFollowers = value
+      newFilters.minFollowers = value;
     }
-    onFiltersChange(newFilters)
-  }
+    onFiltersChange(newFilters);
+  };
 
   const handleMinEngagementRateChange = (value: number) => {
-    setMinEngagementRateValue(value)
-    const newFilters = { ...filters }
+    setMinEngagementRateValue(value);
+    const newFilters = { ...filters };
     if (value === ENGAGEMENT_RATE_RANGE.min) {
-      delete newFilters.minEngagementRate
+      delete newFilters.minEngagementRate;
     } else {
-      newFilters.minEngagementRate = value
+      newFilters.minEngagementRate = value;
     }
-    onFiltersChange(newFilters)
-  }
+    onFiltersChange(newFilters);
+  };
 
   const handleClearCountries = () => {
-    const newFilters = { ...filters }
-    delete newFilters.topCountries
-    onFiltersChange(newFilters)
-  }
+    const newFilters = { ...filters };
+    delete newFilters.topCountries;
+    onFiltersChange(newFilters);
+  };
 
   const handleClearAll = () => {
-    onFiltersChange({})
-    setMinFollowersValue(FOLLOWERS_RANGE.min)
-    setMinEngagementRateValue(ENGAGEMENT_RATE_RANGE.min)
-    onClearAll?.()
-  }
+    onFiltersChange({});
+    setMinFollowersValue(FOLLOWERS_RANGE.min);
+    setMinEngagementRateValue(ENGAGEMENT_RATE_RANGE.min);
+    onClearAll?.();
+  };
 
   const hasFilters =
     selectedCreatorPlatforms.length > 0 ||
     selectedTopCountries.length > 0 ||
     selectedCreatorTypes.length > 0 ||
     (filters.minFollowers !== undefined && filters.minFollowers > FOLLOWERS_RANGE.min) ||
-    (filters.minEngagementRate !== undefined && filters.minEngagementRate > ENGAGEMENT_RATE_RANGE.min)
+    (filters.minEngagementRate !== undefined &&
+      filters.minEngagementRate > ENGAGEMENT_RATE_RANGE.min);
 
   return (
     <>
@@ -152,7 +159,7 @@ export function CreatorFilters({
           title="Select Creator Type"
           options={CREATOR_TYPE_OPTIONS}
           selected={selectedCreatorTypes}
-          onToggle={createToggleHandler('creatorTypes')}
+          onToggle={createToggleHandler("creatorTypes")}
         />
 
         <MultiSelectDropdown
@@ -160,12 +167,12 @@ export function CreatorFilters({
           title="Select Platforms"
           options={PLATFORM_OPTIONS}
           selected={selectedCreatorPlatforms}
-          onToggle={createToggleHandler('creatorPlatforms')}
+          onToggle={createToggleHandler("creatorPlatforms")}
         />
 
         <SearchableCountrySelect
           selected={selectedTopCountries}
-          onToggle={createToggleHandler('topCountries')}
+          onToggle={createToggleHandler("topCountries")}
           onClearAll={handleClearCountries}
         />
 
@@ -175,7 +182,12 @@ export function CreatorFilters({
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
             Clear all
           </button>
@@ -190,35 +202,36 @@ export function CreatorFilters({
               onRemove={() => handleMinFollowersChange(FOLLOWERS_RANGE.min)}
             />
           )}
-          {filters.minEngagementRate !== undefined && filters.minEngagementRate > ENGAGEMENT_RATE_RANGE.min && (
-            <FilterChip
-              label={`Engagement: ${formatEngagementRate(filters.minEngagementRate)}+`}
-              onRemove={() => handleMinEngagementRateChange(ENGAGEMENT_RATE_RANGE.min)}
-            />
-          )}
+          {filters.minEngagementRate !== undefined &&
+            filters.minEngagementRate > ENGAGEMENT_RATE_RANGE.min && (
+              <FilterChip
+                label={`Engagement: ${formatEngagementRate(filters.minEngagementRate)}+`}
+                onRemove={() => handleMinEngagementRateChange(ENGAGEMENT_RATE_RANGE.min)}
+              />
+            )}
           {selectedCreatorTypes.map((type) => (
             <FilterChip
               key={type}
               label={`${type} Creator`}
-              onRemove={() => createToggleHandler('creatorTypes')(type)}
+              onRemove={() => createToggleHandler("creatorTypes")(type)}
             />
           ))}
           {selectedCreatorPlatforms.map((platform) => (
             <FilterChip
               key={platform}
               label={platform}
-              onRemove={() => createToggleHandler('creatorPlatforms')(platform)}
+              onRemove={() => createToggleHandler("creatorPlatforms")(platform)}
             />
           ))}
           {selectedTopCountries.map((country) => (
             <FilterChip
               key={country}
               label={country}
-              onRemove={() => createToggleHandler('topCountries')(country)}
+              onRemove={() => createToggleHandler("topCountries")(country)}
             />
           ))}
         </div>
       )}
     </>
-  )
+  );
 }

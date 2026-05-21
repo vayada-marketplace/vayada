@@ -1,48 +1,58 @@
-'use client'
+"use client";
 
-import { useEffect, useMemo, useState } from 'react'
-import { MagnifyingGlassIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline'
+import { useEffect, useMemo, useState } from "react";
+import { MagnifyingGlassIcon, ArrowDownTrayIcon } from "@heroicons/react/24/outline";
 import {
   financialsService,
   InvoiceListItem,
   InvoiceListResponse,
   InvoiceStatus,
-} from '@/services/financials'
-import { formatCurrency } from '@/lib/formatCurrency'
-import { useTranslation } from '@/lib/i18n'
-import InvoiceDetailModal from './InvoiceDetailModal'
+} from "@/services/financials";
+import { formatCurrency } from "@/lib/formatCurrency";
+import { useTranslation } from "@/lib/i18n";
+import InvoiceDetailModal from "./InvoiceDetailModal";
 
 const STATUS_STYLES: Record<InvoiceStatus, string> = {
-  draft: 'border-gray-200 text-gray-600 bg-gray-50',
-  sent: 'border-sky-200 text-sky-700 bg-sky-50',
-  paid: 'border-emerald-200 text-emerald-700 bg-emerald-50',
-  partial: 'border-amber-200 text-amber-700 bg-amber-50',
-  overdue: 'border-rose-200 text-rose-600 bg-rose-50',
-  voided: 'border-gray-200 text-gray-500 bg-gray-50 line-through',
-}
+  draft: "border-gray-200 text-gray-600 bg-gray-50",
+  sent: "border-sky-200 text-sky-700 bg-sky-50",
+  paid: "border-emerald-200 text-emerald-700 bg-emerald-50",
+  partial: "border-amber-200 text-amber-700 bg-amber-50",
+  overdue: "border-rose-200 text-rose-600 bg-rose-50",
+  voided: "border-gray-200 text-gray-500 bg-gray-50 line-through",
+};
 
-const ORDERED_STATUSES: (InvoiceStatus | 'all')[] = [
-  'all', 'draft', 'sent', 'paid', 'partial', 'overdue', 'voided',
-]
+const ORDERED_STATUSES: (InvoiceStatus | "all")[] = [
+  "all",
+  "draft",
+  "sent",
+  "paid",
+  "partial",
+  "overdue",
+  "voided",
+];
 
-type SortKey = 'date' | 'guest' | 'amount'
+type SortKey = "date" | "guest" | "amount";
 
 function formatDate(s: string): string {
-  return new Date(s).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  return new Date(s).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 export default function InvoicesTab() {
-  const { t } = useTranslation()
-  const [data, setData] = useState<InvoiceListResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | ''>('')
-  const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<SortKey>('date')
-  const [openId, setOpenId] = useState<string | null>(null)
-  const limit = 25
+  const { t } = useTranslation();
+  const [data, setData] = useState<InvoiceListResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "">("");
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("date");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const limit = 25;
 
   useEffect(() => {
-    setLoading(true)
+    setLoading(true);
     financialsService
       .listInvoices({
         status: statusFilter || undefined,
@@ -53,22 +63,25 @@ export default function InvoicesTab() {
       })
       .then(setData)
       .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [statusFilter, search, sort])
+      .finally(() => setLoading(false));
+  }, [statusFilter, search, sort]);
 
-  const counts = data?.counts
+  const counts = data?.counts;
   const visibleStatuses = useMemo(
-    () => ORDERED_STATUSES.filter(
-      (s) => s === 'all' || statusFilter === s || (counts && counts[s as InvoiceStatus] > 0)
-    ),
+    () =>
+      ORDERED_STATUSES.filter(
+        (s) => s === "all" || statusFilter === s || (counts && counts[s as InvoiceStatus] > 0),
+      ),
     [counts, statusFilter],
-  )
+  );
 
   return (
     <div>
       {/* Section header */}
       <div className="flex items-center justify-between gap-4 mb-4">
-        <h2 className="text-base md:text-lg font-semibold text-gray-900">{t('financials.guestInvoices')}</h2>
+        <h2 className="text-base md:text-lg font-semibold text-gray-900">
+          {t("financials.guestInvoices")}
+        </h2>
         <a
           href={financialsService.exportCsvUrl({
             status: statusFilter || undefined,
@@ -77,7 +90,7 @@ export default function InvoicesTab() {
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 text-gray-700 transition-colors"
         >
           <ArrowDownTrayIcon className="w-4 h-4" />
-          {t('financials.exportCsv')}
+          {t("financials.exportCsv")}
         </a>
       </div>
 
@@ -87,22 +100,22 @@ export default function InvoicesTab() {
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder={t('financials.searchPlaceholder')}
+            placeholder={t("financials.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full sm:w-80 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
           />
         </div>
         <div className="flex items-center gap-2 sm:ml-auto">
-          <span className="text-xs text-gray-500">{t('financials.sortBy')}</span>
+          <span className="text-xs text-gray-500">{t("financials.sortBy")}</span>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
             className="text-sm border border-gray-200 rounded-lg bg-white px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
           >
-            <option value="date">{t('financials.sortDate')}</option>
-            <option value="guest">{t('financials.sortGuest')}</option>
-            <option value="amount">{t('financials.sortAmount')}</option>
+            <option value="date">{t("financials.sortDate")}</option>
+            <option value="guest">{t("financials.sortGuest")}</option>
+            <option value="amount">{t("financials.sortAmount")}</option>
           </select>
         </div>
       </div>
@@ -110,35 +123,39 @@ export default function InvoicesTab() {
       {/* Status chips */}
       <div className="flex items-center gap-1.5 mb-4 overflow-x-auto scrollbar-hide -mx-4 px-4 md:mx-0 md:px-0">
         {visibleStatuses.map((s) => {
-          const isAll = s === 'all'
-          const active = isAll ? !statusFilter : statusFilter === s
-          const count = isAll ? data?.total : counts?.[s as InvoiceStatus]
+          const isAll = s === "all";
+          const active = isAll ? !statusFilter : statusFilter === s;
+          const count = isAll ? data?.total : counts?.[s as InvoiceStatus];
           const labelKey = isAll
-            ? 'financials.statusAll'
-            : ({
-                draft: 'financials.statusDraft',
-                sent: 'financials.statusSent',
-                paid: 'financials.statusPaid',
-                partial: 'financials.statusPartial',
-                overdue: 'financials.statusOverdue',
-                voided: 'financials.statusVoided',
-              } as Record<InvoiceStatus, string>)[s as InvoiceStatus]
+            ? "financials.statusAll"
+            : (
+                {
+                  draft: "financials.statusDraft",
+                  sent: "financials.statusSent",
+                  paid: "financials.statusPaid",
+                  partial: "financials.statusPartial",
+                  overdue: "financials.statusOverdue",
+                  voided: "financials.statusVoided",
+                } as Record<InvoiceStatus, string>
+              )[s as InvoiceStatus];
           return (
             <button
               key={s}
-              onClick={() => setStatusFilter(isAll ? '' : (s as InvoiceStatus))}
+              onClick={() => setStatusFilter(isAll ? "" : (s as InvoiceStatus))}
               className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-colors ${
                 active
-                  ? 'bg-gray-900 text-white border-gray-900'
-                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                  ? "bg-gray-900 text-white border-gray-900"
+                  : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
               }`}
             >
               {t(labelKey)}
               {count != null && count > 0 && (
-                <span className={`text-[10px] ${active ? 'text-gray-300' : 'text-gray-400'}`}>{count}</span>
+                <span className={`text-[10px] ${active ? "text-gray-300" : "text-gray-400"}`}>
+                  {count}
+                </span>
               )}
             </button>
-          )
+          );
         })}
       </div>
 
@@ -150,7 +167,7 @@ export default function InvoicesTab() {
           ))}
         </div>
       ) : !data || data.invoices.length === 0 ? (
-        <div className="py-16 text-center text-sm text-gray-400">{t('financials.noInvoices')}</div>
+        <div className="py-16 text-center text-sm text-gray-400">{t("financials.noInvoices")}</div>
       ) : (
         <>
           {/* Mobile cards */}
@@ -165,11 +182,21 @@ export default function InvoicesTab() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400">{t('financials.tableInvoiceGuest')}</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400">{t('financials.tableStay')}</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400">{t('financials.tableRoom')}</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-400">{t('financials.tableTotal')}</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-400 w-[100px]">{t('financials.tableStatus')}</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400">
+                    {t("financials.tableInvoiceGuest")}
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400">
+                    {t("financials.tableStay")}
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-gray-400">
+                    {t("financials.tableRoom")}
+                  </th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-gray-400">
+                    {t("financials.tableTotal")}
+                  </th>
+                  <th className="text-center px-4 py-3 text-xs font-medium text-gray-400 w-[100px]">
+                    {t("financials.tableStatus")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -187,7 +214,8 @@ export default function InvoicesTab() {
                       <div className="text-[11px] text-gray-400">{inv.guestEmail}</div>
                     </td>
                     <td className="px-4 py-3 text-[13px] text-gray-600">
-                      {formatDate(inv.checkIn)} <span className="text-gray-300">→</span> {formatDate(inv.checkOut)}
+                      {formatDate(inv.checkIn)} <span className="text-gray-300">→</span>{" "}
+                      {formatDate(inv.checkOut)}
                     </td>
                     <td className="px-4 py-3 text-[13px] text-gray-600">
                       {inv.roomNumber ? (
@@ -204,15 +232,21 @@ export default function InvoicesTab() {
                       <div className="text-[13px] font-semibold text-gray-900">
                         {formatCurrency(inv.totalAmount, inv.currency)}
                       </div>
-                      {inv.balanceDue > 0 && inv.status !== 'voided' && (
+                      {inv.balanceDue > 0 && inv.status !== "voided" && (
                         <div className="text-[11px] text-rose-600 mt-0.5">
-                          {t('financials.dueLabel', { amount: formatCurrency(inv.balanceDue, inv.currency) })}
+                          {t("financials.dueLabel", {
+                            amount: formatCurrency(inv.balanceDue, inv.currency),
+                          })}
                         </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border ${STATUS_STYLES[inv.status]}`}>
-                        {t(`financials.status${inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}`)}
+                      <span
+                        className={`inline-flex px-2.5 py-1 rounded-full text-[11px] font-semibold border ${STATUS_STYLES[inv.status]}`}
+                      >
+                        {t(
+                          `financials.status${inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}`,
+                        )}
                       </span>
                     </td>
                   </tr>
@@ -238,16 +272,16 @@ export default function InvoicesTab() {
                 offset: 0,
               })
               .then(setData)
-              .catch(console.error)
+              .catch(console.error);
           }}
         />
       )}
     </div>
-  )
+  );
 }
 
 function InvoiceCard({ inv, onOpen }: { inv: InvoiceListItem; onOpen: () => void }) {
-  const { t } = useTranslation()
+  const { t } = useTranslation();
   return (
     <button
       onClick={onOpen}
@@ -260,7 +294,9 @@ function InvoiceCard({ inv, onOpen }: { inv: InvoiceListItem; onOpen: () => void
             {inv.guestFirstName} {inv.guestLastName}
           </p>
         </div>
-        <span className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_STYLES[inv.status]}`}>
+        <span
+          className={`shrink-0 inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${STATUS_STYLES[inv.status]}`}
+        >
           {t(`financials.status${inv.status.charAt(0).toUpperCase() + inv.status.slice(1)}`)}
         </span>
       </div>
@@ -275,14 +311,16 @@ function InvoiceCard({ inv, onOpen }: { inv: InvoiceListItem; onOpen: () => void
           )}
         </div>
         <div className="text-right">
-          <p className="text-sm font-semibold text-gray-900">{formatCurrency(inv.totalAmount, inv.currency)}</p>
-          {inv.balanceDue > 0 && inv.status !== 'voided' && (
+          <p className="text-sm font-semibold text-gray-900">
+            {formatCurrency(inv.totalAmount, inv.currency)}
+          </p>
+          {inv.balanceDue > 0 && inv.status !== "voided" && (
             <p className="text-[11px] text-rose-600 mt-0.5">
-              {t('financials.dueLabel', { amount: formatCurrency(inv.balanceDue, inv.currency) })}
+              {t("financials.dueLabel", { amount: formatCurrency(inv.balanceDue, inv.currency) })}
             </p>
           )}
         </div>
       </div>
     </button>
-  )
+  );
 }

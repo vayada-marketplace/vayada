@@ -1,16 +1,16 @@
 const PROPERTIES = [
-  'Green Poya Resort',
-  'Santa Teresa Surfing Villa',
-  'Sapo Management',
-  'Aether Hilltop Villas',
-  'Organic Harmony',
-  'Nirvana Tetebatu',
-  'Kimah Villas',
-  'Kalima Resort Lombok',
-]
+  "Green Poya Resort",
+  "Santa Teresa Surfing Villa",
+  "Sapo Management",
+  "Aether Hilltop Villas",
+  "Organic Harmony",
+  "Nirvana Tetebatu",
+  "Kimah Villas",
+  "Kalima Resort Lombok",
+];
 
 export default function TrustedBy() {
-  const items = [...PROPERTIES, ...PROPERTIES]
+  const items = [...PROPERTIES, ...PROPERTIES];
   return (
     <section className="border-y border-border bg-[#f7f8fc]/60 py-10">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -31,5 +31,5 @@ export default function TrustedBy() {
         </div>
       </div>
     </section>
-  )
+  );
 }

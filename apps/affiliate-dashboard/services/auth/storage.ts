@@ -8,41 +8,41 @@
  * client-side "is logged in" hint.
  */
 
-const USER_KEYS = ['userId', 'userEmail', 'userName', 'userType', 'userStatus', 'user'] as const
+const USER_KEYS = ["userId", "userEmail", "userName", "userType", "userStatus", "user"] as const;
 
 export interface StoredUser {
-  id: string
-  email: string
-  name: string
-  type: string
-  status: string
+  id: string;
+  email: string;
+  name: string;
+  type: string;
+  status: string;
 }
 
 export function storeUser(data: StoredUser): void {
-  if (typeof window === 'undefined') return
-  localStorage.setItem('isLoggedIn', 'true')
-  localStorage.setItem('userId', data.id)
-  localStorage.setItem('userEmail', data.email)
-  localStorage.setItem('userName', data.name)
-  localStorage.setItem('userType', data.type)
-  localStorage.setItem('userStatus', data.status)
-  localStorage.setItem('user', JSON.stringify(data))
+  if (typeof window === "undefined") return;
+  localStorage.setItem("isLoggedIn", "true");
+  localStorage.setItem("userId", data.id);
+  localStorage.setItem("userEmail", data.email);
+  localStorage.setItem("userName", data.name);
+  localStorage.setItem("userType", data.type);
+  localStorage.setItem("userStatus", data.status);
+  localStorage.setItem("user", JSON.stringify(data));
 }
 
 export function clearAuthData(): void {
-  if (typeof window === 'undefined') return
-  for (const key of USER_KEYS) localStorage.removeItem(key)
-  localStorage.setItem('isLoggedIn', 'false')
+  if (typeof window === "undefined") return;
+  for (const key of USER_KEYS) localStorage.removeItem(key);
+  localStorage.setItem("isLoggedIn", "false");
 }
 
 export function getUserType(): string | null {
-  if (typeof window === 'undefined') return null
-  return localStorage.getItem('userType')
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("userType");
 }
 
 export function getUserName(): string {
-  if (typeof window === 'undefined') return ''
-  return localStorage.getItem('userName') || ''
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("userName") || "";
 }
 
 /** Client-side hint based on the last successful login. The cookie is
@@ -51,6 +51,6 @@ export function getUserName(): string {
  * to /login. The Next middleware does the authoritative gate at
  * navigation time. */
 export function isLoggedInHint(): boolean {
-  if (typeof window === 'undefined') return false
-  return localStorage.getItem('isLoggedIn') === 'true'
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem("isLoggedIn") === "true";
 }

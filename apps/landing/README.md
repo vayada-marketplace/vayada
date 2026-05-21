@@ -8,13 +8,13 @@ repo contains only public website pages — no authenticated app code.
 
 ## Pages
 
-| Route | Purpose |
-|---|---|
-| `/` | Home |
-| `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing` | Product pages |
-| `/about`, `/contact`, `/creator-benefits`, `/hotel-benefits` | Marketing |
-| `/imprint`, `/privacy`, `/terms` | Legal |
-| `/api/health` | Health check (for the container platform) |
+| Route                                                                               | Purpose                                   |
+| ----------------------------------------------------------------------------------- | ----------------------------------------- |
+| `/`                                                                                 | Home                                      |
+| `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing` | Product pages                             |
+| `/about`, `/contact`, `/creator-benefits`, `/hotel-benefits`                        | Marketing                                 |
+| `/imprint`, `/privacy`, `/terms`                                                    | Legal                                     |
+| `/api/health`                                                                       | Health check (for the container platform) |
 
 `/hotel-creator-network` pulls live creators/hotels from the marketplace
 backend API (cross-origin, like the contact form) — see `NEXT_PUBLIC_API_URL`.

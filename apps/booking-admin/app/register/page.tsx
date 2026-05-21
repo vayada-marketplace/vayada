@@ -1,58 +1,61 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { authService } from '@/services/auth'
-import { ApiErrorResponse } from '@/services/api/client'
-import { isSetupComplete } from '@/lib/utils/setupStatus'
-import RegisterForm from '@/components/auth/RegisterForm'
-import { useTranslation } from '@/lib/i18n'
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
+import { isSetupComplete } from "@/lib/utils/setupStatus";
+import RegisterForm from "@/components/auth/RegisterForm";
+import { useTranslation } from "@/lib/i18n";
 
 export default function RegisterPage() {
-  const { t } = useTranslation()
-  const router = useRouter()
-  const [submitError, setSubmitError] = useState('')
+  const { t } = useTranslation();
+  const router = useRouter();
+  const [submitError, setSubmitError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
-    name?: string; email?: string; password?: string; confirmPassword?: string
-  }>({})
-  const [isSubmitting, setIsSubmitting] = useState(false)
+    name?: string;
+    email?: string;
+    password?: string;
+    confirmPassword?: string;
+  }>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleRegister = async (data: { name: string; email: string; password: string }) => {
-    setSubmitError('')
-    setFieldErrors({})
-    setIsSubmitting(true)
+    setSubmitError("");
+    setFieldErrors({});
+    setIsSubmitting(true);
 
     try {
-      await authService.register(data)
-      const complete = await isSetupComplete()
+      await authService.register(data);
+      const complete = await isSetupComplete();
       if (!complete) {
-        localStorage.setItem('setupComplete', 'false')
-        router.push('/setup')
-        return
+        localStorage.setItem("setupComplete", "false");
+        router.push("/setup");
+        return;
       }
-      localStorage.setItem('setupComplete', 'true')
-      router.push('/dashboard')
+      localStorage.setItem("setupComplete", "true");
+      router.push("/dashboard");
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 400) {
-          setSubmitError(t('auth.register.errorEmailExists'))
+          setSubmitError(t("auth.register.errorEmailExists"));
         } else if (error.status === 422) {
-          const detail = error.data.detail
+          const detail = error.data.detail;
           if (Array.isArray(detail)) {
-            setSubmitError(detail.map(e => e.msg).join('. '))
+            setSubmitError(detail.map((e) => e.msg).join(". "));
           } else {
-            setSubmitError(detail || t('auth.register.errorValidation'))
+            setSubmitError(detail || t("auth.register.errorValidation"));
           }
         } else {
-          setSubmitError(t('auth.register.errorUnexpected'))
+          setSubmitError(t("auth.register.errorUnexpected"));
         }
       } else {
-        setSubmitError(t('auth.register.errorUnexpected'))
+        setSubmitError(t("auth.register.errorUnexpected"));
       }
     } finally {
-      setIsSubmitting(false)
+      setIsSubmitting(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -62,8 +65,8 @@ export default function RegisterPage() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">{t('auth.register.title')}</h1>
-          <p className="text-[13px] text-gray-500 mt-1">{t('auth.register.subtitle')}</p>
+          <h1 className="text-xl font-bold text-gray-900">{t("auth.register.title")}</h1>
+          <p className="text-[13px] text-gray-500 mt-1">{t("auth.register.subtitle")}</p>
         </div>
 
         <RegisterForm
@@ -71,9 +74,12 @@ export default function RegisterPage() {
           isSubmitting={isSubmitting}
           submitError={submitError}
           fieldErrors={fieldErrors}
-          onErrorClear={() => { setSubmitError(''); setFieldErrors({}) }}
+          onErrorClear={() => {
+            setSubmitError("");
+            setFieldErrors({});
+          }}
         />
       </div>
     </div>
-  )
+  );
 }

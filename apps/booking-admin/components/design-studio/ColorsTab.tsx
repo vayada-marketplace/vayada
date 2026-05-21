@@ -1,16 +1,14 @@
-'use client'
+"use client";
 
-import { COLOR_PRESETS } from '@/lib/constants/branding'
+import { COLOR_PRESETS } from "@/lib/constants/branding";
 
 interface ColorsTabProps {
-  primaryColor: string; setPrimaryColor: (v: string) => void
-  applyPreset: (preset: typeof COLOR_PRESETS[number]) => void
+  primaryColor: string;
+  setPrimaryColor: (v: string) => void;
+  applyPreset: (preset: (typeof COLOR_PRESETS)[number]) => void;
 }
 
-export default function ColorsTab({
-  primaryColor, setPrimaryColor,
-  applyPreset,
-}: ColorsTabProps) {
+export default function ColorsTab({ primaryColor, setPrimaryColor, applyPreset }: ColorsTabProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <h2 className="text-[13px] font-semibold text-gray-900">Color Profile</h2>
@@ -25,7 +23,12 @@ export default function ColorsTab({
               className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
               style={{ backgroundColor: primaryColor }}
             >
-              <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="opacity-0 w-0 h-0" />
+              <input
+                type="color"
+                value={primaryColor}
+                onChange={(e) => setPrimaryColor(e.target.value)}
+                className="opacity-0 w-0 h-0"
+              />
             </label>
             <input
               type="text"
@@ -45,7 +48,10 @@ export default function ColorsTab({
                 onClick={() => applyPreset(preset)}
                 className="inline-flex items-center gap-1 px-2 py-0.5 border border-gray-200 rounded-full text-[12px] text-gray-700 hover:bg-gray-50 transition-colors"
               >
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: preset.primary }} />
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: preset.primary }}
+                />
                 {preset.name}
               </button>
             ))}
@@ -53,5 +59,5 @@ export default function ColorsTab({
         </div>
       </div>
     </div>
-  )
+  );
 }

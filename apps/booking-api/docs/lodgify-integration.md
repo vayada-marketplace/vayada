@@ -6,28 +6,28 @@ for hotels that opt into this integration — it is **not** an add-on
 on top of the Vayada PMS stack.
 
 This document captures the decisions and the deferred questions. It is
-the contract subsequent VAY-* tickets implement against.
+the contract subsequent VAY-\* tickets implement against.
 
 ## Phase split
 
-| Phase | Scope | Ticket |
-|-------|-------|--------|
+| Phase           | Scope                                                                                                                                                                                                   | Ticket                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
 | 1a — foundation | Data model (`pms_type`, `lodgify_connections`), encrypted-secret helper, Lodgify API-client scaffold, connect/disconnect admin endpoints, Integrations tab UI. **No live sync, no booking write-back.** | **VAY-398 (this commit)** |
-| 1b — read sync | Rooms / rates / availability sync Lodgify → Vayada local cache. Render Lodgify-backed hotels in the guest-facing Booking Engine. | follow-up |
-| 2 — bookings | Booking write-back to Lodgify on Stripe success; refund-on-availability-conflict flow. | follow-up |
-| 3 — lifecycle | Webhook ingest (or polling fallback) for modifications & cancellations made in Lodgify or via its channel manager. | follow-up |
-| 4 — pilot | Onboard 1–2 friendly properties; harden; GA. | follow-up |
+| 1b — read sync  | Rooms / rates / availability sync Lodgify → Vayada local cache. Render Lodgify-backed hotels in the guest-facing Booking Engine.                                                                        | follow-up                 |
+| 2 — bookings    | Booking write-back to Lodgify on Stripe success; refund-on-availability-conflict flow.                                                                                                                  | follow-up                 |
+| 3 — lifecycle   | Webhook ingest (or polling fallback) for modifications & cancellations made in Lodgify or via its channel manager.                                                                                      | follow-up                 |
+| 4 — pilot       | Onboard 1–2 friendly properties; harden; GA.                                                                                                                                                            | follow-up                 |
 
 ## Authentication model
 
-* **Per-property API key.** Each Lodgify property owner provides their
+- **Per-property API key.** Each Lodgify property owner provides their
   own Lodgify API key. We do not act as an OAuth client — Lodgify's
   public API is API-key based (`X-ApiKey` header, scope: read + write
   on the connected property).
-* **Stored encrypted at rest** in `lodgify_connections.api_key`, via
+- **Stored encrypted at rest** in `lodgify_connections.api_key`, via
   `app/utils/integration_secrets.py` (Fernet, keyed off
   `INTEGRATION_SECRETS_KEY`).
-* **Validated on save** by issuing `GET /v2/properties` against
+- **Validated on save** by issuing `GET /v2/properties` against
   Lodgify — a 2xx response is the success signal; 401/403 surfaces as
   a "key invalid" error in the UI.
 
@@ -36,16 +36,16 @@ the contract subsequent VAY-* tickets implement against.
 Confirmed from the public Lodgify v2 API docs
 (<https://docs.lodgify.com/docs/getting-started-1>):
 
-| Purpose | Endpoint | Phase |
-|---------|----------|-------|
-| Validate key, fetch property list | `GET /v2/properties` | 1a |
-| Property details | `GET /v2/properties/{id}` | 1b |
-| Room types | `GET /v2/properties/{id}/rooms` | 1b |
-| Rate plans + daily rates | `GET /v2/rates/calendar` | 1b |
-| Availability calendar | `GET /v2/availability/{propertyId}` | 1b |
-| Create reservation | `POST /v2/reservations` | 2 |
-| Reservation lookup (idempotency check) | `GET /v2/reservations/{id}` | 2 |
-| Modifications / cancellations (polling) | `GET /v2/reservations?updatedSince=` | 3 |
+| Purpose                                 | Endpoint                             | Phase |
+| --------------------------------------- | ------------------------------------ | ----- |
+| Validate key, fetch property list       | `GET /v2/properties`                 | 1a    |
+| Property details                        | `GET /v2/properties/{id}`            | 1b    |
+| Room types                              | `GET /v2/properties/{id}/rooms`      | 1b    |
+| Rate plans + daily rates                | `GET /v2/rates/calendar`             | 1b    |
+| Availability calendar                   | `GET /v2/availability/{propertyId}`  | 1b    |
+| Create reservation                      | `POST /v2/reservations`              | 2     |
+| Reservation lookup (idempotency check)  | `GET /v2/reservations/{id}`          | 2     |
+| Modifications / cancellations (polling) | `GET /v2/reservations?updatedSince=` | 3     |
 
 **Webhook capability is unconfirmed.** Lodgify's public docs do not
 clearly advertise outbound webhooks for reservation modifications.
@@ -55,14 +55,14 @@ unreliable.
 
 ## Rate limits
 
-* Per Lodgify support docs (to be reconfirmed at Phase 1b kickoff): a
+- Per Lodgify support docs (to be reconfirmed at Phase 1b kickoff): a
   small per-key quota (think tens of req/min, not thousands).
-* The `app/services/lodgify/client.py` wrapper:
-  * Retries 5xx and timeouts with exponential backoff (3 attempts:
+- The `app/services/lodgify/client.py` wrapper:
+  - Retries 5xx and timeouts with exponential backoff (3 attempts:
     0.5s, 1s, 2s).
-  * On HTTP 429, sleeps for the value of the `Retry-After` header
+  - On HTTP 429, sleeps for the value of the `Retry-After` header
     (or 5s if absent) and retries once.
-  * Logs every non-2xx response with `hotel_id` so debugging a
+  - Logs every non-2xx response with `hotel_id` so debugging a
     specific property is straightforward.
 
 ## Payment model — decision: Option A (Vayada captures)
@@ -73,11 +73,12 @@ Stripe charge ID in a Lodgify booking note. Lodgify is **not** the
 payment processor for Vayada-originated bookings.
 
 Rationale:
-* Keeps the booking-engine checkout UX identical regardless of
+
+- Keeps the booking-engine checkout UX identical regardless of
   back-end PMS — guests never see a Lodgify-branded payment step.
-* Avoids the "Vayada showed confirmation but Lodgify's payment failed
+- Avoids the "Vayada showed confirmation but Lodgify's payment failed
   later" failure mode.
-* Refund flow stays in Stripe, which we already operate.
+- Refund flow stays in Stripe, which we already operate.
 
 Risk: if availability changes between guest selection and Stripe
 capture, Lodgify will reject `POST /v2/reservations`. Phase 2 must
@@ -89,8 +90,9 @@ a clear error to the guest).
 ### `booking_hotels.pms_type` (new)
 
 Enum-typed text column with check constraint:
-* `vayada_native` (default) — existing Vayada PMS + Channex hotels.
-* `lodgify` — Vayada Booking Engine reads from Lodgify; bookings write
+
+- `vayada_native` (default) — existing Vayada PMS + Channex hotels.
+- `lodgify` — Vayada Booking Engine reads from Lodgify; bookings write
   to Lodgify.
 
 A hotel cannot have both an active Lodgify connection and an active
@@ -101,17 +103,17 @@ connect time.
 
 One row per Lodgify-backed hotel:
 
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID PK | |
-| `hotel_id` | UUID FK → `booking_hotels(id) ON DELETE CASCADE` | unique |
-| `api_key_encrypted` | TEXT | Fernet ciphertext of the Lodgify API key |
-| `lodgify_property_id` | TEXT | The Lodgify property the hotel is bound to |
-| `lodgify_property_name` | TEXT | Cached display name (refreshed on validate) |
-| `status` | TEXT | `active` / `disconnected` / `error` |
-| `last_validated_at` | TIMESTAMPTZ | |
-| `last_error` | TEXT | Most recent failure message, surfaced in the UI |
-| `created_at` / `updated_at` | TIMESTAMPTZ | |
+| Column                      | Type                                             | Notes                                           |
+| --------------------------- | ------------------------------------------------ | ----------------------------------------------- |
+| `id`                        | UUID PK                                          |                                                 |
+| `hotel_id`                  | UUID FK → `booking_hotels(id) ON DELETE CASCADE` | unique                                          |
+| `api_key_encrypted`         | TEXT                                             | Fernet ciphertext of the Lodgify API key        |
+| `lodgify_property_id`       | TEXT                                             | The Lodgify property the hotel is bound to      |
+| `lodgify_property_name`     | TEXT                                             | Cached display name (refreshed on validate)     |
+| `status`                    | TEXT                                             | `active` / `disconnected` / `error`             |
+| `last_validated_at`         | TIMESTAMPTZ                                      |                                                 |
+| `last_error`                | TEXT                                             | Most recent failure message, surfaced in the UI |
+| `created_at` / `updated_at` | TIMESTAMPTZ                                      |                                                 |
 
 The `api_key_encrypted` column is **never** returned by the admin
 status endpoint — the UI only ever sees a masked indicator
@@ -141,13 +143,14 @@ future-us; no code yet.
 All routes live under `/admin/integrations/lodgify` and require
 `require_current_hotel`:
 
-| Method | Path | Body | Returns |
-|--------|------|------|---------|
-| POST | `/admin/integrations/lodgify/connect` | `{ api_key, lodgify_property_id }` | `LodgifyConnectionStatus` |
-| DELETE | `/admin/integrations/lodgify/disconnect` | — | `204` |
-| GET | `/admin/integrations/lodgify/status` | — | `LodgifyConnectionStatus` |
+| Method | Path                                     | Body                               | Returns                   |
+| ------ | ---------------------------------------- | ---------------------------------- | ------------------------- |
+| POST   | `/admin/integrations/lodgify/connect`    | `{ api_key, lodgify_property_id }` | `LodgifyConnectionStatus` |
+| DELETE | `/admin/integrations/lodgify/disconnect` | —                                  | `204`                     |
+| GET    | `/admin/integrations/lodgify/status`     | —                                  | `LodgifyConnectionStatus` |
 
 `LodgifyConnectionStatus`:
+
 ```json
 {
   "connected": true,
@@ -160,6 +163,7 @@ All routes live under `/admin/integrations/lodgify` and require
 ```
 
 On `connect`, we:
+
 1. Call `GET /v2/properties` with the supplied key. On 401/403 →
    422 with `"Invalid Lodgify API key"`.
 2. Confirm the supplied `lodgify_property_id` is in the returned list.
@@ -192,27 +196,27 @@ overwrite a `vayada_native` hotel that was never on Lodgify.
 
 ## Files added in Phase 1a
 
-* `migrations/031_lodgify_integration.sql` — `pms_type` column +
+- `migrations/031_lodgify_integration.sql` — `pms_type` column +
   `lodgify_connections` table.
-* `app/utils/integration_secrets.py` — Fernet wrapper.
-* `app/services/lodgify/__init__.py`
-* `app/services/lodgify/client.py` — async HTTP client.
-* `app/services/lodgify/connection.py` — connect / disconnect /
+- `app/utils/integration_secrets.py` — Fernet wrapper.
+- `app/services/lodgify/__init__.py`
+- `app/services/lodgify/client.py` — async HTTP client.
+- `app/services/lodgify/connection.py` — connect / disconnect /
   status service functions.
-* `app/repositories/lodgify_connection_repo.py` — DB access.
-* `app/models/lodgify.py` — request/response Pydantic models.
-* `app/routers/admin/integrations/__init__.py` —
+- `app/repositories/lodgify_connection_repo.py` — DB access.
+- `app/models/lodgify.py` — request/response Pydantic models.
+- `app/routers/admin/integrations/__init__.py` —
   `/admin/integrations` sub-router.
-* `app/routers/admin/integrations/lodgify.py` — the three endpoints.
-* `tests/test_integration_secrets.py` — encrypt/decrypt round-trip.
-* `tests/test_lodgify_client.py` — retry / rate-limit behavior.
-* `tests/test_admin_lodgify.py` — connect / disconnect endpoint
+- `app/routers/admin/integrations/lodgify.py` — the three endpoints.
+- `tests/test_integration_secrets.py` — encrypt/decrypt round-trip.
+- `tests/test_lodgify_client.py` — retry / rate-limit behavior.
+- `tests/test_admin_lodgify.py` — connect / disconnect endpoint
   happy + auth-failure paths.
 
 Frontend admin (Phase 1a):
 
-* `app/(app)/settings/page.tsx` — `'integrations'` tab added.
-* `app/(app)/settings/integrations/lodgify/page.tsx` — connect /
+- `app/(app)/settings/page.tsx` — `'integrations'` tab added.
+- `app/(app)/settings/integrations/lodgify/page.tsx` — connect /
   status / disconnect UI.
-* `services/integrations/index.ts` — typed client for the three
+- `services/integrations/index.ts` — typed client for the three
   admin endpoints.

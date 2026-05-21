@@ -1,32 +1,40 @@
-'use client'
+"use client";
 
-import { useRef, RefObject } from 'react'
-import { UserIcon, MapPinIcon, EnvelopeIcon, PhoneIcon, LinkIcon, SparklesIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline'
-import { Input, Textarea } from '@/components/ui'
-import { STORAGE_KEYS, CREATOR_TYPE_OPTIONS } from '@/lib/constants'
-import type { CreatorProfile, CreatorEditFormData } from '@/components/profile/types'
-import type { CreatorType } from '@/lib/types'
+import { useRef, RefObject } from "react";
+import {
+  UserIcon,
+  MapPinIcon,
+  EnvelopeIcon,
+  PhoneIcon,
+  LinkIcon,
+  SparklesIcon,
+  PaperAirplaneIcon,
+} from "@heroicons/react/24/outline";
+import { Input, Textarea } from "@/components/ui";
+import { STORAGE_KEYS, CREATOR_TYPE_OPTIONS } from "@/lib/constants";
+import type { CreatorProfile, CreatorEditFormData } from "@/components/profile/types";
+import type { CreatorType } from "@/lib/types";
 
 const CREATOR_TYPE_CONFIG = {
   Lifestyle: {
     icon: SparklesIcon,
-    label: 'Lifestyle Creator',
+    label: "Lifestyle Creator",
   },
   Travel: {
     icon: PaperAirplaneIcon,
-    label: 'Travel Creator',
+    label: "Travel Creator",
   },
-}
+};
 
 interface CreatorOverviewTabProps {
-  profile: CreatorProfile
-  isEditing: boolean
-  editFormData: CreatorEditFormData
-  phone: string
-  onEditFormChange: (data: CreatorEditFormData) => void
-  onPhoneChange: (phone: string) => void
-  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void
-  fileInputRef?: RefObject<HTMLInputElement>
+  profile: CreatorProfile;
+  isEditing: boolean;
+  editFormData: CreatorEditFormData;
+  phone: string;
+  onEditFormChange: (data: CreatorEditFormData) => void;
+  onPhoneChange: (phone: string) => void;
+  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  fileInputRef?: RefObject<HTMLInputElement>;
 }
 
 export function CreatorOverviewTab({
@@ -39,11 +47,11 @@ export function CreatorOverviewTab({
   onImageChange,
   fileInputRef: externalFileInputRef,
 }: CreatorOverviewTabProps) {
-  const internalFileInputRef = useRef<HTMLInputElement>(null)
-  const fileInputRef = externalFileInputRef || internalFileInputRef
+  const internalFileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = externalFileInputRef || internalFileInputRef;
 
-  const profilePic = isEditing ? editFormData.profilePicture : profile.profilePicture
-  const hasPicture = profilePic && profilePic.trim() !== ''
+  const profilePic = isEditing ? editFormData.profilePicture : profile.profilePicture;
+  const hasPicture = profilePic && profilePic.trim() !== "";
 
   return (
     <div className="space-y-5">
@@ -67,7 +75,7 @@ export function CreatorOverviewTab({
             value={isEditing ? editFormData.name : profile.name}
             onChange={(e) => {
               if (isEditing) {
-                onEditFormChange({ ...editFormData, name: e.target.value })
+                onEditFormChange({ ...editFormData, name: e.target.value });
               }
             }}
             disabled={!isEditing}
@@ -82,7 +90,7 @@ export function CreatorOverviewTab({
             value={isEditing ? editFormData.location : profile.location}
             onChange={(e) => {
               if (isEditing) {
-                onEditFormChange({ ...editFormData, location: e.target.value })
+                onEditFormChange({ ...editFormData, location: e.target.value });
               }
             }}
             disabled={!isEditing}
@@ -99,44 +107,53 @@ export function CreatorOverviewTab({
             {isEditing ? (
               <div className="grid grid-cols-2 gap-3">
                 {CREATOR_TYPE_OPTIONS.map((type) => {
-                  const config = CREATOR_TYPE_CONFIG[type as keyof typeof CREATOR_TYPE_CONFIG]
-                  const Icon = config.icon
-                  const isSelected = editFormData.creatorType === type
+                  const config = CREATOR_TYPE_CONFIG[type as keyof typeof CREATOR_TYPE_CONFIG];
+                  const Icon = config.icon;
+                  const isSelected = editFormData.creatorType === type;
 
                   return (
                     <button
                       key={type}
                       type="button"
-                      onClick={() => onEditFormChange({ ...editFormData, creatorType: type as CreatorType })}
+                      onClick={() =>
+                        onEditFormChange({ ...editFormData, creatorType: type as CreatorType })
+                      }
                       className={`flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-xl border transition-all ${
                         isSelected
-                          ? 'border-[#2F54EB] bg-primary-50'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
+                          ? "border-[#2F54EB] bg-primary-50"
+                          : "border-gray-200 bg-white hover:border-gray-300"
                       }`}
                     >
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                        isSelected ? 'bg-primary-100' : 'bg-gray-100'
-                      }`}>
-                        <Icon className={`w-5 h-5 ${isSelected ? 'text-[#2F54EB]' : 'text-gray-500'}`} />
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          isSelected ? "bg-primary-100" : "bg-gray-100"
+                        }`}
+                      >
+                        <Icon
+                          className={`w-5 h-5 ${isSelected ? "text-[#2F54EB]" : "text-gray-500"}`}
+                        />
                       </div>
-                      <span className={`text-sm font-medium ${isSelected ? 'text-gray-900' : 'text-gray-700'}`}>
+                      <span
+                        className={`text-sm font-medium ${isSelected ? "text-gray-900" : "text-gray-700"}`}
+                      >
                         {config.label}
                       </span>
                     </button>
-                  )
+                  );
                 })}
               </div>
             ) : (
               <div className="inline-flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg text-sm font-medium text-gray-700">
                 {(() => {
-                  const config = CREATOR_TYPE_CONFIG[profile.creatorType as keyof typeof CREATOR_TYPE_CONFIG]
-                  const Icon = config?.icon || SparklesIcon
+                  const config =
+                    CREATOR_TYPE_CONFIG[profile.creatorType as keyof typeof CREATOR_TYPE_CONFIG];
+                  const Icon = config?.icon || SparklesIcon;
                   return (
                     <>
                       <Icon className="w-4 h-4 text-gray-500" />
-                      <span>{config?.label || 'Creator'}</span>
+                      <span>{config?.label || "Creator"}</span>
                     </>
-                  )
+                  );
                 })()}
               </div>
             )}
@@ -147,11 +164,14 @@ export function CreatorOverviewTab({
         <div className="w-full md:w-auto flex flex-col items-center gap-2">
           <span className="text-xs font-semibold text-gray-700">Profile Picture</span>
           <div
-            className={`relative w-40 h-40 rounded-full border-2 border-dashed border-gray-300 flex flex-col items-center justify-center transition-all overflow-hidden bg-gray-50 group ${isEditing ? 'cursor-pointer hover:border-primary-500 hover:bg-gray-50' : 'cursor-default'
-              }`}
+            className={`relative w-40 h-40 rounded-full border-2 border-dashed border-gray-300 flex flex-col items-center justify-center transition-all overflow-hidden bg-gray-50 group ${
+              isEditing
+                ? "cursor-pointer hover:border-primary-500 hover:bg-gray-50"
+                : "cursor-default"
+            }`}
             onClick={() => {
               if (isEditing) {
-                fileInputRef.current?.click()
+                fileInputRef.current?.click();
               }
             }}
           >
@@ -162,8 +182,8 @@ export function CreatorOverviewTab({
                   alt="Profile"
                   className="w-full h-full object-cover"
                   onError={(e) => {
-                    const target = e.target as HTMLImageElement
-                    target.style.display = 'none'
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = "none";
                   }}
                 />
                 {isEditing && (
@@ -175,16 +195,34 @@ export function CreatorOverviewTab({
             ) : (
               <>
                 <div className="w-6 h-6 text-gray-400 mb-1 group-hover:text-primary-500 transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z"
+                    />
                   </svg>
                 </div>
-                <span className="text-[10px] text-gray-500 font-medium group-hover:text-primary-600">Upload</span>
+                <span className="text-[10px] text-gray-500 font-medium group-hover:text-primary-600">
+                  Upload
+                </span>
               </>
             )}
           </div>
-          <p className="text-xs text-gray-500 text-center">Optional - JPG, PNG or WebP (max 20MB)</p>
+          <p className="text-xs text-gray-500 text-center">
+            Optional - JPG, PNG or WebP (max 20MB)
+          </p>
           <input
             type="file"
             ref={fileInputRef}
@@ -201,7 +239,7 @@ export function CreatorOverviewTab({
           value={isEditing ? editFormData.shortDescription : profile.shortDescription}
           onChange={(e) => {
             if (isEditing) {
-              onEditFormChange({ ...editFormData, shortDescription: e.target.value })
+              onEditFormChange({ ...editFormData, shortDescription: e.target.value });
             }
           }}
           disabled={!isEditing}
@@ -211,7 +249,9 @@ export function CreatorOverviewTab({
           maxLength={500}
           helperText={`${(isEditing ? editFormData.shortDescription : profile.shortDescription).length}/500 characters`}
         />
-        <p className="text-xs text-gray-500 mt-1">Highlight your niche, primary audience demographics, and unique travel style.</p>
+        <p className="text-xs text-gray-500 mt-1">
+          Highlight your niche, primary audience demographics, and unique travel style.
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -219,10 +259,10 @@ export function CreatorOverviewTab({
         <Input
           label=""
           type="url"
-          value={isEditing ? editFormData.portfolioLink : (profile.portfolioLink || '')}
+          value={isEditing ? editFormData.portfolioLink : profile.portfolioLink || ""}
           onChange={(e) => {
             if (isEditing) {
-              onEditFormChange({ ...editFormData, portfolioLink: e.target.value })
+              onEditFormChange({ ...editFormData, portfolioLink: e.target.value });
             }
           }}
           disabled={!isEditing}
@@ -236,13 +276,20 @@ export function CreatorOverviewTab({
       <div className="space-y-4 pt-2">
         <div>
           <h4 className="text-base font-bold text-gray-900">Contact Information</h4>
-          <p className="text-sm text-gray-500 mt-1">Your email & phone number for direct communication with properties after both accept a collaboration</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Your email & phone number for direct communication with properties after both accept a
+            collaboration
+          </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
             label="Email"
             type="email"
-            value={typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) || profile.email : profile.email}
+            value={
+              typeof window !== "undefined"
+                ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) || profile.email
+                : profile.email
+            }
             disabled
             required
             leadingIcon={<EnvelopeIcon className="w-5 h-5 text-gray-400" />}
@@ -255,7 +302,7 @@ export function CreatorOverviewTab({
             value={phone}
             onChange={(e) => {
               if (isEditing) {
-                onPhoneChange(e.target.value)
+                onPhoneChange(e.target.value);
               }
             }}
             disabled={!isEditing}
@@ -265,5 +312,5 @@ export function CreatorOverviewTab({
         </div>
       </div>
     </div>
-  )
+  );
 }

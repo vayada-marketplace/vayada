@@ -1,25 +1,25 @@
-'use client'
+"use client";
 
-import { SparklesIcon, PaperAirplaneIcon } from '@heroicons/react/24/outline'
-import type { CreatorType } from '@/lib/types'
+import { SparklesIcon, PaperAirplaneIcon } from "@heroicons/react/24/outline";
+import type { CreatorType } from "@/lib/types";
 
 interface CreatorTypeStepProps {
-  selectedType: CreatorType | undefined
-  onSelect: (type: CreatorType) => void
+  selectedType: CreatorType | undefined;
+  onSelect: (type: CreatorType) => void;
 }
 
 const CREATOR_TYPES = [
   {
-    type: 'Lifestyle' as CreatorType,
+    type: "Lifestyle" as CreatorType,
     icon: SparklesIcon,
-    label: 'Lifestyle Creator',
+    label: "Lifestyle Creator",
   },
   {
-    type: 'Travel' as CreatorType,
+    type: "Travel" as CreatorType,
     icon: PaperAirplaneIcon,
-    label: 'Travel Creator',
+    label: "Travel Creator",
   },
-]
+];
 
 export function CreatorTypeStep({ selectedType, onSelect }: CreatorTypeStepProps) {
   return (
@@ -33,7 +33,7 @@ export function CreatorTypeStep({ selectedType, onSelect }: CreatorTypeStepProps
 
       <div className="grid grid-cols-2 gap-4">
         {CREATOR_TYPES.map(({ type, icon: Icon, label }) => {
-          const isSelected = selectedType === type
+          const isSelected = selectedType === type;
 
           return (
             <button
@@ -42,20 +42,24 @@ export function CreatorTypeStep({ selectedType, onSelect }: CreatorTypeStepProps
               onClick={() => onSelect(type)}
               className={`flex flex-col items-center justify-center gap-3 px-4 py-8 rounded-xl border transition-all ${
                 isSelected
-                  ? 'border-[#2F54EB] bg-primary-50'
-                  : 'border-gray-200 bg-white hover:border-gray-300'
+                  ? "border-[#2F54EB] bg-primary-50"
+                  : "border-gray-200 bg-white hover:border-gray-300"
               }`}
             >
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                isSelected ? 'bg-primary-100' : 'bg-gray-100'
-              }`}>
-                <Icon className={`w-6 h-6 ${isSelected ? 'text-[#2F54EB]' : 'text-gray-500'}`} />
+              <div
+                className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                  isSelected ? "bg-primary-100" : "bg-gray-100"
+                }`}
+              >
+                <Icon className={`w-6 h-6 ${isSelected ? "text-[#2F54EB]" : "text-gray-500"}`} />
               </div>
-              <span className={`text-sm font-medium ${isSelected ? 'text-gray-900' : 'text-gray-700'}`}>
+              <span
+                className={`text-sm font-medium ${isSelected ? "text-gray-900" : "text-gray-700"}`}
+              >
                 {label}
               </span>
             </button>
-          )
+          );
         })}
       </div>
 
@@ -63,5 +67,5 @@ export function CreatorTypeStep({ selectedType, onSelect }: CreatorTypeStepProps
         This helps hotels find creators that match their collaboration needs
       </p>
     </div>
-  )
+  );
 }

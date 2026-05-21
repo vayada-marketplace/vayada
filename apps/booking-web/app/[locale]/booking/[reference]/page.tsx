@@ -1,65 +1,65 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useTranslations } from 'next-intl'
-import { Link } from '@/i18n/navigation'
-import BookingNavigation from '@/components/layout/BookingNavigation'
-import BookingFooter from '@/components/layout/BookingFooter'
-import Image from 'next/image'
-import { useHotel, useSlug } from '@/contexts/HotelContext'
-import { useCurrency } from '@/contexts/CurrencyContext'
-import { Booking } from '@/lib/types'
-import { bookingService, BookingChangeRequest } from '@/services/api/booking'
-import { trackEvent } from '@/services/api/tracking'
-import { readLastBooking, saveLastBooking } from '@/lib/storage/bookingDraft'
+import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
+import BookingNavigation from "@/components/layout/BookingNavigation";
+import BookingFooter from "@/components/layout/BookingFooter";
+import Image from "next/image";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import { Booking } from "@/lib/types";
+import { bookingService, BookingChangeRequest } from "@/services/api/booking";
+import { trackEvent } from "@/services/api/tracking";
+import { readLastBooking, saveLastBooking } from "@/lib/storage/bookingDraft";
 
 function CountdownTimer({ deadline }: { deadline: string }) {
-  const [timeLeft, setTimeLeft] = useState('')
+  const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
     const update = () => {
-      const now = new Date().getTime()
-      const end = new Date(deadline).getTime()
-      const diff = end - now
+      const now = new Date().getTime();
+      const end = new Date(deadline).getTime();
+      const diff = end - now;
 
       if (diff <= 0) {
-        setTimeLeft('Expired')
-        return
+        setTimeLeft("Expired");
+        return;
       }
 
-      const hours = Math.floor(diff / (1000 * 60 * 60))
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000)
-      setTimeLeft(`${hours}h ${minutes}m ${seconds}s`)
-    }
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+    };
 
-    update()
-    const interval = setInterval(update, 1000)
-    return () => clearInterval(interval)
-  }, [deadline])
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [deadline]);
 
-  return <span className="font-mono text-lg font-bold text-amber-600">{timeLeft}</span>
+  return <span className="font-mono text-lg font-bold text-amber-600">{timeLeft}</span>;
 }
 
 export default function BookingConfirmationPage({
   params,
   searchParams,
 }: {
-  params: { reference: string }
-  searchParams: { email?: string }
+  params: { reference: string };
+  searchParams: { email?: string };
 }) {
-  const t = useTranslations('confirmation')
-  const tc = useTranslations('common')
-  const { hotel } = useHotel()
-  const { slug } = useSlug()
-  const { formatPrice } = useCurrency()
-  const [booking, setBooking] = useState<Booking | null>(null)
-  const [status, setStatus] = useState<string>('pending')
-  const [withdrawing, setWithdrawing] = useState(false)
-  const [withdrawError, setWithdrawError] = useState('')
-  const [hydrating, setHydrating] = useState(false)
-  const [hydrateError, setHydrateError] = useState(false)
-  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null)
+  const t = useTranslations("confirmation");
+  const tc = useTranslations("common");
+  const { hotel } = useHotel();
+  const { slug } = useSlug();
+  const { formatPrice } = useCurrency();
+  const [booking, setBooking] = useState<Booking | null>(null);
+  const [status, setStatus] = useState<string>("pending");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const [hydrating, setHydrating] = useState(false);
+  const [hydrateError, setHydrateError] = useState(false);
+  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
 
   // Booking details are written to sessionStorage on the checkout flow, but
   // sessionStorage is per-tab, so a guest who opens the "View My Booking" link
@@ -67,110 +67,111 @@ export default function BookingConfirmationPage({
   // backend now appends ?email=… to that link — when present, hydrate from the
   // lookup endpoint so the page works cross-device.
   useEffect(() => {
-    trackEvent(slug, 'completed_booking')
-    const stored = readLastBooking()
+    trackEvent(slug, "completed_booking");
+    const stored = readLastBooking();
     if (stored && stored.bookingReference === params.reference) {
-      setBooking(stored)
-      setStatus(stored.status || 'pending')
-      return
+      setBooking(stored);
+      setStatus(stored.status || "pending");
+      return;
     }
 
-    const email = searchParams.email
-    if (!email) return
+    const email = searchParams.email;
+    if (!email) return;
 
-    let cancelled = false
-    setHydrating(true)
+    let cancelled = false;
+    setHydrating(true);
     bookingService
       .lookup(slug, params.reference, email)
       .then((fetched) => {
-        if (cancelled) return
-        setBooking(fetched)
-        setStatus(fetched.status || 'pending')
-        saveLastBooking(fetched)
+        if (cancelled) return;
+        setBooking(fetched);
+        setStatus(fetched.status || "pending");
+        saveLastBooking(fetched);
       })
       .catch(() => {
-        if (cancelled) return
-        setHydrateError(true)
+        if (cancelled) return;
+        setHydrateError(true);
       })
       .finally(() => {
-        if (!cancelled) setHydrating(false)
-      })
+        if (!cancelled) setHydrating(false);
+      });
 
     return () => {
-      cancelled = true
-    }
-  }, [params.reference, searchParams.email, slug])
+      cancelled = true;
+    };
+  }, [params.reference, searchParams.email, slug]);
 
   // Fetch any existing change request once we know the booking + email.
   useEffect(() => {
-    const email = booking?.guestEmail || searchParams.email
-    if (!booking?.id || !email) return
-    let cancelled = false
-    bookingService.getChangeRequest(slug, booking.id, email)
-      .then((cr) => { if (!cancelled) setChangeRequest(cr) })
-      .catch(() => { /* 404 / network — leave null */ })
-    return () => { cancelled = true }
-  }, [booking?.id, booking?.guestEmail, searchParams.email, slug])
+    const email = booking?.guestEmail || searchParams.email;
+    if (!booking?.id || !email) return;
+    let cancelled = false;
+    bookingService
+      .getChangeRequest(slug, booking.id, email)
+      .then((cr) => {
+        if (!cancelled) setChangeRequest(cr);
+      })
+      .catch(() => {
+        /* 404 / network — leave null */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [booking?.id, booking?.guestEmail, searchParams.email, slug]);
 
   // Poll for status updates every 30s when pending
   useEffect(() => {
-    if (status !== 'pending' || !booking?.guestEmail) return
+    if (status !== "pending" || !booking?.guestEmail) return;
 
     const poll = async () => {
       try {
-        const result = await bookingService.getStatus(slug, params.reference, booking.guestEmail)
+        const result = await bookingService.getStatus(slug, params.reference, booking.guestEmail);
         if (result.status !== status) {
-          setStatus(result.status)
+          setStatus(result.status);
           // Update stored booking
           if (booking) {
-            const updated = { ...booking, status: result.status as Booking['status'] }
-            setBooking(updated)
-            saveLastBooking(updated)
+            const updated = { ...booking, status: result.status as Booking["status"] };
+            setBooking(updated);
+            saveLastBooking(updated);
           }
         }
       } catch {
         // Ignore polling errors
       }
-    }
+    };
 
-    const interval = setInterval(poll, 30000)
-    return () => clearInterval(interval)
-  }, [status, booking, slug, params.reference])
+    const interval = setInterval(poll, 30000);
+    return () => clearInterval(interval);
+  }, [status, booking, slug, params.reference]);
 
   const handleWithdraw = async () => {
-    if (!booking) return
-    setWithdrawing(true)
-    setWithdrawError('')
+    if (!booking) return;
+    setWithdrawing(true);
+    setWithdrawError("");
 
     try {
-      await bookingService.withdraw(slug, booking.id, booking.guestEmail)
-      setStatus('cancelled')
-      const updated = { ...booking, status: 'cancelled' as const }
-      setBooking(updated)
-      saveLastBooking(updated)
+      await bookingService.withdraw(slug, booking.id, booking.guestEmail);
+      setStatus("cancelled");
+      const updated = { ...booking, status: "cancelled" as const };
+      setBooking(updated);
+      saveLastBooking(updated);
     } catch (err: any) {
-      setWithdrawError(err.message || 'Failed to withdraw booking')
+      setWithdrawError(err.message || "Failed to withdraw booking");
     } finally {
-      setWithdrawing(false)
+      setWithdrawing(false);
     }
-  }
+  };
 
-  const isPending = status === 'pending'
-  const isConfirmed = status === 'confirmed'
-  const isCancelled = status === 'cancelled'
-  const isExpired = status === 'expired'
+  const isPending = status === "pending";
+  const isConfirmed = status === "confirmed";
+  const isCancelled = status === "cancelled";
+  const isExpired = status === "expired";
 
   return (
     <div className="min-h-screen bg-surface">
       {/* Mini Hero */}
       <div className="relative h-32 w-full">
-        <Image
-          src={hotel.heroImage}
-          alt={hotel.name}
-          fill
-          className="object-cover"
-          priority
-        />
+        <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
       </div>
@@ -180,22 +181,52 @@ export default function BookingConfirmationPage({
           {/* Status Icon */}
           {isPending && (
             <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              <svg
+                className="w-8 h-8 text-amber-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
           )}
           {isConfirmed && (
             <div className="w-16 h-16 bg-success-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-8 h-8 text-success-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              <svg
+                className="w-8 h-8 text-success-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
             </div>
           )}
           {(isCancelled || isExpired) && (
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-8 h-8 text-red-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </div>
           )}
@@ -204,14 +235,17 @@ export default function BookingConfirmationPage({
           {isPending && (
             <>
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t('requestSubmitted') || 'Booking Request Submitted'}
+                {t("requestSubmitted") || "Booking Request Submitted"}
               </h1>
               <p className="text-gray-600 mb-4">
-                {t('pendingSubtitle') || 'Your booking request has been submitted. The host will respond within 24 hours.'}
+                {t("pendingSubtitle") ||
+                  "Your booking request has been submitted. The host will respond within 24 hours."}
               </p>
               {booking?.hostResponseDeadline && (
                 <div className="mb-6">
-                  <p className="text-sm text-gray-500 mb-1">{t('hostResponseIn') || 'Host will respond latest:'}</p>
+                  <p className="text-sm text-gray-500 mb-1">
+                    {t("hostResponseIn") || "Host will respond latest:"}
+                  </p>
                   <CountdownTimer deadline={booking.hostResponseDeadline} />
                 </div>
               )}
@@ -219,106 +253,113 @@ export default function BookingConfirmationPage({
           )}
           {isConfirmed && (
             <>
-              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t('title')}</h1>
-              <p className="text-gray-600 mb-6">{t('subtitle')}</p>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("title")}</h1>
+              <p className="text-gray-600 mb-6">{t("subtitle")}</p>
             </>
           )}
           {isCancelled && (
             <>
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t('cancelledTitle') || 'Booking Cancelled'}
+                {t("cancelledTitle") || "Booking Cancelled"}
               </h1>
               <p className="text-gray-600 mb-6">
-                {booking?.paymentMethod === 'card'
-                  ? (t('cancelledCardSubtitle') || 'Your booking has been cancelled. Any authorization hold on your card has been released.')
-                  : (t('cancelledSubtitle') || 'Your booking has been cancelled.')
-                }
+                {booking?.paymentMethod === "card"
+                  ? t("cancelledCardSubtitle") ||
+                    "Your booking has been cancelled. Any authorization hold on your card has been released."
+                  : t("cancelledSubtitle") || "Your booking has been cancelled."}
               </p>
             </>
           )}
           {isExpired && (
             <>
               <h1 className="text-2xl font-bold text-gray-900 mb-2">
-                {t('expiredTitle') || 'Booking Request Expired'}
+                {t("expiredTitle") || "Booking Request Expired"}
               </h1>
               <p className="text-gray-600 mb-6">
-                {t('expiredSubtitle') || 'Your booking request expired because the host did not respond within 24 hours. Any card hold has been released.'}
+                {t("expiredSubtitle") ||
+                  "Your booking request expired because the host did not respond within 24 hours. Any card hold has been released."}
               </p>
             </>
           )}
 
           {/* Booking Reference */}
           <div className="bg-accent rounded-xl p-4 mb-8 inline-block">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{t('bookingReference')}</p>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              {t("bookingReference")}
+            </p>
             <p className="text-2xl font-bold text-primary-600 tracking-wider">{params.reference}</p>
           </div>
 
           {/* Booking Details */}
           {hydrating && !booking ? (
             <div className="py-8 text-center text-gray-500 text-sm">
-              {t('loadingDetails') || 'Loading booking details…'}
+              {t("loadingDetails") || "Loading booking details…"}
             </div>
           ) : !booking && hydrateError ? (
             <div className="py-6 text-center">
               <p className="text-sm text-gray-600 mb-3">
-                {t('detailsUnavailable') || "We couldn't load your booking details here."}
+                {t("detailsUnavailable") || "We couldn't load your booking details here."}
               </p>
               <Link
-                href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(searchParams.email || '')}`}
+                href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(searchParams.email || "")}`}
                 className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
               >
-                {t('manageBooking') || 'Manage your booking'}
+                {t("manageBooking") || "Manage your booking"}
               </Link>
             </div>
           ) : (
             <div className="text-left space-y-0 divide-y divide-gray-100">
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('hotel')}</span>
-                <span className="font-medium text-gray-900">{booking?.hotelName || hotel.name}</span>
+                <span className="text-gray-600">{t("hotel")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking?.hotelName || hotel.name}
+                </span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('room')}</span>
+                <span className="text-gray-600">{t("room")}</span>
                 <span className="font-medium text-gray-900">
                   {booking
-                    ? `${booking.numberOfRooms && booking.numberOfRooms > 1 ? `${booking.numberOfRooms}× ` : ''}${booking.roomName}`
-                    : '—'}
+                    ? `${booking.numberOfRooms && booking.numberOfRooms > 1 ? `${booking.numberOfRooms}× ` : ""}${booking.roomName}`
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('checkIn')}</span>
+                <span className="text-gray-600">{t("checkIn")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : '—'}
+                  {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('checkOut')}</span>
+                <span className="text-gray-600">{t("checkOut")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : '—'}
+                  {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('duration')}</span>
+                <span className="text-gray-600">{t("duration")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking ? tc('nights', { count: booking.nights }) : '—'}
+                  {booking ? tc("nights", { count: booking.nights }) : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('guests')}</span>
+                <span className="text-gray-600">{t("guests")}</span>
                 <span className="font-medium text-gray-900">
-                  {booking ? `${booking.adults} ${booking.adults === 1 ? 'Adult' : 'Adults'}${booking.children > 0 ? `, ${booking.children} ${booking.children === 1 ? 'Child' : 'Children'}` : ''}` : '—'}
+                  {booking
+                    ? `${booking.adults} ${booking.adults === 1 ? "Adult" : "Adults"}${booking.children > 0 ? `, ${booking.children} ${booking.children === 1 ? "Child" : "Children"}` : ""}`
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t('totalPaid')}</span>
+                <span className="text-gray-600">{t("totalPaid")}</span>
                 <span className="font-bold text-gray-900 text-lg">
-                  {booking ? formatPrice(booking.totalAmount, booking.currency) : '—'}
+                  {booking ? formatPrice(booking.totalAmount, booking.currency) : "—"}
                 </span>
               </div>
               {booking?.paymentMethod && (
                 <div className="flex justify-between py-3">
-                  <span className="text-gray-600">{t('paymentMethodLabel') || 'Payment'}</span>
+                  <span className="text-gray-600">{t("paymentMethodLabel") || "Payment"}</span>
                   <span className="font-medium text-gray-900">
-                    {booking.paymentMethod === 'card' ? 'Card' : 'Pay at Property'}
+                    {booking.paymentMethod === "card" ? "Card" : "Pay at Property"}
                   </span>
                 </div>
               )}
@@ -326,17 +367,18 @@ export default function BookingConfirmationPage({
           )}
 
           {/* Change request status (VAY-379) */}
-          {changeRequest && changeRequest.status === 'pending' && (
+          {changeRequest && changeRequest.status === "pending" && (
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
               <p className="text-sm font-semibold text-blue-900">
-                {t('changePending') || 'Change request pending approval'}
+                {t("changePending") || "Change request pending approval"}
               </p>
               <p className="text-xs text-blue-700 mt-1">
-                {t('changePendingDesc') || 'The hotel will review your requested change and email you once they respond.'}
+                {t("changePendingDesc") ||
+                  "The hotel will review your requested change and email you once they respond."}
               </p>
               <p className="text-xs text-blue-700 mt-2">
                 {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}
-                {' · '}
+                {" · "}
                 {changeRequest.priceDifference > 0
                   ? `+${formatPrice(changeRequest.priceDifference, changeRequest.currency)}`
                   : formatPrice(changeRequest.priceDifference, changeRequest.currency)}
@@ -345,13 +387,13 @@ export default function BookingConfirmationPage({
           )}
 
           {/* Request Changes — only for confirmed bookings without a pending request. */}
-          {isConfirmed && (!changeRequest || changeRequest.status !== 'pending') && booking && (
+          {isConfirmed && (!changeRequest || changeRequest.status !== "pending") && booking && (
             <div className="mt-6">
               <Link
-                href={`/booking/${params.reference}/request-change?email=${encodeURIComponent(booking.guestEmail || searchParams.email || '')}`}
+                href={`/booking/${params.reference}/request-change?email=${encodeURIComponent(booking.guestEmail || searchParams.email || "")}`}
                 className="inline-flex px-6 py-3 border border-primary-200 text-primary-700 font-semibold rounded-full hover:bg-primary-50 transition-colors"
               >
-                {t('requestChanges') || 'Request Changes'}
+                {t("requestChanges") || "Request Changes"}
               </Link>
             </div>
           )}
@@ -359,15 +401,15 @@ export default function BookingConfirmationPage({
           {/* Withdraw button for pending bookings */}
           {isPending && (
             <div className="mt-8">
-              {withdrawError && (
-                <p className="text-sm text-red-600 mb-3">{withdrawError}</p>
-              )}
+              {withdrawError && <p className="text-sm text-red-600 mb-3">{withdrawError}</p>}
               <button
                 onClick={handleWithdraw}
                 disabled={withdrawing}
                 className="px-6 py-3 border border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
               >
-                {withdrawing ? (t('withdrawing') || 'Withdrawing...') : (t('withdrawRequest') || 'Withdraw Request')}
+                {withdrawing
+                  ? t("withdrawing") || "Withdrawing..."
+                  : t("withdrawRequest") || "Withdraw Request"}
               </button>
             </div>
           )}
@@ -378,24 +420,22 @@ export default function BookingConfirmationPage({
               href="/"
               className="px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
             >
-              {t('backToHotel')}
+              {t("backToHotel")}
             </Link>
             <Link
-              href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(booking?.guestEmail || searchParams.email || '')}`}
+              href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(booking?.guestEmail || searchParams.email || "")}`}
               className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
             >
-              {t('manageBooking')}
+              {t("manageBooking")}
             </Link>
           </div>
         </div>
 
         {/* Email notice */}
-        <p className="text-center text-sm text-gray-500 mt-6">
-          {t('emailNotice')}
-        </p>
+        <p className="text-center text-sm text-gray-500 mt-6">{t("emailNotice")}</p>
       </div>
 
       <BookingFooter />
     </div>
-  )
+  );
 }

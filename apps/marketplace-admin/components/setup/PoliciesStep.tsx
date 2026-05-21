@@ -1,59 +1,99 @@
-'use client'
+"use client";
 
 export const TIME_OPTIONS = Array.from({ length: 24 }, (_, i) => {
-  const h = i.toString().padStart(2, '0')
-  return { value: `${h}:00`, label: `${h}:00` }
-})
+  const h = i.toString().padStart(2, "0");
+  return { value: `${h}:00`, label: `${h}:00` };
+});
 
 interface PoliciesStepProps {
-  checkInTime: string; setCheckInTime: (v: string) => void
-  checkOutTime: string; setCheckOutTime: (v: string) => void
-  payAtHotel: boolean; setPayAtHotel: (v: boolean) => void
-  payAtHotelMethods: string[]; setPayAtHotelMethods: (v: string[]) => void
-  onlineCardPayment: boolean; setOnlineCardPayment: (v: boolean) => void
-  bankTransfer: boolean; setBankTransfer: (v: boolean) => void
-  paymentProvider: 'stripe' | 'xendit' | 'vayada'; setPaymentProvider: (v: 'stripe' | 'xendit' | 'vayada') => void
-  xenditChannelCode: string; setXenditChannelCode: (v: string) => void
-  xenditAccountNumber: string; setXenditAccountNumber: (v: string) => void
-  xenditAccountHolderName: string; setXenditAccountHolderName: (v: string) => void
-  payoutAccountHolder: string; setPayoutAccountHolder: (v: string) => void
-  payoutAccountType: 'iban' | 'account_number'; setPayoutAccountType: (v: 'iban' | 'account_number') => void
-  payoutIban: string; setPayoutIban: (v: string) => void
-  payoutAccountNumber: string; setPayoutAccountNumber: (v: string) => void
-  payoutBankName: string; setPayoutBankName: (v: string) => void
-  payoutSwift: string; setPayoutSwift: (v: string) => void
-  specialRequests: boolean; setSpecialRequests: (v: boolean) => void
-  estimatedArrivalTime: boolean; setEstimatedArrivalTime: (v: boolean) => void
-  numberOfGuests: boolean; setNumberOfGuests: (v: boolean) => void
-  enableReferAGuest: boolean; setEnableReferAGuest: (v: boolean) => void
-  error: string
-  saving: boolean
-  onBack: () => void
-  onComplete: () => void
-  stepIndicators: React.ReactNode
+  checkInTime: string;
+  setCheckInTime: (v: string) => void;
+  checkOutTime: string;
+  setCheckOutTime: (v: string) => void;
+  payAtHotel: boolean;
+  setPayAtHotel: (v: boolean) => void;
+  payAtHotelMethods: string[];
+  setPayAtHotelMethods: (v: string[]) => void;
+  onlineCardPayment: boolean;
+  setOnlineCardPayment: (v: boolean) => void;
+  bankTransfer: boolean;
+  setBankTransfer: (v: boolean) => void;
+  paymentProvider: "stripe" | "xendit" | "vayada";
+  setPaymentProvider: (v: "stripe" | "xendit" | "vayada") => void;
+  xenditChannelCode: string;
+  setXenditChannelCode: (v: string) => void;
+  xenditAccountNumber: string;
+  setXenditAccountNumber: (v: string) => void;
+  xenditAccountHolderName: string;
+  setXenditAccountHolderName: (v: string) => void;
+  payoutAccountHolder: string;
+  setPayoutAccountHolder: (v: string) => void;
+  payoutAccountType: "iban" | "account_number";
+  setPayoutAccountType: (v: "iban" | "account_number") => void;
+  payoutIban: string;
+  setPayoutIban: (v: string) => void;
+  payoutAccountNumber: string;
+  setPayoutAccountNumber: (v: string) => void;
+  payoutBankName: string;
+  setPayoutBankName: (v: string) => void;
+  payoutSwift: string;
+  setPayoutSwift: (v: string) => void;
+  specialRequests: boolean;
+  setSpecialRequests: (v: boolean) => void;
+  estimatedArrivalTime: boolean;
+  setEstimatedArrivalTime: (v: boolean) => void;
+  numberOfGuests: boolean;
+  setNumberOfGuests: (v: boolean) => void;
+  enableReferAGuest: boolean;
+  setEnableReferAGuest: (v: boolean) => void;
+  error: string;
+  saving: boolean;
+  onBack: () => void;
+  onComplete: () => void;
+  stepIndicators: React.ReactNode;
 }
 
 export default function PoliciesStep({
-  checkInTime, setCheckInTime,
-  checkOutTime, setCheckOutTime,
-  payAtHotel, setPayAtHotel,
-  payAtHotelMethods, setPayAtHotelMethods,
-  onlineCardPayment, setOnlineCardPayment,
-  bankTransfer, setBankTransfer,
-  paymentProvider, setPaymentProvider,
-  xenditChannelCode, setXenditChannelCode,
-  xenditAccountNumber, setXenditAccountNumber,
-  xenditAccountHolderName, setXenditAccountHolderName,
-  payoutAccountHolder, setPayoutAccountHolder,
-  payoutAccountType, setPayoutAccountType,
-  payoutIban, setPayoutIban,
-  payoutAccountNumber, setPayoutAccountNumber,
-  payoutBankName, setPayoutBankName,
-  payoutSwift, setPayoutSwift,
-  specialRequests, setSpecialRequests,
-  estimatedArrivalTime, setEstimatedArrivalTime,
-  numberOfGuests, setNumberOfGuests,
-  enableReferAGuest, setEnableReferAGuest,
+  checkInTime,
+  setCheckInTime,
+  checkOutTime,
+  setCheckOutTime,
+  payAtHotel,
+  setPayAtHotel,
+  payAtHotelMethods,
+  setPayAtHotelMethods,
+  onlineCardPayment,
+  setOnlineCardPayment,
+  bankTransfer,
+  setBankTransfer,
+  paymentProvider,
+  setPaymentProvider,
+  xenditChannelCode,
+  setXenditChannelCode,
+  xenditAccountNumber,
+  setXenditAccountNumber,
+  xenditAccountHolderName,
+  setXenditAccountHolderName,
+  payoutAccountHolder,
+  setPayoutAccountHolder,
+  payoutAccountType,
+  setPayoutAccountType,
+  payoutIban,
+  setPayoutIban,
+  payoutAccountNumber,
+  setPayoutAccountNumber,
+  payoutBankName,
+  setPayoutBankName,
+  payoutSwift,
+  setPayoutSwift,
+  specialRequests,
+  setSpecialRequests,
+  estimatedArrivalTime,
+  setEstimatedArrivalTime,
+  numberOfGuests,
+  setNumberOfGuests,
+  enableReferAGuest,
+  setEnableReferAGuest,
   error,
   saving,
   onBack,
@@ -66,7 +106,9 @@ export default function PoliciesStep({
         {stepIndicators}
         <div className="text-center mb-6">
           <h2 className="text-lg font-bold text-gray-900">Policies & Operations</h2>
-          <p className="text-[13px] text-gray-500 mt-1">Configure check-in/out times, payment methods, and guest options</p>
+          <p className="text-[13px] text-gray-500 mt-1">
+            Configure check-in/out times, payment methods, and guest options
+          </p>
         </div>
 
         {/* Check-in & Check-out */}
@@ -74,26 +116,34 @@ export default function PoliciesStep({
           <h3 className="text-[13px] font-semibold text-gray-900">Check-in & Check-out</h3>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-in Time</label>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">
+                Check-in Time
+              </label>
               <select
                 value={checkInTime}
                 onChange={(e) => setCheckInTime(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
               >
                 {TIME_OPTIONS.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-[13px] font-medium text-gray-700 mb-1">Check-out Time</label>
+              <label className="block text-[13px] font-medium text-gray-700 mb-1">
+                Check-out Time
+              </label>
               <select
                 value={checkOutTime}
                 onChange={(e) => setCheckOutTime(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900"
               >
                 {TIME_OPTIONS.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -103,38 +153,112 @@ export default function PoliciesStep({
         {/* Payment Methods — new card-based UI */}
         <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 mb-4">
           <h3 className="text-sm font-semibold text-gray-900">Payment Methods</h3>
-          <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose which payment options are available to guests. Enable multiple to give guests flexibility.</p>
+          <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
+            Choose which payment options are available to guests. Enable multiple to give guests
+            flexibility.
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Online Card Payment */}
             <button
               type="button"
               onClick={() => setOnlineCardPayment(!onlineCardPayment)}
-              className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${onlineCardPayment
-                  ? 'border-primary-500 bg-primary-50/30'
-                  : 'border-gray-200 hover:border-gray-300'
-                }`}
+              className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
+                onlineCardPayment
+                  ? "border-primary-500 bg-primary-50/30"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
             >
-              <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${onlineCardPayment ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                {onlineCardPayment && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+              <div
+                className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${onlineCardPayment ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+              >
+                {onlineCardPayment && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={3}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                )}
               </div>
-              <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+              <svg
+                className="w-6 h-6 text-gray-700 mb-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+                />
+              </svg>
               <span className="text-[13px] font-semibold text-gray-900">Online Card</span>
-              <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays online with credit or debit card</p>
+              <p className="text-[11px] text-gray-500 mt-1 mb-3">
+                Guest pays online with credit or debit card
+              </p>
               <div className="mt-auto space-y-1.5">
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-green-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Instant confirmation</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-green-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Visa, Mastercard, Amex</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-green-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Auto payout to your bank</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-amber-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Processing fees apply</span>
                 </div>
               </div>
@@ -142,29 +266,90 @@ export default function PoliciesStep({
 
             {/* Pay at Hotel */}
             <div
-              className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${payAtHotel
-                  ? 'border-primary-500 bg-primary-50/30'
-                  : 'border-gray-200 hover:border-gray-300'
-                }`}
+              className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left cursor-pointer ${
+                payAtHotel
+                  ? "border-primary-500 bg-primary-50/30"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
             >
               <div onClick={() => setPayAtHotel(!payAtHotel)}>
-                <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${payAtHotel ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                  {payAtHotel && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                <div
+                  className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${payAtHotel ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                >
+                  {payAtHotel && (
+                    <svg
+                      className="w-3 h-3 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={3}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  )}
                 </div>
-                <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                <svg
+                  className="w-6 h-6 text-gray-700 mb-2"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+                  />
+                </svg>
                 <span className="text-[13px] font-semibold text-gray-900">Pay at Hotel</span>
-                <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest pays cash or card at check-in — no online payment</p>
+                <p className="text-[11px] text-gray-500 mt-1 mb-3">
+                  Guest pays cash or card at check-in — no online payment
+                </p>
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1.5">
-                    <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                    <svg
+                      className="w-3 h-3 text-green-500 shrink-0"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
                     <span className="text-[10px] text-gray-500">No processing fees</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                    <svg
+                      className="w-3 h-3 text-green-500 shrink-0"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
                     <span className="text-[10px] text-gray-500">No Stripe account needed</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                    <svg
+                      className="w-3 h-3 text-amber-500 shrink-0"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
                     <span className="text-[10px] text-gray-500">Higher no-show risk</span>
                   </div>
                 </div>
@@ -172,32 +357,37 @@ export default function PoliciesStep({
               {payAtHotel && (
                 <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200 flex-wrap">
                   {[
-                    { key: 'cash', label: 'Cash' },
-                    { key: 'card', label: 'Card' },
+                    { key: "cash", label: "Cash" },
+                    { key: "card", label: "Card" },
                   ].map((m) => {
-                    const selected = payAtHotelMethods.includes(m.key)
+                    const selected = payAtHotelMethods.includes(m.key);
                     return (
                       <button
                         key={m.key}
                         type="button"
                         onClick={() => {
                           if (selected && payAtHotelMethods.length > 1) {
-                            setPayAtHotelMethods(payAtHotelMethods.filter(v => v !== m.key))
+                            setPayAtHotelMethods(payAtHotelMethods.filter((v) => v !== m.key));
                           } else if (!selected) {
-                            setPayAtHotelMethods([...payAtHotelMethods, m.key])
+                            setPayAtHotelMethods([...payAtHotelMethods, m.key]);
                           }
                         }}
-                        className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${selected
-                            ? 'border-primary-500 bg-primary-50 text-primary-700'
-                            : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                          }`}
+                        className={`px-3 py-1.5 text-[12px] font-medium rounded-lg border transition-colors ${
+                          selected
+                            ? "border-primary-500 bg-primary-50 text-primary-700"
+                            : "border-gray-200 text-gray-500 hover:border-gray-300"
+                        }`}
                       >
                         {m.label}
                       </button>
-                    )
+                    );
                   })}
                   <span className="text-[11px] text-gray-400 ml-1">
-                    {payAtHotelMethods.length === 2 ? 'Cash & Card' : payAtHotelMethods.includes('cash') ? 'Cash only' : 'Card only'}
+                    {payAtHotelMethods.length === 2
+                      ? "Cash & Card"
+                      : payAtHotelMethods.includes("cash")
+                        ? "Cash only"
+                        : "Card only"}
                   </span>
                 </div>
               )}
@@ -207,32 +397,103 @@ export default function PoliciesStep({
             <button
               type="button"
               onClick={() => setBankTransfer(!bankTransfer)}
-              className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${bankTransfer
-                  ? 'border-primary-500 bg-primary-50/30'
-                  : 'border-gray-200 hover:border-gray-300'
-                }`}
+              className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
+                bankTransfer
+                  ? "border-primary-500 bg-primary-50/30"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
             >
-              <div className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${bankTransfer ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                {bankTransfer && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+              <div
+                className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${bankTransfer ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+              >
+                {bankTransfer && (
+                  <svg
+                    className="w-3 h-3 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={3}
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                )}
               </div>
-              <svg className="w-6 h-6 text-gray-700 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" /></svg>
+              <svg
+                className="w-6 h-6 text-gray-700 mb-2"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z"
+                />
+              </svg>
               <span className="text-[13px] font-semibold text-gray-900">Bank Transfer</span>
-              <p className="text-[11px] text-gray-500 mt-1 mb-3">Guest transfers money directly to your bank account</p>
+              <p className="text-[11px] text-gray-500 mt-1 mb-3">
+                Guest transfers money directly to your bank account
+              </p>
               <div className="mt-auto space-y-1.5">
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-green-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">No processing fees</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-green-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Direct to your account</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-green-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-green-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Good for large bookings</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <svg className="w-3 h-3 text-amber-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
+                  <svg
+                    className="w-3 h-3 text-amber-500 shrink-0"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <span className="text-[10px] text-gray-500">Manual verification needed</span>
                 </div>
               </div>
@@ -244,77 +505,144 @@ export default function PoliciesStep({
         {onlineCardPayment && (
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 mb-4">
             <h3 className="text-sm font-semibold text-gray-900">Payment Provider</h3>
-            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Choose how you want to accept online card payments from guests.</p>
+            <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
+              Choose how you want to accept online card payments from guests.
+            </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <button
                 type="button"
-                onClick={() => setPaymentProvider('vayada')}
-                className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${paymentProvider === 'vayada'
-                    ? 'border-primary-500 bg-primary-50/30'
-                    : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                onClick={() => setPaymentProvider("vayada")}
+                className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                  paymentProvider === "vayada"
+                    ? "border-primary-500 bg-primary-50/30"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
               >
-                <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'vayada' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                  {paymentProvider === 'vayada' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                <div
+                  className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "vayada" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                >
+                  {paymentProvider === "vayada" && (
+                    <svg
+                      className="w-2.5 h-2.5 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={3}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  )}
                 </div>
                 <span className="text-[13px] font-semibold text-gray-900">vayada Payment</span>
-                <p className="text-[11px] text-gray-500 mt-1">We handle everything. No setup needed.</p>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  We handle everything. No setup needed.
+                </p>
               </button>
               <button
                 type="button"
-                onClick={() => setPaymentProvider('stripe')}
-                className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${paymentProvider === 'stripe'
-                    ? 'border-primary-500 bg-primary-50/30'
-                    : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                onClick={() => setPaymentProvider("stripe")}
+                className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                  paymentProvider === "stripe"
+                    ? "border-primary-500 bg-primary-50/30"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
               >
-                <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'stripe' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                  {paymentProvider === 'stripe' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                <div
+                  className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "stripe" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                >
+                  {paymentProvider === "stripe" && (
+                    <svg
+                      className="w-2.5 h-2.5 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={3}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  )}
                 </div>
                 <span className="text-[13px] font-semibold text-gray-900">Stripe Connect</span>
-                <p className="text-[11px] text-gray-500 mt-1">Your own Stripe account. Direct payouts.</p>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Your own Stripe account. Direct payouts.
+                </p>
               </button>
               <button
                 type="button"
-                onClick={() => setPaymentProvider('xendit')}
-                className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${paymentProvider === 'xendit'
-                    ? 'border-primary-500 bg-primary-50/30'
-                    : 'border-gray-200 hover:border-gray-300'
-                  }`}
+                onClick={() => setPaymentProvider("xendit")}
+                className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                  paymentProvider === "xendit"
+                    ? "border-primary-500 bg-primary-50/30"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
               >
-                <div className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === 'xendit' ? 'border-primary-500 bg-primary-500' : 'border-gray-300'}`}>
-                  {paymentProvider === 'xendit' && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                <div
+                  className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "xendit" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                >
+                  {paymentProvider === "xendit" && (
+                    <svg
+                      className="w-2.5 h-2.5 text-white"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={3}
+                        d="M5 13l4 4L19 7"
+                      />
+                    </svg>
+                  )}
                 </div>
                 <span className="text-[13px] font-semibold text-gray-900">Xendit</span>
-                <p className="text-[11px] text-gray-500 mt-1">Indonesian bank payouts via Xendit.</p>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Indonesian bank payouts via Xendit.
+                </p>
               </button>
             </div>
 
-            {paymentProvider === 'vayada' && (
+            {paymentProvider === "vayada" && (
               <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
                 <p className="text-[13px] text-green-800 font-medium">No setup required</p>
                 <p className="text-[12px] text-green-700 mt-1">
-                  vayada processes card payments on your behalf. Guest payments are collected securely and payouts are sent to your bank account on file.
+                  vayada processes card payments on your behalf. Guest payments are collected
+                  securely and payouts are sent to your bank account on file.
                 </p>
               </div>
             )}
 
-            {paymentProvider === 'stripe' && (
+            {paymentProvider === "stripe" && (
               <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
                 <p className="text-[13px] text-gray-800 font-medium">Stripe Connect</p>
                 <p className="text-[12px] text-gray-600 mt-1">
-                  The hotel will connect their Stripe account from Settings → Billing after redeeming the invite code.
+                  The hotel will connect their Stripe account from Settings → Billing after
+                  redeeming the invite code.
                 </p>
               </div>
             )}
 
-            {paymentProvider === 'xendit' && (
+            {paymentProvider === "xendit" && (
               <div className="space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank</label>
-                    <select value={xenditChannelCode} onChange={(e) => setXenditChannelCode(e.target.value)} className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white">
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                      Bank
+                    </label>
+                    <select
+                      value={xenditChannelCode}
+                      onChange={(e) => setXenditChannelCode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
+                    >
                       <option value="ID_BCA">BCA</option>
                       <option value="ID_MANDIRI">Mandiri</option>
                       <option value="ID_BNI">BNI</option>
@@ -324,13 +652,31 @@ export default function PoliciesStep({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
-                    <input type="text" inputMode="numeric" maxLength={20} value={xenditAccountNumber} onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ''))} placeholder="1234567890" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                      Account Number
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={20}
+                      value={xenditAccountNumber}
+                      onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ""))}
+                      placeholder="1234567890"
+                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
-                  <input type="text" value={xenditAccountHolderName} onChange={(e) => setXenditAccountHolderName(e.target.value)} placeholder="Full name as on bank account" className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                    Account Holder Name
+                  </label>
+                  <input
+                    type="text"
+                    value={xenditAccountHolderName}
+                    onChange={(e) => setXenditAccountHolderName(e.target.value)}
+                    placeholder="Full name as on bank account"
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
                 </div>
               </div>
             )}
@@ -342,11 +688,15 @@ export default function PoliciesStep({
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 mb-4 space-y-3">
             <div>
               <h3 className="text-sm font-semibold text-gray-900">Payout Details</h3>
-              <p className="text-[12px] text-gray-500 mt-0.5">Bank account where guests and vayada pay you.</p>
+              <p className="text-[12px] text-gray-500 mt-0.5">
+                Bank account where guests and vayada pay you.
+              </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="sm:col-span-2">
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Holder Name</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                  Account Holder Name
+                </label>
                 <input
                   type="text"
                   value={payoutAccountHolder}
@@ -356,39 +706,45 @@ export default function PoliciesStep({
                 />
               </div>
               <div className="sm:col-span-2">
-                <label className="block text-[12px] font-medium text-gray-700 mb-1">Account Format</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-1">
+                  Account Format
+                </label>
                 <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
                   <button
                     type="button"
-                    onClick={() => setPayoutAccountType('iban')}
-                    className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${payoutAccountType === 'iban'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                      }`}
+                    onClick={() => setPayoutAccountType("iban")}
+                    className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
+                      payoutAccountType === "iban"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
                   >
                     IBAN
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPayoutAccountType('account_number')}
-                    className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${payoutAccountType === 'account_number'
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
-                      }`}
+                    onClick={() => setPayoutAccountType("account_number")}
+                    className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
+                      payoutAccountType === "account_number"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700"
+                    }`}
                   >
                     Account Number
                   </button>
                 </div>
                 <p className="text-[11px] text-gray-500 mt-1">
-                  {payoutAccountType === 'iban'
-                    ? 'Use IBAN if your bank is in Europe or another IBAN country.'
-                    : 'Use a plain account number for banks without IBAN (e.g. Indonesia, US).'}
+                  {payoutAccountType === "iban"
+                    ? "Use IBAN if your bank is in Europe or another IBAN country."
+                    : "Use a plain account number for banks without IBAN (e.g. Indonesia, US)."}
                 </p>
               </div>
               <div className="sm:col-span-2">
-                {payoutAccountType === 'iban' ? (
+                {payoutAccountType === "iban" ? (
                   <>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">IBAN</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                      IBAN
+                    </label>
                     <input
                       type="text"
                       value={payoutIban}
@@ -399,7 +755,9 @@ export default function PoliciesStep({
                   </>
                 ) : (
                   <>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Account Number</label>
+                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                      Account Number
+                    </label>
                     <input
                       type="text"
                       value={payoutAccountNumber}
@@ -411,7 +769,9 @@ export default function PoliciesStep({
                 )}
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Bank Name</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                  Bank Name
+                </label>
                 <input
                   type="text"
                   value={payoutBankName}
@@ -421,7 +781,9 @@ export default function PoliciesStep({
                 />
               </div>
               <div>
-                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">SWIFT / BIC</label>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                  SWIFT / BIC
+                </label>
                 <input
                   type="text"
                   value={payoutSwift}
@@ -437,30 +799,53 @@ export default function PoliciesStep({
         {/* Guest Information Form */}
         <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-3 mb-4">
           <h3 className="text-[13px] font-semibold text-gray-900">Guest Information Form</h3>
-          <p className="text-[12px] text-gray-500 mb-2">Additional fields shown to guests during the booking process</p>
+          <p className="text-[12px] text-gray-500 mb-2">
+            Additional fields shown to guests during the booking process
+          </p>
 
           {[
-            { label: 'Special Requests', value: specialRequests, setter: setSpecialRequests, badge: 'Recommended' },
-            { label: 'Estimated Arrival Time', value: estimatedArrivalTime, setter: setEstimatedArrivalTime, badge: '' },
-            { label: 'Number of Guests', value: numberOfGuests, setter: setNumberOfGuests, badge: '' },
+            {
+              label: "Special Requests",
+              value: specialRequests,
+              setter: setSpecialRequests,
+              badge: "Recommended",
+            },
+            {
+              label: "Estimated Arrival Time",
+              value: estimatedArrivalTime,
+              setter: setEstimatedArrivalTime,
+              badge: "",
+            },
+            {
+              label: "Number of Guests",
+              value: numberOfGuests,
+              setter: setNumberOfGuests,
+              badge: "",
+            },
           ].map((item) => (
             <button
               key={item.label}
               onClick={() => item.setter(!item.value)}
               className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
                 item.value
-                  ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                  : 'border-gray-200 hover:border-gray-300'
+                  ? "border-primary-500 bg-primary-50/30 ring-1 ring-primary-500"
+                  : "border-gray-200 hover:border-gray-300"
               }`}
             >
               <div className="flex items-center gap-2">
                 <span className="text-[13px] font-medium text-gray-900">{item.label}</span>
                 {item.badge && (
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 bg-green-50 text-green-600 rounded-full">{item.badge}</span>
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 bg-green-50 text-green-600 rounded-full">
+                    {item.badge}
+                  </span>
                 )}
               </div>
-              <div className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${item.value ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${item.value ? 'left-4' : 'left-0.5'}`} />
+              <div
+                className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${item.value ? "bg-primary-500" : "bg-gray-300"}`}
+              >
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${item.value ? "left-4" : "left-0.5"}`}
+                />
               </div>
             </button>
           ))}
@@ -470,15 +855,20 @@ export default function PoliciesStep({
         <div className="bg-white rounded-lg border border-gray-200 p-5 mb-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-[13px] font-semibold text-gray-900">&ldquo;Refer a Guest&rdquo; Feature</h3>
-              <p className="text-[12px] text-gray-500 mt-0.5">Allow guests to refer friends and earn rewards through your booking page</p>
+              <h3 className="text-[13px] font-semibold text-gray-900">
+                &ldquo;Refer a Guest&rdquo; Feature
+              </h3>
+              <p className="text-[12px] text-gray-500 mt-0.5">
+                Allow guests to refer friends and earn rewards through your booking page
+              </p>
             </div>
-            <button
-              onClick={() => setEnableReferAGuest(!enableReferAGuest)}
-              className="shrink-0"
-            >
-              <div className={`w-9 h-5 rounded-full transition-colors relative ${enableReferAGuest ? 'bg-primary-500' : 'bg-gray-300'}`}>
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enableReferAGuest ? 'left-4' : 'left-0.5'}`} />
+            <button onClick={() => setEnableReferAGuest(!enableReferAGuest)} className="shrink-0">
+              <div
+                className={`w-9 h-5 rounded-full transition-colors relative ${enableReferAGuest ? "bg-primary-500" : "bg-gray-300"}`}
+              >
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${enableReferAGuest ? "left-4" : "left-0.5"}`}
+                />
               </div>
             </button>
           </div>
@@ -508,11 +898,11 @@ export default function PoliciesStep({
                 Launching...
               </>
             ) : (
-              'Launch Property →'
+              "Launch Property →"
             )}
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

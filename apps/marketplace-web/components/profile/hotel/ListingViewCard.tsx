@@ -1,49 +1,59 @@
-'use client'
+"use client";
 
-import { PencilIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/solid'
-import { GiftIcon, CurrencyDollarIcon, TagIcon, CalendarDaysIcon, LinkIcon, UserGroupIcon } from '@heroicons/react/24/outline'
-import { HotelBadgeIcon } from '@/components/ui'
-import { PLATFORM_OPTIONS, AGE_GROUP_OPTIONS } from '@/lib/constants'
-import { formatNumber, getCurrencySymbol } from '@/lib/utils'
-import type { ListingOffering, ProfileHotelListing } from '../types'
+import { PencilIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/solid";
+import {
+  GiftIcon,
+  CurrencyDollarIcon,
+  TagIcon,
+  CalendarDaysIcon,
+  LinkIcon,
+  UserGroupIcon,
+} from "@heroicons/react/24/outline";
+import { HotelBadgeIcon } from "@/components/ui";
+import { PLATFORM_OPTIONS, AGE_GROUP_OPTIONS } from "@/lib/constants";
+import { formatNumber, getCurrencySymbol } from "@/lib/utils";
+import type { ListingOffering, ProfileHotelListing } from "../types";
 
-const TYPE_ICONS: Record<ListingOffering['type'], typeof GiftIcon> = {
-  'Free Stay': GiftIcon,
+const TYPE_ICONS: Record<ListingOffering["type"], typeof GiftIcon> = {
+  "Free Stay": GiftIcon,
   Paid: CurrencyDollarIcon,
   Discount: TagIcon,
   Affiliate: LinkIcon,
-}
+};
 
 function formatMonths(months: string[]): string {
-  if (months.length === 12) return 'Available all year'
-  if (months.length === 0) return 'No months selected'
-  return months.map((m) => m.substring(0, 3)).join(', ')
+  if (months.length === 12) return "Available all year";
+  if (months.length === 0) return "No months selected";
+  return months.map((m) => m.substring(0, 3)).join(", ");
 }
 
 function describeOffering(o: ListingOffering): string {
-  if (o.type === 'Free Stay') {
+  if (o.type === "Free Stay") {
     if (o.freeStayMinNights && o.freeStayMaxNights && o.freeStayMinNights !== o.freeStayMaxNights) {
-      return `${o.freeStayMinNights}–${o.freeStayMaxNights} nights complimentary`
+      return `${o.freeStayMinNights}–${o.freeStayMaxNights} nights complimentary`;
     }
-    const n = o.freeStayMaxNights || o.freeStayMinNights
-    return n ? `Up to ${n} night${n === 1 ? '' : 's'} complimentary` : 'Complimentary stay'
+    const n = o.freeStayMaxNights || o.freeStayMinNights;
+    return n ? `Up to ${n} night${n === 1 ? "" : "s"} complimentary` : "Complimentary stay";
   }
-  if (o.type === 'Paid') {
-    const symbol = getCurrencySymbol(o.currency || 'USD')
-    return o.paidMaxAmount ? `Up to ${symbol}${o.paidMaxAmount.toLocaleString()}` : 'Paid collaboration'
+  if (o.type === "Paid") {
+    const symbol = getCurrencySymbol(o.currency || "USD");
+    return o.paidMaxAmount
+      ? `Up to ${symbol}${o.paidMaxAmount.toLocaleString()}`
+      : "Paid collaboration";
   }
-  if (o.type === 'Discount') return o.discountPercentage ? `${o.discountPercentage}% off` : 'Discount'
-  return o.commissionPercentage ? `${o.commissionPercentage}% commission` : 'Affiliate commission'
+  if (o.type === "Discount")
+    return o.discountPercentage ? `${o.discountPercentage}% off` : "Discount";
+  return o.commissionPercentage ? `${o.commissionPercentage}% commission` : "Affiliate commission";
 }
 
 interface ListingViewCardProps {
-  listing: ProfileHotelListing
-  index: number
-  isCollapsed: boolean
-  onToggleCollapse: () => void
-  onEdit: () => void
-  onDelete: () => void
-  canDelete: boolean
+  listing: ProfileHotelListing;
+  index: number;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  canDelete: boolean;
 }
 
 export function ListingViewCard({
@@ -62,7 +72,7 @@ export function ListingViewCard({
     listing.description.trim() &&
     listing.offerings.length > 0 &&
     listing.offerings.every((o) => o.availabilityMonths.length > 0)
-  )
+  );
 
   return (
     <div className="border border-gray-200 rounded-2xl p-5 bg-white shadow-sm">
@@ -81,8 +91,8 @@ export function ListingViewCard({
             <button
               type="button"
               onClick={(e) => {
-                e.stopPropagation()
-                onEdit()
+                e.stopPropagation();
+                onEdit();
               }}
               className="p-1 rounded-md text-gray-600 hover:text-gray-700 hover:bg-gray-50 transition-colors"
               title="Edit listing"
@@ -93,8 +103,8 @@ export function ListingViewCard({
               <button
                 type="button"
                 onClick={(e) => {
-                  e.stopPropagation()
-                  onDelete()
+                  e.stopPropagation();
+                  onDelete();
                 }}
                 className="p-1 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
                 title="Remove listing"
@@ -123,43 +133,56 @@ export function ListingViewCard({
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-base font-medium text-gray-900 mb-2">Listing Name</label>
+                    <label className="block text-base font-medium text-gray-900 mb-2">
+                      Listing Name
+                    </label>
                     <div className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-base text-gray-900">
-                      {listing.name || '-'}
+                      {listing.name || "-"}
                     </div>
                   </div>
                   <div>
-                    <label className="block text-base font-medium text-gray-900 mb-2">Location</label>
+                    <label className="block text-base font-medium text-gray-900 mb-2">
+                      Location
+                    </label>
                     <div className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-base text-gray-900">
-                      {listing.location || '-'}
+                      {listing.location || "-"}
                     </div>
                   </div>
                 </div>
                 <div>
-                  <label className="block text-base font-medium text-gray-900 mb-2">Accommodation Type</label>
+                  <label className="block text-base font-medium text-gray-900 mb-2">
+                    Accommodation Type
+                  </label>
                   <div className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-base text-gray-900">
-                    {listing.accommodationType || 'Not specified'}
+                    {listing.accommodationType || "Not specified"}
                   </div>
                 </div>
                 <div>
-                  <label className="block text-base font-medium text-gray-900 mb-2">Description</label>
+                  <label className="block text-base font-medium text-gray-900 mb-2">
+                    Description
+                  </label>
                   <div className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-gray-50 text-base text-gray-900 whitespace-pre-wrap min-h-[100px]">
-                    {listing.description || '-'}
+                    {listing.description || "-"}
                   </div>
                 </div>
                 {/* Images */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">Property Photos</label>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                    Property Photos
+                  </label>
                   {listing.images && listing.images.length > 0 ? (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       {listing.images.map((image, imageIndex) => (
-                        <div key={imageIndex} className="relative aspect-video rounded-xl overflow-hidden shadow-sm">
+                        <div
+                          key={imageIndex}
+                          className="relative aspect-video rounded-xl overflow-hidden shadow-sm"
+                        >
                           <img
                             src={image}
                             alt={`Property ${imageIndex + 1}`}
                             className="w-full h-full object-cover"
                             onError={(e) => {
-                              e.currentTarget.style.display = 'none'
+                              e.currentTarget.style.display = "none";
                             }}
                           />
                         </div>
@@ -187,7 +210,7 @@ export function ListingViewCard({
               ) : (
                 <div className="space-y-3">
                   {listing.offerings.map((o, idx) => {
-                    const Icon = TYPE_ICONS[o.type]
+                    const Icon = TYPE_ICONS[o.type];
                     return (
                       <div
                         key={idx}
@@ -225,7 +248,7 @@ export function ListingViewCard({
                           </div>
                         </div>
                       </div>
-                    )
+                    );
                   })}
                 </div>
               )}
@@ -240,46 +263,57 @@ export function ListingViewCard({
               <div className="space-y-4 bg-gray-50 border border-gray-200 rounded-2xl p-4">
                 {/* Platforms */}
                 <div>
-                  <label className="block text-base font-semibold text-gray-900 mb-1">Creator&apos;s platforms</label>
-                  <p className="text-sm text-gray-600 mb-3">Which platforms should the creator have?</p>
+                  <label className="block text-base font-semibold text-gray-900 mb-1">
+                    Creator&apos;s platforms
+                  </label>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Which platforms should the creator have?
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {PLATFORM_OPTIONS.map((platform) => {
-                      const isSelected = listing.lookingForPlatforms?.includes(platform) || false
+                      const isSelected = listing.lookingForPlatforms?.includes(platform) || false;
                       return (
                         <div
                           key={platform}
-                          className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${isSelected
-                            ? 'border-[#2F54EB] bg-blue-50 text-[#2F54EB]'
-                            : 'border-gray-200 bg-white text-gray-700'
-                            }`}
+                          className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-all ${
+                            isSelected
+                              ? "border-[#2F54EB] bg-blue-50 text-[#2F54EB]"
+                              : "border-gray-200 bg-white text-gray-700"
+                          }`}
                         >
                           <span
-                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isSelected
-                              ? 'border-[#2F54EB] bg-[#2F54EB]'
-                              : 'border-gray-300 bg-white'
-                              }`}
+                            className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
+                              isSelected
+                                ? "border-[#2F54EB] bg-[#2F54EB]"
+                                : "border-gray-300 bg-white"
+                            }`}
                           >
-                            {isSelected && (
-                              <span className="w-2 h-2 rounded-full bg-white"></span>
-                            )}
+                            {isSelected && <span className="w-2 h-2 rounded-full bg-white"></span>}
                           </span>
-                          <span className={isSelected ? 'text-[#2F54EB]' : 'text-gray-700'}>
+                          <span className={isSelected ? "text-[#2F54EB]" : "text-gray-700"}>
                             {platform}
                           </span>
                         </div>
-                      )
+                      );
                     })}
                   </div>
                 </div>
 
                 {/* Top Countries */}
                 <div>
-                  <label className="block text-base font-semibold text-gray-900 mb-1">Top Countries (optional)</label>
-                  <p className="text-sm text-gray-600 mb-3">Select up to 3 countries your target audience is from</p>
+                  <label className="block text-base font-semibold text-gray-900 mb-1">
+                    Top Countries (optional)
+                  </label>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Select up to 3 countries your target audience is from
+                  </p>
                   {listing.targetGroupCountries && listing.targetGroupCountries.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                       {listing.targetGroupCountries.map((country, countryIndex) => (
-                        <span key={countryIndex} className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 text-sm font-bold px-4 py-2 border border-blue-200 shadow-sm">
+                        <span
+                          key={countryIndex}
+                          className="inline-flex items-center gap-1 rounded-full bg-blue-50 text-blue-700 text-sm font-bold px-4 py-2 border border-blue-200 shadow-sm"
+                        >
                           {country}
                         </span>
                       ))}
@@ -293,22 +327,27 @@ export function ListingViewCard({
 
                 {/* Age Groups */}
                 <div>
-                  <label className="block text-base font-semibold text-gray-900 mb-1">Age Groups (optional)</label>
-                  <p className="text-sm text-gray-600 mb-3">Select up to 3 age groups you want to target</p>
+                  <label className="block text-base font-semibold text-gray-900 mb-1">
+                    Age Groups (optional)
+                  </label>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Select up to 3 age groups you want to target
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {AGE_GROUP_OPTIONS.map((range) => {
-                      const isSelected = listing.targetGroupAgeGroups?.includes(range) || false
+                      const isSelected = listing.targetGroupAgeGroups?.includes(range) || false;
                       return (
                         <div
                           key={range}
-                          className={`px-4 py-2 rounded-full border text-sm font-bold transition-all ${isSelected
-                            ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-sm'
-                            : 'bg-white text-gray-400 border-gray-200'
-                            }`}
+                          className={`px-4 py-2 rounded-full border text-sm font-bold transition-all ${
+                            isSelected
+                              ? "bg-blue-50 text-blue-700 border-blue-200 shadow-sm"
+                              : "bg-white text-gray-400 border-gray-200"
+                          }`}
                         >
                           {range}
                         </div>
-                      )
+                      );
                     })}
                   </div>
                 </div>
@@ -318,5 +357,5 @@ export function ListingViewCard({
         </div>
       )}
     </div>
-  )
+  );
 }

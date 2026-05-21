@@ -1,12 +1,16 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { authService } from '@/services/auth'
-import { marketplaceService, MarketplaceListing, MarketplaceCreator } from '@/services/api/marketplace'
-import { ApiErrorResponse } from '@/services/api/client'
-import { MarketplaceListingModal } from '@/components/marketplace/MarketplaceListingModal'
-import { MarketplaceCreatorModal } from '@/components/marketplace/MarketplaceCreatorModal'
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { authService } from "@/services/auth";
+import {
+  marketplaceService,
+  MarketplaceListing,
+  MarketplaceCreator,
+} from "@/services/api/marketplace";
+import { ApiErrorResponse } from "@/services/api/client";
+import { MarketplaceListingModal } from "@/components/marketplace/MarketplaceListingModal";
+import { MarketplaceCreatorModal } from "@/components/marketplace/MarketplaceCreatorModal";
 import {
   BuildingOfficeIcon,
   UserGroupIcon,
@@ -14,128 +18,117 @@ import {
   MagnifyingGlassIcon,
   StarIcon,
   PhotoIcon,
-} from '@heroicons/react/24/outline'
+} from "@heroicons/react/24/outline";
 
-type Tab = 'listings' | 'creators'
+type Tab = "listings" | "creators";
 
 export default function MarketplacePreviewPage() {
-  const router = useRouter()
-  const [activeTab, setActiveTab] = useState<Tab>('listings')
-  const [listings, setListings] = useState<MarketplaceListing[]>([])
-  const [creators, setCreators] = useState<MarketplaceCreator[]>([])
-  const [loadingListings, setLoadingListings] = useState(true)
-  const [loadingCreators, setLoadingCreators] = useState(true)
-  const [error, setError] = useState('')
-  const [search, setSearch] = useState('')
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<Tab>("listings");
+  const [listings, setListings] = useState<MarketplaceListing[]>([]);
+  const [creators, setCreators] = useState<MarketplaceCreator[]>([]);
+  const [loadingListings, setLoadingListings] = useState(true);
+  const [loadingCreators, setLoadingCreators] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
 
-  const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null)
-  const [selectedCreator, setSelectedCreator] = useState<MarketplaceCreator | null>(null)
+  const [selectedListing, setSelectedListing] = useState<MarketplaceListing | null>(null);
+  const [selectedCreator, setSelectedCreator] = useState<MarketplaceCreator | null>(null);
 
   useEffect(() => {
     if (!authService.isLoggedIn() || !authService.isAdmin()) {
-      router.push('/login')
-      return
+      router.push("/login");
+      return;
     }
 
-    loadData()
-  }, [router])
+    loadData();
+  }, [router]);
 
   const loadData = async () => {
-    await Promise.all([loadListings(), loadCreators()])
-  }
+    await Promise.all([loadListings(), loadCreators()]);
+  };
 
   const loadListings = async () => {
     try {
-      setLoadingListings(true)
-      const data = await marketplaceService.getListings()
-      setListings(data)
+      setLoadingListings(true);
+      const data = await marketplaceService.getListings();
+      setListings(data);
     } catch (err) {
-      console.error('Error loading listings:', err)
+      console.error("Error loading listings:", err);
       if (err instanceof ApiErrorResponse) {
-        setError(err.message)
+        setError(err.message);
       }
     } finally {
-      setLoadingListings(false)
+      setLoadingListings(false);
     }
-  }
+  };
 
   const loadCreators = async () => {
     try {
-      setLoadingCreators(true)
-      const data = await marketplaceService.getCreators()
-      setCreators(data)
+      setLoadingCreators(true);
+      const data = await marketplaceService.getCreators();
+      setCreators(data);
     } catch (err) {
-      console.error('Error loading creators:', err)
+      console.error("Error loading creators:", err);
       if (err instanceof ApiErrorResponse) {
-        setError(err.message)
+        setError(err.message);
       }
     } finally {
-      setLoadingCreators(false)
+      setLoadingCreators(false);
     }
-  }
+  };
 
   const formatNumber = (num: number): string => {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
-    return num.toString()
-  }
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+    if (num >= 1000) return (num / 1000).toFixed(1) + "K";
+    return num.toString();
+  };
 
   const getCollaborationTypeBadge = (type: string) => {
     switch (type) {
-      case 'Free Stay':
-        return 'bg-green-100 text-green-800'
-      case 'Paid':
-        return 'bg-blue-100 text-blue-800'
-      case 'Discount':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'Affiliate':
-        return 'bg-purple-100 text-purple-800'
+      case "Free Stay":
+        return "bg-green-100 text-green-800";
+      case "Paid":
+        return "bg-blue-100 text-blue-800";
+      case "Discount":
+        return "bg-yellow-100 text-yellow-800";
+      case "Affiliate":
+        return "bg-purple-100 text-purple-800";
       default:
-        return 'bg-gray-100 text-gray-800'
+        return "bg-gray-100 text-gray-800";
     }
-  }
+  };
 
   const getPlatformColor = (name: string) => {
     switch (name) {
-      case 'Instagram':
-        return 'bg-pink-100 text-pink-800'
-      case 'TikTok':
-        return 'bg-gray-900 text-white'
-      case 'YouTube':
-        return 'bg-red-100 text-red-800'
-      case 'Facebook':
-        return 'bg-blue-100 text-blue-800'
+      case "Instagram":
+        return "bg-pink-100 text-pink-800";
+      case "TikTok":
+        return "bg-gray-900 text-white";
+      case "YouTube":
+        return "bg-red-100 text-red-800";
+      case "Facebook":
+        return "bg-blue-100 text-blue-800";
       default:
-        return 'bg-gray-100 text-gray-800'
+        return "bg-gray-100 text-gray-800";
     }
-  }
+  };
 
-  const q = search.trim().toLowerCase()
+  const q = search.trim().toLowerCase();
   const filteredListings = q
     ? listings.filter((l) =>
-        [
-          l.name,
-          l.hotel_name,
-          l.location,
-          l.description,
-          l.accommodation_type,
-        ]
+        [l.name, l.hotel_name, l.location, l.description, l.accommodation_type]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
-    : listings
+    : listings;
   const filteredCreators = q
     ? creators.filter((c) =>
-        [
-          c.name,
-          c.location,
-          c.short_description,
-          ...c.platforms.flatMap((p) => [p.name, p.handle]),
-        ]
+        [c.name, c.location, c.short_description, ...c.platforms.flatMap((p) => [p.name, p.handle])]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q)),
       )
-    : creators
+    : creators;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -151,22 +144,22 @@ export default function MarketplacePreviewPage() {
         {/* Tabs */}
         <div className="mb-6 bg-white rounded-lg shadow p-1 inline-flex">
           <button
-            onClick={() => setActiveTab('listings')}
+            onClick={() => setActiveTab("listings")}
             className={`px-6 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'listings'
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              activeTab === "listings"
+                ? "bg-primary-600 text-white"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
             <BuildingOfficeIcon className="w-4 h-4 inline-block mr-2" />
             Listings ({listings.length})
           </button>
           <button
-            onClick={() => setActiveTab('creators')}
+            onClick={() => setActiveTab("creators")}
             className={`px-6 py-2 rounded-md text-sm font-medium transition-colors ${
-              activeTab === 'creators'
-                ? 'bg-primary-600 text-white'
-                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+              activeTab === "creators"
+                ? "bg-primary-600 text-white"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
             <UserGroupIcon className="w-4 h-4 inline-block mr-2" />
@@ -181,9 +174,9 @@ export default function MarketplacePreviewPage() {
             <input
               type="text"
               placeholder={
-                activeTab === 'listings'
-                  ? 'Search by hotel, location, description...'
-                  : 'Search by creator, location, platform...'
+                activeTab === "listings"
+                  ? "Search by hotel, location, description..."
+                  : "Search by creator, location, platform..."
               }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -199,7 +192,7 @@ export default function MarketplacePreviewPage() {
         )}
 
         {/* Listings Tab */}
-        {activeTab === 'listings' && (
+        {activeTab === "listings" && (
           <>
             {loadingListings ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">
@@ -209,12 +202,12 @@ export default function MarketplacePreviewPage() {
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <BuildingOfficeIcon className="mx-auto h-12 w-12 text-gray-400" />
                 <h3 className="mt-2 text-sm font-medium text-gray-900">
-                  {q ? 'No matching listings' : 'No listings'}
+                  {q ? "No matching listings" : "No listings"}
                 </h3>
                 <p className="mt-1 text-sm text-gray-500">
                   {q
-                    ? 'Try a different search.'
-                    : 'No verified hotels with complete profiles have listings yet.'}
+                    ? "Try a different search."
+                    : "No verified hotels with complete profiles have listings yet."}
                 </p>
               </div>
             ) : (
@@ -285,9 +278,10 @@ export default function MarketplacePreviewPage() {
                       {/* Creator requirements */}
                       {listing.creator_requirements && (
                         <div className="text-xs text-gray-500 border-t pt-2">
-                          {listing.creator_requirements.platforms && listing.creator_requirements.platforms.length > 0 && (
-                            <span>{listing.creator_requirements.platforms.join(', ')}</span>
-                          )}
+                          {listing.creator_requirements.platforms &&
+                            listing.creator_requirements.platforms.length > 0 && (
+                              <span>{listing.creator_requirements.platforms.join(", ")}</span>
+                            )}
                         </div>
                       )}
                     </div>
@@ -299,7 +293,7 @@ export default function MarketplacePreviewPage() {
         )}
 
         {/* Creators Tab */}
-        {activeTab === 'creators' && (
+        {activeTab === "creators" && (
           <>
             {loadingCreators ? (
               <div className="text-center py-12 bg-white rounded-lg shadow">
@@ -309,12 +303,12 @@ export default function MarketplacePreviewPage() {
               <div className="text-center py-12 bg-white rounded-lg shadow">
                 <UserGroupIcon className="mx-auto h-12 w-12 text-gray-400" />
                 <h3 className="mt-2 text-sm font-medium text-gray-900">
-                  {q ? 'No matching creators' : 'No creators'}
+                  {q ? "No matching creators" : "No creators"}
                 </h3>
                 <p className="mt-1 text-sm text-gray-500">
                   {q
-                    ? 'Try a different search.'
-                    : 'No verified creators with complete profiles yet.'}
+                    ? "Try a different search."
+                    : "No verified creators with complete profiles yet."}
                 </p>
               </div>
             ) : (
@@ -344,7 +338,7 @@ export default function MarketplacePreviewPage() {
                         <h3 className="font-semibold text-gray-900 truncate">{creator.name}</h3>
                         <div className="flex items-center text-sm text-gray-500">
                           <MapPinIcon className="w-4 h-4 mr-1 flex-shrink-0" />
-                          <span className="truncate">{creator.location || 'No location'}</span>
+                          <span className="truncate">{creator.location || "No location"}</span>
                         </div>
                       </div>
                     </div>
@@ -407,5 +401,5 @@ export default function MarketplacePreviewPage() {
         creator={selectedCreator}
       />
     </div>
-  )
+  );
 }

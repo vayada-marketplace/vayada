@@ -1,6 +1,6 @@
-'use client'
+"use client";
 
-import type { ProfileCompletionProgressProps } from './types'
+import type { ProfileCompletionProgressProps } from "./types";
 
 export function ProfileCompletionProgress({ percentage }: ProfileCompletionProgressProps) {
   return (
@@ -16,5 +16,5 @@ export function ProfileCompletionProgress({ percentage }: ProfileCompletionProgr
         ></div>
       </div>
     </div>
-  )
+  );
 }

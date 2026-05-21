@@ -6,6 +6,6 @@
  * thrown ApiErrorResponse is what SWR sees as `error`), so SWR consumers
  * don't need to handle the auth-expiry case themselves.
  */
-import { apiClient } from './client'
+import { apiClient } from "./client";
 
-export const fetcher = <T>(url: string): Promise<T> => apiClient.get<T>(url)
+export const fetcher = <T>(url: string): Promise<T> => apiClient.get<T>(url);

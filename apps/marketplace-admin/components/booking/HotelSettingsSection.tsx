@@ -1,132 +1,134 @@
-'use client'
+"use client";
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from "react";
 import {
   GlobeAltIcon,
   PhoneIcon,
   ChatBubbleLeftIcon,
   EnvelopeIcon,
   MapPinIcon,
-} from '@heroicons/react/24/outline'
-import { bookingSettingsService, type PropertySettings } from '@/services/booking'
-import { CURRENCY_OPTIONS } from '@/lib/constants/booking'
+} from "@heroicons/react/24/outline";
+import { bookingSettingsService, type PropertySettings } from "@/services/booking";
+import { CURRENCY_OPTIONS } from "@/lib/constants/booking";
 
-type Tab = 'property' | 'notifications'
+type Tab = "property" | "notifications";
 
 const LANGUAGE_OPTIONS = [
-  { code: 'en', label: 'English' },
-  { code: 'de', label: 'German' },
-  { code: 'fr', label: 'French' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'id', label: 'Indonesian' },
-  { code: 'it', label: 'Italian' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'nl', label: 'Dutch' },
-  { code: 'pl', label: 'Polish' },
-  { code: 'cs', label: 'Czech' },
-  { code: 'ro', label: 'Romanian' },
-  { code: 'hr', label: 'Croatian' },
-  { code: 'tr', label: 'Turkish' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'ar', label: 'Arabic' },
-]
+  { code: "en", label: "English" },
+  { code: "de", label: "German" },
+  { code: "fr", label: "French" },
+  { code: "es", label: "Spanish" },
+  { code: "id", label: "Indonesian" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "nl", label: "Dutch" },
+  { code: "pl", label: "Polish" },
+  { code: "cs", label: "Czech" },
+  { code: "ro", label: "Romanian" },
+  { code: "hr", label: "Croatian" },
+  { code: "tr", label: "Turkish" },
+  { code: "ru", label: "Russian" },
+  { code: "ja", label: "Japanese" },
+  { code: "zh", label: "Chinese" },
+  { code: "ko", label: "Korean" },
+  { code: "ar", label: "Arabic" },
+];
 
 const DEFAULT_SETTINGS: PropertySettings = {
-  slug: '',
-  property_name: '',
-  reservation_email: '',
-  phone_number: '',
-  whatsapp_number: '',
-  address: '',
-  default_currency: 'EUR',
+  slug: "",
+  property_name: "",
+  reservation_email: "",
+  phone_number: "",
+  whatsapp_number: "",
+  address: "",
+  default_currency: "EUR",
   supported_currencies: [],
-  supported_languages: ['en'],
+  supported_languages: ["en"],
   email_notifications: true,
   new_booking_alerts: true,
   payment_alerts: true,
   weekly_reports: false,
-}
+};
 
 export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
-  const [activeTab, setActiveTab] = useState<Tab>('property')
-  const [settings, setSettings] = useState<PropertySettings>(DEFAULT_SETTINGS)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [showLanguageDropdown, setShowLanguageDropdown] = useState(false)
-  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false)
+  const [activeTab, setActiveTab] = useState<Tab>("property");
+  const [settings, setSettings] = useState<PropertySettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
+    null,
+  );
+  const [showLanguageDropdown, setShowLanguageDropdown] = useState(false);
+  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     try {
-      setLoading(true)
-      const data = await bookingSettingsService.getPropertySettings(hotelId)
-      setSettings(data)
+      setLoading(true);
+      const data = await bookingSettingsService.getPropertySettings(hotelId);
+      setSettings(data);
     } catch {
-      setFeedback({ type: 'error', message: 'Failed to load settings' })
+      setFeedback({ type: "error", message: "Failed to load settings" });
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [hotelId])
+  }, [hotelId]);
 
   useEffect(() => {
-    fetchSettings()
-  }, [fetchSettings])
+    fetchSettings();
+  }, [fetchSettings]);
 
   const handleSave = async () => {
     try {
-      setSaving(true)
-      setFeedback(null)
-      const data = await bookingSettingsService.updatePropertySettings(hotelId, settings)
-      setSettings(data)
-      setFeedback({ type: 'success', message: 'Settings saved successfully' })
+      setSaving(true);
+      setFeedback(null);
+      const data = await bookingSettingsService.updatePropertySettings(hotelId, settings);
+      setSettings(data);
+      setFeedback({ type: "success", message: "Settings saved successfully" });
     } catch {
-      setFeedback({ type: 'error', message: 'Failed to save settings' })
+      setFeedback({ type: "error", message: "Failed to save settings" });
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const addLanguage = (code: string) => {
     if (!settings.supported_languages.includes(code)) {
       setSettings({
         ...settings,
         supported_languages: [...settings.supported_languages, code],
-      })
+      });
     }
-    setShowLanguageDropdown(false)
-  }
+    setShowLanguageDropdown(false);
+  };
 
   const removeLanguage = (code: string) => {
     setSettings({
       ...settings,
       supported_languages: settings.supported_languages.filter((l) => l !== code),
-    })
-  }
+    });
+  };
 
   const addCurrency = (code: string) => {
     if (!settings.supported_currencies.includes(code)) {
       setSettings({
         ...settings,
         supported_currencies: [...settings.supported_currencies, code],
-      })
+      });
     }
-    setShowCurrencyDropdown(false)
-  }
+    setShowCurrencyDropdown(false);
+  };
 
   const removeCurrency = (code: string) => {
     setSettings({
       ...settings,
       supported_currencies: settings.supported_currencies.filter((c) => c !== code),
-    })
-  }
+    });
+  };
 
   const tabs = [
-    { id: 'property' as const, label: 'Property', icon: PropertyIcon },
-    { id: 'notifications' as const, label: 'Notifications', icon: NotificationsIcon },
-  ]
+    { id: "property" as const, label: "Property", icon: PropertyIcon },
+    { id: "notifications" as const, label: "Notifications", icon: NotificationsIcon },
+  ];
 
   return (
     <div className="max-w-3xl">
@@ -138,8 +140,8 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-[13px] transition-all ${
               activeTab === tab.id
-                ? 'bg-white text-gray-900 font-semibold shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
+                ? "bg-white text-gray-900 font-semibold shadow-sm"
+                : "text-gray-500 hover:text-gray-700"
             }`}
           >
             <tab.icon className="w-4 h-4" />
@@ -152,9 +154,9 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
       {feedback && (
         <div
           className={`mt-3 px-3 py-2.5 rounded-lg text-[13px] ${
-            feedback.type === 'success'
-              ? 'bg-green-50 text-green-800 border border-green-200'
-              : 'bg-red-50 text-red-800 border border-red-200'
+            feedback.type === "success"
+              ? "bg-green-50 text-green-800 border border-green-200"
+              : "bg-red-50 text-red-800 border border-red-200"
           }`}
         >
           {feedback.message}
@@ -162,7 +164,7 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
       )}
 
       {/* Property tab */}
-      {activeTab === 'property' && (
+      {activeTab === "property" && (
         <div className="mt-5 space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-10">
@@ -173,7 +175,9 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
               {/* Property Information card */}
               <div className="bg-white rounded-lg border border-gray-200 p-5">
                 <h2 className="text-sm font-semibold text-gray-900">Property Information</h2>
-                <p className="text-[13px] text-gray-500 mt-0.5 mb-3">Basic details about the property</p>
+                <p className="text-[13px] text-gray-500 mt-0.5 mb-3">
+                  Basic details about the property
+                </p>
                 <div className="space-y-3">
                   <div>
                     <label className="block text-[13px] font-medium text-gray-700 mb-0.5">
@@ -237,7 +241,9 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                       <input
                         type="tel"
                         value={settings.whatsapp_number}
-                        onChange={(e) => setSettings({ ...settings, whatsapp_number: e.target.value })}
+                        onChange={(e) =>
+                          setSettings({ ...settings, whatsapp_number: e.target.value })
+                        }
                         className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         placeholder="+62 812 3456 7890"
                       />
@@ -252,7 +258,9 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                       <input
                         type="email"
                         value={settings.reservation_email}
-                        onChange={(e) => setSettings({ ...settings, reservation_email: e.target.value })}
+                        onChange={(e) =>
+                          setSettings({ ...settings, reservation_email: e.target.value })
+                        }
                         className="w-full pl-8 pr-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
                         placeholder="reservations@hotel.com"
                       />
@@ -276,17 +284,21 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                     <select
                       value={settings.default_currency}
                       onChange={(e) => {
-                        const newPrimary = e.target.value
+                        const newPrimary = e.target.value;
                         setSettings({
                           ...settings,
                           default_currency: newPrimary,
-                          supported_currencies: settings.supported_currencies.filter((c) => c !== newPrimary),
-                        })
+                          supported_currencies: settings.supported_currencies.filter(
+                            (c) => c !== newPrimary,
+                          ),
+                        });
                       }}
                       className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                     >
                       {CURRENCY_OPTIONS.map((c) => (
-                        <option key={c.code} value={c.code}>{c.label}</option>
+                        <option key={c.code} value={c.code}>
+                          {c.label}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -296,7 +308,7 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                     </label>
                     <div className="flex flex-wrap gap-1.5 items-center">
                       {settings.supported_currencies.map((code) => {
-                        const cur = CURRENCY_OPTIONS.find((c) => c.code === code)
+                        const cur = CURRENCY_OPTIONS.find((c) => c.code === code);
                         return (
                           <span
                             key={code}
@@ -310,7 +322,7 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                               &times;
                             </button>
                           </span>
-                        )
+                        );
                       })}
                       <div className="relative">
                         <button
@@ -322,7 +334,9 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                         {showCurrencyDropdown && (
                           <div className="absolute top-full left-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-44 overflow-y-auto">
                             {CURRENCY_OPTIONS.filter(
-                              (c) => c.code !== settings.default_currency && !settings.supported_currencies.includes(c.code)
+                              (c) =>
+                                c.code !== settings.default_currency &&
+                                !settings.supported_currencies.includes(c.code),
                             ).map((cur) => (
                               <button
                                 key={cur.code}
@@ -343,7 +357,7 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                     </label>
                     <div className="flex flex-wrap gap-1.5 items-center">
                       {settings.supported_languages.map((code) => {
-                        const lang = LANGUAGE_OPTIONS.find((l) => l.code === code)
+                        const lang = LANGUAGE_OPTIONS.find((l) => l.code === code);
                         return (
                           <span
                             key={code}
@@ -357,7 +371,7 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                               &times;
                             </button>
                           </span>
-                        )
+                        );
                       })}
                       <div className="relative">
                         <button
@@ -369,7 +383,7 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                         {showLanguageDropdown && (
                           <div className="absolute top-full left-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 max-h-44 overflow-y-auto">
                             {LANGUAGE_OPTIONS.filter(
-                              (l) => !settings.supported_languages.includes(l.code)
+                              (l) => !settings.supported_languages.includes(l.code),
                             ).map((lang) => (
                               <button
                                 key={lang.code}
@@ -397,8 +411,18 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                   {saving ? (
                     <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                    <svg
+                      className="w-3.5 h-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                      />
                     </svg>
                   )}
                   Save Changes
@@ -410,14 +434,16 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
       )}
 
       {/* Notifications tab */}
-      {activeTab === 'notifications' && (
+      {activeTab === "notifications" && (
         <div className="mt-5 space-y-4">
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <div className="flex items-center gap-1.5 mb-0.5">
               <EnvelopeIcon className="w-4 h-4 text-gray-700" />
               <h2 className="text-sm font-semibold text-gray-900">Email Notifications</h2>
             </div>
-            <p className="text-[13px] text-gray-500 mb-4">Configure when and how the hotel receives updates</p>
+            <p className="text-[13px] text-gray-500 mb-4">
+              Configure when and how the hotel receives updates
+            </p>
 
             {/* Email Notifications toggle */}
             <div className="flex items-center justify-between py-3">
@@ -426,14 +452,18 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                 <p className="text-[13px] text-gray-500">Receive notifications via email</p>
               </div>
               <button
-                onClick={() => setSettings({ ...settings, email_notifications: !settings.email_notifications })}
+                onClick={() =>
+                  setSettings({ ...settings, email_notifications: !settings.email_notifications })
+                }
                 className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                  settings.email_notifications ? 'bg-primary-500' : 'bg-gray-300'
+                  settings.email_notifications ? "bg-primary-500" : "bg-gray-300"
                 }`}
               >
-                <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                  settings.email_notifications ? 'translate-x-[18px]' : ''
-                }`} />
+                <span
+                  className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
+                    settings.email_notifications ? "translate-x-[18px]" : ""
+                  }`}
+                />
               </button>
             </div>
 
@@ -446,14 +476,18 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                 <p className="text-[13px] text-gray-500">Get notified when a new booking is made</p>
               </div>
               <button
-                onClick={() => setSettings({ ...settings, new_booking_alerts: !settings.new_booking_alerts })}
+                onClick={() =>
+                  setSettings({ ...settings, new_booking_alerts: !settings.new_booking_alerts })
+                }
                 className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                  settings.new_booking_alerts ? 'bg-primary-500' : 'bg-gray-300'
+                  settings.new_booking_alerts ? "bg-primary-500" : "bg-gray-300"
                 }`}
               >
-                <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                  settings.new_booking_alerts ? 'translate-x-[18px]' : ''
-                }`} />
+                <span
+                  className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
+                    settings.new_booking_alerts ? "translate-x-[18px]" : ""
+                  }`}
+                />
               </button>
             </div>
 
@@ -464,14 +498,18 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                 <p className="text-[13px] text-gray-500">Get notified about payment events</p>
               </div>
               <button
-                onClick={() => setSettings({ ...settings, payment_alerts: !settings.payment_alerts })}
+                onClick={() =>
+                  setSettings({ ...settings, payment_alerts: !settings.payment_alerts })
+                }
                 className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                  settings.payment_alerts ? 'bg-primary-500' : 'bg-gray-300'
+                  settings.payment_alerts ? "bg-primary-500" : "bg-gray-300"
                 }`}
               >
-                <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                  settings.payment_alerts ? 'translate-x-[18px]' : ''
-                }`} />
+                <span
+                  className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
+                    settings.payment_alerts ? "translate-x-[18px]" : ""
+                  }`}
+                />
               </button>
             </div>
 
@@ -482,14 +520,18 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
                 <p className="text-[13px] text-gray-500">Receive weekly performance summaries</p>
               </div>
               <button
-                onClick={() => setSettings({ ...settings, weekly_reports: !settings.weekly_reports })}
+                onClick={() =>
+                  setSettings({ ...settings, weekly_reports: !settings.weekly_reports })
+                }
                 className={`relative w-10 h-[22px] rounded-full transition-colors ${
-                  settings.weekly_reports ? 'bg-primary-500' : 'bg-gray-300'
+                  settings.weekly_reports ? "bg-primary-500" : "bg-gray-300"
                 }`}
               >
-                <span className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
-                  settings.weekly_reports ? 'translate-x-[18px]' : ''
-                }`} />
+                <span
+                  className={`absolute top-[2px] left-[2px] w-[18px] h-[18px] bg-white rounded-full shadow transition-transform ${
+                    settings.weekly_reports ? "translate-x-[18px]" : ""
+                  }`}
+                />
               </button>
             </div>
           </div>
@@ -504,8 +546,18 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
               {saving ? (
                 <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                <svg
+                  className="w-3.5 h-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+                  />
                 </svg>
               )}
               Save Changes
@@ -514,12 +566,20 @@ export default function HotelSettingsSection({ hotelId }: { hotelId: string }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
 function PropertyIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
       <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
       <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
@@ -528,14 +588,22 @@ function PropertyIcon({ className }: { className?: string }) {
       <path d="M10 14h4" />
       <path d="M10 18h4" />
     </svg>
-  )
+  );
 }
 
 function NotificationsIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
       <path d="M13.73 21a2 2 0 0 1-3.46 0" />
     </svg>
-  )
+  );
 }

@@ -1,64 +1,68 @@
-'use client'
+"use client";
 
-import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
-import Image from 'next/image'
-import { ROUTES } from '@/lib/constants/routes'
-import { getErrorMessage } from '@/lib/utils'
-import { authService } from '@/services/auth'
-import { ApiErrorResponse } from '@/services/api/client'
-import { CheckCircleIcon, XCircleIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import Image from "next/image";
+import { ROUTES } from "@/lib/constants/routes";
+import { getErrorMessage } from "@/lib/utils";
+import { authService } from "@/services/auth";
+import { ApiErrorResponse } from "@/services/api/client";
+import { CheckCircleIcon, XCircleIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 
 function VerifyEmailForm() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const [verifying, setVerifying] = useState(true)
-  const [verified, setVerified] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [email, setEmail] = useState<string | null>(null)
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [verifying, setVerifying] = useState(true);
+  const [verified, setVerified] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    const token = searchParams.get('token')
+    const token = searchParams.get("token");
 
     if (!token) {
-      setError('No verification token provided. Please check your email for the verification link.')
-      setVerifying(false)
-      return
+      setError(
+        "No verification token provided. Please check your email for the verification link.",
+      );
+      setVerifying(false);
+      return;
     }
 
     const verifyEmail = async () => {
       try {
-        const response = await authService.verifyEmail(token)
+        const response = await authService.verifyEmail(token);
         if (response.verified) {
-          setVerified(true)
-          setEmail(response.email)
+          setVerified(true);
+          setEmail(response.email);
 
           // Redirect to login after 3 seconds
           setTimeout(() => {
-            router.push(ROUTES.LOGIN)
-          }, 3000)
+            router.push(ROUTES.LOGIN);
+          }, 3000);
         } else {
-          setError(response.message || 'Email verification failed. Please try again.')
+          setError(response.message || "Email verification failed. Please try again.");
         }
       } catch (error) {
         if (error instanceof ApiErrorResponse) {
-          const detail = error.data.detail
-          if (typeof detail === 'string') {
-            setError(detail)
+          const detail = error.data.detail;
+          if (typeof detail === "string") {
+            setError(detail);
           } else {
-            setError('Invalid or expired verification token. Please request a new verification link.')
+            setError(
+              "Invalid or expired verification token. Please request a new verification link.",
+            );
           }
         } else {
-          setError(getErrorMessage(error, 'Failed to verify email. Please try again.'))
+          setError(getErrorMessage(error, "Failed to verify email. Please try again."));
         }
       } finally {
-        setVerifying(false)
+        setVerifying(false);
       }
-    }
+    };
 
-    verifyEmail()
-  }, [searchParams, router])
+    verifyEmail();
+  }, [searchParams, router]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -102,10 +106,13 @@ function VerifyEmailForm() {
               <div className="inline-flex items-center justify-center w-16 h-16 bg-green-100 rounded-full mb-4">
                 <CheckCircleIcon className="w-10 h-10 text-green-600" />
               </div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">Email Verified Successfully!</h2>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">
+                Email Verified Successfully!
+              </h2>
               {email && (
                 <p className="text-sm text-gray-600 mb-4">
-                  Your email <span className="font-medium text-gray-900">{email}</span> has been verified.
+                  Your email <span className="font-medium text-gray-900">{email}</span> has been
+                  verified.
                 </p>
               )}
               <p className="text-sm text-gray-600 mb-6">
@@ -136,7 +143,8 @@ function VerifyEmailForm() {
                   Go to Login
                 </Link>
                 <p className="text-xs text-gray-500">
-                  If you need a new verification link, please complete your profile again or contact support.
+                  If you need a new verification link, please complete your profile again or contact
+                  support.
                 </p>
               </div>
             </div>
@@ -144,18 +152,19 @@ function VerifyEmailForm() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="w-12 h-12 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      }
+    >
       <VerifyEmailForm />
     </Suspense>
-  )
+  );
 }
-

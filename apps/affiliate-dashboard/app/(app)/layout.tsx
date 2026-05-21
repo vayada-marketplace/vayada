@@ -1,4 +1,4 @@
-import SWRProvider from '@/components/SWRProvider'
+import SWRProvider from "@/components/SWRProvider";
 
 /**
  * Authentication is gated server-side by middleware.ts (cookie
@@ -6,10 +6,6 @@ import SWRProvider from '@/components/SWRProvider'
  * This layout no longer needs a client-side check or the loading flash
  * that came with it.
  */
-export default function AppLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return <SWRProvider>{children}</SWRProvider>
+export default function AppLayout({ children }: { children: React.ReactNode }) {
+  return <SWRProvider>{children}</SWRProvider>;
 }

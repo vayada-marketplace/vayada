@@ -1,58 +1,57 @@
-'use client'
+"use client";
 
 import {
   ChatBubbleOvalLeftEllipsisIcon,
   CheckCircleIcon,
   ArrowPathIcon,
   ExclamationCircleIcon,
-} from '@heroicons/react/24/outline'
+} from "@heroicons/react/24/outline";
 
 interface SystemMessageProps {
-  content: string
+  content: string;
 }
 
 export function SystemMessage({ content }: SystemMessageProps) {
   const isNegotiation =
-    content.toLowerCase().includes('counter-offer') ||
-    content.toLowerCase().includes('suggested')
+    content.toLowerCase().includes("counter-offer") || content.toLowerCase().includes("suggested");
   const isSuccess =
-    content.toLowerCase().includes('completed') ||
-    content.toLowerCase().includes('accepted') ||
-    content.toLowerCase().includes('agreed')
-  const isIncomplete = content.toLowerCase().includes('incomplete')
+    content.toLowerCase().includes("completed") ||
+    content.toLowerCase().includes("accepted") ||
+    content.toLowerCase().includes("agreed");
+  const isIncomplete = content.toLowerCase().includes("incomplete");
 
   // Split content if it has structured data (header: detail1 • detail2)
-  let header = content
-  let subtext: string[] = []
+  let header = content;
+  let subtext: string[] = [];
 
-  if (content.includes(':')) {
-    const parts = content.split(':')
-    header = parts[0].trim()
-    const details = parts.slice(1).join(':').trim()
+  if (content.includes(":")) {
+    const parts = content.split(":");
+    header = parts[0].trim();
+    const details = parts.slice(1).join(":").trim();
     if (details) {
       subtext = details
-        .split('•')
+        .split("•")
         .map((s) => s.trim())
-        .filter(Boolean)
+        .filter(Boolean);
     }
   }
 
-  let bgColor = 'bg-gray-100/50 text-gray-500 border-gray-200'
-  let Icon = ChatBubbleOvalLeftEllipsisIcon
-  let iconColor = 'text-gray-400'
+  let bgColor = "bg-gray-100/50 text-gray-500 border-gray-200";
+  let Icon = ChatBubbleOvalLeftEllipsisIcon;
+  let iconColor = "text-gray-400";
 
   if (isNegotiation) {
-    bgColor = 'bg-blue-50/50 text-blue-700 border-blue-100'
-    iconColor = 'text-blue-500'
-    Icon = ArrowPathIcon
+    bgColor = "bg-blue-50/50 text-blue-700 border-blue-100";
+    iconColor = "text-blue-500";
+    Icon = ArrowPathIcon;
   } else if (isSuccess) {
-    bgColor = 'bg-emerald-50/50 text-emerald-700 border-emerald-100'
-    iconColor = 'text-emerald-500'
-    Icon = CheckCircleIcon
+    bgColor = "bg-emerald-50/50 text-emerald-700 border-emerald-100";
+    iconColor = "text-emerald-500";
+    Icon = CheckCircleIcon;
   } else if (isIncomplete) {
-    bgColor = 'bg-amber-50/50 text-amber-700 border-amber-100'
-    iconColor = 'text-amber-500'
-    Icon = ExclamationCircleIcon
+    bgColor = "bg-amber-50/50 text-amber-700 border-amber-100";
+    iconColor = "text-amber-500";
+    Icon = ExclamationCircleIcon;
   }
 
   // If it has subtext or is a negotiation, render as a structured box
@@ -64,7 +63,7 @@ export function SystemMessage({ content }: SystemMessageProps) {
         >
           <div className="flex items-start gap-4">
             <div
-              className={`w-9 h-9 rounded-xl ${bgColor.split(' ')[0]} border border-white/50 flex items-center justify-center flex-shrink-0 shadow-sm`}
+              className={`w-9 h-9 rounded-xl ${bgColor.split(" ")[0]} border border-white/50 flex items-center justify-center flex-shrink-0 shadow-sm`}
             >
               <Icon className={`w-5 h-5 ${iconColor}`} />
             </div>
@@ -80,7 +79,7 @@ export function SystemMessage({ content }: SystemMessageProps) {
                       className="text-[13px] font-bold leading-tight flex items-start gap-2 text-gray-900"
                     >
                       <div
-                        className={`w-1.5 h-1.5 rounded-full mt-1 ${iconColor.replace('text-', 'bg-')} opacity-40 flex-shrink-0`}
+                        className={`w-1.5 h-1.5 rounded-full mt-1 ${iconColor.replace("text-", "bg-")} opacity-40 flex-shrink-0`}
                       />
                       {s}
                     </li>
@@ -88,14 +87,14 @@ export function SystemMessage({ content }: SystemMessageProps) {
                 </ul>
               ) : (
                 <p className="text-[13px] font-bold leading-tight text-gray-900">
-                  {content.includes(':') ? content.split(':')[1].trim() : content}
+                  {content.includes(":") ? content.split(":")[1].trim() : content}
                 </p>
               )}
             </div>
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -107,5 +106,5 @@ export function SystemMessage({ content }: SystemMessageProps) {
         <span className="text-xs font-bold">{content}</span>
       </div>
     </div>
-  )
+  );
 }

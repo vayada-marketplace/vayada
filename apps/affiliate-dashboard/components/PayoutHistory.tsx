@@ -1,33 +1,37 @@
-'use client'
+"use client";
 
-import useSWR from 'swr'
-import { CheckCircleIcon } from '@heroicons/react/24/solid'
-import DataState from '@/components/DataState'
-import type { PayoutsResponse } from '@/services/types'
+import useSWR from "swr";
+import { CheckCircleIcon } from "@heroicons/react/24/solid";
+import DataState from "@/components/DataState";
+import type { PayoutsResponse } from "@/services/types";
 
 const METHOD_LABELS: Record<string, string> = {
-  bank: 'Bank Transfer',
-  paypal: 'PayPal',
-  stripe: 'Stripe',
-  xendit: 'Xendit',
-  manual: 'Manual',
-}
+  bank: "Bank Transfer",
+  paypal: "PayPal",
+  stripe: "Stripe",
+  xendit: "Xendit",
+  manual: "Manual",
+};
 
 function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatAmount(amount: number, currency: string): string {
   try {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
   } catch {
-    return `${currency} ${amount.toLocaleString()}`
+    return `${currency} ${amount.toLocaleString()}`;
   }
 }
 
 export default function PayoutHistory() {
-  const { data, error } = useSWR<PayoutsResponse>('/affiliate/payouts')
+  const { data, error } = useSWR<PayoutsResponse>("/affiliate/payouts");
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -55,7 +59,8 @@ export default function PayoutHistory() {
                       {formatAmount(payout.amount, payout.currency)}
                     </p>
                     <p className="text-xs text-muted">
-                      {formatDate(payout.date)} &middot; {METHOD_LABELS[payout.method] || payout.method}
+                      {formatDate(payout.date)} &middot;{" "}
+                      {METHOD_LABELS[payout.method] || payout.method}
                     </p>
                   </div>
                 </div>
@@ -68,5 +73,5 @@ export default function PayoutHistory() {
         )}
       </DataState>
     </div>
-  )
+  );
 }

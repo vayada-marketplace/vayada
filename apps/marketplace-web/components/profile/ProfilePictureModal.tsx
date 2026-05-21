@@ -1,18 +1,18 @@
-'use client'
+"use client";
 
-import { useRef } from 'react'
-import { XMarkIcon, PencilIcon, TrashIcon } from '@heroicons/react/24/outline'
-import { Button } from '@/components/ui'
+import { useRef } from "react";
+import { XMarkIcon, PencilIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { Button } from "@/components/ui";
 
 interface ProfilePictureModalProps {
-  isOpen: boolean
-  onClose: () => void
-  title: string
-  name: string
-  picture?: string
-  onChangePicture: (file: File, preview: string) => void
-  onDeletePicture: () => void
-  showDeleteButton?: boolean
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  name: string;
+  picture?: string;
+  onChangePicture: (file: File, preview: string) => void;
+  onDeletePicture: () => void;
+  showDeleteButton?: boolean;
 }
 
 export function ProfilePictureModal({
@@ -25,39 +25,39 @@ export function ProfilePictureModal({
   onDeletePicture,
   showDeleteButton = true,
 }: ProfilePictureModalProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert('Please select an image file')
-      return
+    if (!file.type.startsWith("image/")) {
+      alert("Please select an image file");
+      return;
     }
 
     if (file.size > 20 * 1024 * 1024) {
-      alert('Image must be less than 20MB')
-      return
+      alert("Image must be less than 20MB");
+      return;
     }
 
-    const reader = new FileReader()
+    const reader = new FileReader();
     reader.onloadend = () => {
-      const result = reader.result as string
-      onChangePicture(file, result)
-    }
-    reader.readAsDataURL(file)
-  }
+      const result = reader.result as string;
+      onChangePicture(file, result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleDelete = () => {
-    onDeletePicture()
+    onDeletePicture();
     if (fileInputRef.current) {
-      fileInputRef.current.value = ''
+      fileInputRef.current.value = "";
     }
-    onClose()
-  }
+    onClose();
+  };
 
   return (
     <div
@@ -71,10 +71,7 @@ export function ProfilePictureModal({
         {/* Modal Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <h3 className="text-xl font-bold text-gray-900">{title}</h3>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          >
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
             <XMarkIcon className="w-6 h-6 text-gray-600" />
           </button>
         </div>
@@ -83,20 +80,20 @@ export function ProfilePictureModal({
         <div className="p-6 space-y-6">
           {/* Large Picture Preview */}
           <div className="flex justify-center">
-            {picture && picture.trim() !== '' ? (
+            {picture && picture.trim() !== "" ? (
               <img
                 src={picture}
                 alt={name}
                 className="w-64 h-64 rounded-2xl object-cover border-4 border-gray-100 shadow-lg"
                 onError={(e) => {
-                  const target = e.target as HTMLImageElement
-                  target.style.display = 'none'
-                  const fallback = target.nextElementSibling as HTMLElement
-                  if (fallback) fallback.style.display = 'flex'
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = "none";
+                  const fallback = target.nextElementSibling as HTMLElement;
+                  if (fallback) fallback.style.display = "flex";
                 }}
               />
             ) : null}
-            {(!picture || picture.trim() === '') && (
+            {(!picture || picture.trim() === "") && (
               <div className="w-64 h-64 rounded-2xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-bold text-8xl shadow-lg border-4 border-gray-100">
                 {name.charAt(0)}
               </div>
@@ -112,10 +109,7 @@ export function ProfilePictureModal({
               className="hidden"
               onChange={handleFileChange}
             />
-            <Button
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-            >
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
               <PencilIcon className="w-5 h-5 mr-2" />
               Change Picture
             </Button>
@@ -133,5 +127,5 @@ export function ProfilePictureModal({
         </div>
       </div>
     </div>
-  )
+  );
 }

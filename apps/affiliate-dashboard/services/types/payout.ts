@@ -4,16 +4,16 @@
  * the actual JSON, including fields like bookingCount and reference.
  */
 export interface Payout {
-  id: string
-  date: string
-  amount: number
-  currency: string
-  method: string
-  reference: string | null
-  bookingCount: number
-  status: string
+  id: string;
+  date: string;
+  amount: number;
+  currency: string;
+  method: string;
+  reference: string | null;
+  bookingCount: number;
+  status: string;
 }
 
 export interface PayoutsResponse {
-  payouts: Payout[]
+  payouts: Payout[];
 }

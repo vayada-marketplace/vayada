@@ -1,96 +1,85 @@
-'use client'
+"use client";
 
-import { Suspense, useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import {
-  ArrowRightIcon,
-  BuildingOffice2Icon,
-  UserGroupIcon,
-} from '@heroicons/react/24/outline'
-import {
-  ROUTES,
-  PRODUCT_LOGIN_URLS,
-  STORAGE_KEYS,
-  type ProductKey,
-} from '@/lib/constants'
-import { Navigation } from '@/components/layout'
-import { LandingFooter } from '@/components/landing'
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowRightIcon, BuildingOffice2Icon, UserGroupIcon } from "@heroicons/react/24/outline";
+import { ROUTES, PRODUCT_LOGIN_URLS, STORAGE_KEYS, type ProductKey } from "@/lib/constants";
+import { Navigation } from "@/components/layout";
+import { LandingFooter } from "@/components/landing";
 
 interface ProductCard {
-  key: ProductKey
-  title: string
-  description: string
-  tags: string[]
-  icon: typeof BuildingOffice2Icon
+  key: ProductKey;
+  title: string;
+  description: string;
+  tags: string[];
+  icon: typeof BuildingOffice2Icon;
 }
 
 const PRODUCTS: ProductCard[] = [
   {
-    key: 'PMS',
-    title: 'PMS & booking engine',
-    description:
-      'Manage your property, reservations, rates, and direct bookings.',
-    tags: ['Calendar', 'Reservations', 'Rates'],
+    key: "PMS",
+    title: "PMS & booking engine",
+    description: "Manage your property, reservations, rates, and direct bookings.",
+    tags: ["Calendar", "Reservations", "Rates"],
     icon: BuildingOffice2Icon,
   },
   {
-    key: 'HOTEL_CREATOR_NETWORK',
-    title: 'Hotel creator network',
-    description:
-      'Access the marketplace, creator tools, and your partner dashboard.',
-    tags: ['Marketplace', 'Creator tools'],
+    key: "HOTEL_CREATOR_NETWORK",
+    title: "Hotel creator network",
+    description: "Access the marketplace, creator tools, and your partner dashboard.",
+    tags: ["Marketplace", "Creator tools"],
     icon: UserGroupIcon,
   },
-]
+];
 
 function ChooseProductContent() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
+  const router = useRouter();
+  const searchParams = useSearchParams();
   // Keep the chooser hidden until we've decided whether to auto-skip, so a
   // returning user with a remembered product never sees the cards flash.
-  const [ready, setReady] = useState(false)
+  const [ready, setReady] = useState(false);
 
   const goToProduct = (key: ProductKey) => {
-    if (key === 'PMS') {
+    if (key === "PMS") {
       // External product on its own domain — full navigation.
-      window.location.href = PRODUCT_LOGIN_URLS.PMS
+      window.location.href = PRODUCT_LOGIN_URLS.PMS;
     } else {
-      router.push(PRODUCT_LOGIN_URLS.HOTEL_CREATOR_NETWORK)
+      router.push(PRODUCT_LOGIN_URLS.HOTEL_CREATOR_NETWORK);
     }
-  }
+  };
 
   const selectProduct = (key: ProductKey) => {
     try {
-      localStorage.setItem(STORAGE_KEYS.LAST_PRODUCT, key)
+      localStorage.setItem(STORAGE_KEYS.LAST_PRODUCT, key);
     } catch {
       // localStorage can be unavailable (private mode); ignore and continue.
     }
-    goToProduct(key)
-  }
+    goToProduct(key);
+  };
 
   useEffect(() => {
     // `?choose=1` always shows the chooser (escape hatch from the remembered
     // product, e.g. the "Choose a different product" link on a login page).
-    if (searchParams.get('choose') === '1') {
-      setReady(true)
-      return
+    if (searchParams.get("choose") === "1") {
+      setReady(true);
+      return;
     }
 
-    let remembered: string | null = null
+    let remembered: string | null = null;
     try {
-      remembered = localStorage.getItem(STORAGE_KEYS.LAST_PRODUCT)
+      remembered = localStorage.getItem(STORAGE_KEYS.LAST_PRODUCT);
     } catch {
-      remembered = null
+      remembered = null;
     }
 
-    if (remembered === 'PMS' || remembered === 'HOTEL_CREATOR_NETWORK') {
-      goToProduct(remembered)
-      return
+    if (remembered === "PMS" || remembered === "HOTEL_CREATOR_NETWORK") {
+      goToProduct(remembered);
+      return;
     }
 
-    setReady(true)
+    setReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+  }, [searchParams]);
 
   return (
     <main className="min-h-screen bg-white text-ink">
@@ -106,9 +95,7 @@ function ChooseProductContent() {
         ) : (
           <div className="w-full max-w-4xl">
             <div className="text-center">
-              <h1 className="font-display text-3xl font-semibold sm:text-4xl">
-                Welcome to vayada
-              </h1>
+              <h1 className="font-display text-3xl font-semibold sm:text-4xl">Welcome to vayada</h1>
               <p className="mt-3 text-base text-gray-500 sm:text-lg">
                 Which product would you like to sign in to?
               </p>
@@ -116,7 +103,7 @@ function ChooseProductContent() {
 
             <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
               {PRODUCTS.map((product) => {
-                const Icon = product.icon
+                const Icon = product.icon;
                 return (
                   <button
                     key={product.key}
@@ -127,12 +114,8 @@ function ChooseProductContent() {
                     <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary-50 text-primary-600">
                       <Icon className="h-6 w-6" />
                     </span>
-                    <h2 className="mt-5 text-xl font-semibold">
-                      {product.title}
-                    </h2>
-                    <p className="mt-2 text-sm text-gray-500">
-                      {product.description}
-                    </p>
+                    <h2 className="mt-5 text-xl font-semibold">{product.title}</h2>
+                    <p className="mt-2 text-sm text-gray-500">{product.description}</p>
                     <div className="mt-4 flex flex-wrap gap-2">
                       {product.tags.map((tag) => (
                         <span
@@ -148,12 +131,12 @@ function ChooseProductContent() {
                       <ArrowRightIcon className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                     </span>
                   </button>
-                )
+                );
               })}
             </div>
 
             <p className="mt-10 text-center text-sm text-gray-500">
-              Not sure which one?{' '}
+              Not sure which one?{" "}
               <a
                 href={ROUTES.HOME}
                 className="font-semibold text-primary-600 hover:text-primary-700"
@@ -167,7 +150,7 @@ function ChooseProductContent() {
 
       <LandingFooter />
     </main>
-  )
+  );
 }
 
 export default function ChooseProductPage() {
@@ -175,5 +158,5 @@ export default function ChooseProductPage() {
     <Suspense fallback={<main className="min-h-screen bg-white text-ink" />}>
       <ChooseProductContent />
     </Suspense>
-  )
+  );
 }

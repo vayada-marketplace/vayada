@@ -1,25 +1,33 @@
-'use client'
+"use client";
 
-import { LinkIcon, InformationCircleIcon } from '@heroicons/react/24/outline'
-import { PLATFORM_OPTIONS } from '@/lib/constants'
-import type { PlatformFormData } from '@/lib/types'
-import { PlatformCard } from './PlatformCard'
+import { LinkIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import { PLATFORM_OPTIONS } from "@/lib/constants";
+import type { PlatformFormData } from "@/lib/types";
+import { PlatformCard } from "./PlatformCard";
 
 interface CreatorPlatformsStepProps {
-  platforms: PlatformFormData[]
-  expandedPlatforms: Set<number>
-  platformCountryInputs: Record<number, string>
-  onAddPlatform: (name: string) => void
-  onRemovePlatform: (index: number) => void
-  onUpdatePlatform: (index: number, field: keyof PlatformFormData, value: PlatformFormData[keyof PlatformFormData]) => void
-  onTogglePlatformExpanded: (index: number) => void
-  onCountryInputChange: (platformIndex: number, value: string) => void
-  onAddCountry: (platformIndex: number, country?: string) => void
-  onRemoveCountry: (platformIndex: number, countryIndex: number) => void
-  onUpdateCountryPercentage: (platformIndex: number, countryIndex: number, percentage: number) => void
-  onToggleAgeGroup: (platformIndex: number, ageRange: string) => void
-  onUpdateGenderSplit: (platformIndex: number, field: 'male' | 'female', value: string) => void
-  getAvailableCountries: (platformIndex: number) => string[]
+  platforms: PlatformFormData[];
+  expandedPlatforms: Set<number>;
+  platformCountryInputs: Record<number, string>;
+  onAddPlatform: (name: string) => void;
+  onRemovePlatform: (index: number) => void;
+  onUpdatePlatform: (
+    index: number,
+    field: keyof PlatformFormData,
+    value: PlatformFormData[keyof PlatformFormData],
+  ) => void;
+  onTogglePlatformExpanded: (index: number) => void;
+  onCountryInputChange: (platformIndex: number, value: string) => void;
+  onAddCountry: (platformIndex: number, country?: string) => void;
+  onRemoveCountry: (platformIndex: number, countryIndex: number) => void;
+  onUpdateCountryPercentage: (
+    platformIndex: number,
+    countryIndex: number,
+    percentage: number,
+  ) => void;
+  onToggleAgeGroup: (platformIndex: number, ageRange: string) => void;
+  onUpdateGenderSplit: (platformIndex: number, field: "male" | "female", value: string) => void;
+  getAvailableCountries: (platformIndex: number) => string[];
 }
 
 export function CreatorPlatformsStep({
@@ -54,7 +62,8 @@ export function CreatorPlatformsStep({
         </div>
 
         <p className="text-sm text-gray-700">
-          Add at least one platform with audience demographics to help match you with the right properties.
+          Add at least one platform with audience demographics to help match you with the right
+          properties.
         </p>
 
         {/* Platform Cards Grid */}
@@ -93,10 +102,11 @@ export function CreatorPlatformsStep({
         <div className="mt-6 flex items-center gap-3 rounded-2xl bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-700">
           <InformationCircleIcon className="w-5 h-5 text-primary-600" />
           <p className="leading-snug">
-            All data should be verifiable via platform insights (e.g., Instagram Insights, YouTube Analytics).
+            All data should be verifiable via platform insights (e.g., Instagram Insights, YouTube
+            Analytics).
           </p>
         </div>
       </div>
     </div>
-  )
+  );
 }

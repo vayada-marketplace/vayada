@@ -1,6 +1,6 @@
-import Image from 'next/image'
-import Link from 'next/link'
-import { Metadata } from 'next'
+import Image from "next/image";
+import Link from "next/link";
+import { Metadata } from "next";
 import {
   ArrowRightIcon,
   ChartBarIcon,
@@ -9,84 +9,80 @@ import {
   ShoppingCartIcon,
   SparklesIcon,
   UserGroupIcon,
-} from '@heroicons/react/24/outline'
-import { Navigation } from '@/components/layout'
-import { FinalCTA, LandingFooter } from '@/components/landing'
+} from "@heroicons/react/24/outline";
+import { Navigation } from "@/components/layout";
+import { FinalCTA, LandingFooter } from "@/components/landing";
 
 export const metadata: Metadata = {
-  title: 'Booking Engine - vayada',
+  title: "Booking Engine - vayada",
   description:
     "vayada's Booking Engine helps independent hotels convert more direct demand, own more guest data, and increase revenue per stay.",
-}
+};
 
-const HERO_BULLETS = [
-  'More direct bookings',
-  'More owned guest data',
-  'More revenue per stay',
-]
+const HERO_BULLETS = ["More direct bookings", "More owned guest data", "More revenue per stay"];
 
 const FEATURES = [
   {
-    title: 'Fully customizable',
+    title: "Fully customizable",
     body: "Customize your booking engine's look to match your brand. Starting from the domain and hero image to font, colors, text, and booking flow.",
     image: {
-      src: '/be-customizable.png',
-      alt: 'Customizable Vayada booking engine brand settings',
+      src: "/be-customizable.png",
+      alt: "Customizable Vayada booking engine brand settings",
       width: 1920,
       height: 1200,
     },
   },
   {
-    title: 'Refer a Guest',
-    body: 'Turn guests and creators into promoters with trackable referral links that drive more direct bookings and reward successful recommendations.',
+    title: "Refer a Guest",
+    body: "Turn guests and creators into promoters with trackable referral links that drive more direct bookings and reward successful recommendations.",
     image: {
-      src: '/be-referaguest.png',
-      alt: 'Refer a Guest flow in the Vayada booking engine',
+      src: "/be-referaguest.png",
+      alt: "Refer a Guest flow in the Vayada booking engine",
       width: 1920,
       height: 1197,
     },
     reverse: true,
   },
   {
-    title: 'Upsell services, experiences & transportation',
-    body: 'Offer your own add-ons directly in the booking journey, from breakfast and airport transfers to wellness and local experiences.',
+    title: "Upsell services, experiences & transportation",
+    body: "Offer your own add-ons directly in the booking journey, from breakfast and airport transfers to wellness and local experiences.",
     image: {
-      src: '/be-upselling.png',
-      alt: 'Upsell services and transportation during direct booking',
+      src: "/be-upselling.png",
+      alt: "Upsell services and transportation during direct booking",
       width: 1920,
       height: 1084,
     },
   },
-]
+];
 
 const OUTCOMES = [
   {
-    title: 'Stronger direct channel',
-    body: 'Increase demand on your website and reduce reliance on third-party OTAs.',
+    title: "Stronger direct channel",
+    body: "Increase demand on your website and reduce reliance on third-party OTAs.",
     Icon: CursorArrowRaysIcon,
   },
   {
-    title: 'Lower OTA dependency',
-    body: 'Reduce commissions and increase profitability with every direct booking.',
+    title: "Lower OTA dependency",
+    body: "Reduce commissions and increase profitability with every direct booking.",
     Icon: ChartBarIcon,
   },
   {
-    title: 'Better guest relationships',
-    body: 'Own your guest data to personalize stays and drive repeat bookings.',
+    title: "Better guest relationships",
+    body: "Own your guest data to personalize stays and drive repeat bookings.",
     Icon: UserGroupIcon,
   },
   {
-    title: 'Higher basket size',
-    body: 'Increase revenue per stay with add-ons, upgrades and experiences.',
+    title: "Higher basket size",
+    body: "Increase revenue per stay with add-ons, upgrades and experiences.",
     Icon: ShoppingCartIcon,
   },
-]
+];
 
 const AI_BULLETS = [
-  'Live competitor pricing',
-  'Auto-raise rates on occupancy',
-  'Abandonment recovery',
-]
+  "Live competitor pricing",
+  "Auto-raise rates on occupancy",
+  "Abandonment recovery",
+];
 
 function CheckBullet({ children }: { children: string }) {
   return (
@@ -96,7 +92,7 @@ function CheckBullet({ children }: { children: string }) {
       </span>
       <span className="text-gray-700">{children}</span>
     </li>
-  )
+  );
 }
 
 export default function BookingEnginePage() {
@@ -120,9 +116,8 @@ export default function BookingEnginePage() {
                 The booking engine built for independent hospitality
               </h1>
               <p className="mt-6 max-w-xl text-lg text-gray-500">
-                vayada&apos;s Booking Engine helps independent hotels convert
-                more direct demand, own more guest data, and increase their
-                revenue.
+                vayada&apos;s Booking Engine helps independent hotels convert more direct demand,
+                own more guest data, and increase their revenue.
               </p>
               <ul className="mt-8 space-y-3">
                 {HERO_BULLETS.map((bullet) => (
@@ -174,7 +169,7 @@ export default function BookingEnginePage() {
                 key={feature.title}
                 className="grid items-center gap-10 overflow-hidden rounded-3xl border border-border bg-[#f7f8fc]/70 p-8 md:grid-cols-2 md:p-12"
               >
-                <div className={feature.reverse ? 'md:order-2' : ''}>
+                <div className={feature.reverse ? "md:order-2" : ""}>
                   <div className="overflow-hidden rounded-2xl border border-border-strong bg-white shadow-soft">
                     <Image
                       src={feature.image.src}
@@ -185,7 +180,7 @@ export default function BookingEnginePage() {
                     />
                   </div>
                 </div>
-                <div className={feature.reverse ? 'md:order-1' : ''}>
+                <div className={feature.reverse ? "md:order-1" : ""}>
                   <div className="flex items-center gap-3">
                     <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary-500 font-display text-sm font-semibold text-white">
                       {index + 1}
@@ -194,9 +189,7 @@ export default function BookingEnginePage() {
                       {feature.title}
                     </h3>
                   </div>
-                  <p className="mt-5 text-base leading-relaxed text-gray-500">
-                    {feature.body}
-                  </p>
+                  <p className="mt-5 text-base leading-relaxed text-gray-500">{feature.body}</p>
                 </div>
               </div>
             ))}
@@ -216,9 +209,7 @@ export default function BookingEnginePage() {
                   <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-white text-primary-500 shadow-soft">
                     <Icon className="h-6 w-6" />
                   </div>
-                  <div className="mt-4 font-display text-base font-semibold text-ink">
-                    {title}
-                  </div>
+                  <div className="mt-4 font-display text-base font-semibold text-ink">{title}</div>
                   <p className="mt-2 text-sm text-gray-500">{body}</p>
                 </div>
               ))}
@@ -244,8 +235,8 @@ export default function BookingEnginePage() {
                 Ask anything. Automate everything.
               </h3>
               <p className="mt-4 text-base leading-relaxed text-gray-500">
-                Natural-language access to demand, performance, competitors and
-                guests with automations that execute the playbook.
+                Natural-language access to demand, performance, competitors and guests with
+                automations that execute the playbook.
               </p>
               <ul className="mt-6 space-y-2">
                 {AI_BULLETS.map((bullet) => (
@@ -261,9 +252,9 @@ export default function BookingEnginePage() {
                 </div>
                 <div className="mt-4 space-y-2.5">
                   {[
-                    'Why did my direct share drop?',
-                    'Compare my pricing to competitors',
-                    'Any events near me in 60 days?',
+                    "Why did my direct share drop?",
+                    "Compare my pricing to competitors",
+                    "Any events near me in 60 days?",
                   ].map((prompt) => (
                     <div
                       key={prompt}
@@ -279,8 +270,7 @@ export default function BookingEnginePage() {
                     Recommendation
                   </div>
                   <div className="mt-1 text-gray-700">
-                    Raise weekend rates +12% because local event demand is
-                    increasing.
+                    Raise weekend rates +12% because local event demand is increasing.
                   </div>
                 </div>
               </div>
@@ -292,5 +282,5 @@ export default function BookingEnginePage() {
       <FinalCTA />
       <LandingFooter />
     </main>
-  )
+  );
 }

@@ -1,10 +1,10 @@
-import { settingsService, type SetupStatusResponse } from '@/services/settings'
+import { settingsService, type SetupStatusResponse } from "@/services/settings";
 
 export async function checkSetupStatus(): Promise<SetupStatusResponse | null> {
   try {
-    return await settingsService.getSetupStatus()
+    return await settingsService.getSetupStatus();
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -17,9 +17,9 @@ export async function checkSetupStatus(): Promise<SetupStatusResponse | null> {
 // setup wizard's prefill logic.
 export async function isSetupComplete(): Promise<boolean> {
   try {
-    const hotels = await settingsService.listHotels()
-    return hotels.length > 0
+    const hotels = await settingsService.listHotels();
+    return hotels.length > 0;
   } catch {
-    return false
+    return false;
   }
 }

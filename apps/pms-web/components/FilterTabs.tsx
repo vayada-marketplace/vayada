@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
 interface Tab {
-  label: string
-  value: string
+  label: string;
+  value: string;
 }
 
 interface FilterTabsProps {
-  tabs: Tab[]
-  activeValue: string
-  onChange: (value: string) => void
+  tabs: Tab[];
+  activeValue: string;
+  onChange: (value: string) => void;
 }
 
 export default function FilterTabs({ tabs, activeValue, onChange }: FilterTabsProps) {
@@ -20,13 +20,13 @@ export default function FilterTabs({ tabs, activeValue, onChange }: FilterTabsPr
           onClick={() => onChange(tab.value)}
           className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
             activeValue === tab.value
-              ? 'bg-white text-gray-900 shadow-sm'
-              : 'text-gray-600 hover:text-gray-900'
+              ? "bg-white text-gray-900 shadow-sm"
+              : "text-gray-600 hover:text-gray-900"
           }`}
         >
           {tab.label}
         </button>
       ))}
     </div>
-  )
+  );
 }

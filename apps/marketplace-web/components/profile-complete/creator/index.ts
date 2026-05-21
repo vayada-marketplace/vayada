@@ -1,6 +1,6 @@
-export { PlatformDemographics } from './PlatformDemographics'
-export { PlatformCard } from './PlatformCard'
-export { CreatorTypeStep } from './CreatorTypeStep'
-export { CreatorBasicInfoStep } from './CreatorBasicInfoStep'
-export { CreatorPlatformsStep } from './CreatorPlatformsStep'
-export { CreatorProfileForm } from './CreatorProfileForm'
+export { PlatformDemographics } from "./PlatformDemographics";
+export { PlatformCard } from "./PlatformCard";
+export { CreatorTypeStep } from "./CreatorTypeStep";
+export { CreatorBasicInfoStep } from "./CreatorBasicInfoStep";
+export { CreatorPlatformsStep } from "./CreatorPlatformsStep";
+export { CreatorProfileForm } from "./CreatorProfileForm";

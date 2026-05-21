@@ -1,16 +1,16 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { CheckIcon, XMarkIcon, MapPinIcon } from '@heroicons/react/24/outline'
-import { PlatformIcon } from '@/components/ui/icons'
-import type { PendingRequest, PlatformInfo } from './types'
+import { useState } from "react";
+import { CheckIcon, XMarkIcon, MapPinIcon } from "@heroicons/react/24/outline";
+import { PlatformIcon } from "@/components/ui/icons";
+import type { PendingRequest, PlatformInfo } from "./types";
 
 interface PendingApplicationsListProps {
-  requests: PendingRequest[]
-  userType: string | null
-  onViewDetails: (id: string) => void
-  onAccept: (id: string) => void
-  onDecline: (id: string) => void
+  requests: PendingRequest[];
+  userType: string | null;
+  onViewDetails: (id: string) => void;
+  onAccept: (id: string) => void;
+  onDecline: (id: string) => void;
 }
 
 export function PendingApplicationsList({
@@ -20,13 +20,13 @@ export function PendingApplicationsList({
   onAccept,
   onDecline,
 }: PendingApplicationsListProps) {
-  const [applicationsTab, setApplicationsTab] = useState<'received' | 'sent'>('received')
+  const [applicationsTab, setApplicationsTab] = useState<"received" | "sent">("received");
 
-  const receivedCount = requests.filter((r) => r.isReceived).length
-  const sentCount = requests.filter((r) => !r.isReceived).length
+  const receivedCount = requests.filter((r) => r.isReceived).length;
+  const sentCount = requests.filter((r) => !r.isReceived).length;
   const filteredRequests = requests.filter((r) =>
-    applicationsTab === 'received' ? r.isReceived : !r.isReceived
-  )
+    applicationsTab === "received" ? r.isReceived : !r.isReceived,
+  );
 
   return (
     <div className="border-b-4 border-gray-50">
@@ -45,34 +45,34 @@ export function PendingApplicationsList({
       {/* Sub-tabs for Received/Sent */}
       <div className="px-3 py-2 bg-white border-b border-gray-100 flex gap-2">
         <button
-          onClick={() => setApplicationsTab('received')}
+          onClick={() => setApplicationsTab("received")}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-            applicationsTab === 'received'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            applicationsTab === "received"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
           }`}
         >
           Received
           <span
             className={`px-1.5 py-0.5 rounded-md text-[9px] ${
-              applicationsTab === 'received' ? 'bg-white/20' : 'bg-gray-200 text-gray-500'
+              applicationsTab === "received" ? "bg-white/20" : "bg-gray-200 text-gray-500"
             }`}
           >
             {receivedCount}
           </span>
         </button>
         <button
-          onClick={() => setApplicationsTab('sent')}
+          onClick={() => setApplicationsTab("sent")}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-            applicationsTab === 'sent'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            applicationsTab === "sent"
+              ? "bg-blue-600 text-white shadow-sm"
+              : "bg-gray-50 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
           }`}
         >
           Sent
           <span
             className={`px-1.5 py-0.5 rounded-md text-[9px] ${
-              applicationsTab === 'sent' ? 'bg-white/20' : 'bg-gray-200 text-gray-500'
+              applicationsTab === "sent" ? "bg-white/20" : "bg-gray-200 text-gray-500"
             }`}
           >
             {sentCount}
@@ -109,7 +109,7 @@ export function PendingApplicationsList({
                     </h4>
                     <span className="text-[10px] text-gray-400">{request.time}</span>
                   </div>
-                  {userType === 'hotel' ? (
+                  {userType === "hotel" ? (
                     <div className="flex items-center gap-2 text-xs text-gray-500 font-medium leading-none">
                       <span>{request.followers}</span>
                       <span>•</span>
@@ -119,7 +119,7 @@ export function PendingApplicationsList({
                           request.platforms.map((p: PlatformInfo) => (
                             <PlatformIcon
                               key={p.name}
-                              platform={(p.name || p.platform || '').toLowerCase()}
+                              platform={(p.name || p.platform || "").toLowerCase()}
                               className="w-3 h-3 text-gray-400"
                             />
                           ))
@@ -157,8 +157,8 @@ export function PendingApplicationsList({
                         className="w-8 h-8 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors shadow-sm"
                         title="Accept"
                         onClick={(e) => {
-                          e.stopPropagation()
-                          onAccept(request.id)
+                          e.stopPropagation();
+                          onAccept(request.id);
                         }}
                       >
                         <CheckIcon className="w-5 h-5" />
@@ -167,8 +167,8 @@ export function PendingApplicationsList({
                         className="w-8 h-8 flex items-center justify-center bg-white border border-gray-200 hover:bg-gray-50 text-gray-500 rounded-xl transition-colors shadow-sm"
                         title="Decline"
                         onClick={(e) => {
-                          e.stopPropagation()
-                          onDecline(request.id)
+                          e.stopPropagation();
+                          onDecline(request.id);
                         }}
                       >
                         <XMarkIcon className="w-5 h-5" />
@@ -177,7 +177,7 @@ export function PendingApplicationsList({
                   ) : (
                     <div className="flex flex-col items-end gap-1">
                       <span className="text-[10px] font-bold text-gray-400 bg-gray-50 px-2 py-1 rounded-lg border border-gray-100 italic whitespace-nowrap">
-                        Waiting for {userType === 'hotel' ? 'Creator' : 'Hotel'} response
+                        Waiting for {userType === "hotel" ? "Creator" : "Hotel"} response
                       </span>
                     </div>
                   )}
@@ -194,5 +194,5 @@ export function PendingApplicationsList({
         )}
       </div>
     </div>
-  )
+  );
 }

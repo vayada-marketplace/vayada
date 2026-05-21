@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import PasswordInput from '@/components/auth/PasswordInput'
+import { useState } from "react";
+import PasswordInput from "@/components/auth/PasswordInput";
 
 interface LoginFormProps {
-  onSubmit: (email: string, password: string) => Promise<void>
-  isSubmitting: boolean
-  submitError: string
-  onErrorClear: () => void
-  sessionExpired?: boolean
+  onSubmit: (email: string, password: string) => Promise<void>;
+  isSubmitting: boolean;
+  submitError: string;
+  onErrorClear: () => void;
+  sessionExpired?: boolean;
 }
 
 export default function LoginForm({
@@ -18,26 +18,26 @@ export default function LoginForm({
   onErrorClear,
   sessionExpired = false,
 }: LoginFormProps) {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [emailError, setEmailError] = useState('')
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   const validateEmail = (value: string): boolean => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
-  }
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setEmailError('')
-    onErrorClear()
+    e.preventDefault();
+    setEmailError("");
+    onErrorClear();
 
     if (!validateEmail(email)) {
-      setEmailError('Please enter a valid email address')
-      return
+      setEmailError("Please enter a valid email address");
+      return;
     }
 
-    await onSubmit(email, password)
-  }
+    await onSubmit(email, password);
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -60,19 +60,17 @@ export default function LoginForm({
           name="email"
           value={email}
           onChange={(e) => {
-            setEmail(e.target.value)
-            if (emailError) setEmailError('')
+            setEmail(e.target.value);
+            if (emailError) setEmailError("");
           }}
           required
           placeholder="you@example.com"
           autoComplete="email"
           className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
-            emailError ? 'border-red-300 ring-1 ring-red-300' : 'border-gray-300'
+            emailError ? "border-red-300 ring-1 ring-red-300" : "border-gray-300"
           }`}
         />
-        {emailError && (
-          <p className="mt-1 text-sm text-red-600">{emailError}</p>
-        )}
+        {emailError && <p className="mt-1 text-sm text-red-600">{emailError}</p>}
       </div>
 
       {/* Password Field */}
@@ -104,8 +102,8 @@ export default function LoginForm({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? 'Signing In...' : 'Sign In'}
+        {isSubmitting ? "Signing In..." : "Sign In"}
       </button>
     </form>
-  )
+  );
 }

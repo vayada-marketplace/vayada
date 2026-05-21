@@ -1,66 +1,68 @@
-'use client'
+"use client";
 
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { XMarkIcon, ArrowRightIcon } from '@heroicons/react/24/outline'
-import Modal from '@/components/Modal'
-import { importService, ExtractedRoomType } from '@/services/import'
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import { XMarkIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
+import Modal from "@/components/Modal";
+import { importService, ExtractedRoomType } from "@/services/import";
 
 interface Props {
-  onClose: () => void
+  onClose: () => void;
 }
 
 export default function ListingImportModal({ onClose }: Props) {
-  const router = useRouter()
-  const [url, setUrl] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [roomTypes, setRoomTypes] = useState<ExtractedRoomType[]>([])
-  const [step, setStep] = useState<'input' | 'select'>('input')
+  const router = useRouter();
+  const [url, setUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [roomTypes, setRoomTypes] = useState<ExtractedRoomType[]>([]);
+  const [step, setStep] = useState<"input" | "select">("input");
 
   const normalizeUrl = (u: string): string => {
-    let cleaned = u.trim()
-    if (!cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
-      cleaned = 'https://www.' + cleaned
+    let cleaned = u.trim();
+    if (!cleaned.startsWith("http://") && !cleaned.startsWith("https://")) {
+      cleaned = "https://www." + cleaned;
     }
-    return cleaned
-  }
+    return cleaned;
+  };
 
   const isValidUrl = (u: string) => {
     try {
-      const host = new URL(normalizeUrl(u)).hostname
-      return host.includes('booking.com') || host.includes('airbnb')
-    } catch { return false }
-  }
+      const host = new URL(normalizeUrl(u)).hostname;
+      return host.includes("booking.com") || host.includes("airbnb");
+    } catch {
+      return false;
+    }
+  };
 
   const handleFetch = async () => {
     if (!isValidUrl(url)) {
-      setError('Please enter a valid Booking.com or Airbnb URL')
-      return
+      setError("Please enter a valid Booking.com or Airbnb URL");
+      return;
     }
-    setError('')
-    setLoading(true)
+    setError("");
+    setLoading(true);
     try {
-      const preview = await importService.preview(normalizeUrl(url))
-      setRoomTypes(preview.roomTypes)
+      const preview = await importService.preview(normalizeUrl(url));
+      setRoomTypes(preview.roomTypes);
       if (preview.roomTypes.length === 1) {
-        handleSelect(preview.roomTypes[0])
+        handleSelect(preview.roomTypes[0]);
       } else {
-        setStep('select')
+        setStep("select");
       }
     } catch (e: any) {
-      const msg = e?.response?.data?.detail || e?.message || 'Failed to fetch listing'
-      setError(typeof msg === 'string' ? msg : 'Failed to fetch listing')
+      const msg = e?.response?.data?.detail || e?.message || "Failed to fetch listing";
+      setError(typeof msg === "string" ? msg : "Failed to fetch listing");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleSelect = (rt: ExtractedRoomType) => {
-    sessionStorage.setItem('importRoomType', JSON.stringify(rt))
-    onClose()
-    router.push('/rooms/new?from=import')
-  }
+    sessionStorage.setItem("importRoomType", JSON.stringify(rt));
+    onClose();
+    router.push("/rooms/new?from=import");
+  };
 
   return (
     <Modal onClose={onClose} maxWidth="xl">
@@ -78,7 +80,7 @@ export default function ListingImportModal({ onClose }: Props) {
       )}
 
       {/* Step 1: URL Input */}
-      {step === 'input' && (
+      {step === "input" && (
         <div>
           <p className="text-sm text-gray-500 mb-4">
             Paste a Booking.com or Airbnb listing URL to automatically extract room type data.
@@ -86,10 +88,10 @@ export default function ListingImportModal({ onClose }: Props) {
           <input
             type="url"
             value={url}
-            onChange={e => setUrl(e.target.value)}
+            onChange={(e) => setUrl(e.target.value)}
             placeholder="https://www.booking.com/hotel/..."
             className="w-full px-3 py-2.5 text-sm border border-gray-200 rounded-lg bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
-            onKeyDown={e => e.key === 'Enter' && handleFetch()}
+            onKeyDown={(e) => e.key === "Enter" && handleFetch()}
             autoFocus
           />
           <button
@@ -100,13 +102,24 @@ export default function ListingImportModal({ onClose }: Props) {
             {loading ? (
               <>
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
                 </svg>
                 Extracting listing data...
               </>
             ) : (
-              'Fetch Listing'
+              "Fetch Listing"
             )}
           </button>
           {loading && (
@@ -116,7 +129,7 @@ export default function ListingImportModal({ onClose }: Props) {
       )}
 
       {/* Step 2: Select room type (only shown when multiple found) */}
-      {step === 'select' && (
+      {step === "select" && (
         <div className="space-y-3">
           <p className="text-sm text-gray-500">
             {roomTypes.length} room types found. Select one to pre-fill the room type form.
@@ -132,12 +145,18 @@ export default function ListingImportModal({ onClose }: Props) {
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold text-gray-900 truncate">{rt.name}</h3>
-                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{rt.shortDescription || rt.description}</p>
+                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">
+                    {rt.shortDescription || rt.description}
+                  </p>
                   <div className="flex items-center gap-3 mt-2 text-xs text-gray-400">
                     {rt.maxOccupancy > 0 && <span>{rt.maxOccupancy} guests</span>}
                     {rt.size > 0 && <span>{rt.size} m&sup2;</span>}
                     {rt.bedType && <span>{rt.bedType}</span>}
-                    {rt.baseRate > 0 && <span>{rt.currency} {rt.baseRate}/night</span>}
+                    {rt.baseRate > 0 && (
+                      <span>
+                        {rt.currency} {rt.baseRate}/night
+                      </span>
+                    )}
                   </div>
                 </div>
                 <ArrowRightIcon className="w-4 h-4 text-gray-300 group-hover:text-primary-500 shrink-0 ml-3 transition-colors" />
@@ -146,7 +165,10 @@ export default function ListingImportModal({ onClose }: Props) {
           ))}
 
           <button
-            onClick={() => { setStep('input'); setError('') }}
+            onClick={() => {
+              setStep("input");
+              setError("");
+            }}
             className="w-full px-4 py-2.5 text-sm font-semibold text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
           >
             Back
@@ -154,5 +176,5 @@ export default function ListingImportModal({ onClose }: Props) {
         </div>
       )}
     </Modal>
-  )
+  );
 }

@@ -1,29 +1,26 @@
-'use client'
+"use client";
 
-import { XMarkIcon, CalendarDaysIcon } from '@heroicons/react/24/outline'
-import Button from './Button'
+import { XMarkIcon, CalendarDaysIcon } from "@heroicons/react/24/outline";
+import Button from "./Button";
 
 interface FeatureUnavailableModalProps {
-  isOpen: boolean
-  onClose: () => void
-  featureName?: string
+  isOpen: boolean;
+  onClose: () => void;
+  featureName?: string;
 }
 
-export function FeatureUnavailableModal({ 
-  isOpen, 
-  onClose, 
-  featureName = 'This feature' 
+export function FeatureUnavailableModal({
+  isOpen,
+  onClose,
+  featureName = "This feature",
 }: FeatureUnavailableModalProps) {
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+
       {/* Modal */}
       <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 md:p-8 animate-in fade-in zoom-in duration-200">
         {/* Close Button */}
@@ -53,16 +50,11 @@ export function FeatureUnavailableModal({
           </p>
 
           {/* Button */}
-          <Button
-            variant="primary"
-            onClick={onClose}
-            size="lg"
-            className="w-full"
-          >
+          <Button variant="primary" onClick={onClose} size="lg" className="w-full">
             Got it
           </Button>
         </div>
       </div>
     </div>
-  )
+  );
 }

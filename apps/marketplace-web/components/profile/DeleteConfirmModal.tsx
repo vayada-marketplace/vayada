@@ -1,38 +1,35 @@
-'use client'
+"use client";
 
-import { XMarkIcon, TrashIcon } from '@heroicons/react/24/outline'
-import { Button } from '@/components/ui'
+import { XMarkIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { Button } from "@/components/ui";
 
 interface DeleteConfirmModalProps {
-  isOpen: boolean
-  onClose: () => void
-  onConfirm: () => void
-  title?: string
-  itemName: string
-  itemType?: string
-  message?: string
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  title?: string;
+  itemName: string;
+  itemType?: string;
+  message?: string;
 }
 
 export function DeleteConfirmModal({
   isOpen,
   onClose,
   onConfirm,
-  title = 'Delete Listing?',
+  title = "Delete Listing?",
   itemName,
-  itemType = 'listing',
-  message = 'This action cannot be undone. All data associated with this {itemType} will be permanently deleted.',
+  itemType = "listing",
+  message = "This action cannot be undone. All data associated with this {itemType} will be permanently deleted.",
 }: DeleteConfirmModalProps) {
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
-  const displayMessage = message.replace('{itemType}', itemType)
+  const displayMessage = message.replace("{itemType}", itemType);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
       <div className="relative bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 md:p-8 animate-in fade-in zoom-in duration-200">
@@ -53,28 +50,16 @@ export function DeleteConfirmModal({
           </div>
 
           {/* Title */}
-          <h3 className="text-2xl font-bold text-gray-900 mb-2">
-            {title}
-          </h3>
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">{title}</h3>
 
           {/* Message */}
-          <p className="text-gray-700 mb-1">
-            Are you sure you want to delete
-          </p>
-          <p className="text-gray-900 font-semibold mb-4">
-            &quot;{itemName}&quot;?
-          </p>
-          <p className="text-sm text-gray-600 mb-6">
-            {displayMessage}
-          </p>
+          <p className="text-gray-700 mb-1">Are you sure you want to delete</p>
+          <p className="text-gray-900 font-semibold mb-4">&quot;{itemName}&quot;?</p>
+          <p className="text-sm text-gray-600 mb-6">{displayMessage}</p>
 
           {/* Buttons */}
           <div className="flex gap-3">
-            <Button
-              variant="outline"
-              onClick={onClose}
-              className="flex-1"
-            >
+            <Button variant="outline" onClick={onClose} className="flex-1">
               Cancel
             </Button>
             <Button
@@ -88,5 +73,5 @@ export function DeleteConfirmModal({
         </div>
       </div>
     </div>
-  )
+  );
 }

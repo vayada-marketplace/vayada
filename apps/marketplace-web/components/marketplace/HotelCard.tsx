@@ -1,48 +1,58 @@
-import { useState } from 'react'
-import Image from 'next/image'
-import Link from 'next/link'
-import { Hotel } from '@/lib/types'
-import { Button, SuccessModal, ErrorModal, PlatformIcon } from '@/components/ui'
-import { MapPinIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
-import { HotelDetailModal } from './HotelDetailModal'
-import { CollaborationApplicationModal, type CollaborationApplicationData } from './CollaborationApplicationModal'
-import { collaborationService, type CreateCreatorCollaborationRequest } from '@/services/api/collaborations'
-import { getCurrentUserInfo } from '@/lib/utils/accessControl'
-import { getMonthAbbr, sortMonths } from '@/lib/utils/months'
-import { ROUTES } from '@/lib/constants/routes'
+import { useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { Hotel } from "@/lib/types";
+import { Button, SuccessModal, ErrorModal, PlatformIcon } from "@/components/ui";
+import { MapPinIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import { HotelDetailModal } from "./HotelDetailModal";
+import {
+  CollaborationApplicationModal,
+  type CollaborationApplicationData,
+} from "./CollaborationApplicationModal";
+import {
+  collaborationService,
+  type CreateCreatorCollaborationRequest,
+} from "@/services/api/collaborations";
+import { getCurrentUserInfo } from "@/lib/utils/accessControl";
+import { getMonthAbbr, sortMonths } from "@/lib/utils/months";
+import { ROUTES } from "@/lib/constants/routes";
 
 interface HotelCardProps {
-  hotel: Hotel
-  creatorPlatforms?: string[]
-  isPublic?: boolean
+  hotel: Hotel;
+  creatorPlatforms?: string[];
+  isPublic?: boolean;
 }
 
 export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: HotelCardProps) {
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [showApplicationModal, setShowApplicationModal] = useState(false)
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [imageError, setImageError] = useState(false)
-  const [errorState, setErrorState] = useState<{ isOpen: boolean, message: string, title?: string }>({
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [errorState, setErrorState] = useState<{
+    isOpen: boolean;
+    message: string;
+    title?: string;
+  }>({
     isOpen: false,
-    message: ''
-  })
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+    message: "",
+  });
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   const handleApplicationSubmit = async (data: CollaborationApplicationData) => {
     try {
-      const userInfo = getCurrentUserInfo()
+      const userInfo = getCurrentUserInfo();
       if (!userInfo.userId) {
         setErrorState({
           isOpen: true,
-          message: 'Please log in to apply for collaborations',
-          title: 'Authentication Required'
-        })
-        return
+          message: "Please log in to apply for collaborations",
+          title: "Authentication Required",
+        });
+        return;
       }
 
       // Transform frontend data to API format
       const request: CreateCreatorCollaborationRequest = {
-        initiator_type: 'creator',
+        initiator_type: "creator",
         listing_id: hotel.id,
         creator_id: userInfo.userId,
         why_great_fit: data.whyGreatFit,
@@ -50,54 +60,59 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
         travel_date_from: data.travelDateFrom || undefined,
         travel_date_to: data.travelDateTo || undefined,
         preferred_months: data.preferredMonths.length > 0 ? data.preferredMonths : undefined,
-        platform_deliverables: (data.platformDeliverables || []).map(pd => ({
-          platform: pd.platform as 'Instagram' | 'TikTok' | 'YouTube',
-          deliverables: pd.deliverables.map(d => ({
+        platform_deliverables: (data.platformDeliverables || []).map((pd) => ({
+          platform: pd.platform as "Instagram" | "TikTok" | "YouTube",
+          deliverables: pd.deliverables.map((d) => ({
             type: d.type,
             quantity: d.quantity,
           })),
         })),
-      }
+      };
 
-      await collaborationService.create(request)
-      setShowApplicationModal(false)
-      setShowSuccessModal(true)
+      await collaborationService.create(request);
+      setShowApplicationModal(false);
+      setShowSuccessModal(true);
     } catch (error) {
-      console.error('Failed to submit application:', error)
-      const rawMessage = error instanceof Error ? error.message : 'Failed to submit application. Please try again.'
+      console.error("Failed to submit application:", error);
+      const rawMessage =
+        error instanceof Error ? error.message : "Failed to submit application. Please try again.";
 
-      let displayMessage = rawMessage
-      let displayTitle = 'Application Error'
+      let displayMessage = rawMessage;
+      let displayTitle = "Application Error";
 
-      if (rawMessage.includes('unique constraint') && rawMessage.includes('idx_collaborations_unique_active')) {
-        displayMessage = 'You already have an active collaboration or pending request with this hotel. You can only have one active conversation per property.'
-        displayTitle = 'Duplicate Application'
+      if (
+        rawMessage.includes("unique constraint") &&
+        rawMessage.includes("idx_collaborations_unique_active")
+      ) {
+        displayMessage =
+          "You already have an active collaboration or pending request with this hotel. You can only have one active conversation per property.";
+        displayTitle = "Duplicate Application";
       }
 
       setErrorState({
         isOpen: true,
         message: displayMessage,
-        title: displayTitle
-      })
+        title: displayTitle,
+      });
     }
-  }
+  };
 
-  const images = hotel.images && hotel.images.length > 0 ? hotel.images : []
-  const hasMultipleImages = images.length > 1
+  const images = hotel.images && hotel.images.length > 0 ? hotel.images : [];
+  const hasMultipleImages = images.length > 1;
 
   const goToPreviousImage = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setCurrentImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1))
-  }
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+  };
 
   const goToNextImage = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setCurrentImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))
-  }
+    e.stopPropagation();
+    setCurrentImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
+  };
 
   const goToImage = (index: number) => {
-    setCurrentImageIndex(index)
-  }
+    setCurrentImageIndex(index);
+  };
 
   return (
     <>
@@ -143,13 +158,14 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
                     <button
                       key={index}
                       onClick={(e) => {
-                        e.stopPropagation()
-                        goToImage(index)
+                        e.stopPropagation();
+                        goToImage(index);
                       }}
-                      className={`h-2 rounded-full transition-all ${index === currentImageIndex
-                        ? 'w-6 bg-white'
-                        : 'w-2 bg-white/50 hover:bg-white/75'
-                        }`}
+                      className={`h-2 rounded-full transition-all ${
+                        index === currentImageIndex
+                          ? "w-6 bg-white"
+                          : "w-2 bg-white/50 hover:bg-white/75"
+                      }`}
                       aria-label={`Go to image ${index + 1}`}
                     />
                   ))}
@@ -158,9 +174,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
             </>
           ) : (
             <div className="w-full h-full flex items-center justify-center">
-              <span className="text-primary-600 text-3xl font-bold">
-                {hotel.name.charAt(0)}
-              </span>
+              <span className="text-primary-600 text-3xl font-bold">{hotel.name.charAt(0)}</span>
             </div>
           )}
         </div>
@@ -168,9 +182,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
         {/* Content */}
         <div className="p-6 flex flex-col flex-1">
           {/* Name */}
-          <h3 className="text-xl font-bold text-gray-900 mb-2">
-            {hotel.name}
-          </h3>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">{hotel.name}</h3>
 
           {/* Location */}
           <div className="flex items-center text-gray-600 text-sm mb-4">
@@ -188,7 +200,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
                     <div
                       key={index}
                       className="flex items-center justify-center w-6 h-6 text-gray-700"
-                      title={platform === 'YT' ? 'YouTube' : platform}
+                      title={platform === "YT" ? "YouTube" : platform}
                     >
                       <PlatformIcon platform={platform} />
                     </div>
@@ -210,14 +222,16 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
                     </span>
                   ) : hotel.availability.length > 4 ? (
                     <>
-                      {sortMonths(hotel.availability).slice(0, 4).map((month, index) => (
-                        <span
-                          key={index}
-                          className="inline-block px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium"
-                        >
-                          {getMonthAbbr(month)}
-                        </span>
-                      ))}
+                      {sortMonths(hotel.availability)
+                        .slice(0, 4)
+                        .map((month, index) => (
+                          <span
+                            key={index}
+                            className="inline-block px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium"
+                          >
+                            {getMonthAbbr(month)}
+                          </span>
+                        ))}
                       <span className="inline-block px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium">
                         +{hotel.availability.length - 4}
                       </span>
@@ -262,8 +276,8 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
                 size="sm"
                 className="flex-1"
                 onClick={(e) => {
-                  e.preventDefault()
-                  setShowApplicationModal(true)
+                  e.preventDefault();
+                  setShowApplicationModal(true);
                 }}
               >
                 Apply
@@ -301,11 +315,10 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
       {/* Error Modal */}
       <ErrorModal
         isOpen={errorState.isOpen}
-        onClose={() => setErrorState(prev => ({ ...prev, isOpen: false }))}
+        onClose={() => setErrorState((prev) => ({ ...prev, isOpen: false }))}
         title={errorState.title}
         message={errorState.message}
       />
     </>
-  )
+  );
 }
-

@@ -1,15 +1,15 @@
-'use client'
+"use client";
 
-import { ReactNode } from 'react'
+import { ReactNode } from "react";
 
 interface CardProps {
-  title?: string
-  children: ReactNode
-  actions?: ReactNode
-  className?: string
+  title?: string;
+  children: ReactNode;
+  actions?: ReactNode;
+  className?: string;
 }
 
-export function Card({ title, children, actions, className = '' }: CardProps) {
+export function Card({ title, children, actions, className = "" }: CardProps) {
   return (
     <div className={`bg-white rounded-lg shadow-md border border-gray-200 ${className}`}>
       {(title || actions) && (
@@ -18,11 +18,7 @@ export function Card({ title, children, actions, className = '' }: CardProps) {
           {actions && <div className="flex items-center gap-2">{actions}</div>}
         </div>
       )}
-      <div className="px-6 py-4">
-        {children}
-      </div>
+      <div className="px-6 py-4">{children}</div>
     </div>
-  )
+  );
 }
-
-

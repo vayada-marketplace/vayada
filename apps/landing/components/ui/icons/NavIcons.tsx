@@ -4,7 +4,7 @@
  */
 
 interface IconProps {
-  className?: string
+  className?: string;
 }
 
 export const HotelIcon = ({ className = "w-5 h-5" }: IconProps) => (
@@ -26,7 +26,7 @@ export const HotelIcon = ({ className = "w-5 h-5" }: IconProps) => (
     <path d="M10 14h4" />
     <path d="M10 18h4" />
   </svg>
-)
+);
 
 export const ProfileIcon = ({ className = "w-5 h-5" }: IconProps) => (
   <svg
@@ -42,7 +42,7 @@ export const ProfileIcon = ({ className = "w-5 h-5" }: IconProps) => (
     <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
     <circle cx="12" cy="7" r="4" />
   </svg>
-)
+);
 
 export const CalendarIcon = ({ className = "w-5 h-5" }: IconProps) => (
   <svg
@@ -66,7 +66,7 @@ export const CalendarIcon = ({ className = "w-5 h-5" }: IconProps) => (
     <path d="M12 18h.01" />
     <path d="M16 18h.01" />
   </svg>
-)
+);
 
 export const MessageIcon = ({ className = "w-5 h-5" }: IconProps) => (
   <svg
@@ -81,7 +81,7 @@ export const MessageIcon = ({ className = "w-5 h-5" }: IconProps) => (
   >
     <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
   </svg>
-)
+);
 
 /**
  * Hotel Badge Icon with active state styling
@@ -90,12 +90,12 @@ export const MessageIcon = ({ className = "w-5 h-5" }: IconProps) => (
 export const HotelBadgeIcon = ({ active = false }: { active?: boolean }) => (
   <div
     className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-      active ? 'bg-primary-500 text-white' : 'bg-primary-50 text-primary-500'
+      active ? "bg-primary-500 text-white" : "bg-primary-50 text-primary-500"
     }`}
   >
     <HotelIcon className="w-5 h-5" />
   </div>
-)
+);
 
 /**
  * Creator Badge Icon with active state styling
@@ -104,9 +104,9 @@ export const HotelBadgeIcon = ({ active = false }: { active?: boolean }) => (
 export const CreatorBadgeIcon = ({ active = false }: { active?: boolean }) => (
   <div
     className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-      active ? 'bg-primary-500 text-white' : 'bg-primary-50 text-primary-500'
+      active ? "bg-primary-500 text-white" : "bg-primary-50 text-primary-500"
     }`}
   >
     <ProfileIcon className="w-5 h-5" />
   </div>
-)
+);

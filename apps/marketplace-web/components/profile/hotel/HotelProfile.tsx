@@ -1,33 +1,33 @@
-'use client'
+"use client";
 
-import { useRouter } from 'next/navigation'
-import { PencilIcon, PlusIcon } from '@heroicons/react/24/solid'
-import { BuildingOffice2Icon, InformationCircleIcon } from '@heroicons/react/24/outline'
-import { Button, ErrorModal } from '@/components/ui'
-import { ROUTES } from '@/lib/constants/routes'
-import { ProfilePictureModal } from '../ProfilePictureModal'
-import { DeleteConfirmModal } from '../DeleteConfirmModal'
-import { HotelOverviewTab } from './HotelOverviewTab'
-import { ListingViewCard } from './ListingViewCard'
-import { ListingEditorForm } from './ListingEditorForm'
-import { ManagePhotosModal } from './ManagePhotosModal'
-import { useHotelProfile } from '@/hooks/useHotelProfile'
-import { useListingManagement } from '@/hooks/useListingManagement'
-import { useErrorModal } from '@/hooks/useErrorModal'
-import type { HotelProfileStatus } from '@/lib/types'
+import { useRouter } from "next/navigation";
+import { PencilIcon, PlusIcon } from "@heroicons/react/24/solid";
+import { BuildingOffice2Icon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import { Button, ErrorModal } from "@/components/ui";
+import { ROUTES } from "@/lib/constants/routes";
+import { ProfilePictureModal } from "../ProfilePictureModal";
+import { DeleteConfirmModal } from "../DeleteConfirmModal";
+import { HotelOverviewTab } from "./HotelOverviewTab";
+import { ListingViewCard } from "./ListingViewCard";
+import { ListingEditorForm } from "./ListingEditorForm";
+import { ManagePhotosModal } from "./ManagePhotosModal";
+import { useHotelProfile } from "@/hooks/useHotelProfile";
+import { useListingManagement } from "@/hooks/useListingManagement";
+import { useErrorModal } from "@/hooks/useErrorModal";
+import type { HotelProfileStatus } from "@/lib/types";
 
 export function HotelProfile() {
-  const router = useRouter()
-  const { errorModal, showError, closeError } = useErrorModal()
+  const router = useRouter();
+  const { errorModal, showError, closeError } = useErrorModal();
 
-  const hotel = useHotelProfile(showError)
+  const hotel = useHotelProfile(showError);
   const listing = useListingManagement(
     hotel.hotelProfile,
     hotel.loadProfile,
     showError,
     hotel.collapsedListingCards,
     hotel.setCollapsedListingCards,
-  )
+  );
 
   const {
     hotelProfile,
@@ -54,7 +54,7 @@ export function HotelProfile() {
     setCollapsedListingCards,
     handleSaveHotelProfile,
     handleCancelHotelEdit,
-  } = hotel
+  } = hotel;
 
   if (loading) {
     return (
@@ -64,7 +64,7 @@ export function HotelProfile() {
           <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-primary-600 absolute top-0 left-0"></div>
         </div>
       </div>
-    )
+    );
   }
 
   if (isProfileIncomplete) {
@@ -72,27 +72,32 @@ export function HotelProfile() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
         <div className="max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
-            <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            <svg
+              className="w-8 h-8 text-primary-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+              />
             </svg>
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">
-            Complete Your Profile
-          </h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Complete Your Profile</h3>
           <p className="text-gray-600 mb-6">
             {(profileStatus as HotelProfileStatus)?.missing_fields
-              ? `Please complete the following: ${(profileStatus as HotelProfileStatus).missing_fields.join(', ')}`
-              : 'Your profile setup is not complete. Please finish the onboarding process.'}
+              ? `Please complete the following: ${(profileStatus as HotelProfileStatus).missing_fields.join(", ")}`
+              : "Your profile setup is not complete. Please finish the onboarding process."}
           </p>
-          <Button
-            variant="primary"
-            onClick={() => router.push(ROUTES.PROFILE_COMPLETE)}
-          >
+          <Button variant="primary" onClick={() => router.push(ROUTES.PROFILE_COMPLETE)}>
             Complete Profile
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   if (!hotelProfile) {
@@ -100,25 +105,31 @@ export function HotelProfile() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
         <div className="max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
-            <svg className="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            <svg
+              className="w-8 h-8 text-primary-600"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+              />
             </svg>
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">
-            Profile Data Unavailable
-          </h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Profile Data Unavailable</h3>
           <p className="text-gray-600 mb-6">
-            Your profile status is being checked, but profile data endpoints are currently unavailable.
+            Your profile status is being checked, but profile data endpoints are currently
+            unavailable.
           </p>
-          <Button
-            variant="primary"
-            onClick={() => router.push(ROUTES.PROFILE_COMPLETE)}
-          >
+          <Button variant="primary" onClick={() => router.push(ROUTES.PROFILE_COMPLETE)}>
             Go to Profile Completion
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -127,25 +138,27 @@ export function HotelProfile() {
       <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setActiveHotelTab('overview')}
-            className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${activeHotelTab === 'overview'
-              ? 'bg-primary-600 text-white'
-              : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-              }`}
+            onClick={() => setActiveHotelTab("overview")}
+            className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+              activeHotelTab === "overview"
+                ? "bg-primary-600 text-white"
+                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+            }`}
           >
             Overview
           </button>
           <button
-            onClick={() => setActiveHotelTab('listings')}
-            className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${activeHotelTab === 'listings'
-              ? 'bg-primary-600 text-white'
-              : 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50'
-              }`}
+            onClick={() => setActiveHotelTab("listings")}
+            className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+              activeHotelTab === "listings"
+                ? "bg-primary-600 text-white"
+                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+            }`}
           >
             Listings
           </button>
         </div>
-        {activeHotelTab === 'overview' && (
+        {activeHotelTab === "overview" && (
           <>
             {!isEditingHotelProfile ? (
               <Button
@@ -180,7 +193,7 @@ export function HotelProfile() {
 
       {/* Tab Content */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-        {activeHotelTab === 'overview' && (
+        {activeHotelTab === "overview" && (
           <HotelOverviewTab
             profile={hotelProfile}
             isEditing={isEditingHotelProfile}
@@ -192,11 +205,11 @@ export function HotelProfile() {
               about: hotelEditFormData.about,
             }}
             phone={phone}
-            onEditFormChange={(data) => setHotelEditFormData(prev => ({ ...prev, ...data }))}
+            onEditFormChange={(data) => setHotelEditFormData((prev) => ({ ...prev, ...data }))}
             onPhoneChange={setPhone}
           />
         )}
-        {activeHotelTab === 'listings' && (
+        {activeHotelTab === "listings" && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
             {/* Section Header */}
             <div className="mb-4">
@@ -228,7 +241,8 @@ export function HotelProfile() {
                     <h2 className="text-2xl font-bold text-gray-900">Property Listings</h2>
                     {hotelProfile.listings && hotelProfile.listings.length > 0 && (
                       <span className="px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs font-semibold">
-                        {hotelProfile.listings.length} listing{hotelProfile.listings.length !== 1 ? 's' : ''}
+                        {hotelProfile.listings.length} listing
+                        {hotelProfile.listings.length !== 1 ? "s" : ""}
                       </span>
                     )}
                   </div>
@@ -236,19 +250,24 @@ export function HotelProfile() {
                 </div>
               </div>
               <div className="mt-2">
-                <p className="text-sm text-gray-600">Define your property offerings and the type of creators you&apos;re looking for.</p>
+                <p className="text-sm text-gray-600">
+                  Define your property offerings and the type of creators you&apos;re looking for.
+                </p>
               </div>
             </div>
 
             {hotelProfile.listings && hotelProfile.listings.length > 0 ? (
-              <div className={`mt-6 space-y-3 ${listing.isAddingNewListing ? '' : 'mt-6'}`}>
+              <div className={`mt-6 space-y-3 ${listing.isAddingNewListing ? "" : "mt-6"}`}>
                 {hotelProfile.listings.map((listingItem, index) => {
-                  const isCollapsed = collapsedListingCards.has(listingItem.id)
-                  const isEditingThis = listing.editingListingId === listingItem.id
+                  const isCollapsed = collapsedListingCards.has(listingItem.id);
+                  const isEditingThis = listing.editingListingId === listingItem.id;
 
                   if (!isCollapsed && isEditingThis) {
                     return (
-                      <div key={listingItem.id} className="border border-gray-200 rounded-2xl p-5 bg-white shadow-sm">
+                      <div
+                        key={listingItem.id}
+                        className="border border-gray-200 rounded-2xl p-5 bg-white shadow-sm"
+                      >
                         <div className="mt-4 pt-4 border-t border-gray-100">
                           <ListingEditorForm
                             formData={listing.listingFormData}
@@ -266,7 +285,7 @@ export function HotelProfile() {
                           />
                         </div>
                       </div>
-                    )
+                    );
                   }
 
                   return (
@@ -276,19 +295,24 @@ export function HotelProfile() {
                       index={index}
                       isCollapsed={isCollapsed}
                       onToggleCollapse={() => {
-                        const newCollapsed = new Set(collapsedListingCards)
+                        const newCollapsed = new Set(collapsedListingCards);
                         if (isCollapsed) {
-                          newCollapsed.delete(listingItem.id)
+                          newCollapsed.delete(listingItem.id);
                         } else {
-                          newCollapsed.add(listingItem.id)
+                          newCollapsed.add(listingItem.id);
                         }
-                        setCollapsedListingCards(newCollapsed)
+                        setCollapsedListingCards(newCollapsed);
                       }}
                       onEdit={() => listing.openEditListingModal(listingItem)}
-                      onDelete={() => listing.openDeleteConfirmModal(listingItem.id, listingItem.name || `Property Listing ${index + 1}`)}
+                      onDelete={() =>
+                        listing.openDeleteConfirmModal(
+                          listingItem.id,
+                          listingItem.name || `Property Listing ${index + 1}`,
+                        )
+                      }
                       canDelete={hotelProfile.listings.length > 1}
                     />
-                  )
+                  );
                 })}
               </div>
             ) : (
@@ -297,7 +321,9 @@ export function HotelProfile() {
                   <BuildingOffice2Icon className="w-10 h-10 text-gray-400" />
                 </div>
                 <p className="text-lg font-semibold text-gray-900 mb-2">No listings added yet</p>
-                <p className="text-sm text-gray-600 mb-6">Add property listings to complete your profile.</p>
+                <p className="text-sm text-gray-600 mb-6">
+                  Add property listings to complete your profile.
+                </p>
                 <Button
                   variant="outline"
                   onClick={listing.openAddListingModal}
@@ -346,7 +372,8 @@ export function HotelProfile() {
             <div className="mt-6 flex items-start gap-3 rounded-xl bg-blue-50 border border-blue-200 px-4 py-3">
               <InformationCircleIcon className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-gray-700 leading-snug">
-                Each listing can have different collaboration types, availability, and target audience settings.
+                Each listing can have different collaboration types, availability, and target
+                audience settings.
               </p>
             </div>
           </div>
@@ -361,16 +388,16 @@ export function HotelProfile() {
         name={hotelProfile.name}
         picture={hotelProfile.picture}
         onChangePicture={(file, preview) => {
-          setHotelProfilePictureFile(file)
-          setHotelPicturePreview(preview)
-          setHotelEditFormData({ ...hotelEditFormData, picture: preview })
-          setShowHotelPictureModal(false)
-          setIsEditingHotelProfile(true)
+          setHotelProfilePictureFile(file);
+          setHotelPicturePreview(preview);
+          setHotelEditFormData({ ...hotelEditFormData, picture: preview });
+          setShowHotelPictureModal(false);
+          setIsEditingHotelProfile(true);
         }}
         onDeletePicture={() => {
-          setHotelProfile({ ...hotelProfile, picture: undefined })
-          setHotelEditFormData({ ...hotelEditFormData, picture: '' })
-          setHotelPicturePreview(null)
+          setHotelProfile({ ...hotelProfile, picture: undefined });
+          setHotelEditFormData({ ...hotelEditFormData, picture: "" });
+          setHotelPicturePreview(null);
         }}
         showDeleteButton={!!hotelProfile.picture}
       />
@@ -387,7 +414,9 @@ export function HotelProfile() {
       {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
         isOpen={listing.deleteConfirmModal.isOpen}
-        onClose={() => listing.setDeleteConfirmModal({ isOpen: false, listingId: null, listingName: '' })}
+        onClose={() =>
+          listing.setDeleteConfirmModal({ isOpen: false, listingId: null, listingName: "" })
+        }
         onConfirm={listing.handleDeleteListing}
         itemName={listing.deleteConfirmModal.listingName}
         itemType="listing"
@@ -403,5 +432,5 @@ export function HotelProfile() {
         onAddImage={() => listing.listingImageInputRef.current?.click()}
       />
     </>
-  )
+  );
 }

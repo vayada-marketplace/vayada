@@ -1,22 +1,17 @@
-'use client'
+"use client";
 
-import { useCookieConsent } from '@/context/CookieConsentContext'
-import Link from 'next/link'
-import { ROUTES } from '@/lib/constants'
-import { XMarkIcon } from '@heroicons/react/24/outline'
+import { useCookieConsent } from "@/context/CookieConsentContext";
+import Link from "next/link";
+import { ROUTES } from "@/lib/constants";
+import { XMarkIcon } from "@heroicons/react/24/outline";
 
 export function CookieBanner() {
-  const {
-    showBanner,
-    isLoading,
-    acceptAll,
-    acceptNecessaryOnly,
-    openSettings,
-  } = useCookieConsent()
+  const { showBanner, isLoading, acceptAll, acceptNecessaryOnly, openSettings } =
+    useCookieConsent();
 
   // Don't render anything while loading or if user has already consented
   if (isLoading || !showBanner) {
-    return null
+    return null;
   }
 
   return (
@@ -35,7 +30,7 @@ export function CookieBanner() {
         {/* Content */}
         <div className="px-5 pb-4">
           <p className="text-sm text-gray-600 leading-relaxed">
-            We use cookies to improve your experience on our website.{' '}
+            We use cookies to improve your experience on our website.{" "}
             <Link
               href={ROUTES.PRIVACY}
               className="text-primary-600 hover:text-primary-700 underline"
@@ -70,7 +65,7 @@ export function CookieBanner() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default CookieBanner
+export default CookieBanner;

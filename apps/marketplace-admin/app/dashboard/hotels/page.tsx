@@ -1,75 +1,78 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { MagnifyingGlassIcon, ArrowTopRightOnSquareIcon, TrashIcon } from '@heroicons/react/24/outline'
-import { bookingSettingsService, type SuperAdminHotel } from '@/services/booking'
-import { usersService } from '@/services/api'
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  MagnifyingGlassIcon,
+  ArrowTopRightOnSquareIcon,
+  TrashIcon,
+} from "@heroicons/react/24/outline";
+import { bookingSettingsService, type SuperAdminHotel } from "@/services/booking";
+import { usersService } from "@/services/api";
 
-const BOOKING_URL_TEMPLATE = process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || 'https://{slug}.booking.vayada.com'
+const BOOKING_URL_TEMPLATE =
+  process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || "https://{slug}.booking.vayada.com";
 
 interface HotelRow {
-  id: string
-  name: string
-  slug: string
-  location: string
-  country: string
-  owner_name: string
-  owner_email: string
+  id: string;
+  name: string;
+  slug: string;
+  location: string;
+  country: string;
+  owner_name: string;
+  owner_email: string;
   /** marketplace user ID — present for uninitialized hotels */
-  marketplace_user_id?: string
+  marketplace_user_id?: string;
   /** true when a booking_hotels row already exists */
-  initialized: boolean
+  initialized: boolean;
 }
 
 export default function HotelsPage() {
-  const router = useRouter()
-  const [hotels, setHotels] = useState<HotelRow[]>([])
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [settingUp, setSettingUp] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const router = useRouter();
+  const [hotels, setHotels] = useState<HotelRow[]>([]);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [settingUp, setSettingUp] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 400)
-    return () => clearTimeout(timer)
-  }, [search])
+    const timer = setTimeout(() => setDebouncedSearch(search), 400);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
-    loadHotels(debouncedSearch)
-  }, [debouncedSearch])
+    loadHotels(debouncedSearch);
+  }, [debouncedSearch]);
 
   const loadHotels = async (searchTerm: string) => {
     try {
-      setLoading(true)
-      setError('')
+      setLoading(true);
+      setError("");
 
       const marketplaceParams: {
-        type: 'hotel'
-        page: number
-        page_size: number
-        search?: string
-      } = { type: 'hotel', page: 1, page_size: 100 }
-      if (searchTerm) marketplaceParams.search = searchTerm
+        type: "hotel";
+        page: number;
+        page_size: number;
+        search?: string;
+      } = { type: "hotel", page: 1, page_size: 100 };
+      if (searchTerm) marketplaceParams.search = searchTerm;
 
       // Fetch both sources in parallel
       const [bookingHotels, marketplaceRes] = await Promise.all([
         bookingSettingsService.listAllHotels().catch(() => [] as SuperAdminHotel[]),
         usersService.getAllUsers(marketplaceParams),
-      ])
+      ]);
 
       // Build a set of marketplace user emails that already have a booking hotel
-      const initializedEmails = new Set(
-        bookingHotels.map((h) => h.owner_email.toLowerCase()),
-      )
+      const initializedEmails = new Set(bookingHotels.map((h) => h.owner_email.toLowerCase()));
 
       // Start with all booking hotels (already initialized)
       const rows: HotelRow[] = bookingHotels.map((h) => ({
         ...h,
         initialized: true,
-      }))
+      }));
 
       // Add marketplace hotel users that are NOT yet in booking_hotels
       for (const user of marketplaceRes.users || []) {
@@ -77,76 +80,76 @@ export default function HotelsPage() {
           rows.push({
             id: user.id,
             name: user.name,
-            slug: '',
-            location: '',
-            country: '',
+            slug: "",
+            location: "",
+            country: "",
             owner_name: user.name,
             owner_email: user.email,
             marketplace_user_id: user.id,
             initialized: false,
-          })
+          });
         }
       }
 
-      setHotels(rows)
+      setHotels(rows);
     } catch (err) {
-      console.error('Failed to load hotels:', err)
-      setError('Failed to load hotels. Please check your connection and try again.')
+      console.error("Failed to load hotels:", err);
+      setError("Failed to load hotels. Please check your connection and try again.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const handleDelete = async (row: HotelRow) => {
-    const label = row.name || row.owner_email || 'this hotel'
+    const label = row.name || row.owner_email || "this hotel";
     const confirmMsg = row.initialized
       ? `Delete "${label}" and all its booking engine data (rooms, add-ons, promo codes, translations)? This cannot be undone.`
-      : `Delete marketplace account "${label}"? This cannot be undone.`
-    if (!window.confirm(confirmMsg)) return
+      : `Delete marketplace account "${label}"? This cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
 
     try {
-      setDeletingId(row.id)
-      setError('')
+      setDeletingId(row.id);
+      setError("");
       if (row.initialized) {
-        await bookingSettingsService.deleteHotel(row.id)
+        await bookingSettingsService.deleteHotel(row.id);
       } else if (row.marketplace_user_id) {
-        await usersService.deleteUser(row.marketplace_user_id)
+        await usersService.deleteUser(row.marketplace_user_id);
       }
-      setHotels((prev) => prev.filter((h) => h.id !== row.id))
+      setHotels((prev) => prev.filter((h) => h.id !== row.id));
     } catch (err) {
-      console.error('Failed to delete hotel:', err)
-      setError('Failed to delete hotel. Please try again.')
+      console.error("Failed to delete hotel:", err);
+      setError("Failed to delete hotel. Please try again.");
     } finally {
-      setDeletingId(null)
+      setDeletingId(null);
     }
-  }
+  };
 
   const handleSetup = async (row: HotelRow) => {
-    if (!row.marketplace_user_id) return
+    if (!row.marketplace_user_id) return;
     try {
-      setSettingUp(row.marketplace_user_id)
+      setSettingUp(row.marketplace_user_id);
       const created = await bookingSettingsService.createHotelForUser(
         row.marketplace_user_id,
         row.name,
-      )
-      router.push(`/dashboard/hotels/${created.id}`)
+      );
+      router.push(`/dashboard/hotels/${created.id}`);
     } catch (err) {
-      console.error('Failed to create hotel:', err)
-      setError('Failed to initialize hotel. Please try again.')
+      console.error("Failed to create hotel:", err);
+      setError("Failed to initialize hotel. Please try again.");
     } finally {
-      setSettingUp(null)
+      setSettingUp(null);
     }
-  }
+  };
 
   const filtered = hotels.filter((h) => {
-    const q = search.toLowerCase()
+    const q = search.toLowerCase();
     return (
       h.name.toLowerCase().includes(q) ||
-      (h.location || '').toLowerCase().includes(q) ||
+      (h.location || "").toLowerCase().includes(q) ||
       h.owner_name.toLowerCase().includes(q) ||
       h.owner_email.toLowerCase().includes(q)
-    )
-  })
+    );
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -187,7 +190,9 @@ export default function HotelsPage() {
         ) : hotels.length === 0 && !error ? (
           <div className="text-center py-12 bg-white rounded-lg shadow">
             <h3 className="mt-2 text-sm font-medium text-gray-900">No hotels found</h3>
-            <p className="mt-1 text-sm text-gray-500">No hotels are registered on the platform yet.</p>
+            <p className="mt-1 text-sm text-gray-500">
+              No hotels are registered on the platform yet.
+            </p>
           </div>
         ) : (
           <>
@@ -216,7 +221,7 @@ export default function HotelsPage() {
                   {filtered.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="px-6 py-8 text-center text-sm text-gray-500">
-                        {search ? 'No hotels match your search.' : 'No hotels found.'}
+                        {search ? "No hotels match your search." : "No hotels found."}
                       </td>
                     </tr>
                   ) : (
@@ -227,9 +232,11 @@ export default function HotelsPage() {
                           {hotel.slug && <p className="text-xs text-gray-500">{hotel.slug}</p>}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-600">
-                          {hotel.location || hotel.country
-                            ? `${hotel.location}${hotel.country ? `, ${hotel.country}` : ''}`
-                            : <span className="text-gray-400">-</span>}
+                          {hotel.location || hotel.country ? (
+                            `${hotel.location}${hotel.country ? `, ${hotel.country}` : ""}`
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <p className="text-sm text-gray-900">{hotel.owner_name}</p>
@@ -251,7 +258,7 @@ export default function HotelsPage() {
                             <>
                               {hotel.slug && (
                                 <a
-                                  href={BOOKING_URL_TEMPLATE.replace('{slug}', hotel.slug)}
+                                  href={BOOKING_URL_TEMPLATE.replace("{slug}", hotel.slug)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
@@ -273,7 +280,7 @@ export default function HotelsPage() {
                               disabled={settingUp === hotel.marketplace_user_id}
                               className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-white bg-primary-600 border border-primary-600 rounded-md hover:bg-primary-700 transition-colors disabled:opacity-50"
                             >
-                              {settingUp === hotel.marketplace_user_id ? 'Setting up...' : 'Set Up'}
+                              {settingUp === hotel.marketplace_user_id ? "Setting up..." : "Set Up"}
                             </button>
                           )}
                           <button
@@ -283,7 +290,7 @@ export default function HotelsPage() {
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100 transition-colors disabled:opacity-50"
                           >
                             <TrashIcon className="w-3.5 h-3.5" />
-                            {deletingId === hotel.id ? 'Deleting...' : 'Delete'}
+                            {deletingId === hotel.id ? "Deleting..." : "Delete"}
                           </button>
                         </td>
                       </tr>
@@ -300,5 +307,5 @@ export default function HotelsPage() {
         )}
       </div>
     </div>
-  )
+  );
 }

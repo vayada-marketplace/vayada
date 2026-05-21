@@ -1,17 +1,17 @@
-'use client'
+"use client";
 
-import { MONTHS_ABBR } from '@/lib/constants'
-import { CalendarIcon } from '@heroicons/react/24/outline'
+import { MONTHS_ABBR } from "@/lib/constants";
+import { CalendarIcon } from "@heroicons/react/24/outline";
 
 interface DateMonthPickerProps {
-  dateFrom: string
-  dateTo: string
-  onDateFromChange: (value: string) => void
-  onDateToChange: (value: string) => void
-  preferredMonths: string[]
-  onMonthToggle: (month: string) => void
-  isMonthAvailable?: (month: string) => boolean
-  dateLabel?: string
+  dateFrom: string;
+  dateTo: string;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  preferredMonths: string[];
+  onMonthToggle: (month: string) => void;
+  isMonthAvailable?: (month: string) => boolean;
+  dateLabel?: string;
 }
 
 export function DateMonthPicker({
@@ -22,13 +22,11 @@ export function DateMonthPicker({
   preferredMonths,
   onMonthToggle,
   isMonthAvailable,
-  dateLabel = 'Preferred Dates',
+  dateLabel = "Preferred Dates",
 }: DateMonthPickerProps) {
   return (
     <div>
-      <label className="block text-base font-medium text-gray-900 mb-3">
-        {dateLabel}
-      </label>
+      <label className="block text-base font-medium text-gray-900 mb-3">{dateLabel}</label>
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">From</label>
@@ -60,7 +58,7 @@ export function DateMonthPicker({
         <p className="text-sm text-gray-600 mb-3">Or select preferred months</p>
         <div className="grid grid-cols-4 gap-2">
           {MONTHS_ABBR.map((month) => {
-            const available = isMonthAvailable ? isMonthAvailable(month) : true
+            const available = isMonthAvailable ? isMonthAvailable(month) : true;
 
             return (
               <button
@@ -68,19 +66,20 @@ export function DateMonthPicker({
                 type="button"
                 onClick={() => available && onMonthToggle(month)}
                 disabled={!available}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${preferredMonths.includes(month)
-                  ? 'bg-primary-600 text-white shadow-md'
-                  : available
-                    ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
-                  }`}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  preferredMonths.includes(month)
+                    ? "bg-primary-600 text-white shadow-md"
+                    : available
+                      ? "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      : "bg-gray-100 text-gray-400 cursor-not-allowed opacity-50"
+                }`}
               >
                 {month}
               </button>
-            )
+            );
           })}
         </div>
       </div>
     </div>
-  )
+  );
 }

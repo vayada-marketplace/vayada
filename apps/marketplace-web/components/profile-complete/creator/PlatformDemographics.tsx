@@ -1,23 +1,23 @@
-'use client'
+"use client";
 
-import { Input } from '@/components/ui'
-import { XMarkIcon, ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
-import { AGE_GROUP_OPTIONS } from '@/lib/constants'
-import type { PlatformFormData } from '@/lib/types'
+import { Input } from "@/components/ui";
+import { XMarkIcon, ChevronUpIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
+import { AGE_GROUP_OPTIONS } from "@/lib/constants";
+import type { PlatformFormData } from "@/lib/types";
 
 interface PlatformDemographicsProps {
-  platform: PlatformFormData
-  platformIndex: number
-  isExpanded: boolean
-  onToggleExpanded: () => void
-  countryInput: string
-  onCountryInputChange: (value: string) => void
-  availableCountries: string[]
-  onAddCountry: (country?: string) => void
-  onRemoveCountry: (countryIndex: number) => void
-  onUpdateCountryPercentage: (countryIndex: number, percentage: number) => void
-  onToggleAgeGroup: (ageRange: string) => void
-  onUpdateGenderSplit: (field: 'male' | 'female', value: string) => void
+  platform: PlatformFormData;
+  platformIndex: number;
+  isExpanded: boolean;
+  onToggleExpanded: () => void;
+  countryInput: string;
+  onCountryInputChange: (value: string) => void;
+  availableCountries: string[];
+  onAddCountry: (country?: string) => void;
+  onRemoveCountry: (countryIndex: number) => void;
+  onUpdateCountryPercentage: (countryIndex: number, percentage: number) => void;
+  onToggleAgeGroup: (ageRange: string) => void;
+  onUpdateGenderSplit: (field: "male" | "female", value: string) => void;
 }
 
 export function PlatformDemographics({
@@ -41,7 +41,9 @@ export function PlatformDemographics({
         onClick={onToggleExpanded}
         className="flex items-center justify-between w-full text-left"
       >
-        <span className="text-sm font-semibold text-gray-800">Audience Demographics (Optional)</span>
+        <span className="text-sm font-semibold text-gray-800">
+          Audience Demographics (Optional)
+        </span>
         {isExpanded ? (
           <ChevronUpIcon className="w-5 h-5 text-gray-500" />
         ) : (
@@ -56,7 +58,9 @@ export function PlatformDemographics({
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-gray-800">Top Countries</p>
-                <p className="text-xs text-gray-500">Select up to 3 countries with their audience percentage</p>
+                <p className="text-xs text-gray-500">
+                  Select up to 3 countries with their audience percentage
+                </p>
               </div>
             </div>
             <div className="space-y-3">
@@ -66,9 +70,9 @@ export function PlatformDemographics({
                   value={countryInput}
                   onChange={(e) => onCountryInputChange(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      onAddCountry()
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      onAddCountry();
                     }
                   }}
                   placeholder="Search countries..."
@@ -99,7 +103,9 @@ export function PlatformDemographics({
                       className="flex items-center gap-3 rounded-lg border border-gray-200 bg-primary-50/60 px-3 py-2"
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-800 truncate">{country.country || 'Country'}</p>
+                        <p className="text-sm font-semibold text-gray-800 truncate">
+                          {country.country || "Country"}
+                        </p>
                         <p className="text-xs text-gray-500">Audience percentage</p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -107,11 +113,13 @@ export function PlatformDemographics({
                           <input
                             type="text"
                             inputMode="decimal"
-                            value={country.percentage && country.percentage > 0 ? country.percentage : ''}
+                            value={
+                              country.percentage && country.percentage > 0 ? country.percentage : ""
+                            }
                             onChange={(e) => {
-                              const raw = e.target.value
-                              const parsed = raw === '' ? 0 : parseFloat(raw)
-                              onUpdateCountryPercentage(countryIndex, parsed)
+                              const raw = e.target.value;
+                              const parsed = raw === "" ? 0 : parseFloat(raw);
+                              onUpdateCountryPercentage(countryIndex, parsed);
                             }}
                             placeholder="0"
                             className="w-16 bg-transparent text-sm text-gray-800 outline-none"
@@ -131,7 +139,9 @@ export function PlatformDemographics({
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-gray-500">Add up to 3 countries and set the audience % for each.</p>
+                <p className="text-xs text-gray-500">
+                  Add up to 3 countries and set the audience % for each.
+                </p>
               )}
             </div>
           </div>
@@ -140,11 +150,13 @@ export function PlatformDemographics({
           <div className="space-y-2">
             <div>
               <p className="text-sm font-semibold text-gray-800">Age Groups</p>
-              <p className="text-xs text-gray-500">Select up to 3 age groups with their audience percentage</p>
+              <p className="text-xs text-gray-500">
+                Select up to 3 age groups with their audience percentage
+              </p>
             </div>
             <div className="flex flex-wrap gap-2">
               {AGE_GROUP_OPTIONS.map((range) => {
-                const isSelected = platform.top_age_groups?.some((a) => a.ageRange === range)
+                const isSelected = platform.top_age_groups?.some((a) => a.ageRange === range);
                 return (
                   <button
                     key={range}
@@ -152,13 +164,13 @@ export function PlatformDemographics({
                     onClick={() => onToggleAgeGroup(range)}
                     className={`px-3 py-1.5 rounded-full border text-sm font-semibold transition-colors ${
                       isSelected
-                        ? 'bg-primary-50 text-primary-700 border-primary-200'
-                        : 'bg-white text-gray-700 border-gray-200 hover:border-primary-200 hover:text-primary-700'
+                        ? "bg-primary-50 text-primary-700 border-primary-200"
+                        : "bg-white text-gray-700 border-gray-200 hover:border-primary-200 hover:text-primary-700"
                     }`}
                   >
                     {range}
                   </button>
-                )
+                );
               })}
             </div>
           </div>
@@ -170,11 +182,15 @@ export function PlatformDemographics({
               <Input
                 label="Male %"
                 type="number"
-                value={platform.gender_split?.male && platform.gender_split.male > 0 ? platform.gender_split.male : ''}
+                value={
+                  platform.gender_split?.male && platform.gender_split.male > 0
+                    ? platform.gender_split.male
+                    : ""
+                }
                 onChange={(e) => {
-                  const val = e.target.value
-                  const cleanVal = val === '' ? '' : val.replace(/^0+(?=\d)/, '') || val
-                  onUpdateGenderSplit('male', cleanVal)
+                  const val = e.target.value;
+                  const cleanVal = val === "" ? "" : val.replace(/^0+(?=\d)/, "") || val;
+                  onUpdateGenderSplit("male", cleanVal);
                 }}
                 placeholder="45"
                 min={0}
@@ -185,11 +201,15 @@ export function PlatformDemographics({
               <Input
                 label="Female %"
                 type="number"
-                value={platform.gender_split?.female && platform.gender_split.female > 0 ? platform.gender_split.female : ''}
+                value={
+                  platform.gender_split?.female && platform.gender_split.female > 0
+                    ? platform.gender_split.female
+                    : ""
+                }
                 onChange={(e) => {
-                  const val = e.target.value
-                  const cleanVal = val === '' ? '' : val.replace(/^0+(?=\d)/, '') || val
-                  onUpdateGenderSplit('female', cleanVal)
+                  const val = e.target.value;
+                  const cleanVal = val === "" ? "" : val.replace(/^0+(?=\d)/, "") || val;
+                  onUpdateGenderSplit("female", cleanVal);
                 }}
                 placeholder="55"
                 min={0}
@@ -198,12 +218,13 @@ export function PlatformDemographics({
                 className="bg-gray-50"
               />
             </div>
-            {platform.gender_split && (platform.gender_split.male + platform.gender_split.female) > 100 && (
-              <p className="text-xs text-red-600 mt-1">Warning: Total &gt; 100%</p>
-            )}
+            {platform.gender_split &&
+              platform.gender_split.male + platform.gender_split.female > 100 && (
+                <p className="text-xs text-red-600 mt-1">Warning: Total &gt; 100%</p>
+              )}
           </div>
         </div>
       )}
     </div>
-  )
+  );
 }

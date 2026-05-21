@@ -1,20 +1,20 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { ROUTES, MARKETING_BASE_URL } from '@/lib/constants/routes'
-import { ArrowRightIcon } from '@heroicons/react/24/outline'
+import { useState } from "react";
+import { ROUTES, MARKETING_BASE_URL } from "@/lib/constants/routes";
+import { ArrowRightIcon } from "@heroicons/react/24/outline";
 
 // These pages live on the marketing site (vayada.com), not in this app.
 const NAV_LINKS = [
-  { label: 'Booking Engine', href: `${MARKETING_BASE_URL}/booking-engine` },
-  { label: 'PMS', href: `${MARKETING_BASE_URL}/pms` },
-  { label: 'Hotel-Creator-Network', href: `${MARKETING_BASE_URL}/hotel-creator-network` },
-  { label: 'Pricing', href: `${MARKETING_BASE_URL}/pricing` },
-  { label: 'Partner Program', href: `${MARKETING_BASE_URL}/partner-program` },
-]
+  { label: "Booking Engine", href: `${MARKETING_BASE_URL}/booking-engine` },
+  { label: "PMS", href: `${MARKETING_BASE_URL}/pms` },
+  { label: "Hotel-Creator-Network", href: `${MARKETING_BASE_URL}/hotel-creator-network` },
+  { label: "Pricing", href: `${MARKETING_BASE_URL}/pricing` },
+  { label: "Partner Program", href: `${MARKETING_BASE_URL}/partner-program` },
+];
 
 export default function Navigation() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
     <nav className="fixed left-0 right-0 top-0 z-50 border-b border-border bg-white/80 backdrop-blur-xl">
@@ -64,7 +64,12 @@ export default function Navigation() {
             aria-label="Toggle menu"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
         </div>
@@ -100,5 +105,5 @@ export default function Navigation() {
         )}
       </div>
     </nav>
-  )
+  );
 }

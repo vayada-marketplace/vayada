@@ -1,4 +1,4 @@
-export { bookingSettingsService } from './settingsService'
+export { bookingSettingsService } from "./settingsService";
 export type {
   PropertySettings,
   PropertySettingsUpdate,
@@ -11,4 +11,4 @@ export type {
   CommissionRateChange,
   AddonSettings,
   PromoCodeItem,
-} from './settingsService'
+} from "./settingsService";

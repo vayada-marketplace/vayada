@@ -1,13 +1,13 @@
-'use client'
+"use client";
 
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect } from "react";
 
 interface GuestSelectorProps {
-  open: boolean
-  onClose: () => void
-  adults: number
-  children: number
-  onUpdate: (adults: number, children: number) => void
+  open: boolean;
+  onClose: () => void;
+  adults: number;
+  children: number;
+  onUpdate: (adults: number, children: number) => void;
 }
 
 export default function GuestSelector({
@@ -17,19 +17,19 @@ export default function GuestSelector({
   children,
   onUpdate,
 }: GuestSelectorProps) {
-  const ref = useRef<HTMLDivElement>(null)
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose()
+        onClose();
       }
-    }
-    if (open) document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open, onClose])
+    };
+    if (open) document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, onClose]);
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div
@@ -97,5 +97,5 @@ export default function GuestSelector({
         Done
       </button>
     </div>
-  )
+  );
 }

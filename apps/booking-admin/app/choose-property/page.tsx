@@ -1,10 +1,10 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { authService } from '@/services/auth'
-import { settingsService, type HotelSummary } from '@/services/settings'
-import { useTranslation } from '@/lib/i18n'
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { authService } from "@/services/auth";
+import { settingsService, type HotelSummary } from "@/services/settings";
+import { useTranslation } from "@/lib/i18n";
 
 /**
  * Post-login hotel picker.
@@ -22,53 +22,51 @@ import { useTranslation } from '@/lib/i18n'
  *   - Not logged in → /login
  */
 export default function ChoosePropertyPage() {
-  const { t } = useTranslation()
-  const router = useRouter()
-  const [hotels, setHotels] = useState<HotelSummary[] | null>(null)
-  const [error, setError] = useState('')
+  const { t } = useTranslation();
+  const router = useRouter();
+  const [hotels, setHotels] = useState<HotelSummary[] | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
 
     async function load() {
       if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
-        router.replace('/login')
-        return
+        router.replace("/login");
+        return;
       }
       try {
-        const list = await settingsService.listHotels()
-        if (cancelled) return
+        const list = await settingsService.listHotels();
+        if (cancelled) return;
 
         if (list.length === 0) {
-          router.replace('/setup')
-          return
+          router.replace("/setup");
+          return;
         }
         if (list.length === 1) {
-          localStorage.setItem('selectedHotelId', list[0].id)
-          router.replace('/dashboard')
-          return
+          localStorage.setItem("selectedHotelId", list[0].id);
+          router.replace("/dashboard");
+          return;
         }
-        setHotels(list)
+        setHotels(list);
       } catch (e) {
         if (!cancelled) {
-          setError(
-            e instanceof Error ? e.message : t('auth.chooseProperty.loadError')
-          )
+          setError(e instanceof Error ? e.message : t("auth.chooseProperty.loadError"));
         }
       }
     }
 
-    load()
+    load();
     return () => {
-      cancelled = true
-    }
-  }, [router, t])
+      cancelled = true;
+    };
+  }, [router, t]);
 
   const selectHotel = (hotel: HotelSummary) => {
-    localStorage.setItem('selectedHotelId', hotel.id)
-    localStorage.setItem('setupComplete', 'true')
-    router.replace('/dashboard')
-  }
+    localStorage.setItem("selectedHotelId", hotel.id);
+    localStorage.setItem("setupComplete", "true");
+    router.replace("/dashboard");
+  };
 
   if (error) {
     return (
@@ -79,11 +77,11 @@ export default function ChoosePropertyPage() {
             onClick={() => window.location.reload()}
             className="text-[13px] text-primary-600 hover:text-primary-700 font-medium"
           >
-            {t('auth.chooseProperty.retry')}
+            {t("auth.chooseProperty.retry")}
           </button>
         </div>
       </div>
-    )
+    );
   }
 
   if (!hotels) {
@@ -91,11 +89,10 @@ export default function ChoosePropertyPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
-    )
+    );
   }
 
-  const userName =
-    (typeof window !== 'undefined' && localStorage.getItem('userName')) || ''
+  const userName = (typeof window !== "undefined" && localStorage.getItem("userName")) || "";
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-8">
@@ -106,12 +103,10 @@ export default function ChoosePropertyPage() {
           </div>
           <h1 className="text-xl font-bold text-gray-900">
             {userName
-              ? `${t('auth.chooseProperty.welcomeBack')}, ${userName}`
-              : t('auth.chooseProperty.welcome')}
+              ? `${t("auth.chooseProperty.welcomeBack")}, ${userName}`
+              : t("auth.chooseProperty.welcome")}
           </h1>
-          <p className="text-[13px] text-gray-500 mt-1">
-            {t('auth.chooseProperty.subtitle')}
-          </p>
+          <p className="text-[13px] text-gray-500 mt-1">{t("auth.chooseProperty.subtitle")}</p>
         </div>
 
         <div className="space-y-2">
@@ -145,12 +140,10 @@ export default function ChoosePropertyPage() {
                   </svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-semibold text-gray-900 truncate">
-                    {hotel.name}
-                  </p>
+                  <p className="text-[14px] font-semibold text-gray-900 truncate">{hotel.name}</p>
                   {(hotel.location || hotel.country) && (
                     <p className="text-[12px] text-gray-500 truncate">
-                      {[hotel.location, hotel.country].filter(Boolean).join(', ')}
+                      {[hotel.location, hotel.country].filter(Boolean).join(", ")}
                     </p>
                   )}
                 </div>
@@ -163,9 +156,9 @@ export default function ChoosePropertyPage() {
           <button
             onClick={() => {
               try {
-                localStorage.removeItem('selectedHotelId')
+                localStorage.removeItem("selectedHotelId");
               } catch {}
-              router.push('/setup?mode=add')
+              router.push("/setup?mode=add");
             }}
             className="w-full flex items-center justify-center gap-2 text-[13px] text-primary-600 hover:text-primary-700 font-medium py-2"
           >
@@ -182,10 +175,10 @@ export default function ChoosePropertyPage() {
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            {t('auth.chooseProperty.addProperty')}
+            {t("auth.chooseProperty.addProperty")}
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

@@ -2,13 +2,13 @@
  * Reusable Textarea component
  */
 
-import { cn } from '@/lib/utils'
-import { TextareaHTMLAttributes, forwardRef } from 'react'
+import { cn } from "@/lib/utils";
+import { TextareaHTMLAttributes, forwardRef } from "react";
 
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
-  label?: string
-  error?: string
-  helperText?: string
+  label?: string;
+  error?: string;
+  helperText?: string;
 }
 
 const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
@@ -24,29 +24,23 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         <textarea
           ref={ref}
           className={cn(
-            'w-full px-4 py-3 rounded-lg border transition-colors resize-none text-gray-900 bg-gray-50',
-            'focus:outline-none focus:ring-2 focus:ring-offset-0 placeholder:text-gray-500',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
+            "w-full px-4 py-3 rounded-lg border transition-colors resize-none text-gray-900 bg-gray-50",
+            "focus:outline-none focus:ring-2 focus:ring-offset-0 placeholder:text-gray-500",
+            "disabled:opacity-50 disabled:cursor-not-allowed",
             error
-              ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
-              : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500',
-            className
+              ? "border-red-300 focus:border-red-500 focus:ring-red-500"
+              : "border-gray-300 focus:border-primary-500 focus:ring-primary-500",
+            className,
           )}
           {...props}
         />
-        {error && (
-          <p className="mt-1 text-sm text-red-600">{error}</p>
-        )}
-        {helperText && !error && (
-          <p className="mt-1 text-sm text-gray-500">{helperText}</p>
-        )}
+        {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+        {helperText && !error && <p className="mt-1 text-sm text-gray-500">{helperText}</p>}
       </div>
-    )
-  }
-)
+    );
+  },
+);
 
-Textarea.displayName = 'Textarea'
+Textarea.displayName = "Textarea";
 
-export default Textarea
-
-
+export default Textarea;

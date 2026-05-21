@@ -1,12 +1,11 @@
 /** @type {import('next').NextConfig} */
-const path = require('path')
+const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone',
+  output: "standalone",
   turbopack: {
-    root: path.join(__dirname, '../..'),
+    root: path.join(__dirname, "../.."),
   },
-}
+};
 
-module.exports = nextConfig
-
+module.exports = nextConfig;

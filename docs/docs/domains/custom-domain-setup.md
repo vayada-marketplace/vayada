@@ -31,8 +31,8 @@ We recommend using a **subdomain** like `book.hotelname.com` rather than their r
 
 The hotel (or their IT person) needs to add a **CNAME** DNS record:
 
-| Type | Name | Target |
-|------|------|--------|
+| Type  | Name   | Target               |
+| ----- | ------ | -------------------- |
 | CNAME | `book` | `booking.vayada.com` |
 
 **How to explain this to the hotel:**
@@ -69,12 +69,12 @@ Once the hotel has added their CNAME record, we need to add the domain to our Cl
 
 ## Troubleshooting
 
-| Problem | Likely cause | Fix |
-|---------|-------------|-----|
-| "This site can't be reached" | DNS not propagated yet, or CNAME not added | Ask the hotel to double-check their DNS settings |
-| SSL certificate error | Cloudflare hasn't issued the cert yet | Wait a few minutes, then check Cloudflare dashboard |
-| Wrong hotel showing | Domain mapped to wrong hotel in admin | Check the domain setting in Booking Admin |
-| Page loads but looks broken | CSS/assets not loading over HTTPS | Check Cloudflare SSL mode is set to "Full" |
+| Problem                      | Likely cause                               | Fix                                                 |
+| ---------------------------- | ------------------------------------------ | --------------------------------------------------- |
+| "This site can't be reached" | DNS not propagated yet, or CNAME not added | Ask the hotel to double-check their DNS settings    |
+| SSL certificate error        | Cloudflare hasn't issued the cert yet      | Wait a few minutes, then check Cloudflare dashboard |
+| Wrong hotel showing          | Domain mapped to wrong hotel in admin      | Check the domain setting in Booking Admin           |
+| Page loads but looks broken  | CSS/assets not loading over HTTPS          | Check Cloudflare SSL mode is set to "Full"          |
 
 ## Removing a custom domain
 

@@ -1,36 +1,36 @@
-'use client'
+"use client";
 
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useRef, useEffect, useState } from "react";
 import {
   ChatBubbleOvalLeftEllipsisIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
   FaceSmileIcon,
   XMarkIcon,
-} from '@heroicons/react/24/outline'
-import dynamic from 'next/dynamic'
-import { AvatarSimple } from '@/components/ui'
-import { SystemMessage } from './SystemMessage'
-import type { MessageResponse, ConversationResponse } from '@/services/api/collaborations'
+} from "@heroicons/react/24/outline";
+import dynamic from "next/dynamic";
+import { AvatarSimple } from "@/components/ui";
+import { SystemMessage } from "./SystemMessage";
+import type { MessageResponse, ConversationResponse } from "@/services/api/collaborations";
 
 // Dynamically import EmojiPicker to avoid SSR issues
-const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false })
+const EmojiPicker = dynamic(() => import("emoji-picker-react"), { ssr: false });
 
 interface ChatMessageAreaProps {
-  messages: MessageResponse[]
-  activeChat: ConversationResponse
-  isLoading: boolean
-  isLoadingMore: boolean
-  hasMoreMessages: boolean
-  messageInput: string
-  onMessageInputChange: (value: string) => void
-  onSendMessage: (e: React.FormEvent) => void
-  onLoadMore: () => void
-  onSendImageMessage?: (file: File, caption?: string) => Promise<void>
+  messages: MessageResponse[];
+  activeChat: ConversationResponse;
+  isLoading: boolean;
+  isLoadingMore: boolean;
+  hasMoreMessages: boolean;
+  messageInput: string;
+  onMessageInputChange: (value: string) => void;
+  onSendMessage: (e: React.FormEvent) => void;
+  onLoadMore: () => void;
+  onSendImageMessage?: (file: File, caption?: string) => Promise<void>;
 }
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
-const ALLOWED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
+const ALLOWED_FILE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
 export function ChatMessageArea({
   messages,
@@ -44,118 +44,118 @@ export function ChatMessageArea({
   onLoadMore,
   onSendImageMessage,
 }: ChatMessageAreaProps) {
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const textInputRef = useRef<HTMLInputElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
 
-  const [selectedImage, setSelectedImage] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string>('')
-  const [isUploading, setIsUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
     if (!isLoading && !isLoadingMore) {
-      scrollToBottom()
+      scrollToBottom();
     }
-  }, [messages, isLoading, isLoadingMore])
+  }, [messages, isLoading, isLoadingMore]);
 
   // Close emoji picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Element
-      if (showEmojiPicker && !target.closest('.emoji-picker-container')) {
-        setShowEmojiPicker(false)
+      const target = event.target as Element;
+      if (showEmojiPicker && !target.closest(".emoji-picker-container")) {
+        setShowEmojiPicker(false);
       }
-    }
+    };
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showEmojiPicker])
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showEmojiPicker]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    setUploadError(null)
+    setUploadError(null);
 
     // Validate file type
     if (!ALLOWED_FILE_TYPES.includes(file.type)) {
-      setUploadError('Please select an image (JPG, PNG, WebP, GIF)')
-      return
+      setUploadError("Please select an image (JPG, PNG, WebP, GIF)");
+      return;
     }
 
     // Validate file size
     if (file.size > MAX_FILE_SIZE) {
-      setUploadError('Image must be smaller than 20MB')
-      return
+      setUploadError("Image must be smaller than 20MB");
+      return;
     }
 
-    setSelectedImage(file)
-    setImagePreview(URL.createObjectURL(file))
+    setSelectedImage(file);
+    setImagePreview(URL.createObjectURL(file));
 
     // Reset file input
     if (fileInputRef.current) {
-      fileInputRef.current.value = ''
+      fileInputRef.current.value = "";
     }
-  }
+  };
 
   const handleRemoveImage = () => {
     if (imagePreview) {
-      URL.revokeObjectURL(imagePreview)
+      URL.revokeObjectURL(imagePreview);
     }
-    setSelectedImage(null)
-    setImagePreview('')
-    setUploadError(null)
-  }
+    setSelectedImage(null);
+    setImagePreview("");
+    setUploadError(null);
+  };
 
   const handleEmojiClick = (emojiData: { emoji: string }) => {
-    const input = textInputRef.current
+    const input = textInputRef.current;
     if (input) {
-      const start = input.selectionStart || 0
-      const end = input.selectionEnd || 0
-      const newValue = messageInput.slice(0, start) + emojiData.emoji + messageInput.slice(end)
-      onMessageInputChange(newValue)
+      const start = input.selectionStart || 0;
+      const end = input.selectionEnd || 0;
+      const newValue = messageInput.slice(0, start) + emojiData.emoji + messageInput.slice(end);
+      onMessageInputChange(newValue);
 
       // Set cursor position after emoji
       setTimeout(() => {
-        input.selectionStart = input.selectionEnd = start + emojiData.emoji.length
-        input.focus()
-      }, 0)
+        input.selectionStart = input.selectionEnd = start + emojiData.emoji.length;
+        input.focus();
+      }, 0);
     } else {
-      onMessageInputChange(messageInput + emojiData.emoji)
+      onMessageInputChange(messageInput + emojiData.emoji);
     }
-    setShowEmojiPicker(false)
-  }
+    setShowEmojiPicker(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
 
     if (selectedImage && onSendImageMessage) {
-      setIsUploading(true)
-      setUploadError(null)
+      setIsUploading(true);
+      setUploadError(null);
 
       try {
-        const caption = messageInput.trim() || undefined
-        await onSendImageMessage(selectedImage, caption)
-        handleRemoveImage()
-        onMessageInputChange('')
+        const caption = messageInput.trim() || undefined;
+        await onSendImageMessage(selectedImage, caption);
+        handleRemoveImage();
+        onMessageInputChange("");
       } catch (error) {
-        console.error('Failed to send image:', error)
-        setUploadError('Failed to upload. Please try again.')
+        console.error("Failed to send image:", error);
+        setUploadError("Failed to upload. Please try again.");
       } finally {
-        setIsUploading(false)
+        setIsUploading(false);
       }
     } else if (messageInput.trim()) {
-      onSendMessage(e)
+      onSendMessage(e);
     }
-  }
+  };
 
-  const canSend = (selectedImage && !isUploading) || messageInput.trim()
+  const canSend = (selectedImage && !isUploading) || messageInput.trim();
 
   return (
     <>
@@ -174,34 +174,34 @@ export function ChatMessageArea({
                   disabled={isLoadingMore}
                   className="text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-4 py-2 rounded-full border border-blue-100 transition-all disabled:opacity-50"
                 >
-                  {isLoadingMore ? 'Loading older messages...' : 'Load older messages'}
+                  {isLoadingMore ? "Loading older messages..." : "Load older messages"}
                 </button>
               </div>
             )}
 
             {messages.length > 0 ? (
               messages.map((msg, idx) => {
-                const isSystem = msg.sender_id === null || msg.content_type === 'system'
-                const isThem = !isSystem && msg.sender_name === activeChat.partner_name
-                const isMe = !isSystem && !isThem
+                const isSystem = msg.sender_id === null || msg.content_type === "system";
+                const isThem = !isSystem && msg.sender_name === activeChat.partner_name;
+                const isMe = !isSystem && !isThem;
 
                 // Simple date grouping
                 const showDate =
                   idx === 0 ||
                   new Date(messages[idx - 1].created_at).toDateString() !==
-                    new Date(msg.created_at).toDateString()
+                    new Date(msg.created_at).toDateString();
                 const dateStr = new Date(msg.created_at).toLocaleDateString([], {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })
+                  month: "long",
+                  day: "numeric",
+                  year: "numeric",
+                });
                 const timeStr = new Date(msg.created_at).toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
 
                 if (isSystem) {
-                  return <SystemMessage key={msg.id} content={msg.content} />
+                  return <SystemMessage key={msg.id} content={msg.content} />;
                 }
 
                 return (
@@ -213,7 +213,7 @@ export function ChatMessageArea({
                         </span>
                       </div>
                     )}
-                    <div className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex w-full ${isMe ? "justify-end" : "justify-start"}`}>
                       <div className="max-w-[70%]">
                         <div className="flex items-end gap-2">
                           {isThem && (
@@ -228,11 +228,11 @@ export function ChatMessageArea({
                             <div
                               className={`p-4 rounded-2xl text-sm leading-relaxed ${
                                 isMe
-                                  ? 'bg-blue-600 text-white rounded-br-none'
-                                  : 'bg-white border border-gray-100 text-gray-700 rounded-bl-none shadow-sm'
+                                  ? "bg-blue-600 text-white rounded-br-none"
+                                  : "bg-white border border-gray-100 text-gray-700 rounded-bl-none shadow-sm"
                               }`}
                             >
-                              {msg.content_type === 'image' ? (
+                              {msg.content_type === "image" ? (
                                 <img
                                   src={msg.content}
                                   alt="Attachment"
@@ -244,22 +244,24 @@ export function ChatMessageArea({
                             </div>
                             <div
                               className={`text-[10px] text-gray-400 mt-1 ${
-                                isMe ? 'text-right' : 'text-left'
+                                isMe ? "text-right" : "text-left"
                               }`}
                             >
-                              {timeStr} {isMe && '✓'}
+                              {timeStr} {isMe && "✓"}
                             </div>
                           </div>
                         </div>
                       </div>
                     </div>
                   </React.Fragment>
-                )
+                );
               })
             ) : (
               <div className="flex flex-col items-center justify-center h-[400px] text-gray-400">
                 <ChatBubbleOvalLeftEllipsisIcon className="w-12 h-12 mb-2 opacity-20" />
-                <p className="text-sm">No messages yet. Send a message to start the conversation!</p>
+                <p className="text-sm">
+                  No messages yet. Send a message to start the conversation!
+                </p>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -299,7 +301,7 @@ export function ChatMessageArea({
           <input
             ref={fileInputRef}
             type="file"
-            accept={ALLOWED_FILE_TYPES.join(',')}
+            accept={ALLOWED_FILE_TYPES.join(",")}
             onChange={handleFileSelect}
             className="hidden"
           />
@@ -319,7 +321,7 @@ export function ChatMessageArea({
             <input
               ref={textInputRef}
               type="text"
-              placeholder={selectedImage ? 'Add a caption (optional)...' : 'Type a message...'}
+              placeholder={selectedImage ? "Add a caption (optional)..." : "Type a message..."}
               value={messageInput}
               onChange={(e) => onMessageInputChange(e.target.value)}
               disabled={isUploading}
@@ -342,11 +344,7 @@ export function ChatMessageArea({
             {/* Emoji Picker Popup */}
             {showEmojiPicker && (
               <div className="absolute bottom-12 right-0 z-50">
-                <EmojiPicker
-                  onEmojiClick={handleEmojiClick}
-                  width={320}
-                  height={400}
-                />
+                <EmojiPicker onEmojiClick={handleEmojiClick} width={320} height={400} />
               </div>
             )}
           </div>
@@ -366,5 +364,5 @@ export function ChatMessageArea({
         </form>
       </div>
     </>
-  )
+  );
 }

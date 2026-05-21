@@ -1,18 +1,18 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useCookieConsent, CookieConsent } from '@/context/CookieConsentContext'
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import Link from 'next/link'
-import { ROUTES } from '@/lib/constants'
+import { useState, useEffect } from "react";
+import { useCookieConsent, CookieConsent } from "@/context/CookieConsentContext";
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
+import { ROUTES } from "@/lib/constants";
 
 interface CookieCategoryProps {
-  title: string
-  description: string
-  enabled: boolean
-  onChange: (enabled: boolean) => void
-  disabled?: boolean
-  required?: boolean
+  title: string;
+  description: string;
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  disabled?: boolean;
+  required?: boolean;
 }
 
 function CookieCategory({
@@ -29,9 +29,7 @@ function CookieCategory({
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-medium text-gray-900">{title}</h3>
           {required && (
-            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
-              Required
-            </span>
+            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">Required</span>
           )}
         </div>
         <p className="mt-1 text-sm text-gray-500">{description}</p>
@@ -43,8 +41,8 @@ function CookieCategory({
           disabled={disabled}
           className={`
             relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
-            ${enabled ? 'bg-primary-600' : 'bg-gray-200'}
-            ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}
+            ${enabled ? "bg-primary-600" : "bg-gray-200"}
+            ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
           `}
           role="switch"
           aria-checked={enabled}
@@ -52,24 +50,18 @@ function CookieCategory({
           <span
             className={`
               pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out
-              ${enabled ? 'translate-x-5' : 'translate-x-0'}
+              ${enabled ? "translate-x-5" : "translate-x-0"}
             `}
           />
         </button>
       </div>
     </div>
-  )
+  );
 }
 
 export function CookieSettingsModal() {
-  const {
-    consent,
-    showSettings,
-    closeSettings,
-    updateConsent,
-    acceptAll,
-    acceptNecessaryOnly,
-  } = useCookieConsent()
+  const { consent, showSettings, closeSettings, updateConsent, acceptAll, acceptNecessaryOnly } =
+    useCookieConsent();
 
   // Local state for form
   const [localConsent, setLocalConsent] = useState<CookieConsent>({
@@ -77,22 +69,22 @@ export function CookieSettingsModal() {
     functional: false,
     analytics: false,
     marketing: false,
-  })
+  });
 
   // Initialize local state from context
   useEffect(() => {
     if (consent) {
-      setLocalConsent(consent)
+      setLocalConsent(consent);
     }
-  }, [consent])
+  }, [consent]);
 
   if (!showSettings) {
-    return null
+    return null;
   }
 
   const handleSave = async () => {
-    await updateConsent(localConsent)
-  }
+    await updateConsent(localConsent);
+  };
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -107,13 +99,8 @@ export function CookieSettingsModal() {
         <div className="relative w-full max-w-lg transform overflow-hidden rounded-lg bg-white shadow-xl transition-all">
           {/* Header */}
           <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Cookie Settings
-            </h2>
-            <button
-              onClick={closeSettings}
-              className="text-gray-400 hover:text-gray-500"
-            >
+            <h2 className="text-lg font-semibold text-gray-900">Cookie Settings</h2>
+            <button onClick={closeSettings} className="text-gray-400 hover:text-gray-500">
               <XMarkIcon className="h-6 w-6" />
             </button>
           </div>
@@ -121,7 +108,8 @@ export function CookieSettingsModal() {
           {/* Content */}
           <div className="px-6 py-4">
             <p className="text-sm text-gray-600 mb-4">
-              We use cookies to improve your experience on our website. You can choose which categories of cookies you want to allow.{' '}
+              We use cookies to improve your experience on our website. You can choose which
+              categories of cookies you want to allow.{" "}
               <Link
                 href={ROUTES.PRIVACY}
                 className="text-primary-600 hover:text-primary-700 underline"
@@ -154,18 +142,14 @@ export function CookieSettingsModal() {
                 title="Analytics"
                 description="Cookies that help us understand how visitors interact with our website, allowing us to improve our services."
                 enabled={localConsent.analytics}
-                onChange={(enabled) =>
-                  setLocalConsent((prev) => ({ ...prev, analytics: enabled }))
-                }
+                onChange={(enabled) => setLocalConsent((prev) => ({ ...prev, analytics: enabled }))}
               />
 
               <CookieCategory
                 title="Marketing"
                 description="Cookies used to deliver personalized advertisements and measure the effectiveness of our marketing campaigns."
                 enabled={localConsent.marketing}
-                onChange={(enabled) =>
-                  setLocalConsent((prev) => ({ ...prev, marketing: enabled }))
-                }
+                onChange={(enabled) => setLocalConsent((prev) => ({ ...prev, marketing: enabled }))}
               />
             </div>
           </div>
@@ -194,7 +178,7 @@ export function CookieSettingsModal() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-export default CookieSettingsModal
+export default CookieSettingsModal;

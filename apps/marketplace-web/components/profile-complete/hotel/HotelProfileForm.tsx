@@ -1,48 +1,52 @@
-'use client'
+"use client";
 
-import { MutableRefObject } from 'react'
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import type { HotelFormState, ListingFormData } from '@/lib/types'
-import { FormNavigationButtons } from '../FormNavigationButtons'
-import { HotelBasicInfoStep } from './HotelBasicInfoStep'
-import { HotelListingsStep } from './HotelListingsStep'
+import { MutableRefObject } from "react";
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import type { HotelFormState, ListingFormData } from "@/lib/types";
+import { FormNavigationButtons } from "../FormNavigationButtons";
+import { HotelBasicInfoStep } from "./HotelBasicInfoStep";
+import { HotelListingsStep } from "./HotelListingsStep";
 
 interface HotelProfileFormProps {
   // Form state
-  form: HotelFormState
-  listings: ListingFormData[]
+  form: HotelFormState;
+  listings: ListingFormData[];
 
   // Step management
-  currentStep: number
-  totalSteps: number
+  currentStep: number;
+  totalSteps: number;
 
   // UI state
-  error: string
-  submitting: boolean
-  canProceed: boolean
-  collapsedCards: Set<number>
-  countryInputs: Record<number, string>
-  countries: string[]
+  error: string;
+  submitting: boolean;
+  canProceed: boolean;
+  collapsedCards: Set<number>;
+  countryInputs: Record<number, string>;
+  countries: string[];
 
   // Refs
-  imageInputRefs: MutableRefObject<(HTMLInputElement | null)[]>
+  imageInputRefs: MutableRefObject<(HTMLInputElement | null)[]>;
 
   // Form handlers
-  onFormChange: (updates: Partial<HotelFormState>) => void
+  onFormChange: (updates: Partial<HotelFormState>) => void;
 
   // Listing handlers
-  onAddListing: () => void
-  onRemoveListing: (index: number) => void
-  onToggleCollapse: (index: number) => void
-  onUpdateListing: (index: number, field: keyof ListingFormData, value: ListingFormData[keyof ListingFormData]) => void
-  onImageChange: (listingIndex: number, e: React.ChangeEvent<HTMLInputElement>) => void
-  onRemoveImage: (listingIndex: number, imageIndex: number) => void
-  onCountryInputChange: (index: number, value: string) => void
+  onAddListing: () => void;
+  onRemoveListing: (index: number) => void;
+  onToggleCollapse: (index: number) => void;
+  onUpdateListing: (
+    index: number,
+    field: keyof ListingFormData,
+    value: ListingFormData[keyof ListingFormData],
+  ) => void;
+  onImageChange: (listingIndex: number, e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemoveImage: (listingIndex: number, imageIndex: number) => void;
+  onCountryInputChange: (index: number, value: string) => void;
 
   // Navigation handlers
-  onPrevStep: () => void
-  onNextStep: () => void
-  onSubmit: (e: React.FormEvent) => void
+  onPrevStep: () => void;
+  onNextStep: () => void;
+  onSubmit: (e: React.FormEvent) => void;
 }
 
 export function HotelProfileForm({
@@ -70,13 +74,13 @@ export function HotelProfileForm({
   onSubmit,
 }: HotelProfileFormProps) {
   const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (currentStep === totalSteps) {
-      onSubmit(e)
+      onSubmit(e);
     } else {
-      onNextStep()
+      onNextStep();
     }
-  }
+  };
 
   return (
     <div className="space-y-4">
@@ -86,11 +90,7 @@ export function HotelProfileForm({
       >
         {/* Step 1: Basic Information */}
         {currentStep === 1 && (
-          <HotelBasicInfoStep
-            form={form}
-            onFormChange={onFormChange}
-            error={error}
-          />
+          <HotelBasicInfoStep form={form} onFormChange={onFormChange} error={error} />
         )}
 
         {/* Step 2: Property Listings Section */}
@@ -129,5 +129,5 @@ export function HotelProfileForm({
         />
       </form>
     </div>
-  )
+  );
 }

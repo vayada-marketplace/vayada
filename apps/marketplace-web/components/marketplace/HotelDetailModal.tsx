@@ -1,11 +1,11 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import Image from 'next/image'
-import { Hotel } from '@/lib/types'
-import { Button, PlatformIcon } from '@/components/ui'
-import { getMonthAbbr, sortMonths } from '@/lib/utils/months'
-import { formatFollowersCompact } from '@/lib/utils'
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import { Hotel } from "@/lib/types";
+import { Button, PlatformIcon } from "@/components/ui";
+import { getMonthAbbr, sortMonths } from "@/lib/utils/months";
+import { formatFollowersCompact } from "@/lib/utils";
 import {
   MapPinIcon,
   GlobeAltIcon,
@@ -21,61 +21,76 @@ import {
   GiftIcon,
   TagIcon,
   LinkIcon,
-} from '@heroicons/react/24/outline'
-import type { CollaborationOffering } from '@/lib/types'
-import { CollaborationApplicationModal, type CollaborationApplicationData } from './CollaborationApplicationModal'
-import { collaborationService, type CreateCreatorCollaborationRequest } from '@/services/api/collaborations'
-import { getCurrentUserInfo } from '@/lib/utils/accessControl'
-import { SuccessModal } from '@/components/ui/SuccessModal'
-import { ErrorModal } from '@/components/ui/ErrorModal'
+} from "@heroicons/react/24/outline";
+import type { CollaborationOffering } from "@/lib/types";
+import {
+  CollaborationApplicationModal,
+  type CollaborationApplicationData,
+} from "./CollaborationApplicationModal";
+import {
+  collaborationService,
+  type CreateCreatorCollaborationRequest,
+} from "@/services/api/collaborations";
+import { getCurrentUserInfo } from "@/lib/utils/accessControl";
+import { SuccessModal } from "@/components/ui/SuccessModal";
+import { ErrorModal } from "@/components/ui/ErrorModal";
 
 interface HotelDetailModalProps {
-  hotel: Hotel | null
-  isOpen: boolean
-  onClose: () => void
-  creatorPlatforms?: string[]
+  hotel: Hotel | null;
+  isOpen: boolean;
+  onClose: () => void;
+  creatorPlatforms?: string[];
 }
 
 const formatNumber = (num: number): string => {
-  return new Intl.NumberFormat('de-DE').format(num)
-}
+  return new Intl.NumberFormat("de-DE").format(num);
+};
 
-export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = [] }: HotelDetailModalProps) {
-  const [showApplicationModal, setShowApplicationModal] = useState(false)
-  const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [imageError, setImageError] = useState(false)
-  const [errorState, setErrorState] = useState<{ isOpen: boolean, message: string, title?: string }>({
+export function HotelDetailModal({
+  hotel,
+  isOpen,
+  onClose,
+  creatorPlatforms = [],
+}: HotelDetailModalProps) {
+  const [showApplicationModal, setShowApplicationModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [errorState, setErrorState] = useState<{
+    isOpen: boolean;
+    message: string;
+    title?: string;
+  }>({
     isOpen: false,
-    message: ''
-  })
-  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+    message: "",
+  });
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
     if (isOpen) {
-      setCurrentImageIndex(0)
+      setCurrentImageIndex(0);
     }
-  }, [isOpen])
+  }, [isOpen]);
 
-  if (!isOpen || !hotel) return null
+  if (!isOpen || !hotel) return null;
 
   const handleApplyClick = () => {
-    setShowApplicationModal(true)
-  }
+    setShowApplicationModal(true);
+  };
 
   const handleApplicationSubmit = async (data: CollaborationApplicationData) => {
     try {
-      const userInfo = getCurrentUserInfo()
+      const userInfo = getCurrentUserInfo();
       if (!userInfo.userId) {
         setErrorState({
           isOpen: true,
-          message: 'Please log in to apply for collaborations',
-          title: 'Authentication Required'
-        })
-        return
+          message: "Please log in to apply for collaborations",
+          title: "Authentication Required",
+        });
+        return;
       }
 
       const request: CreateCreatorCollaborationRequest = {
-        initiator_type: 'creator',
+        initiator_type: "creator",
         listing_id: hotel.id,
         creator_id: userInfo.userId,
         why_great_fit: data.whyGreatFit,
@@ -83,122 +98,137 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
         travel_date_from: data.travelDateFrom || undefined,
         travel_date_to: data.travelDateTo || undefined,
         preferred_months: data.preferredMonths.length > 0 ? data.preferredMonths : undefined,
-        platform_deliverables: (data.platformDeliverables || []).map(pd => ({
+        platform_deliverables: (data.platformDeliverables || []).map((pd) => ({
           platform: pd.platform,
-          deliverables: pd.deliverables.map(d => ({
+          deliverables: pd.deliverables.map((d) => ({
             type: d.type,
             quantity: d.quantity,
           })),
         })),
-      }
+      };
 
-      await collaborationService.create(request)
-      setShowApplicationModal(false)
-      setShowSuccessModal(true)
+      await collaborationService.create(request);
+      setShowApplicationModal(false);
+      setShowSuccessModal(true);
     } catch (error) {
-      console.error('Failed to submit application:', error)
-      const rawMessage = error instanceof Error ? error.message : 'Failed to submit application. Please try again.'
+      console.error("Failed to submit application:", error);
+      const rawMessage =
+        error instanceof Error ? error.message : "Failed to submit application. Please try again.";
 
-      let displayMessage = rawMessage
-      let displayTitle = 'Application Error'
+      let displayMessage = rawMessage;
+      let displayTitle = "Application Error";
 
-      if (rawMessage.includes('unique constraint') && rawMessage.includes('idx_collaborations_unique_active')) {
-        displayMessage = 'You already have an active collaboration or pending request with this hotel. You can only have one active conversation per property.'
-        displayTitle = 'Duplicate Application'
+      if (
+        rawMessage.includes("unique constraint") &&
+        rawMessage.includes("idx_collaborations_unique_active")
+      ) {
+        displayMessage =
+          "You already have an active collaboration or pending request with this hotel. You can only have one active conversation per property.";
+        displayTitle = "Duplicate Application";
       }
 
       setErrorState({
         isOpen: true,
         message: displayMessage,
-        title: displayTitle
-      })
+        title: displayTitle,
+      });
     }
-  }
+  };
 
-  const images = hotel.images && hotel.images.length > 0 ? hotel.images : []
-  const hasMultipleImages = images.length > 1
+  const images = hotel.images && hotel.images.length > 0 ? hotel.images : [];
+  const hasMultipleImages = images.length > 1;
 
   const goToPreviousImage = () => {
-    setCurrentImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1))
-  }
+    setCurrentImageIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+  };
 
   const goToNextImage = () => {
-    setCurrentImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1))
-  }
+    setCurrentImageIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
+  };
 
   const goToImage = (index: number) => {
-    setCurrentImageIndex(index)
-  }
+    setCurrentImageIndex(index);
+  };
 
-  const collaborationType = hotel.collaborationType === 'Kostenlos' ? 'Free Stay' : 'Paid'
+  const collaborationType = hotel.collaborationType === "Kostenlos" ? "Free Stay" : "Paid";
 
-  const offerings: CollaborationOffering[] = hotel.collaborationOfferings && hotel.collaborationOfferings.length > 0
-    ? hotel.collaborationOfferings
-    : []
+  const offerings: CollaborationOffering[] =
+    hotel.collaborationOfferings && hotel.collaborationOfferings.length > 0
+      ? hotel.collaborationOfferings
+      : [];
 
-  const offeringBadgeClass = (type: CollaborationOffering['collaboration_type']) => {
+  const offeringBadgeClass = (type: CollaborationOffering["collaboration_type"]) => {
     switch (type) {
-      case 'Free Stay':
-        return 'bg-green-500/90 text-white'
-      case 'Paid':
-        return 'bg-amber-500/90 text-white'
-      case 'Discount':
-        return 'bg-yellow-500/90 text-white'
-      case 'Affiliate':
-        return 'bg-purple-500/90 text-white'
+      case "Free Stay":
+        return "bg-green-500/90 text-white";
+      case "Paid":
+        return "bg-amber-500/90 text-white";
+      case "Discount":
+        return "bg-yellow-500/90 text-white";
+      case "Affiliate":
+        return "bg-purple-500/90 text-white";
     }
-  }
+  };
 
-  const offeringIcon = (type: CollaborationOffering['collaboration_type']) => {
+  const offeringIcon = (type: CollaborationOffering["collaboration_type"]) => {
     switch (type) {
-      case 'Free Stay':
-        return GiftIcon
-      case 'Paid':
-        return CurrencyDollarIcon
-      case 'Discount':
-        return TagIcon
-      case 'Affiliate':
-        return LinkIcon
+      case "Free Stay":
+        return GiftIcon;
+      case "Paid":
+        return CurrencyDollarIcon;
+      case "Discount":
+        return TagIcon;
+      case "Affiliate":
+        return LinkIcon;
     }
-  }
+  };
 
   const offeringTitle = (o: CollaborationOffering) => {
     switch (o.collaboration_type) {
-      case 'Free Stay':
-        return 'Complimentary Stay'
-      case 'Paid':
-        return 'Paid Collaboration'
-      case 'Discount':
-        return 'Discounted Stay'
-      case 'Affiliate':
-        return 'Affiliate Partnership'
+      case "Free Stay":
+        return "Complimentary Stay";
+      case "Paid":
+        return "Paid Collaboration";
+      case "Discount":
+        return "Discounted Stay";
+      case "Affiliate":
+        return "Affiliate Partnership";
     }
-  }
+  };
 
   const offeringSubtitle = (o: CollaborationOffering) => {
     switch (o.collaboration_type) {
-      case 'Free Stay':
-        if (o.free_stay_min_nights && o.free_stay_max_nights && o.free_stay_min_nights !== o.free_stay_max_nights) {
-          return `${o.free_stay_min_nights}–${o.free_stay_max_nights} nights`
+      case "Free Stay":
+        if (
+          o.free_stay_min_nights &&
+          o.free_stay_max_nights &&
+          o.free_stay_min_nights !== o.free_stay_max_nights
+        ) {
+          return `${o.free_stay_min_nights}–${o.free_stay_max_nights} nights`;
         }
         if (o.free_stay_max_nights) {
-          return `Up to ${o.free_stay_max_nights} nights`
+          return `Up to ${o.free_stay_max_nights} nights`;
         }
-        return 'Dates flexible'
-      case 'Paid':
+        return "Dates flexible";
+      case "Paid":
         if (o.paid_max_amount != null) {
-          return `Up to ${o.paid_max_amount}${o.currency ? ` ${o.currency}` : ''}`
+          return `Up to ${o.paid_max_amount}${o.currency ? ` ${o.currency}` : ""}`;
         }
-        return 'Amount on request'
-      case 'Discount':
-        return o.discount_percentage != null ? `${o.discount_percentage}% off` : 'Discount offered'
-      case 'Affiliate':
-        return o.commission_percentage != null ? `${o.commission_percentage}% commission` : 'Commission on bookings'
+        return "Amount on request";
+      case "Discount":
+        return o.discount_percentage != null ? `${o.discount_percentage}% off` : "Discount offered";
+      case "Affiliate":
+        return o.commission_percentage != null
+          ? `${o.commission_percentage}% commission`
+          : "Commission on bookings";
     }
-  }
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
         className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -242,10 +272,11 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                     <button
                       key={index}
                       onClick={() => goToImage(index)}
-                      className={`h-2 rounded-full transition-all ${index === currentImageIndex
-                        ? 'w-6 bg-white'
-                        : 'w-2 bg-white/50 hover:bg-white/75'
-                        }`}
+                      className={`h-2 rounded-full transition-all ${
+                        index === currentImageIndex
+                          ? "w-6 bg-white"
+                          : "w-2 bg-white/50 hover:bg-white/75"
+                      }`}
                     />
                   ))}
                 </div>
@@ -283,11 +314,13 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                   </span>
                 ))
               ) : (
-                <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                  collaborationType === 'Free Stay'
-                    ? 'bg-green-500/90 text-white'
-                    : 'bg-amber-500/90 text-white'
-                }`}>
+                <span
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                    collaborationType === "Free Stay"
+                      ? "bg-green-500/90 text-white"
+                      : "bg-amber-500/90 text-white"
+                  }`}
+                >
                   {collaborationType}
                 </span>
               )}
@@ -350,8 +383,8 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
               {offerings.length > 0 ? (
                 <div className="space-y-3">
                   {offerings.map((o) => {
-                    const Icon = offeringIcon(o.collaboration_type)
-                    const months = o.availability_months || []
+                    const Icon = offeringIcon(o.collaboration_type);
+                    const months = o.availability_months || [];
                     return (
                       <div key={o.id} className="bg-white/80 rounded-xl p-3 flex items-start gap-3">
                         <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center shadow-sm flex-shrink-0">
@@ -359,7 +392,9 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-baseline gap-2 flex-wrap">
-                            <div className="text-sm font-semibold text-gray-900">{offeringTitle(o)}</div>
+                            <div className="text-sm font-semibold text-gray-900">
+                              {offeringTitle(o)}
+                            </div>
                             <div className="text-xs text-gray-600">{offeringSubtitle(o)}</div>
                           </div>
                           <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
@@ -371,7 +406,7 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                             ) : months.length > 0 ? (
                               <span className="px-2.5 py-1 bg-primary-100 text-primary-700 rounded-full font-medium inline-flex items-center gap-1">
                                 <CalendarDaysIcon className="w-3.5 h-3.5" />
-                                {sortMonths(months).map(getMonthAbbr).join(', ')}
+                                {sortMonths(months).map(getMonthAbbr).join(", ")}
                               </span>
                             ) : null}
                             {o.min_followers ? (
@@ -383,7 +418,7 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                           </div>
                         </div>
                       </div>
-                    )
+                    );
                   })}
                 </div>
               ) : (
@@ -395,10 +430,14 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                       </div>
                       <div>
                         <div className="text-sm font-medium text-gray-900">
-                          {collaborationType === 'Free Stay' ? 'Complimentary Stay' : 'Paid Collaboration'}
+                          {collaborationType === "Free Stay"
+                            ? "Complimentary Stay"
+                            : "Paid Collaboration"}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {hotel.numberOfNights ? `Up to ${hotel.numberOfNights} nights` : 'Dates flexible'}
+                          {hotel.numberOfNights
+                            ? `Up to ${hotel.numberOfNights} nights`
+                            : "Dates flexible"}
                         </div>
                       </div>
                     </div>
@@ -437,7 +476,7 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
                         >
                           <PlatformIcon platform={platform} className="w-4 h-4" />
                           <span className="font-medium text-gray-700">
-                            {platform === 'YT' ? 'YouTube' : platform}
+                            {platform === "YT" ? "YouTube" : platform}
                           </span>
                         </div>
                       ))}
@@ -535,12 +574,7 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
 
         {/* Sticky Footer */}
         <div className="flex-shrink-0 border-t border-gray-200 bg-white p-4">
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full"
-            onClick={handleApplyClick}
-          >
+          <Button variant="primary" size="lg" className="w-full" onClick={handleApplyClick}>
             Apply for Collaboration
           </Button>
         </div>
@@ -563,8 +597,8 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={() => {
-          setShowSuccessModal(false)
-          onClose()
+          setShowSuccessModal(false);
+          onClose();
         }}
         title="Application Sent!"
         message={`Your application has been sent to ${hotel.name}. They will be notified immediately.`}
@@ -573,10 +607,10 @@ export function HotelDetailModal({ hotel, isOpen, onClose, creatorPlatforms = []
       {/* Error Modal */}
       <ErrorModal
         isOpen={errorState.isOpen}
-        onClose={() => setErrorState(prev => ({ ...prev, isOpen: false }))}
+        onClose={() => setErrorState((prev) => ({ ...prev, isOpen: false }))}
         title={errorState.title}
         message={errorState.message}
       />
     </div>
-  )
+  );
 }

@@ -1,11 +1,11 @@
-'use client'
+"use client";
 
-import { Elements } from '@stripe/react-stripe-js'
-import stripePromise from '@/lib/stripe'
+import { Elements } from "@stripe/react-stripe-js";
+import stripePromise from "@/lib/stripe";
 
 interface StripeProviderProps {
-  clientSecret: string
-  children: React.ReactNode
+  clientSecret: string;
+  children: React.ReactNode;
 }
 
 export default function StripeProvider({ clientSecret, children }: StripeProviderProps) {
@@ -15,15 +15,15 @@ export default function StripeProvider({ clientSecret, children }: StripeProvide
       options={{
         clientSecret,
         appearance: {
-          theme: 'stripe',
+          theme: "stripe",
           variables: {
-            colorPrimary: '#1a1a2e',
-            borderRadius: '8px',
+            colorPrimary: "#1a1a2e",
+            borderRadius: "8px",
           },
         },
       }}
     >
       {children}
     </Elements>
-  )
+  );
 }

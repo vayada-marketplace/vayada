@@ -1,42 +1,42 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { authService } from '@/services/auth'
-import { usersService } from '@/services/api/users'
-import { marketplaceService, MarketplaceCreator } from '@/services/api/marketplace'
-import { collaborationsService } from '@/services/api/collaborations'
-import { ApiErrorResponse } from '@/services/api/client'
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { authService } from "@/services/auth";
+import { usersService } from "@/services/api/users";
+import { marketplaceService, MarketplaceCreator } from "@/services/api/marketplace";
+import { collaborationsService } from "@/services/api/collaborations";
+import { ApiErrorResponse } from "@/services/api/client";
 
 interface KpiData {
-  totalHotels: number
-  verifiedHotels: number
-  totalCreators: number
-  verifiedCreators: number
-  totalListings: number
-  totalCollaborations: number
-  combinedReach: number
-  platformBreakdown: { name: string; followers: number }[]
-  avgEngagementRate: number
+  totalHotels: number;
+  verifiedHotels: number;
+  totalCreators: number;
+  verifiedCreators: number;
+  totalListings: number;
+  totalCollaborations: number;
+  combinedReach: number;
+  platformBreakdown: { name: string; followers: number }[];
+  avgEngagementRate: number;
 }
 
 export default function KpiDashboardPage() {
-  const router = useRouter()
-  const [kpis, setKpis] = useState<KpiData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const router = useRouter();
+  const [kpis, setKpis] = useState<KpiData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!authService.isLoggedIn() || !authService.isAdmin()) {
-      router.push('/login')
-      return
+      router.push("/login");
+      return;
     }
-    loadKpis()
-  }, [router])
+    loadKpis();
+  }, [router]);
 
   const loadKpis = async () => {
     try {
-      setLoading(true)
+      setLoading(true);
       const [
         allHotels,
         verifiedHotels,
@@ -46,32 +46,32 @@ export default function KpiDashboardPage() {
         listings,
         collaborations,
       ] = await Promise.all([
-        usersService.getAllUsers({ type: 'hotel', page: 1, page_size: 1 }),
-        usersService.getAllUsers({ type: 'hotel', status: 'verified', page: 1, page_size: 1 }),
-        usersService.getAllUsers({ type: 'creator', page: 1, page_size: 1 }),
-        usersService.getAllUsers({ type: 'creator', status: 'verified', page: 1, page_size: 1 }),
+        usersService.getAllUsers({ type: "hotel", page: 1, page_size: 1 }),
+        usersService.getAllUsers({ type: "hotel", status: "verified", page: 1, page_size: 1 }),
+        usersService.getAllUsers({ type: "creator", page: 1, page_size: 1 }),
+        usersService.getAllUsers({ type: "creator", status: "verified", page: 1, page_size: 1 }),
         marketplaceService.getCreators(),
         marketplaceService.getListings(),
         collaborationsService.getCollaborations(1, 1),
-      ])
+      ]);
 
       // Calculate combined reach and platform breakdown
-      const platformMap = new Map<string, number>()
-      let totalEngagement = 0
-      let platformCount = 0
+      const platformMap = new Map<string, number>();
+      let totalEngagement = 0;
+      let platformCount = 0;
 
       marketplaceCreators.forEach((creator: MarketplaceCreator) => {
         creator.platforms.forEach((p) => {
-          platformMap.set(p.name, (platformMap.get(p.name) || 0) + p.followers)
-          totalEngagement += p.engagement_rate
-          platformCount++
-        })
-      })
+          platformMap.set(p.name, (platformMap.get(p.name) || 0) + p.followers);
+          totalEngagement += p.engagement_rate;
+          platformCount++;
+        });
+      });
 
-      const combinedReach = Array.from(platformMap.values()).reduce((sum, f) => sum + f, 0)
+      const combinedReach = Array.from(platformMap.values()).reduce((sum, f) => sum + f, 0);
       const platformBreakdown = Array.from(platformMap.entries())
         .map(([name, followers]) => ({ name, followers }))
-        .sort((a, b) => b.followers - a.followers)
+        .sort((a, b) => b.followers - a.followers);
 
       setKpis({
         totalHotels: allHotels.total,
@@ -83,34 +83,39 @@ export default function KpiDashboardPage() {
         combinedReach,
         platformBreakdown,
         avgEngagementRate: platformCount > 0 ? totalEngagement / platformCount : 0,
-      })
+      });
     } catch (err) {
-      console.error('Error loading KPIs:', err)
+      console.error("Error loading KPIs:", err);
       if (err instanceof ApiErrorResponse) {
-        setError(err.message)
+        setError(err.message);
       } else {
-        setError('Failed to load dashboard data')
+        setError("Failed to load dashboard data");
       }
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   const formatNumber = (num: number): string => {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
-    return num.toString()
-  }
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+    if (num >= 1000) return (num / 1000).toFixed(1) + "K";
+    return num.toString();
+  };
 
   const getPlatformColor = (name: string) => {
     switch (name) {
-      case 'Instagram': return 'bg-pink-500'
-      case 'TikTok': return 'bg-gray-900'
-      case 'YouTube': return 'bg-red-500'
-      case 'Facebook': return 'bg-blue-600'
-      default: return 'bg-gray-500'
+      case "Instagram":
+        return "bg-pink-500";
+      case "TikTok":
+        return "bg-gray-900";
+      case "YouTube":
+        return "bg-red-500";
+      case "Facebook":
+        return "bg-blue-600";
+      default:
+        return "bg-gray-500";
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -168,9 +173,8 @@ export default function KpiDashboardPage() {
                 <h2 className="text-sm font-semibold text-gray-900 mb-4">Reach by Platform</h2>
                 <div className="space-y-3">
                   {kpis.platformBreakdown.map((platform) => {
-                    const pct = kpis.combinedReach > 0
-                      ? (platform.followers / kpis.combinedReach) * 100
-                      : 0
+                    const pct =
+                      kpis.combinedReach > 0 ? (platform.followers / kpis.combinedReach) * 100 : 0;
                     return (
                       <div key={platform.name}>
                         <div className="flex items-center justify-between text-sm mb-1">
@@ -186,12 +190,14 @@ export default function KpiDashboardPage() {
                           />
                         </div>
                       </div>
-                    )
+                    );
                   })}
                 </div>
                 <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between text-sm">
                   <span className="text-gray-500">Total combined reach</span>
-                  <span className="font-semibold text-gray-900">{formatNumber(kpis.combinedReach)}</span>
+                  <span className="font-semibold text-gray-900">
+                    {formatNumber(kpis.combinedReach)}
+                  </span>
                 </div>
               </div>
             )}
@@ -199,14 +205,19 @@ export default function KpiDashboardPage() {
         ) : null}
       </div>
     </div>
-  )
+  );
 }
 
-function KpiCard({ label, value, sub, color }: {
-  label: string
-  value: number | string
-  sub: string
-  color: string
+function KpiCard({
+  label,
+  value,
+  sub,
+  color,
+}: {
+  label: string;
+  value: number | string;
+  sub: string;
+  color: string;
 }) {
   return (
     <div className="bg-white rounded-lg shadow p-5">
@@ -217,5 +228,5 @@ function KpiCard({ label, value, sub, color }: {
       <p className="text-2xl font-bold text-gray-900">{value}</p>
       <p className="text-xs text-gray-500 mt-1">{sub}</p>
     </div>
-  )
+  );
 }

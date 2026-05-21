@@ -7,21 +7,26 @@ A FastAPI-based backend service for the vayada Creator Marketplace platform. Thi
 ### Prerequisites
 
 Before you begin, make sure you have the following installed:
+
 - **Docker** and **Docker Compose** - Required to run the application
 - **Python 3.11+** - Only needed if you want to develop locally without Docker
 
 ### Getting Started
 
 1. **Start the application:**
+
    ```bash
    docker-compose up -d
    ```
+
    This command starts all services (database, backend, and frontend) in the background.
 
 2. **Verify everything is running:**
+
    ```bash
    docker-compose ps
    ```
+
    You should see all services with a "running" status.
 
 3. **Access the API:**
@@ -35,17 +40,20 @@ Before you begin, make sure you have the following installed:
 FastAPI automatically generates interactive API documentation that you can access in your browser. This is the easiest way to explore and test all available API endpoints.
 
 **How to access:**
+
 1. Start the backend service (see Quick Start above)
 2. Open your web browser
 3. Navigate to: **`http://localhost:8000/docs`**
 
 **What you'll see:**
+
 - A complete list of all available API endpoints
 - Detailed information about each endpoint (methods, parameters, request/response formats)
 - An interactive interface to test API calls directly from your browser
 - Request/response examples
 
 **How to use the documentation:**
+
 1. Click on any endpoint to expand its details
 2. Click the **"Try it out"** button to test the endpoint
 3. Fill in any required parameters or request body
@@ -53,6 +61,7 @@ FastAPI automatically generates interactive API documentation that you can acces
 5. View the response directly in the browser
 
 **Alternative documentation:**
+
 - **ReDoc**: `http://localhost:8000/redoc` - A cleaner, more readable documentation format
 - **OpenAPI Schema**: `http://localhost:8000/openapi.json` - Raw JSON schema for API tools
 
@@ -65,6 +74,7 @@ FastAPI automatically generates interactive API documentation that you can acces
 The backend uses environment variables for configuration. You need to create a `.env` file in the project root.
 
 **Setup:**
+
 ```bash
 cp .env.example .env
 ```
@@ -95,6 +105,7 @@ The PostgreSQL database runs automatically in a Docker container. Database migra
 ### Accessing the Database
 
 To connect to the database directly using the command line:
+
 ```bash
 docker-compose exec postgres psql -U vayada_user -d vayada_db
 ```
@@ -127,6 +138,7 @@ docker-compose up -d backend
 ### Viewing Logs
 
 To see what's happening in real-time:
+
 ```bash
 docker-compose logs -f backend
 ```
@@ -136,11 +148,13 @@ Press `Ctrl+C` to stop viewing logs.
 ### Stopping Services
 
 To stop all services:
+
 ```bash
 docker-compose down
 ```
 
 To stop and remove all data (including database):
+
 ```bash
 docker-compose down -v
 ```
@@ -150,10 +164,12 @@ docker-compose down -v
 The frontend should be configured to connect to the backend API.
 
 **Development URL:**
+
 - `http://localhost:8000`
 
 **Frontend Configuration:**
 Create a `.env.local` file in your frontend directory with:
+
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
@@ -167,11 +183,13 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 ## 🆘 Troubleshooting
 
 **Problem**: Can't access `http://localhost:8000/docs`
+
 - **Solution**: Make sure the backend service is running (`docker-compose ps`)
 
 **Problem**: Database connection errors
+
 - **Solution**: Ensure the postgres service is healthy (`docker-compose ps`) and wait a few seconds for it to fully start
 
 **Problem**: Port 8000 is already in use
-- **Solution**: Change the `API_PORT` in your `.env` file or stop the service using port 8000
 
+- **Solution**: Change the `API_PORT` in your `.env` file or stop the service using port 8000

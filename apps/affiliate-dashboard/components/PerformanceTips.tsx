@@ -1,22 +1,22 @@
-import { LightBulbIcon, ArrowTrendingUpIcon, ShareIcon } from '@heroicons/react/24/outline'
+import { LightBulbIcon, ArrowTrendingUpIcon, ShareIcon } from "@heroicons/react/24/outline";
 
 const tips = [
   {
     icon: ArrowTrendingUpIcon,
-    title: 'Peak booking season ahead',
-    description: 'April-June sees 40% more bookings. Share your links now to maximize earnings.',
+    title: "Peak booking season ahead",
+    description: "April-June sees 40% more bookings. Share your links now to maximize earnings.",
   },
   {
     icon: ShareIcon,
-    title: 'Instagram Stories convert best',
-    description: 'Affiliates who share via Stories see 2.3x higher click-through rates.',
+    title: "Instagram Stories convert best",
+    description: "Affiliates who share via Stories see 2.3x higher click-through rates.",
   },
   {
     icon: LightBulbIcon,
-    title: 'Add your link to your bio',
-    description: 'A permanent link in your social bio generates steady passive clicks.',
+    title: "Add your link to your bio",
+    description: "A permanent link in your social bio generates steady passive clicks.",
   },
-]
+];
 
 export default function PerformanceTips() {
   return (
@@ -36,5 +36,5 @@ export default function PerformanceTips() {
         ))}
       </div>
     </div>
-  )
+  );
 }

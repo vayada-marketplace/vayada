@@ -5,15 +5,15 @@ on:
     branches:
       - main
     paths:
-      - 'app/**'
-      - 'components/**'
-      - 'lib/**'
-      - 'public/**'
-      - 'Dockerfile'
-      - 'package.json'
-      - 'next.config.js'
-      - 'tailwind.config.js'
-      - '.github/workflows/deploy.yml'
+      - "app/**"
+      - "components/**"
+      - "lib/**"
+      - "public/**"
+      - "Dockerfile"
+      - "package.json"
+      - "next.config.js"
+      - "tailwind.config.js"
+      - ".github/workflows/deploy.yml"
 
 concurrency:
   group: deploy-${{ github.workflow }}-${{ github.ref }}

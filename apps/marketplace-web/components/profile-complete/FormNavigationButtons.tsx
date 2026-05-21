@@ -1,8 +1,8 @@
-'use client'
+"use client";
 
-import { Button } from '@/components/ui'
-import { CheckCircleIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
-import type { FormNavigationButtonsProps } from './types'
+import { Button } from "@/components/ui";
+import { CheckCircleIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
+import type { FormNavigationButtonsProps } from "./types";
 
 export function FormNavigationButtons({
   currentStep,
@@ -11,19 +11,14 @@ export function FormNavigationButtons({
   canProceed,
   onPrevious,
   onNext,
-  submitLabel = 'Complete Profile',
+  submitLabel = "Complete Profile",
 }: FormNavigationButtonsProps) {
-  const isLastStep = currentStep === totalSteps
+  const isLastStep = currentStep === totalSteps;
 
   return (
     <div className="pt-6 border-t border-gray-200 flex items-center justify-between gap-4">
       {currentStep > 1 && (
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onPrevious}
-          className="px-6 py-3"
-        >
+        <Button type="button" variant="outline" onClick={onPrevious} className="px-6 py-3">
           Previous
         </Button>
       )}
@@ -52,5 +47,5 @@ export function FormNavigationButtons({
         )}
       </Button>
     </div>
-  )
+  );
 }

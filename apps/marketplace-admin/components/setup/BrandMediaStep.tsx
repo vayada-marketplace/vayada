@@ -1,34 +1,44 @@
-'use client'
+"use client";
 
-import { RefObject } from 'react'
-import { PhotoIcon, XMarkIcon, CheckIcon } from '@heroicons/react/24/outline'
-import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
+import { RefObject } from "react";
+import { PhotoIcon, XMarkIcon, CheckIcon } from "@heroicons/react/24/outline";
+import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 
 interface BrandMediaStepProps {
-  heroImage: string; setHeroImage: (v: string) => void
-  primaryColor: string; setPrimaryColor: (v: string) => void
-  accentColor: string; setAccentColor: (v: string) => void
-  selectedFont: string; setSelectedFont: (v: string) => void
-  propertyDescription: string; setPropertyDescription: (v: string) => void
-  uploading: boolean
-  fileInputRef: RefObject<HTMLInputElement>
-  handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void
-  propertyName: string
-  currency: string
-  defaultLanguage: string
-  error: string
-  canProceed: boolean
-  onBack: () => void
-  onContinue: () => void
-  stepIndicators: React.ReactNode
+  heroImage: string;
+  setHeroImage: (v: string) => void;
+  primaryColor: string;
+  setPrimaryColor: (v: string) => void;
+  accentColor: string;
+  setAccentColor: (v: string) => void;
+  selectedFont: string;
+  setSelectedFont: (v: string) => void;
+  propertyDescription: string;
+  setPropertyDescription: (v: string) => void;
+  uploading: boolean;
+  fileInputRef: RefObject<HTMLInputElement>;
+  handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  propertyName: string;
+  currency: string;
+  defaultLanguage: string;
+  error: string;
+  canProceed: boolean;
+  onBack: () => void;
+  onContinue: () => void;
+  stepIndicators: React.ReactNode;
 }
 
 export default function BrandMediaStep({
-  heroImage, setHeroImage,
-  primaryColor, setPrimaryColor,
-  accentColor, setAccentColor,
-  selectedFont, setSelectedFont,
-  propertyDescription, setPropertyDescription,
+  heroImage,
+  setHeroImage,
+  primaryColor,
+  setPrimaryColor,
+  accentColor,
+  setAccentColor,
+  selectedFont,
+  setSelectedFont,
+  propertyDescription,
+  setPropertyDescription,
   uploading,
   fileInputRef,
   handleImageUpload,
@@ -41,20 +51,20 @@ export default function BrandMediaStep({
   onContinue,
   stepIndicators,
 }: BrandMediaStepProps) {
-  const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
+  const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="max-w-6xl mx-auto px-6 pt-6 w-full shrink-0">{stepIndicators}</div>
       <div className="max-w-6xl mx-auto px-6 pb-5 flex gap-5 flex-1 min-h-0 w-full">
-
         {/* LEFT: Controls panel */}
         <div className="w-[380px] shrink-0 flex flex-col min-h-0">
           <div className="flex-1 overflow-y-auto space-y-3 pb-3">
-
             {/* Hero Image */}
             <div className="bg-white rounded-lg border border-gray-200 p-4">
-              <h2 className="text-[13px] font-semibold text-gray-900">Hero Image <span className="text-red-500">*</span></h2>
+              <h2 className="text-[13px] font-semibold text-gray-900">
+                Hero Image <span className="text-red-500">*</span>
+              </h2>
               <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">1920x800px recommended</p>
 
               {heroImage ? (
@@ -66,7 +76,10 @@ export default function BrandMediaStep({
                     </div>
                   )}
                   <button
-                    onClick={() => { setHeroImage(''); if (fileInputRef.current) fileInputRef.current.value = '' }}
+                    onClick={() => {
+                      setHeroImage("");
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
                     className="absolute top-1.5 right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center transition-colors"
                   >
                     <XMarkIcon className="w-3.5 h-3.5" />
@@ -82,7 +95,13 @@ export default function BrandMediaStep({
                 </button>
               )}
 
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
 
               {heroImage && (
                 <button
@@ -102,13 +121,20 @@ export default function BrandMediaStep({
               <div className="space-y-4">
                 <div>
                   <h3 className="text-[12px] font-semibold text-gray-900">Primary Brand Color</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">Buttons, links, and accents</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">
+                    Buttons, links, and accents
+                  </p>
                   <div className="flex items-center gap-2">
                     <label
                       className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
                       style={{ backgroundColor: primaryColor }}
                     >
-                      <input type="color" value={primaryColor} onChange={(e) => setPrimaryColor(e.target.value)} className="opacity-0 w-0 h-0" />
+                      <input
+                        type="color"
+                        value={primaryColor}
+                        onChange={(e) => setPrimaryColor(e.target.value)}
+                        className="opacity-0 w-0 h-0"
+                      />
                     </label>
                     <input
                       type="text"
@@ -121,13 +147,20 @@ export default function BrandMediaStep({
 
                 <div>
                   <h3 className="text-[12px] font-semibold text-gray-900">Background Accent</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">Card and section backgrounds</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">
+                    Card and section backgrounds
+                  </p>
                   <div className="flex items-center gap-2">
                     <label
                       className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
                       style={{ backgroundColor: accentColor }}
                     >
-                      <input type="color" value={accentColor} onChange={(e) => setAccentColor(e.target.value)} className="opacity-0 w-0 h-0" />
+                      <input
+                        type="color"
+                        value={accentColor}
+                        onChange={(e) => setAccentColor(e.target.value)}
+                        className="opacity-0 w-0 h-0"
+                      />
                     </label>
                     <input
                       type="text"
@@ -145,12 +178,20 @@ export default function BrandMediaStep({
                     {COLOR_PRESETS.map((preset) => (
                       <button
                         key={preset.name}
-                        onClick={() => { setPrimaryColor(preset.primary); setAccentColor(preset.accent) }}
+                        onClick={() => {
+                          setPrimaryColor(preset.primary);
+                          setAccentColor(preset.accent);
+                        }}
                         className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-lg text-[12px] text-gray-700 hover:bg-gray-50 transition-colors ${
-                          primaryColor === preset.primary ? 'border-primary-500 bg-primary-50/30' : 'border-gray-200'
+                          primaryColor === preset.primary
+                            ? "border-primary-500 bg-primary-50/30"
+                            : "border-gray-200"
                         }`}
                       >
-                        <span className="w-4 h-4 rounded-full shrink-0 border border-gray-200" style={{ backgroundColor: preset.primary }} />
+                        <span
+                          className="w-4 h-4 rounded-full shrink-0 border border-gray-200"
+                          style={{ backgroundColor: preset.primary }}
+                        />
                         {preset.name}
                       </button>
                     ))}
@@ -171,20 +212,25 @@ export default function BrandMediaStep({
                     onClick={() => setSelectedFont(pairing.id)}
                     className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all text-left ${
                       selectedFont === pairing.id
-                        ? 'border-primary-500 bg-primary-50/30 ring-1 ring-primary-500'
-                        : 'border-gray-200 hover:border-gray-300'
+                        ? "border-primary-500 bg-primary-50/30 ring-1 ring-primary-500"
+                        : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
                     <div>
                       <div className="flex items-center gap-1">
-                        <span className="text-[12px] font-semibold text-gray-900">{pairing.name}</span>
+                        <span className="text-[12px] font-semibold text-gray-900">
+                          {pairing.name}
+                        </span>
                         {selectedFont === pairing.id && (
                           <CheckIcon className="w-3.5 h-3.5 text-primary-500" />
                         )}
                       </div>
                       <span className="text-[11px] text-gray-500">{pairing.fonts}</span>
                     </div>
-                    <span className="text-sm text-gray-600" style={{ fontFamily: pairing.headingFamily }}>
+                    <span
+                      className="text-sm text-gray-600"
+                      style={{ fontFamily: pairing.headingFamily }}
+                    >
                       {pairing.preview}
                     </span>
                   </button>
@@ -195,19 +241,22 @@ export default function BrandMediaStep({
             {/* Property Description */}
             <div className="bg-white rounded-lg border border-gray-200 p-4">
               <h2 className="text-[13px] font-semibold text-gray-900">Property Description</h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">Shown below your property name on the booking page</p>
+              <p className="text-[12px] text-gray-500 mt-0.5 mb-2.5">
+                Shown below your property name on the booking page
+              </p>
               <textarea
                 value={propertyDescription}
                 onChange={(e) => {
-                  if (e.target.value.length <= 1000) setPropertyDescription(e.target.value)
+                  if (e.target.value.length <= 1000) setPropertyDescription(e.target.value);
                 }}
                 rows={4}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 resize-none"
                 placeholder="A boutique escape featuring private pools, ocean views, and tranquil luxury..."
               />
-              <p className="text-[11px] text-gray-400 mt-1 text-right">{propertyDescription.length}/1000 characters</p>
+              <p className="text-[11px] text-gray-400 mt-1 text-right">
+                {propertyDescription.length}/1000 characters
+              </p>
             </div>
-
           </div>
 
           {/* Bottom buttons */}
@@ -249,8 +298,10 @@ export default function BrandMediaStep({
           </div>
 
           {/* Preview content */}
-          <div className="flex-1 overflow-y-auto bg-white" style={{ fontFamily: currentFont.bodyFamily }}>
-
+          <div
+            className="flex-1 overflow-y-auto bg-white"
+            style={{ fontFamily: currentFont.bodyFamily }}
+          >
             {/* Hero section */}
             <div className="relative h-[280px] w-full">
               {heroImage ? (
@@ -263,11 +314,17 @@ export default function BrandMediaStep({
               {/* Navigation */}
               <div className="absolute top-0 left-0 right-0 z-10">
                 <div className="flex items-center justify-between px-4 h-10">
-                  <span className="text-[11px] font-semibold text-white" style={{ fontFamily: currentFont.bodyFamily }}>
-                    {propertyName || 'Your Hotel'}
+                  <span
+                    className="text-[11px] font-semibold text-white"
+                    style={{ fontFamily: currentFont.bodyFamily }}
+                  >
+                    {propertyName || "Your Hotel"}
                   </span>
                   <div className="flex items-center gap-1.5">
-                    <span className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full" style={{ backgroundColor: primaryColor }}>
+                    <span
+                      className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full"
+                      style={{ backgroundColor: primaryColor }}
+                    >
                       Contact
                     </span>
                     <span className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full border border-white/60">
@@ -289,13 +346,13 @@ export default function BrandMediaStep({
                   className="text-2xl italic text-white mb-1.5"
                   style={{ fontFamily: currentFont.headingFamily }}
                 >
-                  {propertyName || 'Your Hotel Name'}
+                  {propertyName || "Your Hotel Name"}
                 </h2>
                 <p
                   className="text-[11px] text-white/90 leading-relaxed max-w-sm"
                   style={{ fontFamily: currentFont.bodyFamily }}
                 >
-                  {propertyDescription || 'Your hotel description will appear here.'}
+                  {propertyDescription || "Your hotel description will appear here."}
                 </p>
               </div>
             </div>
@@ -304,28 +361,86 @@ export default function BrandMediaStep({
             <div className="relative z-20 max-w-[92%] mx-auto -mt-6">
               <div className="bg-white rounded-xl shadow-lg border border-gray-100 px-3 py-2.5 flex items-center gap-2">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: primaryColor + '15' }}>
-                    <svg className="w-3 h-3" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  <div
+                    className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: primaryColor + "15" }}
+                  >
+                    <svg
+                      className="w-3 h-3"
+                      style={{ color: primaryColor }}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[8px] text-gray-500 font-medium uppercase tracking-wide" style={{ fontFamily: currentFont.bodyFamily }}>Your Stay</p>
-                    <p className="text-[10px] font-semibold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>Feb 13 — Feb 18, 2026</p>
-                    <p className="text-[8px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>5 nights</p>
+                    <p
+                      className="text-[8px] text-gray-500 font-medium uppercase tracking-wide"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      Your Stay
+                    </p>
+                    <p
+                      className="text-[10px] font-semibold text-gray-900"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      Feb 13 — Feb 18, 2026
+                    </p>
+                    <p
+                      className="text-[8px] text-gray-500"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      5 nights
+                    </p>
                   </div>
                 </div>
                 <div className="w-px h-8 bg-gray-200" />
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: primaryColor + '15' }}>
-                    <svg className="w-3 h-3" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <div
+                    className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ backgroundColor: primaryColor + "15" }}
+                  >
+                    <svg
+                      className="w-3 h-3"
+                      style={{ color: primaryColor }}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[8px] text-gray-500 font-medium uppercase tracking-wide" style={{ fontFamily: currentFont.bodyFamily }}>Guests</p>
-                    <p className="text-[10px] font-semibold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>2 Adults</p>
-                    <p className="text-[8px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>1 Room</p>
+                    <p
+                      className="text-[8px] text-gray-500 font-medium uppercase tracking-wide"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      Guests
+                    </p>
+                    <p
+                      className="text-[10px] font-semibold text-gray-900"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      2 Adults
+                    </p>
+                    <p
+                      className="text-[8px] text-gray-500"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      1 Room
+                    </p>
                   </div>
                 </div>
                 <button
@@ -339,7 +454,10 @@ export default function BrandMediaStep({
 
             {/* Room card preview */}
             <div className="px-4 py-5">
-              <h3 className="text-sm text-gray-900 mb-3" style={{ fontFamily: currentFont.headingFamily }}>
+              <h3
+                className="text-sm text-gray-900 mb-3"
+                style={{ fontFamily: currentFont.headingFamily }}
+              >
                 Available Accommodations
               </h3>
               <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -352,28 +470,59 @@ export default function BrandMediaStep({
                     />
                   </div>
                   <div className="flex-1 p-3">
-                    <h4 className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.headingFamily }}>
+                    <h4
+                      className="text-[12px] font-bold text-gray-900"
+                      style={{ fontFamily: currentFont.headingFamily }}
+                    >
                       Deluxe Mountain Room
                     </h4>
-                    <div className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5" style={{ fontFamily: currentFont.bodyFamily }}>
+                    <div
+                      className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
                       <span>32 m&sup2;</span>
                       <span>Up to 2 guests</span>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-2 mb-2">
-                      {['Mountain View', 'Balcony', 'Minibar'].map((feat) => (
-                        <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full">
-                          <svg className="w-2 h-2 flex-shrink-0" style={{ color: primaryColor }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      {["Mountain View", "Balcony", "Minibar"].map((feat) => (
+                        <span
+                          key={feat}
+                          className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full"
+                        >
+                          <svg
+                            className="w-2 h-2 flex-shrink-0"
+                            style={{ color: primaryColor }}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                           {feat}
                         </span>
                       ))}
                     </div>
                     <div className="border-t border-gray-100 pt-2">
-                      <div className="rounded-lg border-2 px-2.5 py-2" style={{ borderColor: primaryColor }}>
+                      <div
+                        className="rounded-lg border-2 px-2.5 py-2"
+                        style={{ borderColor: primaryColor }}
+                      >
                         <div className="flex items-center justify-between">
-                          <p className="text-[9px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>Flexible Rate</p>
-                          <p className="text-[11px] font-bold" style={{ color: primaryColor, fontFamily: currentFont.bodyFamily }}>
+                          <p
+                            className="text-[9px] font-bold text-gray-900"
+                            style={{ fontFamily: currentFont.bodyFamily }}
+                          >
+                            Flexible Rate
+                          </p>
+                          <p
+                            className="text-[11px] font-bold"
+                            style={{ color: primaryColor, fontFamily: currentFont.bodyFamily }}
+                          >
                             {currency} 120
                           </p>
                         </div>
@@ -387,5 +536,5 @@ export default function BrandMediaStep({
         </div>
       </div>
     </div>
-  )
+  );
 }

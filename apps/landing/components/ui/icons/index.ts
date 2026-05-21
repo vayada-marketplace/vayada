@@ -11,7 +11,7 @@ export {
   PlatformIcon,
   PlatformBadge,
   getPlatformIcon,
-} from './SocialIcons'
+} from "./SocialIcons";
 
 // Navigation & UI Icons
 export {
@@ -21,4 +21,4 @@ export {
   MessageIcon,
   HotelBadgeIcon,
   CreatorBadgeIcon,
-} from './NavIcons'
+} from "./NavIcons";

@@ -1,9 +1,9 @@
 // Types
-export * from './types'
+export * from "./types";
 
 // Shared components
-export { ProfilePictureModal } from './ProfilePictureModal'
-export { DeleteConfirmModal } from './DeleteConfirmModal'
+export { ProfilePictureModal } from "./ProfilePictureModal";
+export { DeleteConfirmModal } from "./DeleteConfirmModal";
 
 // Creator components
 export {
@@ -16,7 +16,7 @@ export {
   CreatorReviewsTab,
   formatFollowersDE,
   getCountryFlag,
-} from './creator'
+} from "./creator";
 // CreatorProfile component exported from './creator/CreatorProfile' directly to avoid name clash with CreatorProfile type
 
 // Hotel components
@@ -32,5 +32,5 @@ export {
   ListingImageGallery,
   AgeGroupSelector,
   CountrySearchInput,
-} from './hotel'
+} from "./hotel";
 // HotelProfile component exported from './hotel/HotelProfile' directly to avoid name clash

@@ -2,99 +2,111 @@
  * Hotel API service
  */
 
-import { apiClient } from './client'
-import type { Hotel, PaginatedResponse, HotelProfile, HotelListing, CollaborationOffering, CreatorRequirements, HotelProfileStatus } from '@/lib/types'
-import { transformHotelListingToHotel, transformListingMarketplaceResponse, buildQueryString } from '@/lib/utils'
+import { apiClient } from "./client";
+import type {
+  Hotel,
+  PaginatedResponse,
+  HotelProfile,
+  HotelListing,
+  CollaborationOffering,
+  CreatorRequirements,
+  HotelProfileStatus,
+} from "@/lib/types";
+import {
+  transformHotelListingToHotel,
+  transformListingMarketplaceResponse,
+  buildQueryString,
+} from "@/lib/utils";
 
 // Backend API response type for marketplace endpoint (snake_case)
 interface ListingMarketplaceResponse {
-  id: string
-  hotel_profile_id: string
-  hotel_name: string
-  hotel_picture: string | null
-  name: string
-  location: string
-  description: string
-  accommodation_type: string | null
-  images: string[]
-  status: "pending" | "verified" | "rejected"
+  id: string;
+  hotel_profile_id: string;
+  hotel_name: string;
+  hotel_picture: string | null;
+  name: string;
+  location: string;
+  description: string;
+  accommodation_type: string | null;
+  images: string[];
+  status: "pending" | "verified" | "rejected";
   collaboration_offerings: Array<{
-    id: string
-    listing_id: string
-    collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate"
-    availability_months: string[]
-    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[]
-    free_stay_min_nights: number | null
-    free_stay_max_nights: number | null
-    paid_max_amount: string | null // Backend returns as string (e.g., "2000.00")
-    currency: string | null
-    discount_percentage: number | null
-    commission_percentage: number | null
-    min_followers: number | null
-    created_at: string
-    updated_at: string
-  }>
+    id: string;
+    listing_id: string;
+    collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate";
+    availability_months: string[];
+    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[];
+    free_stay_min_nights: number | null;
+    free_stay_max_nights: number | null;
+    paid_max_amount: string | null; // Backend returns as string (e.g., "2000.00")
+    currency: string | null;
+    discount_percentage: number | null;
+    commission_percentage: number | null;
+    min_followers: number | null;
+    created_at: string;
+    updated_at: string;
+  }>;
   creator_requirements?: {
-    id: string
-    listing_id: string
-    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[]
-    target_countries: string[]
-    target_age_min: number | null
-    target_age_max: number | null
-    target_age_groups?: string[] | null
-    created_at: string
-    updated_at: string
-  }
-  created_at: string
+    id: string;
+    listing_id: string;
+    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[];
+    target_countries: string[];
+    target_age_min: number | null;
+    target_age_max: number | null;
+    target_age_groups?: string[] | null;
+    created_at: string;
+    updated_at: string;
+  };
+  created_at: string;
 }
 
 // Request/Response types for hotel profile endpoints
 // Partial update for hotel profile (PUT /hotels/me)
 // Send only changed fields; omitted fields stay untouched.
 export interface UpdateHotelProfileRequest {
-  name?: string
-  location?: string
-  email?: string
-  about?: string
-  website?: string
-  phone?: string
-  picture?: string | null // allow clearing or replacing
+  name?: string;
+  location?: string;
+  email?: string;
+  about?: string;
+  website?: string;
+  phone?: string;
+  picture?: string | null; // allow clearing or replacing
 }
 
 export interface CreateListingRequest {
-  name: string
-  location: string
-  description: string
-  accommodation_type?: string
-  images?: string[]
+  name: string;
+  location: string;
+  description: string;
+  accommodation_type?: string;
+  images?: string[];
   collaboration_offerings: Array<{
-    collaboration_type: 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
-    availability_months: string[]
-    platforms: string[]
-    free_stay_min_nights?: number
-    free_stay_max_nights?: number
-    paid_max_amount?: number
-    currency?: string
-    discount_percentage?: number
-    commission_percentage?: number
-  }>
+    collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate";
+    availability_months: string[];
+    platforms: string[];
+    free_stay_min_nights?: number;
+    free_stay_max_nights?: number;
+    paid_max_amount?: number;
+    currency?: string;
+    discount_percentage?: number;
+    commission_percentage?: number;
+  }>;
   creator_requirements: {
-    platforms: string[]
-    target_countries: string[]
-    target_age_min?: number | null
-    target_age_max?: number | null
-    target_age_groups?: string[] | null
-  }
+    platforms: string[];
+    target_countries: string[];
+    target_age_min?: number | null;
+    target_age_max?: number | null;
+    target_age_groups?: string[] | null;
+  };
 }
 
-export interface UpdateListingRequest extends Partial<CreateListingRequest> { }
+export interface UpdateListingRequest extends Partial<CreateListingRequest> {}
 
 export interface UploadPictureResponse {
-  url: string
+  url: string;
 }
 
 export interface UploadImagesResponse {
-  urls: string[]
+  urls: string[];
 }
 
 export const hotelService = {
@@ -105,12 +117,14 @@ export const hotelService = {
     const query = buildQueryString({
       page: params?.page,
       limit: params?.limit,
-    })
+    });
     // Backend returns direct array, not paginated response
-    const response = await apiClient.get<ListingMarketplaceResponse[]>(`/marketplace/listings${query}`)
+    const response = await apiClient.get<ListingMarketplaceResponse[]>(
+      `/marketplace/listings${query}`,
+    );
 
     // Transform API response to frontend format
-    const hotels = response.map(transformListingMarketplaceResponse)
+    const hotels = response.map(transformListingMarketplaceResponse);
 
     // Return as paginated response for consistency with frontend expectations
     return {
@@ -121,15 +135,15 @@ export const hotelService = {
         total: hotels.length,
         totalPages: 1,
       },
-    }
+    };
   },
 
   /**
    * Get hotel by ID (public)
    */
   getById: async (id: string): Promise<Hotel> => {
-    const listing = await apiClient.get<HotelListing>(`/hotels/${id}`)
-    return transformHotelListingToHotel(listing)
+    const listing = await apiClient.get<HotelListing>(`/hotels/${id}`);
+    return transformHotelListingToHotel(listing);
   },
 
   /**
@@ -137,7 +151,7 @@ export const hotelService = {
    * GET /hotels/me
    */
   getMyProfile: async (): Promise<HotelProfile> => {
-    return apiClient.get<HotelProfile>('/hotels/me')
+    return apiClient.get<HotelProfile>("/hotels/me");
   },
 
   /**
@@ -147,9 +161,9 @@ export const hotelService = {
   updateMyProfile: async (data: UpdateHotelProfileRequest | FormData): Promise<HotelProfile> => {
     // If FormData, use upload method; otherwise use regular put
     if (data instanceof FormData) {
-      return apiClient.upload<HotelProfile>('/hotels/me', data, { method: 'PUT' })
+      return apiClient.upload<HotelProfile>("/hotels/me", data, { method: "PUT" });
     }
-    return apiClient.put<HotelProfile>('/hotels/me', data)
+    return apiClient.put<HotelProfile>("/hotels/me", data);
   },
 
   /**
@@ -157,26 +171,28 @@ export const hotelService = {
    * POST /upload/image/hotel-profile
    * Returns URL and metadata to include in profile update
    */
-  uploadProfileImage: async (file: File): Promise<{
-    url: string
-    thumbnail_url?: string
-    key?: string
-    width?: number
-    height?: number
-    size_bytes?: number
-    format?: string
+  uploadProfileImage: async (
+    file: File,
+  ): Promise<{
+    url: string;
+    thumbnail_url?: string;
+    key?: string;
+    width?: number;
+    height?: number;
+    size_bytes?: number;
+    format?: string;
   }> => {
-    const formData = new FormData()
-    formData.append('file', file)
+    const formData = new FormData();
+    formData.append("file", file);
     return apiClient.upload<{
-      url: string
-      thumbnail_url?: string
-      key?: string
-      width?: number
-      height?: number
-      size_bytes?: number
-      format?: string
-    }>('/upload/image/hotel-profile', formData)
+      url: string;
+      thumbnail_url?: string;
+      key?: string;
+      width?: number;
+      height?: number;
+      size_bytes?: number;
+      format?: string;
+    }>("/upload/image/hotel-profile", formData);
   },
 
   /**
@@ -185,9 +201,9 @@ export const hotelService = {
    * @deprecated Use uploadProfileImage() instead (recommended flow)
    */
   uploadPicture: async (file: File): Promise<UploadPictureResponse> => {
-    const formData = new FormData()
-    formData.append('picture', file)
-    return apiClient.upload<UploadPictureResponse>('/hotels/me/upload-picture', formData)
+    const formData = new FormData();
+    formData.append("picture", file);
+    return apiClient.upload<UploadPictureResponse>("/hotels/me/upload-picture", formData);
   },
 
   /**
@@ -195,7 +211,7 @@ export const hotelService = {
    * POST /hotels/me/listings
    */
   createListing: async (data: CreateListingRequest): Promise<HotelListing> => {
-    return apiClient.post<HotelListing>('/hotels/me/listings', data)
+    return apiClient.post<HotelListing>("/hotels/me/listings", data);
   },
 
   /**
@@ -203,7 +219,7 @@ export const hotelService = {
    * PUT /hotels/me/listings/:id
    */
   updateListing: async (id: string, data: UpdateListingRequest): Promise<HotelListing> => {
-    return apiClient.put<HotelListing>(`/hotels/me/listings/${id}`, data)
+    return apiClient.put<HotelListing>(`/hotels/me/listings/${id}`, data);
   },
 
   /**
@@ -211,7 +227,7 @@ export const hotelService = {
    * DELETE /hotels/me/listings/:id
    */
   deleteListing: async (id: string): Promise<void> => {
-    return apiClient.delete<void>(`/hotels/me/listings/${id}`)
+    return apiClient.delete<void>(`/hotels/me/listings/${id}`);
   },
 
   /**
@@ -220,11 +236,11 @@ export const hotelService = {
    * Returns array of image URLs to include in listing creation/update
    */
   uploadListingImages: async (files: File[]): Promise<{ images: Array<{ url: string }> }> => {
-    const formData = new FormData()
+    const formData = new FormData();
     files.forEach((file) => {
-      formData.append('files', file)
-    })
-    return apiClient.upload<{ images: Array<{ url: string }> }>('/upload/images/listing', formData)
+      formData.append("files", file);
+    });
+    return apiClient.upload<{ images: Array<{ url: string }> }>("/upload/images/listing", formData);
   },
 
   /**
@@ -232,12 +248,18 @@ export const hotelService = {
    * POST /hotels/me/listings/:id/upload-images
    * @deprecated Use uploadListingImages() and include URLs in listing update instead
    */
-  uploadListingImagesToExisting: async (id: string, files: File[]): Promise<UploadImagesResponse> => {
-    const formData = new FormData()
+  uploadListingImagesToExisting: async (
+    id: string,
+    files: File[],
+  ): Promise<UploadImagesResponse> => {
+    const formData = new FormData();
     files.forEach((file) => {
-      formData.append('images', file)
-    })
-    return apiClient.upload<UploadImagesResponse>(`/hotels/me/listings/${id}/upload-images`, formData)
+      formData.append("images", file);
+    });
+    return apiClient.upload<UploadImagesResponse>(
+      `/hotels/me/listings/${id}/upload-images`,
+      formData,
+    );
   },
 
   // Legacy methods (kept for backward compatibility)
@@ -245,21 +267,21 @@ export const hotelService = {
    * Create hotel (legacy)
    */
   create: async (data: Partial<Hotel>): Promise<Hotel> => {
-    return apiClient.post<Hotel>('/hotels', data)
+    return apiClient.post<Hotel>("/hotels", data);
   },
 
   /**
    * Update hotel (legacy)
    */
   update: async (id: string, data: Partial<Hotel>): Promise<Hotel> => {
-    return apiClient.put<Hotel>(`/hotels/${id}`, data)
+    return apiClient.put<Hotel>(`/hotels/${id}`, data);
   },
 
   /**
    * Delete hotel (legacy)
    */
   delete: async (id: string): Promise<void> => {
-    return apiClient.delete<void>(`/hotels/${id}`)
+    return apiClient.delete<void>(`/hotels/${id}`);
   },
 
   /**
@@ -267,7 +289,6 @@ export const hotelService = {
    * GET /hotels/me/profile-status
    */
   getProfileStatus: async (): Promise<HotelProfileStatus> => {
-    return apiClient.get<HotelProfileStatus>('/hotels/me/profile-status')
+    return apiClient.get<HotelProfileStatus>("/hotels/me/profile-status");
   },
-}
-
+};

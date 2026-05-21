@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
-import { useTranslations } from 'next-intl'
-import { useAddons } from '@/contexts/HotelContext'
+import { useTranslations } from "next-intl";
+import { useAddons } from "@/contexts/HotelContext";
 
-export type BookingStepName = 'rooms' | 'addons' | 'details' | 'payment'
+export type BookingStepName = "rooms" | "addons" | "details" | "payment";
 
 export interface BookingStep {
-  number: number
-  label: string
-  name: BookingStepName
+  number: number;
+  label: string;
+  name: BookingStepName;
 }
 
 /**
@@ -17,23 +17,23 @@ export interface BookingStep {
  * step name; the returned `currentStep` adjusts to the visible numbering.
  */
 export function useBookingSteps(current: BookingStepName) {
-  const t = useTranslations('steps')
-  const { addons } = useAddons()
-  const hasAddons = addons.length > 0
+  const t = useTranslations("steps");
+  const { addons } = useAddons();
+  const hasAddons = addons.length > 0;
 
   const steps: BookingStep[] = hasAddons
     ? [
-        { number: 1, label: t('rooms'), name: 'rooms' },
-        { number: 2, label: t('addons'), name: 'addons' },
-        { number: 3, label: t('details'), name: 'details' },
-        { number: 4, label: t('payment'), name: 'payment' },
+        { number: 1, label: t("rooms"), name: "rooms" },
+        { number: 2, label: t("addons"), name: "addons" },
+        { number: 3, label: t("details"), name: "details" },
+        { number: 4, label: t("payment"), name: "payment" },
       ]
     : [
-        { number: 1, label: t('rooms'), name: 'rooms' },
-        { number: 2, label: t('details'), name: 'details' },
-        { number: 3, label: t('payment'), name: 'payment' },
-      ]
+        { number: 1, label: t("rooms"), name: "rooms" },
+        { number: 2, label: t("details"), name: "details" },
+        { number: 3, label: t("payment"), name: "payment" },
+      ];
 
-  const currentStep = steps.find((s) => s.name === current)?.number ?? 1
-  return { steps, currentStep, hasAddons }
+  const currentStep = steps.find((s) => s.name === current)?.number ?? 1;
+  return { steps, currentStep, hasAddons };
 }

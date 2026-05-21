@@ -15,30 +15,30 @@
  *     dev container can serve any hotel
  */
 export async function resolveSlugFromHost(hostname: string): Promise<string | null | undefined> {
-  const host = hostname.toLowerCase()
-  const isLocalhost = host.includes('localhost') || host.startsWith('127.0.0.1')
-  if (isLocalhost) return undefined
+  const host = hostname.toLowerCase();
+  const isLocalhost = host.includes("localhost") || host.startsWith("127.0.0.1");
+  if (isLocalhost) return undefined;
 
-  const isSubdomain = host.endsWith('.booking.vayada.com')
+  const isSubdomain = host.endsWith(".booking.vayada.com");
   if (isSubdomain) {
-    const parts = host.split('.')
-    const sub = parts.length >= 3 && parts[0] !== 'www' ? parts[0] : null
-    return sub || process.env.NEXT_PUBLIC_HOTEL_SLUG || null
+    const parts = host.split(".");
+    const sub = parts.length >= 3 && parts[0] !== "www" ? parts[0] : null;
+    return sub || process.env.NEXT_PUBLIC_HOTEL_SLUG || null;
   }
 
   // Custom domain — resolve via the booking-engine API.
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
   try {
     const res = await fetch(
-      `${apiUrl}/api/resolve-domain?domain=${encodeURIComponent(host.split(':')[0])}`,
-      { cache: 'no-store' },
-    )
+      `${apiUrl}/api/resolve-domain?domain=${encodeURIComponent(host.split(":")[0])}`,
+      { cache: "no-store" },
+    );
     if (res.ok) {
-      const data = await res.json()
-      if (data?.slug) return data.slug as string
+      const data = await res.json();
+      if (data?.slug) return data.slug as string;
     }
   } catch {
     // fall through
   }
-  return process.env.NEXT_PUBLIC_HOTEL_SLUG || null
+  return process.env.NEXT_PUBLIC_HOTEL_SLUG || null;
 }

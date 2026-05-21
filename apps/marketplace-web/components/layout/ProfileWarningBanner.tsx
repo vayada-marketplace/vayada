@@ -1,39 +1,41 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { ExclamationTriangleIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { STORAGE_KEYS } from '@/lib/constants'
+import { useState, useEffect } from "react";
+import { ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { STORAGE_KEYS } from "@/lib/constants";
 
 export function ProfileWarningBanner() {
-  const [isVisible, setIsVisible] = useState(false)
-  const [isDismissed, setIsDismissed] = useState(false)
+  const [isVisible, setIsVisible] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(false);
 
   useEffect(() => {
     // Check if profile is complete
-    const profileComplete = typeof window !== 'undefined'
-      ? localStorage.getItem(STORAGE_KEYS.PROFILE_COMPLETE) === 'true'
-      : false
-    
+    const profileComplete =
+      typeof window !== "undefined"
+        ? localStorage.getItem(STORAGE_KEYS.PROFILE_COMPLETE) === "true"
+        : false;
+
     // Check if banner was dismissed for this session
-    const dismissed = typeof window !== 'undefined'
-      ? sessionStorage.getItem('profileWarningDismissed') === 'true'
-      : false
+    const dismissed =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem("profileWarningDismissed") === "true"
+        : false;
 
     // Show banner if profile is not complete and not dismissed
     if (!profileComplete && !dismissed) {
-      setIsVisible(true)
+      setIsVisible(true);
     }
-  }, [])
+  }, []);
 
   const handleDismiss = () => {
-    setIsVisible(false)
-    setIsDismissed(true)
-    if (typeof window !== 'undefined') {
-      sessionStorage.setItem('profileWarningDismissed', 'true')
+    setIsVisible(false);
+    setIsDismissed(true);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("profileWarningDismissed", "true");
     }
-  }
+  };
 
-  if (!isVisible) return null
+  if (!isVisible) return null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -46,17 +48,15 @@ export function ProfileWarningBanner() {
                 <ExclamationTriangleIcon className="w-6 h-6 text-yellow-600" />
               </div>
             </div>
-            
+
             {/* Content */}
             <div className="flex-1 min-w-0">
-              <h3 className="text-lg font-bold text-yellow-900 mb-1">
-                Complete Your Profile
-              </h3>
+              <h3 className="text-lg font-bold text-yellow-900 mb-1">Complete Your Profile</h3>
               <p className="text-sm text-yellow-800">
                 You need to complete your profile before you can submit collaboration requests.
               </p>
             </div>
-            
+
             {/* Dismiss Button */}
             <button
               onClick={handleDismiss}
@@ -69,6 +69,5 @@ export function ProfileWarningBanner() {
         </div>
       </div>
     </div>
-  )
+  );
 }
-

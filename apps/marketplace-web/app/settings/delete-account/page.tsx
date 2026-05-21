@@ -1,11 +1,11 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { AuthenticatedNavigation, ProfileWarningBanner } from '@/components/layout'
-import { useSidebar } from '@/components/layout/AuthenticatedNavigation'
-import { ROUTES } from '@/lib/constants'
-import { consentService, GdprRequestStatusResponse } from '@/services/api/consent'
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { AuthenticatedNavigation, ProfileWarningBanner } from "@/components/layout";
+import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
+import { ROUTES } from "@/lib/constants";
+import { consentService, GdprRequestStatusResponse } from "@/services/api/consent";
 import {
   ArrowLeftIcon,
   TrashIcon,
@@ -13,114 +13,115 @@ import {
   ClockIcon,
   CheckCircleIcon,
   XCircleIcon,
-} from '@heroicons/react/24/outline'
+} from "@heroicons/react/24/outline";
 
 export default function DeleteAccountPage() {
-  const { isCollapsed } = useSidebar()
-  const [deletionStatus, setDeletionStatus] = useState<GdprRequestStatusResponse | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [isRequesting, setIsRequesting] = useState(false)
-  const [isCancelling, setIsCancelling] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [confirmText, setConfirmText] = useState('')
+  const { isCollapsed } = useSidebar();
+  const [deletionStatus, setDeletionStatus] = useState<GdprRequestStatusResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRequesting, setIsRequesting] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
 
   // Load deletion status
   useEffect(() => {
     const loadDeletionStatus = async () => {
       try {
-        setIsLoading(true)
-        const status = await consentService.getDeletionStatus()
-        setDeletionStatus(status)
+        setIsLoading(true);
+        const status = await consentService.getDeletionStatus();
+        setDeletionStatus(status);
       } catch {
         // No existing deletion request
-        setDeletionStatus(null)
+        setDeletionStatus(null);
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
+    };
 
-    loadDeletionStatus()
-  }, [])
+    loadDeletionStatus();
+  }, []);
 
   const handleRequestDeletion = async () => {
-    if (confirmText !== 'DELETE') {
-      setError('Please type DELETE to confirm')
-      return
+    if (confirmText !== "DELETE") {
+      setError("Please type DELETE to confirm");
+      return;
     }
 
     try {
-      setIsRequesting(true)
-      setError(null)
-      setSuccessMessage(null)
+      setIsRequesting(true);
+      setError(null);
+      setSuccessMessage(null);
 
-      const result = await consentService.requestAccountDeletion()
-      setSuccessMessage(result.message)
-      setConfirmDelete(false)
-      setConfirmText('')
+      const result = await consentService.requestAccountDeletion();
+      setSuccessMessage(result.message);
+      setConfirmDelete(false);
+      setConfirmText("");
 
       // Reload status
-      const status = await consentService.getDeletionStatus()
-      setDeletionStatus(status)
+      const status = await consentService.getDeletionStatus();
+      setDeletionStatus(status);
     } catch (err) {
-      console.error('Failed to request account deletion:', err)
-      setError('Failed to request account deletion. Please try again later.')
+      console.error("Failed to request account deletion:", err);
+      setError("Failed to request account deletion. Please try again later.");
     } finally {
-      setIsRequesting(false)
+      setIsRequesting(false);
     }
-  }
+  };
 
   const handleCancelDeletion = async () => {
     try {
-      setIsCancelling(true)
-      setError(null)
-      setSuccessMessage(null)
+      setIsCancelling(true);
+      setError(null);
+      setSuccessMessage(null);
 
-      const result = await consentService.cancelAccountDeletion()
-      setSuccessMessage(result.message)
+      const result = await consentService.cancelAccountDeletion();
+      setSuccessMessage(result.message);
 
       // Reload status
       try {
-        const status = await consentService.getDeletionStatus()
-        setDeletionStatus(status)
+        const status = await consentService.getDeletionStatus();
+        setDeletionStatus(status);
       } catch {
-        setDeletionStatus(null)
+        setDeletionStatus(null);
       }
     } catch (err) {
-      console.error('Failed to cancel account deletion:', err)
-      setError('Failed to cancel account deletion. Please try again later.')
+      console.error("Failed to cancel account deletion:", err);
+      setError("Failed to cancel account deletion. Please try again later.");
     } finally {
-      setIsCancelling(false)
+      setIsCancelling(false);
     }
-  }
+  };
 
   const formatDate = (dateString: string | null) => {
-    if (!dateString) return 'N/A'
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  }
+    if (!dateString) return "N/A";
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
 
   const getDaysUntilDeletion = (expiresAt: string | null) => {
-    if (!expiresAt) return 0
-    const now = new Date()
-    const deletionDate = new Date(expiresAt)
-    const diffTime = deletionDate.getTime() - now.getTime()
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    return Math.max(0, diffDays)
-  }
+    if (!expiresAt) return 0;
+    const now = new Date();
+    const deletionDate = new Date(expiresAt);
+    const diffTime = deletionDate.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays);
+  };
 
-  const hasPendingDeletion = deletionStatus?.status === 'pending' || deletionStatus?.status === 'processing'
+  const hasPendingDeletion =
+    deletionStatus?.status === "pending" || deletionStatus?.status === "processing";
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: '#f9f8f6' }}>
+    <main className="min-h-screen" style={{ backgroundColor: "#f9f8f6" }}>
       <AuthenticatedNavigation />
-      <div className={`transition-all duration-300 ${isCollapsed ? 'md:pl-20' : 'md:pl-64'} pt-16`}>
+      <div className={`transition-all duration-300 ${isCollapsed ? "md:pl-20" : "md:pl-64"} pt-16`}>
         <div className="pt-4">
           <ProfileWarningBanner />
         </div>
@@ -139,9 +140,7 @@ export default function DeleteAccountPage() {
           <div className="mb-8">
             <div className="flex items-center gap-3 mb-3">
               <TrashIcon className="h-8 w-8 text-red-600" />
-              <h1 className="text-4xl font-extrabold text-gray-900">
-                Delete Account
-              </h1>
+              <h1 className="text-4xl font-extrabold text-gray-900">Delete Account</h1>
             </div>
             <p className="text-lg text-gray-600">
               Request permanent deletion of your account (GDPR Article 17 - Right to Erasure)
@@ -172,7 +171,9 @@ export default function DeleteAccountPage() {
                 <div className="flex items-start gap-3">
                   <ExclamationTriangleIcon className="h-6 w-6 text-red-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h3 className="text-sm font-semibold text-red-900 mb-2">Important: This action is irreversible</h3>
+                    <h3 className="text-sm font-semibold text-red-900 mb-2">
+                      Important: This action is irreversible
+                    </h3>
                     <ul className="text-sm text-red-800 space-y-1">
                       <li>• All your personal data will be permanently deleted</li>
                       <li>• Your profile and account will no longer be accessible</li>
@@ -190,20 +191,27 @@ export default function DeleteAccountPage() {
                   <div className="flex items-start gap-3">
                     <ClockIcon className="h-6 w-6 text-yellow-600 flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
-                      <h3 className="text-lg font-semibold text-yellow-900 mb-2">Deletion Scheduled</h3>
+                      <h3 className="text-lg font-semibold text-yellow-900 mb-2">
+                        Deletion Scheduled
+                      </h3>
                       <p className="text-sm text-yellow-800 mb-4">
-                        Your account is scheduled for deletion. You have{' '}
-                        <strong>{getDaysUntilDeletion(deletionStatus.expires_at)} days</strong> to cancel this request.
+                        Your account is scheduled for deletion. You have{" "}
+                        <strong>{getDaysUntilDeletion(deletionStatus.expires_at)} days</strong> to
+                        cancel this request.
                       </p>
 
                       <div className="space-y-2 mb-4">
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-yellow-700">Requested:</span>
-                          <span className="text-yellow-900 font-medium">{formatDate(deletionStatus.requested_at)}</span>
+                          <span className="text-yellow-900 font-medium">
+                            {formatDate(deletionStatus.requested_at)}
+                          </span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
                           <span className="text-yellow-700">Scheduled deletion:</span>
-                          <span className="text-yellow-900 font-medium">{formatDate(deletionStatus.expires_at)}</span>
+                          <span className="text-yellow-900 font-medium">
+                            {formatDate(deletionStatus.expires_at)}
+                          </span>
                         </div>
                       </div>
 
@@ -212,13 +220,14 @@ export default function DeleteAccountPage() {
                         disabled={isCancelling}
                         className={`
                           px-4 py-2 text-sm font-medium rounded-lg transition-colors
-                          ${isCancelling
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-yellow-600 text-white hover:bg-yellow-700'
+                          ${
+                            isCancelling
+                              ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                              : "bg-yellow-600 text-white hover:bg-yellow-700"
                           }
                         `}
                       >
-                        {isCancelling ? 'Cancelling...' : 'Cancel Deletion Request'}
+                        {isCancelling ? "Cancelling..." : "Cancel Deletion Request"}
                       </button>
                     </div>
                   </div>
@@ -226,21 +235,24 @@ export default function DeleteAccountPage() {
               )}
 
               {/* Completed/Cancelled Status */}
-              {deletionStatus && deletionStatus.status === 'cancelled' && (
+              {deletionStatus && deletionStatus.status === "cancelled" && (
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
                   <div className="flex items-center gap-3">
                     <XCircleIcon className="h-6 w-6 text-gray-500" />
                     <div>
-                      <h3 className="text-sm font-semibold text-gray-900">Previous Request Cancelled</h3>
+                      <h3 className="text-sm font-semibold text-gray-900">
+                        Previous Request Cancelled
+                      </h3>
                       <p className="text-sm text-gray-600">
-                        Your previous deletion request was cancelled on {formatDate(deletionStatus.processed_at || deletionStatus.requested_at)}.
+                        Your previous deletion request was cancelled on{" "}
+                        {formatDate(deletionStatus.processed_at || deletionStatus.requested_at)}.
                       </p>
                     </div>
                   </div>
                 </div>
               )}
 
-              {deletionStatus && deletionStatus.status === 'completed' && (
+              {deletionStatus && deletionStatus.status === "completed" && (
                 <div className="bg-green-50 border border-green-200 rounded-lg p-6">
                   <div className="flex items-center gap-3">
                     <CheckCircleIcon className="h-6 w-6 text-green-500" />
@@ -257,10 +269,13 @@ export default function DeleteAccountPage() {
               {/* Request Deletion Form */}
               {!hasPendingDeletion && (
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                  <h2 className="text-lg font-semibold text-gray-900 mb-2">Request Account Deletion</h2>
+                  <h2 className="text-lg font-semibold text-gray-900 mb-2">
+                    Request Account Deletion
+                  </h2>
                   <p className="text-sm text-gray-600 mb-4">
-                    Once you request deletion, your account will be scheduled for permanent deletion after a 30-day grace period.
-                    During this time, you can cancel the request if you change your mind.
+                    Once you request deletion, your account will be scheduled for permanent deletion
+                    after a 30-day grace period. During this time, you can cancel the request if you
+                    change your mind.
                   </p>
 
                   {!confirmDelete ? (
@@ -285,22 +300,23 @@ export default function DeleteAccountPage() {
                       <div className="flex gap-3">
                         <button
                           onClick={handleRequestDeletion}
-                          disabled={isRequesting || confirmText !== 'DELETE'}
+                          disabled={isRequesting || confirmText !== "DELETE"}
                           className={`
                             px-4 py-2 text-sm font-medium rounded-lg transition-colors
-                            ${isRequesting || confirmText !== 'DELETE'
-                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                              : 'bg-red-600 text-white hover:bg-red-700'
+                            ${
+                              isRequesting || confirmText !== "DELETE"
+                                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                                : "bg-red-600 text-white hover:bg-red-700"
                             }
                           `}
                         >
-                          {isRequesting ? 'Processing...' : 'Confirm Deletion'}
+                          {isRequesting ? "Processing..." : "Confirm Deletion"}
                         </button>
                         <button
                           onClick={() => {
-                            setConfirmDelete(false)
-                            setConfirmText('')
-                            setError(null)
+                            setConfirmDelete(false);
+                            setConfirmText("");
+                            setError(null);
                           }}
                           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                         >
@@ -314,13 +330,18 @@ export default function DeleteAccountPage() {
 
               {/* GDPR Info */}
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-2">About Right to Erasure (GDPR Article 17)</h3>
+                <h3 className="text-sm font-semibold text-gray-900 mb-2">
+                  About Right to Erasure (GDPR Article 17)
+                </h3>
                 <p className="text-sm text-gray-600 mb-3">
-                  Under GDPR, you have the right to request the deletion of your personal data. However, please note:
+                  Under GDPR, you have the right to request the deletion of your personal data.
+                  However, please note:
                 </p>
                 <ul className="text-sm text-gray-600 space-y-1">
                   <li>• We provide a 30-day grace period to prevent accidental data loss</li>
-                  <li>• Some data may be retained for legal compliance (e.g., tax records in Germany)</li>
+                  <li>
+                    • Some data may be retained for legal compliance (e.g., tax records in Germany)
+                  </li>
                   <li>• Data shared in collaborations may be anonymized rather than deleted</li>
                   <li>• This action cannot be undone after the grace period expires</li>
                 </ul>
@@ -330,5 +351,5 @@ export default function DeleteAccountPage() {
         </div>
       </div>
     </main>
-  )
+  );
 }

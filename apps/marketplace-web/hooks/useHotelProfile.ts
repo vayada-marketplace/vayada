@@ -1,40 +1,42 @@
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { hotelService } from '@/services/api/hotels'
-import { ApiErrorResponse } from '@/services/api/client'
-import { checkProfileStatus } from '@/lib/utils'
-import { STORAGE_KEYS } from '@/lib/constants'
-import { ROUTES } from '@/lib/constants/routes'
-import { transformHotelProfile } from '@/components/profile/transforms'
-import { formatErrorForModal } from './useErrorModal'
-import type { HotelProfileStatus } from '@/lib/types'
-import type { ProfileHotelProfile } from '@/components/profile/types'
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { hotelService } from "@/services/api/hotels";
+import { ApiErrorResponse } from "@/services/api/client";
+import { checkProfileStatus } from "@/lib/utils";
+import { STORAGE_KEYS } from "@/lib/constants";
+import { ROUTES } from "@/lib/constants/routes";
+import { transformHotelProfile } from "@/components/profile/transforms";
+import { formatErrorForModal } from "./useErrorModal";
+import type { HotelProfileStatus } from "@/lib/types";
+import type { ProfileHotelProfile } from "@/components/profile/types";
 
-export function useHotelProfile(showError: (title: string, message: string | string[], details?: string) => void) {
-  const router = useRouter()
-  const [hotelProfile, setHotelProfile] = useState<ProfileHotelProfile | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [profileStatus, setProfileStatus] = useState<HotelProfileStatus | null>(null)
-  const [isProfileIncomplete, setIsProfileIncomplete] = useState(false)
-  const [activeHotelTab, setActiveHotelTab] = useState<'overview' | 'listings'>('overview')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [isEditingContact, setIsEditingContact] = useState(false)
-  const [isSavingContact, setIsSavingContact] = useState(false)
-  const [isEditingHotelProfile, setIsEditingHotelProfile] = useState(false)
-  const [isSavingHotelProfile, setIsSavingHotelProfile] = useState(false)
-  const [showHotelPictureModal, setShowHotelPictureModal] = useState(false)
-  const [hotelPicturePreview, setHotelPicturePreview] = useState<string | null>(null)
-  const [hotelProfilePictureFile, setHotelProfilePictureFile] = useState<File | null>(null)
-  const hotelFileInputRef = useRef<HTMLInputElement | null>(null)
+export function useHotelProfile(
+  showError: (title: string, message: string | string[], details?: string) => void,
+) {
+  const router = useRouter();
+  const [hotelProfile, setHotelProfile] = useState<ProfileHotelProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [profileStatus, setProfileStatus] = useState<HotelProfileStatus | null>(null);
+  const [isProfileIncomplete, setIsProfileIncomplete] = useState(false);
+  const [activeHotelTab, setActiveHotelTab] = useState<"overview" | "listings">("overview");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [isEditingContact, setIsEditingContact] = useState(false);
+  const [isSavingContact, setIsSavingContact] = useState(false);
+  const [isEditingHotelProfile, setIsEditingHotelProfile] = useState(false);
+  const [isSavingHotelProfile, setIsSavingHotelProfile] = useState(false);
+  const [showHotelPictureModal, setShowHotelPictureModal] = useState(false);
+  const [hotelPicturePreview, setHotelPicturePreview] = useState<string | null>(null);
+  const [hotelProfilePictureFile, setHotelProfilePictureFile] = useState<File | null>(null);
+  const hotelFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [hotelEditFormData, setHotelEditFormData] = useState({
-    name: '',
-    picture: '',
-    location: '',
-    website: '',
-    about: '',
-    collaborationTypes: [] as ('Free Stay' | 'Paid' | 'Discount' | 'Affiliate')[],
+    name: "",
+    picture: "",
+    location: "",
+    website: "",
+    about: "",
+    collaborationTypes: [] as ("Free Stay" | "Paid" | "Discount" | "Affiliate")[],
     availability: [] as string[],
     platforms: [] as string[],
     freeStayMinNights: undefined as number | undefined,
@@ -47,63 +49,63 @@ export function useHotelProfile(showError: (title: string, message: string | str
     targetGroupCountries: [] as string[],
     targetGroupAgeMin: undefined as number | undefined,
     targetGroupAgeMax: undefined as number | undefined,
-  })
+  });
 
-  const [collapsedListingCards, setCollapsedListingCards] = useState<Set<string>>(new Set())
+  const [collapsedListingCards, setCollapsedListingCards] = useState<Set<string>>(new Set());
 
   const loadProfile = async () => {
-    setLoading(true)
+    setLoading(true);
     try {
-      const status = await checkProfileStatus('hotel') as HotelProfileStatus | null
-      setProfileStatus(status)
+      const status = (await checkProfileStatus("hotel")) as HotelProfileStatus | null;
+      setProfileStatus(status);
 
       // Treat a missing status (e.g. endpoint 404'd because profile row
       // doesn't exist yet) the same as an incomplete profile — send the
       // user straight to the completion flow.
       if (!status || !status.profile_complete) {
-        setIsProfileIncomplete(true)
-        setHotelProfile(null)
-        router.push(ROUTES.PROFILE_COMPLETE)
-        return
+        setIsProfileIncomplete(true);
+        setHotelProfile(null);
+        router.push(ROUTES.PROFILE_COMPLETE);
+        return;
       }
 
-      setIsProfileIncomplete(false)
+      setIsProfileIncomplete(false);
 
       try {
-        const apiProfile = await hotelService.getMyProfile()
-        const profile = transformHotelProfile(apiProfile)
-        setHotelProfile(profile)
+        const apiProfile = await hotelService.getMyProfile();
+        const profile = transformHotelProfile(apiProfile);
+        setHotelProfile(profile);
       } catch (error) {
         if (error instanceof ApiErrorResponse && error.status === 405) {
-          console.warn('Profile endpoint not yet implemented:', error.status)
+          console.warn("Profile endpoint not yet implemented:", error.status);
         } else {
-          console.error('Failed to fetch hotel profile:', error)
+          console.error("Failed to fetch hotel profile:", error);
         }
-        setHotelProfile(null)
+        setHotelProfile(null);
       }
     } catch (error: unknown) {
       console.error(
-        'Failed to check profile status:',
-        error instanceof Error ? error : String(error)
-      )
-      setIsProfileIncomplete(false)
+        "Failed to check profile status:",
+        error instanceof Error ? error : String(error),
+      );
+      setIsProfileIncomplete(false);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
   useEffect(() => {
-    loadProfile()
-  }, [])
+    loadProfile();
+  }, []);
 
   useEffect(() => {
     if (hotelProfile) {
       setHotelEditFormData({
         name: hotelProfile.name,
-        picture: hotelProfile.picture || '',
+        picture: hotelProfile.picture || "",
         location: hotelProfile.location,
-        website: hotelProfile.website || '',
-        about: hotelProfile.about || '',
+        website: hotelProfile.website || "",
+        about: hotelProfile.about || "",
         collaborationTypes: [],
         availability: [],
         platforms: [],
@@ -117,189 +119,207 @@ export function useHotelProfile(showError: (title: string, message: string | str
         targetGroupCountries: [],
         targetGroupAgeMin: undefined,
         targetGroupAgeMax: undefined,
-      })
-      setEmail(hotelProfile.email)
-      setPhone(hotelProfile.phone || '')
+      });
+      setEmail(hotelProfile.email);
+      setPhone(hotelProfile.phone || "");
       if (hotelProfile.listings && hotelProfile.listings.length > 0) {
-        setCollapsedListingCards(new Set(hotelProfile.listings.map(listing => listing.id)))
+        setCollapsedListingCards(new Set(hotelProfile.listings.map((listing) => listing.id)));
       } else {
-        setCollapsedListingCards(new Set())
+        setCollapsedListingCards(new Set());
       }
     }
-  }, [hotelProfile])
+  }, [hotelProfile]);
 
   const validateHotelEdit = (): string | null => {
     if (hotelEditFormData.name && !hotelEditFormData.name.trim()) {
-      return 'Name cannot be empty'
+      return "Name cannot be empty";
     }
     if (hotelEditFormData.location && !hotelEditFormData.location.trim()) {
-      return 'Location cannot be empty'
+      return "Location cannot be empty";
     }
-    if (hotelEditFormData.location && hotelEditFormData.location.trim().toLowerCase() === 'not specified') {
-      return 'Location cannot be "Not specified"'
+    if (
+      hotelEditFormData.location &&
+      hotelEditFormData.location.trim().toLowerCase() === "not specified"
+    ) {
+      return 'Location cannot be "Not specified"';
     }
-    if (hotelEditFormData.about && hotelEditFormData.about.trim().length > 0 && hotelEditFormData.about.trim().length < 50) {
-      return 'About must be at least 50 characters when provided'
+    if (
+      hotelEditFormData.about &&
+      hotelEditFormData.about.trim().length > 0 &&
+      hotelEditFormData.about.trim().length < 50
+    ) {
+      return "About must be at least 50 characters when provided";
     }
-    if (hotelEditFormData.website && hotelEditFormData.website.trim() && !/^https?:\/\//i.test(hotelEditFormData.website.trim())) {
-      return 'Website must start with http or https'
+    if (
+      hotelEditFormData.website &&
+      hotelEditFormData.website.trim() &&
+      !/^https?:\/\//i.test(hotelEditFormData.website.trim())
+    ) {
+      return "Website must start with http or https";
     }
-    if (phone !== undefined && phone !== null && phone.trim() === '') {
-      return 'Phone cannot be empty if provided'
+    if (phone !== undefined && phone !== null && phone.trim() === "") {
+      return "Phone cannot be empty if provided";
     }
-    return null
-  }
+    return null;
+  };
 
   const handleSaveHotelProfile = async () => {
-    const validationError = validateHotelEdit()
+    const validationError = validateHotelEdit();
     if (validationError) {
-      showError('Validation Error', validationError)
-      return
+      showError("Validation Error", validationError);
+      return;
     }
 
-    if (!hotelProfile) return
+    if (!hotelProfile) return;
 
-    setIsSavingHotelProfile(true)
+    setIsSavingHotelProfile(true);
     try {
       const payload: {
-        name?: string
-        location?: string
-        picture?: string | null
-        website?: string
-        about?: string
-        email?: string
-        phone?: string
-      } = {}
+        name?: string;
+        location?: string;
+        picture?: string | null;
+        website?: string;
+        about?: string;
+        email?: string;
+        phone?: string;
+      } = {};
 
       if (hotelEditFormData.name.trim() !== hotelProfile.name) {
-        payload.name = hotelEditFormData.name.trim()
+        payload.name = hotelEditFormData.name.trim();
       }
       if (hotelEditFormData.location.trim() !== hotelProfile.location) {
-        payload.location = hotelEditFormData.location.trim()
+        payload.location = hotelEditFormData.location.trim();
       }
-      if ((hotelEditFormData.website || '') !== (hotelProfile.website || '')) {
-        payload.website = hotelEditFormData.website.trim() || undefined
+      if ((hotelEditFormData.website || "") !== (hotelProfile.website || "")) {
+        payload.website = hotelEditFormData.website.trim() || undefined;
       }
-      if ((hotelEditFormData.about || '') !== (hotelProfile.about || '')) {
-        payload.about = hotelEditFormData.about.trim() || undefined
+      if ((hotelEditFormData.about || "") !== (hotelProfile.about || "")) {
+        payload.about = hotelEditFormData.about.trim() || undefined;
       }
-      if ((phone || '') !== (hotelProfile.phone || '')) {
-        payload.phone = phone || undefined
+      if ((phone || "") !== (hotelProfile.phone || "")) {
+        payload.phone = phone || undefined;
       }
 
       if (hotelProfilePictureFile) {
-        const formData = new FormData()
+        const formData = new FormData();
 
         if (hotelEditFormData.name.trim() !== hotelProfile.name) {
-          formData.append('name', hotelEditFormData.name.trim())
+          formData.append("name", hotelEditFormData.name.trim());
         }
         if (hotelEditFormData.location.trim() !== hotelProfile.location) {
-          formData.append('location', hotelEditFormData.location.trim())
+          formData.append("location", hotelEditFormData.location.trim());
         }
-        if ((hotelEditFormData.website || '') !== (hotelProfile.website || '')) {
-          formData.append('website', hotelEditFormData.website.trim() || '')
+        if ((hotelEditFormData.website || "") !== (hotelProfile.website || "")) {
+          formData.append("website", hotelEditFormData.website.trim() || "");
         }
-        if ((hotelEditFormData.about || '') !== (hotelProfile.about || '')) {
-          formData.append('about', hotelEditFormData.about.trim() || '')
+        if ((hotelEditFormData.about || "") !== (hotelProfile.about || "")) {
+          formData.append("about", hotelEditFormData.about.trim() || "");
         }
-        if ((phone || '') !== (hotelProfile.phone || '')) {
-          formData.append('phone', phone || '')
+        if ((phone || "") !== (hotelProfile.phone || "")) {
+          formData.append("phone", phone || "");
         }
 
-        const userEmail = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) : null
+        const userEmail =
+          typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) : null;
         if (userEmail && userEmail !== hotelProfile.email) {
-          formData.append('email', userEmail)
+          formData.append("email", userEmail);
         }
 
-        formData.append('picture', hotelProfilePictureFile)
+        formData.append("picture", hotelProfilePictureFile);
 
-        const updatedProfile = await hotelService.updateMyProfile(formData)
+        const updatedProfile = await hotelService.updateMyProfile(formData);
 
         if (updatedProfile && updatedProfile.picture) {
-          setHotelEditFormData(prev => ({
+          setHotelEditFormData((prev) => ({
             ...prev,
-            picture: updatedProfile.picture || ''
-          }))
+            picture: updatedProfile.picture || "",
+          }));
           if (hotelProfile) {
-            setHotelProfile(prev => prev ? {
-              ...prev,
-              picture: updatedProfile.picture || undefined
-            } : null)
+            setHotelProfile((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    picture: updatedProfile.picture || undefined,
+                  }
+                : null,
+            );
           }
         }
       } else {
-        const currentPicture = hotelProfile.picture || ''
-        const newPicture = hotelEditFormData.picture || ''
+        const currentPicture = hotelProfile.picture || "";
+        const newPicture = hotelEditFormData.picture || "";
         if (newPicture !== currentPicture) {
-          if (newPicture.trim() === '') {
-            payload.picture = null
-          } else if (!newPicture.startsWith('data:')) {
-            payload.picture = newPicture.trim()
+          if (newPicture.trim() === "") {
+            payload.picture = null;
+          } else if (!newPicture.startsWith("data:")) {
+            payload.picture = newPicture.trim();
           }
         }
 
-        const userEmail = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) : null
+        const userEmail =
+          typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) : null;
         if (userEmail && userEmail !== hotelProfile.email) {
-          payload.email = userEmail
+          payload.email = userEmail;
         }
 
         if (Object.keys(payload).length === 0) {
-          setIsEditingHotelProfile(false)
-          setIsSavingHotelProfile(false)
-          return
+          setIsEditingHotelProfile(false);
+          setIsSavingHotelProfile(false);
+          return;
         }
 
-        const updatedProfile = await hotelService.updateMyProfile(payload)
+        const updatedProfile = await hotelService.updateMyProfile(payload);
 
         if (updatedProfile && updatedProfile.picture) {
-          setHotelEditFormData(prev => ({
+          setHotelEditFormData((prev) => ({
             ...prev,
-            picture: updatedProfile.picture || ''
-          }))
+            picture: updatedProfile.picture || "",
+          }));
           if (hotelProfile) {
-            setHotelProfile(prev => prev ? {
-              ...prev,
-              picture: updatedProfile.picture || undefined
-            } : null)
+            setHotelProfile((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    picture: updatedProfile.picture || undefined,
+                  }
+                : null,
+            );
           }
         }
       }
 
-      await loadProfile()
+      await loadProfile();
 
-      setIsEditingHotelProfile(false)
+      setIsEditingHotelProfile(false);
 
-      const hotelInput = hotelFileInputRef.current
+      const hotelInput = hotelFileInputRef.current;
       if (hotelInput) {
-        hotelInput.value = ''
+        hotelInput.value = "";
       }
-      setHotelPicturePreview(null)
-      setHotelProfilePictureFile(null)
+      setHotelPicturePreview(null);
+      setHotelProfilePictureFile(null);
     } catch (error: unknown) {
-      const detail =
-        error instanceof ApiErrorResponse
-          ? error.data.detail
-          : null
+      const detail = error instanceof ApiErrorResponse ? error.data.detail : null;
       const message =
-        typeof detail === 'string'
+        typeof detail === "string"
           ? detail
           : Array.isArray(detail) && detail[0]?.msg
             ? detail[0].msg
-            : 'Failed to save profile'
-      showError('Failed to Save Profile', formatErrorForModal(detail || message))
+            : "Failed to save profile";
+      showError("Failed to Save Profile", formatErrorForModal(detail || message));
     } finally {
-      setIsSavingHotelProfile(false)
+      setIsSavingHotelProfile(false);
     }
-  }
+  };
 
   const handleCancelHotelEdit = () => {
     if (hotelProfile) {
       setHotelEditFormData({
         name: hotelProfile.name,
-        picture: hotelProfile.picture || '',
+        picture: hotelProfile.picture || "",
         location: hotelProfile.location,
-        website: hotelProfile.website || '',
-        about: hotelProfile.about || '',
+        website: hotelProfile.website || "",
+        about: hotelProfile.about || "",
         collaborationTypes: [],
         availability: [],
         platforms: [],
@@ -313,65 +333,62 @@ export function useHotelProfile(showError: (title: string, message: string | str
         targetGroupCountries: [],
         targetGroupAgeMin: undefined,
         targetGroupAgeMax: undefined,
-      })
-      setEmail(hotelProfile.email)
-      setPhone(hotelProfile.phone || '')
-      setHotelPicturePreview(null)
-      setHotelProfilePictureFile(null)
+      });
+      setEmail(hotelProfile.email);
+      setPhone(hotelProfile.phone || "");
+      setHotelPicturePreview(null);
+      setHotelProfilePictureFile(null);
       if (hotelFileInputRef.current) {
-        hotelFileInputRef.current.value = ''
+        hotelFileInputRef.current.value = "";
       }
     }
-    setIsEditingHotelProfile(false)
-  }
+    setIsEditingHotelProfile(false);
+  };
 
   const handleSaveHotelContact = async () => {
-    if (!email || !email.includes('@')) {
-      showError('Validation Error', 'Please enter a valid email address')
-      return
+    if (!email || !email.includes("@")) {
+      showError("Validation Error", "Please enter a valid email address");
+      return;
     }
 
-    if (!hotelProfile) return
+    if (!hotelProfile) return;
 
-    setIsSavingContact(true)
+    setIsSavingContact(true);
     try {
       const payload: {
-        email?: string
-        phone?: string
-      } = {}
+        email?: string;
+        phone?: string;
+      } = {};
 
       if (email !== hotelProfile.email) {
-        payload.email = email
+        payload.email = email;
       }
-      if ((phone || '') !== (hotelProfile.phone || '')) {
-        payload.phone = phone || undefined
+      if ((phone || "") !== (hotelProfile.phone || "")) {
+        payload.phone = phone || undefined;
       }
 
       if (Object.keys(payload).length === 0) {
-        setIsEditingContact(false)
-        setIsSavingContact(false)
-        return
+        setIsEditingContact(false);
+        setIsSavingContact(false);
+        return;
       }
 
-      await hotelService.updateMyProfile(payload)
-      await loadProfile()
-      setIsEditingContact(false)
+      await hotelService.updateMyProfile(payload);
+      await loadProfile();
+      setIsEditingContact(false);
     } catch (error: unknown) {
-      const detail =
-        error instanceof ApiErrorResponse
-          ? error.data.detail
-          : null
+      const detail = error instanceof ApiErrorResponse ? error.data.detail : null;
       const message =
-        typeof detail === 'string'
+        typeof detail === "string"
           ? detail
           : Array.isArray(detail) && detail[0]?.msg
             ? detail[0].msg
-            : 'Failed to save contact information'
-      showError('Failed to Save Contact Information', formatErrorForModal(detail || message))
+            : "Failed to save contact information";
+      showError("Failed to Save Contact Information", formatErrorForModal(detail || message));
     } finally {
-      setIsSavingContact(false)
+      setIsSavingContact(false);
     }
-  }
+  };
 
   return {
     hotelProfile,
@@ -406,5 +423,5 @@ export function useHotelProfile(showError: (title: string, message: string | str
     handleSaveHotelProfile,
     handleCancelHotelEdit,
     handleSaveHotelContact,
-  }
+  };
 }

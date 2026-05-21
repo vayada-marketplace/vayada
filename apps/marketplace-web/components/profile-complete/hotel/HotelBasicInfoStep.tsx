@@ -1,25 +1,21 @@
-'use client'
+"use client";
 
-import { Input, Textarea, HotelBadgeIcon } from '@/components/ui'
+import { Input, Textarea, HotelBadgeIcon } from "@/components/ui";
 import {
   BuildingOfficeIcon,
   MapPinIcon,
   GlobeAltIcon,
   PhoneIcon,
-} from '@heroicons/react/24/outline'
-import type { HotelFormState } from '@/lib/types'
+} from "@heroicons/react/24/outline";
+import type { HotelFormState } from "@/lib/types";
 
 interface HotelBasicInfoStepProps {
-  form: HotelFormState
-  onFormChange: (updates: Partial<HotelFormState>) => void
-  error: string
+  form: HotelFormState;
+  onFormChange: (updates: Partial<HotelFormState>) => void;
+  error: string;
 }
 
-export function HotelBasicInfoStep({
-  form,
-  onFormChange,
-  error,
-}: HotelBasicInfoStepProps) {
+export function HotelBasicInfoStep({ form, onFormChange, error }: HotelBasicInfoStepProps) {
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3 pb-1">
@@ -51,7 +47,7 @@ export function HotelBasicInfoStep({
               onChange={(e) => onFormChange({ location: e.target.value })}
               required
               placeholder="City, Country"
-              error={error && error.includes('Location') ? error : undefined}
+              error={error && error.includes("Location") ? error : undefined}
               helperText="Country or island, e.g., Bali, Indonesia."
               leadingIcon={<MapPinIcon className="w-5 h-5 text-gray-400" />}
             />
@@ -71,7 +67,7 @@ export function HotelBasicInfoStep({
           helperText={`${form.about.length}/5000 characters`}
           className="resize-none"
           error={
-            (error && error.includes('About') ? error : undefined) ||
+            (error && error.includes("About") ? error : undefined) ||
             (form.about.trim().length > 0 && form.about.trim().length < 50
               ? `About section must be at least 50 characters (${form.about.length}/5000)`
               : undefined)
@@ -89,7 +85,7 @@ export function HotelBasicInfoStep({
             onChange={(e) => onFormChange({ website: e.target.value })}
             placeholder="https://your-hotel.com"
             required
-            error={error && error.includes('Website') ? error : undefined}
+            error={error && error.includes("Website") ? error : undefined}
             leadingIcon={<GlobeAltIcon className="w-5 h-5 text-gray-400" />}
           />
 
@@ -105,5 +101,5 @@ export function HotelBasicInfoStep({
         </div>
       </div>
     </div>
-  )
+  );
 }

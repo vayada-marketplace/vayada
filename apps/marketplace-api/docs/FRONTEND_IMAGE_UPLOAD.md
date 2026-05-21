@@ -5,6 +5,7 @@
 ### Option 1: Upload Separately (Recommended)
 
 **Step 1: Upload the image**
+
 ```javascript
 POST /upload/image/hotel-profile
 Content-Type: multipart/form-data
@@ -14,6 +15,7 @@ Body: FormData with 'file' field
 ```
 
 **Response:**
+
 ```json
 {
   "url": "https://bucket.s3.region.amazonaws.com/hotels/user-id/image.jpg",
@@ -27,6 +29,7 @@ Body: FormData with 'file' field
 ```
 
 **Step 2: Update profile with the URL**
+
 ```javascript
 PUT /hotels/me
 Content-Type: application/json
@@ -78,33 +81,33 @@ Body: FormData with:
 // Upload image first
 const uploadImage = async (file, token) => {
   const formData = new FormData();
-  formData.append('file', file);
-  
-  const response = await fetch('/upload/image/hotel-profile', {
-    method: 'POST',
+  formData.append("file", file);
+
+  const response = await fetch("/upload/image/hotel-profile", {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
     },
-    body: formData
+    body: formData,
   });
-  
+
   return await response.json();
 };
 
 // Update profile with image URL
 const updateProfile = async (profileData, imageUrl, token) => {
-  const response = await fetch('/hotels/me', {
-    method: 'PUT',
+  const response = await fetch("/hotels/me", {
+    method: "PUT",
     headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       ...profileData,
-      picture: imageUrl
-    })
+      picture: imageUrl,
+    }),
   });
-  
+
   return await response.json();
 };
 

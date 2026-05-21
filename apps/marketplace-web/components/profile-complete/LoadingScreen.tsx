@@ -1,4 +1,4 @@
-'use client'
+"use client";
 
 export function LoadingScreen() {
   return (
@@ -8,5 +8,5 @@ export function LoadingScreen() {
         <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-primary-600 absolute top-0 left-0"></div>
       </div>
     </div>
-  )
+  );
 }

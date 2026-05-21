@@ -1,31 +1,25 @@
-import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
+import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
 
 const sidebars: SidebarsConfig = {
   mainSidebar: [
-    'intro',
+    "intro",
     {
-      type: 'category',
-      label: 'Domains',
-      items: [
-        'domains/custom-domain-setup',
-        'domains/default-subdomain',
-      ],
+      type: "category",
+      label: "Domains",
+      items: ["domains/custom-domain-setup", "domains/default-subdomain"],
     },
     {
-      type: 'category',
-      label: 'Hotel Onboarding',
-      items: [
-        'onboarding/invite-codes',
-        'onboarding/setup-wizard',
-      ],
+      type: "category",
+      label: "Hotel Onboarding",
+      items: ["onboarding/invite-codes", "onboarding/setup-wizard"],
     },
     {
-      type: 'category',
-      label: 'Booking Engine',
+      type: "category",
+      label: "Booking Engine",
       items: [
-        'booking-engine/design-studio',
-        'booking-engine/room-management',
-        'booking-engine/billing',
+        "booking-engine/design-studio",
+        "booking-engine/room-management",
+        "booking-engine/billing",
       ],
     },
   ],

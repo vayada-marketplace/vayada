@@ -3,39 +3,33 @@
  * Uses the booking engine auth backend (port 8001)
  */
 
-import { ApiClient } from '@/services/api/client'
-import {
-  clearAuthData,
-  getUserName,
-  getUserType,
-  isLoggedInHint,
-  storeUser,
-} from './storage'
+import { ApiClient } from "@/services/api/client";
+import { clearAuthData, getUserName, getUserType, isLoggedInHint, storeUser } from "./storage";
 
-const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'
+const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "http://localhost:8001";
 
-const authClient = new ApiClient(AUTH_API_URL)
+const authClient = new ApiClient(AUTH_API_URL);
 
 export interface LoginRequest {
-  email: string
-  password: string
+  email: string;
+  password: string;
 }
 
 export interface LoginResponse {
-  id: string
-  email: string
-  name: string
-  type: string
-  status: string
-  access_token: string
-  token_type: string
-  expires_in: number
-  message: string
+  id: string;
+  email: string;
+  name: string;
+  type: string;
+  status: string;
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  message: string;
 }
 
 export interface ResetPasswordRequest {
-  token: string
-  new_password: string
+  token: string;
+  new_password: string;
 }
 
 export const authService = {
@@ -43,10 +37,10 @@ export const authService = {
     // Server sets the httpOnly access_token cookie on this response —
     // we don't read or store the token here. Body is just used for
     // user display data.
-    const response = await authClient.post<LoginResponse>('/auth/login', data)
+    const response = await authClient.post<LoginResponse>("/auth/login", data);
 
-    if (response.type !== 'affiliate') {
-      throw new Error('Access denied. Affiliate account required.')
+    if (response.type !== "affiliate") {
+      throw new Error("Access denied. Affiliate account required.");
     }
 
     storeUser({
@@ -55,13 +49,13 @@ export const authService = {
       name: response.name,
       type: response.type,
       status: response.status,
-    })
+    });
 
-    return response
+    return response;
   },
 
   setPassword: async (data: ResetPasswordRequest): Promise<void> => {
-    await authClient.post('/auth/reset-password', data)
+    await authClient.post("/auth/reset-password", data);
   },
 
   logout: async (): Promise<void> => {
@@ -69,29 +63,29 @@ export const authService = {
     // (network blip, server down), local state still gets wiped and
     // the user is bounced to /login.
     try {
-      await authClient.post('/auth/logout')
+      await authClient.post("/auth/logout");
     } catch {
       // ignore
     }
-    clearAuthData()
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login'
+    clearAuthData();
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
     }
   },
 
   isLoggedIn: isLoggedInHint,
 
-  isAffiliate: (): boolean => getUserType() === 'affiliate',
+  isAffiliate: (): boolean => getUserType() === "affiliate",
 
   getUserName,
 
   getUserInitials: (): string => {
-    const name = getUserName()
-    if (!name) return '?'
-    const parts = name.trim().split(/\s+/)
+    const name = getUserName();
+    if (!name) return "?";
+    const parts = name.trim().split(/\s+/);
     if (parts.length >= 2) {
-      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
     }
-    return name.substring(0, 2).toUpperCase()
+    return name.substring(0, 2).toUpperCase();
   },
-}
+};

@@ -1,17 +1,17 @@
-'use client'
+"use client";
 
-import { PencilIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline'
-import { HotelBadgeIcon } from '@/components/ui'
-import type { ProfileHotelListing } from '@/components/profile/types'
+import { PencilIcon, XMarkIcon, ChevronDownIcon, ChevronUpIcon } from "@heroicons/react/24/outline";
+import { HotelBadgeIcon } from "@/components/ui";
+import type { ProfileHotelListing } from "@/components/profile/types";
 
 interface ListingCardHeaderProps {
-  listing: ProfileHotelListing
-  index: number
-  isCollapsed: boolean
-  showDeleteButton: boolean
-  onToggleCollapse: () => void
-  onEdit: () => void
-  onDelete: () => void
+  listing: ProfileHotelListing;
+  index: number;
+  isCollapsed: boolean;
+  showDeleteButton: boolean;
+  onToggleCollapse: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }
 
 export function ListingCardHeader({
@@ -30,7 +30,7 @@ export function ListingCardHeader({
     listing.description.trim() &&
     listing.collaborationTypes.length > 0 &&
     listing.availability.length > 0
-  )
+  );
 
   return (
     <div className="flex items-center justify-between">
@@ -48,8 +48,8 @@ export function ListingCardHeader({
           <button
             type="button"
             onClick={(e) => {
-              e.stopPropagation()
-              onEdit()
+              e.stopPropagation();
+              onEdit();
             }}
             className="p-1 rounded-md text-gray-600 hover:text-gray-700 hover:bg-gray-50 transition-colors"
             title="Edit listing"
@@ -60,8 +60,8 @@ export function ListingCardHeader({
             <button
               type="button"
               onClick={(e) => {
-                e.stopPropagation()
-                onDelete()
+                e.stopPropagation();
+                onDelete();
               }}
               className="p-1 rounded-md text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors"
               title="Remove listing"
@@ -77,5 +77,5 @@ export function ListingCardHeader({
         </div>
       </div>
     </div>
-  )
+  );
 }

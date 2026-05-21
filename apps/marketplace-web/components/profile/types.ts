@@ -4,223 +4,223 @@ import type {
   PlatformCountry,
   PlatformAgeGroup,
   PlatformGenderSplit,
-  CreatorType
-} from '@/lib/types'
+  CreatorType,
+} from "@/lib/types";
 
 // Re-export for convenience
-export type { PlatformCountry, PlatformAgeGroup, PlatformGenderSplit }
+export type { PlatformCountry, PlatformAgeGroup, PlatformGenderSplit };
 
 // Profile page specific types
-export type UserType = 'hotel' | 'creator'
-export type CreatorTab = 'overview' | 'platforms' | 'reviews'
-export type HotelTab = 'overview' | 'listings'
+export type UserType = "hotel" | "creator";
+export type CreatorTab = "overview" | "platforms" | "reviews";
+export type HotelTab = "overview" | "listings";
 
 // Platform with optional id (for profile management)
 export interface ProfilePlatform {
-  id?: string
-  name: string
-  handle: string
-  followers: number
-  engagementRate: number
-  topCountries?: PlatformCountry[]
-  topAgeGroups?: PlatformAgeGroup[]
-  genderSplit?: PlatformGenderSplit
+  id?: string;
+  name: string;
+  handle: string;
+  followers: number;
+  engagementRate: number;
+  topCountries?: PlatformCountry[];
+  topAgeGroups?: PlatformAgeGroup[];
+  genderSplit?: PlatformGenderSplit;
 }
 
 // API response types that may have snake_case or camelCase fields
 export interface ApiAgeGroup {
-  ageRange?: string | null
-  age_range?: string | null
-  percentage?: number
+  ageRange?: string | null;
+  age_range?: string | null;
+  percentage?: number;
 }
 
 export interface ApiPlatformResponse {
-  id?: string
-  name: string
-  handle?: string
-  followers?: number
-  engagementRate?: number
-  engagement_rate?: number
-  topCountries?: PlatformCountry[]
-  top_countries?: PlatformCountry[]
-  topAgeGroups?: ApiAgeGroup[]
-  top_age_groups?: ApiAgeGroup[]
-  genderSplit?: PlatformGenderSplit | string
-  gender_split?: PlatformGenderSplit | string
+  id?: string;
+  name: string;
+  handle?: string;
+  followers?: number;
+  engagementRate?: number;
+  engagement_rate?: number;
+  topCountries?: PlatformCountry[];
+  top_countries?: PlatformCountry[];
+  topAgeGroups?: ApiAgeGroup[];
+  top_age_groups?: ApiAgeGroup[];
+  genderSplit?: PlatformGenderSplit | string;
+  gender_split?: PlatformGenderSplit | string;
 }
 
 export interface ApiRatingResponse {
-  averageRating?: number
-  average_rating?: number
-  totalReviews?: number
-  total_reviews?: number
-  reviews?: CollaborationReview[]
+  averageRating?: number;
+  average_rating?: number;
+  totalReviews?: number;
+  total_reviews?: number;
+  reviews?: CollaborationReview[];
 }
 
 export interface ApiCreatorResponse {
-  id?: string
-  name?: string
-  email?: string
-  phone?: string | null
-  location?: string
-  status?: 'verified' | 'pending' | 'rejected'
-  profilePicture?: string
-  profile_picture?: string
-  shortDescription?: string
-  short_description?: string
-  portfolioLink?: string
-  portfolio_link?: string
-  creatorType?: CreatorType
-  creator_type?: CreatorType
-  platforms?: ApiPlatformResponse[]
-  rating?: ApiRatingResponse
+  id?: string;
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  location?: string;
+  status?: "verified" | "pending" | "rejected";
+  profilePicture?: string;
+  profile_picture?: string;
+  shortDescription?: string;
+  short_description?: string;
+  portfolioLink?: string;
+  portfolio_link?: string;
+  creatorType?: CreatorType;
+  creator_type?: CreatorType;
+  platforms?: ApiPlatformResponse[];
+  rating?: ApiRatingResponse;
 }
 
 // Update payload for creator profile (uses snake_case for backend compatibility)
 export interface CreatorUpdatePayload {
-  name?: string
-  location?: string
-  short_description?: string
-  portfolio_link?: string
-  phone?: string
-  profilePicture?: string
-  audience_size?: number
-  creator_type?: CreatorType
+  name?: string;
+  location?: string;
+  short_description?: string;
+  portfolio_link?: string;
+  phone?: string;
+  profilePicture?: string;
+  audience_size?: number;
+  creator_type?: CreatorType;
   platforms?: Array<{
-    name: 'Instagram' | 'TikTok' | 'YouTube' | 'Facebook'
-    handle: string
-    followers: number
-    engagement_rate: number
-    top_countries?: Array<{ country: string; percentage: number }>
-    topAgeGroups?: Array<{ ageRange: string; percentage: number }>
-    gender_split?: { male: number; female: number }
-  }>
+    name: "Instagram" | "TikTok" | "YouTube" | "Facebook";
+    handle: string;
+    followers: number;
+    engagement_rate: number;
+    top_countries?: Array<{ country: string; percentage: number }>;
+    topAgeGroups?: Array<{ ageRange: string; percentage: number }>;
+    gender_split?: { male: number; female: number };
+  }>;
 }
 
 // Creator profile for display
 export interface CreatorProfile {
-  id: string
-  name: string
-  profilePicture?: string
-  shortDescription: string
-  location: string
-  status: 'verified' | 'pending' | 'rejected'
-  creatorType: CreatorType
-  rating?: CreatorRating
-  platforms: ProfilePlatform[]
-  portfolioLink?: string
-  email: string
-  phone?: string
+  id: string;
+  name: string;
+  profilePicture?: string;
+  shortDescription: string;
+  location: string;
+  status: "verified" | "pending" | "rejected";
+  creatorType: CreatorType;
+  rating?: CreatorRating;
+  platforms: ProfilePlatform[];
+  portfolioLink?: string;
+  email: string;
+  phone?: string;
 }
 
-export type CollaborationKind = 'Free Stay' | 'Paid' | 'Discount' | 'Affiliate'
+export type CollaborationKind = "Free Stay" | "Paid" | "Discount" | "Affiliate";
 
 // One configured offering on a listing — each carries its own availability,
 // platforms, and (optional) per-offering min-follower threshold so a property
 // can express e.g. "Free stay only Jan–May for 100k+ creators".
 export interface ListingOffering {
-  type: CollaborationKind
-  availabilityMonths: string[]
-  platforms: string[]
-  minFollowers?: number
-  freeStayMinNights?: number
-  freeStayMaxNights?: number
-  paidMaxAmount?: number
-  currency?: string
-  discountPercentage?: number
-  commissionPercentage?: number
+  type: CollaborationKind;
+  availabilityMonths: string[];
+  platforms: string[];
+  minFollowers?: number;
+  freeStayMinNights?: number;
+  freeStayMaxNights?: number;
+  paidMaxAmount?: number;
+  currency?: string;
+  discountPercentage?: number;
+  commissionPercentage?: number;
 }
 
 // Hotel listing for profile management
 export interface ProfileHotelListing {
-  id: string
-  name: string
-  location: string
-  description: string
-  images: string[]
-  accommodationType?: string
-  offerings: ListingOffering[]
+  id: string;
+  name: string;
+  location: string;
+  description: string;
+  images: string[];
+  accommodationType?: string;
+  offerings: ListingOffering[];
   // Legacy aggregated fields, kept for read paths that haven't migrated yet
   // (e.g. card chevrons that just check "is the listing complete?").
-  collaborationTypes: CollaborationKind[]
-  availability: string[]
-  platforms: string[]
-  freeStayMinNights?: number
-  freeStayMaxNights?: number
-  paidMaxAmount?: number
-  currency?: string
-  discountPercentage?: number
-  commissionPercentage?: number
-  lookingForPlatforms: string[]
-  targetGroupCountries: string[]
-  targetGroupAgeMin?: number
-  targetGroupAgeMax?: number
-  targetGroupAgeGroups?: string[]
-  lookingForCreatorTypes?: CreatorType[]
-  status: 'verified' | 'pending' | 'rejected'
+  collaborationTypes: CollaborationKind[];
+  availability: string[];
+  platforms: string[];
+  freeStayMinNights?: number;
+  freeStayMaxNights?: number;
+  paidMaxAmount?: number;
+  currency?: string;
+  discountPercentage?: number;
+  commissionPercentage?: number;
+  lookingForPlatforms: string[];
+  targetGroupCountries: string[];
+  targetGroupAgeMin?: number;
+  targetGroupAgeMax?: number;
+  targetGroupAgeGroups?: string[];
+  lookingForCreatorTypes?: CreatorType[];
+  status: "verified" | "pending" | "rejected";
 }
 
 // Hotel profile for display
 export interface ProfileHotelProfile {
-  id: string
-  name: string
-  picture?: string
-  location: string
-  status: 'verified' | 'pending' | 'rejected'
-  website?: string
-  about?: string
-  email: string
-  phone?: string
-  listings: ProfileHotelListing[]
+  id: string;
+  name: string;
+  picture?: string;
+  location: string;
+  status: "verified" | "pending" | "rejected";
+  website?: string;
+  about?: string;
+  email: string;
+  phone?: string;
+  listings: ProfileHotelListing[];
 }
 
 // Form data types
 export interface CreatorEditFormData {
-  name: string
-  profilePicture: string
-  shortDescription: string
-  location: string
-  portfolioLink: string
-  creatorType: CreatorType
-  platforms: ProfilePlatform[]
+  name: string;
+  profilePicture: string;
+  shortDescription: string;
+  location: string;
+  portfolioLink: string;
+  creatorType: CreatorType;
+  platforms: ProfilePlatform[];
 }
 
 export interface HotelEditFormData {
-  name: string
-  picture: string
-  location: string
-  website: string
-  about: string
+  name: string;
+  picture: string;
+  location: string;
+  website: string;
+  about: string;
 }
 
 export interface ListingFormData {
-  name: string
-  location: string
-  description: string
-  images: string[]
-  accommodationType: string
+  name: string;
+  location: string;
+  description: string;
+  images: string[];
+  accommodationType: string;
   // Authoritative editor model — array of independent offerings.
-  offerings: ListingOffering[]
-  lookingForPlatforms: string[]
-  targetGroupCountries: string[]
-  targetGroupAgeMin?: number
-  targetGroupAgeMax?: number
-  targetGroupAgeGroups?: string[]
-  lookingForCreatorTypes?: CreatorType[]
+  offerings: ListingOffering[];
+  lookingForPlatforms: string[];
+  targetGroupCountries: string[];
+  targetGroupAgeMin?: number;
+  targetGroupAgeMax?: number;
+  targetGroupAgeGroups?: string[];
+  lookingForCreatorTypes?: CreatorType[];
 }
 
 // Modal state types
 export interface ErrorModalState {
-  isOpen: boolean
-  title: string
-  message: string | string[]
-  details?: string
+  isOpen: boolean;
+  title: string;
+  message: string | string[];
+  details?: string;
 }
 
 export interface DeleteConfirmModalState {
-  isOpen: boolean
-  listingId: string | null
-  listingName: string
+  isOpen: boolean;
+  listingId: string | null;
+  listingName: string;
 }
 
 /**
@@ -228,11 +228,11 @@ export interface DeleteConfirmModalState {
  */
 export function createEmptyListingFormData(): ListingFormData {
   return {
-    name: '',
-    location: '',
-    description: '',
+    name: "",
+    location: "",
+    description: "",
     images: [],
-    accommodationType: '',
+    accommodationType: "",
     offerings: [],
     lookingForPlatforms: [],
     targetGroupCountries: [],
@@ -240,10 +240,10 @@ export function createEmptyListingFormData(): ListingFormData {
     targetGroupAgeMax: undefined,
     targetGroupAgeGroups: [],
     lookingForCreatorTypes: [],
-  }
+  };
 }
 
-export function createEmptyOffering(type: CollaborationKind = 'Free Stay'): ListingOffering {
+export function createEmptyOffering(type: CollaborationKind = "Free Stay"): ListingOffering {
   return {
     type,
     availabilityMonths: [],
@@ -252,8 +252,8 @@ export function createEmptyOffering(type: CollaborationKind = 'Free Stay'): List
     freeStayMinNights: undefined,
     freeStayMaxNights: undefined,
     paidMaxAmount: undefined,
-    currency: type === 'Paid' ? 'USD' : undefined,
+    currency: type === "Paid" ? "USD" : undefined,
     discountPercentage: undefined,
-    commissionPercentage: type === 'Affiliate' ? 5 : undefined,
-  }
+    commissionPercentage: type === "Affiliate" ? 5 : undefined,
+  };
 }

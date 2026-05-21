@@ -1,23 +1,23 @@
-'use client'
+"use client";
 
-import { RefObject } from 'react'
-import { Input, Textarea } from '@/components/ui'
+import { RefObject } from "react";
+import { Input, Textarea } from "@/components/ui";
 import {
   UserIcon,
   MapPinIcon,
   LinkIcon,
   PhoneIcon,
   EnvelopeIcon,
-} from '@heroicons/react/24/outline'
-import { STORAGE_KEYS } from '@/lib/constants'
-import type { CreatorFormState } from '@/lib/types'
+} from "@heroicons/react/24/outline";
+import { STORAGE_KEYS } from "@/lib/constants";
+import type { CreatorFormState } from "@/lib/types";
 
 interface CreatorBasicInfoStepProps {
-  form: CreatorFormState
-  onFormChange: (updates: Partial<CreatorFormState>) => void
-  error: string
-  imageInputRef: RefObject<HTMLInputElement>
-  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  form: CreatorFormState;
+  onFormChange: (updates: Partial<CreatorFormState>) => void;
+  error: string;
+  imageInputRef: RefObject<HTMLInputElement>;
+  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export function CreatorBasicInfoStep({
@@ -27,7 +27,8 @@ export function CreatorBasicInfoStep({
   imageInputRef,
   onImageChange,
 }: CreatorBasicInfoStepProps) {
-  const profilePictureError = !!error && error.toLowerCase().includes('profile picture') && !form.profile_image
+  const profilePictureError =
+    !!error && error.toLowerCase().includes("profile picture") && !form.profile_image;
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between border-b border-gray-100 pb-2">
@@ -47,7 +48,7 @@ export function CreatorBasicInfoStep({
             onChange={(e) => onFormChange({ name: e.target.value })}
             required
             placeholder="Your full name"
-            error={error && error.includes('Name') ? error : undefined}
+            error={error && error.includes("Name") ? error : undefined}
             leadingIcon={<UserIcon className="w-5 h-5 text-gray-400" />}
           />
 
@@ -58,7 +59,7 @@ export function CreatorBasicInfoStep({
             onChange={(e) => onFormChange({ location: e.target.value })}
             required
             placeholder="e.g., New York, USA"
-            error={error && error.includes('Location') ? error : undefined}
+            error={error && error.includes("Location") ? error : undefined}
             leadingIcon={<MapPinIcon className="w-5 h-5 text-gray-400" />}
           />
         </div>
@@ -71,8 +72,8 @@ export function CreatorBasicInfoStep({
           <div
             className={`relative w-40 h-40 rounded-full border-2 border-dashed flex flex-col items-center justify-center cursor-pointer hover:border-primary-500 transition-all overflow-hidden group ${
               profilePictureError
-                ? 'border-red-500 bg-red-50 hover:bg-red-50'
-                : 'border-gray-300 bg-gray-50 hover:bg-gray-50'
+                ? "border-red-500 bg-red-50 hover:bg-red-50"
+                : "border-gray-300 bg-gray-50 hover:bg-gray-50"
             }`}
             onClick={() => imageInputRef.current?.click()}
           >
@@ -90,12 +91,28 @@ export function CreatorBasicInfoStep({
             ) : (
               <>
                 <div className="w-6 h-6 text-gray-400 mb-1 group-hover:text-primary-500 transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z"
+                    />
                   </svg>
                 </div>
-                <span className="text-[10px] text-gray-500 font-medium group-hover:text-primary-600">Upload</span>
+                <span className="text-[10px] text-gray-500 font-medium group-hover:text-primary-600">
+                  Upload
+                </span>
               </>
             )}
           </div>
@@ -121,19 +138,20 @@ export function CreatorBasicInfoStep({
           placeholder="Tell us about yourself as a travel creator"
           rows={3}
           maxLength={500}
-          error={error && error.includes('description') ? error : undefined}
+          error={error && error.includes("description") ? error : undefined}
         />
-        <p className={`text-xs mt-1 ${
-          form.short_description.trim().length >= 10
-            ? 'text-green-600'
-            : form.short_description.trim().length > 0
-              ? 'text-red-500'
-              : 'text-gray-500'
-        }`}>
+        <p
+          className={`text-xs mt-1 ${
+            form.short_description.trim().length >= 10
+              ? "text-green-600"
+              : form.short_description.trim().length > 0
+                ? "text-red-500"
+                : "text-gray-500"
+          }`}
+        >
           {form.short_description.length}/500 characters
-          {form.short_description.trim().length > 0 && form.short_description.trim().length < 10 && (
-            <span> (minimum 10 characters)</span>
-          )}
+          {form.short_description.trim().length > 0 &&
+            form.short_description.trim().length < 10 && <span> (minimum 10 characters)</span>}
         </p>
       </div>
 
@@ -153,13 +171,20 @@ export function CreatorBasicInfoStep({
       <div className="space-y-4 pt-2">
         <div>
           <h4 className="text-base font-bold text-gray-900">Contact Information</h4>
-          <p className="text-sm text-gray-500 mt-1">Your email & phone number for direct communication with properties after both accept a collaboration</p>
+          <p className="text-sm text-gray-500 mt-1">
+            Your email & phone number for direct communication with properties after both accept a
+            collaboration
+          </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input
             label="Email"
             type="email"
-            value={typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) || '' : ''}
+            value={
+              typeof window !== "undefined"
+                ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) || ""
+                : ""
+            }
             disabled
             required
             leadingIcon={<EnvelopeIcon className="w-5 h-5 text-gray-400" />}
@@ -177,5 +202,5 @@ export function CreatorBasicInfoStep({
         </div>
       </div>
     </div>
-  )
+  );
 }

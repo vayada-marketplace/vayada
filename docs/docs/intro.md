@@ -19,9 +19,9 @@ This is the internal documentation for the vayada team. Here you'll find step-by
 
 ## Platform URLs
 
-| Tool | URL | Who uses it |
-|------|-----|-------------|
-| Booking Admin | [admin.booking.vayada.com](https://admin.booking.vayada.com) | Hotels (manage their booking engine) |
-| PMS | [pms.vayada.com](https://pms.vayada.com) | Hotels (manage rooms, bookings, calendar) |
-| Marketplace Admin | [admin.vayada.com](https://admin.vayada.com) | vayada team (manage users, hotels, collabs) |
-| Hotel Booking Page | `hotelslug.booking.vayada.com` | Guests (book rooms) |
+| Tool               | URL                                                          | Who uses it                                 |
+| ------------------ | ------------------------------------------------------------ | ------------------------------------------- |
+| Booking Admin      | [admin.booking.vayada.com](https://admin.booking.vayada.com) | Hotels (manage their booking engine)        |
+| PMS                | [pms.vayada.com](https://pms.vayada.com)                     | Hotels (manage rooms, bookings, calendar)   |
+| Marketplace Admin  | [admin.vayada.com](https://admin.vayada.com)                 | vayada team (manage users, hotels, collabs) |
+| Hotel Booking Page | `hotelslug.booking.vayada.com`                               | Guests (book rooms)                         |

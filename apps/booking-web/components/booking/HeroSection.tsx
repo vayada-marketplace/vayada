@@ -1,22 +1,35 @@
-import Image from 'next/image'
-import BookingNavigation from '@/components/layout/BookingNavigation'
+import Image from "next/image";
+import BookingNavigation from "@/components/layout/BookingNavigation";
 
 interface HeroSectionProps {
-  heroImage: string
-  hotelName: string
-  description?: string
-  compact?: boolean
+  heroImage: string;
+  hotelName: string;
+  description?: string;
+  compact?: boolean;
 }
 
-export default function HeroSection({ heroImage, hotelName, description, compact }: HeroSectionProps) {
+export default function HeroSection({
+  heroImage,
+  hotelName,
+  description,
+  compact,
+}: HeroSectionProps) {
   if (compact) {
     return (
       <div className="relative h-32 w-full">
-        <Image src={heroImage} alt={hotelName} fill className="object-cover" priority quality={90} sizes="100vw" />
+        <Image
+          src={heroImage}
+          alt={hotelName}
+          fill
+          className="object-cover"
+          priority
+          quality={90}
+          sizes="100vw"
+        />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
       </div>
-    )
+    );
   }
 
   return (
@@ -43,5 +56,5 @@ export default function HeroSection({ heroImage, hotelName, description, compact
         )}
       </div>
     </div>
-  )
+  );
 }

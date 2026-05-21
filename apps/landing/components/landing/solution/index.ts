@@ -1,1 +1,1 @@
-export { default as SolutionSection } from './SolutionSection'
+export { default as SolutionSection } from "./SolutionSection";

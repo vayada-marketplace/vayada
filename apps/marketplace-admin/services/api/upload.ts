@@ -2,21 +2,21 @@
  * Upload API service
  */
 
-import { apiClient, ApiErrorResponse } from './client'
+import { apiClient, ApiErrorResponse } from "./client";
 
 export interface UploadImageResponse {
-  url: string
-  thumbnail_url?: string
-  key?: string
-  width?: number
-  height?: number
-  size_bytes?: number
-  format?: string
+  url: string;
+  thumbnail_url?: string;
+  key?: string;
+  width?: number;
+  height?: number;
+  size_bytes?: number;
+  format?: string;
 }
 
 export interface UploadListingImagesResponse {
-  images: UploadImageResponse[]
-  total: number
+  images: UploadImageResponse[];
+  total: number;
 }
 
 export const uploadService = {
@@ -26,56 +26,62 @@ export const uploadService = {
    * @param targetUserId - The user ID of the creator (required for proper organization)
    * @returns The upload response with URL and metadata
    */
-  uploadCreatorProfileImage: async (file: File, targetUserId: string): Promise<UploadImageResponse> => {
-    const formData = new FormData()
-    formData.append('file', file)
+  uploadCreatorProfileImage: async (
+    file: File,
+    targetUserId: string,
+  ): Promise<UploadImageResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
 
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
     // Get token using the same method as apiClient
-    let token: string | null = null
-    if (typeof window !== 'undefined') {
-      const storedToken = localStorage.getItem('access_token')
-      const expiresAt = localStorage.getItem('token_expires_at')
+    let token: string | null = null;
+    if (typeof window !== "undefined") {
+      const storedToken = localStorage.getItem("access_token");
+      const expiresAt = localStorage.getItem("token_expires_at");
       if (storedToken && expiresAt && Date.now() < parseInt(expiresAt)) {
-        token = storedToken
+        token = storedToken;
       }
     }
 
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = {};
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers["Authorization"] = `Bearer ${token}`;
     }
     // Don't set Content-Type for FormData - browser will set it with boundary
 
     try {
-      const response = await fetch(`${API_BASE_URL}/upload/image/creator-profile?target_user_id=${targetUserId}`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      })
+      const response = await fetch(
+        `${API_BASE_URL}/upload/image/creator-profile?target_user_id=${targetUserId}`,
+        {
+          method: "POST",
+          headers,
+          body: formData,
+        },
+      );
 
       if (!response.ok) {
-        const contentType = response.headers.get('content-type')
-        const hasJsonContent = contentType && contentType.includes('application/json')
-        
-        let errorData: any
+        const contentType = response.headers.get("content-type");
+        const hasJsonContent = contentType && contentType.includes("application/json");
+
+        let errorData: any;
         if (hasJsonContent) {
-          errorData = await response.json()
+          errorData = await response.json();
         } else {
-          errorData = { detail: await response.text() || 'Upload failed' }
+          errorData = { detail: (await response.text()) || "Upload failed" };
         }
 
-        throw new ApiErrorResponse(response.status, errorData)
+        throw new ApiErrorResponse(response.status, errorData);
       }
 
-      const data: UploadImageResponse = await response.json()
-      return data
+      const data: UploadImageResponse = await response.json();
+      return data;
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
-        throw error
+        throw error;
       }
-      throw new Error('Failed to upload image')
+      throw new Error("Failed to upload image");
     }
   },
 
@@ -85,56 +91,62 @@ export const uploadService = {
    * @param targetUserId - The user ID of the hotel (required for proper organization)
    * @returns The upload response with array of image URLs and metadata
    */
-  uploadListingImages: async (files: File[], targetUserId: string): Promise<UploadListingImagesResponse> => {
-    const formData = new FormData()
-    files.forEach(file => formData.append('files', file))
+  uploadListingImages: async (
+    files: File[],
+    targetUserId: string,
+  ): Promise<UploadListingImagesResponse> => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
 
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
     // Get token using the same method as apiClient
-    let token: string | null = null
-    if (typeof window !== 'undefined') {
-      const storedToken = localStorage.getItem('access_token')
-      const expiresAt = localStorage.getItem('token_expires_at')
+    let token: string | null = null;
+    if (typeof window !== "undefined") {
+      const storedToken = localStorage.getItem("access_token");
+      const expiresAt = localStorage.getItem("token_expires_at");
       if (storedToken && expiresAt && Date.now() < parseInt(expiresAt)) {
-        token = storedToken
+        token = storedToken;
       }
     }
 
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = {};
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers["Authorization"] = `Bearer ${token}`;
     }
     // Don't set Content-Type for FormData - browser will set it with boundary
 
     try {
-      const response = await fetch(`${API_BASE_URL}/upload/images/listing?target_user_id=${targetUserId}`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      })
+      const response = await fetch(
+        `${API_BASE_URL}/upload/images/listing?target_user_id=${targetUserId}`,
+        {
+          method: "POST",
+          headers,
+          body: formData,
+        },
+      );
 
       if (!response.ok) {
-        const contentType = response.headers.get('content-type')
-        const hasJsonContent = contentType && contentType.includes('application/json')
-        
-        let errorData: any
+        const contentType = response.headers.get("content-type");
+        const hasJsonContent = contentType && contentType.includes("application/json");
+
+        let errorData: any;
         if (hasJsonContent) {
-          errorData = await response.json()
+          errorData = await response.json();
         } else {
-          errorData = { detail: await response.text() || 'Upload failed' }
+          errorData = { detail: (await response.text()) || "Upload failed" };
         }
 
-        throw new ApiErrorResponse(response.status, errorData)
+        throw new ApiErrorResponse(response.status, errorData);
       }
 
-      const data: UploadListingImagesResponse = await response.json()
-      return data
+      const data: UploadListingImagesResponse = await response.json();
+      return data;
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
-        throw error
+        throw error;
       }
-      throw new Error('Failed to upload listing images')
+      throw new Error("Failed to upload listing images");
     }
   },
 
@@ -144,61 +156,66 @@ export const uploadService = {
    * @param targetUserId - The user ID of the hotel (required for proper organization)
    * @returns The upload response with URL and metadata
    */
-  uploadHotelProfileImage: async (file: File, targetUserId: string): Promise<UploadImageResponse> => {
-    const formData = new FormData()
-    formData.append('files', file)
+  uploadHotelProfileImage: async (
+    file: File,
+    targetUserId: string,
+  ): Promise<UploadImageResponse> => {
+    const formData = new FormData();
+    formData.append("files", file);
 
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
     // Get token using the same method as apiClient
-    let token: string | null = null
-    if (typeof window !== 'undefined') {
-      const storedToken = localStorage.getItem('access_token')
-      const expiresAt = localStorage.getItem('token_expires_at')
+    let token: string | null = null;
+    if (typeof window !== "undefined") {
+      const storedToken = localStorage.getItem("access_token");
+      const expiresAt = localStorage.getItem("token_expires_at");
       if (storedToken && expiresAt && Date.now() < parseInt(expiresAt)) {
-        token = storedToken
+        token = storedToken;
       }
     }
 
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = {};
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`
+      headers["Authorization"] = `Bearer ${token}`;
     }
     // Don't set Content-Type for FormData - browser will set it with boundary
 
     try {
-      const response = await fetch(`${API_BASE_URL}/upload/images?target_user_id=${targetUserId}&prefix=hotels`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      })
+      const response = await fetch(
+        `${API_BASE_URL}/upload/images?target_user_id=${targetUserId}&prefix=hotels`,
+        {
+          method: "POST",
+          headers,
+          body: formData,
+        },
+      );
 
       if (!response.ok) {
-        const contentType = response.headers.get('content-type')
-        const hasJsonContent = contentType && contentType.includes('application/json')
-        
-        let errorData: any
+        const contentType = response.headers.get("content-type");
+        const hasJsonContent = contentType && contentType.includes("application/json");
+
+        let errorData: any;
         if (hasJsonContent) {
-          errorData = await response.json()
+          errorData = await response.json();
         } else {
-          errorData = { detail: await response.text() || 'Upload failed' }
+          errorData = { detail: (await response.text()) || "Upload failed" };
         }
 
-        throw new ApiErrorResponse(response.status, errorData)
+        throw new ApiErrorResponse(response.status, errorData);
       }
 
-      const data: UploadListingImagesResponse = await response.json()
+      const data: UploadListingImagesResponse = await response.json();
       // Return the first image from the response
       if (data.images && data.images.length > 0) {
-        return data.images[0]
+        return data.images[0];
       }
-      throw new Error('No image returned from upload')
+      throw new Error("No image returned from upload");
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
-        throw error
+        throw error;
       }
-      throw new Error('Failed to upload hotel profile image')
+      throw new Error("Failed to upload hotel profile image");
     }
   },
-}
-
+};

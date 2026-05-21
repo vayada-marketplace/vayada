@@ -1,16 +1,16 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { Button, Textarea, StarRating } from '@/components/ui'
-import { XMarkIcon, StarIcon } from '@heroicons/react/24/solid'
-import { StarIcon as StarIconOutline } from '@heroicons/react/24/outline'
+import { useState } from "react";
+import { Button, Textarea, StarRating } from "@/components/ui";
+import { XMarkIcon, StarIcon } from "@heroicons/react/24/solid";
+import { StarIcon as StarIconOutline } from "@heroicons/react/24/outline";
 
 interface CollaborationRatingModalProps {
-  isOpen: boolean
-  onClose: () => void
-  onSubmit: (rating: number, comment: string) => void
-  creatorName: string
-  isLoading?: boolean
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (rating: number, comment: string) => void;
+  creatorName: string;
+  isLoading?: boolean;
 }
 
 export function CollaborationRatingModal({
@@ -20,36 +20,36 @@ export function CollaborationRatingModal({
   creatorName,
   isLoading = false,
 }: CollaborationRatingModalProps) {
-  const [rating, setRating] = useState(0)
-  const [hoveredRating, setHoveredRating] = useState(0)
-  const [comment, setComment] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [rating, setRating] = useState(0);
+  const [hoveredRating, setHoveredRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isOpen) return null
+  if (!isOpen) return null;
 
   const handleSubmit = () => {
-    if (rating === 0) return
+    if (rating === 0) return;
 
-    setIsSubmitting(true)
+    setIsSubmitting(true);
     setTimeout(() => {
-      onSubmit(rating, comment)
+      onSubmit(rating, comment);
       // Reset form
-      setRating(0)
-      setHoveredRating(0)
-      setComment('')
-      setIsSubmitting(false)
-      onClose()
-    }, 500)
-  }
+      setRating(0);
+      setHoveredRating(0);
+      setComment("");
+      setIsSubmitting(false);
+      onClose();
+    }, 500);
+  };
 
   const handleCancel = () => {
-    setRating(0)
-    setHoveredRating(0)
-    setComment('')
-    onClose()
-  }
+    setRating(0);
+    setHoveredRating(0);
+    setComment("");
+    onClose();
+  };
 
-  const displayRating = hoveredRating || rating
+  const displayRating = hoveredRating || rating;
 
   return (
     <div
@@ -78,7 +78,9 @@ export function CollaborationRatingModal({
           <div className="text-center">
             <p className="text-gray-600 mb-1">Your collaboration with</p>
             <p className="text-xl font-semibold text-gray-900 mb-2">{creatorName}</p>
-            <p className="text-sm text-gray-500">has been completed. Please rate your experience:</p>
+            <p className="text-sm text-gray-500">
+              has been completed. Please rate your experience:
+            </p>
           </div>
 
           {/* Star Rating */}
@@ -104,11 +106,11 @@ export function CollaborationRatingModal({
             </div>
             {rating > 0 && (
               <p className="text-sm font-medium text-gray-700">
-                {rating === 1 && 'Poor'}
-                {rating === 2 && 'Fair'}
-                {rating === 3 && 'Good'}
-                {rating === 4 && 'Very Good'}
-                {rating === 5 && 'Excellent'}
+                {rating === 1 && "Poor"}
+                {rating === 2 && "Fair"}
+                {rating === 3 && "Good"}
+                {rating === 4 && "Very Good"}
+                {rating === 5 && "Excellent"}
               </p>
             )}
           </div>
@@ -133,11 +135,7 @@ export function CollaborationRatingModal({
 
           {/* Action Buttons */}
           <div className="flex items-center justify-end gap-3 pt-6 border-t border-gray-200">
-            <Button
-              variant="outline"
-              onClick={handleCancel}
-              disabled={isSubmitting || isLoading}
-            >
+            <Button variant="outline" onClick={handleCancel} disabled={isSubmitting || isLoading}>
               Cancel
             </Button>
             <Button
@@ -152,5 +150,5 @@ export function CollaborationRatingModal({
         </div>
       </div>
     </div>
-  )
+  );
 }

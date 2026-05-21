@@ -1,36 +1,37 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/outline'
-import Link from 'next/link'
-import { roomsService, RoomType, RoomTypeUpdate } from '@/services/rooms'
-import { bookingsService } from '@/services/bookings'
-import { channexService } from '@/services/channex'
-import RoomTypeForm from '@/components/rooms/RoomTypeForm'
-import ConfirmDialog from '@/components/ConfirmDialog'
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
+import Link from "next/link";
+import { roomsService, RoomType, RoomTypeUpdate } from "@/services/rooms";
+import { bookingsService } from "@/services/bookings";
+import { channexService } from "@/services/channex";
+import RoomTypeForm from "@/components/rooms/RoomTypeForm";
+import ConfirmDialog from "@/components/ConfirmDialog";
 
 export default function EditRoomPage({ params }: { params: { id: string } }) {
-  const router = useRouter()
-  const [room, setRoom] = useState<RoomType | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const router = useRouter();
+  const [room, setRoom] = useState<RoomType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const [form, setForm] = useState<RoomTypeUpdate>({})
-  const [initialCurrency, setInitialCurrency] = useState('EUR')
-  const [channexConnected, setChannexConnected] = useState(false)
+  const [form, setForm] = useState<RoomTypeUpdate>({});
+  const [initialCurrency, setInitialCurrency] = useState("EUR");
+  const [channexConnected, setChannexConnected] = useState(false);
 
   useEffect(() => {
-    roomsService.get(params.id)
+    roomsService
+      .get(params.id)
       .then((r) => {
-        setRoom(r)
+        setRoom(r);
         setForm({
           name: r.name,
-          category: r.category || '',
+          category: r.category || "",
           description: r.description,
           shortDescription: r.shortDescription,
           maxOccupancy: r.maxOccupancy,
@@ -52,83 +53,86 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           dailyRates: r.dailyRates || {},
           operatingPeriods: r.operatingPeriods || [],
           seasons: r.seasons || [],
-          weekendSurcharge: r.weekendSurcharge || '+0%',
-          cancellationPolicy: r.cancellationPolicy || 'Free until 7 days before',
+          weekendSurcharge: r.weekendSurcharge || "+0%",
+          cancellationPolicy: r.cancellationPolicy || "Free until 7 days before",
           flexibleRateEnabled: r.flexibleRateEnabled ?? true,
           nonRefundableEnabled: r.nonRefundableEnabled ?? false,
           nonRefundableDiscount: r.nonRefundableDiscount ?? 5,
-          nonRefundableCancellationPolicy: r.nonRefundableCancellationPolicy || 'Non-refundable from booking',
+          nonRefundableCancellationPolicy:
+            r.nonRefundableCancellationPolicy || "Non-refundable from booking",
           minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
           ratePaymentMethods: r.ratePaymentMethods ?? null,
           mealPlans: r.mealPlans ?? [],
-        })
+        });
       })
       .catch(console.error)
-      .finally(() => setLoading(false))
+      .finally(() => setLoading(false));
 
     // Override currency from payment settings (authoritative source)
-    bookingsService.getPaymentSettings()
+    bookingsService
+      .getPaymentSettings()
       .then((res) => {
-        const c = res.paymentSettings.defaultCurrency
+        const c = res.paymentSettings.defaultCurrency;
         if (c) {
-          setInitialCurrency(c)
-          setForm((prev) => ({ ...prev, currency: c }))
+          setInitialCurrency(c);
+          setForm((prev) => ({ ...prev, currency: c }));
         }
       })
-      .catch(console.error)
+      .catch(console.error);
 
     // Tells the save toast whether to mention OTAs (VAY-391). Failures
     // here are non-fatal — worst case the toast falls back to the
     // local-only message.
-    channexService.getStatus()
+    channexService
+      .getStatus()
       .then((status) => setChannexConnected(status.isConnected))
-      .catch(() => setChannexConnected(false))
-  }, [params.id])
+      .catch(() => setChannexConnected(false));
+  }, [params.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!form.seasons?.length || !form.seasons.some(s => s.rate && Number(s.rate) > 0)) {
-      setError('At least one season with a rate greater than 0 is required')
-      return
+    e.preventDefault();
+    if (!form.seasons?.length || !form.seasons.some((s) => s.rate && Number(s.rate) > 0)) {
+      setError("At least one season with a rate greater than 0 is required");
+      return;
     }
-    if (form.seasons.some(s => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
-      setError('Every season must have a rate greater than 0')
-      return
+    if (form.seasons.some((s) => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
+      setError("Every season must have a rate greater than 0");
+      return;
     }
-    setSaving(true)
-    setError('')
-    setSuccess('')
+    setSaving(true);
+    setError("");
+    setSuccess("");
     try {
       if (form.currency && form.currency !== initialCurrency) {
-        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency })
+        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency });
       }
-      await roomsService.update(params.id, form)
+      await roomsService.update(params.id, form);
       // VAY-391: backend now auto-pushes ARI to Channex on rate-affecting
       // saves, so reflect that in the toast when a channel manager is
       // wired up. Hotels without Channex see the original message.
       setSuccess(
         channexConnected
-          ? 'Changes saved. Updating Booking.com & Airbnb in the background…'
-          : 'Room type updated successfully'
-      )
+          ? "Changes saved. Updating Booking.com & Airbnb in the background…"
+          : "Room type updated successfully",
+      );
     } catch (err: any) {
-      setError(err.message || 'Failed to update')
+      setError(err.message || "Failed to update");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const handleDelete = async () => {
-    setShowDeleteConfirm(false)
-    setDeleting(true)
+    setShowDeleteConfirm(false);
+    setDeleting(true);
     try {
-      await roomsService.delete(params.id)
-      router.push('/rooms')
+      await roomsService.delete(params.id);
+      router.push("/rooms");
     } catch (err: any) {
-      setError(err.message || 'Cannot delete — room type may have bookings')
-      setDeleting(false)
+      setError(err.message || "Cannot delete — room type may have bookings");
+      setDeleting(false);
     }
-  }
+  };
 
   if (loading) {
     return (
@@ -138,7 +142,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           <div className="h-96 bg-gray-200 rounded" />
         </div>
       </div>
-    )
+    );
   }
 
   if (!room) {
@@ -146,7 +150,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
       <div className="p-6">
         <p className="text-gray-500">Room type not found.</p>
       </div>
-    )
+    );
   }
 
   return (
@@ -164,7 +168,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 shrink-0"
         >
           <TrashIcon className="w-4 h-4" />
-          <span className="hidden md:inline">{deleting ? 'Deleting...' : 'Delete'}</span>
+          <span className="hidden md:inline">{deleting ? "Deleting..." : "Delete"}</span>
         </button>
       </div>
 
@@ -190,5 +194,5 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
         />
       )}
     </div>
-  )
+  );
 }

@@ -1,16 +1,16 @@
-'use client'
+"use client";
 
-import { Collaboration, Hotel, Creator, UserType } from '@/lib/types'
-import { Button, PlatformIcon } from '@/components/ui'
-import { XMarkIcon } from '@heroicons/react/24/solid'
-import { CheckBadgeIcon, MapPinIcon, XCircleIcon } from '@heroicons/react/24/outline'
-import { formatNumber, formatDateShort, getTimeAgo } from '@/lib/utils'
+import { Collaboration, Hotel, Creator, UserType } from "@/lib/types";
+import { Button, PlatformIcon } from "@/components/ui";
+import { XMarkIcon } from "@heroicons/react/24/solid";
+import { CheckBadgeIcon, MapPinIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { formatNumber, formatDateShort, getTimeAgo } from "@/lib/utils";
 
 interface CollaborationRejectedModalProps {
-  isOpen: boolean
-  onClose: () => void
-  collaboration: (Collaboration & { hotel?: Hotel; creator?: Creator }) | null
-  currentUserType: UserType
+  isOpen: boolean;
+  onClose: () => void;
+  collaboration: (Collaboration & { hotel?: Hotel; creator?: Creator }) | null;
+  currentUserType: UserType;
 }
 
 export function CollaborationRejectedModal({
@@ -19,50 +19,62 @@ export function CollaborationRejectedModal({
   collaboration,
   currentUserType,
 }: CollaborationRejectedModalProps) {
-  if (!isOpen || !collaboration) return null
+  if (!isOpen || !collaboration) return null;
 
   const getTotalFollowers = () => {
-    if (currentUserType === 'hotel' && collaboration.creator?.platforms) {
-      return collaboration.creator.platforms.reduce((sum, p) => sum + p.followers, 0)
+    if (currentUserType === "hotel" && collaboration.creator?.platforms) {
+      return collaboration.creator.platforms.reduce((sum, p) => sum + p.followers, 0);
     }
-    return 0
-  }
+    return 0;
+  };
 
   const getAvgEngagement = () => {
-    if (currentUserType === 'hotel' && collaboration.creator?.platforms && collaboration.creator.platforms.length > 0) {
+    if (
+      currentUserType === "hotel" &&
+      collaboration.creator?.platforms &&
+      collaboration.creator.platforms.length > 0
+    ) {
       // Weighted average (proportional to follower count)
-      const totalFollowers = collaboration.creator.platforms.reduce((sum, p) => sum + p.followers, 0)
+      const totalFollowers = collaboration.creator.platforms.reduce(
+        (sum, p) => sum + p.followers,
+        0,
+      );
       if (totalFollowers > 0) {
-        const weightedEngagement = collaboration.creator.platforms.reduce((sum, p) => sum + (p.followers * p.engagementRate), 0) / totalFollowers
-        return weightedEngagement.toFixed(1)
+        const weightedEngagement =
+          collaboration.creator.platforms.reduce(
+            (sum, p) => sum + p.followers * p.engagementRate,
+            0,
+          ) / totalFollowers;
+        return weightedEngagement.toFixed(1);
       }
     }
-    return '0.0'
-  }
+    return "0.0";
+  };
 
   const getHandle = () => {
-    if (currentUserType === 'hotel' && collaboration.creator?.platforms?.[0]) {
-      return collaboration.creator.platforms[0].handle
+    if (currentUserType === "hotel" && collaboration.creator?.platforms?.[0]) {
+      return collaboration.creator.platforms[0].handle;
     }
-    return ''
-  }
+    return "";
+  };
 
   const getMessage = () => {
-    if (currentUserType === 'hotel' && collaboration.creator) {
-      return "I absolutely love your property! I specialize in luxury travel content and would love to showcase your stunning rooms and amenities to my engaged audience."
+    if (currentUserType === "hotel" && collaboration.creator) {
+      return "I absolutely love your property! I specialize in luxury travel content and would love to showcase your stunning rooms and amenities to my engaged audience.";
     }
-    if (currentUserType === 'creator' && collaboration.hotel) {
-      return "Your eco-friendly approach aligns perfectly with my content focus. I'd love to create authentic content highlighting your sustainability initiatives and unique experiences."
+    if (currentUserType === "creator" && collaboration.hotel) {
+      return "Your eco-friendly approach aligns perfectly with my content focus. I'd love to create authentic content highlighting your sustainability initiatives and unique experiences.";
     }
-    return "Looking forward to collaborating with you!"
-  }
+    return "Looking forward to collaborating with you!";
+  };
 
-  const otherParty = currentUserType === 'hotel' ? collaboration.creator : collaboration.hotel
-  const otherPartyName = otherParty?.name || ''
-  const otherPartyHandle = currentUserType === 'hotel' ? getHandle() : ''
-  const otherPartyLocation = currentUserType === 'hotel' 
-    ? collaboration.creator?.location || ''
-    : collaboration.hotel?.location || ''
+  const otherParty = currentUserType === "hotel" ? collaboration.creator : collaboration.hotel;
+  const otherPartyName = otherParty?.name || "";
+  const otherPartyHandle = currentUserType === "hotel" ? getHandle() : "";
+  const otherPartyLocation =
+    currentUserType === "hotel"
+      ? collaboration.creator?.location || ""
+      : collaboration.hotel?.location || "";
 
   return (
     <div
@@ -76,10 +88,7 @@ export function CollaborationRejectedModal({
         {/* Modal Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <h3 className="text-xl font-bold text-gray-900">Collaboration Rejected</h3>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          >
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
             <XMarkIcon className="w-6 h-6 text-gray-600" />
           </button>
         </div>
@@ -94,15 +103,13 @@ export function CollaborationRejectedModal({
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-1">
                 <h4 className="text-xl font-bold text-gray-900">{otherPartyName}</h4>
-                {(currentUserType === 'hotel' && collaboration.creator?.status === 'verified') ||
-                 (currentUserType === 'creator' && collaboration.hotel?.status === 'verified') ? (
+                {(currentUserType === "hotel" && collaboration.creator?.status === "verified") ||
+                (currentUserType === "creator" && collaboration.hotel?.status === "verified") ? (
                   <CheckBadgeIcon className="w-5 h-5 text-primary-600 flex-shrink-0" />
                 ) : null}
               </div>
-              {otherPartyHandle && (
-                <p className="text-gray-600 mb-2">{otherPartyHandle}</p>
-              )}
-              {currentUserType === 'hotel' && collaboration.creator && (
+              {otherPartyHandle && <p className="text-gray-600 mb-2">{otherPartyHandle}</p>}
+              {currentUserType === "hotel" && collaboration.creator && (
                 <div className="flex items-center gap-2 text-sm text-gray-600 mb-2">
                   <span>{formatNumber(getTotalFollowers())} followers</span>
                   <span>•</span>
@@ -118,7 +125,7 @@ export function CollaborationRejectedModal({
                 </div>
               )}
               {/* Platform Badges */}
-              {currentUserType === 'hotel' && collaboration.creator?.platforms && (
+              {currentUserType === "hotel" && collaboration.creator?.platforms && (
                 <div className="flex flex-wrap gap-2 mt-3">
                   {collaboration.creator.platforms.map((platform, index) => (
                     <div
@@ -126,7 +133,7 @@ export function CollaborationRejectedModal({
                       className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-sm font-medium"
                     >
                       <PlatformIcon platform={platform.name} className="w-5 h-5" />
-                      <span>{platform.name === 'YT' ? 'YouTube' : platform.name}</span>
+                      <span>{platform.name === "YT" ? "YouTube" : platform.name}</span>
                     </div>
                   ))}
                 </div>
@@ -157,15 +164,11 @@ export function CollaborationRejectedModal({
 
         {/* Modal Footer */}
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3">
-          <Button
-            variant="primary"
-            onClick={onClose}
-          >
+          <Button variant="primary" onClick={onClose}>
             Close
           </Button>
         </div>
       </div>
     </div>
-  )
+  );
 }
-

@@ -2,92 +2,101 @@
  * Authentication service for admin
  */
 
-import { apiClient, ApiErrorResponse } from '../api/client'
-import type { LoginRequest, LoginResponse } from '@/lib/types'
+import { apiClient, ApiErrorResponse } from "../api/client";
+import type { LoginRequest, LoginResponse } from "@/lib/types";
 
-const TOKEN_KEY = 'access_token'
-const EXPIRES_AT_KEY = 'token_expires_at'
+const TOKEN_KEY = "access_token";
+const EXPIRES_AT_KEY = "token_expires_at";
 
 /**
  * Store JWT token and expiration time
  */
 function storeToken(token: string, expiresIn: number): void {
-  if (typeof window === 'undefined') return
-  
-  localStorage.setItem(TOKEN_KEY, token)
-  const expiresAt = Date.now() + (expiresIn * 1000)
-  localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString())
+  if (typeof window === "undefined") return;
+
+  localStorage.setItem(TOKEN_KEY, token);
+  const expiresAt = Date.now() + expiresIn * 1000;
+  localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString());
 }
 
 /**
  * Store user data in localStorage
  */
-function storeUserData(data: { id: string; email: string; name: string; type: string; status: string }): void {
-  if (typeof window === 'undefined') return
-  
-  localStorage.setItem('isLoggedIn', 'true')
-  localStorage.setItem('userId', data.id)
-  localStorage.setItem('userEmail', data.email)
-  localStorage.setItem('userName', data.name)
-  localStorage.setItem('userType', data.type)
-  localStorage.setItem('userStatus', data.status)
-  
-  localStorage.setItem('user', JSON.stringify({
-    id: data.id,
-    email: data.email,
-    name: data.name,
-    type: data.type,
-    status: data.status,
-  }))
+function storeUserData(data: {
+  id: string;
+  email: string;
+  name: string;
+  type: string;
+  status: string;
+}): void {
+  if (typeof window === "undefined") return;
+
+  localStorage.setItem("isLoggedIn", "true");
+  localStorage.setItem("userId", data.id);
+  localStorage.setItem("userEmail", data.email);
+  localStorage.setItem("userName", data.name);
+  localStorage.setItem("userType", data.type);
+  localStorage.setItem("userStatus", data.status);
+
+  localStorage.setItem(
+    "user",
+    JSON.stringify({
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      type: data.type,
+      status: data.status,
+    }),
+  );
 }
 
 /**
  * Clear all auth data from localStorage
  */
 function clearAuthData(): void {
-  if (typeof window === 'undefined') return
-  
-  localStorage.removeItem(TOKEN_KEY)
-  localStorage.removeItem(EXPIRES_AT_KEY)
-  localStorage.removeItem('userId')
-  localStorage.removeItem('userEmail')
-  localStorage.removeItem('userName')
-  localStorage.removeItem('userType')
-  localStorage.removeItem('userStatus')
-  localStorage.removeItem('user')
-  localStorage.setItem('isLoggedIn', 'false')
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EXPIRES_AT_KEY);
+  localStorage.removeItem("userId");
+  localStorage.removeItem("userEmail");
+  localStorage.removeItem("userName");
+  localStorage.removeItem("userType");
+  localStorage.removeItem("userStatus");
+  localStorage.removeItem("user");
+  localStorage.setItem("isLoggedIn", "false");
 }
 
 /**
  * Get token if not expired
  */
 function getToken(): string | null {
-  if (typeof window === 'undefined') return null
-  
-  const token = localStorage.getItem(TOKEN_KEY)
-  const expiresAt = localStorage.getItem(EXPIRES_AT_KEY)
-  
-  if (!token || !expiresAt) return null
-  
+  if (typeof window === "undefined") return null;
+
+  const token = localStorage.getItem(TOKEN_KEY);
+  const expiresAt = localStorage.getItem(EXPIRES_AT_KEY);
+
+  if (!token || !expiresAt) return null;
+
   if (Date.now() >= parseInt(expiresAt)) {
-    clearAuthData()
-    return null
+    clearAuthData();
+    return null;
   }
-  
-  return token
+
+  return token;
 }
 
 export interface RegisterRequest {
-  name: string
-  email: string
-  password: string
+  name: string;
+  email: string;
+  password: string;
 }
 
 export interface RegisterResponse {
-  message: string
-  id: string
-  email: string
-  name: string
+  message: string;
+  id: string;
+  email: string;
+  name: string;
 }
 
 export const authService = {
@@ -96,16 +105,16 @@ export const authService = {
    */
   register: async (data: RegisterRequest): Promise<RegisterResponse> => {
     try {
-      const response = await apiClient.post<RegisterResponse>('/auth/register', {
+      const response = await apiClient.post<RegisterResponse>("/auth/register", {
         ...data,
-        type: 'admin',
-      })
-      return response
+        type: "admin",
+      });
+      return response;
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
-        throw error
+        throw error;
       }
-      throw error
+      throw error;
     }
   },
 
@@ -114,29 +123,29 @@ export const authService = {
    */
   login: async (data: LoginRequest): Promise<LoginResponse> => {
     try {
-      const response = await apiClient.post<LoginResponse>('/auth/login', data)
-      
+      const response = await apiClient.post<LoginResponse>("/auth/login", data);
+
       // Verify user is admin
-      if (response.type !== 'admin') {
-        throw new Error('Access denied. Admin account required.')
+      if (response.type !== "admin") {
+        throw new Error("Access denied. Admin account required.");
       }
-      
+
       // Store token and user data
-      storeToken(response.access_token, response.expires_in)
+      storeToken(response.access_token, response.expires_in);
       storeUserData({
         id: response.id,
         email: response.email,
         name: response.name,
         type: response.type,
         status: response.status,
-      })
-      
-      return response
+      });
+
+      return response;
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
-        throw error
+        throw error;
       }
-      throw error
+      throw error;
     }
   },
 
@@ -144,10 +153,10 @@ export const authService = {
    * Logout user
    */
   logout: (): void => {
-    clearAuthData()
-    
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login'
+    clearAuthData();
+
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
     }
   },
 
@@ -156,13 +165,13 @@ export const authService = {
    */
   getCurrentUser: async () => {
     try {
-      const response = await apiClient.get<LoginResponse>('/auth/me')
-      return response
+      const response = await apiClient.get<LoginResponse>("/auth/me");
+      return response;
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
-        throw error
+        throw error;
       }
-      throw new Error('Failed to get current user')
+      throw new Error("Failed to get current user");
     }
   },
 
@@ -170,23 +179,23 @@ export const authService = {
    * Check if user is logged in (has valid token)
    */
   isLoggedIn: (): boolean => {
-    return getToken() !== null
+    return getToken() !== null;
   },
 
   /**
    * Check if current user is admin
    */
   isAdmin: (): boolean => {
-    if (typeof window === 'undefined') return false
-    const userType = localStorage.getItem('userType')
-    return userType === 'admin'
+    if (typeof window === "undefined") return false;
+    const userType = localStorage.getItem("userType");
+    return userType === "admin";
   },
 
   /**
    * Get token if available and not expired
    */
   getToken: (): string | null => {
-    return getToken()
+    return getToken();
   },
 
   /**
@@ -194,11 +203,15 @@ export const authService = {
    */
   forgotPassword: async (email: string): Promise<{ message: string }> => {
     try {
-      const response = await apiClient.post<{ message: string }>('/auth/forgot-password', { email })
-      return { message: response.message }
+      const response = await apiClient.post<{ message: string }>("/auth/forgot-password", {
+        email,
+      });
+      return { message: response.message };
     } catch {
       // Always return success for security (anti-enumeration)
-      return { message: 'If an account with that email exists, a password reset link has been sent.' }
+      return {
+        message: "If an account with that email exists, a password reset link has been sent.",
+      };
     }
   },
 
@@ -206,11 +219,10 @@ export const authService = {
    * Reset password with token
    */
   resetPassword: async (token: string, newPassword: string): Promise<{ message: string }> => {
-    const response = await apiClient.post<{ message: string }>('/auth/reset-password', {
+    const response = await apiClient.post<{ message: string }>("/auth/reset-password", {
       token,
       new_password: newPassword,
-    })
-    return response
+    });
+    return response;
   },
-}
-
+};

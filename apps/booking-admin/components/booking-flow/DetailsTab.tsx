@@ -1,14 +1,14 @@
-'use client'
+"use client";
 
 const GUEST_INFO_FIELDS = [
-  { name: 'First Name', type: 'Text', required: true },
-  { name: 'Last Name', type: 'Text', required: true },
-  { name: 'Email', type: 'Email', required: true },
-  { name: 'Phone Number', type: 'Phone', required: true },
-  { name: 'Country', type: 'Select', required: true },
-  { name: 'Arrival Time', type: 'Time', required: false },
-  { name: 'Special Requests', type: 'Textarea', required: false },
-]
+  { name: "First Name", type: "Text", required: true },
+  { name: "Last Name", type: "Text", required: true },
+  { name: "Email", type: "Email", required: true },
+  { name: "Phone Number", type: "Phone", required: true },
+  { name: "Country", type: "Select", required: true },
+  { name: "Arrival Time", type: "Time", required: false },
+  { name: "Special Requests", type: "Textarea", required: false },
+];
 
 export default function DetailsTab() {
   return (
@@ -16,7 +16,9 @@ export default function DetailsTab() {
       {/* Guest Information Fields */}
       <div className="bg-white rounded-lg border border-gray-200 p-5">
         <h2 className="text-[14px] font-semibold text-gray-900">Guest Information Fields</h2>
-        <p className="text-[12px] text-gray-500 mt-0.5 mb-4">Fields collected during the booking details step</p>
+        <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
+          Fields collected during the booking details step
+        </p>
 
         <div className="space-y-1">
           {GUEST_INFO_FIELDS.map((field) => (
@@ -45,5 +47,5 @@ export default function DetailsTab() {
         </div>
       </div>
     </div>
-  )
+  );
 }

@@ -1,24 +1,26 @@
-'use client'
+"use client";
 
-import type { ProfilePlatform } from '@/components/profile/types'
-import { PlatformIcon, getPlatformGradient } from './PlatformIcon'
-import { formatFollowersDE, getCountryFlag } from './utils'
+import type { ProfilePlatform } from "@/components/profile/types";
+import { PlatformIcon, getPlatformGradient } from "./PlatformIcon";
+import { formatFollowersDE, getCountryFlag } from "./utils";
 
 interface PlatformCardViewProps {
-  platform: ProfilePlatform
+  platform: ProfilePlatform;
 }
 
 export function PlatformCardView({ platform }: PlatformCardViewProps) {
   const hasMetrics =
     (platform.topCountries && platform.topCountries.length > 0) ||
     (platform.topAgeGroups && platform.topAgeGroups.length > 0) ||
-    platform.genderSplit
+    platform.genderSplit;
 
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
       {/* Platform Header */}
       <div className="flex items-center gap-4 mb-4 pb-4 border-b border-gray-200">
-        <div className={`flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm text-white bg-gradient-to-br ${getPlatformGradient(platform.name)}`}>
+        <div
+          className={`flex-shrink-0 w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm text-white bg-gradient-to-br ${getPlatformGradient(platform.name)}`}
+        >
           <PlatformIcon platform={platform.name} className="w-6 h-6 text-white" />
         </div>
         <div className="flex-1">
@@ -30,7 +32,7 @@ export function PlatformCardView({ platform }: PlatformCardViewProps) {
             <span className="text-gray-400">•</span>
             <span>{formatFollowersDE(platform.followers ?? 0)} Follower</span>
             <span className="text-gray-400">•</span>
-            <span>{(platform.engagementRate ?? 0).toFixed(1).replace('.', ',')}% Engagement</span>
+            <span>{(platform.engagementRate ?? 0).toFixed(1).replace(".", ",")}% Engagement</span>
           </div>
         </div>
       </div>
@@ -47,7 +49,8 @@ export function PlatformCardView({ platform }: PlatformCardViewProps) {
                   <li key={idx} className="flex items-center gap-2">
                     <span className="text-lg">{getCountryFlag(country.country)}</span>
                     <span className="text-sm text-gray-700">
-                      {country.country}: <span className="font-semibold text-gray-900">{country.percentage}%</span>
+                      {country.country}:{" "}
+                      <span className="font-semibold text-gray-900">{country.percentage}%</span>
                     </span>
                   </li>
                 ))}
@@ -75,20 +78,22 @@ export function PlatformCardView({ platform }: PlatformCardViewProps) {
               <div className="text-sm font-semibold text-gray-700 mb-2">Gender Split</div>
               <div className="space-y-2">
                 <div className="text-sm text-gray-700">
-                  Male: <span className="font-semibold text-gray-900">{platform.genderSplit.male}%</span>
+                  Male:{" "}
+                  <span className="font-semibold text-gray-900">{platform.genderSplit.male}%</span>
                 </div>
                 <div className="text-sm text-gray-700">
-                  Female: <span className="font-semibold text-gray-900">{platform.genderSplit.female}%</span>
+                  Female:{" "}
+                  <span className="font-semibold text-gray-900">
+                    {platform.genderSplit.female}%
+                  </span>
                 </div>
               </div>
             </div>
           )}
         </div>
       ) : (
-        <div className="text-sm text-gray-500 italic">
-          No audience insights available yet.
-        </div>
+        <div className="text-sm text-gray-500 italic">No audience insights available yet.</div>
       )}
     </div>
-  )
+  );
 }

@@ -1,6 +1,6 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
+import { useState } from "react";
 import {
   PencilSquareIcon,
   CalendarIcon,
@@ -8,19 +8,24 @@ import {
   UserIcon,
   MapPinIcon,
   BanknotesIcon,
-} from '@heroicons/react/24/outline'
-import { PlatformBadge, AvatarSimple } from '@/components/ui'
-import { getStatusClasses } from '@/lib/constants'
-import { formatCompactNumber, getCurrencySymbol } from '@/lib/utils'
-import type { DetailedCollaboration, ConversationResponse, PlatformDeliverablesItem, PlatformDeliverable } from '@/services/api/collaborations'
+} from "@heroicons/react/24/outline";
+import { PlatformBadge, AvatarSimple } from "@/components/ui";
+import { getStatusClasses } from "@/lib/constants";
+import { formatCompactNumber, getCurrencySymbol } from "@/lib/utils";
+import type {
+  DetailedCollaboration,
+  ConversationResponse,
+  PlatformDeliverablesItem,
+  PlatformDeliverable,
+} from "@/services/api/collaborations";
 
 interface ChatDetailsPanelProps {
-  activeChat: ConversationResponse
-  activeCollaboration: DetailedCollaboration
-  userType: string | null
-  onToggleDeliverable: (deliverableId: string) => void
-  onSuggestChanges: () => void
-  onApproveTerms: () => void
+  activeChat: ConversationResponse;
+  activeCollaboration: DetailedCollaboration;
+  userType: string | null;
+  onToggleDeliverable: (deliverableId: string) => void;
+  onSuggestChanges: () => void;
+  onApproveTerms: () => void;
 }
 
 export function ChatDetailsPanel({
@@ -31,51 +36,51 @@ export function ChatDetailsPanel({
   onSuggestChanges,
   onApproveTerms,
 }: ChatDetailsPanelProps) {
-  const [isEditingSidebar, setIsEditingSidebar] = useState(false)
-  const [localCollaboration, setLocalCollaboration] = useState<DetailedCollaboration | null>(null)
+  const [isEditingSidebar, setIsEditingSidebar] = useState(false);
+  const [localCollaboration, setLocalCollaboration] = useState<DetailedCollaboration | null>(null);
 
   // Flatten deliverables for display
   const flatDeliverables =
     activeCollaboration?.platformDeliverables?.flatMap((pd: PlatformDeliverablesItem) =>
       pd.deliverables.map((d: PlatformDeliverable) => {
-        const platformName = pd.platform.toLowerCase()
-        const typeLower = d.type.toLowerCase()
-        const displayType = typeLower.includes(platformName) ? d.type : `${pd.platform} ${d.type}`
+        const platformName = pd.platform.toLowerCase();
+        const typeLower = d.type.toLowerCase();
+        const displayType = typeLower.includes(platformName) ? d.type : `${pd.platform} ${d.type}`;
 
         return {
           id: d.id,
           type: displayType,
           count: d.quantity,
-          completed: d.status === 'completed',
-        }
-      })
-    ) || []
+          completed: d.status === "completed",
+        };
+      }),
+    ) || [];
 
   const stayDetails = {
-    checkIn:
-      activeCollaboration?.travelDateFrom || activeCollaboration?.preferredDateFrom || 'TBD',
-    checkOut: activeCollaboration?.travelDateTo || activeCollaboration?.preferredDateTo || 'TBD',
-  }
+    checkIn: activeCollaboration?.travelDateFrom || activeCollaboration?.preferredDateFrom || "TBD",
+    checkOut: activeCollaboration?.travelDateTo || activeCollaboration?.preferredDateTo || "TBD",
+  };
 
   // Calculate progress
-  const totalDeliverables = flatDeliverables.length
-  const completedCount = flatDeliverables.filter((d) => d.completed).length
-  const progressPercentage = totalDeliverables > 0 ? (completedCount / totalDeliverables) * 100 : 0
+  const totalDeliverables = flatDeliverables.length;
+  const completedCount = flatDeliverables.filter((d) => d.completed).length;
+  const progressPercentage = totalDeliverables > 0 ? (completedCount / totalDeliverables) * 100 : 0;
 
   // Get offer display value
   const getOfferValue = () => {
-    const collab = isEditingSidebar && localCollaboration ? localCollaboration : activeCollaboration
-    if (collab.collaborationType === 'Free Stay') {
-      return `${collab.freeStayMaxNights || '?'} Nights`
-    } else if (collab.collaborationType === 'Paid') {
-      return `${getCurrencySymbol(collab.currency || 'USD')}${collab.paidAmount ? Number(collab.paidAmount).toLocaleString() : '?'}`
-    } else if (collab.collaborationType === 'Discount') {
-      return `${collab.discountPercentage || '?'}% Off`
-    } else if (collab.collaborationType === 'Affiliate') {
-      return `${collab.creatorFee || '?'}% Commission`
+    const collab =
+      isEditingSidebar && localCollaboration ? localCollaboration : activeCollaboration;
+    if (collab.collaborationType === "Free Stay") {
+      return `${collab.freeStayMaxNights || "?"} Nights`;
+    } else if (collab.collaborationType === "Paid") {
+      return `${getCurrencySymbol(collab.currency || "USD")}${collab.paidAmount ? Number(collab.paidAmount).toLocaleString() : "?"}`;
+    } else if (collab.collaborationType === "Discount") {
+      return `${collab.discountPercentage || "?"}% Off`;
+    } else if (collab.collaborationType === "Affiliate") {
+      return `${collab.creatorFee || "?"}% Commission`;
     }
-    return '-'
-  }
+    return "-";
+  };
 
   return (
     <div className="w-[350px] flex flex-col h-full bg-white flex-shrink-0 border-l border-gray-100">
@@ -91,8 +96,8 @@ export function ChatDetailsPanel({
                 <>
                   <button
                     onClick={() => {
-                      setIsEditingSidebar(false)
-                      setLocalCollaboration(null)
+                      setIsEditingSidebar(false);
+                      setLocalCollaboration(null);
                     }}
                     className="text-[10px] font-bold text-gray-400 hover:text-gray-600 uppercase transition-colors"
                   >
@@ -100,8 +105,8 @@ export function ChatDetailsPanel({
                   </button>
                   <button
                     onClick={() => {
-                      setIsEditingSidebar(false)
-                      setLocalCollaboration(null)
+                      setIsEditingSidebar(false);
+                      setLocalCollaboration(null);
                     }}
                     className="text-[10px] font-bold text-blue-600 hover:text-blue-700 uppercase transition-colors"
                   >
@@ -111,8 +116,8 @@ export function ChatDetailsPanel({
               ) : (
                 <button
                   onClick={() => {
-                    setLocalCollaboration(activeCollaboration)
-                    setIsEditingSidebar(true)
+                    setLocalCollaboration(activeCollaboration);
+                    setIsEditingSidebar(true);
                   }}
                   className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:text-blue-700 uppercase transition-all"
                 >
@@ -134,7 +139,7 @@ export function ChatDetailsPanel({
               <h2 className="font-bold text-gray-900">{activeChat.partner_name}</h2>
               {activeCollaboration.listingName && (
                 <p className="text-[10px] text-gray-400 font-medium">
-                  {userType === 'hotel' ? 'Applied to:' : 'Property:'}{' '}
+                  {userType === "hotel" ? "Applied to:" : "Property:"}{" "}
                   <span className="text-blue-600">{activeCollaboration.listingName}</span>
                 </p>
               )}
@@ -147,7 +152,7 @@ export function ChatDetailsPanel({
           </div>
 
           {/* Partner Stats */}
-          {userType === 'creator' ? (
+          {userType === "creator" ? (
             // Show Hotel Stats when creator is signed in
             <div>
               <div className="flex items-center gap-2 mb-3">
@@ -197,7 +202,7 @@ export function ChatDetailsPanel({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {activeCollaboration.creator?.platforms?.map((p) => (
-                    <PlatformBadge key={p.name} platform={(p.name || 'platform').toLowerCase()} />
+                    <PlatformBadge key={p.name} platform={(p.name || "platform").toLowerCase()} />
                   ))}
                 </div>
               </div>
@@ -214,7 +219,7 @@ export function ChatDetailsPanel({
               <div>
                 <div className="text-[10px] text-gray-500 uppercase">Type</div>
                 <div className="text-sm font-bold text-gray-900">
-                  {activeCollaboration.collaborationType || '-'}
+                  {activeCollaboration.collaborationType || "-"}
                 </div>
               </div>
               <div>
@@ -268,16 +273,16 @@ export function ChatDetailsPanel({
                   onClick={() => onToggleDeliverable(d.id)}
                   className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer group ${
                     d.completed
-                      ? 'bg-emerald-50/50 border-emerald-100 text-emerald-700'
-                      : 'bg-white border-gray-100 hover:border-gray-200 text-gray-700'
+                      ? "bg-emerald-50/50 border-emerald-100 text-emerald-700"
+                      : "bg-white border-gray-100 hover:border-gray-200 text-gray-700"
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <div
                       className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
                         d.completed
-                          ? 'bg-emerald-500 border-emerald-500'
-                          : 'border-gray-300 group-hover:border-blue-400'
+                          ? "bg-emerald-500 border-emerald-500"
+                          : "border-gray-300 group-hover:border-blue-400"
                       }`}
                     >
                       {d.completed && (
@@ -297,14 +302,14 @@ export function ChatDetailsPanel({
                       )}
                     </div>
                     <span
-                      className={`text-sm font-medium ${d.completed ? 'line-through opacity-60' : ''}`}
+                      className={`text-sm font-medium ${d.completed ? "line-through opacity-60" : ""}`}
                     >
                       {d.type}
                     </span>
                   </div>
                   <span
                     className={`text-xs font-bold px-2 py-0.5 rounded ${
-                      d.completed ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-500'
+                      d.completed ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-500"
                     }`}
                   >
                     ×{d.count}
@@ -317,7 +322,7 @@ export function ChatDetailsPanel({
       </div>
 
       {/* Footer Actions */}
-      {activeChat.collaboration_status.toLowerCase() === 'negotiating' && (
+      {activeChat.collaboration_status.toLowerCase() === "negotiating" && (
         <div className="p-4 border-t border-gray-100 bg-white flex gap-2">
           <button
             onClick={onSuggestChanges}
@@ -334,5 +339,5 @@ export function ChatDetailsPanel({
         </div>
       )}
     </div>
-  )
+  );
 }

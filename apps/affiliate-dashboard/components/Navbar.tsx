@@ -1,16 +1,16 @@
-'use client'
+"use client";
 
-import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline'
-import { useState } from 'react'
-import { authService } from '@/services/auth'
+import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import { useState } from "react";
+import { authService } from "@/services/auth";
 
 interface NavbarProps {
-  userName: string
-  userInitials: string
+  userName: string;
+  userInitials: string;
 }
 
 export default function Navbar({ userName, userInitials }: NavbarProps) {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -21,8 +21,18 @@ export default function Navbar({ userName, userInitials }: NavbarProps) {
               Affiliate Portal
             </a>
             <div className="hidden sm:flex items-center gap-4 ml-6">
-              <a href="/dashboard" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Dashboard</a>
-              <a href="/settings" className="text-sm text-gray-600 hover:text-gray-900 transition-colors">Settings</a>
+              <a
+                href="/dashboard"
+                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Dashboard
+              </a>
+              <a
+                href="/settings"
+                className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+              >
+                Settings
+              </a>
             </div>
           </div>
 
@@ -53,8 +63,12 @@ export default function Navbar({ userName, userInitials }: NavbarProps) {
 
       {mobileMenuOpen && (
         <div className="sm:hidden border-t border-gray-100 bg-white px-4 py-3 space-y-2">
-          <a href="/dashboard" className="block text-sm text-gray-700 py-1.5">Dashboard</a>
-          <a href="/settings" className="block text-sm text-gray-700 py-1.5">Settings</a>
+          <a href="/dashboard" className="block text-sm text-gray-700 py-1.5">
+            Dashboard
+          </a>
+          <a href="/settings" className="block text-sm text-gray-700 py-1.5">
+            Settings
+          </a>
           <button
             onClick={() => authService.logout()}
             className="block text-sm text-error-600 py-1.5 w-full text-left"
@@ -64,5 +78,5 @@ export default function Navbar({ userName, userInitials }: NavbarProps) {
         </div>
       )}
     </nav>
-  )
+  );
 }

@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --font-heading: 'Playfair Display', serif;
-  --font-body: 'Source Sans Pro', sans-serif;
-  --color-accent: #F5F3EF;
+  --font-heading: "Playfair Display", serif;
+  --font-body: "Source Sans Pro", sans-serif;
+  --color-accent: #f5f3ef;
 }
 
 body {

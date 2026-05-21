@@ -1,162 +1,173 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
-import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline'
-import { bookingsService, Booking, BookingChangeRequest } from '@/services/bookings'
-import ConfirmDialog from '@/components/ConfirmDialog'
-import Modal from '@/components/Modal'
-import { formatCurrency } from '@/lib/formatCurrency'
-import { BOOKING_STATUS_STYLES, PAYMENT_STATUS_STYLES, getPaymentStatusLabel } from '@/lib/constants/statusStyles'
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/outline";
+import { bookingsService, Booking, BookingChangeRequest } from "@/services/bookings";
+import ConfirmDialog from "@/components/ConfirmDialog";
+import Modal from "@/components/Modal";
+import { formatCurrency } from "@/lib/formatCurrency";
+import {
+  BOOKING_STATUS_STYLES,
+  PAYMENT_STATUS_STYLES,
+  getPaymentStatusLabel,
+} from "@/lib/constants/statusStyles";
 
 function CountdownTimer({ deadline }: { deadline: string }) {
-  const [timeLeft, setTimeLeft] = useState('')
+  const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
     const update = () => {
-      const now = new Date().getTime()
-      const end = new Date(deadline).getTime()
-      const diff = end - now
+      const now = new Date().getTime();
+      const end = new Date(deadline).getTime();
+      const diff = end - now;
 
       if (diff <= 0) {
-        setTimeLeft('Expired')
-        return
+        setTimeLeft("Expired");
+        return;
       }
 
-      const hours = Math.floor(diff / (1000 * 60 * 60))
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-      setTimeLeft(`${hours}h ${minutes}m remaining`)
-    }
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      setTimeLeft(`${hours}h ${minutes}m remaining`);
+    };
 
-    update()
-    const interval = setInterval(update, 60000)
-    return () => clearInterval(interval)
-  }, [deadline])
+    update();
+    const interval = setInterval(update, 60000);
+    return () => clearInterval(interval);
+  }, [deadline]);
 
   const isUrgent = (() => {
-    const diff = new Date(deadline).getTime() - Date.now()
-    return diff > 0 && diff < 4 * 60 * 60 * 1000 // Less than 4 hours
-  })()
+    const diff = new Date(deadline).getTime() - Date.now();
+    return diff > 0 && diff < 4 * 60 * 60 * 1000; // Less than 4 hours
+  })();
 
   return (
-    <span className={`text-sm font-medium ${isUrgent ? 'text-red-600' : 'text-amber-600'}`}>
+    <span className={`text-sm font-medium ${isUrgent ? "text-red-600" : "text-amber-600"}`}>
       {timeLeft}
     </span>
-  )
+  );
 }
 
 export default function BookingDetailPage({ params }: { params: { id: string } }) {
-  const [booking, setBooking] = useState<Booking | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [updating, setUpdating] = useState(false)
-  const [error, setError] = useState('')
+  const [booking, setBooking] = useState<Booking | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [updating, setUpdating] = useState(false);
+  const [error, setError] = useState("");
   const [confirmDialog, setConfirmDialog] = useState<{
-    message: string
-    variant?: 'danger' | 'default'
-    confirmLabel?: string
-    onConfirm: () => void
-  } | null>(null)
-  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null)
-  const [decideOpen, setDecideOpen] = useState<'approve' | 'decline' | null>(null)
-  const [declineReason, setDeclineReason] = useState('')
-  const [decidingChange, setDecidingChange] = useState(false)
+    message: string;
+    variant?: "danger" | "default";
+    confirmLabel?: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
+  const [decideOpen, setDecideOpen] = useState<"approve" | "decline" | null>(null);
+  const [declineReason, setDeclineReason] = useState("");
+  const [decidingChange, setDecidingChange] = useState(false);
 
   const loadChangeRequest = useCallback(async () => {
     try {
-      const cr = await bookingsService.getChangeRequest(params.id)
-      setChangeRequest(cr)
+      const cr = await bookingsService.getChangeRequest(params.id);
+      setChangeRequest(cr);
     } catch (err) {
-      console.error(err)
+      console.error(err);
     }
-  }, [params.id])
+  }, [params.id]);
 
   useEffect(() => {
-    bookingsService.get(params.id)
+    bookingsService
+      .get(params.id)
       .then(setBooking)
       .catch(console.error)
-      .finally(() => setLoading(false))
-    loadChangeRequest()
-  }, [params.id, loadChangeRequest])
+      .finally(() => setLoading(false));
+    loadChangeRequest();
+  }, [params.id, loadChangeRequest]);
 
   const doAction = useCallback(async (action: () => Promise<Booking>, errorMsg: string) => {
-    setUpdating(true)
-    setError('')
+    setUpdating(true);
+    setError("");
     try {
-      const updated = await action()
-      setBooking(updated)
+      const updated = await action();
+      setBooking(updated);
     } catch (err: any) {
-      setError(err.message || errorMsg)
+      setError(err.message || errorMsg);
     } finally {
-      setUpdating(false)
+      setUpdating(false);
     }
-  }, [])
+  }, []);
 
   const handleAccept = () => {
     setConfirmDialog({
-      message: 'Are you sure you want to accept this booking? Payment will be captured.',
-      confirmLabel: 'Accept',
+      message: "Are you sure you want to accept this booking? Payment will be captured.",
+      confirmLabel: "Accept",
       onConfirm: () => {
-        setConfirmDialog(null)
-        doAction(() => bookingsService.acceptBooking(params.id), 'Failed to accept booking')
+        setConfirmDialog(null);
+        doAction(() => bookingsService.acceptBooking(params.id), "Failed to accept booking");
       },
-    })
-  }
+    });
+  };
 
-  const [rejectOpen, setRejectOpen] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
   const handleReject = () => {
-    setRejectReason('')
-    setRejectOpen(true)
-  }
+    setRejectReason("");
+    setRejectOpen(true);
+  };
 
   const confirmReject = () => {
-    setRejectOpen(false)
-    doAction(() => bookingsService.rejectBooking(params.id, rejectReason.trim() || undefined), 'Failed to reject booking')
-  }
+    setRejectOpen(false);
+    doAction(
+      () => bookingsService.rejectBooking(params.id, rejectReason.trim() || undefined),
+      "Failed to reject booking",
+    );
+  };
 
   const handleApproveChange = async () => {
-    setDecidingChange(true)
-    setError('')
+    setDecidingChange(true);
+    setError("");
     try {
-      const cr = await bookingsService.approveChangeRequest(params.id)
-      setChangeRequest(cr)
-      const refreshed = await bookingsService.get(params.id)
-      setBooking(refreshed)
-      setDecideOpen(null)
+      const cr = await bookingsService.approveChangeRequest(params.id);
+      setChangeRequest(cr);
+      const refreshed = await bookingsService.get(params.id);
+      setBooking(refreshed);
+      setDecideOpen(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to approve change request')
+      setError(err.message || "Failed to approve change request");
     } finally {
-      setDecidingChange(false)
+      setDecidingChange(false);
     }
-  }
+  };
 
   const handleDeclineChange = async () => {
-    setDecidingChange(true)
-    setError('')
+    setDecidingChange(true);
+    setError("");
     try {
-      const cr = await bookingsService.declineChangeRequest(params.id, declineReason.trim() || undefined)
-      setChangeRequest(cr)
-      setDecideOpen(null)
+      const cr = await bookingsService.declineChangeRequest(
+        params.id,
+        declineReason.trim() || undefined,
+      );
+      setChangeRequest(cr);
+      setDecideOpen(null);
     } catch (err: any) {
-      setError(err.message || 'Failed to decline change request')
+      setError(err.message || "Failed to decline change request");
     } finally {
-      setDecidingChange(false)
+      setDecidingChange(false);
     }
-  }
+  };
 
-  const updateStatus = (status: 'confirmed' | 'cancelled') => {
-    const label = status === 'confirmed' ? 'confirm' : 'cancel'
+  const updateStatus = (status: "confirmed" | "cancelled") => {
+    const label = status === "confirmed" ? "confirm" : "cancel";
     setConfirmDialog({
       message: `Are you sure you want to ${label} this booking?`,
-      variant: status === 'cancelled' ? 'danger' : 'default',
-      confirmLabel: status === 'confirmed' ? 'Confirm' : 'Cancel Booking',
+      variant: status === "cancelled" ? "danger" : "default",
+      confirmLabel: status === "confirmed" ? "Confirm" : "Cancel Booking",
       onConfirm: () => {
-        setConfirmDialog(null)
-        doAction(() => bookingsService.updateStatus(params.id, status), 'Failed to update status')
+        setConfirmDialog(null);
+        doAction(() => bookingsService.updateStatus(params.id, status), "Failed to update status");
       },
-    })
-  }
+    });
+  };
 
   if (loading) {
     return (
@@ -166,7 +177,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div className="h-64 bg-gray-200 rounded" />
         </div>
       </div>
-    )
+    );
   }
 
   if (!booking) {
@@ -174,11 +185,11 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       <div className="p-6">
         <p className="text-gray-500">Booking not found.</p>
       </div>
-    )
+    );
   }
 
-  const isPending = booking.status === 'pending'
-  const hasDeadline = isPending && booking.hostResponseDeadline
+  const isPending = booking.status === "pending";
+  const hasDeadline = isPending && booking.hostResponseDeadline;
 
   return (
     <div className="p-6 max-w-3xl">
@@ -186,10 +197,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         <Link href="/bookings" className="text-gray-400 hover:text-gray-600">
           <ArrowLeftIcon className="w-5 h-5" />
         </Link>
-        <h1 className="text-xl font-bold text-gray-900">
-          Booking {booking.bookingReference}
-        </h1>
-        <span className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || ''}`}>
+        <h1 className="text-xl font-bold text-gray-900">Booking {booking.bookingReference}</h1>
+        <span
+          className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || ""}`}
+        >
           {booking.status}
         </span>
       </div>
@@ -199,7 +210,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-amber-800">Action Required</p>
-            <p className="text-xs text-amber-600">This booking will auto-expire if not responded to in time.</p>
+            <p className="text-xs text-amber-600">
+              This booking will auto-expire if not responded to in time.
+            </p>
           </div>
           <CountdownTimer deadline={booking.hostResponseDeadline!} />
         </div>
@@ -211,46 +224,53 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         </div>
       )}
 
-      {changeRequest && changeRequest.status === 'pending' && (
+      {changeRequest && changeRequest.status === "pending" && (
         <div className="mb-4 p-5 bg-blue-50 border border-blue-200 rounded-xl">
           <div className="flex items-start justify-between gap-4 mb-3">
             <div>
               <p className="text-sm font-semibold text-blue-900">Change Request Pending</p>
               <p className="text-xs text-blue-700">
-                The guest has requested an edit to this booking. Approve to apply
-                the new details, or decline to keep the booking as-is.
+                The guest has requested an edit to this booking. Approve to apply the new details,
+                or decline to keep the booking as-is.
               </p>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
             <div>
               <p className="text-blue-900 font-medium">Current</p>
-              <p className="text-blue-800">{changeRequest.oldCheckIn} → {changeRequest.oldCheckOut}</p>
-              <p className="text-blue-800">Total: {formatCurrency(changeRequest.oldTotal, changeRequest.currency)}</p>
+              <p className="text-blue-800">
+                {changeRequest.oldCheckIn} → {changeRequest.oldCheckOut}
+              </p>
+              <p className="text-blue-800">
+                Total: {formatCurrency(changeRequest.oldTotal, changeRequest.currency)}
+              </p>
             </div>
             <div>
               <p className="text-blue-900 font-medium">Requested</p>
-              <p className="text-blue-800">{changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}</p>
-              <p className="text-blue-800">Total: {formatCurrency(changeRequest.newTotal, changeRequest.currency)}</p>
+              <p className="text-blue-800">
+                {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}
+              </p>
+              <p className="text-blue-800">
+                Total: {formatCurrency(changeRequest.newTotal, changeRequest.currency)}
+              </p>
               {changeRequest.requestedAddonNames.length > 0 && (
                 <p className="text-blue-800 mt-1">
-                  Add-ons: {changeRequest.requestedAddonNames.join(', ')}
+                  Add-ons: {changeRequest.requestedAddonNames.join(", ")}
                 </p>
               )}
             </div>
           </div>
           <div className="text-sm text-blue-900 font-medium mb-4">
-            Price difference: {changeRequest.priceDifference === 0
-              ? 'No change'
-              : (changeRequest.priceDifference > 0
-                  ? `+${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (guest must pay)`
-                  : `${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (refund where applicable)`
-                )
-            }
+            Price difference:{" "}
+            {changeRequest.priceDifference === 0
+              ? "No change"
+              : changeRequest.priceDifference > 0
+                ? `+${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (guest must pay)`
+                : `${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (refund where applicable)`}
           </div>
           <div className="flex gap-3">
             <button
-              onClick={() => setDecideOpen('approve')}
+              onClick={() => setDecideOpen("approve")}
               disabled={decidingChange}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
             >
@@ -258,7 +278,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               Approve Change
             </button>
             <button
-              onClick={() => { setDeclineReason(''); setDecideOpen('decline') }}
+              onClick={() => {
+                setDeclineReason("");
+                setDecideOpen("decline");
+              }}
               disabled={decidingChange}
               className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
             >
@@ -269,13 +292,11 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         </div>
       )}
 
-      {changeRequest && changeRequest.status !== 'pending' && (
+      {changeRequest && changeRequest.status !== "pending" && (
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
-          Last change request was{' '}
+          Last change request was{" "}
           <span className="font-medium text-gray-800">{changeRequest.status}</span>
-          {changeRequest.decidedAt && (
-            <> on {new Date(changeRequest.decidedAt).toLocaleString()}</>
-          )}
+          {changeRequest.decidedAt && <> on {new Date(changeRequest.decidedAt).toLocaleString()}</>}
           {changeRequest.declineReason && (
             <span className="block mt-1 text-xs text-gray-500">
               Reason: {changeRequest.declineReason}
@@ -297,7 +318,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-gray-500">Name</p>
-              <p className="font-medium text-gray-900">{booking.guestFirstName} {booking.guestLastName}</p>
+              <p className="font-medium text-gray-900">
+                {booking.guestFirstName} {booking.guestLastName}
+              </p>
             </div>
             <div>
               <p className="text-gray-500">Email</p>
@@ -317,7 +340,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           {booking.specialRequests && (
             <div className="mt-4 text-sm">
               <p className="text-gray-500">Special Requests</p>
-              <p className="font-medium text-gray-900 whitespace-pre-wrap">{booking.specialRequests}</p>
+              <p className="font-medium text-gray-900 whitespace-pre-wrap">
+                {booking.specialRequests}
+              </p>
             </div>
           )}
           {booking.estimatedArrivalTime && (
@@ -352,13 +377,16 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             </div>
             <div>
               <p className="text-gray-500">Duration</p>
-              <p className="font-medium text-gray-900">{booking.nights} night{booking.nights !== 1 ? 's' : ''}</p>
+              <p className="font-medium text-gray-900">
+                {booking.nights} night{booking.nights !== 1 ? "s" : ""}
+              </p>
             </div>
             <div>
               <p className="text-gray-500">Guests</p>
               <p className="font-medium text-gray-900">
-                {booking.adults} adult{booking.adults !== 1 ? 's' : ''}
-                {booking.children > 0 && `, ${booking.children} child${booking.children !== 1 ? 'ren' : ''}`}
+                {booking.adults} adult{booking.adults !== 1 ? "s" : ""}
+                {booking.children > 0 &&
+                  `, ${booking.children} child${booking.children !== 1 ? "ren" : ""}`}
               </p>
             </div>
           </div>
@@ -370,16 +398,18 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <h2 className="text-sm font-semibold text-gray-900 mb-4">Add-ons</h2>
             <div className="space-y-2 text-sm">
               {booking.addonIds.map((addonId, idx) => {
-                const qty = booking.addonQuantities[addonId]
-                const name = booking.addonNames?.[idx] || addonId
+                const qty = booking.addonQuantities[addonId];
+                const name = booking.addonNames?.[idx] || addonId;
                 return (
                   <div key={addonId} className="flex justify-between">
                     <span className="text-gray-700">{name}</span>
                     {qty && (
-                      <span className="text-gray-500">{qty} night{qty !== 1 ? 's' : ''}</span>
+                      <span className="text-gray-500">
+                        {qty} night{qty !== 1 ? "s" : ""}
+                      </span>
                     )}
                   </div>
-                )
+                );
               })}
             </div>
           </div>
@@ -392,13 +422,19 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             <div>
               <p className="text-gray-500">Method</p>
               <p className="font-medium text-gray-900">
-                {booking.paymentMethod === 'card' ? 'Card' : booking.paymentMethod === 'pay_at_property' ? 'Pay at Property' : booking.paymentMethod || 'N/A'}
+                {booking.paymentMethod === "card"
+                  ? "Card"
+                  : booking.paymentMethod === "pay_at_property"
+                    ? "Pay at Property"
+                    : booking.paymentMethod || "N/A"}
               </p>
             </div>
             <div>
               <p className="text-gray-500">Payment Status</p>
               {booking.paymentStatus && (
-                <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_STYLES[booking.paymentStatus] || 'bg-gray-100 text-gray-600'}`}>
+                <span
+                  className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_STYLES[booking.paymentStatus] || "bg-gray-100 text-gray-600"}`}
+                >
                   {getPaymentStatusLabel(booking.paymentStatus)}
                 </span>
               )}
@@ -412,7 +448,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500">Nightly Rate</span>
-              <span className="font-medium text-gray-900">{formatCurrency(booking.nightlyRate, booking.currency)}</span>
+              <span className="font-medium text-gray-900">
+                {formatCurrency(booking.nightlyRate, booking.currency)}
+              </span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500">Nights</span>
@@ -421,31 +459,42 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             {booking.addonTotal > 0 && (
               <div className="flex justify-between">
                 <span className="text-gray-500">Addons</span>
-                <span className="font-medium text-gray-900">{booking.currency} {booking.addonTotal.toFixed(2)}</span>
+                <span className="font-medium text-gray-900">
+                  {booking.currency} {booking.addonTotal.toFixed(2)}
+                </span>
               </div>
             )}
             <div className="flex justify-between pt-2 border-t border-gray-100">
               <span className="font-semibold text-gray-900">Total</span>
-              <span className="font-bold text-gray-900">{formatCurrency(booking.totalAmount, booking.currency)}</span>
+              <span className="font-bold text-gray-900">
+                {formatCurrency(booking.totalAmount, booking.currency)}
+              </span>
             </div>
             {booking.platformFeeAmount != null && booking.platformFeeAmount > 0 && (
               <div className="flex justify-between pt-2 border-t border-gray-100">
                 <span className="text-gray-500">Platform Fee</span>
-                <span className="font-medium text-gray-600">-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
+                <span className="font-medium text-gray-600">
+                  -{formatCurrency(booking.platformFeeAmount, booking.currency)}
+                </span>
               </div>
             )}
             {booking.affiliateCommissionAmount != null && booking.affiliateCommissionAmount > 0 && (
               <div className="flex justify-between">
                 <span className="text-gray-500">Affiliate Commission</span>
-                <span className="font-medium text-gray-600">{formatCurrency(booking.affiliateCommissionAmount, booking.currency)}</span>
+                <span className="font-medium text-gray-600">
+                  {formatCurrency(booking.affiliateCommissionAmount, booking.currency)}
+                </span>
               </div>
             )}
-            {booking.propertyPayoutAmount != null && booking.propertyPayoutAmount !== booking.totalAmount && (
-              <div className="flex justify-between pt-2 border-t border-gray-100">
-                <span className="font-semibold text-gray-900">Property Payout</span>
-                <span className="font-bold text-green-600">{formatCurrency(booking.propertyPayoutAmount, booking.currency)}</span>
-              </div>
-            )}
+            {booking.propertyPayoutAmount != null &&
+              booking.propertyPayoutAmount !== booking.totalAmount && (
+                <div className="flex justify-between pt-2 border-t border-gray-100">
+                  <span className="font-semibold text-gray-900">Property Payout</span>
+                  <span className="font-bold text-green-600">
+                    {formatCurrency(booking.propertyPayoutAmount, booking.currency)}
+                  </span>
+                </div>
+              )}
           </div>
         </div>
 
@@ -475,7 +524,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         {isPending && !booking.hostResponseDeadline && (
           <div className="flex gap-3">
             <button
-              onClick={() => updateStatus('confirmed')}
+              onClick={() => updateStatus("confirmed")}
               disabled={updating}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
             >
@@ -483,7 +532,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               Confirm Booking
             </button>
             <button
-              onClick={() => updateStatus('cancelled')}
+              onClick={() => updateStatus("cancelled")}
               disabled={updating}
               className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
             >
@@ -493,10 +542,10 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
           </div>
         )}
 
-        {booking.status === 'confirmed' && (
+        {booking.status === "confirmed" && (
           <div>
             <button
-              onClick={() => updateStatus('cancelled')}
+              onClick={() => updateStatus("cancelled")}
               disabled={updating}
               className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
             >
@@ -505,7 +554,6 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
             </button>
           </div>
         )}
-
       </div>
 
       {confirmDialog && (
@@ -518,16 +566,25 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         />
       )}
 
-      {decideOpen === 'approve' && changeRequest && (
+      {decideOpen === "approve" && changeRequest && (
         <Modal onClose={() => setDecideOpen(null)}>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Approve Change Request?</h3>
           <p className="text-sm text-gray-600 mb-4">
             The booking will be updated to use the requested dates and add-ons.
             {changeRequest.priceDifference > 0 && (
-              <> The guest will be asked to pay the {formatCurrency(changeRequest.priceDifference, changeRequest.currency)} difference.</>
+              <>
+                {" "}
+                The guest will be asked to pay the{" "}
+                {formatCurrency(changeRequest.priceDifference, changeRequest.currency)} difference.
+              </>
             )}
             {changeRequest.priceDifference < 0 && (
-              <> The total will decrease by {formatCurrency(Math.abs(changeRequest.priceDifference), changeRequest.currency)} — handle any refund manually.</>
+              <>
+                {" "}
+                The total will decrease by{" "}
+                {formatCurrency(Math.abs(changeRequest.priceDifference), changeRequest.currency)} —
+                handle any refund manually.
+              </>
             )}
           </p>
           <div className="flex justify-end gap-3">
@@ -542,13 +599,13 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               disabled={decidingChange}
               className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 transition-colors"
             >
-              {decidingChange ? 'Approving…' : 'Approve'}
+              {decidingChange ? "Approving…" : "Approve"}
             </button>
           </div>
         </Modal>
       )}
 
-      {decideOpen === 'decline' && (
+      {decideOpen === "decline" && (
         <Modal onClose={() => setDecideOpen(null)}>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Decline Change Request</h3>
           <p className="text-sm text-gray-600 mb-4">
@@ -573,7 +630,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
               disabled={decidingChange}
               className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors"
             >
-              {decidingChange ? 'Declining…' : 'Decline'}
+              {decidingChange ? "Declining…" : "Decline"}
             </button>
           </div>
         </Modal>
@@ -582,7 +639,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       {rejectOpen && (
         <Modal onClose={() => setRejectOpen(false)}>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Reject Booking</h3>
-          <p className="text-sm text-gray-600 mb-4">Are you sure you want to reject this booking? The payment hold will be released.</p>
+          <p className="text-sm text-gray-600 mb-4">
+            Are you sure you want to reject this booking? The payment hold will be released.
+          </p>
           <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
@@ -607,5 +666,5 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
         </Modal>
       )}
     </div>
-  )
+  );
 }

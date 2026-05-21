@@ -1,13 +1,11 @@
-import { ArrowRightIcon, CheckIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { ArrowRightIcon, CheckIcon, XMarkIcon } from "@heroicons/react/24/outline";
 
 export default function PricingSection() {
   return (
     <section id="pricing" className="relative bg-white py-14 md:py-32">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-xs uppercase tracking-[0.2em] text-primary-500">
-            Pricing
-          </p>
+          <p className="text-xs uppercase tracking-[0.2em] text-primary-500">Pricing</p>
           <h2 className="mt-4 font-display text-4xl font-semibold leading-tight text-ink md:text-5xl">
             Turn website visitors into direct bookings
           </h2>
@@ -25,8 +23,8 @@ export default function PricingSection() {
               <span className="text-sm text-gray-500">flat on direct bookings</span>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-gray-500">
-              No upfront cost. Risk-free exploring. Go live in one day. Best
-              for properties who do not have a booking engine.
+              No upfront cost. Risk-free exploring. Go live in one day. Best for properties who do
+              not have a booking engine.
             </p>
             <ul className="mt-6 flex-1 space-y-2.5">
               <li className="flex items-start gap-3">
@@ -45,13 +43,15 @@ export default function PricingSection() {
                 <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-gray-100">
                   <XMarkIcon className="w-3 h-3 text-gray-400" strokeWidth={3} />
                 </span>
-                <span className="text-sm text-gray-500 line-through decoration-gray-400">Channel manager - not included</span>
+                <span className="text-sm text-gray-500 line-through decoration-gray-400">
+                  Channel manager - not included
+                </span>
               </li>
             </ul>
             <div className="mt-5 rounded-xl border border-border bg-white px-4 py-3">
               <p className="text-xs leading-relaxed text-gray-500">
-                <span className="font-semibold">Heads up:</span> Channel manager is not
-                included on Commission. Upgrade to Subscription to sync inventory across OTAs.
+                <span className="font-semibold">Heads up:</span> Channel manager is not included on
+                Commission. Upgrade to Subscription to sync inventory across OTAs.
               </p>
             </div>
             <a
@@ -73,15 +73,15 @@ export default function PricingSection() {
               <span className="text-sm text-gray-500">/month base + $5 per extra room</span>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-gray-500">
-              Predictable pricing for independent properties for more upside
-              from every direct booking.
+              Predictable pricing for independent properties for more upside from every direct
+              booking.
             </p>
             <ul className="mt-6 flex-1 space-y-2.5">
               {[
-                'Booking engine included',
-                'PMS included',
-                'Channel manager included',
-                'Priority support',
+                "Booking engine included",
+                "PMS included",
+                "Channel manager included",
+                "Priority support",
               ].map((item) => (
                 <li key={item} className="flex items-start gap-3">
                   <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-primary-50">
@@ -104,31 +104,35 @@ export default function PricingSection() {
         {/* Standalone Booking Engine */}
         <div className="mx-auto mt-12 max-w-4xl">
           <div className="mb-4 flex items-center gap-3">
-            <span className="text-xs uppercase tracking-[0.2em] text-gray-500">Separate product</span>
+            <span className="text-xs uppercase tracking-[0.2em] text-gray-500">
+              Separate product
+            </span>
             <span className="h-px flex-1 bg-border" />
           </div>
-        <div className="flex flex-col gap-6 rounded-3xl border border-dashed border-border-strong bg-[#f7f8fc]/60 p-8 md:flex-row md:items-center md:justify-between">
-          <div className="flex-1">
-            <p className="text-sm uppercase tracking-widest text-gray-500">Standalone Booking Engine</p>
-            <h3 className="mt-2 font-display text-2xl font-semibold text-ink md:text-3xl">
-              Already have a PMS? Plug in just the booking engine.
-            </h3>
-            <p className="mt-3 text-sm leading-relaxed text-gray-500 md:text-base">
-              For properties that want to use vayada&apos;s booking engine on
-              top of their existing PMS with embeddable checkout, affiliate &amp;
-              referral tracking, guest data export, and full API access.
-            </p>
+          <div className="flex flex-col gap-6 rounded-3xl border border-dashed border-border-strong bg-[#f7f8fc]/60 p-8 md:flex-row md:items-center md:justify-between">
+            <div className="flex-1">
+              <p className="text-sm uppercase tracking-widest text-gray-500">
+                Standalone Booking Engine
+              </p>
+              <h3 className="mt-2 font-display text-2xl font-semibold text-ink md:text-3xl">
+                Already have a PMS? Plug in just the booking engine.
+              </h3>
+              <p className="mt-3 text-sm leading-relaxed text-gray-500 md:text-base">
+                For properties that want to use vayada&apos;s booking engine on top of their
+                existing PMS with embeddable checkout, affiliate &amp; referral tracking, guest data
+                export, and full API access.
+              </p>
+            </div>
+            <a
+              href="#cta"
+              className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-full bg-primary-500 px-7 text-sm font-medium text-white shadow-glow transition-all hover:bg-primary-600"
+            >
+              Talk to sales
+              <ArrowRightIcon className="w-4 h-4" />
+            </a>
           </div>
-          <a
-            href="#cta"
-            className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-full bg-primary-500 px-7 text-sm font-medium text-white shadow-glow transition-all hover:bg-primary-600"
-          >
-            Talk to sales
-            <ArrowRightIcon className="w-4 h-4" />
-          </a>
-        </div>
         </div>
       </div>
     </section>
-  )
+  );
 }

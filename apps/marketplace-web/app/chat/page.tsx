@@ -1,6 +1,6 @@
-'use client'
+"use client";
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect } from "react";
 import {
   collaborationService,
   PlatformDeliverablesItem,
@@ -10,423 +10,424 @@ import {
   MessageResponse,
   UpdateCollaborationTermsRequest,
   ConversationResponse,
-} from '@/services/api/collaborations'
-import { AuthenticatedNavigation } from '@/components/layout'
-import { useSidebar } from '@/components/layout/AuthenticatedNavigation'
-import SuggestChangesModal from './SuggestChangesModal'
+} from "@/services/api/collaborations";
+import { AuthenticatedNavigation } from "@/components/layout";
+import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
+import SuggestChangesModal from "./SuggestChangesModal";
 import {
   MagnifyingGlassIcon,
   ArrowTopRightOnSquareIcon,
   EllipsisVerticalIcon,
   ExclamationTriangleIcon,
-} from '@heroicons/react/24/outline'
-import { CollaborationRequestDetailModal } from '@/components/marketplace/CollaborationRequestDetailModal'
+} from "@heroicons/react/24/outline";
+import { CollaborationRequestDetailModal } from "@/components/marketplace/CollaborationRequestDetailModal";
 import {
   PendingApplicationsList,
   ConversationsList,
   ChatMessageArea,
   ChatDetailsPanel,
   type PendingRequest,
-} from '@/components/chat'
-import type { Collaboration, Hotel, Creator } from '@/lib/types'
-import { STORAGE_KEYS, getStatusClasses } from '@/lib/constants'
-import { getInitials, formatCompactNumber, getCurrencySymbol } from '@/lib/utils'
+} from "@/components/chat";
+import type { Collaboration, Hotel, Creator } from "@/lib/types";
+import { STORAGE_KEYS, getStatusClasses } from "@/lib/constants";
+import { getInitials, formatCompactNumber, getCurrencySymbol } from "@/lib/utils";
 
 function ChatPageContent() {
-  const { isCollapsed } = useSidebar()
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
-  const [messageInput, setMessageInput] = useState('')
-  const [isSuggestModalOpen, setIsSuggestModalOpen] = useState(false)
+  const { isCollapsed } = useSidebar();
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [messageInput, setMessageInput] = useState("");
+  const [isSuggestModalOpen, setIsSuggestModalOpen] = useState(false);
   const [detailCollaboration, setDetailCollaboration] = useState<
     (Collaboration & { hotel?: Hotel; creator?: Creator }) | null
-  >(null)
+  >(null);
 
   // State for pending applications and conversations
-  const [userType, setUserType] = useState<string | null>(null)
-  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([])
-  const [conversations, setConversations] = useState<ConversationResponse[]>([])
-  const [isLoadingConversations, setIsLoadingConversations] = useState(true)
+  const [userType, setUserType] = useState<string | null>(null);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [conversations, setConversations] = useState<ConversationResponse[]>([]);
+  const [isLoadingConversations, setIsLoadingConversations] = useState(true);
 
-  const [realMessages, setRealMessages] = useState<MessageResponse[]>([])
-  const [isLoadingMessages, setIsLoadingMessages] = useState(false)
-  const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [hasMoreMessages, setHasMoreMessages] = useState(true)
-  const [activeCollaboration, setActiveCollaboration] = useState<DetailedCollaboration | null>(null)
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false)
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
-  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
-  const [cancelReason, setCancelReason] = useState('')
-  const [cancellationTargetId, setCancellationTargetId] = useState<string | null>(null)
+  const [realMessages, setRealMessages] = useState<MessageResponse[]>([]);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [activeCollaboration, setActiveCollaboration] = useState<DetailedCollaboration | null>(
+    null,
+  );
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancellationTargetId, setCancellationTargetId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) || 'hotel'
-      setUserType(storedUserType)
+    if (typeof window !== "undefined") {
+      const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) || "hotel";
+      setUserType(storedUserType);
     }
-  }, [])
+  }, []);
 
   const fetchData = async () => {
-    if (!userType) return
+    if (!userType) return;
 
     try {
       const requestsData =
-        userType === 'hotel'
-          ? await collaborationService.getHotelCollaborations({ status: 'pending' })
-          : await collaborationService.getCreatorCollaborations()
+        userType === "hotel"
+          ? await collaborationService.getHotelCollaborations({ status: "pending" })
+          : await collaborationService.getCreatorCollaborations();
 
       const formattedRequests = requestsData
-        .filter((collab) => collab.status === 'pending')
+        .filter((collab) => collab.status === "pending")
         .map((collab) => {
-          const isReceived = !collab.is_initiator
+          const isReceived = !collab.is_initiator;
           const derivedPlatforms =
             collab.platforms ||
             collab.platform_deliverables?.map((pd) => ({
               name: pd.platform.toLowerCase(),
             })) ||
-            []
+            [];
 
-          let offerDetails = ''
-          if (userType === 'creator' && collab.collaboration_type) {
-            if (collab.collaboration_type === 'Free Stay' && collab.free_stay_max_nights) {
-              offerDetails = `${collab.free_stay_max_nights} Nights`
-            } else if (collab.collaboration_type === 'Paid' && collab.paid_amount) {
-              offerDetails = `${getCurrencySymbol(collab.currency || 'USD')}${Number(collab.paid_amount).toLocaleString()}`
-            } else if (collab.collaboration_type === 'Discount' && collab.discount_percentage) {
-              offerDetails = `${collab.discount_percentage}% Off`
+          let offerDetails = "";
+          if (userType === "creator" && collab.collaboration_type) {
+            if (collab.collaboration_type === "Free Stay" && collab.free_stay_max_nights) {
+              offerDetails = `${collab.free_stay_max_nights} Nights`;
+            } else if (collab.collaboration_type === "Paid" && collab.paid_amount) {
+              offerDetails = `${getCurrencySymbol(collab.currency || "USD")}${Number(collab.paid_amount).toLocaleString()}`;
+            } else if (collab.collaboration_type === "Discount" && collab.discount_percentage) {
+              offerDetails = `${collab.discount_percentage}% Off`;
             } else {
-              offerDetails = collab.collaboration_type
+              offerDetails = collab.collaboration_type;
             }
           }
 
           return {
             id: collab.id,
-            name: userType === 'hotel' ? collab.creator_name : collab.hotel_name || 'Hotel',
+            name: userType === "hotel" ? collab.creator_name : collab.hotel_name || "Hotel",
             time: new Date(collab.created_at).toLocaleDateString(),
             followers: formatCompactNumber(collab.total_followers),
-            followersPlatform: (collab.active_platform || 'instagram').toLowerCase(),
-            engagement: (collab.avg_engagement_rate || 0).toFixed(1) + '%',
-            engagementPlatform: (collab.active_platform || 'instagram').toLowerCase(),
+            followersPlatform: (collab.active_platform || "instagram").toLowerCase(),
+            engagement: (collab.avg_engagement_rate || 0).toFixed(1) + "%",
+            engagementPlatform: (collab.active_platform || "instagram").toLowerCase(),
             platforms: derivedPlatforms,
-            location: collab.listing_location || collab.hotel_location || '',
-            collaborationType: collab.collaboration_type || '',
+            location: collab.listing_location || collab.hotel_location || "",
+            collaborationType: collab.collaboration_type || "",
             offerDetails: offerDetails,
-            avatarColor: 'bg-blue-100 text-blue-600',
-            avatarUrl:
-              userType === 'hotel' ? collab.creator_profile_picture : collab.hotel_picture,
+            avatarColor: "bg-blue-100 text-blue-600",
+            avatarUrl: userType === "hotel" ? collab.creator_profile_picture : collab.hotel_picture,
             initials: getInitials(
-              userType === 'hotel' ? collab.creator_name : collab.hotel_name || 'Hotel'
+              userType === "hotel" ? collab.creator_name : collab.hotel_name || "Hotel",
             ),
             isReceived,
             status: collab.status,
-          }
-        })
-      setPendingRequests(formattedRequests)
+          };
+        });
+      setPendingRequests(formattedRequests);
 
-      const convData = await collaborationService.getConversations()
-      setConversations(convData)
+      const convData = await collaborationService.getConversations();
+      setConversations(convData);
     } catch (error) {
-      console.error('Failed to fetch chat data:', error)
+      console.error("Failed to fetch chat data:", error);
     } finally {
-      setIsLoadingConversations(false)
+      setIsLoadingConversations(false);
     }
-  }
+  };
 
   useEffect(() => {
-    fetchData()
-  }, [userType])
+    fetchData();
+  }, [userType]);
 
   const fetchMessages = async (silent = false, skipDetails = false) => {
-    if (!selectedChatId) return
+    if (!selectedChatId) return;
 
     if (!silent) {
-      setIsLoadingMessages(true)
-      if (!skipDetails) setIsLoadingDetails(true)
+      setIsLoadingMessages(true);
+      if (!skipDetails) setIsLoadingDetails(true);
     }
 
-    setHasMoreMessages(true)
+    setHasMoreMessages(true);
     setConversations((prev) =>
       prev.map((conv) =>
-        conv.collaboration_id === selectedChatId ? { ...conv, unread_count: 0 } : conv
-      )
-    )
+        conv.collaboration_id === selectedChatId ? { ...conv, unread_count: 0 } : conv,
+      ),
+    );
 
     try {
-      const msgData = await collaborationService.getMessages(selectedChatId)
-      const reversed = [...msgData].reverse()
-      setRealMessages(reversed)
+      const msgData = await collaborationService.getMessages(selectedChatId);
+      const reversed = [...msgData].reverse();
+      setRealMessages(reversed);
       if (msgData.length < 50) {
-        setHasMoreMessages(false)
+        setHasMoreMessages(false);
       }
 
-      collaborationService.markAsRead(selectedChatId).catch((err) =>
-        console.error('Failed to mark as read:', err)
-      )
+      collaborationService
+        .markAsRead(selectedChatId)
+        .catch((err) => console.error("Failed to mark as read:", err));
 
       if (!skipDetails) {
         const detailResponse =
-          userType === 'hotel'
+          userType === "hotel"
             ? await collaborationService.getHotelCollaborationDetails(selectedChatId)
-            : await collaborationService.getCreatorCollaborationDetails(selectedChatId)
+            : await collaborationService.getCreatorCollaborationDetails(selectedChatId);
 
-        const detailedCollaboration = transformCollaborationResponse(detailResponse)
-        setActiveCollaboration(detailedCollaboration)
+        const detailedCollaboration = transformCollaborationResponse(detailResponse);
+        setActiveCollaboration(detailedCollaboration);
       }
     } catch (error) {
-      console.error('Failed to fetch chat details:', error)
+      console.error("Failed to fetch chat details:", error);
     } finally {
       if (!silent) {
-        setIsLoadingMessages(false)
-        if (!skipDetails) setIsLoadingDetails(false)
+        setIsLoadingMessages(false);
+        if (!skipDetails) setIsLoadingDetails(false);
       }
-      setIsMenuOpen(false)
+      setIsMenuOpen(false);
     }
-  }
+  };
 
   useEffect(() => {
     if (!selectedChatId) {
-      setRealMessages([])
-      return
+      setRealMessages([]);
+      return;
     }
-    fetchMessages()
-  }, [selectedChatId])
+    fetchMessages();
+  }, [selectedChatId]);
 
   const handleLoadMore = async () => {
-    if (isLoadingMore || !hasMoreMessages || !selectedChatId || realMessages.length === 0) return
+    if (isLoadingMore || !hasMoreMessages || !selectedChatId || realMessages.length === 0) return;
 
-    setIsLoadingMore(true)
+    setIsLoadingMore(true);
     try {
-      const oldestMessage = realMessages[0]
-      const data = await collaborationService.getMessages(selectedChatId, oldestMessage.created_at)
+      const oldestMessage = realMessages[0];
+      const data = await collaborationService.getMessages(selectedChatId, oldestMessage.created_at);
 
       if (data.length === 0) {
-        setHasMoreMessages(false)
+        setHasMoreMessages(false);
       } else {
-        const reversed = [...data].reverse()
-        setRealMessages((prev) => [...reversed, ...prev])
+        const reversed = [...data].reverse();
+        setRealMessages((prev) => [...reversed, ...prev]);
         if (data.length < 50) {
-          setHasMoreMessages(false)
+          setHasMoreMessages(false);
         }
       }
     } catch (error) {
-      console.error('Failed to load more messages:', error)
+      console.error("Failed to load more messages:", error);
     } finally {
-      setIsLoadingMore(false)
+      setIsLoadingMore(false);
     }
-  }
+  };
 
   const handleViewDetails = async (id: string) => {
     try {
       const detailResponse =
-        userType === 'creator'
+        userType === "creator"
           ? await collaborationService.getCreatorCollaborationDetails(id)
-          : await collaborationService.getHotelCollaborationDetails(id)
-      const detailedCollaboration = transformCollaborationResponse(detailResponse)
-      setDetailCollaboration(detailedCollaboration)
+          : await collaborationService.getHotelCollaborationDetails(id);
+      const detailedCollaboration = transformCollaborationResponse(detailResponse);
+      setDetailCollaboration(detailedCollaboration);
     } catch (error) {
-      console.error('Error fetching collaboration details:', error)
+      console.error("Error fetching collaboration details:", error);
     }
-  }
+  };
 
   const handleAccept = async (id: string) => {
     try {
-      await collaborationService.respondToCollaboration(id, { status: 'accepted' })
-      setPendingRequests((prev) => prev.filter((r) => r.id !== id))
-      setDetailCollaboration(null)
-      const convData = await collaborationService.getConversations()
-      setConversations(convData)
+      await collaborationService.respondToCollaboration(id, { status: "accepted" });
+      setPendingRequests((prev) => prev.filter((r) => r.id !== id));
+      setDetailCollaboration(null);
+      const convData = await collaborationService.getConversations();
+      setConversations(convData);
     } catch (error) {
-      console.error('Error accepting collaboration:', error)
+      console.error("Error accepting collaboration:", error);
     }
-  }
+  };
 
   const handleDecline = async (id: string) => {
     try {
-      await collaborationService.respondToCollaboration(id, { status: 'declined' })
-      setPendingRequests((prev) => prev.filter((r) => r.id !== id))
-      setDetailCollaboration(null)
-      const convData = await collaborationService.getConversations()
-      setConversations(convData)
+      await collaborationService.respondToCollaboration(id, { status: "declined" });
+      setPendingRequests((prev) => prev.filter((r) => r.id !== id));
+      setDetailCollaboration(null);
+      const convData = await collaborationService.getConversations();
+      setConversations(convData);
     } catch (error) {
-      console.error('Error declining collaboration:', error)
+      console.error("Error declining collaboration:", error);
     }
-  }
+  };
 
   const activeChat = selectedChatId
     ? conversations.find((c) => c.collaboration_id === selectedChatId)
-    : null
+    : null;
 
   const toggleDeliverable = async (deliverableId: string) => {
-    if (!selectedChatId) return
+    if (!selectedChatId) return;
 
     try {
       const updatedResponse = await collaborationService.toggleDeliverable(
         selectedChatId,
-        deliverableId
-      )
-      const detailedCollaboration = transformCollaborationResponse(updatedResponse)
-      setActiveCollaboration(detailedCollaboration)
-      fetchMessages(true, true)
+        deliverableId,
+      );
+      const detailedCollaboration = transformCollaborationResponse(updatedResponse);
+      setActiveCollaboration(detailedCollaboration);
+      fetchMessages(true, true);
     } catch (error) {
-      console.error('Failed to toggle deliverable:', error)
+      console.error("Failed to toggle deliverable:", error);
     }
-  }
+  };
 
   const handleSuggestChanges = async (data: UpdateCollaborationTermsRequest) => {
-    if (!selectedChatId) return
+    if (!selectedChatId) return;
 
     try {
-      const updatedResponse = await collaborationService.updateTerms(selectedChatId, data)
-      const detailedCollaboration = transformCollaborationResponse(updatedResponse)
-      setActiveCollaboration(detailedCollaboration)
-      setIsSuggestModalOpen(false)
-      fetchMessages(true, true)
+      const updatedResponse = await collaborationService.updateTerms(selectedChatId, data);
+      const detailedCollaboration = transformCollaborationResponse(updatedResponse);
+      setActiveCollaboration(detailedCollaboration);
+      setIsSuggestModalOpen(false);
+      fetchMessages(true, true);
     } catch (error) {
-      console.error('Failed to suggest changes:', error)
+      console.error("Failed to suggest changes:", error);
     }
-  }
+  };
 
   const handleApproveTerms = async (id?: string) => {
-    const collabId = id || selectedChatId
-    if (!collabId) return
+    const collabId = id || selectedChatId;
+    if (!collabId) return;
 
     try {
-      const updatedResponse = await collaborationService.approveCollaboration(collabId)
-      const detailedCollaboration = transformCollaborationResponse(updatedResponse)
-      setActiveCollaboration(detailedCollaboration)
-      fetchMessages(true, true)
+      const updatedResponse = await collaborationService.approveCollaboration(collabId);
+      const detailedCollaboration = transformCollaborationResponse(updatedResponse);
+      setActiveCollaboration(detailedCollaboration);
+      fetchMessages(true, true);
     } catch (error) {
-      console.error('Failed to approve terms:', error)
+      console.error("Failed to approve terms:", error);
     }
-  }
+  };
 
   const handleCancelCollaboration = async () => {
-    if (!cancellationTargetId) return
+    if (!cancellationTargetId) return;
 
     try {
       const response = await collaborationService.cancelCollaboration(
         cancellationTargetId,
-        cancelReason
-      )
+        cancelReason,
+      );
 
       if (cancellationTargetId === selectedChatId) {
-        const detailedCollaboration = transformCollaborationResponse(response)
-        setActiveCollaboration(detailedCollaboration)
-        fetchMessages(true, true)
+        const detailedCollaboration = transformCollaborationResponse(response);
+        setActiveCollaboration(detailedCollaboration);
+        fetchMessages(true, true);
       }
 
-      fetchData()
-      setIsCancelModalOpen(false)
-      setCancelReason('')
-      setCancellationTargetId(null)
-      setIsMenuOpen(false)
+      fetchData();
+      setIsCancelModalOpen(false);
+      setCancelReason("");
+      setCancellationTargetId(null);
+      setIsMenuOpen(false);
     } catch (error) {
-      console.error('Failed to cancel collaboration:', error)
+      console.error("Failed to cancel collaboration:", error);
     }
-  }
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!messageInput.trim() || !selectedChatId) return
+    e.preventDefault();
+    if (!messageInput.trim() || !selectedChatId) return;
 
-    const content = messageInput.trim()
-    setMessageInput('')
+    const content = messageInput.trim();
+    setMessageInput("");
 
     try {
       const tempMessage = {
         id: `temp-${Date.now()}`,
         collaboration_id: selectedChatId,
-        sender_id: 'me',
-        sender_name: 'Me',
+        sender_id: "me",
+        sender_name: "Me",
         sender_avatar: null,
         content: content,
-        content_type: 'text' as const,
+        content_type: "text" as const,
         metadata: null,
         created_at: new Date().toISOString(),
-      }
+      };
 
-      setRealMessages((prev) => [...prev, tempMessage])
+      setRealMessages((prev) => [...prev, tempMessage]);
 
       setConversations((prev) => {
-        const chatIndex = prev.findIndex((c) => c.collaboration_id === selectedChatId)
-        if (chatIndex === -1) return prev
+        const chatIndex = prev.findIndex((c) => c.collaboration_id === selectedChatId);
+        if (chatIndex === -1) return prev;
 
         const updatedChat = {
           ...prev[chatIndex],
           last_message_content: content,
           last_message_at: tempMessage.created_at,
           unread_count: 0,
-        }
+        };
 
-        const filtered = prev.filter((c) => c.collaboration_id !== selectedChatId)
-        return [updatedChat, ...filtered]
-      })
+        const filtered = prev.filter((c) => c.collaboration_id !== selectedChatId);
+        return [updatedChat, ...filtered];
+      });
 
-      await collaborationService.sendMessage(selectedChatId, content)
+      await collaborationService.sendMessage(selectedChatId, content);
     } catch (error) {
-      console.error('Failed to send message:', error)
-      setRealMessages((prev) => prev.filter((m) => !m.id.toString().startsWith('temp-')))
-      setMessageInput(content)
+      console.error("Failed to send message:", error);
+      setRealMessages((prev) => prev.filter((m) => !m.id.toString().startsWith("temp-")));
+      setMessageInput(content);
     }
-  }
+  };
 
   const handleSendImageMessage = async (file: File, caption?: string) => {
-    if (!selectedChatId) return
+    if (!selectedChatId) return;
 
     // Upload image
-    const { url } = await collaborationService.uploadChatImage(file)
+    const { url } = await collaborationService.uploadChatImage(file);
 
     // Create temp message for image
     const tempImageMessage = {
       id: `temp-img-${Date.now()}`,
       collaboration_id: selectedChatId,
-      sender_id: 'me',
-      sender_name: 'Me',
+      sender_id: "me",
+      sender_name: "Me",
       sender_avatar: null,
       content: url,
-      content_type: 'image' as const,
+      content_type: "image" as const,
       metadata: null,
       created_at: new Date().toISOString(),
-    }
+    };
 
-    setRealMessages((prev) => [...prev, tempImageMessage])
+    setRealMessages((prev) => [...prev, tempImageMessage]);
 
     // Send image message
-    await collaborationService.sendMessage(selectedChatId, url, 'image')
+    await collaborationService.sendMessage(selectedChatId, url, "image");
 
     // Update conversation list
     setConversations((prev) => {
-      const chatIndex = prev.findIndex((c) => c.collaboration_id === selectedChatId)
-      if (chatIndex === -1) return prev
+      const chatIndex = prev.findIndex((c) => c.collaboration_id === selectedChatId);
+      if (chatIndex === -1) return prev;
 
       const updatedChat = {
         ...prev[chatIndex],
-        last_message_content: caption || 'Sent an image',
+        last_message_content: caption || "Sent an image",
         last_message_at: new Date().toISOString(),
         unread_count: 0,
-      }
+      };
 
-      const filtered = prev.filter((c) => c.collaboration_id !== selectedChatId)
-      return [updatedChat, ...filtered]
-    })
+      const filtered = prev.filter((c) => c.collaboration_id !== selectedChatId);
+      return [updatedChat, ...filtered];
+    });
 
     // If caption provided, send it as a separate text message
     if (caption) {
       const tempCaptionMessage = {
         id: `temp-caption-${Date.now()}`,
         collaboration_id: selectedChatId,
-        sender_id: 'me',
-        sender_name: 'Me',
+        sender_id: "me",
+        sender_name: "Me",
         sender_avatar: null,
         content: caption,
-        content_type: 'text' as const,
+        content_type: "text" as const,
         metadata: null,
         created_at: new Date().toISOString(),
-      }
+      };
 
-      setRealMessages((prev) => [...prev, tempCaptionMessage])
-      await collaborationService.sendMessage(selectedChatId, caption)
+      setRealMessages((prev) => [...prev, tempCaptionMessage]);
+      await collaborationService.sendMessage(selectedChatId, caption);
     }
-  }
+  };
 
   return (
     <main className="min-h-screen bg-white flex flex-col">
@@ -434,7 +435,7 @@ function ChatPageContent() {
 
       <div
         className={`fixed top-16 bottom-0 left-0 right-0 flex transition-all duration-300 ${
-          isCollapsed ? 'md:pl-16' : 'md:pl-56'
+          isCollapsed ? "md:pl-16" : "md:pl-56"
         } z-0`}
       >
         {/* COLUMN 1: LEFT SIDEBAR */}
@@ -504,7 +505,7 @@ function ChatPageContent() {
                     {activeCollaboration.listingName && (
                       <div className="flex items-center gap-1.5 py-0.5 px-2 bg-blue-50/50 border border-blue-100/50 rounded-lg w-fit">
                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-tight">
-                          {userType === 'hotel' ? 'Applied to:' : 'Property:'}
+                          {userType === "hotel" ? "Applied to:" : "Property:"}
                         </span>
                         <span className="text-xs font-black text-blue-600 tracking-wide">
                           {activeCollaboration.listingName}
@@ -532,30 +533,27 @@ function ChatPageContent() {
 
                     {isMenuOpen && (
                       <>
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setIsMenuOpen(false)}
-                        />
+                        <div className="fixed inset-0 z-10" onClick={() => setIsMenuOpen(false)} />
                         <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-100 rounded-xl shadow-lg z-20 py-1 overflow-hidden">
-                          {['pending', 'negotiating', 'accepted'].includes(
-                            activeChat.collaboration_status.toLowerCase()
+                          {["pending", "negotiating", "accepted"].includes(
+                            activeChat.collaboration_status.toLowerCase(),
                           ) && (
                             <button
                               onClick={() => {
-                                setCancellationTargetId(selectedChatId)
-                                setIsCancelModalOpen(true)
-                                setIsMenuOpen(false)
+                                setCancellationTargetId(selectedChatId);
+                                setIsCancelModalOpen(true);
+                                setIsMenuOpen(false);
                               }}
                               className="w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-2"
                             >
                               <ExclamationTriangleIcon className="w-4 h-4" />
-                              {activeChat.collaboration_status.toLowerCase() === 'pending'
-                                ? 'Withdraw Request'
-                                : 'Cancel Collaboration'}
+                              {activeChat.collaboration_status.toLowerCase() === "pending"
+                                ? "Withdraw Request"
+                                : "Cancel Collaboration"}
                             </button>
                           )}
-                          {!['pending', 'negotiating', 'accepted'].includes(
-                            activeChat.collaboration_status.toLowerCase()
+                          {!["pending", "negotiating", "accepted"].includes(
+                            activeChat.collaboration_status.toLowerCase(),
                           ) && (
                             <div className="px-4 py-3 text-xs text-gray-400 italic text-center">
                               No actions available
@@ -613,7 +611,7 @@ function ChatPageContent() {
         isOpen={!!detailCollaboration}
         onClose={() => setDetailCollaboration(null)}
         collaboration={detailCollaboration}
-        currentUserType={userType as 'hotel' | 'creator'}
+        currentUserType={userType as "hotel" | "creator"}
         onAccept={handleAccept}
         onDecline={handleDecline}
       />
@@ -621,8 +619,12 @@ function ChatPageContent() {
       <SuggestChangesModal
         isOpen={isSuggestModalOpen}
         onClose={() => setIsSuggestModalOpen(false)}
-        initialCheckIn={activeCollaboration?.travelDateFrom || activeCollaboration?.preferredDateFrom || ''}
-        initialCheckOut={activeCollaboration?.travelDateTo || activeCollaboration?.preferredDateTo || ''}
+        initialCheckIn={
+          activeCollaboration?.travelDateFrom || activeCollaboration?.preferredDateFrom || ""
+        }
+        initialCheckOut={
+          activeCollaboration?.travelDateTo || activeCollaboration?.preferredDateTo || ""
+        }
         initialPlatformDeliverables={activeCollaboration?.platformDeliverables || []}
         initialCollaborationType={activeCollaboration?.collaborationType}
         initialFreeStayMaxNights={activeCollaboration?.freeStayMaxNights}
@@ -653,9 +655,9 @@ function ChatPageContent() {
             <div className="flex gap-3 mt-4">
               <button
                 onClick={() => {
-                  setIsCancelModalOpen(false)
-                  setCancelReason('')
-                  setCancellationTargetId(null)
+                  setIsCancelModalOpen(false);
+                  setCancelReason("");
+                  setCancellationTargetId(null);
                 }}
                 className="flex-1 py-2.5 px-4 text-sm font-bold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
               >
@@ -672,9 +674,9 @@ function ChatPageContent() {
         </div>
       )}
     </main>
-  )
+  );
 }
 
 export default function ChatPage() {
-  return <ChatPageContent />
+  return <ChatPageContent />;
 }

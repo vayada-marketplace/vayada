@@ -1,6 +1,6 @@
-'use client'
+"use client";
 
-import { FormEvent, useState } from 'react'
+import { FormEvent, useState } from "react";
 import {
   ArrowRightIcon,
   ArrowTrendingUpIcon,
@@ -9,28 +9,28 @@ import {
   EnvelopeIcon,
   ShieldCheckIcon,
   BoltIcon,
-} from '@heroicons/react/24/outline'
+} from "@heroicons/react/24/outline";
 
 const BENEFITS = [
-  { label: 'Boost direct bookings', Icon: ArrowTrendingUpIcon },
-  { label: 'Trust-based demand', Icon: ShieldCheckIcon },
-  { label: 'Increase revenue with upselling', Icon: ChartBarIcon },
-]
+  { label: "Boost direct bookings", Icon: ArrowTrendingUpIcon },
+  { label: "Trust-based demand", Icon: ShieldCheckIcon },
+  { label: "Increase revenue with upselling", Icon: ChartBarIcon },
+];
 
 export default function FinalCTA() {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState("");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+    event.preventDefault();
 
-    const subject = encodeURIComponent('Vayada demo request')
+    const subject = encodeURIComponent("Vayada demo request");
     const body = encodeURIComponent(
       email
         ? `Hi Vayada,\n\nI would like to book a 20-minute demo.\n\nMy email: ${email}`
-        : 'Hi Vayada,\n\nI would like to book a 20-minute demo.'
-    )
+        : "Hi Vayada,\n\nI would like to book a 20-minute demo.",
+    );
 
-    window.location.href = `mailto:t.schreyer@vayada.com?subject=${subject}&body=${body}`
+    window.location.href = `mailto:t.schreyer@vayada.com?subject=${subject}&body=${body}`;
   }
 
   return (
@@ -48,8 +48,8 @@ export default function FinalCTA() {
                 Ready to own your <span className="text-primary-500">demand</span>?
               </h2>
               <p className="mt-6 max-w-xl text-lg text-gray-500">
-                Book a 20-minute demo and see how vayada helps you turn trust-based
-                demand into more direct bookings and revenue.
+                Book a 20-minute demo and see how vayada helps you turn trust-based demand into more
+                direct bookings and revenue.
               </p>
               <div className="mt-10 grid max-w-md grid-cols-3 gap-4">
                 {BENEFITS.map(({ label, Icon }) => (
@@ -57,9 +57,7 @@ export default function FinalCTA() {
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-50 text-primary-500">
                       <Icon className="h-5 w-5" />
                     </div>
-                    <p className="text-sm font-medium leading-tight text-ink">
-                      {label}
-                    </p>
+                    <p className="text-sm font-medium leading-tight text-ink">{label}</p>
                   </div>
                 ))}
               </div>
@@ -105,7 +103,7 @@ export default function FinalCTA() {
                 <div className="h-px flex-1 bg-border-strong" />
               </div>
               <p className="mt-4 text-center text-sm text-gray-500">
-                Or write us directly at{' '}
+                Or write us directly at{" "}
                 <a
                   href="mailto:t.schreyer@vayada.com"
                   className="font-medium text-primary-500 underline-offset-4 hover:underline"
@@ -118,5 +116,5 @@ export default function FinalCTA() {
         </div>
       </div>
     </section>
-  )
+  );
 }

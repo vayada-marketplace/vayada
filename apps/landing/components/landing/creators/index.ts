@@ -1,2 +1,1 @@
-export { default as CreatorsSection } from './CreatorsSection'
-
+export { default as CreatorsSection } from "./CreatorsSection";

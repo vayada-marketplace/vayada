@@ -1,22 +1,22 @@
-'use client'
+"use client";
 
-import { Input } from '@/components/ui'
-import { MagnifyingGlassIcon } from '@heroicons/react/24/outline'
+import { Input } from "@/components/ui";
+import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 
 interface SearchBarProps {
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-  sortOption?: string
-  onSortChange?: (sort: string) => void
-  showSort?: boolean
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  sortOption?: string;
+  onSortChange?: (sort: string) => void;
+  showSort?: boolean;
 }
 
 export function SearchBar({
   value,
   onChange,
-  placeholder = 'Search...',
-  sortOption = 'relevance',
+  placeholder = "Search...",
+  sortOption = "relevance",
   onSortChange,
   showSort = true,
 }: SearchBarProps) {
@@ -48,5 +48,5 @@ export function SearchBar({
         </div>
       )}
     </div>
-  )
+  );
 }

@@ -1,1 +1,1 @@
-export { default as PlatformSection } from './PlatformSection'
+export { default as PlatformSection } from "./PlatformSection";

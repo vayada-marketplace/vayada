@@ -1,24 +1,28 @@
-'use client'
+"use client";
 
-import { ClipboardDocumentIcon, CheckIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
-import { useState } from 'react'
+import {
+  ClipboardDocumentIcon,
+  CheckIcon,
+  ExclamationTriangleIcon,
+} from "@heroicons/react/24/outline";
+import { useState } from "react";
 
 interface PropertyCardProps {
-  name: string
-  commission: number
-  status: 'active' | 'pending' | 'paused'
-  affiliateLink: string
-  bookings: number
-  outstanding: number
-  clicks: number
-  color: string
+  name: string;
+  commission: number;
+  status: "active" | "pending" | "paused";
+  affiliateLink: string;
+  bookings: number;
+  outstanding: number;
+  clicks: number;
+  color: string;
 }
 
 const statusConfig = {
-  active: { dot: 'bg-success-500', label: 'active' },
-  pending: { dot: 'bg-warning-500', label: 'pending' },
-  paused: { dot: 'bg-gray-400', label: 'paused' },
-}
+  active: { dot: "bg-success-500", label: "active" },
+  pending: { dot: "bg-warning-500", label: "pending" },
+  paused: { dot: "bg-gray-400", label: "paused" },
+};
 
 export default function PropertyCard({
   name,
@@ -30,14 +34,14 @@ export default function PropertyCard({
   clicks,
   color,
 }: PropertyCardProps) {
-  const [copied, setCopied] = useState(false)
-  const { dot, label } = statusConfig[status]
+  const [copied, setCopied] = useState(false);
+  const { dot, label } = statusConfig[status];
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(affiliateLink)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+    await navigator.clipboard.writeText(affiliateLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
@@ -68,7 +72,7 @@ export default function PropertyCard({
         </div>
 
         {/* Stats row */}
-        {status === 'active' ? (
+        {status === "active" ? (
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
               <p className="text-xl font-bold text-gray-900">{bookings}</p>
@@ -91,7 +95,7 @@ export default function PropertyCard({
         )}
 
         {/* Copy button */}
-        {status === 'active' ? (
+        {status === "active" ? (
           <button
             onClick={handleCopy}
             className="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -119,5 +123,5 @@ export default function PropertyCard({
         )}
       </div>
     </div>
-  )
+  );
 }

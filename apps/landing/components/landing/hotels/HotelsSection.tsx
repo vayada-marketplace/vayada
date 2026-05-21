@@ -1,6 +1,6 @@
-import { HOTELS_SECTION } from '@/lib/constants'
-import { SECTIONS } from '@/lib/constants/sections'
-import { Button } from '@/components/ui'
+import { HOTELS_SECTION } from "@/lib/constants";
+import { SECTIONS } from "@/lib/constants/sections";
+import { Button } from "@/components/ui";
 
 export default function HotelsSection() {
   return (
@@ -10,19 +10,15 @@ export default function HotelsSection() {
           <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
             {HOTELS_SECTION.title}
           </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            {HOTELS_SECTION.subtitle}
-          </p>
+          <p className="text-xl text-gray-600 max-w-3xl mx-auto">{HOTELS_SECTION.subtitle}</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center mb-16">
           <div>
-            <h3 className="text-3xl font-bold text-gray-900 mb-6">
-              Why Choose vayada?
-            </h3>
+            <h3 className="text-3xl font-bold text-gray-900 mb-6">Why Choose vayada?</h3>
             <div className="space-y-6">
               {HOTELS_SECTION.advantages.map((advantage, index) => {
-                const IconComponent = advantage.icon
+                const IconComponent = advantage.icon;
                 return (
                   <div key={index} className="flex items-start">
                     <div className="flex-shrink-0">
@@ -37,15 +33,13 @@ export default function HotelsSection() {
                       <p className="text-gray-600">{advantage.description}</p>
                     </div>
                   </div>
-                )
+                );
               })}
             </div>
           </div>
 
           <div className="bg-gradient-to-br from-primary-50 to-primary-100 rounded-2xl p-8 lg:p-12">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">
-              How It Works for Hotels
-            </h3>
+            <h3 className="text-2xl font-bold text-gray-900 mb-6">How It Works for Hotels</h3>
             <div className="space-y-6">
               {HOTELS_SECTION.steps.map((step) => (
                 <div key={step.number} className="flex items-start">
@@ -69,6 +63,5 @@ export default function HotelsSection() {
         </div>
       </div>
     </section>
-  )
+  );
 }
-

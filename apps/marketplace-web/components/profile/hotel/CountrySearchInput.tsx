@@ -1,18 +1,20 @@
-'use client'
+"use client";
 
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import { countries } from 'countries-list'
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import { countries } from "countries-list";
 
-const COUNTRIES = Object.values(countries).map(country => country.name).sort()
+const COUNTRIES = Object.values(countries)
+  .map((country) => country.name)
+  .sort();
 
 interface CountrySearchInputProps {
-  selectedCountries: string[]
-  onChange: (countries: string[]) => void
-  searchValue: string
-  onSearchChange: (value: string) => void
-  maxSelections?: number
-  label?: string
-  description?: string
+  selectedCountries: string[];
+  onChange: (countries: string[]) => void;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  maxSelections?: number;
+  label?: string;
+  description?: string;
 }
 
 export function CountrySearchInput({
@@ -26,9 +28,10 @@ export function CountrySearchInput({
 }: CountrySearchInputProps) {
   const filteredCountries = searchValue
     ? COUNTRIES.filter(
-      c => c.toLowerCase().includes(searchValue.toLowerCase()) && !selectedCountries.includes(c)
-    )
-    : []
+        (c) =>
+          c.toLowerCase().includes(searchValue.toLowerCase()) && !selectedCountries.includes(c),
+      )
+    : [];
 
   return (
     <div>
@@ -40,12 +43,17 @@ export function CountrySearchInput({
           value={searchValue}
           onChange={(e) => onSearchChange(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              const country = searchValue.trim()
-              if (country && COUNTRIES.includes(country) && !selectedCountries.includes(country) && selectedCountries.length < maxSelections) {
-                onChange([...selectedCountries, country])
-                onSearchChange('')
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const country = searchValue.trim();
+              if (
+                country &&
+                COUNTRIES.includes(country) &&
+                !selectedCountries.includes(country) &&
+                selectedCountries.length < maxSelections
+              ) {
+                onChange([...selectedCountries, country]);
+                onSearchChange("");
               }
             }
           }}
@@ -59,9 +67,12 @@ export function CountrySearchInput({
                 key={country}
                 type="button"
                 onClick={() => {
-                  if (selectedCountries.length < maxSelections && !selectedCountries.includes(country)) {
-                    onChange([...selectedCountries, country])
-                    onSearchChange('')
+                  if (
+                    selectedCountries.length < maxSelections &&
+                    !selectedCountries.includes(country)
+                  ) {
+                    onChange([...selectedCountries, country]);
+                    onSearchChange("");
                   }
                 }}
                 className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-primary-50"
@@ -74,7 +85,10 @@ export function CountrySearchInput({
         {selectedCountries.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {selectedCountries.map((country, i) => (
-              <span key={i} className="inline-flex items-center gap-1 rounded-full bg-primary-50 text-primary-700 text-xs font-semibold px-3 py-1 border border-primary-100">
+              <span
+                key={i}
+                className="inline-flex items-center gap-1 rounded-full bg-primary-50 text-primary-700 text-xs font-semibold px-3 py-1 border border-primary-100"
+              >
                 {country}
                 <button
                   type="button"
@@ -89,5 +103,5 @@ export function CountrySearchInput({
         )}
       </div>
     </div>
-  )
+  );
 }

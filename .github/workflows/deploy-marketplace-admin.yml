@@ -6,9 +6,9 @@ on:
     branches:
       - main
     paths:
-      - 'apps/marketplace-admin/**'
-      - 'packages/**'
-      - '.github/workflows/deploy-marketplace-admin.yml'
+      - "apps/marketplace-admin/**"
+      - "packages/**"
+      - ".github/workflows/deploy-marketplace-admin.yml"
 
 permissions:
   id-token: write
@@ -35,7 +35,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

@@ -1,9 +1,9 @@
-"use client"
+"use client";
 
-import Link from "next/link"
-import { Navigation, Footer } from "@/components/layout"
-import { Button } from "@/components/ui"
-import { ROUTES } from "@/lib/constants/routes"
+import Link from "next/link";
+import { Navigation, Footer } from "@/components/layout";
+import { Button } from "@/components/ui";
+import { ROUTES } from "@/lib/constants/routes";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -16,8 +16,8 @@ import {
   CurrencyDollarIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-} from "@heroicons/react/24/outline"
-import { useState } from "react"
+} from "@heroicons/react/24/outline";
+import { useState } from "react";
 
 export default function CreatorBenefitsPage() {
   return (
@@ -36,7 +36,8 @@ export default function CreatorBenefitsPage() {
                   <span className="text-primary-600">Professional Hotel Collaborations.</span>
                 </h1>
                 <p className="text-base md:text-lg text-gray-600 leading-relaxed max-w-2xl">
-                  Join the free marketplace where hotels find you based on verified data, ending the chaos of manual outreach and negotiation.
+                  Join the free marketplace where hotels find you based on verified data, ending the
+                  chaos of manual outreach and negotiation.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <Link href={`${ROUTES.SIGNUP}?type=creator`}>
@@ -78,7 +79,12 @@ export default function CreatorBenefitsPage() {
         <section className="bg-[#f5f5f7] border-t border-b border-gray-200/80">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-gray-700 text-sm md:text-base">
-              {["100% Free to Join", "Verified Profile Data", "Direct Hotel Connections", "Fair Compensation"].map((item) => (
+              {[
+                "100% Free to Join",
+                "Verified Profile Data",
+                "Direct Hotel Connections",
+                "Fair Compensation",
+              ].map((item) => (
                 <div key={item} className="flex items-center gap-2">
                   <CheckIcon className="w-4 h-4 text-primary-600" />
                   <span>{item}</span>
@@ -97,8 +103,12 @@ export default function CreatorBenefitsPage() {
 
           <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">The vayada professional advantage</h2>
-              <p className="text-base md:text-lg text-gray-600 mt-3">Three pillars that transform how you collaborate with hotels</p>
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+                The vayada professional advantage
+              </h2>
+              <p className="text-base md:text-lg text-gray-600 mt-3">
+                Three pillars that transform how you collaborate with hotels
+              </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
@@ -108,7 +118,8 @@ export default function CreatorBenefitsPage() {
                   tag: "Credibility",
                   description:
                     "Replaces disorganized pitch decks with a transparent, verified profile showing audience demographics and 5-star hotel reviews.",
-                  footnote: "Higher acceptance rate for high-quality collaborations (e.g., free stays, B&B) because hotels trust your data.",
+                  footnote:
+                    "Higher acceptance rate for high-quality collaborations (e.g., free stays, B&B) because hotels trust your data.",
                   Icon: ArrowTrendingUpIcon,
                 },
                 {
@@ -116,7 +127,8 @@ export default function CreatorBenefitsPage() {
                   tag: "Efficiency",
                   description:
                     "Discover open hotel collaborations and apply instantly. No agencies, no middlemen, just a streamlined hub. With vayada you save hours of time",
-                  footnote: "You save hours of manual outreach and negotiation, focusing only on creating content.",
+                  footnote:
+                    "You save hours of manual outreach and negotiation, focusing only on creating content.",
                   Icon: UserGroupIcon,
                 },
                 {
@@ -124,7 +136,8 @@ export default function CreatorBenefitsPage() {
                   tag: "Future Hook",
                   description:
                     "Build your reputation now to guarantee access to the future affiliate system, turning content into long-term performance income.",
-                  footnote: "Positions you for the 2026 launch to earn up to 10% commission with a 30-day tracking window.",
+                  footnote:
+                    "Positions you for the 2026 launch to earn up to 10% commission with a 30-day tracking window.",
                   Icon: CalendarDaysIcon,
                 },
               ].map(({ title, tag, description, footnote, Icon }) => (
@@ -139,7 +152,9 @@ export default function CreatorBenefitsPage() {
                     <h3 className="text-xl md:text-2xl font-semibold text-gray-900">{title}</h3>
                     <p className="text-sm font-semibold text-primary-600 mt-1">{tag}</p>
                   </div>
-                  <p className="text-gray-700 leading-relaxed text-sm md:text-base">{description}</p>
+                  <p className="text-gray-700 leading-relaxed text-sm md:text-base">
+                    {description}
+                  </p>
                   <p className="text-gray-800 font-semibold text-sm md:text-base">→ {footnote}</p>
                 </div>
               ))}
@@ -169,8 +184,12 @@ export default function CreatorBenefitsPage() {
                 <span className="inline-flex items-center gap-2 rounded-full bg-primary-50 text-primary-700 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
                   Professional profile
                 </span>
-                <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mt-3">Data Replaces DM Chaos</h2>
-                <p className="text-base md:text-lg text-gray-600 mt-2">Your professional creator profile works for you 24/7</p>
+                <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mt-3">
+                  Data Replaces DM Chaos
+                </h2>
+                <p className="text-base md:text-lg text-gray-600 mt-2">
+                  Your professional creator profile works for you 24/7
+                </p>
               </div>
 
               <div className="space-y-8 relative">
@@ -179,15 +198,19 @@ export default function CreatorBenefitsPage() {
                     title: "Verified Data Profile",
                     description:
                       "Your profile displays verified audience demographics and engagement rates across all your platforms. This is the professional standard hotels demand.",
-                    problem: "Inefficient Selection & Risk: Hotels can't verify quality. You stop being judged solely on follower count or manual screenshots.",
-                    value: "Hotels trust and find you faster, leading to a higher acceptance rate for quality collaborations (e.g., free stays).",
+                    problem:
+                      "Inefficient Selection & Risk: Hotels can't verify quality. You stop being judged solely on follower count or manual screenshots.",
+                    value:
+                      "Hotels trust and find you faster, leading to a higher acceptance rate for quality collaborations (e.g., free stays).",
                   },
                   {
                     title: "Hotel Review History",
                     description:
                       "Every successful collaboration results in a rating and review from the hotel. This builds your public, professional track record and credibility within the industry.",
-                    problem: "Lack of Credibility: You move from being a one-off requester to a vetted, reliable partner.",
-                    value: "Excellent reviews provide negotiation power for securing better terms on future collaborations.",
+                    problem:
+                      "Lack of Credibility: You move from being a one-off requester to a vetted, reliable partner.",
+                    value:
+                      "Excellent reviews provide negotiation power for securing better terms on future collaborations.",
                   },
                 ].map(({ title, description, problem, value }) => (
                   <div
@@ -196,7 +219,9 @@ export default function CreatorBenefitsPage() {
                   >
                     <div className="flex-1 space-y-2">
                       <h3 className="text-xl md:text-2xl font-semibold text-gray-900">{title}</h3>
-                      <p className="text-gray-700 leading-relaxed text-sm md:text-base">{description}</p>
+                      <p className="text-gray-700 leading-relaxed text-sm md:text-base">
+                        {description}
+                      </p>
                     </div>
                     <div className="flex flex-col gap-4 lg:w-80">
                       <div className="bg-red-50 border border-red-100 rounded-xl p-4 shadow-[0_6px_18px_-12px_rgba(248,113,113,0.9)]">
@@ -219,8 +244,12 @@ export default function CreatorBenefitsPage() {
         <section className="bg-[#f8f8fb] py-16 md:py-20">
           <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">The Simple 4-Step Journey</h2>
-              <p className="text-base md:text-lg text-gray-600 mt-2">From collaboration to credibility</p>
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+                The Simple 4-Step Journey
+              </h2>
+              <p className="text-base md:text-lg text-gray-600 mt-2">
+                From collaboration to credibility
+              </p>
             </div>
 
             <div className="flex flex-col divide-y divide-gray-200">
@@ -262,7 +291,10 @@ export default function CreatorBenefitsPage() {
                   Icon: CurrencyDollarIcon,
                 },
               ].map(({ number, title, badge, linkText, description, Icon }) => (
-                <div key={number} className="py-7 md:py-8 flex flex-col md:flex-row md:items-center gap-6 md:gap-10">
+                <div
+                  key={number}
+                  className="py-7 md:py-8 flex flex-col md:flex-row md:items-center gap-6 md:gap-10"
+                >
                   <div className="flex items-center gap-3 md:gap-4 min-w-[90px]">
                     <span className="text-3xl md:text-4xl font-bold text-[#c7cdf6]">{number}</span>
                     <div className="h-12 w-12 rounded-xl bg-primary-50 text-primary-600 flex items-center justify-center">
@@ -283,7 +315,9 @@ export default function CreatorBenefitsPage() {
                       </span>
                     </div>
                     <p className="text-sm font-semibold text-primary-700">{linkText}</p>
-                    <p className="text-gray-700 text-sm md:text-base leading-relaxed">{description}</p>
+                    <p className="text-gray-700 text-sm md:text-base leading-relaxed">
+                      {description}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -295,7 +329,9 @@ export default function CreatorBenefitsPage() {
         <section className="bg-white pt-20 md:pt-24 pb-24 md:pb-28">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="rounded-3xl border border-primary-100 bg-[#f4f5ff] px-6 py-10 md:px-12 md:py-14 shadow-[0_20px_60px_-40px_rgba(59,130,246,0.35)] text-center space-y-4">
-              <h3 className="text-2xl md:text-3xl font-bold text-gray-900">Ready to start your journey?</h3>
+              <h3 className="text-2xl md:text-3xl font-bold text-gray-900">
+                Ready to start your journey?
+              </h3>
               <p className="text-base md:text-lg text-gray-600">
                 Join thousands of creators who have professionalized their hotel partnerships
               </p>
@@ -326,18 +362,37 @@ export default function CreatorBenefitsPage() {
                 Build Your Reputation Now. Earn Commission Later.
               </h2>
               <p className="text-base md:text-lg text-slate-200">
-                While the marketplace today focuses on high-quality collaborations and building credibility, we are laying the foundation for your long-term, passive income. In 2026, vayada launches its integrated affiliate tracking system.
+                While the marketplace today focuses on high-quality collaborations and building
+                credibility, we are laying the foundation for your long-term, passive income. In
+                2026, vayada launches its integrated affiliate tracking system.
               </p>
             </div>
 
             <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               {[
-                { label: "Average Commission Rate", value: "5%", sub: "On every direct booking generated through your unique tracking link (up to 10%)." },
-                { label: "Day Tracking Window", value: "30", sub: "Your influence has a longer shelf life. Secure commissions even if guests book weeks later." },
-                { label: "Long-Term Partnerships", value: "∞", sub: "Move from one-off stays to revenue-sharing partnerships with hotels." },
+                {
+                  label: "Average Commission Rate",
+                  value: "5%",
+                  sub: "On every direct booking generated through your unique tracking link (up to 10%).",
+                },
+                {
+                  label: "Day Tracking Window",
+                  value: "30",
+                  sub: "Your influence has a longer shelf life. Secure commissions even if guests book weeks later.",
+                },
+                {
+                  label: "Long-Term Partnerships",
+                  value: "∞",
+                  sub: "Move from one-off stays to revenue-sharing partnerships with hotels.",
+                },
               ].map(({ label, value, sub }) => (
-                <div key={label} className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)]">
-                  <div className="text-5xl md:text-6xl font-extrabold text-primary-400 mb-2">{value}</div>
+                <div
+                  key={label}
+                  className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)]"
+                >
+                  <div className="text-5xl md:text-6xl font-extrabold text-primary-400 mb-2">
+                    {value}
+                  </div>
                   <div className="mt-2 text-base font-bold text-white">{label}</div>
                   <p className="text-sm text-slate-300 mt-3 leading-relaxed">{sub}</p>
                 </div>
@@ -350,25 +405,43 @@ export default function CreatorBenefitsPage() {
                   title: "30-Day Tracking Window",
                   body: "Unlike single-session links, vayada will guarantee you earn commission on any direct booking made up to 30 days after your audience clicks your unique link.",
                   highlights: [
-                    { label: "Problem Solved", text: "The frustration of lost revenue when followers research, click, and book weeks later." },
-                    { label: "Financial Impact", text: "Maximizes your future earning potential, ensuring your content's influence is rewarded for a full month." },
+                    {
+                      label: "Problem Solved",
+                      text: "The frustration of lost revenue when followers research, click, and book weeks later.",
+                    },
+                    {
+                      label: "Financial Impact",
+                      text: "Maximizes your future earning potential, ensuring your content's influence is rewarded for a full month.",
+                    },
                   ],
                 },
                 {
                   title: "Transparent Payouts",
                   body: "Commissions will be tracked automatically and paid directly through the hotel's integrated PMS system. No chasing invoices or manual spreadsheets.",
                   highlights: [
-                    { label: "Problem Solved", text: "Eliminates the friction, distrust, and administrative burden of ensuring timely payment." },
-                    { label: "Financial Impact", text: "Ensures timely, automated, and transparent income, treating you like a true business partner." },
+                    {
+                      label: "Problem Solved",
+                      text: "Eliminates the friction, distrust, and administrative burden of ensuring timely payment.",
+                    },
+                    {
+                      label: "Financial Impact",
+                      text: "Ensures timely, automated, and transparent income, treating you like a true business partner.",
+                    },
                   ],
                 },
               ].map(({ title, body, highlights }) => (
-                <div key={title} className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)] space-y-5">
+                <div
+                  key={title}
+                  className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)] space-y-5"
+                >
                   <h3 className="text-2xl md:text-3xl font-bold text-white">{title}</h3>
                   <p className="text-sm md:text-base text-slate-200 leading-relaxed">{body}</p>
                   <div className="space-y-3">
                     {highlights.map(({ label, text }) => (
-                      <div key={label} className="rounded-xl bg-white/5 border border-white/10 px-4 py-3">
+                      <div
+                        key={label}
+                        className="rounded-xl bg-white/5 border border-white/10 px-4 py-3"
+                      >
                         <p className="text-sm font-bold text-primary-400 mb-1">{label}</p>
                         <p className="text-sm text-slate-200 mt-1 leading-relaxed">{text}</p>
                       </div>
@@ -380,7 +453,9 @@ export default function CreatorBenefitsPage() {
 
             <div className="mt-10">
               <div className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 shadow-[0_20px_50px_-40px_rgba(0,0,0,0.6)] max-w-md">
-                <div className="text-lg font-bold text-white mb-5">Example Earnings (5% Commission)</div>
+                <div className="text-lg font-bold text-white mb-5">
+                  Example Earnings (5% Commission)
+                </div>
                 <div className="space-y-4 text-sm">
                   <div className="flex items-center justify-between border-b border-white/10 pb-3">
                     <span className="text-slate-300">Average Booking Value</span>
@@ -401,7 +476,8 @@ export default function CreatorBenefitsPage() {
                 </div>
               </div>
               <p className="text-sm text-slate-200 mt-4">
-                Join the free marketplace now and complete successful collaborations to earn strong hotel reviews, guaranteeing your place in the 2026 performance model.
+                Join the free marketplace now and complete successful collaborations to earn strong
+                hotel reviews, guaranteeing your place in the 2026 performance model.
               </p>
             </div>
           </div>
@@ -411,8 +487,12 @@ export default function CreatorBenefitsPage() {
         <section className="bg-white py-16 md:py-20">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">Frequently Asked Questions</h2>
-              <p className="text-base md:text-lg text-gray-600 mt-2">Everything you need to know about joining vayada</p>
+              <h2 className="text-3xl md:text-4xl font-bold text-gray-900">
+                Frequently Asked Questions
+              </h2>
+              <p className="text-base md:text-lg text-gray-600 mt-2">
+                Everything you need to know about joining vayada
+              </p>
             </div>
 
             <FAQAccordion />
@@ -426,7 +506,8 @@ export default function CreatorBenefitsPage() {
               Ready to Professionalize Your Influence?
             </h2>
             <p className="text-base md:text-lg text-gray-600">
-              Join the marketplace where your verified data opens doors to premium hotel partnerships and sustainable income.
+              Join the marketplace where your verified data opens doors to premium hotel
+              partnerships and sustainable income.
             </p>
             <div className="pt-2">
               <Link href={`${ROUTES.SIGNUP}?type=creator`}>
@@ -445,11 +526,11 @@ export default function CreatorBenefitsPage() {
       </main>
       <Footer />
     </div>
-  )
+  );
 }
 
 function FAQAccordion() {
-  const [openIndex, setOpenIndex] = useState<number | null>(0)
+  const [openIndex, setOpenIndex] = useState<number | null>(0);
 
   const faqs = [
     {
@@ -472,12 +553,12 @@ function FAQAccordion() {
       answer:
         "Yes! In 2026, vayada is launching an integrated affiliate tracking system where you can earn up to 10% commission on direct bookings with a 30-day tracking window. Build your reputation now to be first in line.",
     },
-  ]
+  ];
 
   return (
     <div className="space-y-0">
       {faqs.map((faq, index) => {
-        const isOpen = openIndex === index
+        const isOpen = openIndex === index;
         return (
           <div key={index} className="border-b border-gray-200">
             <button
@@ -497,8 +578,8 @@ function FAQAccordion() {
               </div>
             )}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }

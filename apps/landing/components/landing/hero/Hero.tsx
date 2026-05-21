@@ -1,7 +1,7 @@
-'use client'
+"use client";
 
-import Image from 'next/image'
-import { ArrowRightIcon } from '@heroicons/react/24/outline'
+import Image from "next/image";
+import { ArrowRightIcon } from "@heroicons/react/24/outline";
 
 export default function Hero() {
   return (
@@ -23,9 +23,9 @@ export default function Hero() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-xl text-lg text-gray-500 md:text-xl">
-            vayada offers an AI &amp; trust-based distribution stack for
-            independent hotels to end your OTA dependency with a Booking
-            Engine, PMS, Channel Manager &amp; Hotel-Creator-Network.
+            vayada offers an AI &amp; trust-based distribution stack for independent hotels to end
+            your OTA dependency with a Booking Engine, PMS, Channel Manager &amp;
+            Hotel-Creator-Network.
           </p>
 
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -60,5 +60,5 @@ export default function Hero() {
         </div>
       </div>
     </section>
-  )
+  );
 }

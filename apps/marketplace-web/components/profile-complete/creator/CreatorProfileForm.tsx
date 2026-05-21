@@ -1,57 +1,65 @@
-'use client'
+"use client";
 
-import { RefObject } from 'react'
-import { XMarkIcon } from '@heroicons/react/24/outline'
-import type { CreatorFormState, PlatformFormData, CreatorType } from '@/lib/types'
-import { FormNavigationButtons } from '../FormNavigationButtons'
-import { CreatorTypeStep } from './CreatorTypeStep'
-import { CreatorBasicInfoStep } from './CreatorBasicInfoStep'
-import { CreatorPlatformsStep } from './CreatorPlatformsStep'
+import { RefObject } from "react";
+import { XMarkIcon } from "@heroicons/react/24/outline";
+import type { CreatorFormState, PlatformFormData, CreatorType } from "@/lib/types";
+import { FormNavigationButtons } from "../FormNavigationButtons";
+import { CreatorTypeStep } from "./CreatorTypeStep";
+import { CreatorBasicInfoStep } from "./CreatorBasicInfoStep";
+import { CreatorPlatformsStep } from "./CreatorPlatformsStep";
 
 interface CreatorProfileFormProps {
   // Form state
-  form: CreatorFormState
-  platforms: PlatformFormData[]
+  form: CreatorFormState;
+  platforms: PlatformFormData[];
 
   // Step management
-  currentStep: number
-  totalSteps: number
+  currentStep: number;
+  totalSteps: number;
 
   // UI state
-  error: string
-  submitting: boolean
-  canProceed: boolean
-  expandedPlatforms: Set<number>
-  platformCountryInputs: Record<number, string>
+  error: string;
+  submitting: boolean;
+  canProceed: boolean;
+  expandedPlatforms: Set<number>;
+  platformCountryInputs: Record<number, string>;
 
   // Refs
-  imageInputRef: RefObject<HTMLInputElement>
+  imageInputRef: RefObject<HTMLInputElement>;
 
   // Form handlers
-  onFormChange: (updates: Partial<CreatorFormState>) => void
-  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onFormChange: (updates: Partial<CreatorFormState>) => void;
+  onImageChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 
   // Platform handlers
-  onAddPlatform: (name: string) => void
-  onRemovePlatform: (index: number) => void
-  onUpdatePlatform: (index: number, field: keyof PlatformFormData, value: PlatformFormData[keyof PlatformFormData]) => void
-  onTogglePlatformExpanded: (index: number) => void
+  onAddPlatform: (name: string) => void;
+  onRemovePlatform: (index: number) => void;
+  onUpdatePlatform: (
+    index: number,
+    field: keyof PlatformFormData,
+    value: PlatformFormData[keyof PlatformFormData],
+  ) => void;
+  onTogglePlatformExpanded: (index: number) => void;
 
   // Country handlers
-  onCountryInputChange: (platformIndex: number, value: string) => void
-  onAddCountry: (platformIndex: number, country?: string) => void
-  onRemoveCountry: (platformIndex: number, countryIndex: number) => void
-  onUpdateCountryPercentage: (platformIndex: number, countryIndex: number, percentage: number) => void
-  getAvailableCountries: (platformIndex: number) => string[]
+  onCountryInputChange: (platformIndex: number, value: string) => void;
+  onAddCountry: (platformIndex: number, country?: string) => void;
+  onRemoveCountry: (platformIndex: number, countryIndex: number) => void;
+  onUpdateCountryPercentage: (
+    platformIndex: number,
+    countryIndex: number,
+    percentage: number,
+  ) => void;
+  getAvailableCountries: (platformIndex: number) => string[];
 
   // Age/gender handlers
-  onToggleAgeGroup: (platformIndex: number, ageRange: string) => void
-  onUpdateGenderSplit: (platformIndex: number, field: 'male' | 'female', value: string) => void
+  onToggleAgeGroup: (platformIndex: number, ageRange: string) => void;
+  onUpdateGenderSplit: (platformIndex: number, field: "male" | "female", value: string) => void;
 
   // Navigation handlers
-  onPrevStep: () => void
-  onNextStep: () => void
-  onSubmit: (e: React.FormEvent) => void
+  onPrevStep: () => void;
+  onNextStep: () => void;
+  onSubmit: (e: React.FormEvent) => void;
 }
 
 export function CreatorProfileForm({
@@ -83,16 +91,19 @@ export function CreatorProfileForm({
   onSubmit,
 }: CreatorProfileFormProps) {
   const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+    e.preventDefault();
     if (currentStep === totalSteps) {
-      onSubmit(e)
+      onSubmit(e);
     } else {
-      onNextStep()
+      onNextStep();
     }
-  }
+  };
 
   return (
-    <form onSubmit={handleFormSubmit} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-5">
+    <form
+      onSubmit={handleFormSubmit}
+      className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-5"
+    >
       {/* Step 1: Creator Type Selection */}
       {currentStep === 1 && (
         <CreatorTypeStep
@@ -149,5 +160,5 @@ export function CreatorProfileForm({
         submitLabel="Review & Complete Profile"
       />
     </form>
-  )
+  );
 }

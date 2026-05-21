@@ -1,19 +1,19 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { ROUTES } from '@/lib/constants/routes'
-import { ArrowRightIcon } from '@heroicons/react/24/outline'
+import { useState } from "react";
+import { ROUTES } from "@/lib/constants/routes";
+import { ArrowRightIcon } from "@heroicons/react/24/outline";
 
 const NAV_LINKS = [
-  { label: 'Booking Engine', href: '/booking-engine' },
-  { label: 'PMS', href: '/pms' },
-  { label: 'Hotel-Creator-Network', href: '/hotel-creator-network' },
-  { label: 'Pricing', href: '/pricing' },
-  { label: 'Partner Program', href: '/partner-program' },
-]
+  { label: "Booking Engine", href: "/booking-engine" },
+  { label: "PMS", href: "/pms" },
+  { label: "Hotel-Creator-Network", href: "/hotel-creator-network" },
+  { label: "Pricing", href: "/pricing" },
+  { label: "Partner Program", href: "/partner-program" },
+];
 
 export default function Navigation() {
-  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
     <nav className="fixed left-0 right-0 top-0 z-50 border-b border-border bg-white/80 backdrop-blur-xl">
@@ -63,7 +63,12 @@ export default function Navigation() {
             aria-label="Toggle menu"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
         </div>
@@ -99,5 +104,5 @@ export default function Navigation() {
         )}
       </div>
     </nav>
-  )
+  );
 }

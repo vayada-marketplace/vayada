@@ -1,139 +1,149 @@
-'use client'
+"use client";
 
-import { useState, useRef, useEffect } from 'react'
-import { settingsService } from '@/services/settings'
-import { COLOR_PRESETS, FONT_PAIRINGS } from '@/lib/constants/branding'
-import { FeedbackAlert, SaveButton } from '@/components/ui'
-import { uploadSingleImage } from '@/lib/utils/uploadImage'
-import { generateColorPalette } from '@/lib/utils/colors'
+import { useState, useRef, useEffect } from "react";
+import { settingsService } from "@/services/settings";
+import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
+import { FeedbackAlert, SaveButton } from "@/components/ui";
+import { uploadSingleImage } from "@/lib/utils/uploadImage";
+import { generateColorPalette } from "@/lib/utils/colors";
 
-import MediaTab from '@/components/design-studio/MediaTab'
-import ColorsTab from '@/components/design-studio/ColorsTab'
-import FontsTab from '@/components/design-studio/FontsTab'
+import MediaTab from "@/components/design-studio/MediaTab";
+import ColorsTab from "@/components/design-studio/ColorsTab";
+import FontsTab from "@/components/design-studio/FontsTab";
 
-const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;600;700&display=swap'
+const GOOGLE_FONTS_URL =
+  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;600;700&display=swap";
 
-type Tab = 'media' | 'colors' | 'fonts'
+type Tab = "media" | "colors" | "fonts";
 
 export default function DesignStudioPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('media')
-  const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [activeTab, setActiveTab] = useState<Tab>("media");
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
+    null,
+  );
 
   // Media & Content state
-  const [heroImage, setHeroImage] = useState<string>('https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1920&q=80')
-  const [heroHeading, setHeroHeading] = useState('Sundancer Lombok')
-  const [heroSubtext, setHeroSubtext] = useState('A boutique escape featuring private pools, ocean views, and tranquil luxury in the pristine shores of Sekotong.')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [heroImage, setHeroImage] = useState<string>(
+    "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1920&q=80",
+  );
+  const [heroHeading, setHeroHeading] = useState("Sundancer Lombok");
+  const [heroSubtext, setHeroSubtext] = useState(
+    "A boutique escape featuring private pools, ocean views, and tranquil luxury in the pristine shores of Sekotong.",
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Colors state
-  const [primaryColor, setPrimaryColor] = useState('#4F46E5')
-  const previewRef = useRef<HTMLDivElement>(null)
+  const [primaryColor, setPrimaryColor] = useState("#4F46E5");
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // Fonts state
-  const [selectedFont, setSelectedFont] = useState('high-end-serif')
+  const [selectedFont, setSelectedFont] = useState("high-end-serif");
 
   // Mirror the live booking engine's palette onto the preview pane so the
   // preview renders with the same shade tokens (bg-primary-600 for CTAs,
   // bg-primary-50 for tints, etc.) as the live site, not the raw input hex.
   // Depends on `loading` so the effect re-fires once the preview mounts.
   useEffect(() => {
-    const el = previewRef.current
-    if (!el) return
-    const palette = generateColorPalette(primaryColor)
+    const el = previewRef.current;
+    if (!el) return;
+    const palette = generateColorPalette(primaryColor);
     for (const [shade, color] of Object.entries(palette)) {
-      el.style.setProperty(`--color-primary-${shade}`, color)
+      el.style.setProperty(`--color-primary-${shade}`, color);
     }
-  }, [primaryColor, loading])
+  }, [primaryColor, loading]);
 
   useEffect(() => {
-    settingsService.getDesignSettings()
+    settingsService
+      .getDesignSettings()
       .then((settings) => {
-        if (settings.hero_image) setHeroImage(settings.hero_image)
-        if (settings.hero_heading) setHeroHeading(settings.hero_heading)
-        if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext)
-        if (settings.primary_color) setPrimaryColor(settings.primary_color)
-        if (settings.font_pairing) setSelectedFont(settings.font_pairing)
+        if (settings.hero_image) setHeroImage(settings.hero_image);
+        if (settings.hero_heading) setHeroHeading(settings.hero_heading);
+        if (settings.hero_subtext) setHeroSubtext(settings.hero_subtext);
+        if (settings.primary_color) setPrimaryColor(settings.primary_color);
+        if (settings.font_pairing) setSelectedFont(settings.font_pairing);
       })
       .catch(() => {
         // Keep attractive defaults on error
       })
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => setLoading(false));
+  }, []);
 
-  const [uploading, setUploading] = useState(false)
+  const [uploading, setUploading] = useState(false);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const previousImage = heroImage
-    const previewUrl = URL.createObjectURL(file)
-    setHeroImage(previewUrl)
+    const previousImage = heroImage;
+    const previewUrl = URL.createObjectURL(file);
+    setHeroImage(previewUrl);
 
     try {
-      setUploading(true)
-      const s3Url = await uploadSingleImage(file)
-      URL.revokeObjectURL(previewUrl)
-      setHeroImage(s3Url)
+      setUploading(true);
+      const s3Url = await uploadSingleImage(file);
+      URL.revokeObjectURL(previewUrl);
+      setHeroImage(s3Url);
 
       try {
-        await settingsService.updateDesignSettings({ hero_image: s3Url })
+        await settingsService.updateDesignSettings({ hero_image: s3Url });
       } catch {
-        console.error('Failed to auto-save hero image')
+        console.error("Failed to auto-save hero image");
       }
     } catch (err) {
-      console.error('Image upload failed:', err)
-      URL.revokeObjectURL(previewUrl)
-      setHeroImage(previousImage)
-      setFeedback({ type: 'error', message: 'Image upload failed. Please try again.' })
+      console.error("Image upload failed:", err);
+      URL.revokeObjectURL(previewUrl);
+      setHeroImage(previousImage);
+      setFeedback({ type: "error", message: "Image upload failed. Please try again." });
     } finally {
-      setUploading(false)
+      setUploading(false);
     }
-  }
+  };
 
   const removeHeroImage = () => {
-    setHeroImage('')
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
+    setHeroImage("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const resetContent = () => {
-    setHeroHeading('Sundancer Lombok')
-    setHeroSubtext('A boutique escape featuring private pools, ocean views, and tranquil luxury in the pristine shores of Sekotong.')
-  }
+    setHeroHeading("Sundancer Lombok");
+    setHeroSubtext(
+      "A boutique escape featuring private pools, ocean views, and tranquil luxury in the pristine shores of Sekotong.",
+    );
+  };
 
   const handleSave = async () => {
     try {
-      setSaving(true)
-      setFeedback(null)
-      const imageToSave = heroImage.startsWith('blob:') ? '' : heroImage
+      setSaving(true);
+      setFeedback(null);
+      const imageToSave = heroImage.startsWith("blob:") ? "" : heroImage;
       await settingsService.updateDesignSettings({
         hero_image: imageToSave,
         hero_heading: heroHeading,
         hero_subtext: heroSubtext,
         primary_color: primaryColor,
         font_pairing: selectedFont,
-      })
-      setFeedback({ type: 'success', message: 'Design settings saved successfully' })
+      });
+      setFeedback({ type: "success", message: "Design settings saved successfully" });
     } catch {
-      setFeedback({ type: 'error', message: 'Failed to save design settings' })
+      setFeedback({ type: "error", message: "Failed to save design settings" });
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
-  const applyPreset = (preset: typeof COLOR_PRESETS[number]) => {
-    setPrimaryColor(preset.primary)
-  }
+  const applyPreset = (preset: (typeof COLOR_PRESETS)[number]) => {
+    setPrimaryColor(preset.primary);
+  };
 
   const tabs = [
-    { id: 'media' as const, label: 'Media & Content', icon: MediaIcon },
-    { id: 'colors' as const, label: 'Colors', icon: ColorsIcon },
-    { id: 'fonts' as const, label: 'Fonts', icon: FontsIcon },
-  ]
+    { id: "media" as const, label: "Media & Content", icon: MediaIcon },
+    { id: "colors" as const, label: "Colors", icon: ColorsIcon },
+    { id: "fonts" as const, label: "Fonts", icon: FontsIcon },
+  ];
 
-  const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0]
+  const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
 
   if (loading) {
     return (
@@ -141,7 +151,7 @@ export default function DesignStudioPage() {
         <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
         <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
       </div>
-    )
+    );
   }
 
   return (
@@ -150,7 +160,9 @@ export default function DesignStudioPage() {
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
       <div className="shrink-0">
         <h1 className="text-2xl md:text-xl font-bold text-gray-900">Design Studio</h1>
-        <p className="text-sm text-gray-500 mt-0.5">Customize your booking engine&apos;s look and feel</p>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Customize your booking engine&apos;s look and feel
+        </p>
       </div>
 
       {/* Feedback banner */}
@@ -160,7 +172,6 @@ export default function DesignStudioPage() {
 
       {/* Main split layout */}
       <div className="mt-4 md:mt-5 flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
-
         {/* LEFT: Controls panel */}
         <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col min-h-0">
           {/* Tab bar */}
@@ -171,24 +182,27 @@ export default function DesignStudioPage() {
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center justify-center gap-1 py-1.5 rounded-md text-[12px] transition-all ${
                   activeTab === tab.id
-                    ? 'bg-white text-gray-900 font-semibold shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? "bg-white text-gray-900 font-semibold shadow-sm"
+                    : "text-gray-500 hover:text-gray-700"
                 }`}
               >
                 <tab.icon className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden">{tab.label.split(' ')[0]}</span>
+                <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
               </button>
             ))}
           </div>
 
           {/* Tab content */}
           <div className="mt-3 flex-1 overflow-y-auto space-y-3 pb-3">
-            {activeTab === 'media' && (
+            {activeTab === "media" && (
               <MediaTab
-                heroImage={heroImage} setHeroImage={setHeroImage}
-                heroHeading={heroHeading} setHeroHeading={setHeroHeading}
-                heroSubtext={heroSubtext} setHeroSubtext={setHeroSubtext}
+                heroImage={heroImage}
+                setHeroImage={setHeroImage}
+                heroHeading={heroHeading}
+                setHeroHeading={setHeroHeading}
+                heroSubtext={heroSubtext}
+                setHeroSubtext={setHeroSubtext}
                 fileInputRef={fileInputRef}
                 handleImageUpload={handleImageUpload}
                 removeHeroImage={removeHeroImage}
@@ -196,20 +210,17 @@ export default function DesignStudioPage() {
               />
             )}
 
-            {activeTab === 'colors' && (
+            {activeTab === "colors" && (
               <ColorsTab
-                primaryColor={primaryColor} setPrimaryColor={setPrimaryColor}
+                primaryColor={primaryColor}
+                setPrimaryColor={setPrimaryColor}
                 applyPreset={applyPreset}
               />
             )}
 
-            {activeTab === 'fonts' && (
-              <FontsTab
-                selectedFont={selectedFont}
-                setSelectedFont={setSelectedFont}
-              />
+            {activeTab === "fonts" && (
+              <FontsTab selectedFont={selectedFont} setSelectedFont={setSelectedFont} />
             )}
-
           </div>
 
           {/* Save button */}
@@ -219,7 +230,10 @@ export default function DesignStudioPage() {
         </div>
 
         {/* RIGHT: Live website preview */}
-        <div ref={previewRef} className="flex-1 min-w-0 min-h-[500px] lg:min-h-0 bg-white rounded-lg border border-gray-200 flex flex-col">
+        <div
+          ref={previewRef}
+          className="flex-1 min-w-0 min-h-[500px] lg:min-h-0 bg-white rounded-lg border border-gray-200 flex flex-col"
+        >
           {/* Browser chrome bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
             <div className="flex gap-1">
@@ -233,20 +247,32 @@ export default function DesignStudioPage() {
           </div>
 
           {/* Preview content */}
-          <div className="flex-1 overflow-y-auto bg-white" style={{ fontFamily: currentFont.bodyFamily }}>
-
+          <div
+            className="flex-1 overflow-y-auto bg-white"
+            style={{ fontFamily: currentFont.bodyFamily }}
+          >
             {/* HERO SECTION */}
             <div className="relative h-[280px] w-full bg-gray-300">
               {heroImage && (
-                <img src={heroImage} alt="" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                <img
+                  src={heroImage}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
               )}
               <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
 
               {/* Navigation */}
               <div className="absolute top-0 left-0 right-0 z-10">
                 <div className="flex items-center justify-between px-4 h-10">
-                  <span className="text-[11px] font-semibold text-white" style={{ fontFamily: currentFont.bodyFamily }}>
-                    {heroHeading || 'Your Hotel'}
+                  <span
+                    className="text-[11px] font-semibold text-white"
+                    style={{ fontFamily: currentFont.bodyFamily }}
+                  >
+                    {heroHeading || "Your Hotel"}
                   </span>
                   <div className="flex items-center gap-1.5">
                     <span className="px-2.5 py-0.5 text-[9px] font-semibold text-white rounded-full bg-primary-600">
@@ -271,13 +297,13 @@ export default function DesignStudioPage() {
                   className="text-2xl italic text-white mb-1.5"
                   style={{ fontFamily: currentFont.headingFamily }}
                 >
-                  {heroHeading || 'Your Hotel Name'}
+                  {heroHeading || "Your Hotel Name"}
                 </h2>
                 <p
                   className="text-[11px] text-white/90 leading-relaxed max-w-sm"
                   style={{ fontFamily: currentFont.bodyFamily }}
                 >
-                  {heroSubtext || 'Your hotel description will appear here.'}
+                  {heroSubtext || "Your hotel description will appear here."}
                 </p>
               </div>
             </div>
@@ -287,14 +313,39 @@ export default function DesignStudioPage() {
               <div className="bg-white rounded-xl shadow-lg border border-gray-100 px-3 py-2.5 flex items-center gap-2">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
                   <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-primary-50">
-                    <svg className="w-3 h-3 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    <svg
+                      className="w-3 h-3 text-primary-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+                      />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[8px] text-gray-500 font-medium uppercase tracking-wide" style={{ fontFamily: currentFont.bodyFamily }}>Your Stay</p>
-                    <p className="text-[10px] font-semibold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>Feb 13 — Feb 18, 2026</p>
-                    <p className="text-[8px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>5 nights</p>
+                    <p
+                      className="text-[8px] text-gray-500 font-medium uppercase tracking-wide"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      Your Stay
+                    </p>
+                    <p
+                      className="text-[10px] font-semibold text-gray-900"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      Feb 13 — Feb 18, 2026
+                    </p>
+                    <p
+                      className="text-[8px] text-gray-500"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      5 nights
+                    </p>
                   </div>
                 </div>
 
@@ -302,14 +353,39 @@ export default function DesignStudioPage() {
 
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 bg-primary-50">
-                    <svg className="w-3 h-3 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <svg
+                      className="w-3 h-3 text-primary-600"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+                      />
                     </svg>
                   </div>
                   <div>
-                    <p className="text-[8px] text-gray-500 font-medium uppercase tracking-wide" style={{ fontFamily: currentFont.bodyFamily }}>Guests</p>
-                    <p className="text-[10px] font-semibold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>2 Adults</p>
-                    <p className="text-[8px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>1 Room</p>
+                    <p
+                      className="text-[8px] text-gray-500 font-medium uppercase tracking-wide"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      Guests
+                    </p>
+                    <p
+                      className="text-[10px] font-semibold text-gray-900"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      2 Adults
+                    </p>
+                    <p
+                      className="text-[8px] text-gray-500"
+                      style={{ fontFamily: currentFont.bodyFamily }}
+                    >
+                      1 Room
+                    </p>
                   </div>
                 </div>
 
@@ -317,9 +393,19 @@ export default function DesignStudioPage() {
 
                 <div className="flex items-center gap-1 text-gray-400 flex-shrink-0">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"
+                    />
                   </svg>
-                  <span className="text-[9px] font-medium" style={{ fontFamily: currentFont.bodyFamily }}>Promo</span>
+                  <span
+                    className="text-[9px] font-medium"
+                    style={{ fontFamily: currentFont.bodyFamily }}
+                  >
+                    Promo
+                  </span>
                 </div>
 
                 <button className="px-3 py-1.5 rounded-full text-[9px] font-semibold text-white shrink-0 bg-primary-600 hover:bg-primary-700 transition-colors">
@@ -340,16 +426,16 @@ export default function DesignStudioPage() {
 
                 <div className="flex items-center gap-1">
                   {[
-                    { n: 1, label: 'Rooms' },
-                    { n: 2, label: 'Add-ons' },
-                    { n: 3, label: 'Details' },
-                    { n: 4, label: 'Payment' },
+                    { n: 1, label: "Rooms" },
+                    { n: 2, label: "Add-ons" },
+                    { n: 3, label: "Details" },
+                    { n: 4, label: "Payment" },
                   ].map((step, idx) => (
                     <div key={step.n} className="flex items-center">
                       <div className="flex items-center gap-0.5">
                         <div
                           className={`w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-bold ${
-                            step.n === 1 ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-500'
+                            step.n === 1 ? "bg-primary-600 text-white" : "bg-gray-200 text-gray-500"
                           }`}
                         >
                           {step.n}
@@ -357,7 +443,7 @@ export default function DesignStudioPage() {
                         <span
                           className="text-[8px] font-medium"
                           style={{
-                            color: step.n === 1 ? '#111827' : '#9CA3AF',
+                            color: step.n === 1 ? "#111827" : "#9CA3AF",
                             fontFamily: currentFont.bodyFamily,
                           }}
                         >
@@ -384,7 +470,7 @@ export default function DesignStudioPage() {
                         <div
                           key={i}
                           className="h-1 flex-1 rounded-full"
-                          style={{ backgroundColor: i === 0 ? 'white' : 'rgba(255,255,255,0.5)' }}
+                          style={{ backgroundColor: i === 0 ? "white" : "rgba(255,255,255,0.5)" }}
                         />
                       ))}
                     </div>
@@ -393,10 +479,16 @@ export default function DesignStudioPage() {
                   <div className="flex-1 p-3">
                     <div className="flex items-start justify-between mb-1.5">
                       <div>
-                        <h4 className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.headingFamily }}>
+                        <h4
+                          className="text-[12px] font-bold text-gray-900"
+                          style={{ fontFamily: currentFont.headingFamily }}
+                        >
                           Deluxe Mountain Room
                         </h4>
-                        <div className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5" style={{ fontFamily: currentFont.bodyFamily }}>
+                        <div
+                          className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5"
+                          style={{ fontFamily: currentFont.bodyFamily }}
+                        >
                           <span>32 m&sup2;</span>
                           <span>Up to 2 guests</span>
                         </div>
@@ -407,10 +499,24 @@ export default function DesignStudioPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-1 mb-2">
-                      {['Mountain View', 'Balcony', 'Minibar', 'Safe'].map((feat) => (
-                        <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full" style={{ fontFamily: currentFont.bodyFamily }}>
-                          <svg className="w-2 h-2 flex-shrink-0 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      {["Mountain View", "Balcony", "Minibar", "Safe"].map((feat) => (
+                        <span
+                          key={feat}
+                          className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full"
+                          style={{ fontFamily: currentFont.bodyFamily }}
+                        >
+                          <svg
+                            className="w-2 h-2 flex-shrink-0 text-primary-600"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                           {feat}
                         </span>
@@ -418,22 +524,57 @@ export default function DesignStudioPage() {
                     </div>
 
                     <div className="border-t border-gray-100 pt-2">
-                      <p className="text-[7px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5" style={{ fontFamily: currentFont.bodyFamily }}>Rate Options</p>
+                      <p
+                        className="text-[7px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5"
+                        style={{ fontFamily: currentFont.bodyFamily }}
+                      >
+                        Rate Options
+                      </p>
 
                       <div className="rounded-lg border-2 mb-1.5 border-primary-500">
                         <div className="flex items-center justify-between px-2.5 py-2">
                           <div className="flex items-center gap-1.5">
-                            <svg className="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            <svg
+                              className="w-3 h-3 text-gray-400 flex-shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                              />
                             </svg>
                             <div>
-                              <p className="text-[9px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>Flexible Rate</p>
-                              <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>Free cancellation until 24h before</p>
+                              <p
+                                className="text-[9px] font-bold text-gray-900"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                Flexible Rate
+                              </p>
+                              <p
+                                className="text-[7px] text-gray-500"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                Free cancellation until 24h before
+                              </p>
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>&euro;600</p>
-                            <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>&euro;120/night</p>
+                            <p
+                              className="text-[12px] font-bold text-gray-900"
+                              style={{ fontFamily: currentFont.bodyFamily }}
+                            >
+                              &euro;600
+                            </p>
+                            <p
+                              className="text-[7px] text-gray-500"
+                              style={{ fontFamily: currentFont.bodyFamily }}
+                            >
+                              &euro;120/night
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -441,20 +582,50 @@ export default function DesignStudioPage() {
                       <div className="rounded-lg border border-gray-200">
                         <div className="flex items-center justify-between px-2.5 py-2">
                           <div className="flex items-center gap-1.5">
-                            <svg className="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            <svg
+                              className="w-3 h-3 text-gray-400 flex-shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
                             </svg>
                             <div>
-                              <p className="text-[9px] font-bold text-gray-900 flex items-center gap-1" style={{ fontFamily: currentFont.bodyFamily }}>
+                              <p
+                                className="text-[9px] font-bold text-gray-900 flex items-center gap-1"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
                                 Non-Refundable
-                                <span className="text-[7px] font-bold text-white px-1 py-px rounded bg-primary-600">-15%</span>
+                                <span className="text-[7px] font-bold text-white px-1 py-px rounded bg-primary-600">
+                                  -15%
+                                </span>
                               </p>
-                              <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>No cancellation or changes</p>
+                              <p
+                                className="text-[7px] text-gray-500"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                No cancellation or changes
+                              </p>
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>&euro;510</p>
-                            <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>&euro;102/night</p>
+                            <p
+                              className="text-[12px] font-bold text-gray-900"
+                              style={{ fontFamily: currentFont.bodyFamily }}
+                            >
+                              &euro;510
+                            </p>
+                            <p
+                              className="text-[7px] text-gray-500"
+                              style={{ fontFamily: currentFont.bodyFamily }}
+                            >
+                              &euro;102/night
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -474,17 +645,27 @@ export default function DesignStudioPage() {
                     />
                     <div className="absolute bottom-1.5 left-1.5 right-1.5 flex gap-0.5">
                       {[0, 1, 2].map((i) => (
-                        <div key={i} className="h-1 flex-1 rounded-full" style={{ backgroundColor: i === 0 ? 'white' : 'rgba(255,255,255,0.5)' }} />
+                        <div
+                          key={i}
+                          className="h-1 flex-1 rounded-full"
+                          style={{ backgroundColor: i === 0 ? "white" : "rgba(255,255,255,0.5)" }}
+                        />
                       ))}
                     </div>
                   </div>
                   <div className="flex-1 p-3">
                     <div className="flex items-start justify-between mb-1.5">
                       <div>
-                        <h4 className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.headingFamily }}>
+                        <h4
+                          className="text-[12px] font-bold text-gray-900"
+                          style={{ fontFamily: currentFont.headingFamily }}
+                        >
                           Premium Ocean Suite
                         </h4>
-                        <div className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5" style={{ fontFamily: currentFont.bodyFamily }}>
+                        <div
+                          className="flex items-center gap-2 text-[9px] text-gray-500 mt-0.5"
+                          style={{ fontFamily: currentFont.bodyFamily }}
+                        >
                           <span>48 m&sup2;</span>
                           <span>Up to 3 guests</span>
                         </div>
@@ -494,35 +675,94 @@ export default function DesignStudioPage() {
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1 mb-2">
-                      {['Ocean View', 'Private Pool', 'Living Area', 'Breakfast'].map((feat) => (
-                        <span key={feat} className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full" style={{ fontFamily: currentFont.bodyFamily }}>
-                          <svg className="w-2 h-2 flex-shrink-0 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      {["Ocean View", "Private Pool", "Living Area", "Breakfast"].map((feat) => (
+                        <span
+                          key={feat}
+                          className="inline-flex items-center gap-0.5 text-[8px] text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded-full"
+                          style={{ fontFamily: currentFont.bodyFamily }}
+                        >
+                          <svg
+                            className="w-2 h-2 flex-shrink-0 text-primary-600"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                           {feat}
                         </span>
                       ))}
                     </div>
                     <div className="border-t border-gray-100 pt-2">
-                      <p className="text-[7px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5" style={{ fontFamily: currentFont.bodyFamily }}>Rate Options</p>
+                      <p
+                        className="text-[7px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5"
+                        style={{ fontFamily: currentFont.bodyFamily }}
+                      >
+                        Rate Options
+                      </p>
                       <div className="rounded-lg border border-gray-200">
                         <div className="flex items-center justify-between px-2.5 py-2">
                           <div className="flex items-center gap-1.5">
-                            <svg className="w-3 h-3 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            <svg
+                              className="w-3 h-3 text-gray-400 flex-shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                              />
                             </svg>
                             <div>
-                              <p className="text-[9px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>Flexible Rate</p>
-                              <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>Free cancellation until 24h before</p>
+                              <p
+                                className="text-[9px] font-bold text-gray-900"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                Flexible Rate
+                              </p>
+                              <p
+                                className="text-[7px] text-gray-500"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                Free cancellation until 24h before
+                              </p>
                             </div>
                           </div>
                           <div className="text-right flex items-center gap-2">
                             <div>
-                              <p className="text-[12px] font-bold text-gray-900" style={{ fontFamily: currentFont.bodyFamily }}>&euro;1,250</p>
-                              <p className="text-[7px] text-gray-500" style={{ fontFamily: currentFont.bodyFamily }}>&euro;250/night</p>
+                              <p
+                                className="text-[12px] font-bold text-gray-900"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                &euro;1,250
+                              </p>
+                              <p
+                                className="text-[7px] text-gray-500"
+                                style={{ fontFamily: currentFont.bodyFamily }}
+                              >
+                                &euro;250/night
+                              </p>
                             </div>
-                            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            <svg
+                              className="w-3 h-3 text-gray-400"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M19 9l-7 7-7-7"
+                              />
                             </svg>
                           </div>
                         </div>
@@ -537,61 +777,106 @@ export default function DesignStudioPage() {
             <div className="px-4 py-4 text-white bg-primary-600">
               <div className="flex gap-6 mb-3">
                 <div className="flex-1">
-                  <p className="text-[11px] font-bold mb-1" style={{ fontFamily: currentFont.headingFamily }}>
-                    {heroHeading || 'Your Hotel'}
+                  <p
+                    className="text-[11px] font-bold mb-1"
+                    style={{ fontFamily: currentFont.headingFamily }}
+                  >
+                    {heroHeading || "Your Hotel"}
                   </p>
-                  <p className="text-[8px] text-white/80 leading-relaxed" style={{ fontFamily: currentFont.bodyFamily }}>
-                    {heroSubtext ? heroSubtext.slice(0, 80) + (heroSubtext.length > 80 ? '...' : '') : 'Your hotel description.'}
+                  <p
+                    className="text-[8px] text-white/80 leading-relaxed"
+                    style={{ fontFamily: currentFont.bodyFamily }}
+                  >
+                    {heroSubtext
+                      ? heroSubtext.slice(0, 80) + (heroSubtext.length > 80 ? "..." : "")
+                      : "Your hotel description."}
                   </p>
                 </div>
                 <div>
-                  <p className="text-[8px] font-bold uppercase tracking-wider mb-1.5" style={{ fontFamily: currentFont.bodyFamily }}>Contact</p>
-                  <div className="space-y-0.5 text-[8px] text-white/80" style={{ fontFamily: currentFont.bodyFamily }}>
+                  <p
+                    className="text-[8px] font-bold uppercase tracking-wider mb-1.5"
+                    style={{ fontFamily: currentFont.bodyFamily }}
+                  >
+                    Contact
+                  </p>
+                  <div
+                    className="space-y-0.5 text-[8px] text-white/80"
+                    style={{ fontFamily: currentFont.bodyFamily }}
+                  >
                     <p>Alpengasse 12, 6020 Innsbruck</p>
                     <p>Phone: +43 512 123 456</p>
                     <p>Email: reservations@hotel.com</p>
                   </div>
                 </div>
               </div>
-              <div className="border-t border-white/20 pt-2 flex items-center justify-between text-[7px] text-white/70" style={{ fontFamily: currentFont.bodyFamily }}>
+              <div
+                className="border-t border-white/20 pt-2 flex items-center justify-between text-[7px] text-white/70"
+                style={{ fontFamily: currentFont.bodyFamily }}
+              >
                 <span>&copy; 2026 All rights reserved</span>
-                <span>Powered by <span className="text-white font-semibold underline">vayada</span></span>
+                <span>
+                  Powered by <span className="text-white font-semibold underline">vayada</span>
+                </span>
               </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function MediaIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <circle cx="8.5" cy="8.5" r="1.5" />
       <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
     </svg>
-  )
+  );
 }
 
 function ColorsIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <circle cx="12" cy="12" r="9" />
       <path d="M12 3a4.5 4.5 0 0 0 0 9 4.5 4.5 0 0 1 0 9" />
       <circle cx="12" cy="7.5" r="1.5" fill="currentColor" />
       <circle cx="12" cy="16.5" r="1.5" />
     </svg>
-  )
+  );
 }
 
 function FontsIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M4 7V4h16v3" />
       <path d="M12 4v16" />
       <path d="M8 20h8" />
     </svg>
-  )
+  );
 }

@@ -6,17 +6,19 @@ A transparent marketplace connecting hotels with travel creators and influencers
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - npm or yarn
 
 ### Installation
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
 
 2. Run the development server:
+
 ```bash
 npm run dev
 ```
@@ -91,4 +93,3 @@ Your site will be live in minutes! 🚀
 - Discovery and filtering
 - Collaboration request system
 - Admin dashboard
-
