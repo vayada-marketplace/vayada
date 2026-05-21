@@ -92,7 +92,7 @@ Full operating model (projects, labels, statuses, priorities, issue quality, age
 Production runs on AWS ECS Fargate, fronted by an ALB. Each app has a GitHub Actions workflow under `.github/workflows/` that triggers on path changes under its `apps/<name>/` directory, then builds, pushes to ECR, and deploys via OIDC.
 
 - **PMS migrations** auto-run on ECS container start. Do not suggest manually running `scripts/run_migration.sh` after a push to `main`.
-- **auth-db** does **not** auto-migrate — run `auth-db/scripts/run_migrations.py` manually (see `README.md`).
+- **auth-db** does **not** auto-migrate in production — run `scripts/run_migration.sh auth` against RDS for any schema change. Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
 - Infrastructure is managed with Terraform under `infra/`.
 
 ## Skills
@@ -105,5 +105,5 @@ Start with `.claude/skills/vayada-skills-storage/SKILL.md` to understand the thr
 
 - **SMTP** — port 587 SES uses `start_tls=True`, **not** `use_tls=True`. Recurring regression — check on any email/SMTP change.
 - **PMS migrations auto-run** on ECS container start. After a push to `main`, do **not** suggest manually running `scripts/run_migration.sh`.
-- **auth-db** does **not** auto-migrate (unlike PMS). See `README.md` getting-started.
+- **auth-db** does **not** auto-migrate **in production** (unlike PMS). Locally, `docker compose up` runs auth migrations via the `auth-db-migrate` one-shot service. For prod schema changes, run `scripts/run_migration.sh auth` against RDS.
 - **`vw` worktree helper is gone.** Ticket work uses normal git branches and direct-to-main commits — no worktree scripts, no shipping helpers.

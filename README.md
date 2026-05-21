@@ -260,27 +260,22 @@ The auth database (`auth-db/`) provides centralized user management for all serv
    cd vayada
    ```
 
-2. **Run auth migrations** (auth DB doesn't auto-migrate):
-
-   ```bash
-   DATABASE_URL="postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db" \
-     python3 auth-db/scripts/run_migrations.py
-   ```
-
-3. **Start all services:**
+2. **Start all services:**
 
    ```bash
    docker compose up -d
    ```
 
-4. **Seed test data:**
+   This brings up Postgres, MinIO, all APIs and frontends, and runs auth-DB migrations once via the `auth-db-migrate` one-shot service.
+
+3. **Seed test data:**
 
    ```bash
    pip install asyncpg bcrypt
    python scripts/seed_all.py
    ```
 
-5. **Access the applications:**
+4. **Access the applications:**
 
    | Application               | URL                        |
    |---------------------------|----------------------------|
