@@ -73,22 +73,6 @@ without a dedicated migration issue.
 
 Run the relevant `pytest` / `npm run build` before claiming a change is complete.
 
-## The `vw` worktree workflow (canonical)
-
-`scripts/vw` (on PATH as `vw`) is how ticket work is done. Each ticket gets an isolated
-worktree at `~/git/vayada-<TICKET>` on branch `<TICKET>`, off `vayada/main`.
-
-- `vw new <TICKET|num>` — create worktree, copy `.env`s, launch Claude.
-- `vw ship-all` — for every worktree: commit monorepo work and push the ticket branch
-  according to the current migration workflow.
-- `vw ship-ready` — `vw done` any worktree already merged into `vayada/main`, then `vw sync`.
-- `vw sync` — pull parent and rebase every worktree on `origin/main`.
-- `vw done <TICKET>` — remove worktree + delete local branch (no Linear change).
-
-Inside a `vw new` worktree, work in two phases: **PHASE 1** plan & wait for approval;
-**PHASE 2** implement + commit locally only. Do **not** merge/push/PR — `vw ship-all`
-does the merge-to-main dance later.
-
 ## Shipping conventions (important)
 
 - **Direct to `main`, no PRs.** Applies to small fixes *and* ticket work. Never
@@ -100,10 +84,9 @@ does the merge-to-main dance later.
 
 ## Linear state rules
 
-- Ticket → **In Progress** only in PHASE 1 (via the `linear` MCP).
-- Shipping does **not** touch Linear. `vw done` does **not** touch Linear.
-- The user moves **In Progress → In Review** manually after their own QA. `vw done`
-  leaves the ticket in *In Review*, not *Done*.
+- Ticket → **In Progress** when implementation starts (via the `linear` MCP).
+- Shipping does **not** touch Linear.
+- The user moves **In Progress → In Review** manually after their own QA.
 
 ## Gotchas
 
