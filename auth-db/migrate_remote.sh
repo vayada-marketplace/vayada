@@ -232,7 +232,7 @@ if [ "$CONFIRM" != "yes" ]; then
 fi
 
 psql -h "$BIZ_HOST" -p "$BIZ_PORT" -U "$BIZ_USER" -d "$BIZ_DB" \
-    -f "$SCRIPT_DIR/../marketplace/vayada-creator-marketplace-backend/migrations/028_remove_auth_tables.sql"
+    -f "$SCRIPT_DIR/../apps/marketplace-api/migrations/028_remove_auth_tables.sql"
 
 echo -e "  ${GREEN}Auth tables dropped from business DB${NC}"
 

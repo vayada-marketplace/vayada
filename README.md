@@ -96,6 +96,10 @@ vayada/
 │   ├── route53.tf                            # DNS records
 │   └── ...
 │
+├── docs/                               # Product and engineering documentation
+│   ├── docs/                                 # Docusaurus product docs
+│   └── engineering/                          # Internal engineering notes
+│
 ├── scripts/                            # Seed and utility scripts
 │   ├── seed_all.py                           # Master seed runner
 │   ├── seed_users.py                         # Auth DB user seeds
@@ -370,8 +374,8 @@ Key environment variables are configured in `docker-compose.yml` and service `.e
 ## Monorepo App Mapping
 
 Product apps are normal directories under `apps/`. The old app repositories were
-imported with path-scoped history; the old submodule paths are kept here only as
-migration notes.
+imported with path-scoped history. The old standalone repositories are archived
+in GitHub; the legacy root product directories were removed from this repo.
 
 | Old path | New monorepo path |
 |---|---|
