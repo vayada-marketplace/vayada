@@ -1,0 +1,4 @@
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS payout_account_holder TEXT NOT NULL DEFAULT '';
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS payout_iban TEXT NOT NULL DEFAULT '';
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS payout_bank_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE booking_hotels ADD COLUMN IF NOT EXISTS payout_swift TEXT NOT NULL DEFAULT '';

@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: vayada-booking-postgres
+    environment:
+      POSTGRES_USER: vayada_booking_user
+      POSTGRES_PASSWORD: vayada_booking_password
+      POSTGRES_DB: vayada_booking_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - booking_postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vayada_booking_user -d vayada_booking_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vayada-booking-backend
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@postgres:5432/vayada_booking_db
+    volumes:
+      - ./app:/app/app
+    restart: unless-stopped
+
+volumes:
+  booking_postgres_data:
