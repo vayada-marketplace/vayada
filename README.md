@@ -22,7 +22,7 @@ vayada is a hospitality platform that connects travel creators and influencers w
 - [Databases](#databases)
 - [Infrastructure](#infrastructure)
 - [Environment Variables](#environment-variables)
-- [Git Submodules](#git-submodules)
+- [Monorepo App Mapping](#monorepo-app-mapping)
 - [Scripts](#scripts)
 - [Test Accounts](#test-accounts)
 - [Development Workflow](#development-workflow)
@@ -71,19 +71,19 @@ The platform follows a microservices architecture:
 
 ```
 vayada/
-├── booking-engine/                     # Booking engine product
-│   ├── vayada-booking-engine-backend/        # FastAPI backend (submodule)
-│   ├── vayada-booking-engine-frontend/       # Next.js guest frontend (submodule)
-│   └── vayada-booking-engine-frontend-admin/ # Next.js admin dashboard (submodule)
+├── apps/                               # Product applications
+│   ├── marketplace-api/                      # FastAPI backend
+│   ├── marketplace-web/                      # Next.js authenticated marketplace app
+│   ├── marketplace-admin/                    # Next.js marketplace admin dashboard
+│   ├── booking-api/                          # FastAPI booking backend
+│   ├── booking-web/                          # Next.js guest booking frontend
+│   ├── booking-admin/                        # Next.js booking admin dashboard
+│   ├── pms-api/                              # FastAPI PMS backend
+│   ├── pms-web/                              # Next.js hotel dashboard
+│   ├── affiliate-dashboard/                  # Next.js affiliate dashboard
+│   └── landing/                              # Next.js public marketing site
 │
-├── pms/                               # Property Management System
-│   ├── vayada-pms-backend/                   # FastAPI backend (submodule)
-│   └── vayada-pms-frontend/                  # Next.js hotel dashboard (submodule)
-│
-├── marketplace/                        # Creator marketplace product
-│   ├── vayada-creator-marketplace-backend/        # FastAPI backend (submodule)
-│   ├── vayada-creator-marketplace-frontend/       # Next.js public frontend (submodule)
-│   └── vayada-creator-marketplace-frontend-admin/ # Next.js admin dashboard (submodule)
+├── packages/                           # Shared packages (created as needed)
 │
 ├── auth-db/                            # Shared authentication database
 │   ├── migrations/                           # Auth schema migrations
@@ -104,7 +104,6 @@ vayada/
 │   └── run_migration.sh                      # Remote migration runner
 │
 ├── docker-compose.yml                  # Full-stack orchestration (13 services)
-├── .gitmodules                         # Submodule definitions
 └── README.md
 ```
 
@@ -137,7 +136,7 @@ vayada/
 
 The marketplace connects travel creators and influencers with hotels for paid collaborations.
 
-**Backend** (`marketplace/vayada-creator-marketplace-backend/`) — Port 8000
+**Backend** (`apps/marketplace-api/`) — Port 8000
 
 - User registration and authentication (creators, hotels, admins)
 - Creator profiles with social platforms, audience analytics, and portfolio
@@ -149,7 +148,7 @@ The marketplace connects travel creators and influencers with hotels for paid co
 - GDPR compliance: data export, deletion requests, consent tracking
 - Email notifications
 
-**Admin Panel** (`marketplace/vayada-creator-marketplace-frontend-admin/`) — Port 3001
+**Admin Panel** (`apps/marketplace-admin/`) — Port 3001
 
 - Sidebar navigation: Users, Hotels, Marketplace, Collaborations, Invite Codes
 - User management (view, edit, approve, reject creators and hotels)
@@ -164,7 +163,7 @@ The marketplace connects travel creators and influencers with hotels for paid co
 
 The booking engine allows hotels to accept direct bookings from guests with a fully customizable, white-label booking experience.
 
-**Backend** (`booking-engine/vayada-booking-engine-backend/`) — Port 8001
+**Backend** (`apps/booking-api/`) — Port 8001
 
 - Hotel configuration with branding, amenities, social links, and translations
 - Room type management with images, pricing, and availability
@@ -175,7 +174,7 @@ The booking engine allows hotels to accept direct bookings from guests with a fu
 - Property settings API (including billing plans and payout details)
 - Add-on management (transport, wellness, dining, experiences)
 
-**Frontend** (`booking-engine/vayada-booking-engine-frontend/`) — Port 3002
+**Frontend** (`apps/booking-web/`) — Port 3002
 
 - Hotel landing page with hero, amenities, and room previews
 - Room listing with filters, availability search, and detail modals
@@ -187,7 +186,7 @@ The booking engine allows hotels to accept direct bookings from guests with a fu
 - Social media links in footer
 - Custom domain resolution
 
-**Admin Dashboard** (`booking-engine/vayada-booking-engine-frontend-admin/`) — Port 3003
+**Admin Dashboard** (`apps/booking-admin/`) — Port 3003
 
 - Dashboard with booking metrics
 - Design Studio: hero image, colors, font pairing (live preview)
@@ -202,7 +201,7 @@ The booking engine allows hotels to accept direct bookings from guests with a fu
 
 The PMS provides hotel operations management — rooms, bookings, calendar, and channel management.
 
-**Backend** (`pms/vayada-pms-backend/`) — Port 8002
+**Backend** (`apps/pms-api/`) — Port 8002
 
 - Hotel and room type management with seasonal pricing
 - Booking management with room assignment
@@ -212,7 +211,7 @@ The PMS provides hotel operations management — rooms, bookings, calendar, and 
 - Beds24 channel manager integration (two-way sync)
 - Affiliate management and payout scheduling
 
-**Frontend** (`pms/vayada-pms-frontend/`) — Port 3004
+**Frontend** (`apps/pms-web/`) — Port 3004
 
 - Dashboard with occupancy and revenue metrics
 - Room type management with amenities, features, and benefits
@@ -245,14 +244,14 @@ The auth database (`auth-db/`) provides centralized user management for all serv
 
 - **Docker** and **Docker Compose** (v2+)
 - **Python 3.11+** with `asyncpg` and `bcrypt` (for seed scripts)
-- **Git** (with submodule support)
+- **Git**
 
 ### Running the Full Stack
 
-1. **Clone with submodules:**
+1. **Clone the repository:**
 
    ```bash
-   git clone --recurse-submodules https://github.com/FlamurMaliqi/vayada.git
+   git clone https://github.com/vayada-marketplace/vayada.git
    cd vayada
    ```
 
@@ -368,27 +367,24 @@ Key environment variables are configured in `docker-compose.yml` and service `.e
 
 ---
 
-## Git Submodules
+## Monorepo App Mapping
 
-| Submodule                                            | Path                                                    |
-|------------------------------------------------------|---------------------------------------------------------|
-| `vayada-booking-engine-backend`                      | `booking-engine/vayada-booking-engine-backend`          |
-| `vayada-booking-engine-frontend`                     | `booking-engine/vayada-booking-engine-frontend`         |
-| `vayada-booking-engine-frontend-admin`               | `booking-engine/vayada-booking-engine-frontend-admin`   |
-| `vayada-pms-backend`                                 | `pms/vayada-pms-backend`                                |
-| `vayada-pms-frontend`                                | `pms/vayada-pms-frontend`                               |
-| `vayada-creator-marketplace-backend`                 | `marketplace/vayada-creator-marketplace-backend`        |
-| `vayada-creator-marketplace-frontend`                | `marketplace/vayada-creator-marketplace-frontend`       |
-| `vayada-creator-marketplace-frontend-admin`          | `marketplace/vayada-creator-marketplace-frontend-admin` |
-| `vayada-landing`                                     | `marketing/vayada-landing`                              |
+Product apps are normal directories under `apps/`. The old app repositories were
+imported with path-scoped history; the old submodule paths are kept here only as
+migration notes.
 
-```bash
-# Initialize and pull all submodules
-git submodule update --init --recursive
-
-# Pull latest changes for all submodules
-git submodule update --remote --merge
-```
+| Old path | New monorepo path |
+|---|---|
+| `marketplace/vayada-creator-marketplace-backend` | `apps/marketplace-api` |
+| `marketplace/vayada-creator-marketplace-frontend` | `apps/marketplace-web` |
+| `marketplace/vayada-creator-marketplace-frontend-admin` | `apps/marketplace-admin` |
+| `booking-engine/vayada-booking-engine-backend` | `apps/booking-api` |
+| `booking-engine/vayada-booking-engine-frontend` | `apps/booking-web` |
+| `booking-engine/vayada-booking-engine-frontend-admin` | `apps/booking-admin` |
+| `pms/vayada-pms-backend` | `apps/pms-api` |
+| `pms/vayada-pms-frontend` | `apps/pms-web` |
+| `affiliate/vayada-affiliate-dashboard` | `apps/affiliate-dashboard` |
+| `marketing/vayada-landing` | `apps/landing` |
 
 ---
 
@@ -429,16 +425,16 @@ After running `python scripts/seed_all.py`:
 
 ### Working on a single service
 
-Each submodule can be developed independently:
+Each app can be developed independently:
 
 ```bash
 # Backend
-cd pms/vayada-pms-backend
+cd apps/pms-api
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8002
 
 # Frontend
-cd booking-engine/vayada-booking-engine-frontend
+cd apps/booking-web
 npm install && npm run dev
 ```
 

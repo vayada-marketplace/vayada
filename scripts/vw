@@ -182,15 +182,9 @@ You are in a fresh git worktree for Linear ticket $ticket, on branch $ticket. Wo
 
 PHASE 1 - PLAN. Use the linear MCP server as $VW_CODEX_LINEAR_EMAIL to fetch ticket $ticket, then move the ticket to "In Progress" via the linear MCP server. First verify the Linear MCP "me" account is $VW_CODEX_LINEAR_EMAIL; if it is not, stop and ask me to run \`vw linear-login\`. Propose a concise implementation plan and wait for my approval.
 
-PHASE 2 - IMPLEMENT AND COMMIT. After I approve, implement the change. Install deps in any submodule you touch. Run tests where they exist. Then commit everything locally - do NOT merge to main, do NOT push, do NOT open PRs. \`vw ship-all\` will run the merge-to-main + push dance later.
+PHASE 2 - IMPLEMENT AND COMMIT. After I approve, implement the change. Install deps in any app you touch. Run tests where they exist. Then commit everything locally in the monorepo branch - do NOT merge to main, do NOT push, do NOT open PRs.
 
-For each submodule with changes:
-  1. Create or checkout a feature branch named $ticket inside the submodule.
-  2. Commit with a descriptive message (what changed and why, not just "ship").
-
-In the parent worktree:
-  3. git add the bumped submodule paths.
-  4. git commit -m "Bump <submodule>: <summary> ($ticket)" with a real summary.
+Commit with a descriptive message that explains what changed and why. Do not reintroduce product app submodules or submodule pointer commits.
 
 Stop after committing. Report the local commit SHAs and wait.
 PROMPT
@@ -219,9 +213,9 @@ usage() {
 vw - vayada worktree helper
 
   vw new <TICKET> [--install]   Create worktree on branch <TICKET> off main,
-                                init submodules, copy .env files, open a new
+                                copy .env files, open a new
                                 Warp tab running the configured agent.
-                                --install also runs deps install in submodules.
+                                --install also runs deps install in apps.
 
   vw launch <TICKET>            Open the configured agent in an existing
                                 worktree with the standard ticket prompt.
@@ -233,20 +227,15 @@ vw - vayada worktree helper
 
   vw list                       Show all active worktrees.
 
-  vw sync                       Pull main repo, rebase every worktree branch
-                                on origin/main, and re-init submodules in all
-                                worktrees (main repo included).
+  vw sync                       Pull main repo and rebase every worktree branch
+                                on origin/main.
 
   vw ship-ready                 Scan all worktrees; for each whose branch tip
                                 is already in origin/main (the agent shipped),
                                 run vw done on it. Run vw sync at the end.
 
-  vw ship-all                   Ship every worktree sequentially: commit any
-                                uncommitted submodule work on a feature branch,
-                                merge each submodule's feature into its main and
-                                push, bump submodule pointers in the parent, and
-                                push the parent branch to origin/main. Then run
-                                ship-ready to clean up.
+  vw ship-all                   Legacy submodule workflow. Do not use until
+                                refactored for the monorepo.
 
 Agent environment:
   VW_AGENT_CMD                  Agent command to launch with the prompt appended.
@@ -306,9 +295,8 @@ cmd_new() {
   git fetch "$remote" main --quiet
   git worktree add -b "$branch" "$worktree" "$remote/main"
 
-  echo "-> Initializing submodules"
+  echo "-> Monorepo checkout ready"
   cd "$worktree"
-  git submodule update --init --recursive --quiet
 
   echo "-> Copying .env files from main repo"
   while IFS= read -r src; do
@@ -325,7 +313,7 @@ cmd_new() {
               2>/dev/null)
 
   if [ "$do_install" -eq 1 ]; then
-    echo "-> Installing deps in submodules (this may take a while)"
+    echo "-> Installing deps in apps (this may take a while)"
     while IFS= read -r pkg; do
       local dir="$(dirname "$pkg")"
       echo "   npm install in ${dir#$worktree/}"
@@ -371,9 +359,6 @@ cmd_done() {
     exit 1
   fi
 
-  echo "-> Deinitializing submodules in worktree"
-  ( cd "$worktree" && git submodule deinit --all -f --quiet ) || true
-
   echo "-> Removing worktree $worktree"
   git worktree remove --force "$worktree"
 
@@ -400,28 +385,18 @@ cmd_sync() {
   echo "-> Fetching $remote/main"
   git fetch "$remote" main --quiet
 
-  # Sync the main repo too: ship-all pushes from worktrees advance
-  # $remote/main, so the main repo's local branch and submodule HEADs drift
-  # behind unless we pull and re-checkout submodule SHAs explicitly.
+  # Sync the main repo too: shipped worktrees can advance $remote/main.
   local main_branch
   main_branch="$(git -C "$MAIN_REPO" branch --show-current)"
   if [ "$main_branch" != "main" ]; then
     echo "-> Skipping main repo ($main_branch checked out, not main)"
   else
-    # Snap submodules to currently-recorded SHAs first so autostash doesn't
-    # re-apply stale pointers on top of the new parent commit.
-    git -C "$MAIN_REPO" submodule update --init --recursive --quiet 2>/dev/null || true
-
     if ! git -C "$MAIN_REPO" merge-base --is-ancestor "$remote/main" main 2>/dev/null; then
       echo "-> Pulling main repo (rebase --autostash)"
       if ! git -C "$MAIN_REPO" -c rebase.autostash=true pull --rebase "$remote" main --quiet; then
         echo "   pull --rebase failed - resolve manually in $MAIN_REPO"
-        launch_agent_to_resolve "$MAIN_REPO" "vw sync: git pull --rebase on the main vayada repo failed. Investigate (likely a local commit, dirty state, or submodule pointer conflict) and resolve so the main repo can fast-forward to $remote/main."
+        launch_agent_to_resolve "$MAIN_REPO" "vw sync: git pull --rebase on the main vayada repo failed. Investigate the local branch/working tree and resolve so the main repo can fast-forward to $remote/main."
       fi
-    fi
-
-    if ! git -C "$MAIN_REPO" submodule update --init --recursive --quiet 2>/dev/null; then
-      echo "   submodule update failed in main repo - resolve manually"
     fi
   fi
 
@@ -442,15 +417,12 @@ cmd_sync() {
     fi
 
     echo "-> Syncing $wt ($wt_branch)"
-    if ! rebase_with_submodule_autoresolve "$wt" "$remote/main" >/dev/null 2>&1; then
+    if ! git -C "$wt" rebase "$remote/main" >/dev/null 2>&1; then
       echo "   rebase failed - leaving clean state"
       echo "   resolve manually in $wt, or run: vw done $wt_branch"
-      launch_agent_to_resolve "$wt" "vw sync: rebasing $wt_branch onto $remote/main failed. The worktree was reset to a clean pre-rebase state by rebase --abort. Investigate why the rebase fails (likely submodule pointer divergence) and either complete it manually, or, if this branch is already obsolete, run vw done $wt_branch."
+      git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+      launch_agent_to_resolve "$wt" "vw sync: rebasing $wt_branch onto $remote/main failed. Investigate why the rebase fails and either complete it manually, or, if this branch is already obsolete, run vw done $wt_branch."
       continue
-    fi
-
-    if ! git -C "$wt" submodule update --init --recursive --quiet 2>/dev/null; then
-      echo "   submodule update failed (likely dirty submodule) - resolve in $wt"
     fi
   done < <(git worktree list --porcelain | awk '/^worktree / {print $2}')
 
@@ -765,6 +737,10 @@ ship_worktree() {
 }
 
 cmd_ship_all() {
+  echo "ERR vw ship-all still contains the legacy submodule shipping flow."
+  echo "    Use normal git/GitHub branch shipping until vw is refactored for the monorepo."
+  exit 1
+
   cd "$MAIN_REPO"
 
   local remote
