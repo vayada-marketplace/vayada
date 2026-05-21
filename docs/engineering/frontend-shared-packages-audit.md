@@ -133,3 +133,15 @@ Step 4 (setup wizard) is the highest-leverage by line count and drift cost. Orde
 - Diffing app-by-app content for Tier 3 files. That belongs in the extraction PR.
 - Component-level deduplication inside `components/marketplace/`, `components/booking-flow/`, etc. — those are app-specific by design.
 - Backend duplication (FastAPI apps). Separate concern.
+
+## Update — dependency-graph complications discovered during step 4
+
+While starting the setup-wizard extraction, the audit's "just move the 7 step files" framing turned out to undersell the work. Each extraction has a dependency tail:
+
+- **Setup wizard steps** import from `@/lib/parseBookingAmenities` (booking-admin only), `@/lib/utils` barrel (booking-admin only), `@/components/ui/ToggleSwitch` (booking-admin only), `@/lib/constants/options`, `@/lib/constants/branding`, `@/lib/utils/uploadImage`, `@/lib/utils/getCurrencySymbol`. Each of those has its own per-app version with drift. Moving the wizard requires moving (or refactoring against props) the whole dependency subgraph.
+- **`getCurrencySymbol`** is byte-identical between marketplace-web and landing but differs from marketplace-admin (Unicode escapes vs literal chars; marketplace-admin lacks the `CURRENCY_OPTIONS` export the longer version provides). Extraction means deciding which characters/escapes win and where `CURRENCY_OPTIONS` stays.
+- **`lib/constants/options.ts`** (5 apps): each app likely has subtly different option arrays. Extraction-as-canonical requires understanding which options are actually needed where.
+
+These are real product decisions, not mechanical moves. The audit's "Tier 3/4/5 extractions are mechanical after step 3" claim was too optimistic — they're each individually a small reconciliation project.
+
+Implication for ordering: steps 5+ should each get their own Linear ticket with the dependency graph noted, the drift decisions surfaced, and a deliberate canonical-winner pick before the actual extraction. Bundling them into one session is how silent feature regressions happen.
