@@ -33,7 +33,9 @@ RUN adduser --system --uid 1001 nextjs
 
 # Copy necessary files from standalone build
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./apps/booking-admin/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/public ./apps/booking-admin/public
 
 USER nextjs
@@ -43,4 +45,4 @@ EXPOSE 3003
 ENV PORT=3003
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "apps/booking-admin/server.js"]
+CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; fi; exec node apps/booking-admin/server.js"]
