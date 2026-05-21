@@ -2,6 +2,8 @@
 AWS S3 service for file uploads
 """
 
+from __future__ import annotations
+
 import logging
 import uuid
 from datetime import UTC, datetime

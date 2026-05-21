@@ -2,6 +2,8 @@
 AWS S3 service for file uploads and URL generation
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import UTC
 
