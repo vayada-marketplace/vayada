@@ -3,3 +3,5 @@ terraform.tfvars
 *.tfplan
 tfplan
 .claude/
+node_modules/
+.npm/

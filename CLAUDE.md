@@ -57,6 +57,20 @@ npm run build    # always run before declaring a frontend change done
 npm run lint
 ```
 
+Root npm workspace commands are also available:
+```bash
+npm run dev:booking-web
+npm run build:booking-web
+npm run lint:booking-web
+npm run build       # all workspaces with build scripts
+npm run lint        # all workspaces with lint scripts
+npm run typecheck   # all workspaces with typecheck scripts
+```
+
+The repo uses npm workspaces because the imported apps already use npm
+`package-lock.json` files. Do not introduce pnpm/Yarn or rewrite lockfiles
+without a dedicated migration issue.
+
 Run the relevant `pytest` / `npm run build` before claiming a change is complete.
 
 ## The `vw` worktree workflow (canonical)

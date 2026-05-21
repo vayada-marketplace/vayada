@@ -1,0 +1,40 @@
+{
+  "name": "vayada",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vayada product application monorepo",
+  "packageManager": "npm@11.12.1",
+  "workspaces": [
+    "apps/*",
+    "docs",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run dev",
+    "dev:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run dev",
+    "dev:booking-web": "npm --workspace vayada-booking-engine-frontend run dev",
+    "dev:docs": "npm --workspace docs run start",
+    "dev:landing": "npm --workspace vayada-landing run dev",
+    "dev:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run dev",
+    "dev:marketplace-web": "npm --workspace vayada-creator-marketplace run dev",
+    "dev:pms-web": "npm --workspace vayada-pms-frontend run dev",
+    "build": "npm --workspaces --if-present run build",
+    "lint": "npm --workspaces --if-present run lint",
+    "typecheck": "npm --workspaces --if-present run typecheck",
+    "build:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run build",
+    "build:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run build",
+    "build:booking-web": "npm --workspace vayada-booking-engine-frontend run build",
+    "build:docs": "npm --workspace docs run build",
+    "build:landing": "npm --workspace vayada-landing run build",
+    "build:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run build",
+    "build:marketplace-web": "npm --workspace vayada-creator-marketplace run build",
+    "build:pms-web": "npm --workspace vayada-pms-frontend run build",
+    "lint:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run lint",
+    "lint:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run lint",
+    "lint:booking-web": "npm --workspace vayada-booking-engine-frontend run lint",
+    "lint:landing": "npm --workspace vayada-landing run lint",
+    "lint:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run lint",
+    "lint:marketplace-web": "npm --workspace vayada-creator-marketplace run lint",
+    "lint:pms-web": "npm --workspace vayada-pms-frontend run lint"
+  }
+}

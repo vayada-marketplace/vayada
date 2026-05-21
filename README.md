@@ -23,6 +23,7 @@ vayada is a hospitality platform that connects travel creators and influencers w
 - [Infrastructure](#infrastructure)
 - [Environment Variables](#environment-variables)
 - [Monorepo App Mapping](#monorepo-app-mapping)
+- [Workspace Package Manager](#workspace-package-manager)
 - [Scripts](#scripts)
 - [Test Accounts](#test-accounts)
 - [Development Workflow](#development-workflow)
@@ -389,6 +390,42 @@ in GitHub; the legacy root product directories were removed from this repo.
 | `pms/vayada-pms-frontend` | `apps/pms-web` |
 | `affiliate/vayada-affiliate-dashboard` | `apps/affiliate-dashboard` |
 | `marketing/vayada-landing` | `apps/landing` |
+
+---
+
+## Workspace Package Manager
+
+The monorepo uses **npm workspaces** at the repository root.
+
+The initial workspace migration preserves each app's existing `package-lock.json`
+and app-local npm workflow, while adding a root `package-lock.json` for
+reproducible workspace installs. You can still run `npm install` and
+`npm run dev/build/lint` from an individual frontend app.
+
+Root workspace commands are available for orchestration:
+
+```bash
+npm ci
+npm run dev:booking-web
+npm run build:booking-web
+npm run lint:booking-web
+npm run build
+npm run lint
+npm run typecheck
+```
+
+Workspace layout:
+
+| Path | Purpose |
+|---|---|
+| `apps/*` | Product apps |
+| `docs` | Docusaurus docs app |
+| `packages/*` | Future shared JavaScript/TypeScript packages |
+
+Python apps remain outside npm workspaces and continue to use
+`requirements.txt`, pytest, and their app-local Python commands.
+
+See `docs/engineering/workspace-package-manager.md` for the decision record.
 
 ---
 
