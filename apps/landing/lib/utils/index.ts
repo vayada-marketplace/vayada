@@ -1,0 +1,499 @@
+/**
+ * Utility functions
+ */
+
+export * from './profileStatus'
+export * from './getCurrencySymbol'
+
+import { type ClassValue, clsx } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+/**
+ * Utility function to merge Tailwind CSS classes
+ */
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+/**
+ * Format number with commas
+ */
+export function formatNumber(num: number): string {
+  return new Intl.NumberFormat('en-US').format(num)
+}
+
+/**
+ * Format budget/currency value
+ */
+export function formatBudget(value: number): string {
+  return `€${value.toLocaleString()}`
+}
+
+/**
+ * Format followers count (e.g., 1000 -> "1K", 1000000 -> "1M")
+ */
+export function formatFollowers(value: number): string {
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(1)}M`
+  } else if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}K`
+  }
+  return value.toString()
+}
+
+/**
+ * Compact follower count with lowercase suffix (e.g., 500000 -> "500k", 1500000 -> "1.5m").
+ * Drops trailing ".0" so 20,000 renders as "20k", not "20.0k".
+ */
+export function formatFollowersCompact(value: number): string {
+  const trimZero = (n: number) => n.toFixed(1).replace(/\.0$/, '')
+  if (value >= 1_000_000) {
+    return `${trimZero(value / 1_000_000)}m`
+  }
+  if (value >= 1_000) {
+    return `${trimZero(value / 1_000)}k`
+  }
+  return value.toString()
+}
+
+/**
+ * Format engagement rate as percentage
+ */
+export function formatEngagementRate(value: number): string {
+  return `${value.toFixed(1)}%`
+}
+
+/**
+ * Get initials from a name (e.g., "John Doe" -> "JD")
+ */
+export function getInitials(name: string | undefined | null): string {
+  if (!name) return ''
+  return name
+    .split(' ')
+    .map((n) => n[0])
+    .join('')
+    .substring(0, 2)
+    .toUpperCase()
+}
+
+/**
+ * Format number with K/M suffix, handling undefined
+ */
+export function formatCompactNumber(num: number | undefined | null): string {
+  if (!num) return '0'
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M'
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K'
+  return num.toString()
+}
+
+/**
+ * Generate slug from string
+ */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * Format date to readable string
+ */
+export function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(d)
+}
+
+/**
+ * Format date to short readable string (e.g., "Jan 15, 2024")
+ */
+export function formatDateShort(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return d.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+/**
+ * Get relative time ago string (e.g., "2 hours ago", "3 days ago")
+ */
+export function getTimeAgo(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const now = new Date()
+  const diffInSeconds = Math.floor((now.getTime() - d.getTime()) / 1000)
+
+  if (diffInSeconds < 60) {
+    return 'less than a minute ago'
+  }
+  const diffInMinutes = Math.floor(diffInSeconds / 60)
+  if (diffInMinutes < 60) {
+    return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`
+  }
+  const diffInHours = Math.floor(diffInMinutes / 60)
+  if (diffInHours < 24) {
+    return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`
+  }
+  const diffInDays = Math.floor(diffInHours / 24)
+  if (diffInDays === 1) return '1 day ago'
+  return `${diffInDays} days ago`
+}
+
+/**
+ * Month abbreviation mapping (German to English abbreviations)
+ */
+const MONTH_ABBR_MAP: Record<string, string> = {
+  'Januar': 'Jan',
+  'Februar': 'Feb',
+  'März': 'Mar',
+  'April': 'Apr',
+  'Mai': 'May',
+  'Juni': 'Jun',
+  'Juli': 'Jul',
+  'August': 'Aug',
+  'September': 'Sep',
+  'Oktober': 'Oct',
+  'November': 'Nov',
+  'Dezember': 'Dec',
+  // English month names (already abbreviated or full)
+  'January': 'Jan',
+  'February': 'Feb',
+  'March': 'Mar',
+  'May': 'May',
+  'June': 'Jun',
+  'July': 'Jul',
+  'October': 'Oct',
+  'December': 'Dec',
+}
+
+/**
+ * Get month abbreviation from full month name (supports German and English)
+ */
+export function getMonthAbbr(month: string): string {
+  return MONTH_ABBR_MAP[month] || month.substring(0, 3)
+}
+
+/**
+ * Debounce function
+ */
+export function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout | null = null
+
+  return function executedFunction(...args: Parameters<T>) {
+    const later = () => {
+      timeout = null
+      func(...args)
+    }
+
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(later, wait)
+  }
+}
+
+/**
+ * Build query string from params object
+ * Filters out undefined/null values and converts numbers to strings
+ * @param params - Object with key-value pairs
+ * @returns Query string with '?' prefix if params exist, empty string otherwise
+ */
+export function buildQueryString(params: Record<string, string | number | boolean | undefined | null>): string {
+  const searchParams = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      searchParams.append(key, String(value))
+    }
+  }
+
+  const query = searchParams.toString()
+  return query ? `?${query}` : ''
+}
+
+/**
+ * Transform HotelListing from API to Hotel type for frontend
+ */
+import type { HotelListing, Hotel, Creator, Platform, CollaborationOffering } from '@/lib/types'
+
+// Backend API response types for marketplace (snake_case from backend)
+interface CreatorMarketplaceResponse {
+  id: string
+  name: string
+  location: string
+  short_description: string
+  portfolio_link: string | null
+  profile_picture: string | null
+  creator_type: 'Lifestyle' | 'Travel'
+  platforms: Array<{
+    id: string
+    name: "Instagram" | "TikTok" | "YouTube" | "Facebook"
+    handle: string
+    followers: number
+    engagement_rate: number
+    top_countries: Array<{ country: string; percentage: number }> | null
+    top_age_groups: Array<{ ageRange: string; percentage: number }> | null
+    gender_split: { male: number; female: number; other?: number } | null
+  }>
+  audience_size: number
+  average_rating: number
+  total_reviews: number
+  created_at: string
+}
+
+interface ListingMarketplaceResponse {
+  id: string
+  hotel_profile_id: string
+  hotel_name: string
+  hotel_picture: string | null
+  name: string
+  location: string
+  description: string
+  accommodation_type: string | null
+  images: string[]
+  status: "pending" | "verified" | "rejected"
+  collaboration_offerings: Array<{
+    id: string
+    listing_id: string
+    collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate"
+    availability_months: string[]
+    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[]
+    free_stay_min_nights: number | null
+    free_stay_max_nights: number | null
+    paid_max_amount: string | null // Backend returns as string (e.g., "2000.00")
+    currency: string | null
+    discount_percentage: number | null
+    commission_percentage: number | null
+    min_followers: number | null
+    created_at: string
+    updated_at: string
+  }>
+  creator_requirements?: {
+    id: string
+    listing_id: string
+    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[]
+    target_countries: string[]
+    target_age_min: number | null
+    target_age_max: number | null
+    created_at: string
+    updated_at: string
+  }
+  created_at: string
+}
+
+/**
+ * Transform CreatorMarketplaceResponse from API to Creator type for frontend
+ */
+export function transformCreatorMarketplaceResponse(apiCreator: CreatorMarketplaceResponse): Creator {
+  // Transform platforms - remove id field and map from snake_case to camelCase
+  const platforms: Platform[] = apiCreator.platforms.map((platform) => ({
+    name: platform.name,
+    handle: platform.handle,
+    followers: platform.followers,
+    engagementRate: typeof platform.engagement_rate === 'number' ? platform.engagement_rate : 0,
+    topCountries: platform.top_countries || undefined,
+    topAgeGroups: platform.top_age_groups || undefined,
+    genderSplit: platform.gender_split || undefined,
+  }))
+
+  return {
+    id: apiCreator.id,
+    email: '', // Not provided by marketplace endpoint
+    name: apiCreator.name,
+    platforms,
+    audienceSize: apiCreator.audience_size,
+    location: apiCreator.location,
+    portfolioLink: apiCreator.portfolio_link || undefined,
+    shortDescription: apiCreator.short_description || undefined,
+    phone: null,
+    profilePicture: apiCreator.profile_picture || undefined,
+    creatorType: apiCreator.creator_type || 'Lifestyle',
+    rating: {
+      averageRating: apiCreator.average_rating,
+      totalReviews: apiCreator.total_reviews,
+    },
+    status: 'verified' as const, // Marketplace only returns active/verified creators
+    createdAt: new Date(apiCreator.created_at),
+    updatedAt: new Date(apiCreator.created_at), // Use created_at as fallback
+  }
+}
+
+/**
+ * Transform ListingMarketplaceResponse from API to Hotel type for frontend
+ */
+export function transformListingMarketplaceResponse(apiListing: ListingMarketplaceResponse): Hotel {
+  // Process collaboration offerings to extract collaboration type, availability, platforms
+  const offerings = apiListing.collaboration_offerings || []
+  
+  // Determine collaboration type (Kostenlos if has Free Stay, otherwise Bezahlt if has Paid)
+  let collaborationType: 'Kostenlos' | 'Bezahlt' | undefined
+  const hasFreeStay = offerings.some(o => o.collaboration_type === 'Free Stay')
+  const hasPaid = offerings.some(o => o.collaboration_type === 'Paid')
+  
+  if (hasFreeStay) {
+    collaborationType = 'Kostenlos'
+  } else if (hasPaid) {
+    collaborationType = 'Bezahlt'
+  }
+  
+  // Get availability months (union of all offerings), sorted chronologically
+  const monthOrder = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+  const availabilityMonths = Array.from(
+    new Set(offerings.flatMap(o => o.availability_months || []))
+  ).sort((a, b) => monthOrder.indexOf(a) - monthOrder.indexOf(b))
+
+  // Get platforms (union of all offerings)
+  const platforms = Array.from(
+    new Set(offerings.flatMap(o => o.platforms || []))
+  )
+  
+  // Get min/max nights from free stay offering
+  const freeStayOffering = offerings.find(o => o.collaboration_type === 'Free Stay')
+  const numberOfNights = freeStayOffering?.free_stay_max_nights || undefined
+  const minNumberOfNights = freeStayOffering?.free_stay_min_nights || undefined
+
+  // Full offerings list for detail rendering — normalize paid_max_amount from string to number
+  const collaborationOfferings: CollaborationOffering[] = offerings.map(o => ({
+    id: o.id,
+    listing_id: o.listing_id,
+    collaboration_type: o.collaboration_type,
+    availability_months: o.availability_months,
+    platforms: o.platforms,
+    free_stay_min_nights: o.free_stay_min_nights,
+    free_stay_max_nights: o.free_stay_max_nights,
+    paid_max_amount: o.paid_max_amount !== null ? Number(o.paid_max_amount) : null,
+    currency: o.currency,
+    discount_percentage: o.discount_percentage,
+    commission_percentage: o.commission_percentage,
+    min_followers: o.min_followers ?? null,
+    created_at: o.created_at,
+    updated_at: o.updated_at,
+  }))
+
+  // Extract creator requirements
+  const creatorRequirements = apiListing.creator_requirements
+  const targetAudience = creatorRequirements?.target_countries || []
+  const targetAgeMin = creatorRequirements?.target_age_min || undefined
+  const targetAgeMax = creatorRequirements?.target_age_max || undefined
+
+  // Use hotel picture as first image if listing has no images, otherwise use listing images
+  const images = apiListing.images && apiListing.images.length > 0
+    ? apiListing.images
+    : apiListing.hotel_picture
+    ? [apiListing.hotel_picture]
+    : []
+
+  return {
+    id: apiListing.id,
+    hotelProfileId: apiListing.hotel_profile_id,
+    name: apiListing.name,
+    location: apiListing.location,
+    description: apiListing.description,
+    images,
+    accommodationType: apiListing.accommodation_type || undefined,
+    collaborationType,
+    collaborationOfferings,
+    availability: availabilityMonths.length > 0 ? availabilityMonths : undefined,
+    platforms: platforms.length > 0 ? platforms : undefined,
+    domain: undefined, // Not provided in listing response
+    boardType: undefined, // Not provided in listing response
+    numberOfNights,
+    minNumberOfNights,
+    targetAudience: targetAudience.length > 0 ? targetAudience : undefined,
+    targetAgeMin,
+    targetAgeMax,
+    socialLinks: undefined, // Not provided in listing response
+    status: apiListing.status,
+    createdAt: new Date(apiListing.created_at),
+    updatedAt: new Date(apiListing.created_at), // Use created_at as fallback
+  }
+}
+
+export function transformHotelListingToHotel(listing: HotelListing): Hotel {
+  // Handle empty or missing collaboration offerings
+  const offerings = listing.collaboration_offerings || []
+  
+  // Extract collaboration types from offerings
+  const hasFreeStay = offerings.some(
+    (o) => o.collaboration_type === 'Free Stay'
+  )
+  const hasPaid = offerings.some(
+    (o) => o.collaboration_type === 'Paid'
+  )
+  
+  // Determine collaboration type (Kostenlos if has Free Stay, otherwise Bezahlt if has Paid)
+  let collaborationType: 'Kostenlos' | 'Bezahlt' | undefined
+  if (hasFreeStay) {
+    collaborationType = 'Kostenlos'
+  } else if (hasPaid) {
+    collaborationType = 'Bezahlt'
+  }
+
+  // Get availability months (union of all offerings), sorted chronologically
+  const monthOrder2 = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+  const availabilityMonths = Array.from(
+    new Set(
+      offerings.flatMap((offering) => offering.availability_months || [])
+    )
+  ).sort((a, b) => monthOrder2.indexOf(a) - monthOrder2.indexOf(b))
+
+  // Get platforms (union of all offerings)
+  const platforms = Array.from(
+    new Set(
+      offerings.flatMap((offering) => offering.platforms || [])
+    )
+  )
+
+  // Extract collaboration-specific fields from the first offering of each type
+  const freeStayOffering = offerings.find(
+    (o) => o.collaboration_type === 'Free Stay'
+  )
+  
+  // Get target audience from creator requirements
+  const targetAudience = listing.creator_requirements?.target_countries || []
+
+  return {
+    id: listing.id,
+    hotelProfileId: listing.hotel_profile_id,
+    name: listing.name,
+    location: listing.location,
+    description: listing.description,
+    images: listing.images || [],
+    accommodationType: listing.accommodation_type || undefined,
+    collaborationType,
+    collaborationOfferings: offerings,
+    availability: availabilityMonths.length > 0 ? availabilityMonths : undefined,
+    platforms: platforms.length > 0 ? platforms : undefined,
+    numberOfNights: freeStayOffering?.free_stay_max_nights || undefined,
+    minNumberOfNights: freeStayOffering?.free_stay_min_nights || undefined,
+    targetAudience: targetAudience.length > 0 ? targetAudience : undefined,
+    status: listing.status,
+    createdAt: new Date(listing.created_at),
+    updatedAt: new Date(listing.updated_at),
+  }
+}
+
+/**
+ * Extract error message from unknown error type
+ * Handles Error objects, ApiErrorResponse, and plain objects with message property
+ */
+export function getErrorMessage(error: unknown, fallback = 'An unexpected error occurred'): string {
+  if (error instanceof Error) {
+    return error.message || fallback
+  }
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message: unknown }).message) || fallback
+  }
+  if (typeof error === 'string') {
+    return error
+  }
+  return fallback
+}
