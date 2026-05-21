@@ -1,28 +1,27 @@
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
+# Monorepo-aware Dockerfile.
+# Build context is the repo root (workflow sets context: .).
+# Workspace package @vayada/hotel-setup-wizard is resolved from packages/.
+
+# Stage 1: Builder
+FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-# Stage 2: Builder
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Copy the monorepo. .dockerignore at root excludes node_modules, .next, etc.
 COPY . .
 
-# Accept build arguments for API URLs
+# Workspace install — resolves apps/*, packages/*, and docs.
+RUN npm ci
+
 ARG NEXT_PUBLIC_API_URL
 ARG NEXT_PUBLIC_PMS_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NEXT_PUBLIC_PMS_URL=${NEXT_PUBLIC_PMS_URL}
 
-# Build the application
+WORKDIR /app/apps/booking-admin
 RUN npm run build
 
-# Stage 3: Runner
+# Stage 2: Runner — Next.js standalone output
 FROM node:20-alpine AS runner
 WORKDIR /app
 
@@ -31,14 +30,10 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy necessary files from standalone build
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./apps/booking-admin/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
-COPY --from=builder --chown=nextjs:nodejs /app/public ./apps/booking-admin/public
+# Standalone is rooted at the monorepo; server.js sits at apps/<name>/server.js.
+COPY --from=builder --chown=nextjs:nodejs /app/apps/booking-admin/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/booking-admin/.next/static ./apps/booking-admin/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/booking-admin/public ./apps/booking-admin/public
 
 USER nextjs
 
@@ -47,4 +42,4 @@ EXPOSE 3003
 ENV PORT=3003
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; fi; if [ -f app/server.js ]; then exec node app/server.js; fi; exec node apps/booking-admin/server.js"]
+CMD ["node", "apps/booking-admin/server.js"]

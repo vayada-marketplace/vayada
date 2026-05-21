@@ -12,7 +12,7 @@ import BrandMediaStep from "@/components/setup/BrandMediaStep";
 import RoomsStep, { type RoomType, createEmptyRoom } from "@/components/setup/RoomsStep";
 import AddonsStep, { type SetupAddon, createEmptyAddon } from "@/components/setup/AddonsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
-import BenefitsStep from "@/components/setup/BenefitsStep";
+import { BenefitsStep } from "@vayada/hotel-setup-wizard";
 import LastMinuteStep, {
   type LastMinuteConfig,
   createEmptyLastMinuteConfig,
@@ -402,7 +402,7 @@ export default function InviteCodesPage() {
 
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col">
-        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        { }
         <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
         {/* Top bar */}

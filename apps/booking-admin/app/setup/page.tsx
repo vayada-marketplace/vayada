@@ -20,7 +20,7 @@ import RoomsStep, {
 } from "@/components/setup/RoomsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
 import AddonsStep, { type SetupAddon } from "@/components/setup/AddonsStep";
-import BenefitsStep from "@/components/setup/BenefitsStep";
+import { BenefitsStep } from "@vayada/hotel-setup-wizard";
 import PromoCodesStep, { type SetupPromoCode } from "@/components/setup/PromoCodesStep";
 import LastMinuteStep, {
   type LastMinuteConfig,
@@ -869,7 +869,7 @@ export default function SetupPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      { }
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
       {/* Top bar */}
