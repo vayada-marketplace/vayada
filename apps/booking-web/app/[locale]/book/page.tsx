@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -19,6 +19,19 @@ import { trackEvent } from "@/services/api/tracking";
 import { usePricing } from "@/lib/hooks/usePricing";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { saveGuestDetails } from "@/lib/storage/bookingDraft";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function FieldError({ id, message }: { id: string; message: string }) {
+  return (
+    <p id={id} role="alert" className="mt-1.5 flex items-center gap-1 text-xs text-red-600">
+      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+      </svg>
+      {message}
+    </p>
+  );
+}
 
 const ARRIVAL_TIMES = Array.from({ length: 24 }, (_, i) => {
   const h = i.toString().padStart(2, "0");
@@ -111,7 +124,18 @@ function BookPageContent() {
   const [estimatedArrivalTime, setEstimatedArrivalTime] = useState("");
   const [numberOfGuests, setNumberOfGuests] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    phone?: string;
+  }>({});
+
+  const firstNameRef = useRef<HTMLInputElement>(null);
+  const lastNameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLDivElement>(null);
   const [guestFormSettings, setGuestFormSettings] = useState<{
     specialRequestsEnabled: boolean;
     arrivalTimeEnabled: boolean;
@@ -129,18 +153,38 @@ function BookPageContent() {
     });
   }, [slug]);
 
+  const validateFields = () => {
+    const errors: typeof fieldErrors = {};
+    if (!firstName.trim()) errors.firstName = t("errorRequired");
+    if (!lastName.trim()) errors.lastName = t("errorRequired");
+    if (!email.trim()) errors.email = t("errorRequired");
+    else if (!EMAIL_RE.test(email)) errors.email = t("errorInvalidEmail");
+    if (!phone.trim()) errors.phone = t("errorRequired");
+    return errors;
+  };
+
+  const handleBlur = (field: keyof typeof fieldErrors) => {
+    const errors = validateFields();
+    setFieldErrors((prev) => ({ ...prev, [field]: errors[field] }));
+  };
+
   const handleSubmit = async () => {
-    if (!firstName || !lastName || !email || !phone || !phoneCountryIso) {
-      setError(t("fillRequired"));
+    const errors = validateFields();
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      if (errors.firstName) firstNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (errors.lastName) lastNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (errors.email) emailRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (errors.phone) phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!room) {
-      setError("No room selected");
+      setSubmitError("No room selected");
       return;
     }
 
     setSubmitting(true);
-    setError("");
+    setSubmitError("");
 
     try {
       // Read referral cookie if present
@@ -187,7 +231,7 @@ function BookPageContent() {
       if (promoCodeParam) params.set("promoCode", promoCodeParam);
       router.push(`/payment?${params.toString()}`);
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      setSubmitError(err.message || "Something went wrong");
     } finally {
       setSubmitting(false);
     }
@@ -217,9 +261,9 @@ function BookPageContent() {
           <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
 
-        {error && (
+        {submitError && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-            {error}
+            {submitError}
           </div>
         )}
 
@@ -333,64 +377,114 @@ function BookPageContent() {
                 {/* First + Last Name */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                    <label htmlFor="firstName" className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t("firstName")} <span className="text-red-500">*</span>
                     </label>
                     <input
+                      id="firstName"
+                      ref={firstNameRef}
                       type="text"
                       value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
+                      onChange={(e) => {
+                        setFirstName(e.target.value);
+                        if (fieldErrors.firstName && e.target.value.trim())
+                          setFieldErrors((prev) => ({ ...prev, firstName: undefined }));
+                      }}
+                      onBlur={() => handleBlur("firstName")}
                       placeholder="John"
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                      aria-invalid={!!fieldErrors.firstName}
+                      aria-describedby={fieldErrors.firstName ? "firstName-error" : undefined}
+                      className={`w-full px-4 py-3 rounded-lg border ${fieldErrors.firstName ? "border-red-400 focus:ring-red-500 focus:border-red-500" : "border-gray-300 focus:ring-primary-500 focus:border-primary-500"} text-gray-900 focus:outline-none focus:ring-2 placeholder:text-gray-400`}
                     />
+                    {fieldErrors.firstName && (
+                      <FieldError id="firstName-error" message={fieldErrors.firstName} />
+                    )}
                   </div>
                   <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                    <label htmlFor="lastName" className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t("lastName")} <span className="text-red-500">*</span>
                     </label>
                     <input
+                      id="lastName"
+                      ref={lastNameRef}
                       type="text"
                       value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
+                      onChange={(e) => {
+                        setLastName(e.target.value);
+                        if (fieldErrors.lastName && e.target.value.trim())
+                          setFieldErrors((prev) => ({ ...prev, lastName: undefined }));
+                      }}
+                      onBlur={() => handleBlur("lastName")}
                       placeholder="Doe"
-                      className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                      aria-invalid={!!fieldErrors.lastName}
+                      aria-describedby={fieldErrors.lastName ? "lastName-error" : undefined}
+                      className={`w-full px-4 py-3 rounded-lg border ${fieldErrors.lastName ? "border-red-400 focus:ring-red-500 focus:border-red-500" : "border-gray-300 focus:ring-primary-500 focus:border-primary-500"} text-gray-900 focus:outline-none focus:ring-2 placeholder:text-gray-400`}
                     />
+                    {fieldErrors.lastName && (
+                      <FieldError id="lastName-error" message={fieldErrors.lastName} />
+                    )}
                   </div>
                 </div>
 
                 {/* Email */}
                 <div>
-                  <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                  <label htmlFor="email" className="block text-sm font-semibold text-gray-900 mb-1.5">
                     {t("emailAddress")} <span className="text-red-500">*</span>
                   </label>
                   <input
+                    id="email"
+                    ref={emailRef}
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (fieldErrors.email && e.target.value.trim() && EMAIL_RE.test(e.target.value))
+                        setFieldErrors((prev) => ({ ...prev, email: undefined }));
+                    }}
+                    onBlur={() => handleBlur("email")}
                     placeholder="john.doe@example.com"
-                    className="w-full px-4 py-3 rounded-lg border border-gray-300 text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 placeholder:text-gray-400"
+                    aria-invalid={!!fieldErrors.email}
+                    aria-describedby={fieldErrors.email ? "email-error" : undefined}
+                    className={`w-full px-4 py-3 rounded-lg border ${fieldErrors.email ? "border-red-400 focus:ring-red-500 focus:border-red-500" : "border-gray-300 focus:ring-primary-500 focus:border-primary-500"} text-gray-900 focus:outline-none focus:ring-2 placeholder:text-gray-400`}
                   />
+                  {fieldErrors.email && (
+                    <FieldError id="email-error" message={fieldErrors.email} />
+                  )}
                 </div>
 
                 {/* Phone + Country */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-900 mb-1.5">
+                    <label htmlFor="phone" className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t("phoneNumber")} <span className="text-red-500">*</span>
                     </label>
-                    <div className="flex rounded-lg border border-gray-300 focus-within:ring-2 focus-within:ring-primary-500 focus-within:border-primary-500">
+                    <div
+                      ref={phoneRef}
+                      className={`flex rounded-lg border ${fieldErrors.phone ? "border-red-400 focus-within:ring-red-500 focus-within:border-red-500" : "border-gray-300 focus-within:ring-primary-500 focus-within:border-primary-500"} focus-within:ring-2`}
+                    >
                       <CountryDialCodePicker
                         value={phoneCountryIso}
                         onChange={setPhoneCountryIso}
                       />
                       <input
+                        id="phone"
                         type="tel"
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => {
+                          setPhone(e.target.value);
+                          if (fieldErrors.phone && e.target.value.trim())
+                            setFieldErrors((prev) => ({ ...prev, phone: undefined }));
+                        }}
+                        onBlur={() => handleBlur("phone")}
                         placeholder={t("phoneLocalPlaceholder")}
+                        aria-invalid={!!fieldErrors.phone}
+                        aria-describedby={fieldErrors.phone ? "phone-error" : undefined}
                         className="flex-1 min-w-0 px-4 py-3 text-gray-900 focus:outline-none placeholder:text-gray-400"
                       />
                     </div>
+                    {fieldErrors.phone && (
+                      <FieldError id="phone-error" message={fieldErrors.phone} />
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-semibold text-gray-900 mb-1.5">

@@ -144,6 +144,8 @@
     "continueToPayment": "Continuer vers le paiement",
     "booking": "Réservation en cours...",
     "fillRequired": "Veuillez remplir tous les champs obligatoires.",
+    "errorRequired": "Obligatoire",
+    "errorInvalidEmail": "Veuillez saisir une adresse e-mail valide",
     "yourStay": "Votre séjour",
     "roomLabel": "Chambre",
     "rate": "Tarif",

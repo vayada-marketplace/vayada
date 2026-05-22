@@ -144,6 +144,8 @@
     "continueToPayment": "Lanjutkan ke Pembayaran",
     "booking": "Memesan...",
     "fillRequired": "Mohon lengkapi semua kolom yang diperlukan.",
+    "errorRequired": "Wajib diisi",
+    "errorInvalidEmail": "Masukkan alamat email yang valid",
     "yourStay": "Masa Menginap Anda",
     "roomLabel": "Kamar",
     "rate": "Tarif",

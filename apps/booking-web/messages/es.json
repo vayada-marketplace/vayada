@@ -144,6 +144,8 @@
     "continueToPayment": "Continuar al pago",
     "booking": "Reservando...",
     "fillRequired": "Por favor completa todos los campos obligatorios.",
+    "errorRequired": "Obligatorio",
+    "errorInvalidEmail": "Por favor ingresa una dirección de correo electrónico válida",
     "yourStay": "Tu Estancia",
     "roomLabel": "Habitación",
     "rate": "Tarifa",

@@ -144,6 +144,8 @@
     "continueToPayment": "Continue to Payment",
     "booking": "Booking...",
     "fillRequired": "Please fill in all required fields.",
+    "errorRequired": "Required",
+    "errorInvalidEmail": "Please enter a valid email address",
     "yourStay": "Your Stay",
     "roomLabel": "Room",
     "rate": "Rate",
