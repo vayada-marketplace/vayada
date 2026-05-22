@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./BenefitsStep": "./src/BenefitsStep.tsx",
+    "./BrandMediaStep": "./src/BrandMediaStep.tsx",
     "./LastMinuteStep": "./src/LastMinuteStep.tsx"
   },
   "peerDependencies": {

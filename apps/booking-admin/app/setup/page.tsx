@@ -6,12 +6,12 @@ import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
 import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
-import { FONT_PAIRINGS } from "@/lib/constants/branding";
+import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { CheckIcon } from "@heroicons/react/24/outline";
 import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
+import { getCurrencySymbol } from "@/lib/utils";
 
 import PropertyStep from "@/components/setup/PropertyStep";
-import BrandMediaStep from "@/components/setup/BrandMediaStep";
 import PmsStep from "@/components/setup/PmsStep";
 import RoomsStep, {
   type RoomType,
@@ -22,6 +22,7 @@ import PoliciesStep from "@/components/setup/PoliciesStep";
 import AddonsStep, { type SetupAddon } from "@/components/setup/AddonsStep";
 import {
   BenefitsStep,
+  BrandMediaStep,
   LastMinuteStep,
   type LastMinuteConfig,
   createEmptyLastMinuteConfig,
@@ -978,6 +979,9 @@ export default function SetupPage() {
             setStep(4);
           }}
           stepIndicators={stepIndicators}
+          colorPresets={COLOR_PRESETS}
+          fontPairings={FONT_PAIRINGS}
+          formatPrice={(amt, c) => `${getCurrencySymbol(c)}${amt}`}
         />
       )}
 

@@ -2,15 +2,29 @@
 
 import { RefObject } from "react";
 import { PhotoIcon, XMarkIcon, CheckIcon } from "@heroicons/react/24/outline";
-import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
+
+export interface ColorPreset {
+  name: string;
+  primary: string;
+  accent?: string;
+}
+
+export interface FontPairing {
+  id: string;
+  name: string;
+  fonts: string;
+  preview: string;
+  headingFamily: string;
+  bodyFamily: string;
+}
 
 interface BrandMediaStepProps {
   heroImage: string;
   setHeroImage: (v: string) => void;
   primaryColor: string;
   setPrimaryColor: (v: string) => void;
-  accentColor: string;
-  setAccentColor: (v: string) => void;
+  accentColor?: string;
+  setAccentColor?: (v: string) => void;
   selectedFont: string;
   setSelectedFont: (v: string) => void;
   propertyDescription: string;
@@ -26,7 +40,12 @@ interface BrandMediaStepProps {
   onBack: () => void;
   onContinue: () => void;
   stepIndicators: React.ReactNode;
+  colorPresets: ColorPreset[];
+  fontPairings: FontPairing[];
+  formatPrice?: (amount: number, currency: string) => string;
 }
+
+const defaultFormatPrice = (amount: number, currency: string) => `${currency} ${amount}`;
 
 export default function BrandMediaStep({
   heroImage,
@@ -50,16 +69,20 @@ export default function BrandMediaStep({
   onBack,
   onContinue,
   stepIndicators,
+  colorPresets,
+  fontPairings,
+  formatPrice = defaultFormatPrice,
 }: BrandMediaStepProps) {
-  const currentFont = FONT_PAIRINGS.find((f) => f.id === selectedFont) || FONT_PAIRINGS[0];
+  const currentFont = fontPairings.find((f) => f.id === selectedFont) || fontPairings[0];
+  const showAccentPicker = accentColor !== undefined && setAccentColor !== undefined;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="max-w-6xl mx-auto px-6 pt-6 w-full shrink-0">{stepIndicators}</div>
-      <div className="max-w-6xl mx-auto px-6 pb-5 flex gap-5 flex-1 min-h-0 w-full">
+    <div className="flex-1 flex flex-col min-h-0 overflow-y-auto lg:overflow-visible">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 w-full shrink-0">{stepIndicators}</div>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-5 flex flex-col lg:flex-row gap-5 flex-1 min-h-0 w-full">
         {/* LEFT: Controls panel */}
-        <div className="w-[380px] shrink-0 flex flex-col min-h-0">
-          <div className="flex-1 overflow-y-auto space-y-3 pb-3">
+        <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col lg:min-h-0">
+          <div className="flex-1 lg:overflow-y-auto space-y-3 pb-3">
             {/* Hero Image */}
             <div className="bg-white rounded-lg border border-gray-200 p-4">
               <h2 className="text-[13px] font-semibold text-gray-900">
@@ -145,42 +168,46 @@ export default function BrandMediaStep({
                   </div>
                 </div>
 
-                <div>
-                  <h3 className="text-[12px] font-semibold text-gray-900">Background Accent</h3>
-                  <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">
-                    Card and section backgrounds
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <label
-                      className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
-                      style={{ backgroundColor: accentColor }}
-                    >
+                {showAccentPicker && (
+                  <div>
+                    <h3 className="text-[12px] font-semibold text-gray-900">Background Accent</h3>
+                    <p className="text-[11px] text-gray-500 mt-0.5 mb-1.5">
+                      Card and section backgrounds
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <label
+                        className="w-8 h-8 rounded-full border border-gray-200 cursor-pointer shrink-0"
+                        style={{ backgroundColor: accentColor }}
+                      >
+                        <input
+                          type="color"
+                          value={accentColor}
+                          onChange={(e) => setAccentColor!(e.target.value)}
+                          className="opacity-0 w-0 h-0"
+                        />
+                      </label>
                       <input
-                        type="color"
+                        type="text"
                         value={accentColor}
-                        onChange={(e) => setAccentColor(e.target.value)}
-                        className="opacity-0 w-0 h-0"
+                        onChange={(e) => setAccentColor!(e.target.value)}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
                       />
-                    </label>
-                    <input
-                      type="text"
-                      value={accentColor}
-                      onChange={(e) => setAccentColor(e.target.value)}
-                      className="w-24 px-2 py-1 border border-gray-300 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
-                    />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Quick Presets */}
                 <div>
                   <h3 className="text-[12px] font-semibold text-gray-900 mb-1.5">Quick Presets</h3>
                   <div className="grid grid-cols-2 gap-1.5">
-                    {COLOR_PRESETS.map((preset) => (
+                    {colorPresets.map((preset) => (
                       <button
                         key={preset.name}
                         onClick={() => {
                           setPrimaryColor(preset.primary);
-                          setAccentColor(preset.accent);
+                          if (showAccentPicker && preset.accent) {
+                            setAccentColor!(preset.accent);
+                          }
                         }}
                         className={`flex items-center gap-2 px-2.5 py-1.5 border rounded-lg text-[12px] text-gray-700 hover:bg-gray-50 transition-colors ${
                           primaryColor === preset.primary
@@ -206,7 +233,7 @@ export default function BrandMediaStep({
               <p className="text-[12px] text-gray-500 mt-0.5 mb-3">Select a font pairing</p>
 
               <div className="space-y-1.5">
-                {FONT_PAIRINGS.map((pairing) => (
+                {fontPairings.map((pairing) => (
                   <button
                     key={pairing.id}
                     onClick={() => setSelectedFont(pairing.id)}
@@ -260,17 +287,17 @@ export default function BrandMediaStep({
           </div>
 
           {/* Bottom buttons */}
-          <div className="pt-3 shrink-0 border-t border-gray-100 flex items-center justify-between gap-3">
+          <div className="mt-6 shrink-0 flex items-center justify-between gap-3">
             <button
               onClick={onBack}
-              className="px-4 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="px-5 py-2 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
             >
               Back
             </button>
             <button
               onClick={onContinue}
               disabled={!canProceed}
-              className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-primary-500 text-white text-[13px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-5 py-2 bg-primary-500 text-white text-[13px] font-semibold rounded-lg hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Continue
             </button>
@@ -284,7 +311,7 @@ export default function BrandMediaStep({
         </div>
 
         {/* RIGHT: Live preview */}
-        <div className="flex-1 min-w-0 bg-white rounded-lg border border-gray-200 flex flex-col min-h-0">
+        <div className="flex-1 min-w-0 bg-white rounded-lg border border-gray-200 flex flex-col min-h-[500px] lg:min-h-0">
           {/* Browser chrome bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
             <div className="flex gap-1">
@@ -523,7 +550,7 @@ export default function BrandMediaStep({
                             className="text-[11px] font-bold"
                             style={{ color: primaryColor, fontFamily: currentFont.bodyFamily }}
                           >
-                            {currency} 120
+                            {formatPrice(120, currency || "USD")}
                           </p>
                         </div>
                       </div>

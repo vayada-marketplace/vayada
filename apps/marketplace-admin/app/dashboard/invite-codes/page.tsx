@@ -4,16 +4,16 @@ import { useState, useEffect, useRef } from "react";
 import { CheckIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { inviteCodesService, type InviteCode, type InviteData } from "@/services/api/inviteCodes";
 import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
-import { FONT_PAIRINGS } from "@/lib/constants/branding";
+import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { TrashIcon, ClipboardIcon, PlusIcon } from "@heroicons/react/24/outline";
 
 import PropertyStep from "@/components/setup/PropertyStep";
-import BrandMediaStep from "@/components/setup/BrandMediaStep";
 import RoomsStep, { type RoomType, createEmptyRoom } from "@/components/setup/RoomsStep";
 import AddonsStep, { type SetupAddon, createEmptyAddon } from "@/components/setup/AddonsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
 import {
   BenefitsStep,
+  BrandMediaStep,
   LastMinuteStep,
   type LastMinuteConfig,
   createEmptyLastMinuteConfig,
@@ -495,6 +495,8 @@ export default function InviteCodesPage() {
             canProceed={canProceed()}
             onBack={() => setStep(1)}
             onContinue={() => setStep(3)}
+            colorPresets={COLOR_PRESETS}
+            fontPairings={FONT_PAIRINGS}
           />
         )}
 
