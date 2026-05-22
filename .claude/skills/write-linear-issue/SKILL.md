@@ -7,7 +7,7 @@ description: Turn rough user notes, follow-ups, or investigation results into a 
 
 Turn rough input ("we should probably refactor the auth middleware") into a ticket someone else can pick up cold.
 
-The full operating model — projects, label semantics, status transitions, priorities, agent rules — lives in `docs/engineering/linear-workspace.md`. This skill is the operational shortcut: how to actually write a ticket. Read the operating-model doc when in doubt; otherwise follow this skill.
+The full operating model — projects, label semantics, status transitions, priorities, agent rules — lives in `engineering/linear-workspace.md`. This skill is the operational shortcut: how to actually write a ticket. Read the operating-model doc when in doubt; otherwise follow this skill.
 
 ## Workflow
 
