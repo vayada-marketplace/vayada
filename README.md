@@ -324,7 +324,7 @@ All databases use PostgreSQL 15 Alpine with UUID primary keys and timestamp colu
 
 ## Infrastructure
 
-Production infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/FlamurMaliqi/vayada-platform) repository. This repo owns application code only.
+Production infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/vayada-marketplace/vayada-platform) repository. This repo owns application code only.
 
 - **AWS ECS Fargate**: All services run as containers
 - **Application Load Balancer**: Routes traffic by hostname
