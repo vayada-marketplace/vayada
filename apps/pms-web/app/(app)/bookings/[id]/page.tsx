@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, use } from "react";
 import Link from "next/link";
 import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/outline";
 import { bookingsService, Booking, BookingChangeRequest } from "@/services/bookings";
@@ -49,7 +49,8 @@ function CountdownTimer({ deadline }: { deadline: string }) {
   );
 }
 
-export default function BookingDetailPage({ params }: { params: { id: string } }) {
+export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
@@ -67,21 +68,21 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
 
   const loadChangeRequest = useCallback(async () => {
     try {
-      const cr = await bookingsService.getChangeRequest(params.id);
+      const cr = await bookingsService.getChangeRequest(id);
       setChangeRequest(cr);
     } catch (err) {
       console.error(err);
     }
-  }, [params.id]);
+  }, [id]);
 
   useEffect(() => {
     bookingsService
-      .get(params.id)
+      .get(id)
       .then(setBooking)
       .catch(console.error)
       .finally(() => setLoading(false));
     loadChangeRequest();
-  }, [params.id, loadChangeRequest]);
+  }, [id, loadChangeRequest]);
 
   const doAction = useCallback(async (action: () => Promise<Booking>, errorMsg: string) => {
     setUpdating(true);
@@ -102,7 +103,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       confirmLabel: "Accept",
       onConfirm: () => {
         setConfirmDialog(null);
-        doAction(() => bookingsService.acceptBooking(params.id), "Failed to accept booking");
+        doAction(() => bookingsService.acceptBooking(id), "Failed to accept booking");
       },
     });
   };
@@ -118,7 +119,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
   const confirmReject = () => {
     setRejectOpen(false);
     doAction(
-      () => bookingsService.rejectBooking(params.id, rejectReason.trim() || undefined),
+      () => bookingsService.rejectBooking(id, rejectReason.trim() || undefined),
       "Failed to reject booking",
     );
   };
@@ -127,9 +128,9 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     setDecidingChange(true);
     setError("");
     try {
-      const cr = await bookingsService.approveChangeRequest(params.id);
+      const cr = await bookingsService.approveChangeRequest(id);
       setChangeRequest(cr);
-      const refreshed = await bookingsService.get(params.id);
+      const refreshed = await bookingsService.get(id);
       setBooking(refreshed);
       setDecideOpen(null);
     } catch (err: any) {
@@ -143,10 +144,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
     setDecidingChange(true);
     setError("");
     try {
-      const cr = await bookingsService.declineChangeRequest(
-        params.id,
-        declineReason.trim() || undefined,
-      );
+      const cr = await bookingsService.declineChangeRequest(id, declineReason.trim() || undefined);
       setChangeRequest(cr);
       setDecideOpen(null);
     } catch (err: any) {
@@ -164,7 +162,7 @@ export default function BookingDetailPage({ params }: { params: { id: string } }
       confirmLabel: status === "confirmed" ? "Confirm" : "Cancel Booking",
       onConfirm: () => {
         setConfirmDialog(null);
-        doAction(() => bookingsService.updateStatus(params.id, status), "Failed to update status");
+        doAction(() => bookingsService.updateStatus(id, status), "Failed to update status");
       },
     });
   };

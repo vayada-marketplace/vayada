@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
@@ -10,7 +10,8 @@ import { channexService } from "@/services/channex";
 import RoomTypeForm from "@/components/rooms/RoomTypeForm";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
-export default function EditRoomPage({ params }: { params: { id: string } }) {
+export default function EditRoomPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +27,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     roomsService
-      .get(params.id)
+      .get(id)
       .then((r) => {
         setRoom(r);
         setForm({
@@ -87,7 +88,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
       .getStatus()
       .then((status) => setChannexConnected(status.isConnected))
       .catch(() => setChannexConnected(false));
-  }, [params.id]);
+  }, [id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,7 +107,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
       if (form.currency && form.currency !== initialCurrency) {
         await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency });
       }
-      await roomsService.update(params.id, form);
+      await roomsService.update(id, form);
       // VAY-391: backend now auto-pushes ARI to Channex on rate-affecting
       // saves, so reflect that in the toast when a channel manager is
       // wired up. Hotels without Channex see the original message.
@@ -126,7 +127,7 @@ export default function EditRoomPage({ params }: { params: { id: string } }) {
     setShowDeleteConfirm(false);
     setDeleting(true);
     try {
-      await roomsService.delete(params.id);
+      await roomsService.delete(id);
       router.push("/rooms");
     } catch (err: any) {
       setError(err.message || "Cannot delete — room type may have bookings");
