@@ -1,14 +1,25 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import {
-  COUNTRY_OPTIONS,
-  CURRENCY_OPTIONS,
-  LANGUAGE_OPTIONS,
-  POPULAR_CURRENCY_CODES,
-  POPULAR_LANGUAGE_CODES,
-} from "@/lib/constants/options";
-import type { CountryOption, CurrencyOption, LanguageOption } from "@/lib/constants/options";
+
+export interface CountryOption {
+  code: string;
+  name: string;
+  flag: string;
+}
+
+export interface CurrencyOption {
+  code: string;
+  name: string;
+  flag: string;
+}
+
+export interface LanguageOption {
+  code: string;
+  name: string;
+  nativeName: string;
+  flag: string;
+}
 
 interface PropertyStepProps {
   propertyName: string;
@@ -46,6 +57,11 @@ interface PropertyStepProps {
   canProceed: boolean;
   onContinue: () => void;
   stepIndicators: React.ReactNode;
+  countryOptions: CountryOption[];
+  currencyOptions: CurrencyOption[];
+  languageOptions: LanguageOption[];
+  popularCurrencyCodes: string[];
+  popularLanguageCodes: string[];
 }
 
 // ── Custom Select Dropdown ───────────────────────────────────────────
@@ -355,6 +371,11 @@ export default function PropertyStep({
   canProceed,
   onContinue,
   stepIndicators,
+  countryOptions,
+  currencyOptions,
+  languageOptions,
+  popularCurrencyCodes,
+  popularLanguageCodes,
 }: PropertyStepProps) {
   return (
     <div className="flex-1 overflow-auto">
@@ -429,7 +450,7 @@ export default function PropertyStep({
               <FlagSelect<CountryOption>
                 value={country}
                 onChange={setCountry}
-                options={COUNTRY_OPTIONS}
+                options={countryOptions}
                 getLabel={(o) => o.name}
                 getValue={(o) => o.name}
                 placeholder="Select country"
@@ -635,7 +656,7 @@ export default function PropertyStep({
                       : without,
                   );
                 }}
-                options={CURRENCY_OPTIONS}
+                options={currencyOptions}
                 getLabel={(o) => o.name}
               />
             </div>
@@ -655,7 +676,7 @@ export default function PropertyStep({
                       : without,
                   );
                 }}
-                options={LANGUAGE_OPTIONS}
+                options={languageOptions}
                 getLabel={(o) => o.name}
               />
             </div>
@@ -676,12 +697,12 @@ export default function PropertyStep({
                     : [...supportedCurrencies, code],
                 );
               }}
-              options={CURRENCY_OPTIONS}
+              options={currencyOptions}
               excludeCode={currency}
               placeholder={`Search currencies, e.g. "Swiss" or "CHF"...`}
               getLabel={(o) => o.code}
               getSearchLabel={(o) => `${o.name} \u00b7 ${o.code}`}
-              popularCodes={POPULAR_CURRENCY_CODES}
+              popularCodes={popularCurrencyCodes}
               emptyMessage={`No additional currencies added \u2014 your booking page will show only ${currency}`}
             />
           </div>
@@ -701,12 +722,12 @@ export default function PropertyStep({
                     : [...supportedLanguages, code],
                 );
               }}
-              options={LANGUAGE_OPTIONS}
+              options={languageOptions}
               excludeCode={defaultLanguage}
               placeholder={`Search languages, e.g. "German" or "Deutsch"...`}
               getLabel={(o) => o.nativeName}
               getSearchLabel={(o) => `${o.name} \u00b7 ${o.nativeName}`}
-              popularCodes={POPULAR_LANGUAGE_CODES}
+              popularCodes={popularLanguageCodes}
               emptyMessage={`No additional languages added \u2014 your booking page will show only ${defaultLanguage.toUpperCase()}`}
             />
           </div>

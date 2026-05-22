@@ -7,11 +7,17 @@ import { settingsService } from "@/services/settings";
 import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
+import {
+  COUNTRY_OPTIONS,
+  CURRENCY_OPTIONS,
+  LANGUAGE_OPTIONS,
+  POPULAR_CURRENCY_CODES,
+  POPULAR_LANGUAGE_CODES,
+} from "@/lib/constants/options";
 import { CheckIcon } from "@heroicons/react/24/outline";
 import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
 import { getCurrencySymbol } from "@/lib/utils";
 
-import PropertyStep from "@/components/setup/PropertyStep";
 import PmsStep from "@/components/setup/PmsStep";
 import RoomsStep, {
   type RoomType,
@@ -24,6 +30,7 @@ import {
   BrandMediaStep,
   LastMinuteStep,
   PoliciesStep,
+  PropertyStep,
   type LastMinuteConfig,
   type SetupAddon,
   createEmptyLastMinuteConfig,
@@ -953,6 +960,11 @@ export default function SetupPage() {
             setStep(2);
           }}
           stepIndicators={stepIndicators}
+          countryOptions={COUNTRY_OPTIONS}
+          currencyOptions={CURRENCY_OPTIONS}
+          languageOptions={LANGUAGE_OPTIONS}
+          popularCurrencyCodes={POPULAR_CURRENCY_CODES}
+          popularLanguageCodes={POPULAR_LANGUAGE_CODES}
         />
       )}
 

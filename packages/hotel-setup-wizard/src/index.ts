@@ -9,3 +9,9 @@ export {
   type LastMinuteTier,
 } from "./LastMinuteStep";
 export { default as PoliciesStep } from "./PoliciesStep";
+export {
+  default as PropertyStep,
+  type CountryOption,
+  type CurrencyOption,
+  type LanguageOption,
+} from "./PropertyStep";
