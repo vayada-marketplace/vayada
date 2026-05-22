@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, use } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import Image from "next/image";
@@ -16,9 +16,11 @@ export default function RequestChangePage({
   params,
   searchParams,
 }: {
-  params: { reference: string };
-  searchParams: { email?: string };
+  params: Promise<{ reference: string }>;
+  searchParams: Promise<{ email?: string }>;
 }) {
+  const { reference } = use(params);
+  const { email: emailParam } = use(searchParams);
   const t = useTranslations("requestChange");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
@@ -43,7 +45,7 @@ export default function RequestChangePage({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
-  const guestEmail = searchParams.email || "";
+  const guestEmail = emailParam || "";
 
   // Initial load: fetch the booking + the hotel's add-ons + any existing
   // change request. We need all three before the form is meaningful.
@@ -57,7 +59,7 @@ export default function RequestChangePage({
     }
     let cancelled = false;
     Promise.all([
-      bookingService.lookup(slug, params.reference, guestEmail),
+      bookingService.lookup(slug, reference, guestEmail),
       hotelService.getAddons(slug).catch(() => [] as Addon[]),
     ])
       .then(async ([fetched, fetchedAddons]) => {
@@ -88,7 +90,7 @@ export default function RequestChangePage({
     return () => {
       cancelled = true;
     };
-  }, [params.reference, guestEmail, slug, t]);
+  }, [reference, guestEmail, slug, t]);
 
   // Debounced preview fetch whenever the form changes.
   useEffect(() => {
@@ -151,7 +153,7 @@ export default function RequestChangePage({
         addonQuantities,
         addonDates,
       });
-      router.push(`/booking/${params.reference}?email=${encodeURIComponent(guestEmail)}`);
+      router.push(`/booking/${reference}?email=${encodeURIComponent(guestEmail)}`);
     } catch (err: any) {
       setSubmitError(err.message || "Failed to submit change request");
     } finally {
