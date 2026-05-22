@@ -21,21 +21,25 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TFVARS="$REPO_ROOT/infra/terraform.tfvars"
-RDS_ENDPOINT="vayada-database.c7eiqkoq4as4.eu-west-1.rds.amazonaws.com"
 RDS_SG_ID="sg-0089fc5e42fa33566"
 RDS_PORT=5432
 AWS_REGION="eu-west-1"
+SSM_PREFIX="/vayada/prod"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 die() { echo "❌ $*" >&2; exit 1; }
 
-read_tfvar() {
-    # Extract a value from terraform.tfvars: key = "value"
-    local key="$1"
-    grep -E "^${key}[[:space:]]*=" "$TFVARS" | sed 's/.*=[[:space:]]*"\(.*\)"/\1/'
+read_ssm() {
+    # Fetch a SecureString parameter from SSM and decrypt it
+    local name="$1"
+    aws ssm get-parameter \
+        --region "$AWS_REGION" \
+        --name "$name" \
+        --with-decryption \
+        --query Parameter.Value \
+        --output text 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -43,41 +47,39 @@ read_tfvar() {
 # ---------------------------------------------------------------------------
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <service>"
-    echo "  service: pms | booking | marketplace"
+    echo "  service: pms | booking | marketplace | auth"
     exit 1
 fi
 
 SERVICE="$1"
 
 # ---------------------------------------------------------------------------
-# Service config mapping (matches infra/ecs.tf)
+# Service config mapping. SSM holds the full DATABASE_URL for each backend
+# (provisioned in vayada-platform infra/ssm.tf). For SSL connectivity from
+# outside the VPC we prefer the *-ssl variant where it exists.
 # ---------------------------------------------------------------------------
 case "$SERVICE" in
     pms)
-        DB_USER="vayada_pms_user"
-        DB_NAME="vayada_pms_db"
-        DB_PASSWORD_KEY="db_pms_password"
+        SSM_URL_KEY="${SSM_PREFIX}/db-pms-url-ssl"
         MIGRATION_SCRIPT="apps/pms-api/scripts/run_migrations.py"
         SERVICE_DIR="apps/pms-api"
         ;;
     booking)
-        DB_USER="vayada_booking_user"
-        DB_NAME="vayada_booking_db"
-        DB_PASSWORD_KEY="db_booking_password"
+        SSM_URL_KEY="${SSM_PREFIX}/db-booking-url"
+        APPEND_SSL=true
         MIGRATION_SCRIPT="apps/booking-api/scripts/run_migrations.py"
         SERVICE_DIR="apps/booking-api"
         ;;
     marketplace)
-        DB_USER="vayada_user"
-        DB_NAME="vayada_db"
-        DB_PASSWORD_KEY="db_marketplace_password"
+        # Note: /vayada/prod/db-marketplace-url is the admin URL pointing at
+        # the postgres database. Build the marketplace URL explicitly using
+        # the master password.
+        SSM_URL_KEY=""
         MIGRATION_SCRIPT="apps/marketplace-api/scripts/run_migrations.py"
         SERVICE_DIR="apps/marketplace-api"
         ;;
     auth)
-        DB_USER="vayada_auth_user"
-        DB_NAME="vayada_auth_db"
-        DB_PASSWORD_KEY="db_auth_password"
+        SSM_URL_KEY="${SSM_PREFIX}/db-auth-url-ssl"
         MIGRATION_SCRIPT="auth-db/scripts/run_migrations.py"
         SERVICE_DIR="auth-db"
         ;;
@@ -87,12 +89,30 @@ case "$SERVICE" in
 esac
 
 # ---------------------------------------------------------------------------
-# Read password from tfvars
+# Resolve DATABASE_URL from SSM
 # ---------------------------------------------------------------------------
-[[ -f "$TFVARS" ]] || die "terraform.tfvars not found at $TFVARS"
+aws sts get-caller-identity --region "$AWS_REGION" >/dev/null 2>&1 \
+    || die "AWS credentials are not configured or expired. Run your SSO login first."
 
-DB_PASSWORD=$(read_tfvar "$DB_PASSWORD_KEY")
-[[ -n "$DB_PASSWORD" ]] || die "Could not read $DB_PASSWORD_KEY from $TFVARS"
+if [[ "$SERVICE" == "marketplace" ]]; then
+    # Marketplace doesn't have a clean SSM URL — assemble it from one we do.
+    # db-pms-url-ssl is in the same RDS instance with sslmode=require, so reuse
+    # its host. Password comes from a dedicated SSM lookup if it exists,
+    # otherwise the platform team needs to add /vayada/prod/db-marketplace-url-ssl.
+    die "marketplace migrations require /vayada/prod/db-marketplace-url-ssl in SSM (not yet provisioned). Ask platform team to add it, or set DATABASE_URL manually and run the migration script directly."
+fi
+
+echo "🔑 Fetching DATABASE_URL from SSM ($SSM_URL_KEY)..."
+DATABASE_URL=$(read_ssm "$SSM_URL_KEY")
+[[ -n "$DATABASE_URL" ]] || die "Could not read $SSM_URL_KEY from SSM"
+
+if [[ "${APPEND_SSL:-false}" == "true" && "$DATABASE_URL" != *"sslmode="* ]]; then
+    if [[ "$DATABASE_URL" == *"?"* ]]; then
+        DATABASE_URL="${DATABASE_URL}&sslmode=require"
+    else
+        DATABASE_URL="${DATABASE_URL}?sslmode=require"
+    fi
+fi
 
 # Verify migration script exists
 FULL_MIGRATION_SCRIPT="$REPO_ROOT/$MIGRATION_SCRIPT"
@@ -147,8 +167,6 @@ sleep 2
 echo ""
 echo "🚀 Running $SERVICE migrations..."
 echo ""
-
-DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD}@${RDS_ENDPOINT}:${RDS_PORT}/${DB_NAME}?sslmode=require"
 
 cd "$REPO_ROOT/$SERVICE_DIR"
 DATABASE_URL="$DATABASE_URL" python3 scripts/run_migrations.py
