@@ -622,5 +622,15 @@
   "auth.chooseProperty.addProperty": "Ajouter une nouvelle propriété",
   "auth.chooseProperty.loadError": "Impossible de charger les propriétés",
   "auth.chooseProperty.retry": "Réessayer",
-  "layout.sidebar.affiliatePayouts": "Paiements aux affiliés"
+  "layout.sidebar.affiliatePayouts": "Paiements aux affiliés",
+  "auth.totp.hint": "Enter the 6-digit code from your authenticator app, or a recovery code.",
+  "auth.totp.codeLabel": "Verification code",
+  "auth.totp.codePlaceholder": "000000",
+  "auth.totp.submitting": "Verifying...",
+  "auth.totp.submit": "Verify",
+  "auth.totp.cancel": "Back to login",
+  "auth.totp.subtitle": "Two-factor authentication",
+  "auth.totp.errorInvalid": "Invalid code. Please try again.",
+  "auth.totp.errorTooMany": "Too many attempts. Please wait and try again.",
+  "auth.totp.errorUnexpected": "Verification failed. Please try again."
 }

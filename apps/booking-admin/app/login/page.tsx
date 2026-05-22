@@ -7,6 +7,7 @@ import { ApiErrorResponse } from "@/services/api/client";
 import { isSetupComplete } from "@/lib/utils/setupStatus";
 import { settingsService } from "@/services/settings";
 import LoginForm from "@/components/auth/LoginForm";
+import TotpForm from "@/components/auth/TotpForm";
 import { useTranslation } from "@/lib/i18n";
 
 export default function LoginPage() {
@@ -17,6 +18,36 @@ export default function LoginPage() {
     searchParams.get("expired") === "true" ? t("auth.login.errorSessionExpired") : "",
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [totpSession, setTotpSession] = useState<string | null>(null);
+
+  const redirectAfterLogin = async (loginResponse: { is_superadmin?: boolean }) => {
+    if (loginResponse.is_superadmin) {
+      localStorage.setItem("setupComplete", "true");
+      router.push("/manage-hotels");
+      return;
+    }
+
+    const complete = await isSetupComplete();
+    if (!complete) {
+      localStorage.setItem("setupComplete", "false");
+      router.push("/setup");
+      return;
+    }
+
+    const hotelList = await settingsService.listHotels();
+    localStorage.setItem("setupComplete", "true");
+
+    if (hotelList.length > 1) {
+      localStorage.removeItem("selectedHotelId");
+      router.push("/choose-property");
+      return;
+    }
+
+    if (hotelList.length === 1) {
+      localStorage.setItem("selectedHotelId", hotelList[0].id);
+    }
+    router.push("/dashboard");
+  };
 
   const handleLogin = async (email: string, password: string) => {
     setSubmitError("");
@@ -25,38 +56,13 @@ export default function LoginPage() {
     try {
       const loginResponse = await authService.login({ email, password });
 
-      // Super admins skip setup check and go straight to manage hotels
-      if (loginResponse.is_superadmin) {
-        localStorage.setItem("setupComplete", "true");
-        router.push("/manage-hotels");
+      if (loginResponse.requires_totp) {
+        setTotpSession(loginResponse.totp_session!);
+        setIsSubmitting(false);
         return;
       }
 
-      const complete = await isSetupComplete();
-      if (!complete) {
-        localStorage.setItem("setupComplete", "false");
-        router.push("/setup");
-        return;
-      }
-
-      // Pre-load the user's hotel list. Multi-hotel users are sent to
-      // a dedicated picker so they land in the property they actually
-      // want to work on, instead of an arbitrary "last-used" fallback.
-      // Single-hotel users skip the picker for speed.
-      const hotelList = await settingsService.listHotels();
-      localStorage.setItem("setupComplete", "true");
-
-      if (hotelList.length > 1) {
-        // Clear any stale selection — the picker will set a fresh one.
-        localStorage.removeItem("selectedHotelId");
-        router.push("/choose-property");
-        return;
-      }
-
-      if (hotelList.length === 1) {
-        localStorage.setItem("selectedHotelId", hotelList[0].id);
-      }
-      router.push("/dashboard");
+      await redirectAfterLogin(loginResponse);
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
@@ -83,24 +89,64 @@ export default function LoginPage() {
     }
   };
 
+  const handleTotpVerify = async (code: string) => {
+    setSubmitError("");
+    setIsSubmitting(true);
+
+    try {
+      const loginResponse = await authService.verifyTotp(totpSession!, code);
+      await redirectAfterLogin(loginResponse);
+    } catch (error) {
+      if (error instanceof ApiErrorResponse) {
+        if (error.status === 401) {
+          setSubmitError(t("auth.totp.errorInvalid"));
+        } else if (error.status === 429) {
+          setSubmitError(t("auth.totp.errorTooMany"));
+        } else {
+          setSubmitError(t("auth.totp.errorUnexpected"));
+        }
+      } else if (error instanceof Error) {
+        setSubmitError(error.message);
+      } else {
+        setSubmitError(t("auth.totp.errorUnexpected"));
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-lg shadow-lg p-8">
-        {/* Logo / Title */}
         <div className="mb-6 text-center">
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
           <h1 className="text-xl font-bold text-gray-900">{t("auth.login.title")}</h1>
-          <p className="text-[13px] text-gray-500 mt-1">{t("auth.login.subtitle")}</p>
+          <p className="text-[13px] text-gray-500 mt-1">
+            {totpSession ? t("auth.totp.subtitle") : t("auth.login.subtitle")}
+          </p>
         </div>
 
-        <LoginForm
-          onSubmit={handleLogin}
-          isSubmitting={isSubmitting}
-          submitError={submitError}
-          onErrorClear={() => setSubmitError("")}
-        />
+        {totpSession ? (
+          <TotpForm
+            onSubmit={handleTotpVerify}
+            onCancel={() => {
+              setTotpSession(null);
+              setSubmitError("");
+            }}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            onErrorClear={() => setSubmitError("")}
+          />
+        ) : (
+          <LoginForm
+            onSubmit={handleLogin}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            onErrorClear={() => setSubmitError("")}
+          />
+        )}
       </div>
     </div>
   );

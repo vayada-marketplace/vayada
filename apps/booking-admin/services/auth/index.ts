@@ -13,16 +13,18 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  id: string;
-  email: string;
-  name: string;
-  type: string;
-  status: string;
-  access_token: string;
-  token_type: string;
-  expires_in: number;
+  id?: string;
+  email?: string;
+  name?: string;
+  type?: string;
+  status?: string;
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
   message: string;
   is_superadmin?: boolean;
+  requires_totp?: boolean;
+  totp_session?: string;
 }
 
 export interface RegisterRequest {
@@ -151,24 +153,54 @@ export const authService = {
   },
 
   /**
-   * Login user (hotel admin or super admin)
+   * Login user (hotel admin or super admin). Returns early with requires_totp=true
+   * if TOTP is needed. Caller must call verifyTotp() to complete the flow.
    */
   login: async (data: LoginRequest): Promise<LoginResponse> => {
     const response = await apiClient.post<LoginResponse>("/auth/login", data);
+
+    if (response.requires_totp) {
+      return response;
+    }
 
     // Verify user is hotel admin or super admin
     if (response.type !== "hotel" && !response.is_superadmin) {
       throw new Error("Access denied. Hotel admin account required.");
     }
 
-    // Store token and user data
-    storeToken(response.access_token, response.expires_in);
+    storeToken(response.access_token!, response.expires_in!);
     storeUserData({
-      id: response.id,
-      email: response.email,
-      name: response.name,
-      type: response.type,
-      status: response.status,
+      id: response.id!,
+      email: response.email!,
+      name: response.name!,
+      type: response.type!,
+      status: response.status!,
+      is_superadmin: response.is_superadmin,
+    });
+
+    return response;
+  },
+
+  /**
+   * Complete TOTP login step after a successful password auth.
+   */
+  verifyTotp: async (totpSession: string, code: string): Promise<LoginResponse> => {
+    const response = await apiClient.post<LoginResponse>("/auth/totp/verify", {
+      totp_session: totpSession,
+      code,
+    });
+
+    if (response.type !== "hotel" && !response.is_superadmin) {
+      throw new Error("Access denied. Hotel admin account required.");
+    }
+
+    storeToken(response.access_token!, response.expires_in!);
+    storeUserData({
+      id: response.id!,
+      email: response.email!,
+      name: response.name!,
+      type: response.type!,
+      status: response.status!,
       is_superadmin: response.is_superadmin,
     });
 

@@ -622,5 +622,15 @@
   "auth.chooseProperty.addProperty": "Добавить новый объект",
   "auth.chooseProperty.loadError": "Не удалось загрузить объекты",
   "auth.chooseProperty.retry": "Повторить",
-  "layout.sidebar.affiliatePayouts": "Выплаты партнёрам"
+  "layout.sidebar.affiliatePayouts": "Выплаты партнёрам",
+  "auth.totp.hint": "Enter the 6-digit code from your authenticator app, or a recovery code.",
+  "auth.totp.codeLabel": "Verification code",
+  "auth.totp.codePlaceholder": "000000",
+  "auth.totp.submitting": "Verifying...",
+  "auth.totp.submit": "Verify",
+  "auth.totp.cancel": "Back to login",
+  "auth.totp.subtitle": "Two-factor authentication",
+  "auth.totp.errorInvalid": "Invalid code. Please try again.",
+  "auth.totp.errorTooMany": "Too many attempts. Please wait and try again.",
+  "auth.totp.errorUnexpected": "Verification failed. Please try again."
 }

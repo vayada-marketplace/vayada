@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { authService } from "@/services/auth";
 import { ApiErrorResponse } from "@/services/api/client";
 import LoginForm from "@/components/auth/LoginForm";
+import TotpForm from "@/components/auth/TotpForm";
 
 function LoginContent() {
   const router = useRouter();
@@ -12,6 +13,7 @@ function LoginContent() {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [totpSession, setTotpSession] = useState<string | null>(null);
 
   useEffect(() => {
     if (searchParams.get("expired") === "true") {
@@ -26,11 +28,9 @@ function LoginContent() {
     try {
       const response = await authService.login({ email, password });
 
-      // Verify admin type
-      if (response.type !== "admin") {
-        setSubmitError("Access denied. Admin account required.");
+      if (response.requires_totp) {
+        setTotpSession(response.totp_session!);
         setIsSubmitting(false);
-        authService.logout();
         return;
       }
 
@@ -61,25 +61,65 @@ function LoginContent() {
     }
   };
 
+  const handleTotpVerify = async (code: string) => {
+    setSubmitError("");
+    setIsSubmitting(true);
+
+    try {
+      await authService.verifyTotp(totpSession!, code);
+      router.push("/dashboard");
+    } catch (error) {
+      setIsSubmitting(false);
+
+      if (error instanceof ApiErrorResponse) {
+        if (error.status === 401) {
+          setSubmitError("Invalid code. Please try again.");
+        } else if (error.status === 429) {
+          setSubmitError("Too many attempts. Please wait and try again.");
+        } else {
+          setSubmitError((error.data.detail as string) || "Verification failed.");
+        }
+      } else if (error instanceof Error) {
+        setSubmitError(error.message);
+      } else {
+        setSubmitError("Network error. Please check your connection and try again.");
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm bg-white rounded-lg shadow-lg p-8">
-        {/* Logo/Title */}
         <div className="mb-6 text-center">
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">V</span>
           </div>
           <h1 className="text-xl font-bold text-gray-900">vayada Admin</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Sign in to access the admin panel</p>
+          <p className="text-[13px] text-gray-500 mt-1">
+            {totpSession ? "Two-factor authentication" : "Sign in to access the admin panel"}
+          </p>
         </div>
 
-        <LoginForm
-          onSubmit={handleLogin}
-          isSubmitting={isSubmitting}
-          submitError={submitError}
-          onErrorClear={() => setSubmitError("")}
-          sessionExpired={sessionExpired}
-        />
+        {totpSession ? (
+          <TotpForm
+            onSubmit={handleTotpVerify}
+            onCancel={() => {
+              setTotpSession(null);
+              setSubmitError("");
+            }}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            onErrorClear={() => setSubmitError("")}
+          />
+        ) : (
+          <LoginForm
+            onSubmit={handleLogin}
+            isSubmitting={isSubmitting}
+            submitError={submitError}
+            onErrorClear={() => setSubmitError("")}
+            sessionExpired={sessionExpired}
+          />
+        )}
       </div>
     </div>
   );

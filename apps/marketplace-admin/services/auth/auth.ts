@@ -119,25 +119,29 @@ export const authService = {
   },
 
   /**
-   * Login user (admin)
+   * Login user (admin). Returns early with requires_totp=true if TOTP is needed.
+   * Caller must call verifyTotp() to complete the flow.
    */
   login: async (data: LoginRequest): Promise<LoginResponse> => {
     try {
       const response = await apiClient.post<LoginResponse>("/auth/login", data);
+
+      if (response.requires_totp) {
+        return response;
+      }
 
       // Verify user is admin
       if (response.type !== "admin") {
         throw new Error("Access denied. Admin account required.");
       }
 
-      // Store token and user data
-      storeToken(response.access_token, response.expires_in);
+      storeToken(response.access_token!, response.expires_in!);
       storeUserData({
-        id: response.id,
-        email: response.email,
-        name: response.name,
-        type: response.type,
-        status: response.status,
+        id: response.id!,
+        email: response.email!,
+        name: response.name!,
+        type: response.type!,
+        status: response.status!,
       });
 
       return response;
@@ -147,6 +151,31 @@ export const authService = {
       }
       throw error;
     }
+  },
+
+  /**
+   * Complete TOTP login step after a successful password auth.
+   */
+  verifyTotp: async (totpSession: string, code: string): Promise<LoginResponse> => {
+    const response = await apiClient.post<LoginResponse>("/auth/totp/verify", {
+      totp_session: totpSession,
+      code,
+    });
+
+    if (response.type !== "admin") {
+      throw new Error("Access denied. Admin account required.");
+    }
+
+    storeToken(response.access_token!, response.expires_in!);
+    storeUserData({
+      id: response.id!,
+      email: response.email!,
+      name: response.name!,
+      type: response.type!,
+      status: response.status!,
+    });
+
+    return response;
   },
 
   /**

@@ -77,15 +77,17 @@ export interface LoginRequest {
 }
 
 export interface LoginResponse {
-  id: string;
-  email: string;
-  name: string;
-  type: string;
-  status: string;
-  access_token: string;
-  token_type: string;
-  expires_in: number;
+  id?: string;
+  email?: string;
+  name?: string;
+  type?: string;
+  status?: string;
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
   message: string;
+  requires_totp?: boolean;
+  totp_session?: string;
 }
 
 export interface CreateUserRequest {
