@@ -95,7 +95,7 @@ Production runs on AWS ECS Fargate, fronted by an ALB. Each app has a GitHub Act
 
 - **PMS migrations** auto-run on ECS container start. Do not suggest manually running `scripts/run_migration.sh` after a push to `main`.
 - **auth-db** does **not** auto-migrate in production — run `scripts/run_migration.sh auth` against RDS for any schema change. Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
-- Infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/vayada-marketplace/vayada-platform) repository. Do not make infrastructure changes in this repo's `infra/` directory — it is being removed (VAY-426).
+- Infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/vayada-marketplace/vayada-platform) repository. This repo contains no infrastructure code.
 
 ## Skills
 

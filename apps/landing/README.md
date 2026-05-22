@@ -42,5 +42,4 @@ in prod). See `.env.example`.
 
 `Dockerfile` builds a Next.js `standalone` image. `.github/workflows/deploy.yml`
 pushes to ECR repo **`vayada-landing`** on push to `main`; the container
-platform auto-deploys. ECR repo + service + DNS are provisioned in the parent
-repo's `infra/` (Terraform) — pending the domain cutover.
+platform auto-deploys. ECR repo + service + DNS are provisioned in [`vayada-platform`](https://github.com/vayada-marketplace/vayada-platform) — pending the domain cutover.

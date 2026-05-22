@@ -12,8 +12,7 @@ service's `scripts/run_migrations.py`, then revokes the ingress rule on exit.
 ./scripts/run_migration.sh <pms|booking|marketplace|auth>
 ```
 
-Requires AWS CLI credentials, `infra/terraform.tfvars` (DB passwords), and
-Python 3 with `asyncpg`.
+Requires AWS CLI credentials and Python 3 with `asyncpg`. DB passwords are stored in AWS SSM under `/vayada/prod/`.
 
 ## Seed scripts
 

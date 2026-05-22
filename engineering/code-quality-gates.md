@@ -60,7 +60,7 @@ These are deliberate choices, not accidents:
   - `react/no-unescaped-entities`, `react/no-children-prop` — `warn`. Mostly noise in product code.
   - `react-hooks/immutability`, `preserve-manual-memoization`, `purity`, `set-state-in-effect` — `off`. The React Hooks v6 strict rules don't fit the current code; revisit after the React 19 / Next 16 settling.
 - **Prettier**:
-  - `.prettierignore` excludes `**/migrations/**`, `infra/.terraform/**`, build artifacts, and all Python files (Ruff owns Python formatting).
+  - `.prettierignore` excludes `**/migrations/**`, build artifacts, and all Python files (Ruff owns Python formatting).
   - The 643-file initial baseline drift is **not** being reformatted in one pass. Files get reformatted when touched.
 - **Ruff** (`pyproject.toml`):
   - Rules enabled: `E` (pycodestyle), `F` (pyflakes), `I` (isort), `UP` (pyupgrade), `B` (bugbear). `D` (docstrings), `N` (naming), `S` (bandit security), and others are deferred.
