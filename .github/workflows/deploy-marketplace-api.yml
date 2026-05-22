@@ -22,8 +22,6 @@ env:
   AWS_REGION: eu-west-1
   ECR_REPOSITORY: vayada-creator-marketplace-backend
   AWS_ACCOUNT_ID: 269416271598
-  ECS_CLUSTER: vayada-backend-cluster
-  ECS_SERVICE: vayada-marketplace-backend-service
   APP_DIR: apps/marketplace-api
 
 jobs:
@@ -285,17 +283,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Output image URI
-        run: |
-          echo "Image pushed successfully!"
-          echo "Latest: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest"
-          echo "Commit SHA: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
-
-      - name: Deploy to ECS
-        run: |
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment \
-            --region ${{ env.AWS_REGION }}
-          echo "Deployment triggered for ${{ env.ECS_SERVICE }}"
+      - name: Dispatch deploy to platform
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.PLATFORM_DEPLOY_TOKEN }}
+          repository: FlamurMaliqi/vayada-platform
+          event-type: app-image-published
+          client-payload: |
+            {
+              "service": "marketplace-backend",
+              "ecr_repo": "${{ env.ECR_REPOSITORY }}",
+              "image_sha": "${{ github.sha }}",
+              "environment": "production"
+            }
