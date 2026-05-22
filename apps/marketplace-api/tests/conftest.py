@@ -163,6 +163,15 @@ async def cleanup_database(init_database):
     )
     await AuthDatabase.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
 
+    # Clean up rate limit and audit log for all test emails (including static ones like
+    # "nonexistent@example.com" used by login tests)
+    await AuthDatabase.execute(
+        "DELETE FROM login_rate_limit WHERE email LIKE '%@example.com'"
+    )
+    await AuthDatabase.execute(
+        "DELETE FROM login_audit_log WHERE email LIKE '%@example.com'"
+    )
+
 
 @pytest.fixture(autouse=True)
 def mock_send_email():

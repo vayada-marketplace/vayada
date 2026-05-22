@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authService } from "@/services/auth";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -10,7 +10,7 @@ import LoginForm from "@/components/auth/LoginForm";
 import TotpForm from "@/components/auth/TotpForm";
 import { useTranslation } from "@/lib/i18n";
 
-export default function LoginPage() {
+function LoginContent() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -68,7 +68,12 @@ export default function LoginPage() {
         if (error.status === 401) {
           setSubmitError(t("auth.login.errorInvalidCredentials"));
         } else if (error.status === 403) {
-          setSubmitError(t("auth.login.errorSuspended"));
+          const detail = error.data.detail as { message?: string } | string;
+          setSubmitError(
+            typeof detail === "object"
+              ? (detail.message ?? t("auth.login.errorSuspended"))
+              : t("auth.login.errorSuspended"),
+          );
         } else if (error.status === 422) {
           const detail = error.data.detail;
           if (Array.isArray(detail)) {
@@ -100,8 +105,10 @@ export default function LoginPage() {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
           setSubmitError(t("auth.totp.errorInvalid"));
-        } else if (error.status === 429) {
-          setSubmitError(t("auth.totp.errorTooMany"));
+        } else if (error.status === 403) {
+          const detail = error.data.detail as { message?: string } | string;
+          const msg = typeof detail === "object" ? detail.message : detail;
+          setSubmitError(msg || t("auth.totp.errorTooMany"));
         } else {
           setSubmitError(t("auth.totp.errorUnexpected"));
         }
@@ -149,5 +156,13 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <LoginContent />
+    </Suspense>
   );
 }

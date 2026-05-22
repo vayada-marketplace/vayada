@@ -42,7 +42,12 @@ function LoginContent() {
         if (error.status === 401) {
           setSubmitError("Invalid email or password");
         } else if (error.status === 403) {
-          setSubmitError("Your account has been suspended. Please contact support.");
+          const detail = error.data.detail as { message?: string } | string;
+          setSubmitError(
+            typeof detail === "object"
+              ? (detail.message ?? "Your account has been suspended. Please contact support.")
+              : "Your account has been suspended. Please contact support.",
+          );
         } else if (error.status === 422) {
           const detail = error.data.detail;
           if (Array.isArray(detail)) {
@@ -74,8 +79,13 @@ function LoginContent() {
       if (error instanceof ApiErrorResponse) {
         if (error.status === 401) {
           setSubmitError("Invalid code. Please try again.");
-        } else if (error.status === 429) {
-          setSubmitError("Too many attempts. Please wait and try again.");
+        } else if (error.status === 403) {
+          const detail = error.data.detail as { message?: string } | string;
+          setSubmitError(
+            typeof detail === "object"
+              ? (detail.message ?? "Too many attempts. Please wait and try again.")
+              : detail,
+          );
         } else {
           setSubmitError((error.data.detail as string) || "Verification failed.");
         }

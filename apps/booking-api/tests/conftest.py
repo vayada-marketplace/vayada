@@ -91,6 +91,12 @@ async def cleanup_database(init_database):
                 await conn.execute("DELETE FROM password_reset_tokens WHERE user_id = $1", uid)
                 await conn.execute("DELETE FROM email_change_tokens WHERE user_id = $1", uid)
             await conn.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
+            await conn.execute(
+                "DELETE FROM login_rate_limit WHERE email LIKE '%@example.com'"
+            )
+            await conn.execute(
+                "DELETE FROM login_audit_log WHERE email LIKE '%@example.com'"
+            )
 
 
 @pytest.fixture(autouse=True)

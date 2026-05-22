@@ -229,6 +229,16 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
     email = payload["email"]
     user_type = payload["type"]
 
+    lockout = await RateLimitRepository.check_locked(email)
+    if lockout:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "Too many failed attempts. Try again later.",
+                "locked_until": lockout["locked_until"].isoformat(),
+            },
+        )
+
     user = await UserRepository.get_by_id(user_id, columns="id, email, name, type, status, is_superadmin")
     if not user or user["status"] == "suspended":
         raise HTTPException(status_code=401, detail="Invalid session")
@@ -253,12 +263,14 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
         verified = verify_totp_code(secret, code)
 
     if not verified:
+        await RateLimitRepository.record_failure(email)
         await LoginAuditRepository.log(
             email=email, success=False, failure_reason="wrong_totp",
             auth_method=auth_method, user_id=user_id, ip_address=ip, user_agent=ua,
         )
         raise HTTPException(status_code=401, detail="Invalid code")
 
+    await RateLimitRepository.clear(email)
     access_token = create_access_token(
         data={"sub": user_id, "email": email, "type": user_type}
     )
