@@ -19,11 +19,6 @@ import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
 import { getCurrencySymbol } from "@/lib/utils";
 
 import PmsStep from "@/components/setup/PmsStep";
-import RoomsStep, {
-  type RoomType,
-  createEmptyRoom,
-  hasSeasonCoverageGaps,
-} from "@/components/setup/RoomsStep";
 import {
   AddonsStep,
   BenefitsStep,
@@ -31,9 +26,13 @@ import {
   LastMinuteStep,
   PoliciesStep,
   PropertyStep,
-  type LastMinuteConfig,
-  type SetupAddon,
+  RoomsStep,
+  createEmptyRoom,
   createEmptyLastMinuteConfig,
+  hasSeasonCoverageGaps,
+  type LastMinuteConfig,
+  type RoomType,
+  type SetupAddon,
 } from "@vayada/hotel-setup-wizard";
 import PromoCodesStep, { type SetupPromoCode } from "@/components/setup/PromoCodesStep";
 

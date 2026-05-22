@@ -7,7 +7,6 @@ import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { TrashIcon, ClipboardIcon, PlusIcon } from "@heroicons/react/24/outline";
 
-import RoomsStep, { type RoomType, createEmptyRoom } from "@/components/setup/RoomsStep";
 import {
   COUNTRY_OPTIONS,
   CURRENCY_OPTIONS,
@@ -22,10 +21,13 @@ import {
   LastMinuteStep,
   PoliciesStep,
   PropertyStep,
-  type LastMinuteConfig,
-  type SetupAddon,
+  RoomsStep,
   createEmptyAddon,
   createEmptyLastMinuteConfig,
+  createEmptyRoom,
+  type LastMinuteConfig,
+  type RoomType,
+  type SetupAddon,
 } from "@vayada/hotel-setup-wizard";
 
 const GOOGLE_FONTS_URL =

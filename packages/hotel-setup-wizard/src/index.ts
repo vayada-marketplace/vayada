@@ -15,3 +15,20 @@ export {
   type CurrencyOption,
   type LanguageOption,
 } from "./PropertyStep";
+export {
+  default as RoomsStep,
+  AMENITY_CATEGORIES,
+  BED_TYPES,
+  FEATURE_CATEGORIES,
+  MEAL_PLAN_LABEL,
+  MEAL_PLAN_OPTIONS,
+  ROOM_CATEGORIES,
+  ROOM_TABS,
+  createEmptyRoom,
+  getRoomCompleteness,
+  hasSeasonCoverageGaps,
+  type MealPlan,
+  type MealPlanCode,
+  type PartialRefundTier,
+  type RoomType,
+} from "./RoomsStep";

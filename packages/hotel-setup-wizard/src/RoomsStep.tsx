@@ -8,8 +8,8 @@ import {
   ChevronDownIcon,
   DocumentDuplicateIcon,
 } from "@heroicons/react/24/outline";
-import { getCurrencySymbol } from "@/lib/utils";
-import { parseBookingAmenities } from "@/lib/parseBookingAmenities";
+import { getCurrencySymbol } from "./internal/currency";
+import { parseBookingAmenities } from "./internal/parseBookingAmenities";
 
 export type MealPlanCode = 1 | 3 | 4 | 9;
 export interface MealPlan {
