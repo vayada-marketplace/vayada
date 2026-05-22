@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { CheckIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { inviteCodesService, type InviteCode, type InviteData } from "@/services/api/inviteCodes";
 import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
@@ -22,10 +22,9 @@ import {
   PoliciesStep,
   PropertyStep,
   RoomsStep,
-  createEmptyAddon,
-  createEmptyLastMinuteConfig,
-  createEmptyRoom,
+  useSetupWizardState,
   type LastMinuteConfig,
+  type RoomTab,
   type RoomType,
   type SetupAddon,
 } from "@vayada/hotel-setup-wizard";
@@ -44,8 +43,6 @@ const STEPS = [
   { number: 8, label: "Payment Terms" },
 ];
 
-type RoomTab = "details" | "pricing" | "media" | "benefits";
-
 export default function InviteCodesPage() {
   const [view, setView] = useState<"list" | "create">("list");
   const [invites, setInvites] = useState<InviteCode[]>([]);
@@ -58,93 +55,82 @@ export default function InviteCodesPage() {
   const [saving, setSaving] = useState(false);
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
 
-  // Step 1: Property
-  const [propertyName, setPropertyName] = useState("");
-  const [city, setCity] = useState("");
-  const [country, setCountry] = useState("");
-  const [address, setAddress] = useState("");
-  const [reservationEmail, setReservationEmail] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [whatsapp, setWhatsapp] = useState("");
-  const [instagram, setInstagram] = useState("");
-  const [facebook, setFacebook] = useState("");
-  const [tiktok, setTiktok] = useState("");
-  const [youtube, setYoutube] = useState("");
-  const [currency, setCurrency] = useState("EUR");
-  const [defaultLanguage, setDefaultLanguage] = useState("en");
-  const [supportedCurrencies, setSupportedCurrencies] = useState<string[]>([]);
-  const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
-
-  // Step 2: Brand & Media
-  const [heroImage, setHeroImage] = useState("");
-  const [primaryColor, setPrimaryColor] = useState("#4F46E5");
-  const [accentColor, setAccentColor] = useState("#F5F3EF");
-  const [selectedFont, setSelectedFont] = useState("high-end-serif");
-  const [propertyDescription, setPropertyDescription] = useState("");
-  const [bookingFilters, setBookingFilters] = useState<string[]>([
-    "includeBreakfast",
-    "freeCancellation",
-    "payAtHotel",
-  ]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-
-  // Step 3: Rooms
-  const [rooms, setRooms] = useState<RoomType[]>([createEmptyRoom()]);
-  const [activeRoomIndex, setActiveRoomIndex] = useState(0);
-  const [activeRoomTab, setActiveRoomTab] = useState<RoomTab>("details");
-  const [amenityInput, setAmenityInput] = useState("");
-  const [featureInput, setFeatureInput] = useState("");
-  const roomFileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadingRoomImages, setUploadingRoomImages] = useState(false);
-
-  // Step 4: Add-ons
-  const [setupAddons, setSetupAddons] = useState<SetupAddon[]>([]);
-
-  // Step 5: Benefits
-  const [benefits, setBenefits] = useState<string[]>([]);
-
-  // Step 6: Last-Minute Discounts
-  const [lastMinuteConfig, setLastMinuteConfig] = useState<LastMinuteConfig>(
-    createEmptyLastMinuteConfig(),
-  );
-
-  // Step 7: Policies
-  const [checkInFrom, setCheckInFrom] = useState("15:00");
-  const [checkInUntil, setCheckInUntil] = useState("22:00");
-  const [checkOutFrom, setCheckOutFrom] = useState("07:00");
-  const [checkOutUntil, setCheckOutUntil] = useState("11:00");
-  const [payAtHotel, setPayAtHotel] = useState(true);
-  const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(["cash", "card"]);
-  const [onlineCardPayment, setOnlineCardPayment] = useState(false);
-  const [bankTransfer, setBankTransfer] = useState(false);
-  const [payoutAccountHolder, setPayoutAccountHolder] = useState("");
-  const [payoutAccountType, setPayoutAccountType] = useState<"iban" | "account_number">("iban");
-  const [payoutIban, setPayoutIban] = useState("");
-  const [payoutAccountNumber, setPayoutAccountNumber] = useState("");
-  const [payoutBankName, setPayoutBankName] = useState("");
-  const [payoutSwift, setPayoutSwift] = useState("");
-  const [specialRequests, setSpecialRequests] = useState(true);
-  const [estimatedArrivalTime, setEstimatedArrivalTime] = useState(false);
-  const [numberOfGuests, setNumberOfGuests] = useState(false);
-  const [enableReferAGuest, setEnableReferAGuest] = useState(true);
-
   // Internal: vayada payment terms (not shown to hotel during setup)
   const [activePlan, setActivePlan] = useState<"commission" | "fixed">("commission");
   const [commissionRate, setCommissionRate] = useState("5");
   const [fixedMonthlyFee, setFixedMonthlyFee] = useState("49");
-  const [paymentProvider, setPaymentProvider] = useState<"stripe" | "xendit" | "vayada">("vayada");
-  const [xenditChannelCode, setXenditChannelCode] = useState("ID_BCA");
-  const [xenditAccountNumber, setXenditAccountNumber] = useState("");
-  const [xenditAccountHolderName, setXenditAccountHolderName] = useState("");
+
+  const {
+    propertyName, setPropertyName,
+    city, setCity,
+    country, setCountry,
+    address, setAddress,
+    reservationEmail, setReservationEmail,
+    phoneNumber, setPhoneNumber,
+    whatsapp, setWhatsapp,
+    instagram, setInstagram,
+    facebook, setFacebook,
+    tiktok, setTiktok,
+    youtube, setYoutube,
+    currency, setCurrency,
+    defaultLanguage, setDefaultLanguage,
+    supportedCurrencies, setSupportedCurrencies,
+    supportedLanguages, setSupportedLanguages,
+    heroImage, setHeroImage,
+    primaryColor, setPrimaryColor,
+    accentColor, setAccentColor,
+    selectedFont, setSelectedFont,
+    propertyDescription, setPropertyDescription,
+    bookingFilters, setBookingFilters,
+    fileInputRef,
+    uploading,
+    handleImageUpload,
+    rooms, setRooms,
+    activeRoomIndex, setActiveRoomIndex,
+    activeRoomTab, setActiveRoomTab,
+    amenityInput, setAmenityInput,
+    featureInput, setFeatureInput,
+    roomFileInputRef,
+    uploadingRoomImages,
+    handleRoomImageUpload,
+    setupAddons, setSetupAddons,
+    benefits, setBenefits,
+    lastMinuteConfig, setLastMinuteConfig,
+    checkInFrom, setCheckInFrom,
+    checkInUntil, setCheckInUntil,
+    checkOutFrom, setCheckOutFrom,
+    checkOutUntil, setCheckOutUntil,
+    payAtHotel, setPayAtHotel,
+    payAtHotelMethods, setPayAtHotelMethods,
+    onlineCardPayment, setOnlineCardPayment,
+    bankTransfer, setBankTransfer,
+    payoutAccountHolder, setPayoutAccountHolder,
+    payoutAccountType, setPayoutAccountType,
+    payoutIban, setPayoutIban,
+    payoutAccountNumber, setPayoutAccountNumber,
+    payoutBankName, setPayoutBankName,
+    payoutSwift, setPayoutSwift,
+    specialRequests, setSpecialRequests,
+    estimatedArrivalTime, setEstimatedArrivalTime,
+    numberOfGuests, setNumberOfGuests,
+    enableReferAGuest, setEnableReferAGuest,
+    paymentProvider, setPaymentProvider,
+    xenditChannelCode, setXenditChannelCode,
+    xenditAccountNumber, setXenditAccountNumber,
+    xenditAccountHolderName, setXenditAccountHolderName,
+    reset,
+  } = useSetupWizardState({
+    uploadSingleImage,
+    uploadImages,
+    defaultCurrency: "EUR",
+    defaultCheckInFrom: "15:00",
+    defaultEnableReferAGuest: true,
+    syncAddonCurrency: false,
+  });
 
   useEffect(() => {
     loadInvites();
   }, []);
-
-  useEffect(() => {
-    setRooms((prev) => prev.map((r) => (r.currency ? r : { ...r, currency })));
-  }, [currency]);
 
   // Auto-set payment provider based on country
   useEffect(() => {
@@ -171,40 +157,6 @@ export default function InviteCodesPage() {
     if (!confirm("Delete this invite code?")) return;
     await inviteCodesService.delete(id);
     setInvites((prev) => prev.filter((i) => i.id !== id));
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const previewUrl = URL.createObjectURL(file);
-    setHeroImage(previewUrl);
-    try {
-      setUploading(true);
-      const s3Url = await uploadSingleImage(file);
-      URL.revokeObjectURL(previewUrl);
-      setHeroImage(s3Url);
-    } catch {
-      console.error("Image upload failed");
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleRoomImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    try {
-      setUploadingRoomImages(true);
-      const urls = await uploadImages(Array.from(files));
-      setRooms((prev) =>
-        prev.map((r, i) => (i === activeRoomIndex ? { ...r, images: [...r.images, ...urls] } : r)),
-      );
-    } catch {
-      console.error("Room image upload failed");
-    } finally {
-      setUploadingRoomImages(false);
-      if (roomFileInputRef.current) roomFileInputRef.current.value = "";
-    }
   };
 
   const canProceed = (): boolean => {
@@ -311,42 +263,8 @@ export default function InviteCodesPage() {
   };
 
   const resetForm = () => {
+    reset();
     setStep(1);
-    setPropertyName("");
-    setCity("");
-    setCountry("");
-    setAddress("");
-    setReservationEmail("");
-    setPhoneNumber("");
-    setWhatsapp("");
-    setInstagram("");
-    setFacebook("");
-    setCurrency("EUR");
-    setDefaultLanguage("en");
-    setSupportedCurrencies([]);
-    setSupportedLanguages([]);
-    setHeroImage("");
-    setPrimaryColor("#4F46E5");
-    setAccentColor("#F5F3EF");
-    setSelectedFont("high-end-serif");
-    setPropertyDescription("");
-    setBookingFilters(["includeBreakfast", "freeCancellation", "payAtHotel"]);
-    setRooms([createEmptyRoom()]);
-    setActiveRoomIndex(0);
-    setSetupAddons([]);
-    setBenefits([]);
-    setLastMinuteConfig(createEmptyLastMinuteConfig());
-    setCheckInFrom("15:00");
-    setCheckInUntil("22:00");
-    setCheckOutFrom("07:00");
-    setCheckOutUntil("11:00");
-    setPayAtHotel(true);
-    setOnlineCardPayment(false);
-    setBankTransfer(false);
-    setSpecialRequests(true);
-    setEstimatedArrivalTime(false);
-    setNumberOfGuests(false);
-    setEnableReferAGuest(false);
     setActivePlan("commission");
     setCommissionRate("5");
     setFixedMonthlyFee("49");
