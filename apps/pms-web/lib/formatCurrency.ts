@@ -4,6 +4,7 @@ const SYMBOLS: Record<string, string> = {
   GBP: "£",
   JPY: "¥",
   THB: "฿",
+  PHP: "₱",
   IDR: "IDR ",
   CHF: "CHF",
   AUD: "A$",

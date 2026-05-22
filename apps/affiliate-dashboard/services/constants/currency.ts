@@ -7,6 +7,7 @@ export const CURRENCY_SYMBOLS: Record<string, string> = {
   EUR: "€",
   USD: "$",
   GBP: "£",
+  PHP: "₱",
   IDR: "IDR ",
 };
 
