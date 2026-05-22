@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
@@ -45,9 +45,11 @@ export default function BookingConfirmationPage({
   params,
   searchParams,
 }: {
-  params: { reference: string };
-  searchParams: { email?: string };
+  params: Promise<{ reference: string }>;
+  searchParams: Promise<{ email?: string }>;
 }) {
+  const { reference } = use(params);
+  const { email: emailParam } = use(searchParams);
   const t = useTranslations("confirmation");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
@@ -69,19 +71,19 @@ export default function BookingConfirmationPage({
   useEffect(() => {
     trackEvent(slug, "completed_booking");
     const stored = readLastBooking();
-    if (stored && stored.bookingReference === params.reference) {
+    if (stored && stored.bookingReference === reference) {
       setBooking(stored);
       setStatus(stored.status || "pending");
       return;
     }
 
-    const email = searchParams.email;
+    const email = emailParam;
     if (!email) return;
 
     let cancelled = false;
     setHydrating(true);
     bookingService
-      .lookup(slug, params.reference, email)
+      .lookup(slug, reference, email)
       .then((fetched) => {
         if (cancelled) return;
         setBooking(fetched);
@@ -99,11 +101,11 @@ export default function BookingConfirmationPage({
     return () => {
       cancelled = true;
     };
-  }, [params.reference, searchParams.email, slug]);
+  }, [reference, emailParam, slug]);
 
   // Fetch any existing change request once we know the booking + email.
   useEffect(() => {
-    const email = booking?.guestEmail || searchParams.email;
+    const email = booking?.guestEmail || emailParam;
     if (!booking?.id || !email) return;
     let cancelled = false;
     bookingService
@@ -117,7 +119,7 @@ export default function BookingConfirmationPage({
     return () => {
       cancelled = true;
     };
-  }, [booking?.id, booking?.guestEmail, searchParams.email, slug]);
+  }, [booking?.id, booking?.guestEmail, emailParam, slug]);
 
   // Poll for status updates every 30s when pending
   useEffect(() => {
@@ -125,7 +127,7 @@ export default function BookingConfirmationPage({
 
     const poll = async () => {
       try {
-        const result = await bookingService.getStatus(slug, params.reference, booking.guestEmail);
+        const result = await bookingService.getStatus(slug, reference, booking.guestEmail);
         if (result.status !== status) {
           setStatus(result.status);
           // Update stored booking
@@ -142,7 +144,7 @@ export default function BookingConfirmationPage({
 
     const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
-  }, [status, booking, slug, params.reference]);
+  }, [status, booking, slug, reference]);
 
   const handleWithdraw = async () => {
     if (!booking) return;
@@ -287,7 +289,7 @@ export default function BookingConfirmationPage({
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
               {t("bookingReference")}
             </p>
-            <p className="text-2xl font-bold text-primary-600 tracking-wider">{params.reference}</p>
+            <p className="text-2xl font-bold text-primary-600 tracking-wider">{reference}</p>
           </div>
 
           {/* Booking Details */}
@@ -301,7 +303,7 @@ export default function BookingConfirmationPage({
                 {t("detailsUnavailable") || "We couldn't load your booking details here."}
               </p>
               <Link
-                href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(searchParams.email || "")}`}
+                href={`/my-booking?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(emailParam || "")}`}
                 className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
               >
                 {t("manageBooking") || "Manage your booking"}
@@ -390,7 +392,7 @@ export default function BookingConfirmationPage({
           {isConfirmed && (!changeRequest || changeRequest.status !== "pending") && booking && (
             <div className="mt-6">
               <Link
-                href={`/booking/${params.reference}/request-change?email=${encodeURIComponent(booking.guestEmail || searchParams.email || "")}`}
+                href={`/booking/${reference}/request-change?email=${encodeURIComponent(booking.guestEmail || emailParam || "")}`}
                 className="inline-flex px-6 py-3 border border-primary-200 text-primary-700 font-semibold rounded-full hover:bg-primary-50 transition-colors"
               >
                 {t("requestChanges") || "Request Changes"}
@@ -423,7 +425,7 @@ export default function BookingConfirmationPage({
               {t("backToHotel")}
             </Link>
             <Link
-              href={`/my-booking?reference=${encodeURIComponent(params.reference)}&email=${encodeURIComponent(booking?.guestEmail || searchParams.email || "")}`}
+              href={`/my-booking?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(booking?.guestEmail || emailParam || "")}`}
               className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
             >
               {t("manageBooking")}
