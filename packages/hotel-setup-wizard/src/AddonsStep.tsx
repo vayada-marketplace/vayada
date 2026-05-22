@@ -8,9 +8,7 @@ import {
   XMarkIcon,
   PhotoIcon,
 } from "@heroicons/react/24/outline";
-import { ToggleSwitch } from "@/components/ui";
-import { uploadSingleImage } from "@/lib/utils/uploadImage";
-import { getCurrencySymbol } from "@/lib/utils";
+import { ToggleSwitch } from "./internal/ToggleSwitch";
 
 const CATEGORIES = [
   { value: "dining", label: "Dining" },
@@ -64,7 +62,11 @@ interface AddonsStepProps {
   onBack: () => void;
   onContinue: () => void;
   stepIndicators: React.ReactNode;
+  uploadImage: (file: File) => Promise<string>;
+  formatPrice?: (amount: number, currency: string) => string;
 }
+
+const defaultFormatPrice = (amount: number, currency: string) => `${currency} ${amount.toFixed(2)}`;
 
 export default function AddonsStep({
   addons,
@@ -75,6 +77,8 @@ export default function AddonsStep({
   onBack,
   onContinue,
   stepIndicators,
+  uploadImage,
+  formatPrice = defaultFormatPrice,
 }: AddonsStepProps) {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -105,7 +109,7 @@ export default function AddonsStep({
 
     try {
       setUploadingImage(true);
-      const s3Url = await uploadSingleImage(file);
+      const s3Url = await uploadImage(file);
       URL.revokeObjectURL(previewUrl);
       setFormData((prev) => ({ ...prev, image: s3Url }));
     } catch (err) {
@@ -130,8 +134,6 @@ export default function AddonsStep({
     }
     setShowModal(false);
   };
-
-  const currencySymbol = getCurrencySymbol(currency || "USD");
 
   return (
     <div className="flex-1 overflow-auto">
@@ -190,7 +192,6 @@ export default function AddonsStep({
                   key={addon._localId}
                   className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors"
                 >
-                  {/* Image thumbnail */}
                   {addon.image ? (
                     <img
                       src={addon.image}
@@ -213,7 +214,6 @@ export default function AddonsStep({
                     </div>
                   )}
 
-                  {/* Name and category */}
                   <div className="flex-1 min-w-0">
                     <p className="text-[13px] font-medium text-gray-900 truncate">{addon.name}</p>
                     <div className="flex items-center gap-2 mt-0.5">
@@ -228,16 +228,13 @@ export default function AddonsStep({
                     </div>
                   </div>
 
-                  {/* Price */}
                   <div className="text-right shrink-0">
                     <p className="text-[13px] font-semibold text-gray-900">
-                      {currencySymbol}
-                      {addon.price.toFixed(2)}
+                      {formatPrice(addon.price, addon.currency || currency || "USD")}
                     </p>
                     {addon.perPerson && <p className="text-[10px] text-gray-400">per person</p>}
                   </div>
 
-                  {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => openEditModal(addon)}
@@ -258,7 +255,6 @@ export default function AddonsStep({
           )}
         </div>
 
-        {/* Tip */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
           <p className="text-[12px] text-blue-700">
             This step is optional — you can skip it and configure add-ons later from Booking Flow
@@ -289,7 +285,6 @@ export default function AddonsStep({
         </div>
       </div>
 
-      {/* ADD/EDIT ADDON MODAL */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowModal(false)} />
@@ -307,7 +302,6 @@ export default function AddonsStep({
             </div>
 
             <div className="p-4 space-y-3">
-              {/* Name */}
               <div>
                 <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Name *</label>
                 <input
@@ -319,7 +313,6 @@ export default function AddonsStep({
                 />
               </div>
 
-              {/* Description */}
               <div>
                 <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
                   Description
@@ -333,7 +326,6 @@ export default function AddonsStep({
                 />
               </div>
 
-              {/* Price + Currency */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
@@ -368,7 +360,6 @@ export default function AddonsStep({
                 </div>
               </div>
 
-              {/* Category */}
               <div>
                 <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
                   Category
@@ -386,7 +377,6 @@ export default function AddonsStep({
                 </select>
               </div>
 
-              {/* Image */}
               <div>
                 <label className="block text-[12px] font-medium text-gray-700 mb-0.5">Image</label>
                 {formData.image ? (
@@ -460,7 +450,6 @@ export default function AddonsStep({
                 )}
               </div>
 
-              {/* Duration */}
               <div>
                 <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
                   Duration
@@ -474,7 +463,6 @@ export default function AddonsStep({
                 />
               </div>
 
-              {/* Per Person toggle */}
               <ToggleSwitch
                 size="sm"
                 enabled={formData.perPerson}
@@ -483,7 +471,6 @@ export default function AddonsStep({
                 description="Price is multiplied by number of guests"
               />
 
-              {/* Per Night toggle */}
               <ToggleSwitch
                 size="sm"
                 enabled={formData.perNight}

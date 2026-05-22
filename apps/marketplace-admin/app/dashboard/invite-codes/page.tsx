@@ -9,13 +9,15 @@ import { TrashIcon, ClipboardIcon, PlusIcon } from "@heroicons/react/24/outline"
 
 import PropertyStep from "@/components/setup/PropertyStep";
 import RoomsStep, { type RoomType, createEmptyRoom } from "@/components/setup/RoomsStep";
-import AddonsStep, { type SetupAddon, createEmptyAddon } from "@/components/setup/AddonsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
 import {
+  AddonsStep,
   BenefitsStep,
   BrandMediaStep,
   LastMinuteStep,
   type LastMinuteConfig,
+  type SetupAddon,
+  createEmptyAddon,
   createEmptyLastMinuteConfig,
 } from "@vayada/hotel-setup-wizard";
 
@@ -534,6 +536,7 @@ export default function InviteCodesPage() {
             onBack={() => setStep(3)}
             onContinue={() => setStep(5)}
             stepIndicators={stepIndicators}
+            uploadImage={uploadSingleImage}
           />
         )}
 

@@ -19,12 +19,13 @@ import RoomsStep, {
   hasSeasonCoverageGaps,
 } from "@/components/setup/RoomsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
-import AddonsStep, { type SetupAddon } from "@/components/setup/AddonsStep";
 import {
+  AddonsStep,
   BenefitsStep,
   BrandMediaStep,
   LastMinuteStep,
   type LastMinuteConfig,
+  type SetupAddon,
   createEmptyLastMinuteConfig,
 } from "@vayada/hotel-setup-wizard";
 import PromoCodesStep, { type SetupPromoCode } from "@/components/setup/PromoCodesStep";
@@ -1027,6 +1028,8 @@ export default function SetupPage() {
             setStep(7);
           }}
           stepIndicators={stepIndicators}
+          uploadImage={uploadSingleImage}
+          formatPrice={(amt, c) => `${getCurrencySymbol(c)}${amt.toFixed(2)}`}
         />
       )}
 
