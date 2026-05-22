@@ -7,7 +7,8 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./BenefitsStep": "./src/BenefitsStep.tsx"
+    "./BenefitsStep": "./src/BenefitsStep.tsx",
+    "./LastMinuteStep": "./src/LastMinuteStep.tsx"
   },
   "peerDependencies": {
     "@heroicons/react": "^2.2.0",

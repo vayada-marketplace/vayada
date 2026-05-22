@@ -20,12 +20,13 @@ import RoomsStep, {
 } from "@/components/setup/RoomsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
 import AddonsStep, { type SetupAddon } from "@/components/setup/AddonsStep";
-import { BenefitsStep } from "@vayada/hotel-setup-wizard";
-import PromoCodesStep, { type SetupPromoCode } from "@/components/setup/PromoCodesStep";
-import LastMinuteStep, {
+import {
+  BenefitsStep,
+  LastMinuteStep,
   type LastMinuteConfig,
   createEmptyLastMinuteConfig,
-} from "@/components/setup/LastMinuteStep";
+} from "@vayada/hotel-setup-wizard";
+import PromoCodesStep, { type SetupPromoCode } from "@/components/setup/PromoCodesStep";
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600;700&display=swap";
@@ -869,7 +870,7 @@ export default function SetupPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      { }
+      {}
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
       {/* Top bar */}

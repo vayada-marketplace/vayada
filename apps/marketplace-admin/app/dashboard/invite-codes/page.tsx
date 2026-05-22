@@ -12,11 +12,12 @@ import BrandMediaStep from "@/components/setup/BrandMediaStep";
 import RoomsStep, { type RoomType, createEmptyRoom } from "@/components/setup/RoomsStep";
 import AddonsStep, { type SetupAddon, createEmptyAddon } from "@/components/setup/AddonsStep";
 import PoliciesStep from "@/components/setup/PoliciesStep";
-import { BenefitsStep } from "@vayada/hotel-setup-wizard";
-import LastMinuteStep, {
+import {
+  BenefitsStep,
+  LastMinuteStep,
   type LastMinuteConfig,
   createEmptyLastMinuteConfig,
-} from "@/components/setup/LastMinuteStep";
+} from "@vayada/hotel-setup-wizard";
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&display=swap";
@@ -402,7 +403,7 @@ export default function InviteCodesPage() {
 
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col">
-        { }
+        {}
         <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
         {/* Top bar */}
