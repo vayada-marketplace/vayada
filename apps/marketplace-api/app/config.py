@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
+    # 2FA Configuration
+    TOTP_ENCRYPTION_KEY: str = Field(
+        "0" * 64,
+        description="64-char hex key (32 bytes) for AES-encrypting TOTP secrets in the DB. "
+        "Generate: openssl rand -hex 32. Must be provisioned in ECS before deploying 2FA.",
+    )
+
     # JWT Configuration
     JWT_SECRET_KEY: str = "your-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"

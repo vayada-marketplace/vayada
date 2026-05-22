@@ -55,17 +55,19 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Login response model"""
+    """Login response model. When requires_totp=True, only message/requires_totp/totp_session are set."""
 
-    id: str
-    email: str
-    name: str
-    type: Literal["creator", "hotel", "admin"]
-    status: str
-    access_token: str
+    id: str | None = None
+    email: str | None = None
+    name: str | None = None
+    type: str | None = None
+    status: str | None = None
+    access_token: str | None = None
     token_type: str = "bearer"
-    expires_in: int  # Token expiration time in seconds
+    expires_in: int | None = None
     message: str
+    requires_totp: bool = False
+    totp_session: str | None = None
 
 
 # ============================================
@@ -162,3 +164,55 @@ class VerifyEmailResponse(BaseModel):
     message: str
     verified: bool
     email: str | None = None
+
+
+# ============================================
+# TOTP / 2FA
+# ============================================
+
+
+class TotpVerifyRequest(BaseModel):
+    totp_session: str
+    code: str = Field(..., description="6-digit TOTP code or recovery code (XXXXXX-XXXXXX)")
+
+
+class TotpSetupResponse(BaseModel):
+    otpauth_uri: str
+    secret: str
+    message: str
+
+
+class TotpConfirmRequest(BaseModel):
+    code: str = Field(..., min_length=6, description="6-digit TOTP code from the authenticator app")
+
+
+class TotpConfirmResponse(BaseModel):
+    recovery_codes: list[str]
+    message: str
+
+
+class TotpRegenerateRequest(BaseModel):
+    code: str = Field(..., min_length=6, description="Current TOTP code to authorize regeneration")
+
+
+class TotpRegenerateResponse(BaseModel):
+    recovery_codes: list[str]
+    message: str
+
+
+class TotpRecoveryCodeCountResponse(BaseModel):
+    count: int
+
+
+class LoginHistoryEntry(BaseModel):
+    id: str
+    success: bool
+    auth_method: str | None
+    failure_reason: str | None
+    ip_address: str | None
+    user_agent: str | None
+    created_at: str
+
+
+class LoginHistoryResponse(BaseModel):
+    entries: list[LoginHistoryEntry]

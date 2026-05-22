@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
+    # 2FA Configuration
+    TOTP_ENCRYPTION_KEY: str = Field(
+        "0" * 64,
+        description="64-char hex key (32 bytes) for AES-encrypting TOTP secrets in the DB. "
+        "Generate: openssl rand -hex 32. Must match marketplace-api and be in ECS task defs.",
+    )
+
     # CORS Configuration
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
     CORS_ORIGIN_REGEX: str = Field(

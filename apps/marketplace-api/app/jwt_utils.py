@@ -100,6 +100,22 @@ def get_token_expiration(token: str) -> datetime | None:
         return None
 
 
+def create_totp_session_token(user_id: str, email: str, user_type: str) -> str:
+    """Short-lived (3 min) token proving password auth passed. Carries totp_pending=True."""
+    return create_access_token(
+        data={"sub": user_id, "email": email, "type": user_type, "totp_pending": True},
+        expires_delta=timedelta(minutes=3),
+    )
+
+
+def decode_totp_session_token(token: str) -> dict | None:
+    """Validate a totp_session token. Returns payload only if totp_pending=True."""
+    payload = decode_access_token(token)
+    if payload and payload.get("totp_pending") is True:
+        return payload
+    return None
+
+
 def is_token_expired(token: str) -> bool | None:
     """
     Check if token is expired

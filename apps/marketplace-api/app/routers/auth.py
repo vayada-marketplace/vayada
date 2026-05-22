@@ -5,7 +5,7 @@ Authentication routes
 import logging
 
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.auth import (
@@ -20,6 +20,7 @@ from app.auth import (
     verify_email_code,
 )
 from app.config import settings
+from app.dependencies import get_current_user_id
 from app.email_service import (
     create_email_verification_html,
     create_password_reset_email_html,
@@ -27,13 +28,16 @@ from app.email_service import (
 )
 from app.jwt_utils import (
     create_access_token,
+    create_totp_session_token,
     decode_access_token,
+    decode_totp_session_token,
     get_token_expiration_seconds,
     is_token_expired,
 )
 from app.models.auth import (
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    LoginHistoryResponse,
     LoginRequest,
     LoginResponse,
     RegisterRequest,
@@ -43,6 +47,13 @@ from app.models.auth import (
     SendVerificationCodeRequest,
     SendVerificationCodeResponse,
     TokenValidationResponse,
+    TotpConfirmRequest,
+    TotpConfirmResponse,
+    TotpRecoveryCodeCountResponse,
+    TotpRegenerateRequest,
+    TotpRegenerateResponse,
+    TotpSetupResponse,
+    TotpVerifyRequest,
     VerifyEmailCodeRequest,
     VerifyEmailCodeResponse,
     VerifyEmailResponse,
@@ -50,8 +61,20 @@ from app.models.auth import (
 from app.repositories.consent_repo import ConsentRepository
 from app.repositories.creator_repo import CreatorRepository
 from app.repositories.hotel_repo import HotelRepository
+from app.repositories.login_audit_repo import LoginAuditRepository, RateLimitRepository
 from app.repositories.password_reset_repo import PasswordResetRepository
+from app.repositories.totp_repo import TotpRepository
 from app.repositories.user_repo import UserRepository
+from app.totp_utils import (
+    decrypt_secret,
+    encrypt_secret,
+    generate_recovery_codes,
+    generate_totp_secret,
+    get_totp_uri,
+    hash_recovery_code,
+    verify_recovery_code,
+    verify_totp_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -258,43 +281,79 @@ async def register(request: RegisterRequest):
 
 
 @router.post("/login", response_model=LoginResponse, status_code=status.HTTP_200_OK)
-async def login(request: LoginRequest):
-    """
-    Login with email and password
+async def login(http_request: Request, request: LoginRequest):
+    """Login with email and password. Admin accounts with 2FA enrolled receive a totp_session."""
+    ip = http_request.client.host if http_request.client else None
+    ua = http_request.headers.get("user-agent")
 
-    - **email**: User's email address
-    - **password**: User's password
-    """
     try:
-        # Find user by email
+        lockout = await RateLimitRepository.check_locked(request.email)
+        if lockout:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "message": "Too many failed login attempts. Try again later.",
+                    "locked_until": lockout["locked_until"].isoformat(),
+                },
+            )
+
         user = await UserRepository.get_by_email(request.email)
 
         if not user:
+            await RateLimitRepository.record_failure(request.email)
+            await LoginAuditRepository.log(
+                email=request.email, success=False, failure_reason="user_not_found",
+                ip_address=ip, user_agent=ua,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
             )
 
-        # Verify password
         password_valid = bcrypt.checkpw(
             request.password.encode("utf-8"), user["password_hash"].encode("utf-8")
         )
-
         if not password_valid:
+            await RateLimitRepository.record_failure(request.email)
+            await LoginAuditRepository.log(
+                email=request.email, success=False, failure_reason="wrong_password",
+                user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
             )
 
-        # Check if user account is suspended
         if user["status"] == "suspended":
+            await LoginAuditRepository.log(
+                email=request.email, success=False, failure_reason="suspended",
+                user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Account is suspended"
             )
 
-        # Create JWT token
+        await RateLimitRepository.clear(request.email)
+
+        if user["type"] == "admin" and await TotpRepository.is_enrolled(str(user["id"])):
+            totp_session = create_totp_session_token(
+                str(user["id"]), user["email"], user["type"]
+            )
+            await LoginAuditRepository.log(
+                email=request.email, success=False, failure_reason="totp_required",
+                auth_method="password", user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+            )
+            return LoginResponse(
+                message="Two-factor authentication required.",
+                requires_totp=True,
+                totp_session=totp_session,
+            )
+
         access_token = create_access_token(
             data={"sub": str(user["id"]), "email": user["email"], "type": user["type"]}
         )
-
+        await LoginAuditRepository.log(
+            email=request.email, success=True, auth_method="password",
+            user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+        )
         return LoginResponse(
             id=str(user["id"]),
             email=user["email"],
@@ -312,6 +371,164 @@ async def login(request: LoginRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Login failed"
         )
+
+
+@router.post("/totp/verify", response_model=LoginResponse, status_code=status.HTTP_200_OK)
+async def totp_verify(http_request: Request, request: TotpVerifyRequest):
+    """Verify a TOTP code (or recovery code) after the password step. Issues a full JWT on success."""
+    ip = http_request.client.host if http_request.client else None
+    ua = http_request.headers.get("user-agent")
+
+    payload = decode_totp_session_token(request.totp_session)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
+
+    user_id = payload["sub"]
+    email = payload["email"]
+    user_type = payload["type"]
+
+    user = await UserRepository.get_by_id(user_id, columns="id, email, name, type, status")
+    if not user or user["status"] == "suspended":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+
+    secret_row = await TotpRepository.get_secret(user_id)
+    if not secret_row or not secret_row["enrolled"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not enrolled")
+
+    code = request.code.strip()
+    verified = False
+    auth_method = "password+totp"
+
+    if len(code) > 6:
+        # Attempt recovery code match
+        for rc in await TotpRepository.get_unused_recovery_codes(user_id):
+            if verify_recovery_code(code, rc["code_hash"]):
+                await TotpRepository.mark_recovery_code_used(str(rc["id"]))
+                verified = True
+                auth_method = "password+recovery_code"
+                break
+    else:
+        secret = decrypt_secret(secret_row["secret_encrypted"])
+        verified = verify_totp_code(secret, code)
+
+    if not verified:
+        await LoginAuditRepository.log(
+            email=email, success=False, failure_reason="wrong_totp",
+            auth_method=auth_method, user_id=user_id, ip_address=ip, user_agent=ua,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid code")
+
+    access_token = create_access_token(
+        data={"sub": user_id, "email": email, "type": user_type}
+    )
+    await LoginAuditRepository.log(
+        email=email, success=True, auth_method=auth_method,
+        user_id=user_id, ip_address=ip, user_agent=ua,
+    )
+    return LoginResponse(
+        id=user_id,
+        email=user["email"],
+        name=user["name"],
+        type=user["type"],
+        status=user["status"],
+        access_token=access_token,
+        expires_in=get_token_expiration_seconds(),
+        message="Login successful",
+    )
+
+
+@router.post("/totp/setup", response_model=TotpSetupResponse, status_code=status.HTTP_200_OK)
+async def totp_setup(user_id: str = Depends(get_current_user_id)):
+    """Generate a new TOTP secret and return the otpauth URI for QR display. Does not enroll yet."""
+    user = await UserRepository.get_by_id(user_id, columns="id, email, type")
+    if not user or user["type"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    secret = generate_totp_secret()
+    await TotpRepository.upsert_secret(user_id, encrypt_secret(secret))
+
+    return TotpSetupResponse(
+        otpauth_uri=get_totp_uri(secret, user["email"]),
+        secret=secret,
+        message="Scan the QR code with your authenticator app, then confirm with a code.",
+    )
+
+
+@router.post("/totp/confirm", response_model=TotpConfirmResponse, status_code=status.HTTP_200_OK)
+async def totp_confirm(request: TotpConfirmRequest, user_id: str = Depends(get_current_user_id)):
+    """Verify the first TOTP code to complete enrollment and receive recovery codes."""
+    secret_row = await TotpRepository.get_secret(user_id)
+    if not secret_row:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Run /totp/setup first")
+
+    secret = decrypt_secret(secret_row["secret_encrypted"])
+    if not verify_totp_code(secret, request.code.strip()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid code")
+
+    await TotpRepository.mark_enrolled(user_id)
+    await TotpRepository.delete_recovery_codes(user_id)
+
+    codes = generate_recovery_codes()
+    await TotpRepository.insert_recovery_codes(user_id, [hash_recovery_code(c) for c in codes])
+
+    return TotpConfirmResponse(
+        recovery_codes=codes,
+        message="2FA enabled. Save these recovery codes — they will not be shown again.",
+    )
+
+
+@router.post(
+    "/totp/recovery-codes/regenerate",
+    response_model=TotpRegenerateResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def totp_regenerate_recovery_codes(
+    request: TotpRegenerateRequest, user_id: str = Depends(get_current_user_id)
+):
+    """Regenerate recovery codes. Requires a valid TOTP code as confirmation."""
+    secret_row = await TotpRepository.get_secret(user_id)
+    if not secret_row or not secret_row["enrolled"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not enrolled")
+
+    secret = decrypt_secret(secret_row["secret_encrypted"])
+    if not verify_totp_code(secret, request.code.strip()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid TOTP code")
+
+    await TotpRepository.delete_recovery_codes(user_id)
+    codes = generate_recovery_codes()
+    await TotpRepository.insert_recovery_codes(user_id, [hash_recovery_code(c) for c in codes])
+
+    return TotpRegenerateResponse(
+        recovery_codes=codes,
+        message="Recovery codes regenerated. Save these — they will not be shown again.",
+    )
+
+
+@router.get(
+    "/totp/recovery-codes/count",
+    response_model=TotpRecoveryCodeCountResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def totp_recovery_code_count(user_id: str = Depends(get_current_user_id)):
+    """Return the number of unused recovery codes remaining."""
+    count = await TotpRepository.count_unused_recovery_codes(user_id)
+    return TotpRecoveryCodeCountResponse(count=count)
+
+
+@router.get("/login-history", response_model=LoginHistoryResponse, status_code=status.HTTP_200_OK)
+async def login_history(user_id: str = Depends(get_current_user_id)):
+    """Return the 20 most recent login events for the current user."""
+    entries = await LoginAuditRepository.get_recent(user_id)
+    return LoginHistoryResponse(
+        entries=[
+            {
+                **e,
+                "id": str(e["id"]),
+                "created_at": e["created_at"].isoformat(),
+            }
+            for e in entries
+        ]
+    )
 
 
 @router.post(
