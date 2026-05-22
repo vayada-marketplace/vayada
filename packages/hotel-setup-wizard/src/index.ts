@@ -8,3 +8,4 @@ export {
   type LastMinuteConfig,
   type LastMinuteTier,
 } from "./LastMinuteStep";
+export { default as PoliciesStep } from "./PoliciesStep";

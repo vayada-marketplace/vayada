@@ -9,12 +9,12 @@ import { TrashIcon, ClipboardIcon, PlusIcon } from "@heroicons/react/24/outline"
 
 import PropertyStep from "@/components/setup/PropertyStep";
 import RoomsStep, { type RoomType, createEmptyRoom } from "@/components/setup/RoomsStep";
-import PoliciesStep from "@/components/setup/PoliciesStep";
 import {
   AddonsStep,
   BenefitsStep,
   BrandMediaStep,
   LastMinuteStep,
+  PoliciesStep,
   type LastMinuteConfig,
   type SetupAddon,
   createEmptyAddon,
@@ -101,8 +101,10 @@ export default function InviteCodesPage() {
   );
 
   // Step 7: Policies
-  const [checkInTime, setCheckInTime] = useState("15:00");
-  const [checkOutTime, setCheckOutTime] = useState("11:00");
+  const [checkInFrom, setCheckInFrom] = useState("15:00");
+  const [checkInUntil, setCheckInUntil] = useState("22:00");
+  const [checkOutFrom, setCheckOutFrom] = useState("07:00");
+  const [checkOutUntil, setCheckOutUntil] = useState("11:00");
   const [payAtHotel, setPayAtHotel] = useState(true);
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(["cash", "card"]);
   const [onlineCardPayment, setOnlineCardPayment] = useState(false);
@@ -266,8 +268,12 @@ export default function InviteCodesPage() {
         },
         benefits,
         policies: {
-          check_in_time: checkInTime,
-          check_out_time: checkOutTime,
+          check_in_time: checkInFrom,
+          check_out_time: checkOutUntil,
+          check_in_from: checkInFrom,
+          check_in_until: checkInUntil,
+          check_out_from: checkOutFrom,
+          check_out_until: checkOutUntil,
           pay_at_property: payAtHotel,
           pay_at_hotel_methods: payAtHotelMethods,
           online_card_payment: onlineCardPayment,
@@ -321,8 +327,10 @@ export default function InviteCodesPage() {
     setSetupAddons([]);
     setBenefits([]);
     setLastMinuteConfig(createEmptyLastMinuteConfig());
-    setCheckInTime("15:00");
-    setCheckOutTime("11:00");
+    setCheckInFrom("15:00");
+    setCheckInUntil("22:00");
+    setCheckOutFrom("07:00");
+    setCheckOutUntil("11:00");
     setPayAtHotel(true);
     setOnlineCardPayment(false);
     setBankTransfer(false);
@@ -566,10 +574,14 @@ export default function InviteCodesPage() {
 
         {step === 7 && (
           <PoliciesStep
-            checkInTime={checkInTime}
-            setCheckInTime={setCheckInTime}
-            checkOutTime={checkOutTime}
-            setCheckOutTime={setCheckOutTime}
+            checkInFrom={checkInFrom}
+            setCheckInFrom={setCheckInFrom}
+            checkInUntil={checkInUntil}
+            setCheckInUntil={setCheckInUntil}
+            checkOutFrom={checkOutFrom}
+            setCheckOutFrom={setCheckOutFrom}
+            checkOutUntil={checkOutUntil}
+            setCheckOutUntil={setCheckOutUntil}
             payAtHotel={payAtHotel}
             setPayAtHotel={setPayAtHotel}
             payAtHotelMethods={payAtHotelMethods}

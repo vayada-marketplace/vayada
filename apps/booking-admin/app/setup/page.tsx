@@ -18,12 +18,12 @@ import RoomsStep, {
   createEmptyRoom,
   hasSeasonCoverageGaps,
 } from "@/components/setup/RoomsStep";
-import PoliciesStep from "@/components/setup/PoliciesStep";
 import {
   AddonsStep,
   BenefitsStep,
   BrandMediaStep,
   LastMinuteStep,
+  PoliciesStep,
   type LastMinuteConfig,
   type SetupAddon,
   createEmptyLastMinuteConfig,

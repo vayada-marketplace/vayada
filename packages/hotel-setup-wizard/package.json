@@ -10,7 +10,8 @@
     "./AddonsStep": "./src/AddonsStep.tsx",
     "./BenefitsStep": "./src/BenefitsStep.tsx",
     "./BrandMediaStep": "./src/BrandMediaStep.tsx",
-    "./LastMinuteStep": "./src/LastMinuteStep.tsx"
+    "./LastMinuteStep": "./src/LastMinuteStep.tsx",
+    "./PoliciesStep": "./src/PoliciesStep.tsx"
   },
   "peerDependencies": {
     "@heroicons/react": "^2.2.0",

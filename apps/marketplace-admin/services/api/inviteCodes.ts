@@ -95,6 +95,10 @@ export interface InviteData {
   policies: {
     check_in_time: string;
     check_out_time: string;
+    check_in_from?: string;
+    check_in_until?: string;
+    check_out_from?: string;
+    check_out_until?: string;
     pay_at_property: boolean;
     pay_at_hotel_methods?: string[];
     online_card_payment: boolean;
