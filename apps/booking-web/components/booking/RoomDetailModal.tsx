@@ -124,6 +124,128 @@ export default function RoomDetailModal({
   const nonRefundableTotal = nonRefundableNightly * nights;
   const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100);
 
+  // Rate option buttons — shared between mobile scroll body and desktop sticky footer
+  const rateOptionsJsx = (
+    <div className="space-y-3">
+      {/* Flexible Rate */}
+      {showFlexibleRate && (
+        <button
+          onClick={() => setSelectedRate("flexible")}
+          className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === "flexible" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <svg
+                className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
+                {flexibleExpired ? (
+                  <p className="text-xs text-gray-500">
+                    Cancellation no longer available
+                  </p>
+                ) : room.flexibleCancellationType === "partial_refund" ? (
+                  (() => {
+                    const tiers =
+                      room.partialRefundTiers && room.partialRefundTiers.length > 0
+                        ? [...room.partialRefundTiers].sort(
+                            (a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn,
+                          )
+                        : null;
+                    if (tiers) {
+                      return (
+                        <ul className="text-xs text-gray-500 space-y-0.5">
+                          {tiers.map((t, i) => (
+                            <li key={i}>
+                              {i === 0
+                                ? `≥ ${t.minDaysBeforeCheckIn} days before: ${t.refundPercent}% refund`
+                                : `${tiers[i - 1].minDaysBeforeCheckIn - 1}–${t.minDaysBeforeCheckIn} days before: ${t.refundPercent}% refund`}
+                            </li>
+                          ))}
+                          {tiers[tiers.length - 1].minDaysBeforeCheckIn > 0 && (
+                            <li>{`< ${tiers[tiers.length - 1].minDaysBeforeCheckIn} days before: non-refundable`}</li>
+                          )}
+                        </ul>
+                      );
+                    }
+                    return (
+                      <p className="text-xs text-gray-500">
+                        {`${room.partialRefundAmountPercent ?? 50}% refund if cancelled at least ${room.partialRefundCancelWindowDays ?? 30} days before`}
+                      </p>
+                    );
+                  })()
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    {`Free cancellation until ${getFreeCancellationDays(room.cancellationPolicy)} days before`}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
+                {formatPrice(room.baseRate, room.currency)}
+              </p>
+              <p className="text-xs text-gray-500">/night</p>
+            </div>
+          </div>
+        </button>
+      )}
+
+      {/* Non-Refundable */}
+      {room.nonRefundableRate != null && (
+        <button
+          onClick={() => setSelectedRate("nonrefundable")}
+          className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === "nonrefundable" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <svg
+                className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
+                  Non-Refundable Rate
+                  {discount > 0 && (
+                    <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded whitespace-nowrap">
+                      -{discount}% OFF
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-gray-500">Non-refundable</p>
+              </div>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
+                {formatPrice(nonRefundableNightly, room.currency)}
+              </p>
+              <p className="text-xs text-gray-500">/night</p>
+            </div>
+          </div>
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-stretch md:items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -174,7 +296,8 @@ export default function RoomDetailModal({
           </button>
         </div>
 
-        <div className="flex flex-col md:flex-row overflow-hidden flex-1 min-h-0 overscroll-contain">
+        {/* VAY-444: on mobile the entire content scrolls as one flow; on desktop keep two-column layout */}
+        <div className="flex flex-col md:flex-row overflow-y-auto md:overflow-hidden flex-1 min-h-0 overscroll-contain">
           {/* Left — Images */}
           <div className="md:w-1/2 md:flex-shrink-0 flex flex-col md:min-h-0">
             <div
@@ -243,8 +366,9 @@ export default function RoomDetailModal({
           </div>
 
           {/* Right — Details */}
-          <div className="md:w-1/2 flex flex-col flex-1 min-h-0">
-            <div className="flex-1 overflow-y-auto overscroll-contain p-6">
+          <div className="md:w-1/2 flex flex-col md:flex-1 md:min-h-0">
+            {/* On desktop this div scrolls; on mobile the parent wrapper scrolls */}
+            <div className="md:flex-1 md:overflow-y-auto overscroll-contain p-6">
               {soldOut && (
                 <div className="mb-4 flex items-center gap-2 px-4 py-3 rounded-xl bg-gray-100 border border-gray-200 text-gray-800">
                   <svg
@@ -421,132 +545,22 @@ export default function RoomDetailModal({
                   </div>
                 </div>
               )}
+
+              {/* Mobile: rate options flow inline so user scrolls past them naturally */}
+              <div className="md:hidden pt-4 border-t border-gray-100">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                  Select Your Rate
+                </p>
+                {rateOptionsJsx}
+              </div>
             </div>
 
-            {/* Sticky footer — rate selection always visible regardless of scroll */}
-            <div className="flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
+            {/* Desktop sticky footer — rate selection always visible regardless of scroll */}
+            <div className="hidden md:block flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
                 Select Your Rate
               </p>
-              <div className="space-y-3">
-                {/* Flexible Rate */}
-                {showFlexibleRate && (
-                  <button
-                    onClick={() => setSelectedRate("flexible")}
-                    className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === "flexible" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3 min-w-0 flex-1">
-                        <svg
-                          className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                          />
-                        </svg>
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
-                          {flexibleExpired ? (
-                            <p className="text-xs text-gray-500">
-                              Cancellation no longer available
-                            </p>
-                          ) : room.flexibleCancellationType === "partial_refund" ? (
-                            (() => {
-                              const tiers =
-                                room.partialRefundTiers && room.partialRefundTiers.length > 0
-                                  ? [...room.partialRefundTiers].sort(
-                                      (a, b) => b.minDaysBeforeCheckIn - a.minDaysBeforeCheckIn,
-                                    )
-                                  : null;
-                              if (tiers) {
-                                return (
-                                  <ul className="text-xs text-gray-500 space-y-0.5">
-                                    {tiers.map((t, i) => (
-                                      <li key={i}>
-                                        {i === 0
-                                          ? `≥ ${t.minDaysBeforeCheckIn} days before: ${t.refundPercent}% refund`
-                                          : `${tiers[i - 1].minDaysBeforeCheckIn - 1}–${t.minDaysBeforeCheckIn} days before: ${t.refundPercent}% refund`}
-                                      </li>
-                                    ))}
-                                    {tiers[tiers.length - 1].minDaysBeforeCheckIn > 0 && (
-                                      <li>{`< ${tiers[tiers.length - 1].minDaysBeforeCheckIn} days before: non-refundable`}</li>
-                                    )}
-                                  </ul>
-                                );
-                              }
-                              return (
-                                <p className="text-xs text-gray-500">
-                                  {`${room.partialRefundAmountPercent ?? 50}% refund if cancelled at least ${room.partialRefundCancelWindowDays ?? 30} days before`}
-                                </p>
-                              );
-                            })()
-                          ) : (
-                            <p className="text-xs text-gray-500">
-                              {`Free cancellation until ${getFreeCancellationDays(room.cancellationPolicy)} days before`}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
-                          {formatPrice(room.baseRate, room.currency)}
-                        </p>
-                        <p className="text-xs text-gray-500">/night</p>
-                      </div>
-                    </div>
-                  </button>
-                )}
-
-                {/* Non-Refundable */}
-                {room.nonRefundableRate != null && (
-                  <button
-                    onClick={() => setSelectedRate("nonrefundable")}
-                    className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === "nonrefundable" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-3 min-w-0 flex-1">
-                        <svg
-                          className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 18L18 6M6 6l12 12"
-                          />
-                        </svg>
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-gray-900 flex items-center gap-2 flex-wrap">
-                            Non-Refundable Rate
-                            {discount > 0 && (
-                              <span className="text-[10px] font-bold bg-primary-600 text-white px-1.5 py-0.5 rounded whitespace-nowrap">
-                                -{discount}% OFF
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-xs text-gray-500">Non-refundable</p>
-                        </div>
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
-                          {formatPrice(nonRefundableNightly, room.currency)}
-                        </p>
-                        <p className="text-xs text-gray-500">/night</p>
-                      </div>
-                    </div>
-                  </button>
-                )}
-              </div>
-
+              {rateOptionsJsx}
               <button
                 onClick={() => {
                   if (!soldOut) onSelectRate(selectedRate);
@@ -575,6 +589,36 @@ export default function RoomDetailModal({
               )}
             </div>
           </div>
+        </div>
+
+        {/* Mobile sticky CTA — outside scroll area so it's always reachable */}
+        <div className="md:hidden flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
+          <button
+            onClick={() => {
+              if (!soldOut) onSelectRate(selectedRate);
+            }}
+            disabled={soldOut}
+            className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
+          >
+            {soldOut ? "Sold Out" : "Select This Rate"}
+          </button>
+
+          {!soldOut && room.remainingRooms <= 3 && (
+            <p
+              className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${
+                room.remainingRooms === 1 ? "text-red-700" : "text-amber-800"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  room.remainingRooms === 1 ? "bg-red-500" : "bg-amber-500"
+                }`}
+              />
+              {room.remainingRooms === 1
+                ? tc("lastRoomLeft")
+                : tc("onlyLeft", { count: room.remainingRooms })}
+            </p>
+          )}
         </div>
       </div>
     </div>
