@@ -146,6 +146,10 @@ class TotpRecoveryCodeCountResponse(BaseModel):
     count: int
 
 
+class TotpStatusResponse(BaseModel):
+    enrolled: bool
+
+
 class LoginHistoryEntry(BaseModel):
     id: str
     success: bool

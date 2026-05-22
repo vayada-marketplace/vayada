@@ -254,4 +254,48 @@ export const authService = {
     });
     return response;
   },
+
+  totpStatus: async (): Promise<{ enrolled: boolean }> => {
+    return apiClient.get<{ enrolled: boolean }>("/auth/totp/status");
+  },
+
+  totpSetup: async (): Promise<{ otpauth_uri: string; secret: string; message: string }> => {
+    return apiClient.post<{ otpauth_uri: string; secret: string; message: string }>(
+      "/auth/totp/setup",
+      {},
+    );
+  },
+
+  totpConfirm: async (code: string): Promise<{ recovery_codes: string[]; message: string }> => {
+    return apiClient.post<{ recovery_codes: string[]; message: string }>("/auth/totp/confirm", {
+      code,
+    });
+  },
+
+  totpRegenerateCodes: async (
+    code: string,
+  ): Promise<{ recovery_codes: string[]; message: string }> => {
+    return apiClient.post<{ recovery_codes: string[]; message: string }>(
+      "/auth/totp/recovery-codes/regenerate",
+      { code },
+    );
+  },
+
+  totpCodeCount: async (): Promise<{ count: number }> => {
+    return apiClient.get<{ count: number }>("/auth/totp/recovery-codes/count");
+  },
+
+  loginHistory: async (): Promise<{
+    entries: Array<{
+      id: string;
+      success: boolean;
+      auth_method: string | null;
+      failure_reason: string | null;
+      ip_address: string | null;
+      user_agent: string | null;
+      created_at: string;
+    }>;
+  }> => {
+    return apiClient.get("/auth/login-history");
+  },
 };

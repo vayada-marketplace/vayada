@@ -21,6 +21,7 @@ import {
 } from "@/services/settings";
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from "@/components/ui";
 import { LodgifyIntegrationPanel } from "@/components/settings/LodgifyIntegrationPanel";
+import { TotpSettings } from "@/components/settings/TotpSettings";
 import { useTranslation } from "@/lib/i18n";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -1069,6 +1070,9 @@ export default function SettingsPage() {
               </SaveButton>
             </div>
           </div>
+
+          {/* Two-factor authentication + login history */}
+          <TotpSettings />
         </div>
       )}
 

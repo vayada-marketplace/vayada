@@ -53,6 +53,7 @@ from app.models.auth import (
     TotpRegenerateRequest,
     TotpRegenerateResponse,
     TotpSetupResponse,
+    TotpStatusResponse,
     TotpVerifyRequest,
     VerifyEmailCodeRequest,
     VerifyEmailCodeResponse,
@@ -513,6 +514,13 @@ async def totp_recovery_code_count(user_id: str = Depends(get_current_user_id)):
     """Return the number of unused recovery codes remaining."""
     count = await TotpRepository.count_unused_recovery_codes(user_id)
     return TotpRecoveryCodeCountResponse(count=count)
+
+
+@router.get("/totp/status", response_model=TotpStatusResponse, status_code=status.HTTP_200_OK)
+async def totp_status(user_id: str = Depends(get_current_user_id)):
+    """Return whether the current user has TOTP enrolled."""
+    enrolled = await TotpRepository.is_enrolled(user_id)
+    return TotpStatusResponse(enrolled=enrolled)
 
 
 @router.get("/login-history", response_model=LoginHistoryResponse, status_code=status.HTTP_200_OK)

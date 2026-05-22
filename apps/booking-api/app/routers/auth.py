@@ -55,6 +55,7 @@ from app.models.auth import (
     TotpRegenerateRequest,
     TotpRegenerateResponse,
     TotpSetupResponse,
+    TotpStatusResponse,
     TotpVerifyRequest,
     VerifyEmailChangeRequest,
     VerifyEmailChangeResponse,
@@ -179,7 +180,7 @@ async def login(http_request: Request, request: LoginRequest, response: Response
 
     await RateLimitRepository.clear(request.email)
 
-    if user["type"] == "admin" and await TotpRepository.is_enrolled(str(user["id"])):
+    if user["type"] in ("admin", "hotel") and await TotpRepository.is_enrolled(str(user["id"])):
         totp_session = create_totp_session_token(
             str(user["id"]), user["email"], user["type"]
         )
@@ -283,7 +284,7 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
 async def totp_setup(user_id: str = Depends(get_current_user_id)):
     """Generate a new TOTP secret and return the otpauth URI for QR display. Does not enroll yet."""
     user = await UserRepository.get_by_id(user_id, columns="id, email, type")
-    if not user or user["type"] != "admin":
+    if not user or user["type"] not in ("admin", "hotel"):
         raise HTTPException(status_code=403, detail="Admin access required")
 
     secret = generate_totp_secret()
@@ -355,6 +356,13 @@ async def totp_recovery_code_count(user_id: str = Depends(get_current_user_id)):
     """Return the number of unused recovery codes remaining."""
     count = await TotpRepository.count_unused_recovery_codes(user_id)
     return TotpRecoveryCodeCountResponse(count=count)
+
+
+@router.get("/totp/status", response_model=TotpStatusResponse, status_code=status.HTTP_200_OK)
+async def totp_status(user_id: str = Depends(get_current_user_id)):
+    """Return whether the current user has TOTP enrolled."""
+    enrolled = await TotpRepository.is_enrolled(user_id)
+    return TotpStatusResponse(enrolled=enrolled)
 
 
 @router.get("/login-history", response_model=LoginHistoryResponse, status_code=status.HTTP_200_OK)
