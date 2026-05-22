@@ -90,12 +90,6 @@ vayada/
 │   ├── migrations/                           # Auth schema migrations
 │   └── scripts/                              # Migration runner
 │
-├── infra/                              # AWS infrastructure (Terraform)
-│   ├── ecs.tf                                # ECS service definitions
-│   ├── alb.tf                                # ALB and routing rules
-│   ├── ecr.tf                                # Container registries
-│   ├── route53.tf                            # DNS records
-│   └── ...
 │
 ├── docs/                               # Product and engineering documentation
 │   ├── docs/                                 # Docusaurus product docs
@@ -330,16 +324,16 @@ All databases use PostgreSQL 15 Alpine with UUID primary keys and timestamp colu
 
 ## Infrastructure
 
-Production infrastructure is managed with Terraform in the `infra/` directory:
+Production infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/FlamurMaliqi/vayada-platform) repository. This repo owns application code only.
 
 - **AWS ECS Fargate**: All services run as containers
 - **Application Load Balancer**: Routes traffic by hostname
 - **RDS PostgreSQL**: Single multi-database instance
-- **ECR**: Container registries for each service
+- **ECR**: Container registries for each service (owned by platform; images built and pushed by app CI)
 - **Route53**: DNS for `*.booking.vayada.com`, `pms.vayada.com`, `api.vayada.com`, etc.
 - **S3**: Production image storage (`vayada-uploads-prod`)
 - **Cloudflare**: Custom domain SSL for hotel booking engines
-- **GitHub Actions**: CI/CD pipelines per service (test, build, push, deploy)
+- **GitHub Actions**: App CI builds, tests, and publishes images; platform CI deploys to ECS
 
 Production domains:
 
@@ -355,7 +349,7 @@ Production domains:
 
 ## Environment Variables
 
-Key environment variables are configured in `docker-compose.yml` and service `.env` files. See `infra/terraform.tfvars.example` for production variables.
+Key environment variables are configured in `docker-compose.yml` and service `.env` files. Production variable names and values are managed in `vayada-platform`.
 
 ### Frontends
 
@@ -422,7 +416,7 @@ Workspace layout:
 Python apps remain outside npm workspaces and continue to use
 `requirements.txt`, pytest, and their app-local Python commands.
 
-See `docs/engineering/workspace-package-manager.md` for the decision record.
+See `engineering/workspace-package-manager.md` for the decision record.
 
 ---
 

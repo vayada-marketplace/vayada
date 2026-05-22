@@ -66,7 +66,7 @@ Before claiming a change is complete:
 - **Cross-app or workspace changes** — also run root `npm run build` / `npm run typecheck` to confirm no workspace consumer broke.
 - **UI changes** — start the dev server and exercise the feature in a browser before declaring it done. Type checks and tests verify code correctness, not feature correctness.
 
-Formatting (Prettier for JS/TS/MD/YAML/CSS, Ruff for Python) is wired up but **not enforced** across the existing codebase yet. Touched files should be clean; pre-existing drift is acceptable. Full operating model: [`docs/engineering/code-quality-gates.md`](docs/engineering/code-quality-gates.md).
+Formatting (Prettier for JS/TS/MD/YAML/CSS, Ruff for Python) is wired up but **not enforced** across the existing codebase yet. Touched files should be clean; pre-existing drift is acceptable. Full operating model: [`engineering/code-quality-gates.md`](engineering/code-quality-gates.md).
 
 If a check cannot be run locally (env, secrets, infra), say so explicitly rather than claiming success.
 
@@ -87,7 +87,7 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.
 
-Full operating model (projects, labels, statuses, priorities, issue quality, agent rules) is in [`docs/engineering/linear-workspace.md`](docs/engineering/linear-workspace.md). Read that before creating issues or restructuring tickets.
+Full operating model (projects, labels, statuses, priorities, issue quality, agent rules) is in [`engineering/linear-workspace.md`](engineering/linear-workspace.md). Read that before creating issues or restructuring tickets.
 
 ## Deployment
 
@@ -95,7 +95,7 @@ Production runs on AWS ECS Fargate, fronted by an ALB. Each app has a GitHub Act
 
 - **PMS migrations** auto-run on ECS container start. Do not suggest manually running `scripts/run_migration.sh` after a push to `main`.
 - **auth-db** does **not** auto-migrate in production — run `scripts/run_migration.sh auth` against RDS for any schema change. Locally, the `auth-db-migrate` one-shot service in `docker-compose.yml` runs migrations on `docker compose up`.
-- Infrastructure is managed with Terraform under `infra/`.
+- Infrastructure is managed with Terraform in the [`vayada-platform`](https://github.com/FlamurMaliqi/vayada-platform) repository. Do not make infrastructure changes in this repo's `infra/` directory — it is being removed (VAY-426).
 
 ## Skills
 
