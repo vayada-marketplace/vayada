@@ -149,7 +149,7 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-5">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-5 overflow-x-hidden">
       {/* Title */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
@@ -418,6 +418,21 @@ function occupancyBarClass(pct: number): string {
   return pct >= HIGH_OCCUPANCY_THRESHOLD ? "bg-blue-600" : "bg-blue-300";
 }
 
+function formatAdrTick(amount: number, currency: string): string {
+  const abs = Math.abs(amount);
+  if (abs >= 1_000_000) {
+    const prefix = formatCurrency(0, currency).slice(0, -1);
+    const v = amount / 1_000_000;
+    return `${prefix}${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}M`;
+  }
+  if (abs >= 10_000) {
+    const prefix = formatCurrency(0, currency).slice(0, -1);
+    const v = amount / 1_000;
+    return `${prefix}${v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)}K`;
+  }
+  return formatCurrency(Math.round(amount), currency);
+}
+
 function niceAdrMax(rawMax: number): number {
   if (rawMax <= 0) return 100;
   const exponent = Math.floor(Math.log10(rawMax));
@@ -471,11 +486,11 @@ function ForecastChart({
   if (current.length > 0) segments.push(current);
 
   return (
-    <div>
+    <div className="min-w-0">
       <div className="flex">
         {/* Left axis (occupancy %) */}
         <div
-          className="flex flex-col justify-between pr-2 text-[9px] text-gray-400 select-none"
+          className="flex flex-col justify-between pr-2 text-[9px] text-gray-400 select-none shrink-0"
           style={{ height: chartHeight }}
         >
           {occupancyTicks.map((tick) => (
@@ -486,7 +501,7 @@ function ForecastChart({
         </div>
 
         {/* Plot area */}
-        <div className="relative flex-1" style={{ height: chartHeight }}>
+        <div className="relative flex-1 min-w-0" style={{ height: chartHeight }}>
           {/* Gridlines */}
           <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
             {occupancyTicks.map((tick, idx) => (
@@ -584,12 +599,12 @@ function ForecastChart({
 
         {/* Right axis (ADR currency) */}
         <div
-          className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none"
+          className="flex flex-col justify-between pl-2 text-[9px] text-blue-400 select-none shrink-0"
           style={{ height: chartHeight }}
         >
           {adrTicks.map((tick, idx) => (
             <span key={idx} className="leading-none">
-              {formatCurrency(Math.round(tick), currency)}
+              {formatAdrTick(tick, currency)}
             </span>
           ))}
         </div>
@@ -597,16 +612,16 @@ function ForecastChart({
 
       {/* Day labels (mirror axis layout to stay aligned with bars) */}
       <div className="flex mt-2">
-        <div className="invisible pr-2 text-[9px] select-none">
+        <div className="invisible pr-2 text-[9px] select-none shrink-0">
           <span>100%</span>
         </div>
-        <div className="flex-1 flex gap-1">
+        <div className="flex-1 flex gap-1 min-w-0">
           {days.map((day) => {
             const isToday = day.dateStr === today;
             return (
-              <div key={day.dateStr} className="flex-1 text-center">
+              <div key={day.dateStr} className="flex-1 min-w-0 text-center overflow-hidden">
                 <p
-                  className={`text-[10px] font-medium ${isToday ? "text-blue-700" : "text-gray-500"}`}
+                  className={`text-[10px] font-medium truncate ${isToday ? "text-blue-700" : "text-gray-500"}`}
                 >
                   {day.label}
                 </p>
@@ -615,8 +630,8 @@ function ForecastChart({
             );
           })}
         </div>
-        <div className="invisible pl-2 text-[9px] select-none">
-          <span>{formatCurrency(Math.round(adrMax), currency)}</span>
+        <div className="invisible pl-2 text-[9px] select-none shrink-0">
+          <span>{formatAdrTick(adrMax, currency)}</span>
         </div>
       </div>
 
