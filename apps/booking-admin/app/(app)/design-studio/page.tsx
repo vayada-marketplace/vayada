@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { EyeIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { settingsService } from "@/services/settings";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import { FeedbackAlert, SaveButton } from "@/components/ui";
@@ -20,6 +21,7 @@ export default function DesignStudioPage() {
   const [activeTab, setActiveTab] = useState<Tab>("media");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
     null,
   );
@@ -155,14 +157,23 @@ export default function DesignStudioPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 h-full flex flex-col">
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+    <div className="p-4 md:p-6 pb-24 lg:pb-6 lg:h-full flex flex-col">
+      { }
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
-      <div className="shrink-0">
-        <h1 className="text-2xl md:text-xl font-bold text-gray-900">Design Studio</h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          Customize your booking engine&apos;s look and feel
-        </p>
+      <div className="shrink-0 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl md:text-xl font-bold text-gray-900">Design Studio</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Customize your booking engine&apos;s look and feel
+          </p>
+        </div>
+        <button
+          onClick={() => setPreviewOpen(true)}
+          className="lg:hidden inline-flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
+        >
+          <EyeIcon className="w-4 h-4" />
+          Preview
+        </button>
       </div>
 
       {/* Feedback banner */}
@@ -171,11 +182,11 @@ export default function DesignStudioPage() {
       )}
 
       {/* Main split layout */}
-      <div className="mt-4 md:mt-5 flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
+      <div className="mt-4 md:mt-5 flex flex-col lg:flex-row gap-5 lg:flex-1 lg:min-h-0">
         {/* LEFT: Controls panel */}
-        <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col min-h-0">
+        <div className="w-full lg:w-[380px] lg:shrink-0 flex flex-col lg:min-h-0">
           {/* Tab bar */}
-          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-3 shrink-0">
+          <div className="bg-gray-100 rounded-lg p-1 grid grid-cols-3 shrink-0 sticky top-0 z-10 lg:static">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -194,7 +205,7 @@ export default function DesignStudioPage() {
           </div>
 
           {/* Tab content */}
-          <div className="mt-3 flex-1 overflow-y-auto space-y-3 pb-3">
+          <div className="mt-3 space-y-3 lg:flex-1 lg:overflow-y-auto lg:pb-3">
             {activeTab === "media" && (
               <MediaTab
                 heroImage={heroImage}
@@ -223,19 +234,36 @@ export default function DesignStudioPage() {
             )}
           </div>
 
-          {/* Save button */}
-          <div className="pt-3 shrink-0 border-t border-gray-100">
+          {/* Save button — desktop inline */}
+          <div className="hidden lg:block pt-3 shrink-0 border-t border-gray-100">
             <SaveButton onClick={handleSave} saving={saving} disabled={uploading} />
           </div>
         </div>
 
-        {/* RIGHT: Live website preview */}
+        {/* RIGHT: Live website preview
+            Desktop: side panel. Mobile: hidden by default; full-screen overlay when previewOpen. */}
         <div
           ref={previewRef}
-          className="flex-1 min-w-0 min-h-[500px] lg:min-h-0 bg-white rounded-lg border border-gray-200 flex flex-col"
+          className={`bg-white border border-gray-200 flex-col lg:flex lg:flex-1 lg:min-w-0 lg:min-h-0 lg:rounded-lg ${
+            previewOpen ? "flex fixed inset-0 z-50 lg:relative lg:inset-auto lg:z-auto" : "hidden"
+          }`}
         >
-          {/* Browser chrome bar */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
+          {/* Mobile-only drawer header */}
+          {previewOpen && (
+            <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
+              <h2 className="text-sm font-semibold text-gray-900">Live Preview</h2>
+              <button
+                onClick={() => setPreviewOpen(false)}
+                className="w-8 h-8 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+                aria-label="Close preview"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
+          {/* Browser chrome bar — desktop only */}
+          <div className="hidden lg:flex items-center gap-2 px-3 py-2 border-b border-gray-200 shrink-0 bg-gray-50">
             <div className="flex gap-1">
               <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
               <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
@@ -248,7 +276,7 @@ export default function DesignStudioPage() {
 
           {/* Preview content */}
           <div
-            className="flex-1 overflow-y-auto bg-white"
+            className="flex-1 overflow-y-auto overflow-x-hidden bg-white"
             style={{ fontFamily: currentFont.bodyFamily }}
           >
             {/* HERO SECTION */}
@@ -821,6 +849,34 @@ export default function DesignStudioPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Mobile-only sticky Save footer */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-gray-200 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <button
+          onClick={handleSave}
+          disabled={saving || uploading}
+          className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-primary-500 text-white text-[14px] font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+        >
+          {saving ? (
+            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"
+              />
+            </svg>
+          )}
+          Save Changes
+        </button>
       </div>
     </div>
   );
