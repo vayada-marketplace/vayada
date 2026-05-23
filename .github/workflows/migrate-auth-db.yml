@@ -1,0 +1,47 @@
+name: Migrate auth-db
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "auth-db/migrations/**"
+      - "auth-db/scripts/run_migrations.py"
+      - "scripts/run_migration.sh"
+      - ".github/workflows/migrate-auth-db.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+# Serialize: never run two auth-db migrations at once (race on SG rules + DDL).
+concurrency:
+  group: migrate-auth-db
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    name: Apply auth-db migrations to prod RDS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install asyncpg
+        run: pip install asyncpg
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::269416271598:role/vayada-github-actions-deploy
+          aws-region: eu-west-1
+
+      - name: Apply auth migrations
+        run: ./scripts/run_migration.sh auth
