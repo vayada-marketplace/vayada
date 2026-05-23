@@ -58,12 +58,43 @@ class BookingResponse(BaseModel):
     number_of_rooms: int = 1
     total_amount: float
     addon_total: float = 0
+    addon_ids: list[str] = []
+    addon_names: list[str] = []
+    addon_quantities: dict[str, int] = {}
+    addon_dates: dict[str, list[str]] = {}
     currency: str
     status: str
     payment_method: str | None = None
     payment_status: str | None = None
     host_response_deadline: str | None = None
     created_at: str
+
+    @field_validator("addon_ids", "addon_names", mode="before")
+    @classmethod
+    def parse_addon_list(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        if v is None:
+            return []
+        return v
+
+    @field_validator("addon_quantities", mode="before")
+    @classmethod
+    def parse_addon_quantities(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        if v is None:
+            return {}
+        return v
+
+    @field_validator("addon_dates", mode="before")
+    @classmethod
+    def parse_addon_dates(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        if v is None:
+            return {}
+        return v
 
 
 class AdminBookingCreate(BaseModel):

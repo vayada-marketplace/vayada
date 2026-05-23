@@ -105,6 +105,13 @@ export interface Booking {
   numberOfRooms?: number;
   totalAmount: number;
   addonTotal?: number;
+  // Selected add-ons snapshot from booking creation. Names are cached at
+  // booking time so historical bookings still show the correct name even
+  // if the addon is later renamed or removed.
+  addonIds?: string[];
+  addonNames?: string[];
+  addonQuantities?: Record<string, number>;
+  addonDates?: Record<string, string[]>;
   currency: string;
   // 'draft' is the placeholder shape returned for the card-payment flow
   // before the booking row is materialized (VAY-388).

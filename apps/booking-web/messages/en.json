@@ -266,6 +266,7 @@
     "checkOut": "Check-out",
     "duration": "Duration",
     "guests": "Guests",
+    "addons": "Add-ons",
     "totalPaid": "Total Paid",
     "paymentMethodLabel": "Payment",
     "withdrawRequest": "Withdraw Request",

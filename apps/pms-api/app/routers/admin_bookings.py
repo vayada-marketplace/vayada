@@ -103,6 +103,7 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         affiliate_commission_amount=float(ac) if ac is not None else None,
         property_payout_amount=float(pp) if pp is not None else None,
         addon_ids=b.get("addon_ids") or [],
+        addon_names=b.get("addon_names") or [],
         addon_total=float(b["addon_total"]) if b.get("addon_total") else 0,
         addon_quantities=b.get("addon_quantities") or {},
         addon_dates=b.get("addon_dates") or {},
