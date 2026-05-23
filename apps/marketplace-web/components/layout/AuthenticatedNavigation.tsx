@@ -9,6 +9,7 @@ import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
 import { authService } from "@/services/auth";
 import { HotelIcon, ProfileIcon, CalendarIcon, MessageIcon } from "@/components/ui";
 import { ArrowRightOnRectangleIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
+import { AppSwitcher } from "./AppSwitcher";
 
 // Context for sidebar collapsed state
 const SidebarContext = createContext<{
@@ -119,6 +120,9 @@ export default function AuthenticatedNavigation() {
             />
           </Link>
         </div>
+
+        {/* App Switcher — lets hotel users hop back to PMS / Booking Engine. */}
+        <AppSwitcher isCollapsed={isCollapsed} />
 
         {/* Navigation Links */}
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">

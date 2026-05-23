@@ -1,20 +1,24 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { AuthenticatedNavigation, ProfileWarningBanner } from "@/components/layout";
 import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
 import { MarketplaceFilters } from "@/components/marketplace/MarketplaceFilters";
 import { HotelCard } from "@/components/marketplace/HotelCard";
 import { CreatorCard } from "@/components/marketplace/CreatorCard";
-import { STORAGE_KEYS } from "@/lib/constants";
+import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
 import type { Hotel, Creator, UserType } from "@/lib/types";
 import { hotelService } from "@/services/api/hotels";
 import { creatorService } from "@/services/api/creators";
 import { ApiErrorResponse } from "@/services/api/client";
+import { checkProfileStatus } from "@/lib/utils";
 
 export default function MarketplacePage() {
+  const router = useRouter();
   const { isCollapsed } = useSidebar();
   const [userType, setUserType] = useState<UserType | null>(null);
+  const [profileReady, setProfileReady] = useState(false);
   const [hotels, setHotels] = useState<Hotel[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
   const [currentCreator, setCurrentCreator] = useState<Creator | null>(null);
@@ -33,19 +37,45 @@ export default function MarketplacePage() {
     topCountries?: string | string[];
     creatorTypes?: string | string[];
   }>({});
-  // Get userType from localStorage on mount
+  // Get userType from localStorage on mount, then verify the user has a
+  // marketplace profile. If not (or if it's incomplete) send them to the
+  // onboarding flow — covers both fresh signups and users who arrived here
+  // via the cross-app handoff from PMS / Booking Engine. Mirrors the same
+  // gate the /login flow runs after authenticating.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
-      setUserType(storedUserType);
+    if (typeof window === "undefined") return;
+    const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
+    setUserType(storedUserType);
+
+    if (storedUserType !== "hotel" && storedUserType !== "creator") {
+      // Admins and other roles don't have a marketplace profile to gate on.
+      setProfileReady(true);
+      return;
     }
-  }, []);
+
+    let cancelled = false;
+    (async () => {
+      const status = await checkProfileStatus(storedUserType);
+      if (cancelled) return;
+      if (!status || !status.profile_complete) {
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
+        router.replace(ROUTES.PROFILE_COMPLETE);
+        return;
+      }
+      localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
+      setProfileReady(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   useEffect(() => {
-    if (userType) {
+    if (userType && profileReady) {
       loadData();
     }
-  }, [filters, userType]);
+  }, [filters, userType, profileReady]);
 
   const loadData = async () => {
     if (!userType) return;
