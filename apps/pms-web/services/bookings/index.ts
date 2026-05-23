@@ -85,6 +85,38 @@ export interface PaymentSettingsResponse {
   cancellationPolicy: CancellationPolicy;
 }
 
+export interface BookingNote {
+  id: string;
+  bookingId: string;
+  authorUserId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface BookingAdditionalGuest {
+  id: string;
+  bookingId: string;
+  position: number;
+  firstName: string;
+  lastName: string;
+  gender: string;
+  nationality: string;
+  dateOfBirth: string | null;
+  email: string;
+  phone: string;
+  passportNumber: string;
+  /** Which of the booking's rooms this guest is assigned to.
+   * 0 = primary room, 1..N-1 = extras, null = unassigned. */
+  roomPosition: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BookingAdditionalGuestPayload = Partial<
+  Omit<BookingAdditionalGuest, "id" | "bookingId" | "position" | "createdAt" | "updatedAt">
+>;
+
 export interface BookingChangeRequest {
   id: string;
   bookingId: string;
@@ -145,8 +177,11 @@ export const bookingsService = {
   assignRoom: (id: string, roomId: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/assign-room`, { roomId }),
 
-  moveRoom: (id: string, roomId: string) =>
-    pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, { roomId }),
+  moveRoom: (id: string, roomId: string, fromRoomId?: string) =>
+    pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, {
+      roomId,
+      ...(fromRoomId ? { fromRoomId } : {}),
+    }),
 
   swapRoom: (id: string, partnerBookingId: string, partnerDestinationRoomId?: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/swap-room`, {
@@ -181,4 +216,31 @@ export const bookingsService = {
     pmsClient.post<BookingChangeRequest>(`/admin/bookings/${id}/change-request/decline`, {
       reason,
     }),
+
+  // VAY-495 booking detail — internal notes, additional guests, cancel-with-reason.
+  listNotes: (id: string) => pmsClient.get<{ notes: BookingNote[] }>(`/admin/bookings/${id}/notes`),
+
+  createNote: (id: string, body: string) =>
+    pmsClient.post<BookingNote>(`/admin/bookings/${id}/notes`, { body }),
+
+  deleteNote: (id: string, noteId: string) =>
+    pmsClient.delete<void>(`/admin/bookings/${id}/notes/${noteId}`),
+
+  listAdditionalGuests: (id: string) =>
+    pmsClient.get<{ guests: BookingAdditionalGuest[] }>(`/admin/bookings/${id}/additional-guests`),
+
+  createAdditionalGuest: (id: string, data: BookingAdditionalGuestPayload) =>
+    pmsClient.post<BookingAdditionalGuest>(`/admin/bookings/${id}/additional-guests`, data),
+
+  updateAdditionalGuest: (id: string, guestId: string, data: BookingAdditionalGuestPayload) =>
+    pmsClient.patch<BookingAdditionalGuest>(
+      `/admin/bookings/${id}/additional-guests/${guestId}`,
+      data,
+    ),
+
+  deleteAdditionalGuest: (id: string, guestId: string) =>
+    pmsClient.delete<void>(`/admin/bookings/${id}/additional-guests/${guestId}`),
+
+  cancelWithReason: (id: string, reason: string) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/cancel`, { reason }),
 };

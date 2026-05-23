@@ -335,3 +335,70 @@ class ChangeRequestDecline(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     reason: str | None = None
+
+
+# ── Booking detail page extras (VAY-495) ──────────────────────────────
+
+
+class BookingNoteCreate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    body: str
+
+
+class BookingNoteResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    booking_id: str
+    author_user_id: str
+    author_name: str
+    body: str
+    created_at: str
+
+
+class BookingAdditionalGuestPayload(BaseModel):
+    """Both create + update share this shape; all fields optional on update.
+    room_position links the guest to one of the booking's rooms (0 = primary,
+    1..N-1 = extras). null clears the assignment back to "unassigned"."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    first_name: str | None = None
+    last_name: str | None = None
+    gender: str | None = None
+    nationality: str | None = None
+    date_of_birth: date | None = None
+    email: str | None = None
+    phone: str | None = None
+    passport_number: str | None = None
+    room_position: int | None = None
+
+
+class BookingAdditionalGuestResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    booking_id: str
+    position: int
+    first_name: str
+    last_name: str
+    gender: str
+    nationality: str
+    date_of_birth: str | None = None
+    email: str
+    phone: str
+    passport_number: str
+    # null = unassigned. 0 = primary room, 1..N-1 = extras.
+    room_position: int | None = None
+    created_at: str
+    updated_at: str
+
+
+class CancelBookingRequest(BaseModel):
+    """Body for the explicit cancel endpoint (VAY-495 — cancellation now
+    requires a reason and applies to every room in the booking)."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    reason: str
