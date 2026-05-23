@@ -1,9 +1,29 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback, use, useMemo, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeftIcon, CheckCircleIcon, XCircleIcon } from "@heroicons/react/24/outline";
-import { bookingsService, Booking, BookingChangeRequest } from "@/services/bookings";
+import {
+  ArrowLeftIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  EllipsisHorizontalIcon,
+  HomeModernIcon,
+  PencilSquareIcon,
+  ArrowsRightLeftIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  TrashIcon,
+  PlusIcon,
+} from "@heroicons/react/24/outline";
+import {
+  bookingsService,
+  Booking,
+  BookingChangeRequest,
+  BookingNote,
+  BookingAdditionalGuest,
+  BookingAdditionalGuestPayload,
+  CancellationPolicy,
+} from "@/services/bookings";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Modal from "@/components/Modal";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -11,37 +31,88 @@ import {
   BOOKING_STATUS_STYLES,
   PAYMENT_STATUS_STYLES,
   getPaymentStatusLabel,
+  getChannelLabel,
+  normalizeChannelKey,
 } from "@/lib/constants/statusStyles";
+
+// ─── Helpers ─────────────────────────────────────────────────────────
+
+/** Deterministic colored dot per roomTypeId — palette per room category
+ * (ticket §2 "Room type icon (color per room/category)"). Same input
+ * always returns the same color so the calendar / list / detail page
+ * stay visually aligned even without a server-side palette. */
+const ROOM_TYPE_PALETTE = [
+  "bg-blue-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-purple-500",
+  "bg-rose-500",
+  "bg-cyan-500",
+  "bg-indigo-500",
+  "bg-orange-500",
+];
+function roomTypeColor(roomTypeId: string | null | undefined): string {
+  if (!roomTypeId) return "bg-gray-400";
+  let hash = 0;
+  for (let i = 0; i < roomTypeId.length; i++) {
+    hash = (hash * 31 + roomTypeId.charCodeAt(i)) >>> 0;
+  }
+  return ROOM_TYPE_PALETTE[hash % ROOM_TYPE_PALETTE.length];
+}
+
+function formatDateLong(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso + "T00:00:00");
+  return d.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function errMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function totalGuestsLabel(adults: number, children: number): string {
+  const parts: string[] = [];
+  parts.push(`${adults} adult${adults !== 1 ? "s" : ""}`);
+  if (children > 0) {
+    parts.push(`${children} child${children !== 1 ? "ren" : ""}`);
+  }
+  return parts.join(", ");
+}
 
 function CountdownTimer({ deadline }: { deadline: string }) {
   const [timeLeft, setTimeLeft] = useState("");
 
   useEffect(() => {
     const update = () => {
-      const now = new Date().getTime();
-      const end = new Date(deadline).getTime();
-      const diff = end - now;
-
+      const diff = new Date(deadline).getTime() - Date.now();
       if (diff <= 0) {
         setTimeLeft("Expired");
         return;
       }
-
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       setTimeLeft(`${hours}h ${minutes}m remaining`);
     };
-
     update();
     const interval = setInterval(update, 60000);
     return () => clearInterval(interval);
   }, [deadline]);
 
-  const isUrgent = (() => {
-    const diff = new Date(deadline).getTime() - Date.now();
-    return diff > 0 && diff < 4 * 60 * 60 * 1000; // Less than 4 hours
-  })();
-
+  const isUrgent = new Date(deadline).getTime() - Date.now() < 4 * 60 * 60 * 1000;
   return (
     <span className={`text-sm font-medium ${isUrgent ? "text-red-600" : "text-amber-600"}`}>
       {timeLeft}
@@ -49,9 +120,384 @@ function CountdownTimer({ deadline }: { deadline: string }) {
   );
 }
 
+// ─── Header bar with overflow menu ───────────────────────────────────
+
+function OverflowMenu({
+  onPrint,
+  onResendConfirmation,
+  onExport,
+}: {
+  onPrint: () => void;
+  onResendConfirmation: () => void;
+  onExport: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+        aria-label="More actions"
+      >
+        <EllipsisHorizontalIcon className="w-5 h-5" />
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-52 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+          <button
+            onClick={() => {
+              setOpen(false);
+              onPrint();
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Print
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onResendConfirmation();
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Resend confirmation email
+          </button>
+          <button
+            onClick={() => {
+              setOpen(false);
+              onExport();
+            }}
+            className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Export as JSON
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Cancellation policy panel ───────────────────────────────────────
+
+interface CancellationPanelProps {
+  checkIn: string;
+  rateType: string;
+  numberOfRooms: number;
+  nightlyRate: number;
+  currency: string;
+  policy: CancellationPolicy | null;
+}
+
+function CancellationPolicyPanel({
+  checkIn,
+  rateType,
+  numberOfRooms,
+  nightlyRate,
+  currency,
+  policy,
+}: CancellationPanelProps) {
+  // Free window cutoff = check-in - freeCancellationDays.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const checkInDate = new Date(checkIn + "T00:00:00");
+  const freeDays = policy?.freeCancellationDays ?? 0;
+  const cutoff = new Date(checkInDate);
+  cutoff.setDate(cutoff.getDate() - freeDays);
+
+  const inFreeWindow = freeDays > 0 && today.getTime() < cutoff.getTime();
+  // Non-refundable plan: no free window at all.
+  const nonRefundable = freeDays <= 0;
+
+  // Per-room charge after window. Default: first night of each room.
+  const partialPct = policy?.partialRefundPct ?? 0;
+  const perRoomCharge = nightlyRate;
+  const totalCharge = perRoomCharge * numberOfRooms;
+  // Effective refund percent inside the post-window region.
+  const refundPctLabel =
+    partialPct > 0
+      ? `${partialPct}% refund`
+      : `1 night/room · ${formatCurrency(totalCharge, currency)}`;
+
+  const todayLabel = today.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const cutoffLabel = cutoff.toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        Cancellation policy · {rateType} rate
+      </div>
+      <div className="divide-y divide-gray-100">
+        {!nonRefundable && (
+          <div className="px-4 py-3 flex items-start justify-between gap-3">
+            <div className="text-sm">
+              <p className="font-medium text-gray-900">Free cancellation</p>
+              <p className="text-gray-500 text-xs">
+                Until {cutoffLabel} · {freeDays} day{freeDays !== 1 ? "s" : ""} before check-in
+              </p>
+            </div>
+            <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+              No charge
+            </span>
+          </div>
+        )}
+        <div className="px-4 py-3 flex items-start justify-between gap-3">
+          <div className="text-sm">
+            <p className="font-medium text-gray-900">
+              {nonRefundable ? "Non-refundable" : "After free window"}
+            </p>
+            <p className="text-gray-500 text-xs">
+              {nonRefundable
+                ? "Cancellation charges apply for the full stay."
+                : `After ${cutoffLabel} · Within ${freeDays} day${freeDays !== 1 ? "s" : ""} of check-in`}
+            </p>
+          </div>
+          <span className="shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-red-100 text-red-700">
+            {refundPctLabel}
+          </span>
+        </div>
+      </div>
+      <div
+        className={`px-4 py-2.5 text-xs font-medium ${
+          inFreeWindow ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"
+        }`}
+      >
+        Today is {todayLabel} —{" "}
+        {inFreeWindow
+          ? "within the free cancellation window. No charge applies."
+          : nonRefundable
+            ? "cancellation will incur the full charge."
+            : `${refundPctLabel} applies.`}
+      </div>
+    </div>
+  );
+}
+
+// ─── Additional guest expandable row ─────────────────────────────────
+
+interface GuestRowProps {
+  guest: BookingAdditionalGuest;
+  position: number;
+  total: number;
+  onSave: (patch: BookingAdditionalGuestPayload) => Promise<void>;
+  onDelete: () => Promise<void>;
+}
+
+function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestRowProps) {
+  const [open, setOpen] = useState(!guest.firstName && !guest.lastName);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    firstName: guest.firstName,
+    lastName: guest.lastName,
+    gender: guest.gender,
+    nationality: guest.nationality,
+    dateOfBirth: guest.dateOfBirth ?? "",
+    email: guest.email,
+    phone: guest.phone,
+    passportNumber: guest.passportNumber,
+  });
+
+  const initials =
+    guest.firstName || guest.lastName
+      ? `${(guest.firstName[0] || "").toUpperCase()}${(guest.lastName[0] || "").toUpperCase()}`
+      : "?";
+  const displayName =
+    [guest.firstName, guest.lastName].filter(Boolean).join(" ") || "Unnamed guest";
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave({
+        firstName: form.firstName,
+        lastName: form.lastName,
+        gender: form.gender,
+        nationality: form.nationality,
+        dateOfBirth: form.dateOfBirth || null,
+        email: form.email,
+        phone: form.phone,
+        passportNumber: form.passportNumber,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-600">
+          {initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
+          <p className="text-xs text-gray-500">
+            Guest {position} of {total}
+          </p>
+        </div>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+          aria-label={open ? "Collapse" : "Expand"}
+        >
+          {open ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
+        </button>
+        <button
+          onClick={onDelete}
+          className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+          aria-label="Delete guest"
+        >
+          <TrashIcon className="w-4 h-4" />
+        </button>
+      </div>
+      {open && (
+        <div className="px-4 py-4 border-t border-gray-100 bg-gray-50">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field
+              label="First name"
+              value={form.firstName}
+              onChange={(v) => setForm({ ...form, firstName: v })}
+            />
+            <Field
+              label="Last name"
+              value={form.lastName}
+              onChange={(v) => setForm({ ...form, lastName: v })}
+            />
+            <SelectField
+              label="Gender"
+              value={form.gender}
+              onChange={(v) => setForm({ ...form, gender: v })}
+              options={[
+                { value: "", label: "—" },
+                { value: "female", label: "Female" },
+                { value: "male", label: "Male" },
+                { value: "other", label: "Other" },
+                { value: "prefer_not_to_say", label: "Prefer not to say" },
+              ]}
+            />
+            <Field
+              label="Nationality"
+              value={form.nationality}
+              onChange={(v) => setForm({ ...form, nationality: v })}
+            />
+            <Field
+              label="Date of birth"
+              type="date"
+              value={form.dateOfBirth}
+              onChange={(v) => setForm({ ...form, dateOfBirth: v })}
+            />
+            <Field
+              label="Email (optional)"
+              type="email"
+              value={form.email}
+              onChange={(v) => setForm({ ...form, email: v })}
+            />
+            <Field
+              label="Phone (optional)"
+              type="tel"
+              value={form.phone}
+              onChange={(v) => setForm({ ...form, phone: v })}
+            />
+            <Field
+              label="Passport / ID (optional)"
+              value={form.passportNumber}
+              onChange={(v) => setForm({ ...form, passportNumber: v })}
+            />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-black disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-gray-600 mb-1">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        // 16px text size prevents iOS Safari from auto-zooming on focus.
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-gray-600 mb-1">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent bg-white"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+// ─── Page ────────────────────────────────────────────────────────────
+
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [booking, setBooking] = useState<Booking | null>(null);
+  const [policy, setPolicy] = useState<CancellationPolicy | null>(null);
+  const [notes, setNotes] = useState<BookingNote[]>([]);
+  const [guests, setGuests] = useState<BookingAdditionalGuest[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
@@ -65,24 +511,43 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [decideOpen, setDecideOpen] = useState<"approve" | "decline" | null>(null);
   const [declineReason, setDeclineReason] = useState("");
   const [decidingChange, setDecidingChange] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteDraftOpen, setNoteDraftOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
 
-  const loadChangeRequest = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     try {
-      const cr = await bookingsService.getChangeRequest(id);
-      setChangeRequest(cr);
+      const b = await bookingsService.get(id);
+      setBooking(b);
     } catch (err) {
       console.error(err);
+    } finally {
+      setLoading(false);
     }
+    Promise.all([
+      bookingsService.getChangeRequest(id).then(setChangeRequest).catch(console.error),
+      bookingsService
+        .listNotes(id)
+        .then((r) => setNotes(r.notes))
+        .catch(console.error),
+      bookingsService
+        .listAdditionalGuests(id)
+        .then((r) => setGuests(r.guests))
+        .catch(console.error),
+      bookingsService
+        .getPaymentSettings()
+        .then((r) => setPolicy(r.cancellationPolicy))
+        .catch(console.error),
+    ]);
   }, [id]);
 
   useEffect(() => {
-    bookingsService
-      .get(id)
-      .then(setBooking)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-    loadChangeRequest();
-  }, [id, loadChangeRequest]);
+    loadAll();
+  }, [loadAll]);
 
   const doAction = useCallback(async (action: () => Promise<Booking>, errorMsg: string) => {
     setUpdating(true);
@@ -90,8 +555,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     try {
       const updated = await action();
       setBooking(updated);
-    } catch (err: any) {
-      setError(err.message || errorMsg);
+    } catch (err) {
+      setError(errMessage(err, errorMsg));
     } finally {
       setUpdating(false);
     }
@@ -107,9 +572,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       },
     });
   };
-
-  const [rejectOpen, setRejectOpen] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
 
   const handleReject = () => {
     setRejectReason("");
@@ -133,8 +595,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       const refreshed = await bookingsService.get(id);
       setBooking(refreshed);
       setDecideOpen(null);
-    } catch (err: any) {
-      setError(err.message || "Failed to approve change request");
+    } catch (err) {
+      setError(errMessage(err, "Failed to approve change request"));
     } finally {
       setDecidingChange(false);
     }
@@ -147,25 +609,119 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       const cr = await bookingsService.declineChangeRequest(id, declineReason.trim() || undefined);
       setChangeRequest(cr);
       setDecideOpen(null);
-    } catch (err: any) {
-      setError(err.message || "Failed to decline change request");
+    } catch (err) {
+      setError(errMessage(err, "Failed to decline change request"));
     } finally {
       setDecidingChange(false);
     }
   };
 
-  const updateStatus = (status: "confirmed" | "cancelled") => {
-    const label = status === "confirmed" ? "confirm" : "cancel";
+  const handleConfirmFromPending = () => {
     setConfirmDialog({
-      message: `Are you sure you want to ${label} this booking?`,
-      variant: status === "cancelled" ? "danger" : "default",
-      confirmLabel: status === "confirmed" ? "Confirm" : "Cancel Booking",
+      message: "Are you sure you want to confirm this booking?",
+      confirmLabel: "Confirm",
       onConfirm: () => {
         setConfirmDialog(null);
-        doAction(() => bookingsService.updateStatus(id, status), "Failed to update status");
+        doAction(() => bookingsService.updateStatus(id, "confirmed"), "Failed to confirm booking");
       },
     });
   };
+
+  const handleSaveNote = async () => {
+    const body = noteDraft.trim();
+    if (!body) return;
+    try {
+      const note = await bookingsService.createNote(id, body);
+      setNotes((prev) => [note, ...prev]);
+      setNoteDraft("");
+      setNoteDraftOpen(false);
+    } catch (err) {
+      setError(errMessage(err, "Failed to save note"));
+    }
+  };
+
+  const handleDeleteNote = (noteId: string) => {
+    setConfirmDialog({
+      message: "Delete this note?",
+      variant: "danger",
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await bookingsService.deleteNote(id, noteId);
+          setNotes((prev) => prev.filter((n) => n.id !== noteId));
+        } catch (err) {
+          setError(errMessage(err, "Failed to delete note"));
+        }
+      },
+    });
+  };
+
+  const handleAddGuest = async () => {
+    setError("");
+    try {
+      const guest = await bookingsService.createAdditionalGuest(id, {});
+      setGuests((prev) => [...prev, guest]);
+    } catch (err) {
+      setError(errMessage(err, "Failed to add guest"));
+    }
+  };
+
+  const handleSaveGuest = async (guestId: string, patch: BookingAdditionalGuestPayload) => {
+    try {
+      const updated = await bookingsService.updateAdditionalGuest(id, guestId, patch);
+      setGuests((prev) => prev.map((g) => (g.id === guestId ? updated : g)));
+    } catch (err) {
+      setError(errMessage(err, "Failed to save guest"));
+    }
+  };
+
+  const handleDeleteGuest = async (guestId: string) => {
+    setConfirmDialog({
+      message: "Delete this guest?",
+      variant: "danger",
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await bookingsService.deleteAdditionalGuest(id, guestId);
+          setGuests((prev) => prev.filter((g) => g.id !== guestId));
+        } catch (err) {
+          setError(errMessage(err, "Failed to delete guest"));
+        }
+      },
+    });
+  };
+
+  const handleCancelBooking = async () => {
+    const reason = cancelReason.trim();
+    if (!reason) return;
+    setCancelling(true);
+    setError("");
+    try {
+      const updated = await bookingsService.cancelWithReason(id, reason);
+      setBooking(updated);
+      // Refresh notes — the cancel records a reason note server-side.
+      const r = await bookingsService.listNotes(id);
+      setNotes(r.notes);
+      setCancelOpen(false);
+      setCancelReason("");
+    } catch (err) {
+      setError(errMessage(err, "Failed to cancel booking"));
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  // ── Pricing math (ticket §2: must reconcile) ───────────────────────
+  const pricingBreakdown = useMemo(() => {
+    if (!booking) return null;
+    const roomsCost = booking.nightlyRate * booking.nights * booking.numberOfRooms;
+    const addonsCost = booking.addonTotal || 0;
+    const computed = roomsCost + addonsCost;
+    const mismatch = Math.abs(computed - booking.totalAmount) > 0.01;
+    return { roomsCost, addonsCost, computed, mismatch };
+  }, [booking]);
 
   if (loading) {
     return (
@@ -187,23 +743,85 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const isPending = booking.status === "pending";
+  const isCancelled = booking.status === "cancelled" || booking.status === "expired";
   const hasDeadline = isPending && booking.hostResponseDeadline;
+  const totalParty = booking.adults + booking.children;
+  const additionalCapacity = Math.max(0, totalParty - 1);
+
+  // Build the per-room rows: bookings have numberOfRooms physical slots; the
+  // assignedRooms list says which physical rooms map to which slot. If we
+  // don't have an assignedRoom for every slot (e.g. an unassigned multi-room
+  // booking), pad with an "unassigned" placeholder so the count matches.
+  const roomRows = Array.from({ length: Math.max(1, booking.numberOfRooms) }, (_, idx) => {
+    const assigned = booking.assignedRooms.find((a) => a.position === idx);
+    return {
+      position: idx,
+      roomId: assigned?.roomId ?? null,
+      roomNumber: assigned?.roomNumber ?? null,
+    };
+  });
+
+  // Per-room guest distribution: spread the booking-level total across rooms
+  // evenly with any remainder on the first rooms. This is a display-only
+  // split — the authoritative count stays at the booking level. Per-room
+  // guest assignment is a deferred follow-up (ticket open question).
+  const perRoomAdults = (() => {
+    const base = Math.floor(booking.adults / roomRows.length);
+    const remainder = booking.adults - base * roomRows.length;
+    return roomRows.map((_, idx) => base + (idx < remainder ? 1 : 0));
+  })();
+
+  const channelKey = normalizeChannelKey(booking.channel);
+  const channelLabel = getChannelLabel(booking.channel);
+  const rateType = "Flexible"; // current bookings always use the hotel's default rate plan.
+
+  // Add-ons rendered with quantity-suffix from addonQuantities.
+  const addonRows = booking.addonIds.map((addonId, idx) => {
+    const qty = booking.addonQuantities[addonId];
+    const name = booking.addonNames?.[idx] || addonId;
+    return { addonId, name, qty };
+  });
 
   return (
-    <div className="p-6 max-w-3xl">
+    <div className="p-4 sm:p-6 max-w-3xl mx-auto">
+      {/* 1. Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/bookings" className="text-gray-400 hover:text-gray-600">
+        <Link href="/bookings" className="text-gray-400 hover:text-gray-600 -ml-1 p-1">
           <ArrowLeftIcon className="w-5 h-5" />
         </Link>
         <h1 className="text-xl font-bold text-gray-900">Booking {booking.bookingReference}</h1>
         <span
-          className={`ml-2 inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || ""}`}
+          className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${BOOKING_STATUS_STYLES[booking.status] || "bg-gray-100 text-gray-600"}`}
         >
           {booking.status}
         </span>
+        <div className="ml-auto">
+          <OverflowMenu
+            onPrint={() => window.print()}
+            onResendConfirmation={() =>
+              setConfirmDialog({
+                message:
+                  "Resend the booking confirmation email to the guest? (Not yet implemented — placeholder.)",
+                confirmLabel: "OK",
+                onConfirm: () => setConfirmDialog(null),
+              })
+            }
+            onExport={() => {
+              const blob = new Blob([JSON.stringify(booking, null, 2)], {
+                type: "application/json",
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${booking.bookingReference}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          />
+        </div>
       </div>
 
-      {/* Deadline banner for pending bookings */}
+      {/* Pending-deadline + change-request banners (carried over) */}
       {hasDeadline && (
         <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between">
           <div>
@@ -224,14 +842,12 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       {changeRequest && changeRequest.status === "pending" && (
         <div className="mb-4 p-5 bg-blue-50 border border-blue-200 rounded-xl">
-          <div className="flex items-start justify-between gap-4 mb-3">
-            <div>
-              <p className="text-sm font-semibold text-blue-900">Change Request Pending</p>
-              <p className="text-xs text-blue-700">
-                The guest has requested an edit to this booking. Approve to apply the new details,
-                or decline to keep the booking as-is.
-              </p>
-            </div>
+          <div className="mb-3">
+            <p className="text-sm font-semibold text-blue-900">Change Request Pending</p>
+            <p className="text-xs text-blue-700">
+              The guest has requested an edit to this booking. Approve to apply the new details, or
+              decline to keep the booking as-is.
+            </p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mb-4">
             <div>
@@ -266,11 +882,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 ? `+${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (guest must pay)`
                 : `${formatCurrency(changeRequest.priceDifference, changeRequest.currency)} (refund where applicable)`}
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button
               onClick={() => setDecideOpen("approve")}
               disabled={decidingChange}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
             >
               <CheckCircleIcon className="w-4 h-4" />
               Approve Change
@@ -281,7 +897,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 setDecideOpen("decline");
               }}
               disabled={decidingChange}
-              className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
             >
               <XCircleIcon className="w-4 h-4" />
               Decline Change
@@ -294,7 +910,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-600">
           Last change request was{" "}
           <span className="font-medium text-gray-800">{changeRequest.status}</span>
-          {changeRequest.decidedAt && <> on {new Date(changeRequest.decidedAt).toLocaleString()}</>}
+          {changeRequest.decidedAt && <> on {formatDateTime(changeRequest.decidedAt)}</>}
           {changeRequest.declineReason && (
             <span className="block mt-1 text-xs text-gray-500">
               Reason: {changeRequest.declineReason}
@@ -310,250 +926,434 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       )}
 
       <div className="space-y-6">
-        {/* Guest Information */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Guest Information</h2>
+        {/* 2. Stay details */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3 mb-5">
+            <h2 className="text-sm font-semibold text-gray-900">Stay details</h2>
+            {/* Booking-level Modify (dates / guest count for whole booking) */}
+            <button
+              disabled
+              title="Use the guest's change-request flow to modify dates or add-ons"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed"
+            >
+              <PencilSquareIcon className="w-4 h-4" />
+              Modify
+            </button>
+          </div>
+
+          {/* Summary row */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-6">
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Check-in</p>
+              <p className="font-semibold text-gray-900">{formatDateLong(booking.checkIn)}</p>
+              <p className="text-xs text-gray-500">from 15:00</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Check-out</p>
+              <p className="font-semibold text-gray-900">{formatDateLong(booking.checkOut)}</p>
+              <p className="text-xs text-gray-500">by 12:00</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Duration</p>
+              <p className="font-semibold text-gray-900">
+                {booking.nights} night{booking.nights !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Total guests</p>
+              <p className="font-semibold text-gray-900">
+                {totalGuestsLabel(booking.adults, booking.children)}
+              </p>
+            </div>
+          </div>
+
+          {/* ROOMS sub-section */}
+          <div className="mb-6">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Rooms ({roomRows.length})
+            </p>
+            <div className="space-y-2">
+              {roomRows.map((row, idx) => (
+                <div
+                  key={row.position}
+                  className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg"
+                >
+                  <div
+                    className={`shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-white ${roomTypeColor(booking.roomTypeId)}`}
+                    aria-hidden
+                  >
+                    <HomeModernIcon className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{booking.roomName}</p>
+                    <p className="text-xs text-gray-500 truncate">
+                      {row.roomNumber ? `Room ${row.roomNumber}` : "Unassigned"} ·{" "}
+                      {perRoomAdults[idx]} adult{perRoomAdults[idx] !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <button
+                    disabled
+                    title="Per-room edits are not yet supported — modify at booking level."
+                    className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-md cursor-not-allowed"
+                  >
+                    <PencilSquareIcon className="w-3.5 h-3.5" />
+                    Modify
+                  </button>
+                  <button
+                    disabled
+                    title="To move a room, drag it on the calendar or use Move from the bookings list."
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-md cursor-not-allowed"
+                  >
+                    <ArrowsRightLeftIcon className="w-3.5 h-3.5" />
+                    Move
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Pricing sub-section */}
+          <div className="mb-6">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Pricing
+            </p>
+            <div className="space-y-1.5 text-sm">
+              <div className="flex justify-between text-gray-700">
+                <span>
+                  {roomRows.length} room{roomRows.length !== 1 ? "s" : ""} × {booking.nights} night
+                  {booking.nights !== 1 ? "s" : ""} ×{" "}
+                  {formatCurrency(booking.nightlyRate, booking.currency)}
+                </span>
+                <span className="font-medium text-gray-900">
+                  {formatCurrency(pricingBreakdown?.roomsCost ?? 0, booking.currency)}
+                </span>
+              </div>
+              {(pricingBreakdown?.addonsCost ?? 0) > 0 && (
+                <div className="flex justify-between text-gray-700">
+                  <span>Add-ons</span>
+                  <span className="font-medium text-gray-900">
+                    {formatCurrency(pricingBreakdown!.addonsCost, booking.currency)}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between pt-2 mt-1 border-t border-gray-100">
+                <span className="font-semibold text-gray-900">Total</span>
+                <span className="font-bold text-gray-900">
+                  {formatCurrency(booking.totalAmount, booking.currency)}
+                </span>
+              </div>
+              {pricingBreakdown?.mismatch && (
+                <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                  Charged total {formatCurrency(booking.totalAmount, booking.currency)} doesn&apos;t
+                  match the line-item math (
+                  {formatCurrency(pricingBreakdown.computed, booking.currency)}). May reflect a
+                  promo, discount, or rate-override.
+                </p>
+              )}
+              {booking.platformFeeAmount != null && booking.platformFeeAmount > 0 && (
+                <div className="flex justify-between text-xs text-gray-500 pt-1">
+                  <span>Platform fee</span>
+                  <span>-{formatCurrency(booking.platformFeeAmount, booking.currency)}</span>
+                </div>
+              )}
+              {booking.propertyPayoutAmount != null &&
+                booking.propertyPayoutAmount !== booking.totalAmount && (
+                  <div className="flex justify-between text-sm pt-2 border-t border-gray-100">
+                    <span className="font-medium text-gray-700">Property payout</span>
+                    <span className="font-bold text-green-700">
+                      {formatCurrency(booking.propertyPayoutAmount, booking.currency)}
+                    </span>
+                  </div>
+                )}
+            </div>
+          </div>
+
+          {/* Payment sub-section */}
+          <div className="mb-6">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+              Payment
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-gray-500">Method</p>
+                <p className="font-medium text-gray-900">
+                  {booking.paymentMethod === "card"
+                    ? "Card"
+                    : booking.paymentMethod === "pay_at_property"
+                      ? "Pay at property"
+                      : booking.paymentMethod || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Status</p>
+                {booking.paymentStatus ? (
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_STYLES[booking.paymentStatus] || "bg-gray-100 text-gray-600"}`}
+                  >
+                    {getPaymentStatusLabel(booking.paymentStatus)}
+                  </span>
+                ) : (
+                  <p className="text-gray-400">—</p>
+                )}
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Rate plan</p>
+                <p className="font-medium text-gray-900">{rateType}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Source</p>
+                <p className="font-medium text-gray-900">{channelLabel}</p>
+                {channelKey !== "direct" && (
+                  <p className="text-xs text-gray-500">Channel-managed</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Add-ons sub-section (only if any) */}
+          {addonRows.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                Add-ons
+              </p>
+              <div className="space-y-1.5 text-sm">
+                {addonRows.map((row) => (
+                  <div key={row.addonId} className="flex justify-between text-gray-700">
+                    <span>{row.name}</span>
+                    {row.qty && <span className="text-gray-500">{row.qty} × stay</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 3. Guest information · booker */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">Guest information · booker</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="text-gray-500">Name</p>
+              <p className="text-xs text-gray-500">Name</p>
               <p className="font-medium text-gray-900">
                 {booking.guestFirstName} {booking.guestLastName}
               </p>
             </div>
             <div>
-              <p className="text-gray-500">Email</p>
-              <p className="font-medium text-gray-900">{booking.guestEmail}</p>
+              <p className="text-xs text-gray-500">Email</p>
+              <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
             </div>
             <div>
-              <p className="text-gray-500">Phone</p>
-              <p className="font-medium text-gray-900">{booking.guestPhone}</p>
-            </div>
-            {booking.guestCountry && (
-              <div>
-                <p className="text-gray-500">Country</p>
-                <p className="font-medium text-gray-900">{booking.guestCountry}</p>
-              </div>
-            )}
-          </div>
-          {booking.specialRequests && (
-            <div className="mt-4 text-sm">
-              <p className="text-gray-500">Special Requests</p>
-              <p className="font-medium text-gray-900 whitespace-pre-wrap">
-                {booking.specialRequests}
-              </p>
-            </div>
-          )}
-          {booking.estimatedArrivalTime && (
-            <div className="mt-4 text-sm">
-              <p className="text-gray-500">Estimated Arrival Time</p>
-              <p className="font-medium text-gray-900">{booking.estimatedArrivalTime}</p>
-            </div>
-          )}
-          {booking.numberOfGuests != null && (
-            <div className="mt-4 text-sm">
-              <p className="text-gray-500">Number of Guests</p>
-              <p className="font-medium text-gray-900">{booking.numberOfGuests}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Stay Details */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Stay Details</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-gray-500">Room Type</p>
-              <p className="font-medium text-gray-900">{booking.roomName}</p>
+              <p className="text-xs text-gray-500">Phone</p>
+              <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
             </div>
             <div>
-              <p className="text-gray-500">Check-in</p>
-              <p className="font-medium text-gray-900">{booking.checkIn}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Check-out</p>
-              <p className="font-medium text-gray-900">{booking.checkOut}</p>
-            </div>
-            <div>
-              <p className="text-gray-500">Duration</p>
-              <p className="font-medium text-gray-900">
-                {booking.nights} night{booking.nights !== 1 ? "s" : ""}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500">Guests</p>
-              <p className="font-medium text-gray-900">
-                {booking.adults} adult{booking.adults !== 1 ? "s" : ""}
-                {booking.children > 0 &&
-                  `, ${booking.children} child${booking.children !== 1 ? "ren" : ""}`}
-              </p>
+              <p className="text-xs text-gray-500">Nationality</p>
+              <p className="font-medium text-gray-900">{booking.guestCountry || "—"}</p>
             </div>
           </div>
-        </div>
-
-        {/* Addons */}
-        {booking.addonIds.length > 0 && (
-          <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">Add-ons</h2>
-            <div className="space-y-2 text-sm">
-              {booking.addonIds.map((addonId, idx) => {
-                const qty = booking.addonQuantities[addonId];
-                const name = booking.addonNames?.[idx] || addonId;
-                return (
-                  <div key={addonId} className="flex justify-between">
-                    <span className="text-gray-700">{name}</span>
-                    {qty && (
-                      <span className="text-gray-500">
-                        {qty} night{qty !== 1 ? "s" : ""}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Payment Information */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Payment</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-gray-500">Method</p>
-              <p className="font-medium text-gray-900">
-                {booking.paymentMethod === "card"
-                  ? "Card"
-                  : booking.paymentMethod === "pay_at_property"
-                    ? "Pay at Property"
-                    : booking.paymentMethod || "N/A"}
-              </p>
-            </div>
-            <div>
-              <p className="text-gray-500">Payment Status</p>
-              {booking.paymentStatus && (
-                <span
-                  className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${PAYMENT_STATUS_STYLES[booking.paymentStatus] || "bg-gray-100 text-gray-600"}`}
-                >
-                  {getPaymentStatusLabel(booking.paymentStatus)}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Pricing & Split */}
-        <div className="bg-white border border-gray-200 rounded-xl p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Pricing</h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-500">Nightly Rate</span>
-              <span className="font-medium text-gray-900">
-                {formatCurrency(booking.nightlyRate, booking.currency)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">Nights</span>
-              <span className="font-medium text-gray-900">{booking.nights}</span>
-            </div>
-            {booking.addonTotal > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-500">Addons</span>
-                <span className="font-medium text-gray-900">
-                  {booking.currency} {booking.addonTotal.toFixed(2)}
-                </span>
-              </div>
-            )}
-            <div className="flex justify-between pt-2 border-t border-gray-100">
-              <span className="font-semibold text-gray-900">Total</span>
-              <span className="font-bold text-gray-900">
-                {formatCurrency(booking.totalAmount, booking.currency)}
-              </span>
-            </div>
-            {booking.platformFeeAmount != null && booking.platformFeeAmount > 0 && (
-              <div className="flex justify-between pt-2 border-t border-gray-100">
-                <span className="text-gray-500">Platform Fee</span>
-                <span className="font-medium text-gray-600">
-                  -{formatCurrency(booking.platformFeeAmount, booking.currency)}
-                </span>
-              </div>
-            )}
-            {booking.affiliateCommissionAmount != null && booking.affiliateCommissionAmount > 0 && (
-              <div className="flex justify-between">
-                <span className="text-gray-500">Affiliate Commission</span>
-                <span className="font-medium text-gray-600">
-                  {formatCurrency(booking.affiliateCommissionAmount, booking.currency)}
-                </span>
-              </div>
-            )}
-            {booking.propertyPayoutAmount != null &&
-              booking.propertyPayoutAmount !== booking.totalAmount && (
-                <div className="flex justify-between pt-2 border-t border-gray-100">
-                  <span className="font-semibold text-gray-900">Property Payout</span>
-                  <span className="font-bold text-green-600">
-                    {formatCurrency(booking.propertyPayoutAmount, booking.currency)}
-                  </span>
+          {(booking.specialRequests || booking.estimatedArrivalTime) && (
+            <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              {booking.specialRequests && (
+                <div>
+                  <p className="text-xs text-gray-500">Special requests</p>
+                  <p className="text-gray-900 whitespace-pre-wrap">{booking.specialRequests}</p>
                 </div>
               )}
-          </div>
+              {booking.estimatedArrivalTime && (
+                <div>
+                  <p className="text-xs text-gray-500">Estimated arrival time</p>
+                  <p className="font-medium text-gray-900">{booking.estimatedArrivalTime}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Actions — Accept/Reject for pending with payment flow */}
+        {/* 4. Additional guests */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Additional guests</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {totalParty} {totalParty === 1 ? "guest" : "guests"} booked · {guests.length} of{" "}
+                {additionalCapacity} added
+              </p>
+            </div>
+            <button
+              onClick={handleAddGuest}
+              disabled={guests.length >= additionalCapacity || channelKey !== "direct"}
+              title={
+                channelKey !== "direct"
+                  ? "Channel-managed bookings carry limited guest PII"
+                  : guests.length >= additionalCapacity
+                    ? "All booked guests have been added"
+                    : ""
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-900 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <PlusIcon className="w-4 h-4" />
+              Add guest
+            </button>
+          </div>
+          {guests.length === 0 ? (
+            <p className="text-sm text-gray-500">No additional guests added yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {guests.map((g, idx) => (
+                <AdditionalGuestRow
+                  key={g.id}
+                  guest={g}
+                  position={idx + 1}
+                  total={additionalCapacity}
+                  onSave={(patch) => handleSaveGuest(g.id, patch)}
+                  onDelete={() => handleDeleteGuest(g.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 5. Internal notes */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3 mb-4">
+            <h2 className="text-sm font-semibold text-gray-900">Internal notes</h2>
+            <button
+              onClick={() => setNoteDraftOpen((v) => !v)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-900 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              <PlusIcon className="w-4 h-4" />
+              Add note
+            </button>
+          </div>
+          {noteDraftOpen && (
+            <div className="mb-4">
+              <textarea
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder="Notes are only visible to your team — never shown to the guest."
+                rows={3}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent resize-none"
+              />
+              <div className="flex justify-end gap-2 mt-2">
+                <button
+                  onClick={() => {
+                    setNoteDraft("");
+                    setNoteDraftOpen(false);
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 rounded-lg hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveNote}
+                  disabled={!noteDraft.trim()}
+                  className="px-3 py-1.5 text-xs font-medium text-white bg-gray-900 rounded-lg hover:bg-black disabled:opacity-50"
+                >
+                  Save note
+                </button>
+              </div>
+            </div>
+          )}
+          {notes.length === 0 ? (
+            <p className="text-sm text-gray-500">No notes yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {notes.map((n) => (
+                <div key={n.id} className="border border-gray-200 rounded-lg p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{n.authorName || "Unknown"}</span>{" "}
+                      · {formatDateTime(n.createdAt)}
+                    </div>
+                    <button
+                      onClick={() => handleDeleteNote(n.id)}
+                      className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50"
+                      aria-label="Delete note"
+                    >
+                      <TrashIcon className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-sm text-gray-900 whitespace-pre-wrap">{n.body}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Pending-booking accept/reject — kept above the cancel card so the
+            most urgent action stays visible without scrolling further. */}
         {isPending && booking.hostResponseDeadline && (
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button
               onClick={handleAccept}
               disabled={updating}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
             >
               <CheckCircleIcon className="w-4 h-4" />
-              Accept Booking
+              Accept booking
             </button>
             <button
               onClick={handleReject}
               disabled={updating}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
             >
               <XCircleIcon className="w-4 h-4" />
-              Reject Booking
+              Reject booking
             </button>
           </div>
         )}
-
-        {/* Legacy actions for bookings without payment flow */}
         {isPending && !booking.hostResponseDeadline && (
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             <button
-              onClick={() => updateStatus("confirmed")}
+              onClick={handleConfirmFromPending}
               disabled={updating}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
             >
               <CheckCircleIcon className="w-4 h-4" />
-              Confirm Booking
-            </button>
-            <button
-              onClick={() => updateStatus("cancelled")}
-              disabled={updating}
-              className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
-            >
-              <XCircleIcon className="w-4 h-4" />
-              Cancel Booking
+              Confirm booking
             </button>
           </div>
         )}
 
-        {booking.status === "confirmed" && (
-          <div>
+        {/* 6. Cancel booking (hidden once already cancelled / expired) */}
+        {!isCancelled && (
+          <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
+            <h2 className="text-sm font-semibold text-gray-900 mb-1">Cancel booking</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              <span className="font-semibold">
+                Cancels all {roomRows.length} {roomRows.length === 1 ? "room" : "rooms"} in this
+                booking.
+              </span>{" "}
+              A reason is required.
+            </p>
+
+            <div className="mb-4">
+              <CancellationPolicyPanel
+                checkIn={booking.checkIn}
+                rateType={rateType}
+                numberOfRooms={roomRows.length}
+                nightlyRate={booking.nightlyRate}
+                currency={booking.currency}
+                policy={policy}
+              />
+            </div>
+
             <button
-              onClick={() => updateStatus("cancelled")}
+              onClick={() => {
+                setCancelReason("");
+                setCancelOpen(true);
+              }}
               disabled={updating}
-              className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
             >
               <XCircleIcon className="w-4 h-4" />
-              Cancel Booking
+              Cancel this booking
             </button>
           </div>
         )}
       </div>
 
+      {/* Modals */}
       {confirmDialog && (
         <ConfirmDialog
           message={confirmDialog.message}
@@ -566,7 +1366,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       {decideOpen === "approve" && changeRequest && (
         <Modal onClose={() => setDecideOpen(null)}>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Approve Change Request?</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Approve change request?</h3>
           <p className="text-sm text-gray-600 mb-4">
             The booking will be updated to use the requested dates and add-ons.
             {changeRequest.priceDifference > 0 && (
@@ -588,14 +1388,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setDecideOpen(null)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
             >
               Cancel
             </button>
             <button
               onClick={handleApproveChange}
               disabled={decidingChange}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50"
             >
               {decidingChange ? "Approving…" : "Approve"}
             </button>
@@ -605,7 +1405,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       {decideOpen === "decline" && (
         <Modal onClose={() => setDecideOpen(null)}>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Decline Change Request</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Decline change request</h3>
           <p className="text-sm text-gray-600 mb-4">
             The booking will stay as-is. The guest will receive an email with your reason.
           </p>
@@ -614,19 +1414,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             onChange={(e) => setDeclineReason(e.target.value)}
             placeholder="Reason (optional — will be included in the guest's email)"
             rows={3}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
           />
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setDecideOpen(null)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
             >
               Cancel
             </button>
             <button
               onClick={handleDeclineChange}
               disabled={decidingChange}
-              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
             >
               {decidingChange ? "Declining…" : "Decline"}
             </button>
@@ -636,7 +1436,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       {rejectOpen && (
         <Modal onClose={() => setRejectOpen(false)}>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Reject Booking</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Reject booking</h3>
           <p className="text-sm text-gray-600 mb-4">
             Are you sure you want to reject this booking? The payment hold will be released.
           </p>
@@ -645,20 +1445,52 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="Reason for rejection (optional — will be included in the guest's email)"
             rows={3}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
           />
           <div className="flex justify-end gap-3">
             <button
               onClick={() => setRejectOpen(false)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
             >
               Cancel
             </button>
             <button
               onClick={confirmReject}
-              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
             >
               Reject
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {cancelOpen && (
+        <Modal onClose={() => setCancelOpen(false)}>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Cancel this booking?</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            This cancels all {roomRows.length} {roomRows.length === 1 ? "room" : "rooms"} in the
+            booking and emails the guest. The reason is recorded as an internal note.
+          </p>
+          <textarea
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Cancellation reason (required)"
+            rows={3}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent mb-4 resize-none"
+          />
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => setCancelOpen(false)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+            >
+              Keep booking
+            </button>
+            <button
+              onClick={handleCancelBooking}
+              disabled={!cancelReason.trim() || cancelling}
+              className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
+            >
+              {cancelling ? "Cancelling…" : "Cancel booking"}
             </button>
           </div>
         </Modal>

@@ -3,6 +3,10 @@ export const BOOKING_STATUS_STYLES: Record<string, string> = {
   confirmed: "bg-green-100 text-green-700",
   cancelled: "bg-red-100 text-red-600",
   expired: "bg-gray-100 text-gray-600",
+  // VAY-495 — backend may surface these in future; covered now so the badge
+  // stays consistent if they do.
+  completed: "bg-blue-100 text-blue-700",
+  no_show: "bg-orange-100 text-orange-700",
 };
 
 export const PAYMENT_STATUS_STYLES: Record<string, string> = {

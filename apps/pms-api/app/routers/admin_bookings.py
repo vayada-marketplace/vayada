@@ -4,19 +4,29 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from app.database import AuthDatabase
 from app.dependencies import require_hotel_admin
 from app.models.booking import (
     AdminBookingCreate,
     AssignedRoom,
+    BookingAdditionalGuestPayload,
+    BookingAdditionalGuestResponse,
     BookingAdminResponse,
     BookingDetailsUpdate,
+    BookingNoteCreate,
+    BookingNoteResponse,
     BookingRoomAssign,
     BookingRoomSwap,
     BookingStatusUpdate,
+    CancelBookingRequest,
 )
 from app.models.payment import PayoutResponse
+from app.repositories.booking_additional_guest_repo import (
+    BookingAdditionalGuestRepository,
+)
 from app.repositories.booking_change_request_repo import BookingChangeRequestRepository
 from app.repositories.booking_event_repo import BookingEventRepository
+from app.repositories.booking_note_repo import BookingNoteRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_room_repo import BookingRoomRepository
 from app.repositories.payout_repo import PayoutRepository
@@ -803,6 +813,226 @@ async def admin_decline_change_request(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _change_request_admin(cr)
+
+
+# ── Booking detail page — notes, additional guests, cancel (VAY-495) ──
+
+
+def _note_to_response(n: dict) -> BookingNoteResponse:
+    return BookingNoteResponse(
+        id=str(n["id"]),
+        booking_id=str(n["booking_id"]),
+        author_user_id=str(n["author_user_id"]),
+        author_name=n.get("author_name") or "",
+        body=n["body"],
+        created_at=n["created_at"].isoformat(),
+    )
+
+
+def _guest_to_response(g: dict) -> BookingAdditionalGuestResponse:
+    dob = g.get("date_of_birth")
+    return BookingAdditionalGuestResponse(
+        id=str(g["id"]),
+        booking_id=str(g["booking_id"]),
+        position=g["position"],
+        first_name=g.get("first_name") or "",
+        last_name=g.get("last_name") or "",
+        gender=g.get("gender") or "",
+        nationality=g.get("nationality") or "",
+        date_of_birth=str(dob) if dob else None,
+        email=g.get("email") or "",
+        phone=g.get("phone") or "",
+        passport_number=g.get("passport_number") or "",
+        created_at=g["created_at"].isoformat(),
+        updated_at=g["updated_at"].isoformat(),
+    )
+
+
+async def _booking_owned_by_hotel(booking_id: str, user_id: str) -> tuple[dict, str]:
+    """Load a booking and assert it belongs to the caller's hotel. Raises 404
+    on miss to avoid leaking which IDs exist for other hotels."""
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return booking, hotel_id
+
+
+@router.get("/bookings/{booking_id}/notes")
+async def list_booking_notes(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    await _booking_owned_by_hotel(booking_id, user_id)
+    notes = await BookingNoteRepository.list_for_booking(booking_id)
+    return {"notes": [_note_to_response(n).model_dump(by_alias=True) for n in notes]}
+
+
+@router.post("/bookings/{booking_id}/notes", response_model=BookingNoteResponse, status_code=201)
+async def create_booking_note(
+    booking_id: str,
+    data: BookingNoteCreate,
+    user_id: str = Depends(require_hotel_admin),
+):
+    body = data.body.strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="Note body is required")
+    _, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    user = await AuthDatabase.fetchrow("SELECT name, email FROM users WHERE id = $1", user_id)
+    author_name = (user["name"] if user else None) or (user["email"] if user else None) or ""
+    note = await BookingNoteRepository.create(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        author_user_id=user_id,
+        author_name=author_name,
+        body=body,
+    )
+    return _note_to_response(note)
+
+
+@router.delete("/bookings/{booking_id}/notes/{note_id}", status_code=204)
+async def delete_booking_note(
+    booking_id: str,
+    note_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    _, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    note = await BookingNoteRepository.get_by_id(note_id)
+    if not note or str(note["booking_id"]) != booking_id or str(note["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Note not found")
+    await BookingNoteRepository.delete(note_id)
+
+
+@router.get("/bookings/{booking_id}/additional-guests")
+async def list_additional_guests(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    await _booking_owned_by_hotel(booking_id, user_id)
+    guests = await BookingAdditionalGuestRepository.list_for_booking(booking_id)
+    return {"guests": [_guest_to_response(g).model_dump(by_alias=True) for g in guests]}
+
+
+@router.post(
+    "/bookings/{booking_id}/additional-guests",
+    response_model=BookingAdditionalGuestResponse,
+    status_code=201,
+)
+async def create_additional_guest(
+    booking_id: str,
+    data: BookingAdditionalGuestPayload,
+    user_id: str = Depends(require_hotel_admin),
+):
+    booking, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    # Cap at booked-count minus the booker (lead guest), per the ticket.
+    capacity = max(0, int(booking.get("adults") or 0) + int(booking.get("children") or 0) - 1)
+    existing = await BookingAdditionalGuestRepository.list_for_booking(booking_id)
+    if len(existing) >= capacity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This booking only allows {capacity} additional guest(s).",
+        )
+    position = await BookingAdditionalGuestRepository.next_position(booking_id)
+    payload = data.model_dump(exclude_unset=True)
+    guest = await BookingAdditionalGuestRepository.create(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        position=position,
+        data=payload,
+    )
+    return _guest_to_response(guest)
+
+
+@router.patch(
+    "/bookings/{booking_id}/additional-guests/{guest_id}",
+    response_model=BookingAdditionalGuestResponse,
+)
+async def update_additional_guest(
+    booking_id: str,
+    guest_id: str,
+    data: BookingAdditionalGuestPayload,
+    user_id: str = Depends(require_hotel_admin),
+):
+    _, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    existing = await BookingAdditionalGuestRepository.get_by_id(guest_id)
+    if (
+        not existing
+        or str(existing["booking_id"]) != booking_id
+        or str(existing["hotel_id"]) != hotel_id
+    ):
+        raise HTTPException(status_code=404, detail="Guest not found")
+    payload = data.model_dump(exclude_unset=True)
+    updated = await BookingAdditionalGuestRepository.update(guest_id, payload)
+    return _guest_to_response(updated)
+
+
+@router.delete("/bookings/{booking_id}/additional-guests/{guest_id}", status_code=204)
+async def delete_additional_guest(
+    booking_id: str,
+    guest_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    _, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    existing = await BookingAdditionalGuestRepository.get_by_id(guest_id)
+    if (
+        not existing
+        or str(existing["booking_id"]) != booking_id
+        or str(existing["hotel_id"]) != hotel_id
+    ):
+        raise HTTPException(status_code=404, detail="Guest not found")
+    await BookingAdditionalGuestRepository.delete(guest_id)
+
+
+@router.post("/bookings/{booking_id}/cancel", response_model=BookingAdminResponse)
+async def cancel_booking_with_reason(
+    booking_id: str,
+    data: CancelBookingRequest,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """Reason-required cancel (VAY-495). Internally records the reason as a
+    booking note then defers to the existing status-update path so the
+    Channex availability push + guest email side effects stay identical."""
+    reason = data.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A cancellation reason is required")
+
+    booking, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    if booking["status"] == "cancelled":
+        raise HTTPException(status_code=400, detail="Booking is already cancelled")
+
+    user = await AuthDatabase.fetchrow("SELECT name, email FROM users WHERE id = $1", user_id)
+    author_name = (user["name"] if user else None) or (user["email"] if user else None) or ""
+    await BookingNoteRepository.create(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        author_user_id=user_id,
+        author_name=author_name,
+        body=f"Cancellation reason: {reason}",
+    )
+
+    await BookingRepository.update_status(booking_id, "cancelled")
+    updated = await BookingRepository.get_by_id(booking_id)
+
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id,
+            str(booking["room_type_id"]),
+            start_date=booking["check_in"],
+            end_date=booking["check_out"],
+        )
+    )
+    asyncio.create_task(send_guest_cancellation(updated["guest_email"], updated))
+    if booking.get("room_id"):
+        asyncio.create_task(
+            try_place_unassigned_after_cancellation(
+                hotel_id,
+                str(booking["room_type_id"]),
+                booking["check_in"],
+                booking["check_out"],
+            )
+        )
+
+    return await _admin_response(updated)
 
 
 # ── Payouts ───────────────────────────────────────────────────────
