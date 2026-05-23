@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import { messagingService, Message, MessageThread, ThreadStatus } from "@/services/messaging";
 
@@ -206,9 +207,13 @@ export default function InboxPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="border-b border-gray-200 bg-white px-5 py-4 flex items-center justify-between">
+      <div
+        className={`border-b border-gray-200 bg-white px-5 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between ${
+          selectedId ? "hidden md:flex" : "flex"
+        }`}
+      >
         <h1 className="text-xl font-semibold text-gray-900">{t("layout.sidebar.inbox")}</h1>
-        <div className="flex gap-1 text-sm">
+        <div className="flex flex-wrap gap-1 text-sm">
           {(["open", "closed", "no_reply_needed"] as ThreadStatus[]).map((s) => (
             <button
               key={s}
@@ -228,7 +233,11 @@ export default function InboxPage() {
 
       <div className="flex-1 flex min-h-0">
         {/* Thread list */}
-        <aside className="w-80 border-r border-gray-200 bg-white overflow-y-auto shrink-0">
+        <aside
+          className={`w-full md:w-80 border-r border-gray-200 bg-white overflow-y-auto shrink-0 ${
+            selectedId ? "hidden md:block" : "block"
+          }`}
+        >
           {loadingList ? (
             <div className="p-6 text-sm text-gray-500">Loading…</div>
           ) : threads.length === 0 ? (
@@ -279,7 +288,11 @@ export default function InboxPage() {
         </aside>
 
         {/* Thread detail */}
-        <section className="flex-1 flex flex-col bg-gray-50 min-w-0">
+        <section
+          className={`flex-1 flex-col bg-gray-50 min-w-0 ${
+            selectedId ? "flex" : "hidden md:flex"
+          }`}
+        >
           {!selectedId ? (
             <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
               Select a conversation
@@ -290,17 +303,26 @@ export default function InboxPage() {
             </div>
           ) : thread ? (
             <>
-              <header className="border-b border-gray-200 bg-white px-5 py-3 flex items-center justify-between">
-                <div className="min-w-0">
-                  <h2 className="text-sm font-semibold text-gray-900 truncate">
-                    {thread.guestName || thread.guestEmail || "Guest"}
-                  </h2>
-                  <p className="text-xs text-gray-500 truncate">
-                    {(CHANNEL_BADGE[thread.channel || "other"] || CHANNEL_BADGE.other).label}
-                    {thread.bookingId && " · Booking linked"}
-                  </p>
+              <header className="border-b border-gray-200 bg-white px-5 py-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <button
+                    onClick={() => setSelectedId(null)}
+                    className="md:hidden -ml-1 p-1 text-gray-500 hover:text-gray-900 shrink-0"
+                    aria-label="Back to inbox"
+                  >
+                    <ArrowLeftIcon className="w-5 h-5" />
+                  </button>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold text-gray-900 truncate">
+                      {thread.guestName || thread.guestEmail || "Guest"}
+                    </h2>
+                    <p className="text-xs text-gray-500 truncate">
+                      {(CHANNEL_BADGE[thread.channel || "other"] || CHANNEL_BADGE.other).label}
+                      {thread.bookingId && " · Booking linked"}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 shrink-0">
                   {thread.channel === "booking.com" && thread.status === "open" && (
                     <button
                       onClick={handleNoReplyNeeded}
