@@ -16,8 +16,8 @@ interface RoomCardProps {
   checkIn: string;
   hotelTimezone?: string;
   onChangeImageIndex: (index: number) => void;
-  expandedRate: "flexible" | "nonrefundable" | null;
-  onToggleRate: (next: "flexible" | "nonrefundable" | null) => void;
+  selectedRate: "flexible" | "nonrefundable" | null;
+  onChangeSelectedRate: (next: "flexible" | "nonrefundable") => void;
   onView: () => void;
   onSelectRate: (rateType: "flexible" | "nonrefundable", requiredRooms: number) => void;
 }
@@ -30,8 +30,8 @@ export default function RoomCard({
   checkIn,
   hotelTimezone,
   onChangeImageIndex,
-  expandedRate,
-  onToggleRate,
+  selectedRate,
+  onChangeSelectedRate,
   onView,
   onSelectRate,
 }: RoomCardProps) {
@@ -79,6 +79,18 @@ export default function RoomCard({
   // unless no Non-Refundable exists, in which case keep Flexible visible with replacement copy.
   const showFlexibleRate =
     room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null);
+  const hasNonRefundable = room.nonRefundableRate != null;
+
+  const effectiveSelectedRate: "flexible" | "nonrefundable" | null =
+    selectedRate === "flexible" && showFlexibleRate
+      ? "flexible"
+      : selectedRate === "nonrefundable" && hasNonRefundable
+        ? "nonrefundable"
+        : hasNonRefundable
+          ? "nonrefundable"
+          : showFlexibleRate
+            ? "flexible"
+            : null;
 
   return (
     <div
@@ -269,67 +281,65 @@ export default function RoomCard({
             </div>
           )}
 
-          {!soldOut && room.remainingRooms <= 3 && (
-            <div
-              className={`inline-flex items-center gap-2 self-start mb-3 px-3 py-1.5 rounded-full border text-sm font-medium ${
-                room.remainingRooms === 1
-                  ? "bg-red-50 border-red-200 text-red-700"
-                  : "bg-amber-50 border-amber-200 text-amber-800"
-              }`}
-            >
-              <span
-                className={`relative flex w-2 h-2 ${
-                  room.remainingRooms === 1 ? "text-red-500" : "text-amber-500"
-                }`}
-              >
-                <span className="absolute inset-0 rounded-full bg-current opacity-75 animate-ping" />
-                <span className="relative w-2 h-2 rounded-full bg-current" />
-              </span>
-              {room.remainingRooms === 1
-                ? tc("lastRoomLeft")
-                : tc("onlyLeft", { count: room.remainingRooms })}
-            </div>
-          )}
-
           <div className="border-t border-gray-100 pt-4">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-              {t("rateOptions")}
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+              {t("selectYourRate")}
             </p>
             <div className="space-y-3">
-              {room.nonRefundableRate != null && (
+              {hasNonRefundable && (
                 <RateOption
                   rateType="nonrefundable"
-                  expanded={expandedRate === "nonrefundable"}
-                  onToggle={() =>
-                    onToggleRate(expandedRate === "nonrefundable" ? null : "nonrefundable")
-                  }
+                  selected={effectiveSelectedRate === "nonrefundable"}
+                  onSelect={() => onChangeSelectedRate("nonrefundable")}
                   iconType="nonrefundable"
                   title={t("nonRefundableRate")}
                   description={t("nonRefundableDesc")}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
                   nightlyLabel={formatPrice(nonRefundableNightly * requiredRooms, selectedCurrency)}
                   discountPercent={discount}
-                  benefits={room.benefits}
                   soldOut={soldOut}
-                  onSelect={() => onSelectRate("nonrefundable", requiredRooms)}
                 />
               )}
               {showFlexibleRate && (
                 <RateOption
                   rateType="flexible"
-                  expanded={expandedRate === "flexible"}
-                  onToggle={() => onToggleRate(expandedRate === "flexible" ? null : "flexible")}
+                  selected={effectiveSelectedRate === "flexible"}
+                  onSelect={() => onChangeSelectedRate("flexible")}
                   iconType="flexible"
                   title={t("flexibleRate")}
                   description={flexibleDescription}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
                   nightlyLabel={formatPrice(flexibleNightly * requiredRooms, selectedCurrency)}
-                  benefits={room.benefits}
                   soldOut={soldOut}
-                  onSelect={() => onSelectRate("flexible", requiredRooms)}
                 />
               )}
             </div>
+            <button
+              onClick={() => {
+                if (soldOut || !effectiveSelectedRate) return;
+                onSelectRate(effectiveSelectedRate, requiredRooms);
+              }}
+              disabled={soldOut || !effectiveSelectedRate}
+              className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
+            >
+              {soldOut ? t("soldOut") : t("selectThisRate")}
+            </button>
+            {!soldOut && room.remainingRooms <= 3 && (
+              <p
+                className={`text-sm mt-3 flex items-center gap-1.5 font-medium ${
+                  room.remainingRooms === 1 ? "text-red-700" : "text-amber-800"
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    room.remainingRooms === 1 ? "bg-red-500" : "bg-amber-500"
+                  }`}
+                />
+                {room.remainingRooms === 1
+                  ? tc("lastRoomLeft")
+                  : tc("onlyLeft", { count: room.remainingRooms })}
+              </p>
+            )}
           </div>
         </div>
       </div>

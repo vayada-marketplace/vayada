@@ -70,6 +70,7 @@
     "upToGuests": "Up to {count} guests",
     "viewDetails": "View Details",
     "rateOptions": "Rate Options",
+    "selectYourRate": "Select Your Rate",
     "flexibleRate": "Flexible Rate",
     "flexibleDesc": "Free cancellation until {days} days before",
     "flexibleNoLongerCancellable": "Cancellation no longer available",

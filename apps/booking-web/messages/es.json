@@ -70,6 +70,7 @@
     "upToGuests": "Hasta {count} huéspedes",
     "viewDetails": "Ver Detalles",
     "rateOptions": "Opciones de Tarifa",
+    "selectYourRate": "Selecciona tu Tarifa",
     "flexibleRate": "Tarifa Flexible",
     "flexibleDesc": "Cancelación gratuita hasta {days} días antes",
     "flexibleNoLongerCancellable": "Cancelación no disponible",

@@ -70,6 +70,7 @@
     "upToGuests": "Jusqu'à {count} voyageurs",
     "viewDetails": "Voir les détails",
     "rateOptions": "Options de tarif",
+    "selectYourRate": "Choisissez votre tarif",
     "flexibleRate": "Tarif flexible",
     "flexibleDesc": "Annulation gratuite jusqu'à {days} jours avant",
     "flexibleNoLongerCancellable": "Annulation plus possible",

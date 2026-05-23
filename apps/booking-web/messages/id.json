@@ -70,6 +70,7 @@
     "upToGuests": "Hingga {count} tamu",
     "viewDetails": "Lihat Detail",
     "rateOptions": "Pilihan Tarif",
+    "selectYourRate": "Pilih Tarif Anda",
     "flexibleRate": "Tarif Fleksibel",
     "flexibleDesc": "Pembatalan gratis hingga {days} hari sebelumnya",
     "flexibleNoLongerCancellable": "Pembatalan tidak lagi tersedia",

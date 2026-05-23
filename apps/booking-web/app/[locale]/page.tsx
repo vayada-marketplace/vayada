@@ -169,7 +169,7 @@ function HomePageContent() {
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState("");
   const [imageIndices, setImageIndices] = useState<Record<string, number>>({});
-  const [expandedRates, setExpandedRates] = useState<Record<string, string | null>>({});
+  const [selectedRates, setSelectedRates] = useState<Record<string, string | null>>({});
   const [detailModalIndex, setDetailModalIndex] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
   const roomsSectionRef = useRef<HTMLDivElement>(null);
@@ -181,24 +181,20 @@ function HomePageContent() {
     }
   }, [rooms.length, detailModalIndex]);
 
-  // Auto-expand rate: if only one rate exists, expand it so the
-  // "Select This Rate" button is immediately visible without a click.
-  // When both rates exist, default to non-refundable expanded.
+  // Default per-room rate selection: prefer non-refundable when available, else flexible.
   useEffect(() => {
-    if (rooms.length > 0 && Object.keys(expandedRates).length === 0) {
+    if (rooms.length > 0 && Object.keys(selectedRates).length === 0) {
       const defaults: Record<string, string> = {};
       rooms.forEach((room) => {
         const hasNonRefundable = room.nonRefundableRate != null;
         const hasFlexible = room.flexibleRateEnabled !== false;
-        if (hasNonRefundable && hasFlexible) {
-          defaults[room.id] = "nonrefundable";
-        } else if (hasNonRefundable) {
+        if (hasNonRefundable) {
           defaults[room.id] = "nonrefundable";
         } else if (hasFlexible) {
           defaults[room.id] = "flexible";
         }
       });
-      setExpandedRates(defaults);
+      setSelectedRates(defaults);
     }
   }, [rooms]);
 
@@ -615,11 +611,11 @@ function HomePageContent() {
                   checkIn={committedCheckIn}
                   hotelTimezone={hotel.timezone}
                   onChangeImageIndex={(i) => setImageIndices((prev) => ({ ...prev, [room.id]: i }))}
-                  expandedRate={
-                    (expandedRates[room.id] as "flexible" | "nonrefundable" | null) ?? null
+                  selectedRate={
+                    (selectedRates[room.id] as "flexible" | "nonrefundable" | null) ?? null
                   }
-                  onToggleRate={(next) =>
-                    setExpandedRates((prev) => ({ ...prev, [room.id]: next }))
+                  onChangeSelectedRate={(next) =>
+                    setSelectedRates((prev) => ({ ...prev, [room.id]: next }))
                   }
                   onView={() => {
                     trackEvent(slug, "viewed_room", { roomId: room.id });
