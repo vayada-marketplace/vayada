@@ -34,12 +34,15 @@ class TestPublicRooms:
     async def test_guest_mix_filters_room_occupancy_limits(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
+        # total_rooms=1 isolates the per-unit occupancy check; multi-room
+        # behavior is covered separately in TestMultiRoomCapacity (VAY-492).
         await create_test_room_type(
             str(hotel["id"]),
             name="Family Room",
             max_occupancy=3,
             max_adults=2,
             max_children=1,
+            total_rooms=1,
         )
 
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=2&children=1")
@@ -63,7 +66,9 @@ class TestPublicRooms:
     ):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
-        await create_test_room_type(str(hotel["id"]), name="Legacy Room", max_occupancy=3)
+        await create_test_room_type(
+            str(hotel["id"]), name="Legacy Room", max_occupancy=3, total_rooms=1
+        )
 
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=3&children=0")
         assert resp.status_code == 200
@@ -214,3 +219,99 @@ class TestPublicRooms:
         resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
         assert resp.status_code == 200
         assert resp.json()[0]["ratePaymentMethods"] is None
+
+
+class TestMultiRoomCapacity:
+    """VAY-492: a room type should surface when its combined inventory can
+    fit a party, even if a single unit cannot. Frontend computes
+    ``ceil(totalGuests / maxOccupancy)`` and renders "Select N villas" —
+    the backend's job is to not pre-filter the room type away."""
+
+    async def test_party_exceeds_one_unit_but_fits_two(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(
+            str(hotel["id"]), name="Two-Bedroom Pool Villa", max_occupancy=4, total_rooms=2
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=6&children=0")
+        assert resp.status_code == 200
+        rooms = resp.json()
+        assert [r["name"] for r in rooms] == ["Two-Bedroom Pool Villa"]
+
+    async def test_party_exceeds_combined_capacity(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(
+            str(hotel["id"]), name="Two-Bedroom Pool Villa", max_occupancy=4, total_rooms=2
+        )
+
+        # 9 > 4 * 2 — combined capacity insufficient
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=9&children=0")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_single_unit_inventory_does_not_combine(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(
+            str(hotel["id"]), name="Solo Villa", max_occupancy=4, total_rooms=1
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=6&children=0")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_remaining_under_required_still_returns_room_for_sold_out_badge(
+        self, client, cleanup_database
+    ):
+        """Capacity gate uses ``total_rooms`` (theoretical capability) so the
+        frontend can render the "Sold Out" badge when ``remaining < ceil(guests/cap)``.
+        Hiding it server-side would surprise guests whose dates just shifted."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(
+            str(hotel["id"]), name="Two-Bedroom Pool Villa", max_occupancy=4, total_rooms=2
+        )
+
+        # Book one of the two units — only 1 remains for these dates,
+        # but 6 guests need 2 units → frontend will show "Sold Out".
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-09-14",
+            check_out="2026-09-16",
+        )
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={
+                "check_in": "2026-09-14",
+                "check_out": "2026-09-16",
+                "adults": 6,
+                "children": 0,
+            },
+        )
+        assert resp.status_code == 200
+        rooms = resp.json()
+        assert len(rooms) == 1
+        assert rooms[0]["remainingRooms"] == 1
+
+    async def test_adults_constraint_scales_with_units(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        # Per-unit: max 2 adults; with 3 units combined: max 6.
+        await create_test_room_type(
+            str(hotel["id"]),
+            name="Couples Suite",
+            max_occupancy=2,
+            max_adults=2,
+            max_children=0,
+            total_rooms=3,
+        )
+
+        ok = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=6&children=0")
+        assert [r["name"] for r in ok.json()] == ["Couples Suite"]
+
+        too_many = await client.get(f"/api/hotels/{hotel['slug']}/rooms?adults=7&children=0")
+        assert too_many.json() == []

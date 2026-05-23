@@ -72,7 +72,14 @@ async def get_rooms_for_guest(
     result = []
 
     for room in rooms:
-        if not room_allows_guest_mix(room, adults, children):
+        # Capacity gate scales by total_rooms (VAY-492): a 4-cap room with
+        # 2 units in inventory should still appear for a 6-guest search, so
+        # the guest can book 2 of them. Per-stay availability is shown via
+        # remaining_rooms below — sold-out room types still surface so the
+        # frontend can render the "Sold Out" badge.
+        if not room_allows_guest_mix(
+            room, adults, children, units=int(room.get("total_rooms") or 1)
+        ):
             continue
 
         # Skip rooms that require more advance notice than available

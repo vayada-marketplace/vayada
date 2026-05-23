@@ -863,7 +863,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         raise ValueError("Room type not found")
     if not room["is_active"]:
         raise ValueError("Room type is not available")
-    if not room_allows_guest_mix(room, data.adults, data.children):
+    if not room_allows_guest_mix(
+        room, data.adults, data.children, units=data.number_of_rooms or 1
+    ):
         raise ValueError("Guest mix exceeds this room's occupancy limits")
 
     # ── Validate stay window (availability, nights, min-stay, advance) ──
