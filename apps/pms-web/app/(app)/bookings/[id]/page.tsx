@@ -24,6 +24,7 @@ import {
   BookingAdditionalGuestPayload,
   CancellationPolicy,
 } from "@/services/bookings";
+import { individualRoomsService, Room } from "@/services/rooms";
 import ConfirmDialog from "@/components/ConfirmDialog";
 import Modal from "@/components/Modal";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -293,15 +294,28 @@ function CancellationPolicyPanel({
 
 // ─── Additional guest expandable row ─────────────────────────────────
 
+interface RoomOption {
+  position: number;
+  label: string;
+}
+
 interface GuestRowProps {
   guest: BookingAdditionalGuest;
   position: number;
   total: number;
+  roomOptions: RoomOption[];
   onSave: (patch: BookingAdditionalGuestPayload) => Promise<void>;
   onDelete: () => Promise<void>;
 }
 
-function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestRowProps) {
+function AdditionalGuestRow({
+  guest,
+  position,
+  total,
+  roomOptions,
+  onSave,
+  onDelete,
+}: GuestRowProps) {
   const [open, setOpen] = useState(!guest.firstName && !guest.lastName);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -313,6 +327,9 @@ function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestR
     email: guest.email,
     phone: guest.phone,
     passportNumber: guest.passportNumber,
+    // Empty string in the dropdown represents "unassigned"; we translate
+    // to null on save so the backend clears the row.
+    roomPosition: guest.roomPosition == null ? "" : String(guest.roomPosition),
   });
 
   const initials =
@@ -321,6 +338,12 @@ function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestR
       : "?";
   const displayName =
     [guest.firstName, guest.lastName].filter(Boolean).join(" ") || "Unnamed guest";
+
+  const roomBadge =
+    guest.roomPosition == null
+      ? null
+      : roomOptions.find((r) => r.position === guest.roomPosition)?.label ||
+        `Room ${guest.roomPosition + 1}`;
 
   const handleSave = async () => {
     setSaving(true);
@@ -334,6 +357,7 @@ function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestR
         email: form.email,
         phone: form.phone,
         passportNumber: form.passportNumber,
+        roomPosition: form.roomPosition === "" ? null : Number(form.roomPosition),
       });
     } finally {
       setSaving(false);
@@ -350,6 +374,12 @@ function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestR
           <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
           <p className="text-xs text-gray-500">
             Guest {position} of {total}
+            {roomBadge && (
+              <>
+                {" · "}
+                <span className="text-gray-700">{roomBadge}</span>
+              </>
+            )}
           </p>
         </div>
         <button
@@ -420,6 +450,20 @@ function AdditionalGuestRow({ guest, position, total, onSave, onDelete }: GuestR
               value={form.passportNumber}
               onChange={(v) => setForm({ ...form, passportNumber: v })}
             />
+            {roomOptions.length > 1 && (
+              <SelectField
+                label="Room"
+                value={form.roomPosition}
+                onChange={(v) => setForm({ ...form, roomPosition: v })}
+                options={[
+                  { value: "", label: "Unassigned" },
+                  ...roomOptions.map((r) => ({
+                    value: String(r.position),
+                    label: r.label,
+                  })),
+                ]}
+              />
+            )}
           </div>
           <div className="mt-4 flex justify-end">
             <button
@@ -490,6 +534,197 @@ function SelectField({
   );
 }
 
+// ─── Move-room modal ─────────────────────────────────────────────────
+
+interface MoveRoomModalProps {
+  fromRoomNumber: string | null;
+  candidates: Room[];
+  onClose: () => void;
+  onMove: (toRoomId: string) => Promise<void>;
+}
+
+function MoveRoomModal({ fromRoomNumber, candidates, onClose, onMove }: MoveRoomModalProps) {
+  const [toRoomId, setToRoomId] = useState(candidates[0]?.id || "");
+  const [moving, setMoving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleMove = async () => {
+    if (!toRoomId) return;
+    setMoving(true);
+    setErr("");
+    try {
+      await onMove(toRoomId);
+      onClose();
+    } catch (e) {
+      setErr(errMessage(e, "Failed to move room"));
+      setMoving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h3 className="text-lg font-semibold text-gray-900 mb-2">
+        Move {fromRoomNumber ? `Room ${fromRoomNumber}` : "this room"}
+      </h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Pick another room of the same type to reassign this segment to. Other rooms on this booking
+        are excluded; rooms already occupied for these dates are excluded by the backend.
+      </p>
+      {candidates.length === 0 ? (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-4">
+          No other rooms of this type exist in your inventory.
+        </p>
+      ) : (
+        <SelectField
+          label="Destination room"
+          value={toRoomId}
+          onChange={setToRoomId}
+          options={candidates.map((r) => ({
+            value: r.id,
+            label: `Room ${r.roomNumber}${r.floor ? ` · Floor ${r.floor}` : ""}`,
+          }))}
+        />
+      )}
+      {err && (
+        <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+          {err}
+        </p>
+      )}
+      <div className="flex justify-end gap-3 mt-4">
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleMove}
+          disabled={!toRoomId || moving || candidates.length === 0}
+          className="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-black rounded-lg disabled:opacity-50"
+        >
+          {moving ? "Moving…" : "Move room"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Per-room "assign guests" modal (per-room Modify) ────────────────
+
+interface AssignGuestsModalProps {
+  roomLabel: string;
+  roomPosition: number;
+  guests: BookingAdditionalGuest[];
+  onClose: () => void;
+  onSave: (assignments: Record<string, number | null>) => Promise<void>;
+}
+
+function AssignGuestsModal({
+  roomLabel,
+  roomPosition,
+  guests,
+  onClose,
+  onSave,
+}: AssignGuestsModalProps) {
+  // Track which guest IDs the user has toggled into this room. Seed from
+  // current state so editing then cancelling is a true no-op.
+  const [assigned, setAssigned] = useState<Set<string>>(
+    () => new Set(guests.filter((g) => g.roomPosition === roomPosition).map((g) => g.id)),
+  );
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const toggle = (guestId: string) =>
+    setAssigned((prev) => {
+      const next = new Set(prev);
+      if (next.has(guestId)) next.delete(guestId);
+      else next.add(guestId);
+      return next;
+    });
+
+  const handleSave = async () => {
+    setSaving(true);
+    setErr("");
+    try {
+      // Build a minimal diff: only patch guests whose membership in
+      // `assigned` actually changed from their current state.
+      const changes: Record<string, number | null> = {};
+      for (const g of guests) {
+        const wantsIn = assigned.has(g.id);
+        const isIn = g.roomPosition === roomPosition;
+        if (wantsIn && !isIn) changes[g.id] = roomPosition;
+        else if (!wantsIn && isIn) changes[g.id] = null;
+      }
+      await onSave(changes);
+      onClose();
+    } catch (e) {
+      setErr(errMessage(e, "Failed to update assignments"));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h3 className="text-lg font-semibold text-gray-900 mb-2">Guests in {roomLabel}</h3>
+      <p className="text-sm text-gray-600 mb-4">
+        Check the guests staying in this room. Unchecked guests are moved to other rooms or
+        unassigned. The booker is always in the primary room and isn&apos;t listed here.
+      </p>
+      {guests.length === 0 ? (
+        <p className="text-sm text-gray-500 mb-4">
+          No additional guests have been added yet. Add them from the Additional guests card first.
+        </p>
+      ) : (
+        <div className="space-y-2 mb-4 max-h-72 overflow-y-auto">
+          {guests.map((g) => {
+            const name =
+              [g.firstName, g.lastName].filter(Boolean).join(" ") || `Guest ${g.position}`;
+            const elsewhere =
+              g.roomPosition != null && g.roomPosition !== roomPosition
+                ? ` · currently Room ${g.roomPosition + 1}`
+                : "";
+            return (
+              <label
+                key={g.id}
+                className="flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={assigned.has(g.id)}
+                  onChange={() => toggle(g.id)}
+                  className="h-4 w-4 accent-gray-900"
+                />
+                <span className="flex-1 text-sm text-gray-900">{name}</span>
+                <span className="text-xs text-gray-500">{elsewhere}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      {err && (
+        <p className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+          {err}
+        </p>
+      )}
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving || guests.length === 0}
+          className="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-black rounded-lg disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save assignments"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -518,6 +753,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [allRooms, setAllRooms] = useState<Room[]>([]);
+  const [moveTarget, setMoveTarget] = useState<{
+    fromRoomId: string | null;
+    fromRoomNumber: string | null;
+  } | null>(null);
+  const [assignTarget, setAssignTarget] = useState<{
+    position: number;
+    label: string;
+  } | null>(null);
 
   const loadAll = useCallback(async () => {
     try {
@@ -542,6 +786,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .getPaymentSettings()
         .then((r) => setPolicy(r.cancellationPolicy))
         .catch(console.error),
+      individualRoomsService.list().then(setAllRooms).catch(console.error),
     ]);
   }, [id]);
 
@@ -693,6 +938,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
+  const handleMoveRoom = async (fromRoomId: string | null, toRoomId: string) => {
+    // The backend can move the primary or any extra; primary is identified
+    // by omitting from_room_id. Pass it through unconditionally if we have it
+    // so multi-room cases are unambiguous.
+    const updated = await bookingsService.moveRoom(id, toRoomId, fromRoomId || undefined);
+    setBooking(updated);
+  };
+
+  const handleAssignGuests = async (changes: Record<string, number | null>) => {
+    // Issue PATCH calls in parallel; build a fresh list from the updated
+    // rows so the UI doesn't go through a stale render.
+    const updatedGuests = await Promise.all(
+      Object.entries(changes).map(([guestId, roomPosition]) =>
+        bookingsService.updateAdditionalGuest(id, guestId, { roomPosition }),
+      ),
+    );
+    setGuests((prev) => {
+      const byId = new Map(updatedGuests.map((g) => [g.id, g]));
+      return prev.map((g) => byId.get(g.id) || g);
+    });
+  };
+
   const handleCancelBooking = async () => {
     const reason = cancelReason.trim();
     if (!reason) return;
@@ -761,15 +1028,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     };
   });
 
-  // Per-room guest distribution: spread the booking-level total across rooms
-  // evenly with any remainder on the first rooms. This is a display-only
-  // split — the authoritative count stays at the booking level. Per-room
-  // guest assignment is a deferred follow-up (ticket open question).
-  const perRoomAdults = (() => {
-    const base = Math.floor(booking.adults / roomRows.length);
-    const remainder = booking.adults - base * roomRows.length;
-    return roomRows.map((_, idx) => base + (idx < remainder ? 1 : 0));
-  })();
+  // Per-room guest count: explicit additional-guest assignments only, plus
+  // the booker who lives implicitly in the primary room (position 0).
+  // Unassigned additional guests don't count anywhere yet and are surfaced
+  // on the Additional guests card header instead.
+  const perRoomAssigned = roomRows.map(
+    (_, idx) => guests.filter((g) => g.roomPosition === idx).length + (idx === 0 ? 1 : 0),
+  );
+  const unassignedGuests = guests.filter((g) => g.roomPosition == null).length;
+
+  // Room-picker options for the per-guest dropdown + AssignGuestsModal label.
+  const roomOptions: RoomOption[] = roomRows.map((row, idx) => ({
+    position: idx,
+    label: row.roomNumber ? `Room ${row.roomNumber}` : `Room slot ${idx + 1}`,
+  }));
+
+  // Candidates for Move: same room type, exclude rooms already on this booking.
+  const ownRoomIds = new Set(
+    booking.assignedRooms.map((r) => r.roomId).filter((rid): rid is string => !!rid),
+  );
+  const moveCandidates = allRooms.filter(
+    (r) => r.roomTypeId === booking.roomTypeId && !ownRoomIds.has(r.id),
+  );
 
   const channelKey = normalizeChannelKey(booking.channel);
   const channelLabel = getChannelLabel(booking.channel);
@@ -988,21 +1268,38 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     <p className="text-sm font-medium text-gray-900 truncate">{booking.roomName}</p>
                     <p className="text-xs text-gray-500 truncate">
                       {row.roomNumber ? `Room ${row.roomNumber}` : "Unassigned"} ·{" "}
-                      {perRoomAdults[idx]} adult{perRoomAdults[idx] !== 1 ? "s" : ""}
+                      {perRoomAssigned[idx]} guest{perRoomAssigned[idx] !== 1 ? "s" : ""}
+                      {idx === 0 && " (incl. booker)"}
                     </p>
                   </div>
                   <button
-                    disabled
-                    title="Per-room edits are not yet supported — modify at booking level."
-                    className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-md cursor-not-allowed"
+                    onClick={() =>
+                      setAssignTarget({
+                        position: idx,
+                        label: row.roomNumber ? `Room ${row.roomNumber}` : `Room slot ${idx + 1}`,
+                      })
+                    }
+                    disabled={isCancelled}
+                    title="Assign which additional guests are staying in this room"
+                    className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <PencilSquareIcon className="w-3.5 h-3.5" />
                     Modify
                   </button>
                   <button
-                    disabled
-                    title="To move a room, drag it on the calendar or use Move from the bookings list."
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-md cursor-not-allowed"
+                    onClick={() =>
+                      setMoveTarget({
+                        fromRoomId: row.roomId,
+                        fromRoomNumber: row.roomNumber,
+                      })
+                    }
+                    disabled={isCancelled || moveCandidates.length === 0}
+                    title={
+                      moveCandidates.length === 0
+                        ? "No other rooms of this type available"
+                        : "Reassign this segment to another physical room"
+                    }
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <ArrowsRightLeftIcon className="w-3.5 h-3.5" />
                     Move
@@ -1177,6 +1474,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               <p className="text-xs text-gray-500 mt-0.5">
                 {totalParty} {totalParty === 1 ? "guest" : "guests"} booked · {guests.length} of{" "}
                 {additionalCapacity} added
+                {roomRows.length > 1 && unassignedGuests > 0 && (
+                  <> · {unassignedGuests} not yet assigned to a room</>
+                )}
               </p>
             </div>
             <button
@@ -1205,6 +1505,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   guest={g}
                   position={idx + 1}
                   total={additionalCapacity}
+                  roomOptions={roomOptions}
                   onSave={(patch) => handleSaveGuest(g.id, patch)}
                   onDelete={() => handleDeleteGuest(g.id)}
                 />
@@ -1494,6 +1795,25 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </button>
           </div>
         </Modal>
+      )}
+
+      {moveTarget && (
+        <MoveRoomModal
+          fromRoomNumber={moveTarget.fromRoomNumber}
+          candidates={moveCandidates}
+          onClose={() => setMoveTarget(null)}
+          onMove={(toRoomId) => handleMoveRoom(moveTarget.fromRoomId, toRoomId)}
+        />
+      )}
+
+      {assignTarget && (
+        <AssignGuestsModal
+          roomLabel={assignTarget.label}
+          roomPosition={assignTarget.position}
+          guests={guests}
+          onClose={() => setAssignTarget(null)}
+          onSave={handleAssignGuests}
+        />
       )}
     </div>
   );

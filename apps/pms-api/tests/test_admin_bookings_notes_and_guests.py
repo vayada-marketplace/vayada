@@ -11,6 +11,7 @@ from tests.conftest import (
     create_test_booking,
     create_test_hotel,
     create_test_user,
+    generate_test_email,
     get_auth_headers,
 )
 
@@ -62,7 +63,7 @@ class TestBookingNotes:
     async def test_other_hotel_cannot_access(self, client, hotel_with_booking):
         booking_id = str(hotel_with_booking["booking"]["id"])
 
-        other = await create_test_user(email="other@example.com")
+        other = await create_test_user(email=generate_test_email())
         await create_test_hotel(str(other["id"]))
         resp = await client.get(
             f"/admin/bookings/{booking_id}/notes",
@@ -118,6 +119,60 @@ class TestAdditionalGuests:
         resp = await client.post(
             f"/admin/bookings/{booking_id}/additional-guests",
             json={"firstName": "Beta"},
+            headers=get_auth_headers(token),
+        )
+        assert resp.status_code == 400
+
+    async def test_room_position_round_trip_and_bounds(self, client, hotel_with_booking):
+        """room_position 0..number_of_rooms-1 round-trips; out-of-range 400s."""
+        token = hotel_with_booking["user"]["token"]
+        booking_id = str(hotel_with_booking["booking"]["id"])
+        # 2-room booking so positions 0 and 1 are valid, 2 is not.
+        await Database.execute(
+            "UPDATE bookings SET adults = 4, number_of_rooms = 2 WHERE id = $1",
+            hotel_with_booking["booking"]["id"],
+        )
+
+        # Assigned at create time.
+        resp = await client.post(
+            f"/admin/bookings/{booking_id}/additional-guests",
+            json={"firstName": "Anna", "roomPosition": 1},
+            headers=get_auth_headers(token),
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["roomPosition"] == 1
+        guest_id = resp.json()["id"]
+
+        # Reassigned to room 0 via PATCH.
+        resp = await client.patch(
+            f"/admin/bookings/{booking_id}/additional-guests/{guest_id}",
+            json={"roomPosition": 0},
+            headers=get_auth_headers(token),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["roomPosition"] == 0
+
+        # Unassigned (null) round-trips.
+        resp = await client.patch(
+            f"/admin/bookings/{booking_id}/additional-guests/{guest_id}",
+            json={"roomPosition": None},
+            headers=get_auth_headers(token),
+        )
+        assert resp.status_code == 200
+        assert resp.json()["roomPosition"] is None
+
+        # Out-of-range rejected on create.
+        resp = await client.post(
+            f"/admin/bookings/{booking_id}/additional-guests",
+            json={"firstName": "Bad", "roomPosition": 2},
+            headers=get_auth_headers(token),
+        )
+        assert resp.status_code == 400
+
+        # Out-of-range rejected on update too.
+        resp = await client.patch(
+            f"/admin/bookings/{booking_id}/additional-guests/{guest_id}",
+            json={"roomPosition": 99},
             headers=get_auth_headers(token),
         )
         assert resp.status_code == 400

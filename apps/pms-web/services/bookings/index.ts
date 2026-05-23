@@ -106,6 +106,9 @@ export interface BookingAdditionalGuest {
   email: string;
   phone: string;
   passportNumber: string;
+  /** Which of the booking's rooms this guest is assigned to.
+   * 0 = primary room, 1..N-1 = extras, null = unassigned. */
+  roomPosition: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,8 +177,11 @@ export const bookingsService = {
   assignRoom: (id: string, roomId: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/assign-room`, { roomId }),
 
-  moveRoom: (id: string, roomId: string) =>
-    pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, { roomId }),
+  moveRoom: (id: string, roomId: string, fromRoomId?: string) =>
+    pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, {
+      roomId,
+      ...(fromRoomId ? { fromRoomId } : {}),
+    }),
 
   swapRoom: (id: string, partnerBookingId: string, partnerDestinationRoomId?: string) =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/swap-room`, {

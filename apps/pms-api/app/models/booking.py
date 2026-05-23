@@ -358,7 +358,9 @@ class BookingNoteResponse(BaseModel):
 
 
 class BookingAdditionalGuestPayload(BaseModel):
-    """Both create + update share this shape; all fields optional on update."""
+    """Both create + update share this shape; all fields optional on update.
+    room_position links the guest to one of the booking's rooms (0 = primary,
+    1..N-1 = extras). null clears the assignment back to "unassigned"."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -370,6 +372,7 @@ class BookingAdditionalGuestPayload(BaseModel):
     email: str | None = None
     phone: str | None = None
     passport_number: str | None = None
+    room_position: int | None = None
 
 
 class BookingAdditionalGuestResponse(BaseModel):
@@ -386,6 +389,8 @@ class BookingAdditionalGuestResponse(BaseModel):
     email: str
     phone: str
     passport_number: str
+    # null = unassigned. 0 = primary room, 1..N-1 = extras.
+    room_position: int | None = None
     created_at: str
     updated_at: str
 

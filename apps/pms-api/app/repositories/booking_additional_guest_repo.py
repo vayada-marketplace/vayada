@@ -35,11 +35,11 @@ class BookingAdditionalGuestRepository:
             INSERT INTO booking_additional_guests (
                 booking_id, hotel_id, position,
                 first_name, last_name, gender, nationality, date_of_birth,
-                email, phone, passport_number
+                email, phone, passport_number, room_position
             ) VALUES (
                 $1, $2, $3,
                 $4, $5, $6, $7, $8,
-                $9, $10, $11
+                $9, $10, $11, $12
             ) RETURNING *
             """,
             booking_id,
@@ -53,6 +53,7 @@ class BookingAdditionalGuestRepository:
             data.get("email", ""),
             data.get("phone", ""),
             data.get("passport_number", ""),
+            data.get("room_position"),
         )
         return dict(row)
 
@@ -76,6 +77,7 @@ class BookingAdditionalGuestRepository:
             "email",
             "phone",
             "passport_number",
+            "room_position",
         ]
         sets = []
         values: list = []

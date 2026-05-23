@@ -843,9 +843,22 @@ def _guest_to_response(g: dict) -> BookingAdditionalGuestResponse:
         email=g.get("email") or "",
         phone=g.get("phone") or "",
         passport_number=g.get("passport_number") or "",
+        room_position=g.get("room_position"),
         created_at=g["created_at"].isoformat(),
         updated_at=g["updated_at"].isoformat(),
     )
+
+
+def _validate_room_position(booking: dict, room_position: int | None) -> None:
+    """0..number_of_rooms-1 or None. Raise 400 otherwise."""
+    if room_position is None:
+        return
+    n = int(booking.get("number_of_rooms") or 1)
+    if room_position < 0 or room_position >= n:
+        raise HTTPException(
+            status_code=400,
+            detail=f"roomPosition must be between 0 and {n - 1} for this booking",
+        )
 
 
 async def _booking_owned_by_hotel(booking_id: str, user_id: str) -> tuple[dict, str]:
@@ -934,6 +947,7 @@ async def create_additional_guest(
         )
     position = await BookingAdditionalGuestRepository.next_position(booking_id)
     payload = data.model_dump(exclude_unset=True)
+    _validate_room_position(booking, payload.get("room_position"))
     guest = await BookingAdditionalGuestRepository.create(
         booking_id=booking_id,
         hotel_id=hotel_id,
@@ -953,7 +967,7 @@ async def update_additional_guest(
     data: BookingAdditionalGuestPayload,
     user_id: str = Depends(require_hotel_admin),
 ):
-    _, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+    booking, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
     existing = await BookingAdditionalGuestRepository.get_by_id(guest_id)
     if (
         not existing
@@ -962,6 +976,8 @@ async def update_additional_guest(
     ):
         raise HTTPException(status_code=404, detail="Guest not found")
     payload = data.model_dump(exclude_unset=True)
+    if "room_position" in payload:
+        _validate_room_position(booking, payload["room_position"])
     updated = await BookingAdditionalGuestRepository.update(guest_id, payload)
     return _guest_to_response(updated)
 
