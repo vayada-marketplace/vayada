@@ -24,7 +24,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="h-screen flex overflow-x-hidden">
+    // 100dvh (not 100vh): on iOS Safari 100vh ignores the URL bar, so the
+    // shell's bottom — and any sticky footers anchored to it — sit behind
+    // the browser chrome until Safari collapses it mid-scroll.
+    <div className="h-[100dvh] flex overflow-x-hidden">
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -40,7 +43,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
       <div className="flex-1 flex flex-col min-w-0">
         <Header onMenuToggle={() => setSidebarOpen(!sidebarOpen)} />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-gray-50">{children}</main>
+        <main className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50">
+          {children}
+        </main>
       </div>
     </div>
   );
