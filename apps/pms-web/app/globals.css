@@ -23,6 +23,21 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
+/*
+ * VAY-485: iOS Safari auto-zooms into any focused input/textarea/select whose
+ * computed font-size is < 16px and never zooms back out. Many of our form
+ * controls use Tailwind's text-sm (14px), so force a 16px minimum at mobile
+ * widths. !important is required because Tailwind utility classes outrank
+ * element selectors. Desktop styling is unaffected.
+ */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
