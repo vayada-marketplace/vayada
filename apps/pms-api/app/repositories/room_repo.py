@@ -329,3 +329,61 @@ class RoomRepository:
     async def delete(room_id: str) -> bool:
         result = await Database.execute("DELETE FROM rooms WHERE id = $1", room_id)
         return result == "DELETE 1"
+
+    @staticmethod
+    async def list_for_reconciliation(room_type_id: str) -> list[dict]:
+        """List a room type's rooms in delete-last order (VAY-406).
+
+        Used when "Total Rooms" is reduced and we have to choose which
+        physical rooms to drop. Ordering keeps "Deluxe 1, Deluxe 2" and
+        removes "Deluxe 3, …, Deluxe 21": ascending trailing-integer
+        suffix first, then sort_order, then created_at. The caller takes
+        the tail of the returned list and deletes those rooms.
+        """
+        rows = await Database.fetch(
+            """
+            SELECT id, room_number, sort_order
+            FROM rooms
+            WHERE room_type_id = $1
+            ORDER BY (COALESCE(NULLIF(regexp_replace(room_number, '.*[^0-9]', '', 'g'), ''), '0'))::int,
+                     sort_order,
+                     created_at,
+                     room_number
+            """,
+            room_type_id,
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    async def active_bookings_referencing(room_ids: list[str]) -> list[dict]:
+        """Return non-cancelled bookings that would lose their room
+        assignment if any of `room_ids` were deleted (VAY-406).
+
+        Covers both the primary `bookings.room_id` (ON DELETE SET NULL
+        would silently unassign) and `booking_rooms.room_id` for
+        multi-room bookings (ON DELETE CASCADE would silently drop the
+        link). "Active" means status NOT IN ('cancelled', 'expired') —
+        historical/cancelled bookings are fine to leave behind.
+        """
+        if not room_ids:
+            return []
+        rows = await Database.fetch(
+            """
+            SELECT DISTINCT b.id AS booking_id,
+                            b.booking_reference,
+                            b.status,
+                            b.check_in,
+                            b.check_out,
+                            r.id AS room_id,
+                            r.room_number
+            FROM bookings b
+            JOIN rooms r
+              ON r.id = b.room_id
+              OR r.id IN (SELECT room_id FROM booking_rooms WHERE booking_id = b.id)
+            WHERE r.id = ANY($1::uuid[])
+              AND b.status NOT IN ('cancelled', 'expired')
+            ORDER BY b.check_in, b.booking_reference
+            """,
+            room_ids,
+        )
+        return [dict(r) for r in rows]

@@ -41,9 +41,11 @@ class TestTotalRoomsDerived:
         await Database.execute("DELETE FROM rooms WHERE id = $1", str(r1["id"]))
         assert await _total_rooms(str(room["id"])) == 2
 
-    async def test_patch_cannot_inflate_total_rooms(self, client, cleanup_database):
-        """The Rooms & Rates edit form can no longer push total_rooms above
-        the real room count — the field is stripped server-side."""
+    async def test_patch_total_rooms_stays_truthful(self, client, cleanup_database):
+        """The PATCH payload's totalRooms can change the count — but only
+        by creating real rooms (VAY-406 reconciliation). The VAY-402
+        invariant still holds: total_rooms can never exceed the number
+        of physical room rows that actually exist."""
         user = await create_test_user()
         await create_test_hotel(str(user["id"]))
         headers = get_auth_headers(user["token"])
@@ -68,9 +70,14 @@ class TestTotalRoomsDerived:
             headers=headers,
         )
         assert patch_resp.status_code == 200
-        # The inflate attempt is ignored — value stays the real room count.
-        assert patch_resp.json()["totalRooms"] == 6
-        assert await _total_rooms(rt_id) == 6
+        # Raising totalRooms creates a 7th physical room — the trigger
+        # mirrors the new count. The column and COUNT(rooms) always agree.
+        assert patch_resp.json()["totalRooms"] == 7
+        assert await _total_rooms(rt_id) == 7
+        real_count = await Database.fetchval(
+            "SELECT COUNT(*) FROM rooms WHERE room_type_id = $1", rt_id
+        )
+        assert real_count == 7
 
     @pytest.mark.parametrize("payment_method", ["card", "pay_at_property"])
     async def test_all_rooms_blocked_is_sold_out_and_rejects_booking(
