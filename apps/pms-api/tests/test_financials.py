@@ -256,6 +256,144 @@ class TestSummary:
         assert body["overdueCount"] == 1
         assert body["currency"] == "EUR"
 
+    async def test_ota_bookings_excluded_from_outstanding_and_overdue(
+        self, client, cleanup_database
+    ):
+        """OTA bookings (Airbnb, Booking.com, …) are settled by the platform,
+        so they must not appear as outstanding or overdue in the PMS
+        financial dashboard — VAY-490.
+        """
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        future_start = (date.today() + timedelta(days=30)).isoformat()
+        future_end = (date.today() + timedelta(days=33)).isoformat()
+        past_start = (date.today() - timedelta(days=30)).isoformat()
+        past_end = (date.today() - timedelta(days=27)).isoformat()
+        # Direct future + past → contribute 200×3 + 300×3 = 1500 outstanding,
+        # 1 overdue.
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_start,
+            check_out=future_end,
+            nightly_rate=200.0,
+            status="confirmed",
+            channel="direct",
+            guest_email="direct-future@example.com",
+        )
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=past_start,
+            check_out=past_end,
+            nightly_rate=300.0,
+            status="confirmed",
+            channel="direct",
+            guest_email="direct-past@example.com",
+        )
+        # OTA future + past → must NOT contribute to outstanding/overdue.
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_start,
+            check_out=future_end,
+            nightly_rate=500.0,
+            status="confirmed",
+            channel="airbnb",
+            payment_status="pay_at_property",
+            guest_email="airbnb-future@example.com",
+        )
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=past_start,
+            check_out=past_end,
+            nightly_rate=700.0,
+            status="confirmed",
+            channel="booking.com",
+            payment_status="pay_at_property",
+            guest_email="bdc-past@example.com",
+        )
+
+        resp = await client.get(
+            "/admin/financials/summary",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # OTA bookings still count toward revenue (the property earned it),
+        # but outstanding/overdue must only reflect direct bookings.
+        assert body["outstanding"] == 1500.0
+        assert body["overdueCount"] == 1
+
+    async def test_ota_invoice_shows_as_paid(self, client, cleanup_database):
+        """OTA invoices appear in the list as 'paid' with zero balance,
+        even though no PMS-side payment row exists — VAY-490."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-08-01",
+            check_out="2026-08-05",
+            nightly_rate=200.0,
+            status="confirmed",
+            channel="airbnb",
+            payment_status="pay_at_property",
+            guest_email="airbnb-guest@example.com",
+        )
+
+        resp = await client.get(
+            "/admin/financials/invoices",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        invoice = resp.json()["invoices"][0]
+        assert invoice["status"] == "paid"
+        assert invoice["amountPaid"] == 800.0
+        assert invoice["balanceDue"] == 0
+
+    async def test_ota_booking_with_unpaid_override_still_outstanding(
+        self, client, cleanup_database
+    ):
+        """If an admin explicitly sets payment_status='unpaid' on an OTA
+        booking (no-show charge owed to the property), it falls back to
+        the normal flow and counts as outstanding — VAY-490."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        future_start = (date.today() + timedelta(days=10)).isoformat()
+        future_end = (date.today() + timedelta(days=12)).isoformat()
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=future_start,
+            check_out=future_end,
+            nightly_rate=400.0,
+            status="confirmed",
+            channel="booking.com",
+            payment_status="unpaid",  # explicit admin override
+            guest_email="bdc-noshow@example.com",
+        )
+
+        resp = await client.get(
+            "/admin/financials/summary",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["outstanding"] == 800.0  # 400 × 2 nights
+
+        resp_list = await client.get(
+            "/admin/financials/invoices",
+            headers=get_auth_headers(user["token"]),
+        )
+        invoice = resp_list.json()["invoices"][0]
+        assert invoice["status"] in {"sent", "overdue"}
+        assert invoice["balanceDue"] == 800.0
+
     async def test_pending_bookings_excluded_from_summary(self, client, cleanup_database):
         """Pending booking requests (host hasn't accepted yet) must not
         contribute to revenue, outstanding, or overdue counts — VAY-334.

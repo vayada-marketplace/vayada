@@ -11,6 +11,7 @@ Manual invoices not tied to a booking are tracked in VAY-301.
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
 
+from app.channels import is_ota_channel
 from app.models.financials import (
     InvoiceCharge,
     InvoiceDetail,
@@ -44,6 +45,21 @@ def _amount_paid(payments: Iterable[dict]) -> float:
     return round(sum(float(p["amount"]) for p in payments if p.get("status") in PAID_STATUSES), 2)
 
 
+def is_externally_settled(booking: dict) -> bool:
+    """True if this booking is paid through an OTA platform, not the property.
+
+    OTA channels (Airbnb, Booking.com, …) collect payment themselves, so
+    by default the PMS should not show an outstanding guest balance.
+    A hotel admin can override this by explicitly setting
+    ``payment_status='unpaid'`` (e.g. to flag a no-show charge owed
+    directly to the property) — that override falls back to the normal
+    payment-driven flow.
+    """
+    if not is_ota_channel(booking.get("channel")):
+        return False
+    return booking.get("payment_status") != "unpaid"
+
+
 def derive_status(booking: dict, amount_paid: float, today: date | None = None) -> str:
     """draft | sent | paid | partial | overdue | voided"""
     today = today or date.today()
@@ -53,6 +69,10 @@ def derive_status(booking: dict, amount_paid: float, today: date | None = None) 
     total = float(booking.get("total_amount") or 0)
     if status == "pending":
         return "draft"
+    # OTA bookings are settled by the platform — show as paid unless an
+    # admin explicitly overrode payment_status to 'unpaid' (VAY-490).
+    if is_externally_settled(booking):
+        return "paid"
     if amount_paid >= total and total > 0:
         return "paid"
     check_in = booking.get("check_in")
@@ -150,9 +170,13 @@ def to_payment(payment: dict) -> InvoicePayment:
 
 
 def to_list_item(booking: dict, payments: list[dict]) -> InvoiceListItem:
-    paid = _amount_paid(payments)
+    actual_paid = _amount_paid(payments)
     total = float(booking["total_amount"])
-    status = derive_status(booking, paid)
+    status = derive_status(booking, actual_paid)
+    # OTA-paid bookings have no payment row in our DB, but the invoice
+    # is settled externally — show the full amount as paid so the UI
+    # doesn't display "Paid" alongside a non-zero balance (VAY-490).
+    displayed_paid = total if status == "paid" else actual_paid
     return InvoiceListItem(
         id=str(booking["id"]),
         invoice_number=invoice_number(booking),
@@ -167,19 +191,23 @@ def to_list_item(booking: dict, payments: list[dict]) -> InvoiceListItem:
         room_name=booking.get("room_name", "Room"),
         currency=booking["currency"],
         total_amount=total,
-        amount_paid=paid,
-        balance_due=round(total - paid, 2),
+        amount_paid=displayed_paid,
+        balance_due=round(max(0.0, total - displayed_paid), 2),
         status=status,
         issued_at=booking["created_at"].isoformat(),
     )
 
 
 def to_detail(booking: dict, payments: list[dict]) -> InvoiceDetail:
-    paid = _amount_paid(payments)
+    actual_paid = _amount_paid(payments)
     total = float(booking["total_amount"])
     charges = build_charges(booking)
     subtotal = round(sum(c.amount for c in charges), 2)
     nights = max(1, (booking["check_out"] - booking["check_in"]).days)
+    status = derive_status(booking, actual_paid)
+    # Mirror to_list_item: OTA-paid invoices show as fully settled
+    # (no PMS-side payment row, but the OTA handled it).
+    displayed_paid = total if status == "paid" else actual_paid
     return InvoiceDetail(
         id=str(booking["id"]),
         invoice_number=invoice_number(booking),
@@ -199,9 +227,9 @@ def to_detail(booking: dict, payments: list[dict]) -> InvoiceDetail:
         subtotal=subtotal,
         total_amount=total,
         payments=[to_payment(p) for p in payments],
-        amount_paid=paid,
-        balance_due=round(total - paid, 2),
-        status=derive_status(booking, paid),
+        amount_paid=displayed_paid,
+        balance_due=round(max(0.0, total - displayed_paid), 2),
+        status=status,
         issued_at=booking["created_at"].isoformat(),
     )
 

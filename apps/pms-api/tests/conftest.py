@@ -386,6 +386,8 @@ async def create_test_booking(
     guest_email: str = "guest@example.com",
     nightly_rate: float = 150.0,
     status: str = "pending",
+    channel: str = "direct",
+    payment_status: str = "unpaid",
 ) -> dict:
     """Create a booking in the PMS database."""
     from datetime import date as date_type
@@ -401,9 +403,11 @@ async def create_test_booking(
             hotel_id, room_type_id, booking_reference,
             guest_first_name, guest_last_name, guest_email, guest_phone,
             special_requests, check_in, check_out,
-            adults, children, nightly_rate, total_amount, currency, status
+            adults, children, nightly_rate, total_amount, currency, status,
+            channel, payment_status
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+            $17, $18
         ) RETURNING *
         """,
         hotel_id,
@@ -422,6 +426,8 @@ async def create_test_booking(
         total,
         "EUR",
         status,
+        channel,
+        payment_status,
     )
     return dict(row)
 

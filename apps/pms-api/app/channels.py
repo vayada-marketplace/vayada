@@ -52,6 +52,35 @@ _CHANNEL_ALIASES: dict[str, str] = {
 }
 
 
+# Channels whose bookings are settled by the OTA platform — the guest
+# has already paid (or is bound to a card the OTA charges), so the PMS
+# should treat the invoice as paid by default instead of nagging hosts
+# for an outstanding balance the guest doesn't actually owe them (VAY-490).
+# ``channex`` is included because the inbound pipeline falls back to it
+# when Channex sends an OTA name the alias table doesn't know — still
+# externally-settled, just unbranded.
+OTA_CHANNELS: frozenset[str] = frozenset(
+    {
+        "airbnb",
+        "booking.com",
+        "expedia",
+        "agoda",
+        "vrbo",
+        "hostelworld",
+        "tripadvisor",
+        "hotels.com",
+        "channex",
+    }
+)
+
+
+def is_ota_channel(value: str | None) -> bool:
+    """True if ``value`` (raw or canonical) is an externally-settled OTA channel."""
+    if not value:
+        return False
+    return normalize_channel(value) in OTA_CHANNELS
+
+
 def normalize_channel(value: str | None) -> str:
     """Map a raw channel value (e.g. Channex ``ota_name``) onto the
     canonical key used throughout the PMS.

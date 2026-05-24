@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from app.channels import is_ota_channel
 from app.database import Database
 from app.dependencies import require_hotel_admin
 from app.models.financials import (
@@ -86,6 +87,7 @@ async def get_summary(user_id: str = Depends(require_hotel_admin)):
     rows = await Database.fetch(
         """
         SELECT b.total_amount, b.currency, b.created_at, b.status, b.check_in,
+               b.channel, b.payment_status,
                COALESCE(SUM(p.amount) FILTER (WHERE p.status IN ('captured', 'authorized')), 0) AS paid
         FROM bookings b
         LEFT JOIN payments p ON p.booking_id = b.id
@@ -117,6 +119,12 @@ async def get_summary(user_id: str = Depends(require_hotel_admin)):
             revenue_mtd += total
         elif created.date() >= prev_start:
             revenue_prev += total
+        # OTA bookings are settled by the platform — don't count them as
+        # outstanding or overdue unless an admin explicitly overrode
+        # payment_status to 'unpaid' (VAY-490).
+        ota_settled = is_ota_channel(r["channel"]) and r["payment_status"] != "unpaid"
+        if ota_settled:
+            continue
         outstanding += max(0.0, total - paid)
         check_in = r["check_in"]
         if isinstance(check_in, date) and check_in < today and paid + 0.01 < total:

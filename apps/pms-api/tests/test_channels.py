@@ -7,7 +7,7 @@ don't each re-implement the alias table.
 """
 
 import pytest
-from app.channels import channel_label, normalize_channel
+from app.channels import channel_label, is_ota_channel, normalize_channel
 
 # ── normalize_channel ─────────────────────────────────────────────────
 
@@ -75,3 +75,36 @@ def test_normalize_channel(raw, expected):
 )
 def test_channel_label(raw, expected):
     assert channel_label(raw) == expected
+
+
+# ── is_ota_channel (VAY-490 — externally-settled invoices) ────────────
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # OTA channels — externally settled
+        ("airbnb", True),
+        ("Airbnb", True),
+        ("booking.com", True),
+        ("Booking.com", True),
+        ("booking_com", True),
+        ("booking", True),
+        ("expedia", True),
+        ("agoda", True),
+        ("vrbo", True),
+        ("hostelworld", True),
+        ("tripadvisor", True),
+        ("hotels.com", True),
+        # Fallback for unknown OTA names from Channex — still externally settled
+        ("channex", True),
+        # PMS-native / unknown sources are not OTA-settled
+        ("direct", False),
+        ("Direct", False),
+        ("", False),
+        (None, False),
+        ("some_unknown_pos", False),
+    ],
+)
+def test_is_ota_channel(raw, expected):
+    assert is_ota_channel(raw) == expected
