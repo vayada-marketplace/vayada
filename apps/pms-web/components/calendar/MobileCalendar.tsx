@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   format,
   startOfMonth,
@@ -41,35 +41,103 @@ export default function MobileCalendar({
   onSelectBlock,
 }: MobileCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  // Default behavior: tapping a day single-selects it (so the user can
-  // browse the day's bookings/blocks). To form a multi-day range the user
-  // taps "Add end date", which puts the calendar in pick-end-date mode —
-  // the next tap completes the range (auto-sorted, swapped if earlier).
+  // Selection model: tap a day to single-select it (so the user can browse
+  // that day's bookings/blocks); drag from one day onto another to form a
+  // range. The drag mirrors desktop's pointer drag-to-select. While the
+  // user is mid-drag, `drag` holds the live anchor + current day so we can
+  // paint the in-progress range without committing to selection state yet.
   const [selectionStart, setSelectionStart] = useState<Date | null>(new Date());
   const [selectionEnd, setSelectionEnd] = useState<Date | null>(new Date());
-  const [pickingEndDate, setPickingEndDate] = useState(false);
+  const [drag, setDrag] = useState<{ start: Date; current: Date; moved: boolean } | null>(null);
+  const dragRef = useRef<typeof drag>(null);
+  useEffect(() => {
+    dragRef.current = drag;
+  }, [drag]);
+  // Tracks the (clientX, clientY) where the pointer first went down. Used to
+  // distinguish a tap from a drag — only past a small movement threshold do
+  // we start treating the gesture as a range select.
+  const downPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  const handleDayTap = (day: Date) => {
-    if (pickingEndDate && selectionStart) {
-      if (day < selectionStart) {
-        setSelectionEnd(selectionStart);
-        setSelectionStart(day);
-      } else {
-        setSelectionEnd(day);
-      }
-      setPickingEndDate(false);
-      return;
-    }
-    setSelectionStart(day);
-    setSelectionEnd(day);
-  };
-
-  const startPickingEndDate = () => setPickingEndDate(true);
-  const cancelPickingEndDate = () => setPickingEndDate(false);
   const clearRange = () => {
     if (selectionStart) setSelectionEnd(selectionStart);
-    setPickingEndDate(false);
   };
+
+  // Pointer-drag handlers wired to each day button. Single tap (no movement
+  // past threshold) commits the tapped day; a drag onto another day commits
+  // the range (auto-sorted).
+  const DRAG_THRESHOLD = 8;
+  const handleDayPointerDown = (e: React.PointerEvent<HTMLButtonElement>, day: Date) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    downPosRef.current = { x: e.clientX, y: e.clientY };
+    setDrag({ start: day, current: day, moved: false });
+    // Capture so subsequent move events keep coming to us even when the
+    // finger / pointer leaves this exact button.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore — capture is best-effort, some environments don't support it
+    }
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const findDayUnderPointer = (clientX: number, clientY: number): Date | null => {
+      const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+      if (!el) return null;
+      const cell = el.closest("[data-day]") as HTMLElement | null;
+      if (!cell) return null;
+      const iso = cell.getAttribute("data-day");
+      if (!iso) return null;
+      return parseISO(iso);
+    };
+    const onMove = (ev: PointerEvent) => {
+      const down = downPosRef.current;
+      const d = dragRef.current;
+      if (!d) return;
+      const dist = down
+        ? Math.hypot(ev.clientX - down.x, ev.clientY - down.y)
+        : Number.POSITIVE_INFINITY;
+      const moved = d.moved || dist > DRAG_THRESHOLD;
+      const dayAt = findDayUnderPointer(ev.clientX, ev.clientY);
+      const nextCurrent = dayAt ?? d.current;
+      if (moved && ev.cancelable) ev.preventDefault();
+      if (
+        moved === d.moved &&
+        nextCurrent.getTime() === d.current.getTime()
+      ) {
+        return;
+      }
+      setDrag({ start: d.start, current: nextCurrent, moved });
+    };
+    const onUp = () => {
+      const d = dragRef.current;
+      setDrag(null);
+      downPosRef.current = null;
+      if (!d) return;
+      if (!d.moved) {
+        setSelectionStart(d.start);
+        setSelectionEnd(d.start);
+        return;
+      }
+      const a = d.start;
+      const b = d.current;
+      if (a <= b) {
+        setSelectionStart(a);
+        setSelectionEnd(b);
+      } else {
+        setSelectionStart(b);
+        setSelectionEnd(a);
+      }
+    };
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [drag !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -127,18 +195,33 @@ export default function MobileCalendar({
     return map;
   }, [blocks, days]);
 
-  // Aggregate bookings/blocks across the selected range so the user still sees
-  // what's occupied while picking dates for a new booking or block.
+  // While dragging past the threshold, derive everything below from the live
+  // preview range so the header, nights count, and bookings/blocks list all
+  // update in real time. After release `dragPreview` is null and these fall
+  // back to the committed selection.
+  const headerStart = drag?.moved
+    ? drag.start <= drag.current
+      ? drag.start
+      : drag.current
+    : selectionStart;
+  const headerEnd = drag?.moved
+    ? drag.start <= drag.current
+      ? drag.current
+      : drag.start
+    : selectionEnd;
+
+  // Aggregate bookings/blocks across the (preview or committed) range so the
+  // user still sees what's occupied while picking dates for a booking/block.
   const rangeDays = useMemo(() => {
-    if (!selectionStart || !selectionEnd) return [] as Date[];
+    if (!headerStart || !headerEnd) return [] as Date[];
     const result: Date[] = [];
-    let d = selectionStart;
-    while (d <= selectionEnd) {
+    let d = headerStart;
+    while (d <= headerEnd) {
       result.push(d);
       d = addDays(d, 1);
     }
     return result;
-  }, [selectionStart, selectionEnd]);
+  }, [headerStart, headerEnd]);
 
   const selectedBookings = useMemo(() => {
     const seen = new Set<string>();
@@ -168,9 +251,13 @@ export default function MobileCalendar({
     return out;
   }, [rangeDays, blocksByDay]);
 
-  const isRangeSelection =
-    !!selectionStart && !!selectionEnd && !isSameDay(selectionStart, selectionEnd);
+  const isRangeSelection = !!headerStart && !!headerEnd && !isSameDay(headerStart, headerEnd);
   const nights = rangeDays.length; // 1 for single-day selection, N for an N-day range
+
+  // Calendar grid uses the same preview-or-committed bounds so the painted
+  // range, the header, and the bookings/blocks list never disagree.
+  const previewStart = headerStart;
+  const previewEnd = headerEnd;
 
   // Both dates yyyy-MM-dd. endDate is exclusive checkout (last selected day +
   // 1) to match desktop drag-select semantics.
@@ -237,10 +324,10 @@ export default function MobileCalendar({
             const dayBookings = bookingsByDay[key] || [];
             const isCurrentMonth = isSameMonth(day, currentMonth);
             const isToday = isSameDay(day, today);
-            const isRangeStart = !!selectionStart && isSameDay(day, selectionStart);
-            const isRangeEnd = !!selectionEnd && isSameDay(day, selectionEnd);
+            const isRangeStart = !!previewStart && isSameDay(day, previewStart);
+            const isRangeEnd = !!previewEnd && isSameDay(day, previewEnd);
             const isWithinRange =
-              !!selectionStart && !!selectionEnd && day >= selectionStart && day <= selectionEnd;
+              !!previewStart && !!previewEnd && day >= previewStart && day <= previewEnd;
             const isMiddle = isWithinRange && !isRangeStart && !isRangeEnd;
             const isEndpoint = isRangeStart || isRangeEnd;
             const dow = day.getDay();
@@ -275,9 +362,10 @@ export default function MobileCalendar({
             return (
               <button
                 key={key}
-                onClick={() => handleDayTap(day)}
-                style={cellBgStyle}
-                className={`relative flex flex-col items-center py-1.5 transition-colors ${rangeClass}`}
+                data-day={key}
+                onPointerDown={(e) => handleDayPointerDown(e, day)}
+                style={{ ...cellBgStyle, touchAction: "none" }}
+                className={`relative flex flex-col items-center py-1.5 transition-colors select-none ${rangeClass}`}
               >
                 {isToday && !isWithinRange ? (
                   <span
@@ -311,11 +399,13 @@ export default function MobileCalendar({
             );
           })}
         </div>
-        {pickingEndDate && (
-          <p className="mt-1.5 text-center text-[10px] text-primary-600 font-medium">
-            Tap end date to form a range
-          </p>
-        )}
+        <p className="mt-1.5 text-center text-[10px] text-gray-400">
+          {drag?.moved
+            ? "Release to confirm range"
+            : isRangeSelection
+              ? "Drag again or tap a day to change"
+              : "Tap a day, or drag across days for a range"}
+        </p>
       </div>
 
       {/* Selected day / range bookings */}
@@ -324,28 +414,12 @@ export default function MobileCalendar({
           <div className="flex items-center justify-between gap-2 mb-2">
             <div className="min-w-0 flex-1">
               <h3 className="text-[12px] font-semibold text-gray-700 truncate">
-                {!selectionStart || !selectionEnd
+                {!headerStart || !headerEnd
                   ? "Select a day"
                   : isRangeSelection
-                    ? `${format(selectionStart, "MMM d")} – ${format(selectionEnd, "MMM d")} · ${nights} nights`
-                    : format(selectionStart, "EEEE, MMM d")}
+                    ? `${format(headerStart, "MMM d")} – ${format(headerEnd, "MMM d")} · ${nights} nights`
+                    : format(headerStart, "EEEE, MMM d")}
               </h3>
-              {selectionStart && !isRangeSelection && !pickingEndDate && (
-                <button
-                  onClick={startPickingEndDate}
-                  className="text-[10px] text-primary-600 hover:text-primary-700 underline"
-                >
-                  + Add end date
-                </button>
-              )}
-              {pickingEndDate && (
-                <button
-                  onClick={cancelPickingEndDate}
-                  className="text-[10px] text-gray-500 hover:text-gray-700 underline"
-                >
-                  Cancel range pick
-                </button>
-              )}
               {isRangeSelection && (
                 <button
                   onClick={clearRange}
