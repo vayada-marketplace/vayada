@@ -19,12 +19,20 @@ export class ApiErrorResponse extends Error {
   data: ApiError;
 
   constructor(status: number, data: ApiError) {
-    const message =
-      typeof data.detail === "string"
-        ? data.detail
-        : Array.isArray(data.detail)
-          ? data.detail.map((e) => e.msg).join(", ")
-          : `API Error: ${status}`;
+    let message: string;
+    if (typeof data.detail === "string") {
+      message = data.detail;
+    } else if (Array.isArray(data.detail)) {
+      message = data.detail.map((e) => e.msg).join(", ");
+    } else if (
+      data.detail &&
+      typeof data.detail === "object" &&
+      typeof (data.detail as { message?: unknown }).message === "string"
+    ) {
+      message = (data.detail as { message: string }).message;
+    } else {
+      message = `API Error: ${status}`;
+    }
     super(message);
     this.name = "ApiErrorResponse";
     this.status = status;

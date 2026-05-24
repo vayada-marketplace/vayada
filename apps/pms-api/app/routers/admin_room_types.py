@@ -94,6 +94,71 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
     )
 
 
+async def _reconcile_rooms_to_total(
+    hotel_id: str, room_type_id: str, desired: int, room_type_name: str
+) -> None:
+    """Make COUNT(rooms) for this room type equal `desired` (VAY-406).
+
+    The number of physical rooms is what total_rooms mirrors — see
+    migration 074. Rather than letting the column drift (the VAY-402
+    bug), this reconciles the rooms themselves and lets the DB trigger
+    rewrite total_rooms.
+
+    - desired == current: no-op.
+    - desired > current: append the missing rooms via _auto_create_rooms
+      so numbering stays sequential ("<Name> N").
+    - desired < current: drop the tail of the room list — the rooms a
+      caller is "least likely to have customized" (lowest numeric
+      suffix kept first, sort_order, created_at). Atomic: if ANY of
+      those rooms is referenced by a non-cancelled booking (primary or
+      via booking_rooms), raise 409 and delete nothing, so the user
+      reassigns/cancels first.
+    """
+    if desired < 0:
+        raise HTTPException(status_code=400, detail="totalRooms must be at least 0")
+
+    rooms = await RoomRepository.list_for_reconciliation(room_type_id)
+    current = len(rooms)
+    if desired == current:
+        return
+    if desired > current:
+        await _auto_create_rooms(hotel_id, room_type_id, desired - current, room_type_name)
+        return
+
+    to_remove = rooms[desired:]
+    room_ids = [str(r["id"]) for r in to_remove]
+    blocking = await RoomRepository.active_bookings_referencing(room_ids)
+    if blocking:
+        blocked_room_ids = {str(row["room_id"]) for row in blocking}
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "rooms_have_bookings",
+                "message": (
+                    f"Cannot reduce Total Rooms — {len(blocked_room_ids)} of the "
+                    f"{len(to_remove)} rooms that would be removed still have "
+                    "active reservations. Reassign or cancel them first."
+                ),
+                "blockingBookings": [
+                    {
+                        "bookingId": str(row["booking_id"]),
+                        "bookingReference": row["booking_reference"],
+                        "status": row["status"],
+                        "checkIn": row["check_in"].isoformat(),
+                        "checkOut": row["check_out"].isoformat(),
+                        "roomId": str(row["room_id"]),
+                        "roomNumber": row["room_number"],
+                    }
+                    for row in blocking
+                ],
+                "blockingRoomIds": sorted(blocked_room_ids),
+            },
+        )
+
+    for room in to_remove:
+        await RoomRepository.delete(str(room["id"]))
+
+
 async def _auto_create_rooms(
     hotel_id: str, room_type_id: str, count: int, room_type_name: str
 ) -> None:
@@ -232,12 +297,19 @@ async def update_room_type(
         raise HTTPException(status_code=404, detail="Room type not found")
 
     updates = data.model_dump(exclude_unset=True)
-    # VAY-402: total_rooms is a derived mirror of COUNT(rooms), maintained by
-    # the trg_sync_room_type_total_rooms trigger (migration 074). Inventory
-    # changes go through Add Room / delete in the room list, never a direct
-    # write here — a stale or hand-crafted payload must not be able to inflate
-    # availability past the number of physical rooms that exist.
-    updates.pop("total_rooms", None)
+    # VAY-402 + VAY-406: total_rooms is a derived mirror of COUNT(rooms),
+    # written only by the trg_sync_room_type_total_rooms trigger
+    # (migration 074). The PATCH payload's total_rooms is treated as a
+    # *desired count* — we reconcile the rooms (insert / delete) and let
+    # the trigger update the column. That keeps the VAY-402 safety
+    # invariant ("never higher than the real room count") while letting
+    # the form change inventory in one save (the duplicate-and-shrink
+    # flow from VAY-406).
+    desired_total = updates.pop("total_rooms", None)
+    if desired_total is not None:
+        await _reconcile_rooms_to_total(
+            hotel_id, room_type_id, int(desired_total), existing["name"]
+        )
     if "monthly_rates" in updates and updates["monthly_rates"] is not None:
         updates["monthly_rates"] = {
             k: {kk: vv for kk, vv in v.items() if vv is not None}
