@@ -46,6 +46,11 @@ def _map_status(raw_status: str, guest_withdrawn: bool) -> str:
         return "pending"
     if raw_status == "confirmed":
         return "accepted"
+    # VAY-404: 'declined' is the canonical host-rejected status. Legacy rows
+    # that landed in 'cancelled' before the migration keep working — those
+    # with guest_withdrawn=false were also host rejections.
+    if raw_status == "declined":
+        return "rejected"
     if raw_status == "cancelled":
         return "withdrawn" if guest_withdrawn else "rejected"
     return raw_status

@@ -115,7 +115,7 @@ export interface Booking {
   currency: string;
   // 'draft' is the placeholder shape returned for the card-payment flow
   // before the booking row is materialized (VAY-388).
-  status: "confirmed" | "pending" | "cancelled" | "expired" | "draft";
+  status: "confirmed" | "pending" | "cancelled" | "declined" | "expired" | "draft";
   paymentMethod?: string | null;
   paymentStatus?: string | null;
   hostResponseDeadline?: string | null;

@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "チェックイン済み",
   "bookings.statusInHouse": "滞在中",
   "bookings.statusCancelled": "キャンセル済み",
+  "bookings.statusDeclined": "拒否されました",
   "bookings.statusExpired": "期限切れ",
   "bookings.tableGuest": "ゲスト",
   "bookings.tableStatus": "ステータス",

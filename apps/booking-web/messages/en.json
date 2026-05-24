@@ -247,6 +247,7 @@
     "bookingWithdrawn": "Your booking request has been withdrawn.",
     "status": "Status",
     "cancelled": "Cancelled",
+    "declined": "Declined",
     "withdrawn": "Withdrawn"
   },
   "confirmation": {
@@ -258,6 +259,9 @@
     "cancelledTitle": "Booking Cancelled",
     "cancelledSubtitle": "Your booking has been cancelled.",
     "cancelledCardSubtitle": "Your booking has been cancelled. Any authorization hold on your card has been released.",
+    "declinedTitle": "Booking Request Declined",
+    "declinedSubtitle": "The host declined your booking request. We encourage you to explore alternative dates or properties.",
+    "declinedCardSubtitle": "The host declined your booking request. Any authorization hold on your card has been released.",
     "expiredTitle": "Booking Request Expired",
     "expiredSubtitle": "Your booking request expired because the host did not respond within 24 hours. Any card hold has been released.",
     "bookingReference": "Booking Reference",

@@ -246,6 +246,7 @@
     "bookingWithdrawn": "Permintaan pemesanan Anda telah ditarik.",
     "status": "Status",
     "cancelled": "Dibatalkan",
+    "declined": "Ditolak",
     "withdrawn": "Ditarik"
   },
   "confirmation": {
@@ -257,6 +258,9 @@
     "cancelledTitle": "Pemesanan Dibatalkan",
     "cancelledSubtitle": "Pemesanan Anda telah dibatalkan.",
     "cancelledCardSubtitle": "Pemesanan Anda telah dibatalkan. Otorisasi pada kartu Anda telah dilepaskan.",
+    "declinedTitle": "Permintaan Pemesanan Ditolak",
+    "declinedSubtitle": "Tuan rumah menolak permintaan pemesanan Anda. Kami menyarankan Anda mencoba tanggal atau properti lain.",
+    "declinedCardSubtitle": "Tuan rumah menolak permintaan pemesanan Anda. Otorisasi pada kartu Anda telah dilepaskan.",
     "expiredTitle": "Permintaan Pemesanan Kedaluwarsa",
     "expiredSubtitle": "Permintaan pemesanan Anda kedaluwarsa karena tuan rumah tidak merespons dalam 24 jam. Otorisasi pada kartu Anda telah dilepaskan.",
     "bookingReference": "Referensi Pemesanan",

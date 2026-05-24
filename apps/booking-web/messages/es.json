@@ -246,6 +246,7 @@
     "bookingWithdrawn": "Tu solicitud de reserva ha sido retirada.",
     "status": "Estado",
     "cancelled": "Cancelada",
+    "declined": "Rechazada",
     "withdrawn": "Retirada"
   },
   "confirmation": {
@@ -257,6 +258,9 @@
     "cancelledTitle": "Reserva cancelada",
     "cancelledSubtitle": "Tu reserva ha sido cancelada.",
     "cancelledCardSubtitle": "Tu reserva ha sido cancelada. La retención de autorización en tu tarjeta ha sido liberada.",
+    "declinedTitle": "Solicitud de reserva rechazada",
+    "declinedSubtitle": "El anfitrión rechazó tu solicitud de reserva. Te invitamos a explorar otras fechas o alojamientos.",
+    "declinedCardSubtitle": "El anfitrión rechazó tu solicitud de reserva. La retención de autorización en tu tarjeta ha sido liberada.",
     "expiredTitle": "Solicitud de reserva expirada",
     "expiredSubtitle": "Tu solicitud de reserva expiró porque el anfitrión no respondió en 24 horas. La retención en tu tarjeta ha sido liberada.",
     "bookingReference": "Referencia de Reserva",

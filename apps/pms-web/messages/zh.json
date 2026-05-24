@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "已入住",
   "bookings.statusInHouse": "在住",
   "bookings.statusCancelled": "已取消",
+  "bookings.statusDeclined": "已拒绝",
   "bookings.statusExpired": "已过期",
   "bookings.tableGuest": "客人",
   "bookings.tableStatus": "状态",

@@ -27,7 +27,7 @@ export interface Booking {
   numberOfRooms: number;
   totalAmount: number;
   currency: string;
-  status: "pending" | "confirmed" | "cancelled" | "expired";
+  status: "pending" | "confirmed" | "cancelled" | "declined" | "expired";
   roomId: string | null;
   roomNumber: string | null;
   // VAY-403: every physical room the booking occupies — the primary

@@ -151,7 +151,7 @@ class HotelRepository:
             SELECT COUNT(*) FROM bookings
             WHERE hotel_id = $1
               AND check_in >= CURRENT_DATE
-              AND status NOT IN ('cancelled', 'rejected')
+              AND status NOT IN ('cancelled', 'declined', 'expired')
             """,
                 hotel_id,
             )

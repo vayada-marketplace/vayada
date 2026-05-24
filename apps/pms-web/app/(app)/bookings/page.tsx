@@ -14,6 +14,8 @@ const STATUS_STYLES: Record<string, string> = {
   checked_in: "border-sky-200 text-sky-700 bg-sky-50",
   in_house: "border-violet-200 text-violet-700 bg-violet-50",
   cancelled: "border-rose-200 text-rose-600 bg-rose-50",
+  // VAY-404 — host-rejected request, distinct from guest cancel.
+  declined: "border-rose-300 text-rose-700 bg-rose-50",
   expired: "border-gray-200 text-gray-500 bg-gray-50",
 };
 
@@ -23,6 +25,7 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   checked_in: "bookings.statusCheckedIn",
   in_house: "bookings.statusInHouse",
   cancelled: "bookings.statusCancelled",
+  declined: "bookings.statusDeclined",
   expired: "bookings.statusExpired",
 };
 
@@ -42,7 +45,8 @@ const SOURCE_ICONS: Record<string, { bg: string; letter: string; title: string }
 };
 
 function getBalanceStatus(b: Booking): string {
-  if (b.status === "cancelled") return b.paymentStatus === "refunded" ? "refunded" : "due";
+  if (b.status === "cancelled" || b.status === "declined")
+    return b.paymentStatus === "refunded" ? "refunded" : "due";
   if (b.paymentStatus === "captured") return "paid";
   if (b.paymentStatus === "authorized") return "partial";
   if (b.paymentMethod === "pay_at_property") return "due";
@@ -132,6 +136,11 @@ export default function ReservationsPage() {
       label: t("bookings.statusCancelled"),
       value: "cancelled",
       count: statusCounts["cancelled"] || 0,
+    },
+    {
+      label: t("bookings.statusDeclined"),
+      value: "declined",
+      count: statusCounts["declined"] || 0,
     },
     { label: t("bookings.statusPending"), value: "pending", count: statusCounts["pending"] || 0 },
     { label: t("bookings.statusExpired"), value: "expired", count: statusCounts["expired"] || 0 },

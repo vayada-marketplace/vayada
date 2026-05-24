@@ -140,7 +140,7 @@ class RoomTypeRepository:
     async def delete(room_type_id: str) -> bool:
         # Remove terminal-state bookings so the FK constraint doesn't block deletion
         await Database.execute(
-            "DELETE FROM bookings WHERE room_type_id = $1 AND status IN ('cancelled', 'withdrawn', 'expired')",
+            "DELETE FROM bookings WHERE room_type_id = $1 AND status IN ('cancelled', 'declined', 'withdrawn', 'expired')",
             room_type_id,
         )
         result = await Database.execute("DELETE FROM room_types WHERE id = $1", room_type_id)

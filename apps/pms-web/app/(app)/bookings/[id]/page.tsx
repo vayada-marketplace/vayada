@@ -1010,7 +1010,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const isPending = booking.status === "pending";
-  const isCancelled = booking.status === "cancelled" || booking.status === "expired";
+  // VAY-404: treat 'declined' (host rejected) the same as cancelled/expired
+  // for read-only/disabled UI affordances — the booking is terminal.
+  const isCancelled =
+    booking.status === "cancelled" || booking.status === "declined" || booking.status === "expired";
   const hasDeadline = isPending && booking.hostResponseDeadline;
   const totalParty = booking.adults + booking.children;
   const additionalCapacity = Math.max(0, totalParty - 1);

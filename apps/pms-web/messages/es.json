@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Registrado",
   "bookings.statusInHouse": "En estancia",
   "bookings.statusCancelled": "Cancelada",
+  "bookings.statusDeclined": "Rechazada",
   "bookings.statusExpired": "Expirada",
   "bookings.tableGuest": "Huesped",
   "bookings.tableStatus": "Estado",

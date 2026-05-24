@@ -867,9 +867,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         raise ValueError("Room type not found")
     if not room["is_active"]:
         raise ValueError("Room type is not available")
-    if not room_allows_guest_mix(
-        room, data.adults, data.children, units=data.number_of_rooms or 1
-    ):
+    if not room_allows_guest_mix(room, data.adults, data.children, units=data.number_of_rooms or 1):
         raise ValueError("Guest mix exceeds this room's occupancy limits")
 
     # ── Validate stay window (availability, nights, min-stay, advance) ──
@@ -1284,7 +1282,10 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
                 logger.warning("Failed to expire Xendit invoice for booking %s: %s", booking_id, e)
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
-    await BookingRepository.update_status(booking_id, "cancelled")
+    # VAY-404: host-rejected requests are stored as 'declined' so the UI can
+    # distinguish them from guest-driven cancellations ('cancelled' covers
+    # guest withdraw + guest-initiated cancellation of a confirmed booking).
+    await BookingRepository.update_status(booking_id, "declined")
     await BookingRepository.update_payment_status(booking_id, "cancelled")
     await PayoutRepository.cancel_by_booking(booking_id)
 

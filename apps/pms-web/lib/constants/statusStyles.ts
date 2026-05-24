@@ -2,6 +2,9 @@ export const BOOKING_STATUS_STYLES: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-700",
   confirmed: "bg-green-100 text-green-700",
   cancelled: "bg-red-100 text-red-600",
+  // VAY-404 — host-rejected request. Visually distinct from guest cancel
+  // so the property doesn't think a guest pulled out when they didn't.
+  declined: "bg-rose-100 text-rose-700",
   expired: "bg-gray-100 text-gray-600",
   // VAY-495 — backend may surface these in future; covered now so the badge
   // stays consistent if they do.

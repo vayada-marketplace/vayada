@@ -725,7 +725,9 @@ class TestHostAcceptReject:
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] == "cancelled"
+        # VAY-404: host-rejected requests are now stored as 'declined' so the
+        # UI can distinguish them from guest cancellations.
+        assert body["status"] == "declined"
         mock_cancel.assert_called_once_with("pi_test_reject")
 
     async def test_accept_non_pending_fails(self, client, cleanup_database):

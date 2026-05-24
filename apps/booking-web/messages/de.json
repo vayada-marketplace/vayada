@@ -246,6 +246,7 @@
     "bookingWithdrawn": "Ihre Buchungsanfrage wurde zurückgezogen.",
     "status": "Status",
     "cancelled": "Storniert",
+    "declined": "Abgelehnt",
     "withdrawn": "Zurückgezogen"
   },
   "confirmation": {
@@ -257,6 +258,9 @@
     "cancelledTitle": "Buchung storniert",
     "cancelledSubtitle": "Ihre Buchung wurde storniert.",
     "cancelledCardSubtitle": "Ihre Buchung wurde storniert. Die Autorisierung auf Ihrer Karte wurde freigegeben.",
+    "declinedTitle": "Buchungsanfrage abgelehnt",
+    "declinedSubtitle": "Der Gastgeber hat Ihre Buchungsanfrage abgelehnt. Sie können gerne andere Daten oder Unterkünfte suchen.",
+    "declinedCardSubtitle": "Der Gastgeber hat Ihre Buchungsanfrage abgelehnt. Die Autorisierung auf Ihrer Karte wurde freigegeben.",
     "expiredTitle": "Buchungsanfrage abgelaufen",
     "expiredSubtitle": "Ihre Buchungsanfrage ist abgelaufen, da der Gastgeber nicht innerhalb von 24 Stunden geantwortet hat.",
     "bookingReference": "Buchungsreferenz",

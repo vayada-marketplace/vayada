@@ -121,6 +121,9 @@ export default function MyBookingPage() {
     confirmed: "text-success-600",
     pending: "text-yellow-600",
     cancelled: "text-red-600",
+    // VAY-404 — host-rejected request, distinct from guest cancel.
+    declined: "text-red-700",
+    expired: "text-gray-500",
   };
 
   return (
@@ -203,10 +206,16 @@ export default function MyBookingPage() {
             <div className="flex items-center gap-3 mb-4">
               <div
                 className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  booking.status === "cancelled" ? "bg-red-100" : "bg-success-100"
+                  booking.status === "cancelled" ||
+                  booking.status === "declined" ||
+                  booking.status === "expired"
+                    ? "bg-red-100"
+                    : "bg-success-100"
                 }`}
               >
-                {booking.status === "cancelled" ? (
+                {booking.status === "cancelled" ||
+                booking.status === "declined" ||
+                booking.status === "expired" ? (
                   <svg
                     className="w-5 h-5 text-red-600"
                     fill="none"
@@ -241,7 +250,11 @@ export default function MyBookingPage() {
                 <p
                   className={`text-sm font-medium capitalize ${statusColor[booking.status] || ""}`}
                 >
-                  {booking.status === "cancelled" ? t("cancelled") : booking.status}
+                  {booking.status === "cancelled"
+                    ? t("cancelled")
+                    : booking.status === "declined"
+                      ? t("declined") || "Declined"
+                      : booking.status}
                 </p>
               </div>
             </div>

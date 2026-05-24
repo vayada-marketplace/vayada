@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Sudah Check-in",
   "bookings.statusInHouse": "Di Properti",
   "bookings.statusCancelled": "Dibatalkan",
+  "bookings.statusDeclined": "Ditolak",
   "bookings.statusExpired": "Kedaluwarsa",
   "bookings.tableGuest": "Tamu",
   "bookings.tableStatus": "Status",

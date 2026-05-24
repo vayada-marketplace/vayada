@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Eingecheckt",
   "bookings.statusInHouse": "Im Haus",
   "bookings.statusCancelled": "Storniert",
+  "bookings.statusDeclined": "Abgelehnt",
   "bookings.statusExpired": "Abgelaufen",
   "bookings.tableGuest": "Gast",
   "bookings.tableStatus": "Status",

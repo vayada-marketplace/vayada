@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Enregistre",
   "bookings.statusInHouse": "En sejour",
   "bookings.statusCancelled": "Annulee",
+  "bookings.statusDeclined": "Refusee",
   "bookings.statusExpired": "Expiree",
   "bookings.tableGuest": "Voyageur",
   "bookings.tableStatus": "Statut",

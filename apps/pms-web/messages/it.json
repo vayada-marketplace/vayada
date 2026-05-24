@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Check-in effettuato",
   "bookings.statusInHouse": "In struttura",
   "bookings.statusCancelled": "Cancellata",
+  "bookings.statusDeclined": "Rifiutata",
   "bookings.statusExpired": "Scaduta",
   "bookings.tableGuest": "Ospite",
   "bookings.tableStatus": "Stato",

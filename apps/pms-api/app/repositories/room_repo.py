@@ -362,8 +362,9 @@ class RoomRepository:
         Covers both the primary `bookings.room_id` (ON DELETE SET NULL
         would silently unassign) and `booking_rooms.room_id` for
         multi-room bookings (ON DELETE CASCADE would silently drop the
-        link). "Active" means status NOT IN ('cancelled', 'expired') —
-        historical/cancelled bookings are fine to leave behind.
+        link). "Active" means status NOT IN ('cancelled', 'declined',
+        'expired') — historical/terminal-state bookings are fine to leave
+        behind.
         """
         if not room_ids:
             return []
@@ -381,7 +382,7 @@ class RoomRepository:
               ON r.id = b.room_id
               OR r.id IN (SELECT room_id FROM booking_rooms WHERE booking_id = b.id)
             WHERE r.id = ANY($1::uuid[])
-              AND b.status NOT IN ('cancelled', 'expired')
+              AND b.status NOT IN ('cancelled', 'declined', 'expired')
             ORDER BY b.check_in, b.booking_reference
             """,
             room_ids,

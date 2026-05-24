@@ -246,6 +246,7 @@
     "bookingWithdrawn": "Votre demande de réservation a été retirée.",
     "status": "Statut",
     "cancelled": "Annulée",
+    "declined": "Refusée",
     "withdrawn": "Retirée"
   },
   "confirmation": {
@@ -257,6 +258,9 @@
     "cancelledTitle": "Réservation annulée",
     "cancelledSubtitle": "Votre réservation a été annulée.",
     "cancelledCardSubtitle": "Votre réservation a été annulée. L'autorisation de prélèvement sur votre carte a été levée.",
+    "declinedTitle": "Demande de réservation refusée",
+    "declinedSubtitle": "L'hôte a refusé votre demande de réservation. Nous vous encourageons à essayer d'autres dates ou logements.",
+    "declinedCardSubtitle": "L'hôte a refusé votre demande de réservation. L'autorisation de prélèvement sur votre carte a été levée.",
     "expiredTitle": "Demande de réservation expirée",
     "expiredSubtitle": "Votre demande de réservation a expiré car l'hôte n'a pas répondu dans les 24 heures. L'autorisation de prélèvement sur votre carte a été levée.",
     "bookingReference": "Référence de réservation",

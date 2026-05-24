@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Ingecheckt",
   "bookings.statusInHouse": "In huis",
   "bookings.statusCancelled": "Geannuleerd",
+  "bookings.statusDeclined": "Afgewezen",
   "bookings.statusExpired": "Verlopen",
   "bookings.tableGuest": "Gast",
   "bookings.tableStatus": "Status",

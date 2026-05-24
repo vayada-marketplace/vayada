@@ -171,6 +171,7 @@
   "bookings.statusCheckedIn": "Заселен",
   "bookings.statusInHouse": "В отеле",
   "bookings.statusCancelled": "Отменено",
+  "bookings.statusDeclined": "Отклонено",
   "bookings.statusExpired": "Истекло",
   "bookings.tableGuest": "Гость",
   "bookings.tableStatus": "Статус",

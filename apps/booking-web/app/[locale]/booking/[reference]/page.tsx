@@ -167,6 +167,9 @@ export default function BookingConfirmationPage({
   const isPending = status === "pending";
   const isConfirmed = status === "confirmed";
   const isCancelled = status === "cancelled";
+  // VAY-404: host-rejected request. Shares the red-X visual with cancelled
+  // but uses different copy so the guest doesn't think they cancelled.
+  const isDeclined = status === "declined";
   const isExpired = status === "expired";
 
   return (
@@ -215,7 +218,7 @@ export default function BookingConfirmationPage({
               </svg>
             </div>
           )}
-          {(isCancelled || isExpired) && (
+          {(isCancelled || isDeclined || isExpired) && (
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg
                 className="w-8 h-8 text-red-600"
@@ -269,6 +272,20 @@ export default function BookingConfirmationPage({
                   ? t("cancelledCardSubtitle") ||
                     "Your booking has been cancelled. Any authorization hold on your card has been released."
                   : t("cancelledSubtitle") || "Your booking has been cancelled."}
+              </p>
+            </>
+          )}
+          {isDeclined && (
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {t("declinedTitle") || "Booking Request Declined"}
+              </h1>
+              <p className="text-gray-600 mb-6">
+                {booking?.paymentMethod === "card"
+                  ? t("declinedCardSubtitle") ||
+                    "The host declined your booking request. Any authorization hold on your card has been released."
+                  : t("declinedSubtitle") ||
+                    "The host declined your booking request. We encourage you to explore alternative dates or properties."}
               </p>
             </>
           )}
