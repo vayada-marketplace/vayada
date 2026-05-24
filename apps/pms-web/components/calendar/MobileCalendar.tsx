@@ -24,8 +24,10 @@ interface MobileCalendarProps {
   blocks: CalendarBlock[];
   roomTypes: CalendarRoomType[];
   onSelectBooking: (id: string) => void;
-  onNewBooking: () => void;
-  onBlockRoom: (selectedDate: string) => void;
+  // Both dates are yyyy-MM-dd. endDate is the exclusive checkout (last selected
+  // day + 1), matching desktop drag-select semantics.
+  onNewBooking: (startDate?: string, endDate?: string) => void;
+  onBlockRoom: (startDate: string, endDate: string) => void;
   onSelectBlock: (block: CalendarBlock) => void;
 }
 
@@ -39,7 +41,35 @@ export default function MobileCalendar({
   onSelectBlock,
 }: MobileCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  // Default behavior: tapping a day single-selects it (so the user can
+  // browse the day's bookings/blocks). To form a multi-day range the user
+  // taps "Add end date", which puts the calendar in pick-end-date mode —
+  // the next tap completes the range (auto-sorted, swapped if earlier).
+  const [selectionStart, setSelectionStart] = useState<Date | null>(new Date());
+  const [selectionEnd, setSelectionEnd] = useState<Date | null>(new Date());
+  const [pickingEndDate, setPickingEndDate] = useState(false);
+
+  const handleDayTap = (day: Date) => {
+    if (pickingEndDate && selectionStart) {
+      if (day < selectionStart) {
+        setSelectionEnd(selectionStart);
+        setSelectionStart(day);
+      } else {
+        setSelectionEnd(day);
+      }
+      setPickingEndDate(false);
+      return;
+    }
+    setSelectionStart(day);
+    setSelectionEnd(day);
+  };
+
+  const startPickingEndDate = () => setPickingEndDate(true);
+  const cancelPickingEndDate = () => setPickingEndDate(false);
+  const clearRange = () => {
+    if (selectionStart) setSelectionEnd(selectionStart);
+    setPickingEndDate(false);
+  };
 
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -97,15 +127,55 @@ export default function MobileCalendar({
     return map;
   }, [blocks, days]);
 
-  const selectedDayBookings = useMemo(() => {
-    if (!selectedDate) return [];
-    return bookingsByDay[format(selectedDate, "yyyy-MM-dd")] || [];
-  }, [selectedDate, bookingsByDay]);
+  // Aggregate bookings/blocks across the selected range so the user still sees
+  // what's occupied while picking dates for a new booking or block.
+  const rangeDays = useMemo(() => {
+    if (!selectionStart || !selectionEnd) return [] as Date[];
+    const result: Date[] = [];
+    let d = selectionStart;
+    while (d <= selectionEnd) {
+      result.push(d);
+      d = addDays(d, 1);
+    }
+    return result;
+  }, [selectionStart, selectionEnd]);
 
-  const selectedDayBlocks = useMemo(() => {
-    if (!selectedDate) return [];
-    return blocksByDay[format(selectedDate, "yyyy-MM-dd")] || [];
-  }, [selectedDate, blocksByDay]);
+  const selectedBookings = useMemo(() => {
+    const seen = new Set<string>();
+    const out: CalendarBooking[] = [];
+    for (const d of rangeDays) {
+      for (const b of bookingsByDay[format(d, "yyyy-MM-dd")] || []) {
+        if (!seen.has(b.id)) {
+          seen.add(b.id);
+          out.push(b);
+        }
+      }
+    }
+    return out;
+  }, [rangeDays, bookingsByDay]);
+
+  const selectedBlocks = useMemo(() => {
+    const seen = new Set<string>();
+    const out: CalendarBlock[] = [];
+    for (const d of rangeDays) {
+      for (const bl of blocksByDay[format(d, "yyyy-MM-dd")] || []) {
+        if (!seen.has(bl.id)) {
+          seen.add(bl.id);
+          out.push(bl);
+        }
+      }
+    }
+    return out;
+  }, [rangeDays, blocksByDay]);
+
+  const isRangeSelection =
+    !!selectionStart && !!selectionEnd && !isSameDay(selectionStart, selectionEnd);
+  const nights = rangeDays.length; // 1 for single-day selection, N for an N-day range
+
+  // Both dates yyyy-MM-dd. endDate is exclusive checkout (last selected day +
+  // 1) to match desktop drag-select semantics.
+  const rangeStartStr = selectionStart ? format(selectionStart, "yyyy-MM-dd") : null;
+  const rangeEndStr = selectionEnd ? format(addDays(selectionEnd, 1), "yyyy-MM-dd") : null;
 
   const today = new Date();
 
@@ -167,7 +237,12 @@ export default function MobileCalendar({
             const dayBookings = bookingsByDay[key] || [];
             const isCurrentMonth = isSameMonth(day, currentMonth);
             const isToday = isSameDay(day, today);
-            const isSelected = selectedDate && isSameDay(day, selectedDate);
+            const isRangeStart = !!selectionStart && isSameDay(day, selectionStart);
+            const isRangeEnd = !!selectionEnd && isSameDay(day, selectionEnd);
+            const isWithinRange =
+              !!selectionStart && !!selectionEnd && day >= selectionStart && day <= selectionEnd;
+            const isMiddle = isWithinRange && !isRangeStart && !isRangeEnd;
+            const isEndpoint = isRangeStart || isRangeEnd;
             const dow = day.getDay();
             const isWeekend = dow === 0 || dow === 6;
             const hasBookings = dayBookings.length > 0;
@@ -177,22 +252,34 @@ export default function MobileCalendar({
             const channels = Array.from(new Set(dayBookings.map((b) => b.channel)));
 
             const cellBgStyle =
-              !isSelected && !isToday && isWeekend ? { backgroundColor: "#fafafa" } : undefined;
+              !isWithinRange && !isToday && isWeekend ? { backgroundColor: "#fafafa" } : undefined;
+
+            // Range visual: rounded pill ends + flat middle, with the same
+            // primary fill on endpoints and a lighter tint inside the range.
+            // Single-day selection keeps the original rounded pill look.
+            let rangeClass = "";
+            if (isRangeStart && isRangeEnd) {
+              rangeClass = "bg-primary-500 text-white rounded-xl";
+            } else if (isRangeStart) {
+              rangeClass = "bg-primary-500 text-white rounded-l-xl";
+            } else if (isRangeEnd) {
+              rangeClass = "bg-primary-500 text-white rounded-r-xl";
+            } else if (isMiddle) {
+              rangeClass = "bg-primary-100 text-primary-700";
+            } else if (isCurrentMonth) {
+              rangeClass = "text-gray-900 rounded-xl";
+            } else {
+              rangeClass = "text-gray-300 rounded-xl";
+            }
 
             return (
               <button
                 key={key}
-                onClick={() => setSelectedDate(day)}
+                onClick={() => handleDayTap(day)}
                 style={cellBgStyle}
-                className={`relative flex flex-col items-center py-1.5 rounded-xl transition-colors ${
-                  isSelected
-                    ? "bg-primary-500 text-white"
-                    : isCurrentMonth
-                      ? "text-gray-900"
-                      : "text-gray-300"
-                }`}
+                className={`relative flex flex-col items-center py-1.5 transition-colors ${rangeClass}`}
               >
-                {isToday && !isSelected ? (
+                {isToday && !isWithinRange ? (
                   <span
                     style={{ backgroundColor: "#2563eb" }}
                     className="w-6 h-6 rounded-full flex items-center justify-center text-[13px] font-bold text-white"
@@ -200,7 +287,7 @@ export default function MobileCalendar({
                     {format(day, "d")}
                   </span>
                 ) : (
-                  <span className={`text-[13px] font-medium ${isSelected ? "font-bold" : ""}`}>
+                  <span className={`text-[13px] font-medium ${isEndpoint ? "font-bold" : ""}`}>
                     {format(day, "d")}
                   </span>
                 )}
@@ -210,12 +297,12 @@ export default function MobileCalendar({
                     {channels.slice(0, 3).map((ch) => (
                       <div
                         key={ch}
-                        className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/60" : getChannelBarColor(ch)}`}
+                        className={`w-1 h-1 rounded-full ${isEndpoint ? "bg-white/60" : getChannelBarColor(ch)}`}
                       />
                     ))}
                     {hasBlocks && (
                       <div
-                        className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/60" : "bg-red-500"}`}
+                        className={`w-1 h-1 rounded-full ${isEndpoint ? "bg-white/60" : "bg-red-500"}`}
                       />
                     )}
                   </div>
@@ -224,19 +311,54 @@ export default function MobileCalendar({
             );
           })}
         </div>
+        {pickingEndDate && (
+          <p className="mt-1.5 text-center text-[10px] text-primary-600 font-medium">
+            Tap end date to form a range
+          </p>
+        )}
       </div>
 
-      {/* Selected day bookings */}
+      {/* Selected day / range bookings */}
       <div className="flex-1 bg-gray-50 overflow-auto">
         <div className="px-3 py-2">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-[12px] font-semibold text-gray-700">
-              {selectedDate ? format(selectedDate, "EEEE, MMM d") : "Select a day"}
-            </h3>
-            <div className="flex items-center gap-1.5">
-              {selectedDate && (
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[12px] font-semibold text-gray-700 truncate">
+                {!selectionStart || !selectionEnd
+                  ? "Select a day"
+                  : isRangeSelection
+                    ? `${format(selectionStart, "MMM d")} – ${format(selectionEnd, "MMM d")} · ${nights} nights`
+                    : format(selectionStart, "EEEE, MMM d")}
+              </h3>
+              {selectionStart && !isRangeSelection && !pickingEndDate && (
                 <button
-                  onClick={() => onBlockRoom(format(selectedDate, "yyyy-MM-dd"))}
+                  onClick={startPickingEndDate}
+                  className="text-[10px] text-primary-600 hover:text-primary-700 underline"
+                >
+                  + Add end date
+                </button>
+              )}
+              {pickingEndDate && (
+                <button
+                  onClick={cancelPickingEndDate}
+                  className="text-[10px] text-gray-500 hover:text-gray-700 underline"
+                >
+                  Cancel range pick
+                </button>
+              )}
+              {isRangeSelection && (
+                <button
+                  onClick={clearRange}
+                  className="text-[10px] text-gray-400 hover:text-gray-600 underline"
+                >
+                  Clear range
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {rangeStartStr && rangeEndStr && (
+                <button
+                  onClick={() => onBlockRoom(rangeStartStr, rangeEndStr)}
                   className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-red-600 border border-red-200 bg-white rounded-lg hover:bg-red-50 transition-colors"
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -251,7 +373,7 @@ export default function MobileCalendar({
                 </button>
               )}
               <button
-                onClick={onNewBooking}
+                onClick={() => onNewBooking(rangeStartStr ?? undefined, rangeEndStr ?? undefined)}
                 className="px-2.5 py-1 text-[11px] font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
               >
                 + New
@@ -259,13 +381,17 @@ export default function MobileCalendar({
             </div>
           </div>
 
-          {selectedDayBookings.length === 0 && selectedDayBlocks.length === 0 ? (
+          {selectedBookings.length === 0 && selectedBlocks.length === 0 ? (
             <div className="bg-white rounded-lg border border-gray-200 p-6 text-center">
-              <p className="text-[12px] text-gray-400">No bookings or blocks on this day</p>
+              <p className="text-[12px] text-gray-400">
+                {isRangeSelection
+                  ? "No bookings or blocks in this range"
+                  : "No bookings or blocks on this day"}
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
-              {selectedDayBlocks.map((bl) => {
+              {selectedBlocks.map((bl) => {
                 const rt = roomTypes.find((r) => r.id === bl.roomTypeId);
                 return (
                   <button
@@ -309,7 +435,7 @@ export default function MobileCalendar({
                   </button>
                 );
               })}
-              {selectedDayBookings.map((b) => {
+              {selectedBookings.map((b) => {
                 const channelColor = getChannelBarColor(b.channel);
                 return (
                   <button

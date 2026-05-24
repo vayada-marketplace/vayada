@@ -73,9 +73,14 @@ export default function CalendarPage() {
   const [showNewBookingModal, setShowNewBookingModal] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [selectedBlock, setSelectedBlock] = useState<CalendarBlock | null>(null);
-  // Mobile-only: the day tapped in MobileCalendar before opening BlockModal,
-  // used to default the block's start date (desktop uses `prefill` instead).
-  const [mobileBlockDate, setMobileBlockDate] = useState<string | null>(null);
+  // Mobile-only: the date range selected in MobileCalendar before opening
+  // either modal. `startDate` and `endDate` follow the desktop convention
+  // (endDate is exclusive checkout). Desktop uses `prefill` instead, which
+  // also carries a `roomId`.
+  const [mobilePrefill, setMobilePrefill] = useState<{
+    startDate: string;
+    endDate: string;
+  } | null>(null);
   const [connectedChannelKeys, setConnectedChannelKeys] = useState<Set<string> | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
@@ -277,17 +282,29 @@ export default function CalendarPage() {
     await calendarService.createRoomBlock(blockData);
     setShowBlockModal(false);
     setPrefill(null);
-    setMobileBlockDate(null);
+    setMobilePrefill(null);
     fetchData();
   };
 
-  // Mobile: tapping "Block" on a day opens the shared BlockModal with the
-  // tapped day as the default start date (no room pre-selected — the user
-  // picks rooms in the modal, matching desktop's room/multi-room selector).
-  const handleMobileBlockRoom = (dateStr: string) => {
+  // Mobile: tapping "Block" opens the shared BlockModal with the selected
+  // date range pre-filled (no room pre-selected — the user picks rooms in
+  // the modal, matching desktop's room/multi-room selector).
+  const handleMobileBlockRoom = (startDate: string, endDate: string) => {
     setPrefill(null);
-    setMobileBlockDate(dateStr);
+    setMobilePrefill({ startDate, endDate });
     setShowBlockModal(true);
+  };
+
+  // Mobile: tapping "+ New" opens NewBookingModal. If a date range is
+  // selected on the mobile calendar, use it as check-in/check-out defaults.
+  const handleMobileNewBooking = (startDate?: string, endDate?: string) => {
+    setPrefill(null);
+    if (startDate && endDate) {
+      setMobilePrefill({ startDate, endDate });
+    } else {
+      setMobilePrefill(null);
+    }
+    setShowNewBookingModal(true);
   };
 
   const handleUpdateBlock = async (updates: {
@@ -312,6 +329,7 @@ export default function CalendarPage() {
     await calendarService.createAdminBooking(bookingData);
     setShowNewBookingModal(false);
     setPrefill(null);
+    setMobilePrefill(null);
     fetchData();
   };
 
@@ -481,7 +499,7 @@ export default function CalendarPage() {
             blocks={data?.blocks || []}
             roomTypes={data?.roomTypes || []}
             onSelectBooking={(id) => setSelectedBookingId(id)}
-            onNewBooking={() => setShowNewBookingModal(true)}
+            onNewBooking={handleMobileNewBooking}
             onBlockRoom={handleMobileBlockRoom}
             onSelectBlock={(bl) => setSelectedBlock(bl)}
           />
@@ -1128,15 +1146,10 @@ export default function CalendarPage() {
           onClose={() => {
             setShowBlockModal(false);
             setPrefill(null);
-            setMobileBlockDate(null);
+            setMobilePrefill(null);
           }}
-          initialStartDate={prefill?.startDate ?? mobileBlockDate ?? undefined}
-          initialEndDate={
-            prefill?.endDate ??
-            (mobileBlockDate
-              ? format(addDays(parseISO(mobileBlockDate), 1), "yyyy-MM-dd")
-              : undefined)
-          }
+          initialStartDate={prefill?.startDate ?? mobilePrefill?.startDate ?? undefined}
+          initialEndDate={prefill?.endDate ?? mobilePrefill?.endDate ?? undefined}
           initialRoomTypeId={
             prefill ? data.rooms.find((r) => r.id === prefill.roomId)?.roomTypeId : undefined
           }
@@ -1153,10 +1166,11 @@ export default function CalendarPage() {
           onClose={() => {
             setShowNewBookingModal(false);
             setPrefill(null);
+            setMobilePrefill(null);
           }}
           initialRoomId={prefill?.roomId}
-          initialCheckIn={prefill?.startDate}
-          initialCheckOut={prefill?.endDate}
+          initialCheckIn={prefill?.startDate ?? mobilePrefill?.startDate}
+          initialCheckOut={prefill?.endDate ?? mobilePrefill?.endDate}
           connectedChannelKeys={connectedChannelKeys}
         />
       )}
