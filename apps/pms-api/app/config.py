@@ -25,7 +25,10 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
-    CORS_ORIGIN_REGEX: str = r"https://.*\.vayada\.com"
+    # Preserves the prod *.vayada.com pattern and additionally permits
+    # portless local-dev origins (https://*.localhost). Prod env may
+    # override to a narrower regex.
+    CORS_ORIGIN_REGEX: str = r"https://.*\.vayada\.com|https://([^.]+\.)*localhost(:\d+)?"
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"
     CORS_ALLOW_HEADERS: str = "*"

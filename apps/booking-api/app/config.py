@@ -33,8 +33,10 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
+    # Default permits portless local-dev origins (https://*.localhost). Prod
+    # overrides via env to the explicit production origin regex.
     CORS_ORIGIN_REGEX: str = Field(
-        default="",
+        default=r"^https://([^.]+\.)*localhost(:\d+)?$",
         description="Regex for wildcard origin matching (e.g. https://.*\\.booking\\.vayada\\.com)",
     )
     CORS_ALLOW_CREDENTIALS: bool = True
