@@ -4,6 +4,9 @@
   "private": true,
   "description": "Vayada product application monorepo",
   "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=24"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
