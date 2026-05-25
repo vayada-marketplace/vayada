@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
+  BuildingOffice2Icon,
+  CalendarDaysIcon,
   BellIcon,
-  ShieldCheckIcon,
-  DocumentTextIcon,
+  UserCircleIcon,
+  CreditCardIcon,
+  BanknotesIcon,
+  PuzzlePieceIcon,
   GlobeAltIcon,
   PhoneIcon,
   ChatBubbleLeftIcon,
@@ -22,178 +26,31 @@ import {
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from "@/components/ui";
 import { LodgifyIntegrationPanel } from "@/components/settings/LodgifyIntegrationPanel";
 import { TotpSettings } from "@/components/settings/TotpSettings";
+import { CountrySelect } from "@/components/settings/CountrySelect";
+import {
+  SettingsLayout,
+  SettingsSection,
+  SettingsCard,
+  type SettingsNavSection,
+} from "@/components/settings/layout";
 import { useTranslation } from "@/lib/i18n";
 
-type Translate = (key: string, params?: Record<string, string | number>) => string;
+// Audit-driven section IDs (VAY-400):
+// - "account" replaces the old "security" tab — those are personal-account
+//   concerns (email/password/2FA), not hotel concerns.
+// - "payments" is new — Stripe Connect + Xendit moved out of billing into
+//   their own section (billing = what hotel pays Vayada; payments = how hotel
+//   collects from guests).
+// - Custom domain moved from "booking" into "integrations".
+type Section =
+  | "property"
+  | "booking"
+  | "notifications"
+  | "account"
+  | "billing"
+  | "payments"
+  | "integrations";
 
-type Tab = "property" | "booking" | "notifications" | "security" | "billing" | "integrations";
-
-const STRIPE_COUNTRIES = [
-  { c: "AE", n: "United Arab Emirates", f: "🇦🇪" },
-  { c: "AR", n: "Argentina", f: "🇦🇷" },
-  { c: "AT", n: "Austria", f: "🇦🇹" },
-  { c: "AU", n: "Australia", f: "🇦🇺" },
-  { c: "BE", n: "Belgium", f: "🇧🇪" },
-  { c: "BG", n: "Bulgaria", f: "🇧🇬" },
-  { c: "BO", n: "Bolivia", f: "🇧🇴" },
-  { c: "BR", n: "Brazil", f: "🇧🇷" },
-  { c: "CA", n: "Canada", f: "🇨🇦" },
-  { c: "CH", n: "Switzerland", f: "🇨🇭" },
-  { c: "CL", n: "Chile", f: "🇨🇱" },
-  { c: "CO", n: "Colombia", f: "🇨🇴" },
-  { c: "CR", n: "Costa Rica", f: "🇨🇷" },
-  { c: "CY", n: "Cyprus", f: "🇨🇾" },
-  { c: "CZ", n: "Czech Republic", f: "🇨🇿" },
-  { c: "DE", n: "Germany", f: "🇩🇪" },
-  { c: "DK", n: "Denmark", f: "🇩🇰" },
-  { c: "DO", n: "Dominican Republic", f: "🇩🇴" },
-  { c: "EE", n: "Estonia", f: "🇪🇪" },
-  { c: "EG", n: "Egypt", f: "🇪🇬" },
-  { c: "ES", n: "Spain", f: "🇪🇸" },
-  { c: "FI", n: "Finland", f: "🇫🇮" },
-  { c: "FR", n: "France", f: "🇫🇷" },
-  { c: "GB", n: "United Kingdom", f: "🇬🇧" },
-  { c: "GH", n: "Ghana", f: "🇬🇭" },
-  { c: "GR", n: "Greece", f: "🇬🇷" },
-  { c: "GT", n: "Guatemala", f: "🇬🇹" },
-  { c: "HK", n: "Hong Kong", f: "🇭🇰" },
-  { c: "HR", n: "Croatia", f: "🇭🇷" },
-  { c: "HU", n: "Hungary", f: "🇭🇺" },
-  { c: "ID", n: "Indonesia", f: "🇮🇩" },
-  { c: "IE", n: "Ireland", f: "🇮🇪" },
-  { c: "IL", n: "Israel", f: "🇮🇱" },
-  { c: "IN", n: "India", f: "🇮🇳" },
-  { c: "IS", n: "Iceland", f: "🇮🇸" },
-  { c: "IT", n: "Italy", f: "🇮🇹" },
-  { c: "JM", n: "Jamaica", f: "🇯🇲" },
-  { c: "JP", n: "Japan", f: "🇯🇵" },
-  { c: "KE", n: "Kenya", f: "🇰🇪" },
-  { c: "KR", n: "South Korea", f: "🇰🇷" },
-  { c: "LI", n: "Liechtenstein", f: "🇱🇮" },
-  { c: "LT", n: "Lithuania", f: "🇱🇹" },
-  { c: "LU", n: "Luxembourg", f: "🇱🇺" },
-  { c: "LV", n: "Latvia", f: "🇱🇻" },
-  { c: "MA", n: "Morocco", f: "🇲🇦" },
-  { c: "MT", n: "Malta", f: "🇲🇹" },
-  { c: "MX", n: "Mexico", f: "🇲🇽" },
-  { c: "MY", n: "Malaysia", f: "🇲🇾" },
-  { c: "NG", n: "Nigeria", f: "🇳🇬" },
-  { c: "NL", n: "Netherlands", f: "🇳🇱" },
-  { c: "NO", n: "Norway", f: "🇳🇴" },
-  { c: "NZ", n: "New Zealand", f: "🇳🇿" },
-  { c: "PA", n: "Panama", f: "🇵🇦" },
-  { c: "PE", n: "Peru", f: "🇵🇪" },
-  { c: "PH", n: "Philippines", f: "🇵🇭" },
-  { c: "PL", n: "Poland", f: "🇵🇱" },
-  { c: "PT", n: "Portugal", f: "🇵🇹" },
-  { c: "PY", n: "Paraguay", f: "🇵🇾" },
-  { c: "RO", n: "Romania", f: "🇷🇴" },
-  { c: "RS", n: "Serbia", f: "🇷🇸" },
-  { c: "SA", n: "Saudi Arabia", f: "🇸🇦" },
-  { c: "SE", n: "Sweden", f: "🇸🇪" },
-  { c: "SG", n: "Singapore", f: "🇸🇬" },
-  { c: "SI", n: "Slovenia", f: "🇸🇮" },
-  { c: "SK", n: "Slovakia", f: "🇸🇰" },
-  { c: "TH", n: "Thailand", f: "🇹🇭" },
-  { c: "TN", n: "Tunisia", f: "🇹🇳" },
-  { c: "TR", n: "Turkey", f: "🇹🇷" },
-  { c: "TT", n: "Trinidad & Tobago", f: "🇹🇹" },
-  { c: "TW", n: "Taiwan", f: "🇹🇼" },
-  { c: "US", n: "United States", f: "🇺🇸" },
-  { c: "UY", n: "Uruguay", f: "🇺🇾" },
-  { c: "VN", n: "Vietnam", f: "🇻🇳" },
-  { c: "ZA", n: "South Africa", f: "🇿🇦" },
-].sort((a, b) => a.n.localeCompare(b.n));
-
-function CountrySelect({
-  value,
-  onChange,
-  t,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  t: Translate;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const filtered = STRIPE_COUNTRIES.filter(
-    (c) =>
-      c.n.toLowerCase().includes(search.toLowerCase()) ||
-      c.c.toLowerCase().includes(search.toLowerCase()),
-  );
-  const selected = STRIPE_COUNTRIES.find((c) => c.c === value);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(!open);
-          setSearch("");
-        }}
-        className="w-full px-2.5 py-1.5 text-left border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white flex items-center justify-between"
-      >
-        <span>
-          {selected ? `${selected.f} ${selected.n}` : t("settings.billing.selectCountry")}
-        </span>
-        <svg
-          className="w-3.5 h-3.5 text-gray-400"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg">
-          <div className="p-1.5">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("settings.billing.searchCountry")}
-              autoFocus
-              className="w-full px-2.5 py-1.5 text-[13px] border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
-          </div>
-          <ul className="max-h-52 overflow-y-auto py-1">
-            {filtered.length === 0 ? (
-              <li className="px-3 py-2 text-[13px] text-gray-400">
-                {t("settings.billing.noResults")}
-              </li>
-            ) : (
-              filtered.map((c) => (
-                <li
-                  key={c.c}
-                  onClick={() => {
-                    onChange(c.c);
-                    setOpen(false);
-                  }}
-                  className={`px-3 py-1.5 text-[13px] cursor-pointer hover:bg-primary-50 flex items-center gap-2 ${c.c === value ? "bg-primary-50 font-medium text-primary-700" : "text-gray-700"}`}
-                >
-                  <span>{c.f}</span>
-                  <span>{c.n}</span>
-                  <span className="text-gray-400 text-[11px] ml-auto">{c.c}</span>
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
 
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: "",
@@ -235,7 +92,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
 
 export default function SettingsPage() {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<Tab>("property");
+  const [activeSection, setActiveSection] = useState<Section>("property");
   const [settings, setSettings] = useState<PropertySettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -511,54 +368,41 @@ export default function SettingsPage() {
     } catch {}
   };
 
-  const tabs = [
-    { id: "property" as const, label: t("settings.tabs.property"), icon: PropertyIcon },
-    { id: "booking" as const, label: t("settings.tabs.booking"), icon: BookingIcon },
+  const sections: SettingsNavSection[] = [
+    { id: "property", label: t("settings.tabs.property"), icon: BuildingOffice2Icon },
+    { id: "booking", label: t("settings.tabs.booking"), icon: CalendarDaysIcon },
     {
-      id: "notifications" as const,
+      id: "notifications",
       label: t("settings.tabs.notifications"),
-      icon: NotificationsIcon,
+      icon: BellIcon,
     },
-    { id: "security" as const, label: t("settings.tabs.security"), icon: SecurityIcon },
-    { id: "billing" as const, label: t("settings.tabs.billing"), icon: BillingIcon },
-    { id: "integrations" as const, label: t("settings.tabs.integrations"), icon: IntegrationsIcon },
+    // TODO i18n: add settings.tabs.account + settings.tabs.payments keys to
+    // messages/*.json. Hardcoded English until then.
+    { id: "account", label: "Account", icon: UserCircleIcon },
+    { id: "billing", label: t("settings.tabs.billing"), icon: CreditCardIcon },
+    { id: "payments", label: "Payments", icon: BanknotesIcon },
+    {
+      id: "integrations",
+      label: t("settings.tabs.integrations"),
+      icon: PuzzlePieceIcon,
+    },
   ];
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl">
-      <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("settings.title")}</h1>
-      <p className="text-sm text-gray-500 mt-0.5">{t("settings.subtitle")}</p>
-
-      {/* Tab bar */}
-      <div className="mt-4 md:mt-5 relative">
-        <div className="overflow-x-auto scrollbar-hide">
-          <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 md:py-1.5 rounded-md text-[12px] md:text-[13px] whitespace-nowrap transition-all ${
-                  activeTab === tab.id
-                    ? "bg-white text-gray-900 font-semibold shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                <tab.icon className="w-4 h-4 shrink-0" />
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
-      </div>
-
+    <SettingsLayout
+      title={t("settings.title")}
+      description={t("settings.subtitle")}
+      sections={sections}
+      activeId={activeSection}
+      onSelect={(id) => setActiveSection(id as Section)}
+    >
       {/* Feedback banner */}
       {feedback && (
-        <FeedbackAlert type={feedback.type} message={feedback.message} className="mt-3" />
+        <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
       )}
 
       {/* Property tab */}
-      {activeTab === "property" && (
+      {activeSection === "property" && (
         <div className="mt-5 space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-10">
@@ -740,7 +584,7 @@ export default function SettingsPage() {
       )}
 
       {/* Booking tab */}
-      {activeTab === "booking" && (
+      {activeSection === "booking" && (
         <div className="mt-5 space-y-4">
           {/* Refer a Guest */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
@@ -904,7 +748,7 @@ export default function SettingsPage() {
       )}
 
       {/* Notifications tab */}
-      {activeTab === "notifications" && (
+      {activeSection === "notifications" && (
         <div className="mt-5 space-y-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <div className="flex items-center gap-1.5 mb-0.5">
@@ -955,8 +799,8 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Security tab */}
-      {activeTab === "security" && (
+      {/* Account tab — personal-account settings (was "Security"). */}
+      {activeSection === "account" && (
         <div className="mt-5 space-y-4">
           {/* Change Email card */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
@@ -1077,7 +921,7 @@ export default function SettingsPage() {
       )}
 
       {/* Billing tab */}
-      {activeTab === "billing" && (
+      {activeSection === "billing" && (
         <div className="mt-5 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Commission Plan */}
@@ -1658,8 +1502,154 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Payments — Provider Selection */}
-          {settings.online_card_payment && (
+
+          {/* Payout Details */}
+          {(settings.pay_at_property_enabled || settings.bank_transfer) && (
+            <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {t("settings.billing.payoutDetails")}
+                </h2>
+                <p className="text-[12px] text-gray-500 mt-0.5">
+                  {t("settings.billing.payoutDetailsDesc")}
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                    {t("settings.billing.payoutAccountHolder")}
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.payout_account_holder || ""}
+                    onChange={(e) => updateSetting("payout_account_holder", e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder={t("settings.billing.payoutAccountHolderPlaceholder")}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-[12px] font-medium text-gray-700 mb-1">
+                    {t("settings.billing.accountFormatLabel")}
+                  </label>
+                  <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+                    <button
+                      type="button"
+                      onClick={() => updateSetting("payout_account_type", "iban")}
+                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
+                        (settings.payout_account_type || "iban") === "iban"
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {t("settings.billing.payoutIban")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateSetting("payout_account_type", "account_number")}
+                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
+                        settings.payout_account_type === "account_number"
+                          ? "bg-white text-gray-900 shadow-sm"
+                          : "text-gray-500 hover:text-gray-700"
+                      }`}
+                    >
+                      {t("settings.billing.accountNumberLabel")}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    {(settings.payout_account_type || "iban") === "iban"
+                      ? t("settings.billing.useIbanHelp")
+                      : t("settings.billing.usePlainNumberHelp")}
+                  </p>
+                </div>
+                <div className="sm:col-span-2">
+                  {(settings.payout_account_type || "iban") === "iban" ? (
+                    <>
+                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                        {t("settings.billing.payoutIban")}
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.payout_iban || ""}
+                        onChange={(e) => updateSetting("payout_iban", e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder={t("settings.billing.payoutIbanPlaceholder")}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                        {t("settings.billing.accountNumberLabel")}
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.payout_account_number || ""}
+                        onChange={(e) => updateSetting("payout_account_number", e.target.value)}
+                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                        placeholder={t("settings.billing.payoutAccountNumberPlaceholder")}
+                      />
+                    </>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                    {t("settings.billing.payoutBankName")}
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.payout_bank_name || ""}
+                    onChange={(e) => updateSetting("payout_bank_name", e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder={t("settings.billing.payoutBankNamePlaceholder")}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                    {t("settings.billing.payoutSwift")}
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.payout_swift || ""}
+                    onChange={(e) => updateSetting("payout_swift", e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder={t("settings.billing.payoutSwiftPlaceholder")}
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <SaveButton onClick={handleSave} saving={saving}>
+                  {t("common.save")}
+                </SaveButton>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payments tab — how the hotel collects from guests (VAY-400 audit:
+          extracted from Billing where it was nested under online_card_payment). */}
+      {activeSection === "payments" && (
+        <SettingsSection
+          id="payments"
+          title="Payments"
+          description="How your hotel collects payments from guests."
+        >
+          {!settings.online_card_payment ? (
+            <SettingsCard>
+              <p className="text-sm text-gray-700">
+                Enable <strong>Online card payment</strong> in{" "}
+                <button
+                  type="button"
+                  onClick={() => setActiveSection("billing")}
+                  className="text-primary-600 hover:underline"
+                >
+                  Billing &rarr; Payment methods
+                </button>{" "}
+                first to set up your payment provider.
+              </p>
+            </SettingsCard>
+          ) : (
+            <>
             <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
               <h2 className="text-sm font-semibold text-gray-900">
                 {t("settings.billing.paymentProvider")}
@@ -1922,242 +1912,21 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+            </>
           )}
-
-          {/* Payout Details */}
-          {(settings.pay_at_property_enabled || settings.bank_transfer) && (
-            <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-900">
-                  {t("settings.billing.payoutDetails")}
-                </h2>
-                <p className="text-[12px] text-gray-500 mt-0.5">
-                  {t("settings.billing.payoutDetailsDesc")}
-                </p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("settings.billing.payoutAccountHolder")}
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.payout_account_holder || ""}
-                    onChange={(e) => updateSetting("payout_account_holder", e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder={t("settings.billing.payoutAccountHolderPlaceholder")}
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-[12px] font-medium text-gray-700 mb-1">
-                    {t("settings.billing.accountFormatLabel")}
-                  </label>
-                  <div className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
-                    <button
-                      type="button"
-                      onClick={() => updateSetting("payout_account_type", "iban")}
-                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
-                        (settings.payout_account_type || "iban") === "iban"
-                          ? "bg-white text-gray-900 shadow-sm"
-                          : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {t("settings.billing.payoutIban")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => updateSetting("payout_account_type", "account_number")}
-                      className={`px-3 py-1 text-[12px] font-medium rounded-md transition-colors ${
-                        settings.payout_account_type === "account_number"
-                          ? "bg-white text-gray-900 shadow-sm"
-                          : "text-gray-500 hover:text-gray-700"
-                      }`}
-                    >
-                      {t("settings.billing.accountNumberLabel")}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    {(settings.payout_account_type || "iban") === "iban"
-                      ? t("settings.billing.useIbanHelp")
-                      : t("settings.billing.usePlainNumberHelp")}
-                  </p>
-                </div>
-                <div className="sm:col-span-2">
-                  {(settings.payout_account_type || "iban") === "iban" ? (
-                    <>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                        {t("settings.billing.payoutIban")}
-                      </label>
-                      <input
-                        type="text"
-                        value={settings.payout_iban || ""}
-                        onChange={(e) => updateSetting("payout_iban", e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder={t("settings.billing.payoutIbanPlaceholder")}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                        {t("settings.billing.accountNumberLabel")}
-                      </label>
-                      <input
-                        type="text"
-                        value={settings.payout_account_number || ""}
-                        onChange={(e) => updateSetting("payout_account_number", e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder={t("settings.billing.payoutAccountNumberPlaceholder")}
-                      />
-                    </>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("settings.billing.payoutBankName")}
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.payout_bank_name || ""}
-                    onChange={(e) => updateSetting("payout_bank_name", e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder={t("settings.billing.payoutBankNamePlaceholder")}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("settings.billing.payoutSwift")}
-                  </label>
-                  <input
-                    type="text"
-                    value={settings.payout_swift || ""}
-                    onChange={(e) => updateSetting("payout_swift", e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder={t("settings.billing.payoutSwiftPlaceholder")}
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <SaveButton onClick={handleSave} saving={saving}>
-                  {t("common.save")}
-                </SaveButton>
-              </div>
-            </div>
-          )}
-        </div>
+        </SettingsSection>
       )}
 
       {/* Integrations tab — third-party PMS connections (VAY-398) */}
-      {activeTab === "integrations" && (
-        <div className="mt-5">
+      {activeSection === "integrations" && (
+        <SettingsSection
+          id="integrations"
+          title={t("settings.tabs.integrations")}
+          description="Third-party connections, custom domain, and PMS sync."
+        >
           <LodgifyIntegrationPanel />
-        </div>
+        </SettingsSection>
       )}
-    </div>
-  );
-}
-
-function PropertyIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
-      <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
-      <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
-      <path d="M10 6h4" />
-      <path d="M10 10h4" />
-      <path d="M10 14h4" />
-      <path d="M10 18h4" />
-    </svg>
-  );
-}
-
-function BookingIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-    </svg>
-  );
-}
-
-function NotificationsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-  );
-}
-
-function SecurityIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-    </svg>
-  );
-}
-
-function BillingIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <rect x="2" y="5" width="20" height="14" rx="2" />
-      <path d="M2 10h20" />
-    </svg>
-  );
-}
-
-function IntegrationsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-    </svg>
+    </SettingsLayout>
   );
 }

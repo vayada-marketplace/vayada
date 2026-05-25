@@ -1,215 +1,55 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
+import {
+  BuildingOffice2Icon,
+  BoltIcon,
+  CalendarDaysIcon,
+  ClockIcon,
+  GlobeAltIcon,
+} from "@heroicons/react/24/outline";
 import { bookingsService } from "@/services/bookings";
 import { apiClient } from "@/services/api/client";
 import { pmsClient } from "@/services/api/pmsClient";
-import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
+import { useTranslation } from "@/lib/i18n";
+import {
+  SettingsLayout,
+  type SettingsNavSection,
+} from "@/components/settings/layout";
+import { PropertySection } from "@/components/settings/PropertySection";
+import { BookingEngineSection } from "@/components/settings/BookingEngineSection";
+import { CalendarSection } from "@/components/settings/CalendarSection";
+import { CheckInOutSection } from "@/components/settings/CheckInOutSection";
+import { LocalizationSection } from "@/components/settings/LocalizationSection";
+import { humanizeApiError } from "@/components/settings/constants";
 
-const CURRENCY_OPTIONS = [
-  { code: "AED", name: "UAE Dirham", flag: "🇦🇪" },
-  { code: "AUD", name: "Australian Dollar", flag: "🇦🇺" },
-  { code: "BGN", name: "Bulgarian Lev", flag: "🇧🇬" },
-  { code: "BRL", name: "Brazilian Real", flag: "🇧🇷" },
-  { code: "CAD", name: "Canadian Dollar", flag: "🇨🇦" },
-  { code: "CHF", name: "Swiss Franc", flag: "🇨🇭" },
-  { code: "CNY", name: "Chinese Yuan", flag: "🇨🇳" },
-  { code: "CZK", name: "Czech Koruna", flag: "🇨🇿" },
-  { code: "DKK", name: "Danish Krone", flag: "🇩🇰" },
-  { code: "EUR", name: "Euro", flag: "🇪🇺" },
-  { code: "GBP", name: "British Pound", flag: "🇬🇧" },
-  { code: "HKD", name: "Hong Kong Dollar", flag: "🇭🇰" },
-  { code: "HRK", name: "Croatian Kuna", flag: "🇭🇷" },
-  { code: "HUF", name: "Hungarian Forint", flag: "🇭🇺" },
-  { code: "IDR", name: "Indonesian Rupiah", flag: "🇮🇩" },
-  { code: "INR", name: "Indian Rupee", flag: "🇮🇳" },
-  { code: "JPY", name: "Japanese Yen", flag: "🇯🇵" },
-  { code: "KRW", name: "South Korean Won", flag: "🇰🇷" },
-  { code: "MXN", name: "Mexican Peso", flag: "🇲🇽" },
-  { code: "MYR", name: "Malaysian Ringgit", flag: "🇲🇾" },
-  { code: "NOK", name: "Norwegian Krone", flag: "🇳🇴" },
-  { code: "NZD", name: "New Zealand Dollar", flag: "🇳🇿" },
-  { code: "PHP", name: "Philippine Peso", flag: "🇵🇭" },
-  { code: "PLN", name: "Polish Zloty", flag: "🇵🇱" },
-  { code: "RON", name: "Romanian Leu", flag: "🇷🇴" },
-  { code: "RUB", name: "Russian Ruble", flag: "🇷🇺" },
-  { code: "SEK", name: "Swedish Krona", flag: "🇸🇪" },
-  { code: "SGD", name: "Singapore Dollar", flag: "🇸🇬" },
-  { code: "THB", name: "Thai Baht", flag: "🇹🇭" },
-  { code: "TRY", name: "Turkish Lira", flag: "🇹🇷" },
-  { code: "USD", name: "US Dollar", flag: "🇺🇸" },
-  { code: "VND", name: "Vietnamese Dong", flag: "🇻🇳" },
-];
+// Rail items also map to anchor IDs. Localization combines the existing
+// #currency + #language anchors (both preserved as sub-targets so the global
+// SearchModal links from VAY-367 still scroll to the right place).
+type SectionId =
+  | "property-details"
+  | "booking-engine"
+  | "calendar"
+  | "check-in-out"
+  | "localization";
 
-const CURRENCIES = CURRENCY_OPTIONS.map((c) => ({
-  value: c.code,
-  label: `${c.flag} ${c.name} (${c.code})`,
-}));
-
-const PROPERTY_TYPES = [
-  { value: "apart_hotel", label: "Apart Hotel" },
-  { value: "apartment", label: "Apartment" },
-  { value: "boat", label: "Boat" },
-  { value: "camping", label: "Camping" },
-  { value: "capsule_hotel", label: "Capsule Hotel" },
-  { value: "chalet", label: "Chalet" },
-  { value: "country_house", label: "Country House" },
-  { value: "farm_stay", label: "Farm Stay" },
-  { value: "guest_house", label: "Guest House" },
-  { value: "holiday_home", label: "Holiday Home" },
-  { value: "holiday_park", label: "Holiday Park" },
-  { value: "homestay", label: "Homestay" },
-  { value: "hostel", label: "Hostel" },
-  { value: "hotel", label: "Hotel" },
-  { value: "inn", label: "Inn" },
-  { value: "lodge", label: "Lodge" },
-  { value: "motel", label: "Motel" },
-  { value: "resort", label: "Resort" },
-  { value: "riad", label: "Riad" },
-  { value: "ryokan", label: "Ryokan" },
-  { value: "tent", label: "Tent" },
-  { value: "villa", label: "Villa" },
-];
-
-const TIMEZONE_OPTIONS = [
-  "Pacific/Midway",
-  "Pacific/Honolulu",
-  "America/Anchorage",
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-  "America/Sao_Paulo",
-  "Atlantic/Azores",
-  "Europe/London",
-  "Europe/Paris",
-  "Europe/Istanbul",
-  "Asia/Dubai",
-  "Asia/Karachi",
-  "Asia/Kolkata",
-  "Asia/Dhaka",
-  "Asia/Bangkok",
-  "Asia/Jakarta",
-  "Asia/Makassar",
-  "Asia/Jayapura",
-  "Asia/Singapore",
-  "Asia/Shanghai",
-  "Asia/Tokyo",
-  "Asia/Seoul",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-];
-
-function CurrencySelect({
-  value,
-  onChange,
-  t,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  t: (key: string) => string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  const filtered = CURRENCIES.filter((c) => c.label.toLowerCase().includes(search.toLowerCase()));
-
-  const selectedLabel = CURRENCIES.find((c) => c.value === value)?.label ?? value;
-
-  return (
-    <div ref={ref} className="relative w-full sm:max-w-xs">
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(!open);
-          setSearch("");
-        }}
-        className="w-full px-3 py-2 text-sm text-left border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white flex items-center justify-between"
-      >
-        <span>{selectedLabel}</span>
-        <svg
-          className="w-4 h-4 text-gray-400"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg">
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("settings.searchCurrency")}
-            autoFocus
-            className="w-full px-3 py-2 text-sm border-b border-gray-200 focus:outline-none rounded-t-lg"
-          />
-          <ul className="max-h-60 overflow-y-auto py-1">
-            {filtered.length === 0 ? (
-              <li className="px-3 py-2 text-sm text-gray-400">{t("common.noResults")}</li>
-            ) : (
-              filtered.map((c) => (
-                <li
-                  key={c.value}
-                  onClick={() => {
-                    onChange(c.value);
-                    setOpen(false);
-                  }}
-                  className={`px-3 py-2 text-sm cursor-pointer hover:bg-primary-50 ${c.value === value ? "bg-primary-50 font-medium text-primary-700" : "text-gray-700"}`}
-                >
-                  {c.label}
-                </li>
-              ))
-            )}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Raw HTTP status reason-phrases (e.g. "Not Found", "Bad Gateway") leak
-// through when the API returns FastAPI's default {"detail": "<phrase>"}.
-// They tell the user nothing actionable, so swap them for the fallback.
-const RAW_HTTP_PHRASES = new Set([
-  "not found",
-  "internal server error",
-  "bad request",
-  "forbidden",
-  "unauthorized",
-  "bad gateway",
-  "service unavailable",
-  "gateway timeout",
-  "unprocessable entity",
-  "conflict",
-  "method not allowed",
-  "request timeout",
-]);
-
-function humanizeApiError(err: any, fallback: string): string {
-  const msg = (err?.message || "").trim();
-  if (!msg) return fallback;
-  if (RAW_HTTP_PHRASES.has(msg.toLowerCase())) return fallback;
-  return msg;
-}
+// Anchors used by SearchModal (apps/pms-web/components/layout/SearchModal.tsx)
+// that map onto a parent rail section.
+const ANCHOR_TO_SECTION: Record<string, SectionId> = {
+  "property-details": "property-details",
+  "booking-engine": "booking-engine",
+  calendar: "calendar",
+  "check-in-out": "check-in-out",
+  currency: "localization",
+  language: "localization",
+};
 
 export default function SettingsPage() {
-  const { t, locale, setLocale } = useTranslation();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState("");
   const [error, setError] = useState("");
-  const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<SectionId>("property-details");
 
   // Currency
   const [currency, setCurrency] = useState("EUR");
@@ -294,37 +134,32 @@ export default function SettingsPage() {
       .catch(() => {});
   }, []);
 
-  // Scroll to the URL hash section and briefly highlight it (used by global search).
-  // Wait until loading is false so the target element exists, and re-run on
-  // hashchange — when the user is already on /settings, the global-search
-  // navigation only updates the hash and would otherwise skip the scroll.
+  // Hash → active rail item + scrollIntoView. Re-runs on hashchange so the
+  // global SearchModal navigation (VAY-367) lands on the right section even
+  // when already on /settings.
   useEffect(() => {
     if (loading) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     const handle = () => {
       const hash = window.location.hash.slice(1);
       if (!hash) return;
+      const mapped = ANCHOR_TO_SECTION[hash];
+      if (mapped) setActiveId(mapped);
       const el = document.getElementById(hash);
-      if (!el) return;
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-      setHighlightedSection(hash);
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => setHighlightedSection(null), 1800);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     };
     handle();
     window.addEventListener("hashchange", handle);
-    return () => {
-      window.removeEventListener("hashchange", handle);
-      if (timer) clearTimeout(timer);
-    };
+    return () => window.removeEventListener("hashchange", handle);
   }, [loading]);
 
-  const sectionClass = (id: string) =>
-    `bg-white border rounded-xl p-4 md:p-6 scroll-mt-20 transition-shadow ${
-      highlightedSection === id
-        ? "border-primary-400 ring-2 ring-primary-300 shadow-md"
-        : "border-gray-200"
-    }`;
+  const handleSelect = (id: string) => {
+    setActiveId(id as SectionId);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `#${id}`);
+    }
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const saveTimes = async () => {
     setSavingTimes(true);
@@ -394,7 +229,12 @@ export default function SettingsPage() {
       );
     } catch (err: any) {
       setAutoRearrange(previous);
-      setError(humanizeApiError(err, "Couldn’t update auto-rearrange setting. Please try again."));
+      setError(
+        humanizeApiError(
+          err,
+          "Couldn’t update auto-rearrange setting. Please try again.",
+        ),
+      );
     } finally {
       setSavingAutoRearrange(false);
     }
@@ -408,7 +248,9 @@ export default function SettingsPage() {
     setInstantBook(next);
     try {
       await pmsClient.patch("/admin/hotel", { instant_book: next });
-      setSuccess(next ? "Instant booking enabled" : "Booking requests re-enabled");
+      setSuccess(
+        next ? "Instant booking enabled" : "Booking requests re-enabled",
+      );
     } catch (err: any) {
       setInstantBook(previous);
       setError(
@@ -436,6 +278,22 @@ export default function SettingsPage() {
     }
   };
 
+  const sections: SettingsNavSection[] = [
+    {
+      id: "property-details",
+      label: "Property",
+      icon: BuildingOffice2Icon,
+    },
+    { id: "booking-engine", label: "Booking Engine", icon: BoltIcon },
+    { id: "calendar", label: "Calendar", icon: CalendarDaysIcon },
+    {
+      id: "check-in-out",
+      label: t("settings.checkInCheckOut"),
+      icon: ClockIcon,
+    },
+    { id: "localization", label: "Localization", icon: GlobeAltIcon },
+  ];
+
   if (loading) {
     return (
       <div className="p-4 md:p-6">
@@ -448,11 +306,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-3xl">
-      <h1 className="text-2xl md:text-xl font-bold text-gray-900 mb-5 md:mb-6">
-        {t("settings.title")}
-      </h1>
-
+    <SettingsLayout
+      title={t("settings.title")}
+      sections={sections}
+      activeId={activeId}
+      onSelect={handleSelect}
+    >
       {error && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
           {error}
@@ -464,336 +323,62 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="space-y-5 md:space-y-8">
-        {/* Property Details */}
-        <div id="property-details" className={sectionClass("property-details")}>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Property Details</h2>
-          <p className="text-xs text-gray-500 mb-4">
-            Required for channel manager (OTA connections).
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                Property Type
-              </label>
-              <select
-                value={propertyType}
-                onChange={(e) => setPropertyType(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
-              >
-                {PROPERTY_TYPES.map((pt) => (
-                  <option key={pt.value} value={pt.value}>
-                    {pt.label}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-gray-400 mt-1">
-                Affects channel manager billing. Only select &quot;Hotel&quot; for actual hotels.
-              </p>
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Timezone</label>
-              <select
-                value={timezone}
-                onChange={(e) => setTimezone(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
-              >
-                {TIMEZONE_OPTIONS.map((tz) => (
-                  <option key={tz} value={tz}>
-                    {tz}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                Country (ISO code)
-              </label>
-              <input
-                type="text"
-                value={country}
-                onChange={(e) => setCountry(e.target.value.toUpperCase())}
-                placeholder="ID"
-                maxLength={2}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                State / Province
-              </label>
-              <input
-                type="text"
-                value={state}
-                onChange={(e) => setState(e.target.value)}
-                placeholder="Bali"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">City</label>
-              <input
-                type="text"
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                placeholder="Seminyak"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Zip Code</label>
-              <input
-                type="text"
-                value={zipCode}
-                onChange={(e) => setZipCode(e.target.value)}
-                placeholder="80361"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Address</label>
-              <input
-                type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Jl. Raya Seminyak No. 123"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-1">Phone</label>
-              <input
-                type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+62 812 3456 7890"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
-            </div>
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                  Latitude
-                </label>
-                <input
-                  type="text"
-                  value={latitude}
-                  onChange={(e) => setLatitude(e.target.value)}
-                  placeholder="-8.6917"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-              <div className="flex-1">
-                <label className="block text-[12px] font-semibold text-gray-700 mb-1">
-                  Longitude
-                </label>
-                <input
-                  type="text"
-                  value={longitude}
-                  onChange={(e) => setLongitude(e.target.value)}
-                  placeholder="115.1683"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={savePropertyDetails}
-            disabled={savingProperty}
-            className="mt-5 w-full sm:w-auto sm:block px-4 py-2.5 sm:py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-          >
-            {savingProperty ? "Saving..." : "Save"}
-          </button>
-        </div>
+      <PropertySection
+        propertyType={propertyType}
+        setPropertyType={setPropertyType}
+        timezone={timezone}
+        setTimezone={setTimezone}
+        country={country}
+        setCountry={setCountry}
+        state={state}
+        setState={setState}
+        city={city}
+        setCity={setCity}
+        address={address}
+        setAddress={setAddress}
+        zipCode={zipCode}
+        setZipCode={setZipCode}
+        phone={phone}
+        setPhone={setPhone}
+        latitude={latitude}
+        setLatitude={setLatitude}
+        longitude={longitude}
+        setLongitude={setLongitude}
+        saving={savingProperty}
+        onSave={savePropertyDetails}
+      />
 
-        {/* Booking Engine — accept mode */}
-        <div id="booking-engine" className={sectionClass("booking-engine")}>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Booking Engine</h2>
-          <p className="text-xs text-gray-500 mb-4">
-            Choose how new bookings from your booking engine are accepted.
-          </p>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900">Accept bookings instantly</p>
-              <p className="text-xs text-gray-500 mt-1">
-                {instantBook
-                  ? "On — new bookings are confirmed immediately. Card payments are charged at booking time and the guest receives an instant confirmation."
-                  : "Off — new bookings arrive as requests. You have 24 hours to accept or reject; card payments are only authorized until you confirm."}
-              </p>
-              <p className="text-[11px] text-gray-400 mt-2">
-                Bank-transfer bookings always require manual review since no payment has been
-                received yet.
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={instantBook}
-              disabled={savingInstantBook}
-              onClick={() => toggleInstantBook(!instantBook)}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-50 ${
-                instantBook ? "bg-primary-600" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                  instantBook ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-          </div>
-        </div>
+      <BookingEngineSection
+        instantBook={instantBook}
+        saving={savingInstantBook}
+        onToggle={toggleInstantBook}
+      />
 
-        {/* Calendar — auto-rearrange (VAY-397) */}
-        <div id="calendar" className={sectionClass("calendar")}>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Calendar</h2>
-          <p className="text-xs text-gray-500 mb-4">
-            How new bookings are placed on the calendar when no single room fits the dates.
-          </p>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900">Auto-rearrange room assignments</p>
-              <p className="text-xs text-gray-500 mt-1">
-                {autoRearrange
-                  ? "On — when a new booking doesn’t fit any single room, the system shuffles future bookings between same-type rooms to free a slot. Checked-in and checked-out guests are never moved. Every shuffle is logged."
-                  : "Off — when a new booking doesn’t fit any single room, it goes to the Unassigned row and you place it manually."}
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoRearrange}
-              disabled={savingAutoRearrange}
-              onClick={() => toggleAutoRearrange(!autoRearrange)}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-50 ${
-                autoRearrange ? "bg-primary-600" : "bg-gray-300"
-              }`}
-            >
-              <span
-                className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
-                  autoRearrange ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
-            </button>
-          </div>
-        </div>
+      <CalendarSection
+        autoRearrange={autoRearrange}
+        saving={savingAutoRearrange}
+        onToggle={toggleAutoRearrange}
+      />
 
-        {/* Currency */}
-        <div id="currency" className={sectionClass("currency")}>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">{t("settings.currency")}</h2>
-          <p className="text-xs text-gray-500 mb-4">{t("settings.currencyDescription")}</p>
-          <CurrencySelect value={currency} onChange={setCurrency} t={t} />
-          <button
-            onClick={saveCurrency}
-            disabled={savingCurrency}
-            className="mt-4 w-full sm:w-auto sm:block px-4 py-2.5 sm:py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-          >
-            {savingCurrency ? t("common.saving") : t("common.save")}
-          </button>
-        </div>
+      <CheckInOutSection
+        checkInFrom={checkInFrom}
+        setCheckInFrom={setCheckInFrom}
+        checkInUntil={checkInUntil}
+        setCheckInUntil={setCheckInUntil}
+        checkOutFrom={checkOutFrom}
+        setCheckOutFrom={setCheckOutFrom}
+        checkOutUntil={checkOutUntil}
+        setCheckOutUntil={setCheckOutUntil}
+        saving={savingTimes}
+        onSave={saveTimes}
+      />
 
-        {/* Check-in / Check-out */}
-        <div id="check-in-out" className={sectionClass("check-in-out")}>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">
-            {t("settings.checkInCheckOut")}
-          </h2>
-          <p className="text-xs text-gray-500 mb-4">{t("settings.checkInCheckOutDescription")}</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-2">
-                {t("settings.checkInPeriod")}
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">
-                    {t("common.from")}
-                  </label>
-                  <input
-                    type="time"
-                    value={checkInFrom}
-                    onChange={(e) => setCheckInFrom(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-                <span className="text-gray-400 mt-4">—</span>
-                <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">
-                    {t("common.until")}
-                  </label>
-                  <input
-                    type="time"
-                    value={checkInUntil}
-                    onChange={(e) => setCheckInUntil(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-              <p className="text-[10px] text-gray-400 mt-1">{t("settings.checkInExample")}</p>
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-gray-700 mb-2">
-                {t("settings.checkOutPeriod")}
-              </label>
-              <div className="flex items-center gap-2">
-                <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">
-                    {t("common.from")}
-                  </label>
-                  <input
-                    type="time"
-                    value={checkOutFrom}
-                    onChange={(e) => setCheckOutFrom(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-                <span className="text-gray-400 mt-4">—</span>
-                <div className="flex-1">
-                  <label className="block text-[10px] text-gray-400 mb-0.5">
-                    {t("common.until")}
-                  </label>
-                  <input
-                    type="time"
-                    value={checkOutUntil}
-                    onChange={(e) => setCheckOutUntil(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-              <p className="text-[10px] text-gray-400 mt-1">{t("settings.checkOutExample")}</p>
-            </div>
-          </div>
-          <button
-            onClick={saveTimes}
-            disabled={savingTimes}
-            className="mt-5 w-full sm:w-auto sm:block px-4 py-2.5 sm:py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-          >
-            {savingTimes ? t("common.saving") : t("common.save")}
-          </button>
-        </div>
-
-        {/* Language */}
-        <div id="language" className={sectionClass("language")}>
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">{t("settings.language")}</h2>
-          <p className="text-xs text-gray-500 mb-4">{t("settings.languageDescription")}</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-            {SUPPORTED_LANGUAGES.map((lang) => (
-              <button
-                key={lang.code}
-                type="button"
-                onClick={() => setLocale(lang.code)}
-                className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors ${
-                  locale === lang.code
-                    ? "bg-primary-50 border-primary-300 text-primary-700 font-medium"
-                    : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                <span>{lang.flag}</span>
-                <span className="truncate">{lang.nativeName}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
+      <LocalizationSection
+        currency={currency}
+        setCurrency={setCurrency}
+        savingCurrency={savingCurrency}
+        onSaveCurrency={saveCurrency}
+      />
+    </SettingsLayout>
   );
 }

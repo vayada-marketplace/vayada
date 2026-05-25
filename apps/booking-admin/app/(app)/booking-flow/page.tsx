@@ -2,8 +2,17 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "@/lib/i18n";
-import { XMarkIcon, PhotoIcon } from "@heroicons/react/24/outline";
-import { GlobeAltIcon } from "@heroicons/react/24/outline";
+import {
+  XMarkIcon,
+  PhotoIcon,
+  GlobeAltIcon,
+  HomeIcon,
+  SparklesIcon,
+  TicketIcon,
+  CheckBadgeIcon,
+  ClipboardDocumentListIcon,
+  ClockIcon,
+} from "@heroicons/react/24/outline";
 import {
   settingsService,
   type AddonItem,
@@ -22,6 +31,10 @@ import {
   POPULAR_LANGUAGE_CODES,
 } from "@/lib/constants/options";
 import type { CurrencyOption, LanguageOption } from "@/lib/constants/options";
+import {
+  SettingsLayout,
+  type SettingsNavSection,
+} from "@/components/settings/layout";
 
 import RoomsTab from "@/components/booking-flow/RoomsTab";
 import AddonsTab from "@/components/booking-flow/AddonsTab";
@@ -513,18 +526,22 @@ export default function BookingFlowPage() {
     }
   };
 
-  const tabs = [
-    { id: "rooms" as const, label: t("bookingFlow.tabs.filters"), icon: RoomsIcon },
-    { id: "addons" as const, label: t("bookingFlow.tabs.addons"), icon: AddonsIcon },
-    { id: "promo-codes" as const, label: t("bookingFlow.tabs.promos"), icon: PromoIcon },
-    { id: "benefits" as const, label: t("bookingFlow.tabs.benefits"), icon: BenefitsIcon },
+  const sections: SettingsNavSection[] = [
+    { id: "rooms", label: t("bookingFlow.tabs.filters"), icon: HomeIcon },
+    { id: "addons", label: t("bookingFlow.tabs.addons"), icon: SparklesIcon },
+    { id: "promo-codes", label: t("bookingFlow.tabs.promos"), icon: TicketIcon },
+    { id: "benefits", label: t("bookingFlow.tabs.benefits"), icon: CheckBadgeIcon },
     {
-      id: "localization" as const,
+      id: "localization",
       label: t("bookingFlow.tabs.localization"),
-      icon: LocalizationIcon,
+      icon: GlobeAltIcon,
     },
-    { id: "guest-form" as const, label: t("bookingFlow.tabs.guestForm"), icon: GuestFormIcon },
-    { id: "last-minute" as const, label: "Last-Minute", icon: LastMinuteIcon },
+    {
+      id: "guest-form",
+      label: t("bookingFlow.tabs.guestForm"),
+      icon: ClipboardDocumentListIcon,
+    },
+    { id: "last-minute", label: "Last-Minute", icon: ClockIcon },
   ];
 
   if (loading) {
@@ -536,45 +553,19 @@ export default function BookingFlowPage() {
   }
 
   return (
-    <div className="p-4 md:p-6 h-full flex flex-col">
-      <div className="shrink-0">
-        <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("bookingFlow.title")}</h1>
-        <p className="text-sm text-gray-500 mt-0.5">{t("bookingFlow.subtitle")}</p>
-      </div>
-
+    <SettingsLayout
+      title={t("bookingFlow.title")}
+      description={t("bookingFlow.subtitle")}
+      sections={sections}
+      activeId={activeTab}
+      onSelect={(id) => setActiveTab(id as Tab)}
+    >
       {/* Feedback banner */}
       {feedback && (
-        <FeedbackAlert type={feedback.type} message={feedback.message} className="mt-3 shrink-0" />
+        <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
       )}
 
-      {/* Tab bar */}
-      <div className="mt-4 md:mt-5 shrink-0 relative">
-        <div className="overflow-x-auto scrollbar-hide">
-          <div className="bg-gray-100 rounded-lg p-1 inline-flex min-w-full md:min-w-0 md:max-w-2xl">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`shrink-0 flex-1 md:flex-initial flex items-center justify-center gap-1 px-3 py-2 md:py-1.5 rounded-md text-[12px] whitespace-nowrap transition-all ${
-                  activeTab === tab.id
-                    ? "bg-white text-gray-900 font-semibold shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                <tab.icon className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">{tab.label}</span>
-                <span className="sm:hidden text-[11px]">
-                  {tab.label.replace("Promo Codes", "Promos").replace("Guest Form", "Form")}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-50 to-transparent pointer-events-none lg:hidden" />
-      </div>
-
-      {/* Tab content */}
-      <div className="mt-4 flex-1 overflow-y-auto pb-4">
+      <div>
         {activeTab === "rooms" && (
           <RoomsTab
             bookingFilters={bookingFilters}
@@ -1390,133 +1381,10 @@ export default function BookingFlowPage() {
           else confirmDeletePromoCode(pendingDelete.id);
         }}
       />
-    </div>
+    </SettingsLayout>
   );
 }
 
-/* Tab Icon Components */
-
-function RoomsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 7v11a2 2 0 002 2h14a2 2 0 002-2V7" />
-      <path d="M6 7V5a2 2 0 012-2h8a2 2 0 012 2v2" />
-      <path d="M3 7h18" />
-      <path d="M8 11h8" />
-    </svg>
-  );
-}
-
-function AddonsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-    </svg>
-  );
-}
-
-function PromoIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-    </svg>
-  );
-}
-
-function BenefitsIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 12l2 2 4-4" />
-      <path d="M12 3a9 9 0 100 18 9 9 0 000-18z" />
-    </svg>
-  );
-}
-
-function LocalizationIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20" />
-      <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
-    </svg>
-  );
-}
-
-function GuestFormIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
-      <rect x="9" y="3" width="6" height="4" rx="1" />
-      <path d="M9 12h6" />
-      <path d="M9 16h6" />
-    </svg>
-  );
-}
-
-function LastMinuteIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
 
 // ── Flag Select ──────────────────────────────────────────────────────
 function FlagSelect<T extends { code: string; flag: string }>({
