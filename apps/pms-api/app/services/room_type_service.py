@@ -1,11 +1,13 @@
 import json
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from app.database import Database
 from app.models.room_type import RoomTypeResponse
+from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.availability_service import remaining_for_stay
+from app.services.calendar_auto_open_service import has_sellable_rate_on_date, is_date_auto_open
 from app.services.occupancy import room_allows_guest_mix
 from app.utils import parse_jsonb
 
@@ -69,6 +71,7 @@ async def get_rooms_for_guest(
         hotel_lm_config = json.loads(raw) if isinstance(raw, str) else raw
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
+    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
     result = []
 
     for room in rooms:
@@ -91,7 +94,17 @@ async def get_rooms_for_guest(
 
         total = room["total_rooms"]
         if check_in and check_out:
-            if not RoomTypeRepository.is_date_in_operating_periods(room, check_in):
+            stay_open = True
+            current = check_in
+            while current < check_out:
+                if (
+                    not is_date_auto_open(calendar_settings, current)
+                    or not has_sellable_rate_on_date(room, current)
+                ):
+                    stay_open = False
+                    break
+                current += timedelta(days=1)
+            if not stay_open:
                 remaining = 0
             else:
                 remaining = await remaining_for_stay(str(room["id"]), total, check_in, check_out)

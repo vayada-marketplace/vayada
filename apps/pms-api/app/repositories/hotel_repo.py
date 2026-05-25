@@ -35,6 +35,16 @@ _GUEST_FORM_COLUMNS = {
     "guest_count_enabled",
 }
 
+_CALENDAR_SETTINGS_COLUMNS = {
+    "auto_rearrange_enabled",
+    "calendar_auto_open_enabled",
+    "calendar_auto_open_mode",
+    "calendar_auto_open_months",
+    "calendar_auto_open_fixed_month",
+    "calendar_auto_open_through",
+    "calendar_auto_open_last_run_at",
+}
+
 
 class HotelRepository:
     @staticmethod
@@ -241,3 +251,67 @@ class HotelRepository:
             hotel_id,
             enabled,
         )
+
+    @staticmethod
+    async def get_calendar_settings(hotel_id: str) -> dict | None:
+        row = await Database.fetchrow(
+            """
+            SELECT
+                auto_rearrange_enabled,
+                calendar_auto_open_enabled,
+                calendar_auto_open_mode,
+                calendar_auto_open_months,
+                calendar_auto_open_fixed_month,
+                calendar_auto_open_through,
+                calendar_auto_open_last_run_at,
+                timezone
+            FROM hotels
+            WHERE id = $1
+            """,
+            hotel_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def update_calendar_settings(hotel_id: str, fields: dict) -> dict | None:
+        filtered = {k: v for k, v in fields.items() if k in _CALENDAR_SETTINGS_COLUMNS}
+        if not filtered:
+            return await HotelRepository.get_calendar_settings(hotel_id)
+
+        set_clauses = ", ".join(f"{k} = ${i + 1}" for i, k in enumerate(filtered))
+        values = list(filtered.values())
+        values.append(hotel_id)
+        row = await Database.fetchrow(
+            f"""
+            UPDATE hotels
+            SET {set_clauses}
+            WHERE id = ${len(values)}
+            RETURNING
+                auto_rearrange_enabled,
+                calendar_auto_open_enabled,
+                calendar_auto_open_mode,
+                calendar_auto_open_months,
+                calendar_auto_open_fixed_month,
+                calendar_auto_open_through,
+                calendar_auto_open_last_run_at,
+                timezone
+            """,
+            *values,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def list_rolling_auto_open_hotels() -> list[dict]:
+        rows = await Database.fetch(
+            """
+            SELECT
+                id,
+                timezone,
+                calendar_auto_open_months,
+                calendar_auto_open_through
+            FROM hotels
+            WHERE calendar_auto_open_enabled = true
+              AND calendar_auto_open_mode = 'rolling'
+            """
+        )
+        return [dict(r) for r in rows]

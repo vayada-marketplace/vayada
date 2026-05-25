@@ -13,8 +13,10 @@ from app.repositories.channex_mapping_repo import (
     ChannexRatePlanMappingRepository,
     ChannexRoomTypeMappingRepository,
 )
+from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services import channex_service
+from app.services.calendar_auto_open_service import has_sellable_rate_on_date, is_date_auto_open
 from app.services.channex._common import SYNC_HORIZON_DAYS, _count_local_blocks
 from app.utils import parse_jsonb
 
@@ -52,6 +54,7 @@ async def push_availability_for_room_type(
     channex_property_id = str(conn["channex_property_id"])
     channex_room_type_id = str(room_mapping["channex_room_type_id"])
     total_rooms = room_type["total_rooms"]
+    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
 
     # Build per-day availability, batch into date ranges where possible
     values = []
@@ -61,9 +64,15 @@ async def push_availability_for_room_type(
 
     while current <= end_date:
         next_day = current + timedelta(days=1)
-        booked = await RoomTypeRepository.count_booked(room_type_id, current, next_day)
-        blocked = await _count_local_blocks(room_type_id, current, next_day)
-        available = max(0, total_rooms - booked - blocked)
+        if (
+            not is_date_auto_open(calendar_settings, current)
+            or not has_sellable_rate_on_date(room_type, current)
+        ):
+            available = 0
+        else:
+            booked = await RoomTypeRepository.count_booked(room_type_id, current, next_day)
+            blocked = await _count_local_blocks(room_type_id, current, next_day)
+            available = max(0, total_rooms - booked - blocked)
 
         if prev_available is not None and available != prev_available:
             # Flush previous batch
@@ -140,6 +149,7 @@ def _meal_surcharge_for_code(room_type: dict, meal_plan_code: int) -> Decimal:
 def _build_restriction_entry(
     room_type: dict,
     check_date: date,
+    calendar_settings: dict | None = None,
     plan_name: str = "standard",
     markup_pct: Decimal = Decimal(0),
     meal_plan_code: int = 0,
@@ -171,7 +181,11 @@ def _build_restriction_entry(
 
     # stop_sell: true if the date falls outside all operating periods
     in_operating = RoomTypeRepository.is_date_in_operating_periods(room_type, check_date)
-    stop_sell = not in_operating
+    stop_sell = (
+        not in_operating
+        or not is_date_auto_open(calendar_settings, check_date)
+        or float(base_rate) <= 0
+    )
 
     return {
         "rate": rate,
@@ -241,6 +255,7 @@ async def push_restrictions_for_rate_plan(
     room_type = await RoomTypeRepository.get_by_id(room_type_id)
     if not room_type:
         return
+    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
 
     if start_date is None:
         start_date = date.today()
@@ -261,7 +276,14 @@ async def push_restrictions_for_rate_plan(
     prev_restr = None
 
     while current <= end_date:
-        restr = _build_restriction_entry(room_type, current, plan_name, markup_pct, meal_plan_code)
+        restr = _build_restriction_entry(
+            room_type,
+            current,
+            calendar_settings,
+            plan_name,
+            markup_pct,
+            meal_plan_code,
+        )
 
         if prev_restr is not None and not _restrictions_equal(prev_restr, restr):
             values.append(

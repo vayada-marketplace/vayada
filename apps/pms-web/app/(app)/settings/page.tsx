@@ -76,6 +76,12 @@ export default function SettingsPage() {
   // Calendar — VAY-397 auto-rearrange toggle
   const [autoRearrange, setAutoRearrange] = useState(true);
   const [savingAutoRearrange, setSavingAutoRearrange] = useState(false);
+  const [autoOpenEnabled, setAutoOpenEnabled] = useState(false);
+  const [autoOpenMode, setAutoOpenMode] = useState<"rolling" | "fixed">("rolling");
+  const [autoOpenMonths, setAutoOpenMonths] = useState<12 | 18 | 24>(18);
+  const [autoOpenFixedMonth, setAutoOpenFixedMonth] = useState("");
+  const [autoOpenThrough, setAutoOpenThrough] = useState<string | null>(null);
+  const [autoOpenWarnings, setAutoOpenWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     bookingsService
@@ -115,8 +121,24 @@ export default function SettingsPage() {
       .catch(() => {});
 
     pmsClient
-      .get<{ autoRearrangeEnabled: boolean }>("/admin/calendar-settings")
-      .then((s) => setAutoRearrange(Boolean(s.autoRearrangeEnabled)))
+      .get<{
+        autoRearrangeEnabled: boolean;
+        autoOpenEnabled: boolean;
+        autoOpenMode: "rolling" | "fixed";
+        autoOpenMonths: 12 | 18 | 24;
+        autoOpenFixedMonth: string | null;
+        autoOpenThrough: string | null;
+        autoOpenWarnings: string[];
+      }>("/admin/calendar-settings")
+      .then((s) => {
+        setAutoRearrange(Boolean(s.autoRearrangeEnabled));
+        setAutoOpenEnabled(Boolean(s.autoOpenEnabled));
+        setAutoOpenMode(s.autoOpenMode || "rolling");
+        setAutoOpenMonths(s.autoOpenMonths || 18);
+        setAutoOpenFixedMonth(s.autoOpenFixedMonth?.slice(0, 7) || "");
+        setAutoOpenThrough(s.autoOpenThrough || null);
+        setAutoOpenWarnings(s.autoOpenWarnings || []);
+      })
       .catch(() => {});
   }, []);
 
@@ -211,6 +233,50 @@ export default function SettingsPage() {
         humanizeApiError(
           err,
           "Couldn’t update auto-rearrange setting. Please try again.",
+        ),
+      );
+    } finally {
+      setSavingAutoRearrange(false);
+    }
+  };
+
+  const saveAutoOpen = async () => {
+    setSavingAutoRearrange(true);
+    setError("");
+    setSuccess("");
+    try {
+      const payload: Record<string, unknown> = {
+        autoOpenEnabled,
+        autoOpenMode,
+        autoOpenMonths,
+      };
+      if (autoOpenMode === "fixed") {
+        payload.autoOpenFixedMonth = `${autoOpenFixedMonth}-01`;
+      }
+      const saved = await pmsClient.patch<{
+        autoOpenEnabled: boolean;
+        autoOpenMode: "rolling" | "fixed";
+        autoOpenMonths: 12 | 18 | 24;
+        autoOpenFixedMonth: string | null;
+        autoOpenThrough: string | null;
+        autoOpenWarnings: string[];
+      }>("/admin/calendar-settings", payload);
+      setAutoOpenEnabled(Boolean(saved.autoOpenEnabled));
+      setAutoOpenMode(saved.autoOpenMode || "rolling");
+      setAutoOpenMonths(saved.autoOpenMonths || 18);
+      setAutoOpenFixedMonth(saved.autoOpenFixedMonth?.slice(0, 7) || "");
+      setAutoOpenThrough(saved.autoOpenThrough || null);
+      setAutoOpenWarnings(saved.autoOpenWarnings || []);
+      setSuccess(
+        saved.autoOpenEnabled
+          ? "Calendar auto-open settings saved"
+          : "Calendar auto-open disabled",
+      );
+    } catch (err: any) {
+      setError(
+        humanizeApiError(
+          err,
+          "Couldn’t update calendar auto-open settings. Please try again.",
         ),
       );
     } finally {
@@ -318,8 +384,19 @@ export default function SettingsPage() {
 
       <CalendarSection
         autoRearrange={autoRearrange}
+        autoOpenEnabled={autoOpenEnabled}
+        autoOpenMode={autoOpenMode}
+        autoOpenMonths={autoOpenMonths}
+        autoOpenFixedMonth={autoOpenFixedMonth}
+        autoOpenThrough={autoOpenThrough}
+        autoOpenWarnings={autoOpenWarnings}
         saving={savingAutoRearrange}
         onToggle={toggleAutoRearrange}
+        onAutoOpenEnabledChange={setAutoOpenEnabled}
+        onAutoOpenModeChange={setAutoOpenMode}
+        onAutoOpenMonthsChange={setAutoOpenMonths}
+        onAutoOpenFixedMonthChange={setAutoOpenFixedMonth}
+        onSaveAutoOpen={saveAutoOpen}
       />
 
       <CheckInOutSection

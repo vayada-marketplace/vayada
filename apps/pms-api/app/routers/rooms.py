@@ -4,7 +4,9 @@ from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Query
 
 from app.models.room_type import RoomTypeResponse, UnavailableDatesResponse
+from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.services.calendar_auto_open_service import has_sellable_rate_on_date, is_date_auto_open
 from app.services.room_type_service import get_hotel_id_by_slug, get_rooms_for_guest
 
 logger = logging.getLogger(__name__)
@@ -24,7 +26,7 @@ async def get_rooms(
         rooms = await get_rooms_for_guest(slug, check_in, check_out, adults, children)
     except Exception as e:
         logger.error("Error fetching rooms for %s: %s", slug, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return rooms
 
 
@@ -49,6 +51,7 @@ async def get_unavailable_dates(
     if not rooms:
         return UnavailableDatesResponse()
 
+    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
     seasons_by_room = {str(r["id"]): RoomTypeRepository._parse_seasons(r) for r in rooms}
 
     today = date.today()
@@ -62,7 +65,9 @@ async def get_unavailable_dates(
         eligible_min_stays: list[int] = []
         for room in rooms:
             total = room["total_rooms"]
-            if not RoomTypeRepository.is_date_in_operating_periods(room, current):
+            if not is_date_auto_open(calendar_settings, current):
+                continue
+            if not has_sellable_rate_on_date(room, current):
                 continue  # not operating = skip, don't count as available
             # Check minimum advance days requirement
             min_advance = room.get("minimum_advance_days") or 0
