@@ -26,7 +26,6 @@ reviews:
     - "!**/.pytest_cache/**"
     - "!**/.ruff_cache/**"
     - "!**/node_modules/**"
-    - "!**/package-lock.json"
   path_instructions:
     - path: "apps/*-api/**"
       instructions: |
