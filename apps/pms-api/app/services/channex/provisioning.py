@@ -137,6 +137,28 @@ async def provision_property(hotel_id: str) -> dict:
                 e,
             )
 
+    same_day_enabled = bool(hotel.get("same_day_bookings_enabled", True))
+    same_day_cutoff = hotel.get("same_day_booking_cutoff_time")
+    try:
+        await channex_service.update_property(
+            api_key,
+            channex_property_id,
+            {
+                "settings": {
+                    "cut_off_time": f"{same_day_cutoff}:00"
+                    if same_day_enabled and same_day_cutoff
+                    else None,
+                    "cut_off_days": 0 if same_day_enabled and same_day_cutoff else None,
+                }
+            },
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to sync same-day cutoff during Channex provisioning for hotel %s: %s",
+            hotel_id,
+            e,
+        )
+
     # Step 2: Create room types + rate plans for each vayada room type.
     # `room_types` was loaded above for pre-flight; reuse it.
 

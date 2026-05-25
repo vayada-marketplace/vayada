@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 def to_camel(string: str) -> str:
@@ -149,3 +149,27 @@ class HotelDetailsResponse(BaseModel):
     longitude: float | None = None
     last_minute_discount: Any | None = None
     instant_book: bool = False
+    same_day_bookings_enabled: bool = True
+    same_day_booking_cutoff_time: str | None = "18:00"
+
+
+class SameDayBookingSettingsUpdate(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    same_day_bookings_enabled: bool | None = None
+    same_day_booking_cutoff_time: str | None = None
+
+    @field_validator("same_day_booking_cutoff_time")
+    @classmethod
+    def validate_cutoff_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            hour, minute = value.split(":")
+            hour_int = int(hour)
+            minute_int = int(minute)
+        except (TypeError, ValueError):
+            raise ValueError("sameDayBookingCutoffTime must use HH:mm format")
+        if hour_int < 0 or hour_int > 23 or minute_int not in (0, 30):
+            raise ValueError("sameDayBookingCutoffTime must be in 30-minute intervals")
+        return f"{hour_int:02d}:{minute_int:02d}"

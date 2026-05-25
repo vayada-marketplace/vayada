@@ -216,7 +216,12 @@ function PaymentPageContent() {
           ([400, 409, 422].includes(err.status) &&
             /not enough rooms|no longer available|not available|sold ?out|availab/.test(blob)));
 
-      if (availabilityGone) {
+      if (blob.includes("same-day bookings are no longer available")) {
+        setSoldOut(true);
+        setError(
+          "Same-day bookings are no longer available for today. Please select tomorrow or another available date.",
+        );
+      } else if (availabilityGone) {
         setSoldOut(true);
         setError(t("errorSoldOut"));
       } else if (
