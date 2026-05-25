@@ -50,6 +50,11 @@ from app.services.room_assignment import (
     try_place_unassigned_after_cancellation,
 )
 from app.services.room_type_service import resolve_last_minute_discount
+from app.services.same_day_booking import (
+    SAME_DAY_BOOKING_CLOSED_MESSAGE,
+    is_same_day_booking_closed,
+    property_today,
+)
 from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
@@ -289,7 +294,7 @@ async def _compute_booking_pricing(
     room_total = round(pricing.room_total * data.number_of_rooms, 2)
 
     # Last-minute discount based on days before check-in
-    days_before = (data.check_in - date.today()).days
+    days_before = (data.check_in - property_today(hotel.get("timezone"))).days
     hotel_lm_raw = hotel.get("last_minute_discount")
     hotel_lm_config = (
         json.loads(hotel_lm_raw)
@@ -855,7 +860,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     handles (Stripe client_secret or Xendit invoice URL)."""
     # ── Validate hotel + room ──────────────────────────────────────
     hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email, last_minute_discount, instant_book "
+        "SELECT id, name, contact_email, last_minute_discount, instant_book, "
+        "timezone, same_day_bookings_enabled, same_day_booking_cutoff_time "
         "FROM hotels WHERE slug = $1",
         slug,
     )
@@ -871,6 +877,13 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         raise ValueError("Room type is not available")
     if not room_allows_guest_mix(room, data.adults, data.children, units=data.number_of_rooms or 1):
         raise ValueError("Guest mix exceeds this room's occupancy limits")
+    if is_same_day_booking_closed(
+        data.check_in,
+        same_day_bookings_enabled=bool(hotel.get("same_day_bookings_enabled", True)),
+        same_day_booking_cutoff_time=hotel.get("same_day_booking_cutoff_time"),
+        timezone=hotel.get("timezone"),
+    ):
+        raise ValueError(SAME_DAY_BOOKING_CLOSED_MESSAGE)
 
     # ── Validate stay window (availability, nights, min-stay, advance) ──
     calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
@@ -902,7 +915,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     min_advance = room.get("minimum_advance_days") or 0
     if min_advance > 0:
-        days_until_checkin = (data.check_in - date.today()).days
+        days_until_checkin = (data.check_in - property_today(hotel.get("timezone"))).days
         if days_until_checkin < min_advance:
             raise ValueError(f"This room requires booking at least {min_advance} days in advance")
 

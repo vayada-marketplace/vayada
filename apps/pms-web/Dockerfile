@@ -1,17 +1,17 @@
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
+# Monorepo-aware Dockerfile.
+# Build context is the repo root (workflow sets context: .).
+# Workspace package @vayada/locale-constants is resolved from packages/.
+
+# Stage 1: Builder
+FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-# Stage 2: Builder
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Copy the monorepo. .dockerignore at root excludes node_modules, .next, etc.
 COPY . .
+
+# Workspace install resolves apps/* and packages/*.
+RUN npm ci
 
 # Accept build arguments for API URLs
 ARG NEXT_PUBLIC_AUTH_API_URL
@@ -20,9 +20,10 @@ ENV NEXT_PUBLIC_AUTH_API_URL=${NEXT_PUBLIC_AUTH_API_URL}
 ENV NEXT_PUBLIC_PMS_API_URL=${NEXT_PUBLIC_PMS_API_URL}
 
 # Build the application
+WORKDIR /app/apps/pms-web
 RUN npm run build
 
-# Stage 3: Runner
+# Stage 2: Runner
 FROM node:20-alpine AS runner
 WORKDIR /app
 
@@ -32,13 +33,9 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Copy necessary files from standalone build
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./app/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./apps/pms-web/.next/static
-COPY --from=builder --chown=nextjs:nodejs /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
-COPY --from=builder --chown=nextjs:nodejs /app/public ./apps/pms-web/public
+COPY --from=builder --chown=nextjs:nodejs /app/apps/pms-web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/pms-web/.next/static ./apps/pms-web/.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/pms-web/public ./apps/pms-web/public
 
 USER nextjs
 
@@ -47,4 +44,4 @@ EXPOSE 3004
 ENV PORT=3004
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["sh", "-c", "if [ -f server.js ]; then exec node server.js; fi; if [ -f app/server.js ]; then exec node app/server.js; fi; exec node apps/pms-web/server.js"]
+CMD ["node", "apps/pms-web/server.js"]

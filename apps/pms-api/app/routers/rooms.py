@@ -3,11 +3,13 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.database import Database
 from app.models.room_type import RoomTypeResponse, UnavailableDatesResponse
 from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.calendar_auto_open_service import has_sellable_rate_on_date, is_date_auto_open
 from app.services.room_type_service import get_hotel_id_by_slug, get_rooms_for_guest
+from app.services.same_day_booking import is_same_day_booking_closed, property_today
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,12 @@ async def get_unavailable_dates(
     if not hotel_id:
         return UnavailableDatesResponse()
 
+    hotel_row = await Database.fetchrow(
+        "SELECT timezone, same_day_bookings_enabled, same_day_booking_cutoff_time "
+        "FROM hotels WHERE id = $1",
+        hotel_id,
+    )
+    hotel = dict(hotel_row) if hotel_row else None
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     if not rooms:
         return UnavailableDatesResponse()
@@ -54,12 +62,22 @@ async def get_unavailable_dates(
     calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
     seasons_by_room = {str(r["id"]): RoomTypeRepository._parse_seasons(r) for r in rooms}
 
-    today = date.today()
+    hotel_timezone = hotel.get("timezone") if hotel else None
+    today = property_today(hotel_timezone)
     unavailable = []
     min_stay_by_arrival: dict[str, int] = {}
     current = start
     while current < end:
         next_day = current + timedelta(days=1)
+        if hotel and is_same_day_booking_closed(
+            current,
+            same_day_bookings_enabled=bool(hotel.get("same_day_bookings_enabled", True)),
+            same_day_booking_cutoff_time=hotel.get("same_day_booking_cutoff_time"),
+            timezone=hotel_timezone,
+        ):
+            unavailable.append(current.isoformat())
+            current = next_day
+            continue
         all_full = True
         days_until = (current - today).days
         eligible_min_stays: list[int] = []

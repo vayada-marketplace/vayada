@@ -16,6 +16,7 @@ from app.models.hotel import (
     HotelDetailsResponse,
     HotelRegister,
     HotelResponse,
+    SameDayBookingSettingsUpdate,
     SetupStatusResponse,
 )
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
@@ -64,6 +65,34 @@ def _hotel_to_details(row: dict) -> HotelDetailsResponse:
         longitude=float(row["longitude"]) if row.get("longitude") is not None else None,
         last_minute_discount=json.loads(lm) if isinstance(lm, str) else lm,
         instant_book=bool(row.get("instant_book", False)),
+        same_day_bookings_enabled=bool(row.get("same_day_bookings_enabled", True)),
+        same_day_booking_cutoff_time=row.get("same_day_booking_cutoff_time") or "18:00",
+    )
+
+
+async def _sync_same_day_cutoff_to_channex(hotel_id: str, data: dict) -> None:
+    conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
+    if not conn or not conn.get("is_active") or not conn.get("channex_property_id"):
+        return
+
+    enabled = bool(data.get("same_day_bookings_enabled", True))
+    cutoff_time = data.get("same_day_booking_cutoff_time")
+    if enabled and cutoff_time:
+        settings_payload = {
+            "cut_off_time": f"{cutoff_time}:00",
+            "cut_off_days": 0,
+        }
+    else:
+        settings_payload = {
+            "cut_off_time": None,
+            "cut_off_days": None,
+        }
+
+    api_key = channex_service.get_platform_api_key()
+    await channex_service.update_property(
+        api_key,
+        str(conn["channex_property_id"]),
+        {"settings": settings_payload},
     )
 
 
@@ -185,6 +214,29 @@ async def update_hotel(
 ):
     """Update hotel details (slug, name, email, last_minute_discount, etc.)."""
     hotel_id = await get_hotel_id(user_id)
+    same_day_changed = (
+        "same_day_bookings_enabled" in data
+        or "sameDayBookingsEnabled" in data
+        or "same_day_booking_cutoff_time" in data
+        or "sameDayBookingCutoffTime" in data
+    )
+    if same_day_changed:
+        same_day_data = SameDayBookingSettingsUpdate.model_validate(data).model_dump(
+            exclude_none=False
+        )
+        if "sameDayBookingsEnabled" in data:
+            data["same_day_bookings_enabled"] = same_day_data["same_day_bookings_enabled"]
+        if "same_day_bookings_enabled" in data:
+            data["same_day_bookings_enabled"] = same_day_data["same_day_bookings_enabled"]
+        if "sameDayBookingCutoffTime" in data:
+            data["same_day_booking_cutoff_time"] = same_day_data[
+                "same_day_booking_cutoff_time"
+            ]
+        if "same_day_booking_cutoff_time" in data:
+            data["same_day_booking_cutoff_time"] = same_day_data[
+                "same_day_booking_cutoff_time"
+            ]
+
     row = await HotelRepository.update_fields(hotel_id, data)
     if not row:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -201,6 +253,16 @@ async def update_hotel(
             raise HTTPException(
                 status_code=502,
                 detail="Failed to sync booking-acceptance setting to booking engine. Please retry.",
+            ) from e
+
+    if same_day_changed:
+        try:
+            await _sync_same_day_cutoff_to_channex(hotel_id, row)
+        except Exception as e:
+            logger.error("Failed to sync same-day cutoff to Channex: %s", e)
+            raise HTTPException(
+                status_code=502,
+                detail="Saved locally, but failed to sync same-day cutoff to Channex. Please retry.",
             ) from e
 
     return _hotel_to_details(row)

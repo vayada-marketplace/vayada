@@ -961,6 +961,10 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const handleCancelBooking = async () => {
+    if (!booking || booking.status !== "confirmed") {
+      setCancelOpen(false);
+      return;
+    }
     const reason = cancelReason.trim();
     if (!reason) return;
     setCancelling(true);
@@ -1010,6 +1014,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   }
 
   const isPending = booking.status === "pending";
+  const canCancelBooking = booking.status === "confirmed";
   // VAY-404: treat 'declined' (host rejected) the same as cancelled/expired
   // for read-only/disabled UI affordances — the booking is terminal.
   const isCancelled =
@@ -1619,8 +1624,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        {/* 6. Cancel booking (hidden once already cancelled / expired) */}
-        {!isCancelled && (
+        {/* 6. Cancel booking (confirmed bookings only) */}
+        {canCancelBooking && (
           <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
             <h2 className="text-sm font-semibold text-gray-900 mb-1">Cancel booking</h2>
             <p className="text-sm text-gray-600 mb-4">
@@ -1768,7 +1773,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </Modal>
       )}
 
-      {cancelOpen && (
+      {cancelOpen && canCancelBooking && (
         <Modal onClose={() => setCancelOpen(false)}>
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Cancel this booking?</h3>
           <p className="text-sm text-gray-600 mb-4">
