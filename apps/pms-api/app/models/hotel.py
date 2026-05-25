@@ -1,4 +1,5 @@
-from typing import Any
+from datetime import date
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -102,12 +103,22 @@ class CalendarSettingsResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     auto_rearrange_enabled: bool = True
+    auto_open_enabled: bool = False
+    auto_open_mode: Literal["rolling", "fixed"] = "rolling"
+    auto_open_months: Literal[12, 18, 24] = 18
+    auto_open_fixed_month: date | None = None
+    auto_open_through: date | None = None
+    auto_open_warnings: list[str] = []
 
 
 class CalendarSettingsUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    auto_rearrange_enabled: bool
+    auto_rearrange_enabled: bool | None = None
+    auto_open_enabled: bool | None = None
+    auto_open_mode: Literal["rolling", "fixed"] | None = None
+    auto_open_months: Literal[12, 18, 24] | None = None
+    auto_open_fixed_month: date | None = None
 
 
 class SetupStatusResponse(BaseModel):

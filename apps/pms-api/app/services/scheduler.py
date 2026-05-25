@@ -12,9 +12,11 @@ from app.repositories.booking_draft_repo import BookingDraftRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
 from app.repositories.hotel_payment_settings_repo import HotelPaymentSettingsRepository
+from app.repositories.hotel_repo import HotelRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.services import xendit_service
 from app.services.booking_service import expire_booking
+from app.services.calendar_auto_open_service import apply_auto_open_for_hotel
 from app.services.channex.inbound import poll_bookings_for_hotel
 from app.services.channex.messaging import poll_messages_for_all_hotels
 from app.services.channex.orchestrator import push_ari_for_hotel
@@ -316,6 +318,23 @@ async def full_channex_ari_sync():
             logger.error("Failed to sync Channex ARI for hotel %s: %s", hotel_id, e)
 
 
+async def advance_calendar_auto_open_windows():
+    """Advance rolling auto-open horizons. Idempotent and safe to run daily."""
+    hotels = await HotelRepository.list_rolling_auto_open_hotels()
+    for hotel in hotels:
+        hotel_id = str(hotel["id"])
+        try:
+            result = await apply_auto_open_for_hotel(hotel_id)
+            if result.changed:
+                logger.info(
+                    "Advanced calendar auto-open horizon for hotel %s through %s",
+                    hotel_id,
+                    result.open_through,
+                )
+        except Exception as e:
+            logger.error("Failed to advance calendar auto-open for hotel %s: %s", hotel_id, e)
+
+
 async def poll_channex_messages():
     """Manual reconciliation sweep — no longer scheduled. Channex requested we
     stop polling their `BookingMessages` list/feed; we rely on the `message`
@@ -383,6 +402,13 @@ def setup_scheduler():
         full_channex_ari_sync,
         trigger=CronTrigger(hour=app_settings.CHANNEX_FULL_SYNC_HOUR, minute=0),
         id="full_channex_ari_sync",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        advance_calendar_auto_open_windows,
+        trigger=CronTrigger(hour=1, minute=15),
+        id="advance_calendar_auto_open_windows",
         replace_existing=True,
     )
 
