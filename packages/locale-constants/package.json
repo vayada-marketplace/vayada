@@ -1,0 +1,11 @@
+{
+  "name": "@vayada/locale-constants",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Single source of truth for currency (and future locale) option lists shared across vayada frontends.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

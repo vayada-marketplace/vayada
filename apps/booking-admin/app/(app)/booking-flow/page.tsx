@@ -31,10 +31,7 @@ import {
   POPULAR_LANGUAGE_CODES,
 } from "@/lib/constants/options";
 import type { CurrencyOption, LanguageOption } from "@/lib/constants/options";
-import {
-  SettingsLayout,
-  type SettingsNavSection,
-} from "@/components/settings/layout";
+import { SettingsLayout, type SettingsNavSection } from "@/components/settings/layout";
 
 import RoomsTab from "@/components/booking-flow/RoomsTab";
 import AddonsTab from "@/components/booking-flow/AddonsTab";
@@ -872,11 +869,11 @@ export default function BookingFlowPage() {
                     onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
                     className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
                   >
-                    <option value="EUR">EUR</option>
-                    <option value="USD">USD</option>
-                    <option value="GBP">GBP</option>
-                    <option value="CHF">CHF</option>
-                    <option value="IDR">IDR</option>
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.code}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1384,7 +1381,6 @@ export default function BookingFlowPage() {
     </SettingsLayout>
   );
 }
-
 
 // ── Flag Select ──────────────────────────────────────────────────────
 function FlagSelect<T extends { code: string; flag: string }>({
