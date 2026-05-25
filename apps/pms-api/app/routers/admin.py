@@ -485,9 +485,20 @@ async def update_calendar_settings(
     if next_enabled and next_mode == "fixed" and not next_fixed_month:
         raise HTTPException(status_code=400, detail="Fixed auto-open requires a target month")
 
+    auto_open_fields = {
+        "calendar_auto_open_enabled",
+        "calendar_auto_open_mode",
+        "calendar_auto_open_months",
+        "calendar_auto_open_fixed_month",
+    }
+    auto_open_fields_changed = any(
+        key in db_updates and db_updates[key] != current.get(key)
+        for key in auto_open_fields
+    )
+
     row = await HotelRepository.update_calendar_settings(hotel_id, db_updates)
     warnings: list[str] = []
-    if next_enabled:
+    if next_enabled and auto_open_fields_changed:
         applied = await apply_auto_open_for_hotel(hotel_id)
         row = await HotelRepository.get_calendar_settings(hotel_id)
         warnings = applied.warnings
@@ -497,5 +508,8 @@ async def update_calendar_settings(
             row.get("calendar_auto_open_through"),
             row.get("timezone"),
         )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Hotel not found")
 
     return _calendar_settings_response(row, warnings)

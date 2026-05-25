@@ -267,7 +267,7 @@ export default function SettingsPage() {
         autoOpenMode,
         autoOpenMonths,
       };
-      if (autoOpenMode === "fixed") {
+      if (autoOpenMode === "fixed" && /^\d{4}-\d{2}$/.test(autoOpenFixedMonth)) {
         payload.autoOpenFixedMonth = `${autoOpenFixedMonth}-01`;
       }
       const saved = await pmsClient.patch<{

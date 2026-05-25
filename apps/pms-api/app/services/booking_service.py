@@ -22,7 +22,7 @@ from app.repositories.payout_repo import PayoutRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services import stripe_service, xendit_service
 from app.services.availability_service import compute_stay_pricing, remaining_for_stay
-from app.services.calendar_auto_open_service import has_sellable_rate_on_date, is_date_auto_open
+from app.services.calendar_auto_open_service import is_stay_sellable
 from app.services.channex.ari_push import push_availability_for_room_type
 from app.services.channex.orchestrator import push_ari_for_booking
 from app.services.channex.outbound import handle_vayada_cancellation as channex_handle_cancellation
@@ -887,14 +887,8 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     # ── Validate stay window (availability, nights, min-stay, advance) ──
     calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
-    current = data.check_in
-    while current < data.check_out:
-        if (
-            not is_date_auto_open(calendar_settings, current)
-            or not has_sellable_rate_on_date(room, current)
-        ):
-            raise ValueError("Room type is not available for the selected dates")
-        current += timedelta(days=1)
+    if not is_stay_sellable(data.check_in, data.check_out, room, calendar_settings):
+        raise ValueError("Room type is not available for the selected dates")
 
     available = await remaining_for_stay(
         data.room_type_id, room["total_rooms"], data.check_in, data.check_out

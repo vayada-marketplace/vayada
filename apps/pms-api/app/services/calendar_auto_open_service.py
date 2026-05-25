@@ -72,10 +72,29 @@ def has_sellable_rate_on_date(room_type: dict, check_date: date) -> bool:
 def is_date_auto_open(hotel_settings: dict | None, check_date: date) -> bool:
     if not hotel_settings:
         return True
+    if not hotel_settings.get("calendar_auto_open_enabled", False):
+        return True
     open_through = hotel_settings.get("calendar_auto_open_through")
     if not open_through:
         return True
     return check_date <= open_through
+
+
+def is_stay_sellable(
+    check_in: date,
+    check_out: date,
+    room_type: dict,
+    calendar_settings: dict | None,
+) -> bool:
+    current = check_in
+    while current < check_out:
+        if (
+            not is_date_auto_open(calendar_settings, current)
+            or not has_sellable_rate_on_date(room_type, current)
+        ):
+            return False
+        current += timedelta(days=1)
+    return True
 
 
 async def collect_rate_warnings(

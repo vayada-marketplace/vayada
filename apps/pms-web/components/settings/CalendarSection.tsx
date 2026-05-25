@@ -85,6 +85,7 @@ export function CalendarSection({
               type="button"
               role="switch"
               aria-checked={autoOpenEnabled}
+              aria-label="Auto-open future calendar"
               disabled={saving}
               onClick={() => onAutoOpenEnabledChange(!autoOpenEnabled)}
               className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:opacity-50 ${
