@@ -57,10 +57,17 @@ The frontend API fallbacks (`process.env.NEXT_PUBLIC_*_URL || …`) default to t
 
 ### Multi-tenant subdomains (booking-web)
 
-`booking-web` extracts the hotel slug from the hostname (`<slug>.booking.localhost` → that hotel's booking page). portless does **not** forward arbitrary subdomains of a registered name — verified with curl against the v0.13 proxy: `https://booking.localhost` routes, but `https://acme.booking.localhost` returns a portless 404. Two workarounds:
+`booking-web` extracts the hotel slug from the hostname (`<slug>.booking.localhost` → that hotel's booking page). portless does not forward arbitrary subdomains in its default proxy mode, but v0.13 supports this with the proxy-level `--wildcard` flag. Verified with curl: after `portless proxy start --wildcard`, both `https://booking.localhost` and `https://acme.booking.localhost` route to the same `booking` app/alias.
 
-1. **Per-tenant alias** — `portless alias <slug>.booking 3002` for each hotel slug you want to hit. Confirmed working in the same curl test. Add the slugs you care about to your shell init or amend `scripts/portless-setup.sh` locally.
-2. **Plain-port fallback** — `cd apps/booking-web && npm run dev` and reach the tenant at `http://<slug>.localhost:3002` (the pre-portless path; booking-web's middleware reads `Host` regardless of port).
+If you are testing booking tenants, start the proxy with wildcard enabled before launching booking-web:
+
+```bash
+portless proxy stop
+portless proxy start --wildcard
+cd apps/booking-web && portless
+```
+
+Plain-port fallback still works: `cd apps/booking-web && npm run dev` and reach the tenant at `http://<slug>.localhost:3002` (the pre-portless path; booking-web's middleware reads `Host` regardless of port).
 
 ### Plain-port fallback
 
