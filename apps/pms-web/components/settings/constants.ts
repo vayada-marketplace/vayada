@@ -38,31 +38,6 @@ export const CURRENCIES = CURRENCY_OPTIONS.map((c) => ({
   label: `${c.flag} ${c.name} (${c.code})`,
 }));
 
-export const PROPERTY_TYPES = [
-  { value: "apart_hotel", label: "Apart Hotel" },
-  { value: "apartment", label: "Apartment" },
-  { value: "boat", label: "Boat" },
-  { value: "camping", label: "Camping" },
-  { value: "capsule_hotel", label: "Capsule Hotel" },
-  { value: "chalet", label: "Chalet" },
-  { value: "country_house", label: "Country House" },
-  { value: "farm_stay", label: "Farm Stay" },
-  { value: "guest_house", label: "Guest House" },
-  { value: "holiday_home", label: "Holiday Home" },
-  { value: "holiday_park", label: "Holiday Park" },
-  { value: "homestay", label: "Homestay" },
-  { value: "hostel", label: "Hostel" },
-  { value: "hotel", label: "Hotel" },
-  { value: "inn", label: "Inn" },
-  { value: "lodge", label: "Lodge" },
-  { value: "motel", label: "Motel" },
-  { value: "resort", label: "Resort" },
-  { value: "riad", label: "Riad" },
-  { value: "ryokan", label: "Ryokan" },
-  { value: "tent", label: "Tent" },
-  { value: "villa", label: "Villa" },
-];
-
 export const TIMEZONE_OPTIONS = [
   "Pacific/Midway",
   "Pacific/Honolulu",

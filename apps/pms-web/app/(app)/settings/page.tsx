@@ -62,17 +62,11 @@ export default function SettingsPage() {
   const [checkOutUntil, setCheckOutUntil] = useState("11:00");
   const [savingTimes, setSavingTimes] = useState(false);
 
-  // Property details
-  const [propertyType, setPropertyType] = useState("guest_house");
+  // Property details — only fields Channex actually enforces (timezone + country).
+  // Title/currency/contact-email live elsewhere; other address fields are filled
+  // later by each OTA's own validation flow when needed.
   const [timezone, setTimezone] = useState("Asia/Makassar");
   const [country, setCountry] = useState("");
-  const [state, setState] = useState("");
-  const [city, setCity] = useState("");
-  const [address, setAddress] = useState("");
-  const [zipCode, setZipCode] = useState("");
-  const [phone, setPhone] = useState("");
-  const [latitude, setLatitude] = useState("");
-  const [longitude, setLongitude] = useState("");
   const [savingProperty, setSavingProperty] = useState(false);
 
   // Booking engine
@@ -114,16 +108,8 @@ export default function SettingsPage() {
     pmsClient
       .get<any>("/admin/hotel")
       .then((h) => {
-        if (h.property_type) setPropertyType(h.property_type);
         if (h.timezone) setTimezone(h.timezone);
         if (h.country) setCountry(h.country);
-        if (h.state) setState(h.state);
-        if (h.city) setCity(h.city);
-        if (h.address) setAddress(h.address);
-        if (h.zip_code) setZipCode(h.zip_code);
-        if (h.phone) setPhone(h.phone);
-        if (h.latitude != null) setLatitude(String(h.latitude));
-        if (h.longitude != null) setLongitude(String(h.longitude));
         setInstantBook(Boolean(h.instant_book));
       })
       .catch(() => {});
@@ -187,18 +173,10 @@ export default function SettingsPage() {
     setError("");
     setSuccess("");
     try {
-      await pmsClient.patch("/admin/hotel", {
-        property_type: propertyType,
-        timezone,
-        country,
-        state,
-        city,
-        address,
-        zip_code: zipCode,
-        phone,
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
-      });
+      // PATCH only the fields the form actually edits; the backend leaves
+      // unsent fields untouched (so any address/lat-lon set during onboarding
+      // or via a future OTA-specific flow is preserved).
+      await pmsClient.patch("/admin/hotel", { timezone, country });
       setSuccess("Property details saved");
     } catch (err: any) {
       setError(
@@ -324,26 +302,10 @@ export default function SettingsPage() {
       )}
 
       <PropertySection
-        propertyType={propertyType}
-        setPropertyType={setPropertyType}
         timezone={timezone}
         setTimezone={setTimezone}
         country={country}
         setCountry={setCountry}
-        state={state}
-        setState={setState}
-        city={city}
-        setCity={setCity}
-        address={address}
-        setAddress={setAddress}
-        zipCode={zipCode}
-        setZipCode={setZipCode}
-        phone={phone}
-        setPhone={setPhone}
-        latitude={latitude}
-        setLatitude={setLatitude}
-        longitude={longitude}
-        setLongitude={setLongitude}
         saving={savingProperty}
         onSave={savePropertyDetails}
       />
