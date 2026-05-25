@@ -83,7 +83,7 @@ def _booking_details_html(booking: dict) -> str:
     """
 
 
-async def _send_email(to: str, subject: str, html_body: str):
+async def _send_email(to: str, subject: str, html_body: str, reply_to: str | None = None):
     if not settings.SMTP_HOST:
         logger.debug("SMTP not configured — skipping email to %s", to)
         return
@@ -95,6 +95,8 @@ async def _send_email(to: str, subject: str, html_body: str):
         msg["From"] = settings.SMTP_FROM
         msg["To"] = to
         msg["Subject"] = subject
+        if reply_to:
+            msg["Reply-To"] = reply_to
         msg.attach(MIMEText(html_body, "html"))
 
         await aiosmtplib.send(
@@ -246,10 +248,12 @@ def _render_request_status_email(booking: dict, status_event: str) -> tuple[str,
     return subject, _wrap_html(content)
 
 
-async def _send_to_host_and_ops(hotel_email: str, subject: str, html_body: str):
+async def _send_to_host_and_ops(
+    hotel_email: str, subject: str, html_body: str, reply_to: str | None = None
+):
     """Send to the hotel host and the Vayada ops watchlist."""
     if hotel_email:
-        await _send_email(hotel_email, subject, html_body)
+        await _send_email(hotel_email, subject, html_body, reply_to=reply_to)
     ops_recipients = [
         settings.VAYADA_OPS_EMAIL,
         "p.paetzold@vayada.com",
@@ -257,13 +261,42 @@ async def _send_to_host_and_ops(hotel_email: str, subject: str, html_body: str):
     ]
     for recipient in ops_recipients:
         if recipient and recipient != hotel_email:
-            await _send_email(recipient, subject, html_body)
+            await _send_email(recipient, subject, html_body, reply_to=reply_to)
+
+
+def _looks_like_email(value: str | None) -> bool:
+    if not value or not isinstance(value, str):
+        return False
+    value = value.strip()
+    if "@" not in value or " " in value:
+        return False
+    local, _, domain = value.rpartition("@")
+    return bool(local) and "." in domain
+
+
+def _booking_request_reply_to(booking: dict) -> str:
+    """Reply-To for the host's "New Booking Request" email so a plain Reply
+    in the host's mail client reaches the guest, not the unmonitored
+    noreply@ inbox. Falls back to the monitored ops address (and logs)
+    when the guest email is missing or malformed, so a reply is never
+    silently lost. From stays noreply@; Reply-To doesn't affect SPF/DKIM/DMARC."""
+    guest_email = booking.get("guest_email")
+    if _looks_like_email(guest_email):
+        return guest_email.strip()
+    logger.warning(
+        "Booking %s has missing/invalid guest_email (%r); falling back to %s for Reply-To",
+        booking.get("booking_reference") or booking.get("id"),
+        guest_email,
+        settings.VAYADA_OPS_EMAIL,
+    )
+    return settings.VAYADA_OPS_EMAIL
 
 
 async def send_booking_request_notification(hotel_email: str, booking: dict):
     """Notify host of new booking request with Accept/Reject actions."""
     subject, html_body = _render_request_status_email(booking, "pending")
-    await _send_to_host_and_ops(hotel_email, subject, html_body)
+    reply_to = _booking_request_reply_to(booking)
+    await _send_to_host_and_ops(hotel_email, subject, html_body, reply_to=reply_to)
 
 
 async def send_guest_booking_requested(guest_email: str, booking: dict):

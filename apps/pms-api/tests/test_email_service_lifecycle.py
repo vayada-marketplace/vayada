@@ -115,7 +115,7 @@ async def test_host_emails_cc_ops_recipients(sender, expected_headline):
     """Every host-facing lifecycle email must be CC'd to the Vayada ops list."""
     sent = []
 
-    async def fake_send(to, subject, html_body):
+    async def fake_send(to, subject, html_body, reply_to=None):
         sent.append((to, subject, html_body))
 
     with (
@@ -143,7 +143,7 @@ async def test_no_duplicate_when_host_email_matches_ops_email():
     """If the hotel contact_email is the same as an ops recipient, don't double-send."""
     sent = []
 
-    async def fake_send(to, subject, html_body):
+    async def fake_send(to, subject, html_body, reply_to=None):
         sent.append(to)
 
     with (
@@ -160,7 +160,7 @@ async def test_no_duplicate_when_host_email_matches_ops_email():
 async def test_missing_hotel_email_still_sends_to_ops():
     sent = []
 
-    async def fake_send(to, subject, html_body):
+    async def fake_send(to, subject, html_body, reply_to=None):
         sent.append(to)
 
     with (
@@ -171,3 +171,103 @@ async def test_missing_hotel_email_still_sends_to_ops():
 
     assert "" not in sent
     assert "ops@vayada.com" in sent
+
+
+# ── Reply-To on direct Booking Engine "New Booking Request" (VAY-502) ──
+
+
+@pytest.mark.asyncio
+async def test_booking_request_sets_reply_to_guest_email():
+    """Hitting Reply on the host notification must address the guest, not noreply@."""
+    sent = []
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, reply_to))
+
+    with (
+        patch.object(email_service, "_send_email", side_effect=fake_send),
+        patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"),
+    ):
+        await send_booking_request_notification("host@example.com", BOOKING)
+
+    # Every recipient (host + ops) gets Reply-To set to the guest.
+    assert sent, "no emails sent"
+    assert all(reply_to == "alice@example.com" for (_to, reply_to) in sent)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_email", [None, "", "   ", "not-an-email", "missing@nodot", "a b@c.com"])
+async def test_booking_request_falls_back_to_ops_when_guest_email_invalid(bad_email, caplog):
+    """Don't silently route Reply to noreply@ when the guest email is bad."""
+    sent = []
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, reply_to))
+
+    booking = {**BOOKING, "guest_email": bad_email}
+
+    with (
+        patch.object(email_service, "_send_email", side_effect=fake_send),
+        patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"),
+        caplog.at_level("WARNING", logger="app.services.email_service"),
+    ):
+        await send_booking_request_notification("host@example.com", booking)
+
+    assert sent, "no emails sent"
+    assert all(reply_to == "ops@vayada.com" for (_to, reply_to) in sent)
+    assert any("missing/invalid guest_email" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_other_host_lifecycle_emails_do_not_set_reply_to():
+    """Reply-To override is scoped to the pending notification only —
+    accepted/declined/cancelled/expired emails keep the default behavior."""
+    sent = []
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, reply_to))
+
+    with (
+        patch.object(email_service, "_send_email", side_effect=fake_send),
+        patch.object(email_service.settings, "VAYADA_OPS_EMAIL", "ops@vayada.com"),
+    ):
+        await send_host_booking_accepted("host@example.com", BOOKING)
+        await send_host_booking_rejected("host@example.com", BOOKING, reason="full")
+        await send_host_booking_withdrawn("host@example.com", BOOKING)
+        await send_host_booking_expired("host@example.com", BOOKING)
+        await send_host_guest_cancelled("host@example.com", BOOKING)
+
+    assert sent
+    assert all(reply_to is None for (_to, reply_to) in sent)
+
+
+@pytest.mark.asyncio
+async def test_send_email_writes_reply_to_header():
+    """The MIME message must carry a Reply-To header when one is provided."""
+    captured = {}
+
+    class _FakeAioSmtplib:
+        async def send(self, msg, **_kwargs):
+            captured["msg"] = msg
+
+    fake_module = _FakeAioSmtplib()
+
+    import sys
+
+    with (
+        patch.object(email_service.settings, "SMTP_HOST", "smtp.example.com"),
+        patch.object(email_service.settings, "SMTP_PORT", 587),
+        patch.object(email_service.settings, "SMTP_USERNAME", "u"),
+        patch.object(email_service.settings, "SMTP_PASSWORD", "p"),
+        patch.object(email_service.settings, "SMTP_USE_TLS", True),
+        patch.object(email_service.settings, "SMTP_FROM", "noreply@vayada.com"),
+        patch.dict(sys.modules, {"aiosmtplib": fake_module}),
+    ):
+        await email_service._send_email(
+            "host@example.com", "subj", "<p>body</p>", reply_to="guest@example.com"
+        )
+
+    msg = captured.get("msg")
+    assert msg is not None
+    assert msg["Reply-To"] == "guest@example.com"
+    assert msg["From"] == "noreply@vayada.com"
