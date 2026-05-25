@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  review_details: false
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+  path_filters:
+    - "!**/.next/**"
+    - "!**/coverage/**"
+    - "!**/htmlcov/**"
+    - "!**/.pytest_cache/**"
+    - "!**/.ruff_cache/**"
+    - "!**/node_modules/**"
+  path_instructions:
+    - path: "apps/*-api/**"
+      instructions: |
+        Review FastAPI changes for authentication, authorization, tenant isolation, input validation, migration safety, and async/database session correctness. Flag any schema change that lacks a migration plan.
+    - path: "apps/*-web/**"
+      instructions: |
+        Review Next.js changes for server/client component boundaries, API URL handling, auth redirects, accessibility, responsive behavior, and build-time type/import failures.
+    - path: "apps/*-admin/**"
+      instructions: |
+        Review admin app changes for permission checks, unsafe mutations, destructive actions, auditability, and clear failure states.
+    - path: "packages/**"
+      instructions: |
+        Shared package changes can affect multiple apps. Check API compatibility, exported types, environment assumptions, and whether affected consumers need validation.
+    - path: ".github/workflows/**"
+      instructions: |
+        Review CI/CD changes for path filters, required checks, secret handling, deployment safety, and whether production migrations are handled according to AGENTS.md.
+    - path: "docker-compose.yml"
+      instructions: |
+        Review local infrastructure changes for port conflicts, persistent volume impact, auth-db migration behavior, and compatibility with portless local development.
+
+chat:
+  auto_reply: true
