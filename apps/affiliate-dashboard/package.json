@@ -2,8 +2,11 @@
   "name": "vayada-affiliate-dashboard",
   "version": "0.1.0",
   "private": true,
+  "portless": {
+    "name": "affiliate"
+  },
   "scripts": {
-    "dev": "next dev -p 3005",
+    "dev": "next dev -p ${PORT:-3005}",
     "build": "next build",
     "start": "next start -p 3005",
     "lint": "eslint .",

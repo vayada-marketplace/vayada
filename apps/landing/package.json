@@ -2,8 +2,11 @@
   "name": "vayada-landing",
   "version": "0.1.0",
   "private": true,
+  "portless": {
+    "name": "landing"
+  },
   "scripts": {
-    "dev": "next dev -p 3006",
+    "dev": "next dev -p ${PORT:-3006}",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
