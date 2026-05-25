@@ -33,7 +33,7 @@ export const uploadService = {
     const formData = new FormData();
     formData.append("file", file);
 
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
     // Get token using the same method as apiClient
     let token: string | null = null;
@@ -98,7 +98,7 @@ export const uploadService = {
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
 
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
     // Get token using the same method as apiClient
     let token: string | null = null;
@@ -163,7 +163,7 @@ export const uploadService = {
     const formData = new FormData();
     formData.append("files", file);
 
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
     // Get token using the same method as apiClient
     let token: string | null = null;

@@ -2,7 +2,7 @@
  * Image upload service — uploads files to PMS backend via multipart form data.
  */
 
-const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_API_URL || "http://localhost:8002";
+const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
 
 export interface UploadedImage {
   url: string;

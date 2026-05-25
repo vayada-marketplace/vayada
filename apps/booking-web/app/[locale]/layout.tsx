@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
   if (!slug) return fallback;
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
   try {
     const res = await fetch(`${apiUrl}/api/hotels/${slug}`, { cache: "no-store" });
     if (!res.ok) return fallback;

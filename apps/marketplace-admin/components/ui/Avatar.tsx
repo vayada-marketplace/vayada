@@ -27,7 +27,7 @@ export function Avatar({ src, alt, name, className = "", size = "md" }: AvatarPr
     if (src && !src.startsWith("http") && !src.startsWith("data:")) {
       // If it starts with /, assume it needs API_URL prepended
       if (src.startsWith("/")) {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
         // Remove trailing slash from API URL if present and leading slash from src
         const cleanApiUrl = apiUrl.replace(/\/$/, "");
         setImgSrc(`${cleanApiUrl}${src}`);

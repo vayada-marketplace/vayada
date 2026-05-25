@@ -74,7 +74,7 @@ export const messagingService = {
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
     if (hotelId) headers["X-Hotel-Id"] = hotelId;
-    const baseUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "http://localhost:8002";
+    const baseUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
     const res = await fetch(`${baseUrl}/admin/messaging/threads/${threadId}/attachments`, {
       method: "POST",
       body: form,

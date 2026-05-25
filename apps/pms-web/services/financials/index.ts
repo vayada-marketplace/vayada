@@ -139,7 +139,7 @@ export const financialsService = {
 
   exportCsvUrl: (params?: { status?: InvoiceStatus; search?: string }) => {
     const qs = buildQueryString(params);
-    const base = process.env.NEXT_PUBLIC_PMS_API_URL || "http://localhost:8002";
+    const base = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
     return `${base}/admin/financials/invoices/export.csv${qs}`;
   },
 };

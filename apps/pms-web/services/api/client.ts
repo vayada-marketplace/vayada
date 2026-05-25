@@ -2,7 +2,7 @@
  * API client configuration
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "http://localhost:8001";
+const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.booking.localhost";
 
 export interface ApiError {
   detail:

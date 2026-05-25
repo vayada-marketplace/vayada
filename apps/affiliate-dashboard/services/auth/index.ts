@@ -6,7 +6,7 @@
 import { ApiClient } from "@/services/api/client";
 import { clearAuthData, getUserName, getUserType, isLoggedInHint, storeUser } from "./storage";
 
-const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "http://localhost:8001";
+const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.booking.localhost";
 
 const authClient = new ApiClient(AUTH_API_URL);
 

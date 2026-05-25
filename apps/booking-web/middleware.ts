@@ -4,7 +4,7 @@ import { routing } from "./i18n/routing";
 
 const intlMiddleware = createMiddleware(routing);
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 
 function isKnownSubdomain(hostname: string): boolean {
   // Matches *.booking.vayada.com or *.localhost (local dev)

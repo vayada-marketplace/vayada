@@ -12,7 +12,8 @@
  * The authenticated app (login, signup, marketplace, dashboards, …) is a
  * separate deployment on its own domain. Configurable per environment;
  * defaults to the production host. In local dev set
- * NEXT_PUBLIC_APP_URL=http://localhost:3000
+ * NEXT_PUBLIC_APP_URL=https://marketplace.localhost (portless) or
+ * http://localhost:3000 (plain-port).
  */
 export const APP_BASE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://app.vayada.com";
 

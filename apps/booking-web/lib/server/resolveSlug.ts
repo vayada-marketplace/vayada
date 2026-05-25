@@ -27,7 +27,7 @@ export async function resolveSlugFromHost(hostname: string): Promise<string | nu
   }
 
   // Custom domain — resolve via the booking-engine API.
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
   try {
     const res = await fetch(
       `${apiUrl}/api/resolve-domain?domain=${encodeURIComponent(host.split(":")[0])}`,
