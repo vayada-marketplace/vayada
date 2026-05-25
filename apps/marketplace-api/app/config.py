@@ -29,7 +29,9 @@ class Settings(BaseSettings):
     # CORS Configuration
     # Require explicit frontend origins in env (no baked-in default)
     CORS_ORIGINS: str = Field(..., description="Comma-separated allowed origins")
-    CORS_ORIGIN_REGEX: str = ""
+    # Default permits portless local-dev origins (https://*.localhost). Prod
+    # overrides via env to the explicit production origin regex.
+    CORS_ORIGIN_REGEX: str = r"^https://([^.]+\.)*localhost(:\d+)?$"
     CORS_ALLOW_CREDENTIALS: bool = True
     CORS_ALLOW_METHODS: str = "*"  # Comma-separated or "*" for all
     CORS_ALLOW_HEADERS: str = "*"  # Comma-separated or "*" for all

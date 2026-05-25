@@ -2,6 +2,9 @@
   "name": "vayada-creator-marketplace",
   "version": "0.1.0",
   "private": true,
+  "portless": {
+    "name": "marketplace"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
