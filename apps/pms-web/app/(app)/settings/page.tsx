@@ -9,6 +9,7 @@ import {
   GlobeAltIcon,
 } from "@heroicons/react/24/outline";
 import { bookingsService } from "@/services/bookings";
+import { channexService } from "@/services/channex";
 import { apiClient } from "@/services/api/client";
 import { pmsClient } from "@/services/api/pmsClient";
 import { useTranslation } from "@/lib/i18n";
@@ -72,6 +73,11 @@ export default function SettingsPage() {
   // Booking engine
   const [instantBook, setInstantBook] = useState(false);
   const [savingInstantBook, setSavingInstantBook] = useState(false);
+  const [sameDayBookingsEnabled, setSameDayBookingsEnabled] = useState(true);
+  const [sameDayBookingCutoffTime, setSameDayBookingCutoffTime] =
+    useState("18:00");
+  const [savingSameDay, setSavingSameDay] = useState(false);
+  const [channexConnected, setChannexConnected] = useState(false);
 
   // Calendar — VAY-397 auto-rearrange toggle
   const [autoRearrange, setAutoRearrange] = useState(true);
@@ -110,9 +116,20 @@ export default function SettingsPage() {
       .then((h) => {
         if (h.timezone) setTimezone(h.timezone);
         if (h.country) setCountry(h.country);
-        setInstantBook(Boolean(h.instant_book));
+        setInstantBook(Boolean(h.instant_book ?? h.instantBook));
+        setSameDayBookingsEnabled(
+          h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? true,
+        );
+        setSameDayBookingCutoffTime(
+          h.same_day_booking_cutoff_time ?? h.sameDayBookingCutoffTime ?? "18:00",
+        );
       })
       .catch(() => {});
+
+    channexService
+      .getStatus()
+      .then((status) => setChannexConnected(Boolean(status.isConnected)))
+      .catch(() => setChannexConnected(false));
 
     pmsClient
       .get<{ autoRearrangeEnabled: boolean }>("/admin/calendar-settings")
@@ -242,6 +259,37 @@ export default function SettingsPage() {
     }
   };
 
+  const saveSameDayBookingCutoff = async () => {
+    setSavingSameDay(true);
+    setError("");
+    setSuccess("");
+    try {
+      const payload = {
+        sameDayBookingsEnabled,
+        sameDayBookingCutoffTime: sameDayBookingsEnabled
+          ? sameDayBookingCutoffTime
+          : null,
+      };
+      const h = await pmsClient.patch<any>("/admin/hotel", payload);
+      setSameDayBookingsEnabled(
+        h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? sameDayBookingsEnabled,
+      );
+      setSameDayBookingCutoffTime(
+        h.same_day_booking_cutoff_time ?? h.sameDayBookingCutoffTime ?? "18:00",
+      );
+      setSuccess("Same-day booking cutoff saved");
+    } catch (err: any) {
+      setError(
+        humanizeApiError(
+          err,
+          "Couldn’t update same-day booking cutoff. Please try again.",
+        ),
+      );
+    } finally {
+      setSavingSameDay(false);
+    }
+  };
+
   const saveCurrency = async () => {
     setSavingCurrency(true);
     setError("");
@@ -314,6 +362,13 @@ export default function SettingsPage() {
         instantBook={instantBook}
         saving={savingInstantBook}
         onToggle={toggleInstantBook}
+        sameDayBookingsEnabled={sameDayBookingsEnabled}
+        sameDayBookingCutoffTime={sameDayBookingCutoffTime}
+        savingSameDay={savingSameDay}
+        channexConnected={channexConnected}
+        onSameDayEnabledChange={setSameDayBookingsEnabled}
+        onSameDayCutoffTimeChange={setSameDayBookingCutoffTime}
+        onSaveSameDay={saveSameDayBookingCutoff}
       />
 
       <CalendarSection

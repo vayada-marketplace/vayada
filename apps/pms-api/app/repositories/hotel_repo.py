@@ -25,6 +25,8 @@ _UPDATE_COLUMNS = {
     "latitude",
     "longitude",
     "instant_book",
+    "same_day_bookings_enabled",
+    "same_day_booking_cutoff_time",
     "last_minute_discount",
 }
 _JSONB_COLUMNS = {"last_minute_discount"}

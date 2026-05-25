@@ -253,7 +253,8 @@ async def get_payment_settings(slug: str):
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
 
     hotel = await Database.fetchrow(
-        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
+        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled, "
+        "same_day_bookings_enabled, same_day_booking_cutoff_time "
         "FROM hotels WHERE id = $1",
         hotel_id,
     )
@@ -305,6 +306,8 @@ async def get_payment_settings(slug: str):
         "specialRequestsEnabled": hotel["special_requests_enabled"] if hotel else True,
         "arrivalTimeEnabled": hotel["arrival_time_enabled"] if hotel else False,
         "guestCountEnabled": hotel["guest_count_enabled"] if hotel else False,
+        "sameDayBookingsEnabled": hotel["same_day_bookings_enabled"] if hotel else True,
+        "sameDayBookingCutoffTime": hotel["same_day_booking_cutoff_time"] if hotel else "18:00",
     }
 
     # Fetch pay-at-hotel methods, bank details, and policy texts from booking engine DB.

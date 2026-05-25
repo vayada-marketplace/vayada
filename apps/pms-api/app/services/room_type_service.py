@@ -7,6 +7,7 @@ from app.models.room_type import RoomTypeResponse
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.availability_service import remaining_for_stay
 from app.services.occupancy import room_allows_guest_mix
+from app.services.same_day_booking import is_same_day_booking_closed, property_today
 from app.utils import parse_jsonb
 
 logger = logging.getLogger(__name__)
@@ -58,15 +59,33 @@ async def get_rooms_for_guest(
     if not hotel_id:
         return []
 
-    # Load global benefits and last-minute discount config from hotel
+    # Load global benefits, property timezone, and booking rule config from hotel.
     hotel_row = await Database.fetchrow(
-        "SELECT benefits, last_minute_discount FROM hotels WHERE id = $1", hotel_id
+        "SELECT benefits, last_minute_discount, timezone, "
+        "same_day_bookings_enabled, same_day_booking_cutoff_time "
+        "FROM hotels WHERE id = $1",
+        hotel_id,
     )
     hotel_benefits = parse_jsonb(hotel_row["benefits"]) if hotel_row else []
     hotel_lm_config = None
     if hotel_row and hotel_row.get("last_minute_discount"):
         raw = hotel_row["last_minute_discount"]
         hotel_lm_config = json.loads(raw) if isinstance(raw, str) else raw
+    hotel_timezone = hotel_row.get("timezone") if hotel_row else None
+    today = property_today(hotel_timezone)
+    same_day_closed = bool(
+        check_in
+        and is_same_day_booking_closed(
+            check_in,
+            same_day_bookings_enabled=bool(
+                hotel_row.get("same_day_bookings_enabled", True) if hotel_row else True
+            ),
+            same_day_booking_cutoff_time=hotel_row.get("same_day_booking_cutoff_time")
+            if hotel_row
+            else None,
+            timezone=hotel_timezone,
+        )
+    )
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     result = []
@@ -85,13 +104,15 @@ async def get_rooms_for_guest(
         # Skip rooms that require more advance notice than available
         min_advance = room.get("minimum_advance_days") or 0
         if check_in and min_advance > 0:
-            days_until = (check_in - date.today()).days
+            days_until = (check_in - today).days
             if days_until < min_advance:
                 continue
 
         total = room["total_rooms"]
         if check_in and check_out:
-            if not RoomTypeRepository.is_date_in_operating_periods(room, check_in):
+            if same_day_closed or not RoomTypeRepository.is_date_in_operating_periods(
+                room, check_in
+            ):
                 remaining = 0
             else:
                 remaining = await remaining_for_stay(str(room["id"]), total, check_in, check_out)
@@ -129,7 +150,7 @@ async def get_rooms_for_guest(
         original_rate = None
         lm_discount_pct = None
         if check_in:
-            days_before = (check_in - date.today()).days
+            days_before = (check_in - today).days
             room_lm_raw = room.get("last_minute_discount")
             room_lm_config = None
             if room_lm_raw:
