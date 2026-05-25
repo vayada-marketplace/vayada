@@ -16,6 +16,7 @@ jobs:
   frontend:
     name: Frontend Typecheck, Lint, Build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -44,6 +45,7 @@ jobs:
   backend:
     name: Backend Tests (${{ matrix.app }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -192,6 +194,7 @@ jobs:
   required:
     name: Required Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs:
       - frontend
       - backend
