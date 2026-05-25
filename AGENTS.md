@@ -37,15 +37,15 @@ npm install -g portless                # requires Node 24+
 ./scripts/portless-setup.sh            # trusts local CA (sudo) + registers the FastAPI aliases
 ```
 
-`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings. The proxy binds port 443 and will auto-elevate with sudo the first time any app starts.
+`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
 
 ### Running apps
 
-| What                              | Command                                                                                |
-| --------------------------------- | -------------------------------------------------------------------------------------- |
-| Start every Next.js app at once   | `portless` from the repo root                                                          |
-| Start one Next.js app             | `cd apps/<name> && portless`                                                           |
-| Start a FastAPI backend           | `cd apps/<api> && uvicorn app.main:app --reload --port <P>` (P from the App map)       |
+| What                            | Command                                                                          |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| Start every Next.js app at once | `portless` from the repo root                                                    |
+| Start one Next.js app           | `cd apps/<name> && portless`                                                     |
+| Start a FastAPI backend         | `cd apps/<api> && uvicorn app.main:app --reload --port <P>` (P from the App map) |
 
 The Next.js apps register their portless name via a `"portless"` key in `apps/<name>/package.json`. The FastAPI apps run on their existing uvicorn ports (8000 / 8001 / 8002) and are reached at `https://api.<product>.localhost` thanks to the static aliases registered by `scripts/portless-setup.sh`.
 
@@ -57,7 +57,10 @@ The frontend API fallbacks (`process.env.NEXT_PUBLIC_*_URL || …`) default to t
 
 ### Multi-tenant subdomains (booking-web)
 
-`booking-web` extracts the hotel slug from the hostname (`<slug>.booking.localhost` → that hotel's booking page). This depends on portless forwarding arbitrary subdomains of `booking.localhost` to booking-web. If you need multi-tenant testing in dev, verify with one of your seed slugs first; if the proxy doesn't honor the wildcard, fall back to plain-port `<slug>.localhost:3002` until VAY-499's follow-up lands.
+`booking-web` extracts the hotel slug from the hostname (`<slug>.booking.localhost` → that hotel's booking page). portless does **not** forward arbitrary subdomains of a registered name — verified with curl against the v0.13 proxy: `https://booking.localhost` routes, but `https://acme.booking.localhost` returns a portless 404. Two workarounds:
+
+1. **Per-tenant alias** — `portless alias <slug>.booking 3002` for each hotel slug you want to hit. Confirmed working in the same curl test. Add the slugs you care about to your shell init or amend `scripts/portless-setup.sh` locally.
+2. **Plain-port fallback** — `cd apps/booking-web && npm run dev` and reach the tenant at `http://<slug>.localhost:3002` (the pre-portless path; booking-web's middleware reads `Host` regardless of port).
 
 ### Plain-port fallback
 
