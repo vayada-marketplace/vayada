@@ -126,17 +126,19 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 ## Shipping conventions
 
-- **Direct to `main`, no PRs.** Applies to small fixes _and_ ticket work. Never `gh pr create` / `gh pr merge` unless the user explicitly asks.
-- Commit with a descriptive message that explains what changed and why.
-- Push the working branch for review unless the user explicitly asks to ship to `main`.
+- **Protected `main`, PR-based workflow.** Do not commit directly to `main` for implementation work.
+- For each Linear implementation issue, create a branch linked to the issue, commit with a descriptive message, push the branch, and open a GitHub PR.
+- PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
+- CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
+- Merge with squash merge after required checks pass.
 - Do not reintroduce app submodules or submodule pointer commits.
 
 ## Linear workflow
 
 - Ticket → **In Progress** when implementation starts (via the `linear` MCP).
-- Ticket → **Done** when implementation is complete (default close-out — the agent owns the full lifecycle).
-- Ticket → **In Review** (optional) only when the agent wants explicit human review before closing — risky change, subjective acceptance criteria, low confidence.
-- Shipping/merging does **not** auto-transition any status. Move to `Done` because implementation is finished, not because code landed in `main`.
+- Ticket → **In Review** when the PR is opened and ready for CodeRabbit/human review.
+- Ticket → **Done** when implementation is merged and no required follow-up remains.
+- Shipping/merging does **not** auto-transition any status. Move to `Done` because implementation is merged and complete, not just because code landed in `main`.
 - If QA later finds an issue, the human reopens the ticket (back to `In Progress`) or opens a follow-up.
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.
