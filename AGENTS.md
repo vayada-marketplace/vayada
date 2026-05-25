@@ -8,20 +8,64 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                       | Stack      | Port |
-| -------------------------- | ---------- | ---- |
-| `apps/marketplace-api`     | FastAPI    | 8000 |
-| `apps/marketplace-web`     | Next.js 14 | 3000 |
-| `apps/marketplace-admin`   | Next.js 14 | 3001 |
-| `apps/booking-api`         | FastAPI    | 8001 |
-| `apps/booking-web`         | Next.js 14 | 3002 |
-| `apps/booking-admin`       | Next.js 14 | 3003 |
-| `apps/pms-api`             | FastAPI    | 8002 |
-| `apps/pms-web`             | Next.js 14 | 3004 |
-| `apps/affiliate-dashboard` | Next.js 14 | 3005 |
-| `apps/landing`             | Next.js 14 | 3006 |
+| Path                       | Stack      | Port | Local URL                             |
+| -------------------------- | ---------- | ---- | ------------------------------------- |
+| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost`   |
+| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`       |
+| `apps/marketplace-admin`   | Next.js 14 | 3001 | `https://admin.marketplace.localhost` |
+| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`       |
+| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`           |
+| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`     |
+| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`           |
+| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`               |
+| `apps/affiliate-dashboard` | Next.js 14 | 3005 | `https://affiliate.localhost`         |
+| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`           |
+
+Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
 `apps/landing` is the **public marketing/landing site**, split out of `apps/marketplace-web`. The marketplace frontend is the authenticated app only; its `/` redirects to `/login`. The marketing pages (home, `/booking-engine`, `/pms`, `/hotel-creator-network`, `/partner-program`, `/pricing`, about/contact/benefits, legal) live in `apps/landing`; `/hotel-creator-network` there fetches live creators/hotels from the marketplace API cross-origin. `/choose-product` stays in the marketplace frontend (auth-flow router off `/login`). The public chrome (`Navigation` / `Footer` / `LandingFooter`) is intentionally duplicated in both apps because app pages (`/hotels/[id]`, `/choose-product`, `/creators`, `/properties`) still use it. Deferred to a domain cutover: infra (ECR `vayada-landing` + service + DNS), domain topology, the app-root redirect target, the marketing `Navigation` links (still point at moved routes), and contact/HCN CORS on the marketplace backend.
+
+## Local dev — portless
+
+[portless](https://portless.sh) maps every app to a stable HTTPS URL on `*.localhost` (column 4 of the App map above). No port numbers to remember, no per-worktree port collisions, and frontends reach their backends via the same named URLs whether you're in the main tree or a worktree. **portless is the recommended local-dev workflow.** Plain `localhost:PORT` still works — see [Plain-port fallback](#plain-port-fallback) below.
+
+### One-time setup
+
+```bash
+nvm use                                # picks Node 24 from .nvmrc (use fnm/asdf if you prefer)
+npm install -g portless                # requires Node 24+
+./scripts/portless-setup.sh            # trusts local CA (sudo) + registers the FastAPI aliases
+```
+
+`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings. The proxy binds port 443 and will auto-elevate with sudo the first time any app starts.
+
+### Running apps
+
+| What                              | Command                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| Start every Next.js app at once   | `portless` from the repo root                                                          |
+| Start one Next.js app             | `cd apps/<name> && portless`                                                           |
+| Start a FastAPI backend           | `cd apps/<api> && uvicorn app.main:app --reload --port <P>` (P from the App map)       |
+
+The Next.js apps register their portless name via a `"portless"` key in `apps/<name>/package.json`. The FastAPI apps run on their existing uvicorn ports (8000 / 8001 / 8002) and are reached at `https://api.<product>.localhost` thanks to the static aliases registered by `scripts/portless-setup.sh`.
+
+The frontend API fallbacks (`process.env.NEXT_PUBLIC_*_URL || …`) default to the portless URLs, so a contributor running portless needs **no `.env.local` to talk to the right APIs**.
+
+### Worktrees
+
+`git worktree add /tmp/vayada-<branch> <branch>` then `cd /tmp/vayada-<branch>/apps/<name> && portless` automatically prefixes the worktree as a subdomain: `https://<branch>.<name>.localhost`. Worktrees on different branches don't collide.
+
+### Multi-tenant subdomains (booking-web)
+
+`booking-web` extracts the hotel slug from the hostname (`<slug>.booking.localhost` → that hotel's booking page). This depends on portless forwarding arbitrary subdomains of `booking.localhost` to booking-web. If you need multi-tenant testing in dev, verify with one of your seed slugs first; if the proxy doesn't honor the wildcard, fall back to plain-port `<slug>.localhost:3002` until VAY-499's follow-up lands.
+
+### Plain-port fallback
+
+Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000–3006), and uvicorn binds to 8000/8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
+
+### Pre-1.0 caveat
+
+portless is pre-1.0 (currently 0.13.x). Upgrades occasionally change the state-dir format; if `portless list` shows nothing or HTTPS suddenly fails, re-run `portless trust` and `./scripts/portless-setup.sh`.
 
 ## Per-stack commands
 
@@ -39,7 +83,7 @@ uvicorn app.main:app --reload --port <P> # P = port from table above
 ```bash
 cd apps/<web>
 npm install
-npm run dev      # bound to its own port
+npm run dev      # plain-port (3000–3006); use `portless` for HTTPS named URL — see Local dev
 npm run build    # always run before declaring a frontend change done
 npm run lint
 ```
