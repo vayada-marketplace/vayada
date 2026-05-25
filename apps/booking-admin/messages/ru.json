@@ -389,7 +389,6 @@
   "settings.tabs.notifications": "Уведомления",
   "settings.tabs.security": "Безопасность",
   "settings.tabs.billing": "Оплата",
-  "settings.tabs.integrations": "Интеграции",
   "settings.feedback.saveSuccess": "Настройки успешно сохранены",
   "settings.feedback.saveError": "Не удалось сохранить настройки",
   "settings.property.propertyInfo": "Информация об объекте",

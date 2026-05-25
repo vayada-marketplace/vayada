@@ -11,7 +11,6 @@ from app.routers.admin.benefits import router as benefits_router
 from app.routers.admin.custom_domain import router as custom_domain_router
 from app.routers.admin.dashboard import router as dashboard_router
 from app.routers.admin.design import router as design_router
-from app.routers.admin.integrations import router as integrations_router
 from app.routers.admin.profile import router as profile_router
 from app.routers.admin.promo_codes import router as promo_codes_router
 from app.routers.admin.settings import router as settings_router
@@ -32,4 +31,3 @@ router.include_router(superadmin_router)
 router.include_router(dashboard_router)
 router.include_router(benefits_router)
 router.include_router(promo_codes_router)
-router.include_router(integrations_router)

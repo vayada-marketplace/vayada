@@ -389,7 +389,6 @@
   "settings.tabs.notifications": "Notifications",
   "settings.tabs.security": "Sécurité",
   "settings.tabs.billing": "Facturation",
-  "settings.tabs.integrations": "Intégrations",
   "settings.feedback.saveSuccess": "Paramètres enregistrés avec succès",
   "settings.feedback.saveError": "Échec de l'enregistrement des paramètres",
   "settings.property.propertyInfo": "Informations sur l'établissement",

@@ -9,7 +9,6 @@ import {
   UserCircleIcon,
   CreditCardIcon,
   BanknotesIcon,
-  PuzzlePieceIcon,
   GlobeAltIcon,
   PhoneIcon,
   ChatBubbleLeftIcon,
@@ -24,7 +23,6 @@ import {
   type CustomDomainStatus,
 } from "@/services/settings";
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from "@/components/ui";
-import { LodgifyIntegrationPanel } from "@/components/settings/LodgifyIntegrationPanel";
 import { TotpSettings } from "@/components/settings/TotpSettings";
 import { CountrySelect } from "@/components/settings/CountrySelect";
 import {
@@ -41,15 +39,13 @@ import { useTranslation } from "@/lib/i18n";
 // - "payments" is new — Stripe Connect + Xendit moved out of billing into
 //   their own section (billing = what hotel pays Vayada; payments = how hotel
 //   collects from guests).
-// - Custom domain moved from "booking" into "integrations".
 type Section =
   | "property"
   | "booking"
   | "notifications"
   | "account"
   | "billing"
-  | "payments"
-  | "integrations";
+  | "payments";
 
 
 const DEFAULT_SETTINGS: PropertySettings = {
@@ -381,11 +377,6 @@ export default function SettingsPage() {
     { id: "account", label: "Account", icon: UserCircleIcon },
     { id: "billing", label: t("settings.tabs.billing"), icon: CreditCardIcon },
     { id: "payments", label: "Payments", icon: BanknotesIcon },
-    {
-      id: "integrations",
-      label: t("settings.tabs.integrations"),
-      icon: PuzzlePieceIcon,
-    },
   ];
 
   return (
@@ -1917,16 +1908,6 @@ export default function SettingsPage() {
         </SettingsSection>
       )}
 
-      {/* Integrations tab — third-party PMS connections (VAY-398) */}
-      {activeSection === "integrations" && (
-        <SettingsSection
-          id="integrations"
-          title={t("settings.tabs.integrations")}
-          description="Third-party connections, custom domain, and PMS sync."
-        >
-          <LodgifyIntegrationPanel />
-        </SettingsSection>
-      )}
     </SettingsLayout>
   );
 }
