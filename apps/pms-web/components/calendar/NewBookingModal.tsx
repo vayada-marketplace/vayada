@@ -32,19 +32,6 @@ const CHANNELS = [
 // Direct and Other are always offered regardless of channel-manager state.
 const ALWAYS_SHOWN_CHANNELS = new Set(["direct", "other"]);
 
-const MONTHS_SHORT = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-
-function parseLocalDate(iso: string): { day: string; month: string; year: string } | null {
-  if (!iso) return null;
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  return {
-    day: String(d).padStart(2, "0"),
-    month: MONTHS_SHORT[m - 1] ?? "",
-    year: String(y).slice(2),
-  };
-}
-
 // Returns the YYYY-MM-DD string one day after the given YYYY-MM-DD string.
 // Parsed as local date so DST / timezone doesn't shift the result.
 function addOneDay(date: string): string {
@@ -213,111 +200,91 @@ export default function NewBookingModal({
     }
   };
 
-  const ci = parseLocalDate(checkIn);
-  const co = parseLocalDate(checkOut);
+  const inputCls =
+    "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent";
+  const fieldLabelCls = "block text-xs font-medium text-gray-700 mb-1";
+  const sectionLabelCls =
+    "block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2";
+  const required = <span className="text-red-500 font-normal">*</span>;
 
   return (
     <Modal
       onClose={onClose}
       maxWidth="lg"
-      bleedBody
-      bleedFooter
       footer={
-        <div className="px-5 sm:px-8 py-4 bg-ivory bg-grain border-t border-hairline">
-          <div className="flex items-end justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-[10px] font-medium tracking-[0.2em] uppercase text-ash mb-0.5">
-                Folio total
-              </div>
-              {total !== null && selectedRoomType ? (
-                <>
-                  <div className="font-display text-[28px] sm:text-[32px] leading-none text-ink numerals">
-                    {formatCurrency(total, selectedRoomType.currency)}
-                  </div>
-                  <div className="mt-1 text-[10px] tracking-[0.16em] uppercase text-ash numerals">
-                    {nights} {nights === 1 ? "night" : "nights"} ·{" "}
-                    {formatCurrency(rateNum ?? 0, selectedRoomType.currency)}/nt
-                  </div>
-                </>
-              ) : (
-                <div className="font-display italic text-ash text-[15px] leading-none">
-                  Set dates &amp; rate to total
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-11 px-4 text-[13px] font-medium text-ash hover:text-ink transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                form="new-booking-form"
-                disabled={submitting}
-                className="h-11 px-5 text-[13px] font-semibold uppercase tracking-[0.14em] rounded-[2px] border border-ink bg-ink text-ivory hover:bg-[#2a2520] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {submitting ? "Filing…" : "Create reservation"}
-              </button>
-            </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-500 min-w-0">
+            {total !== null && selectedRoomType ? (
+              <>
+                <span className="text-gray-500">Total</span>{" "}
+                <span className="font-semibold text-gray-900 text-sm">
+                  {formatCurrency(total, selectedRoomType.currency)}
+                </span>
+                <span className="text-gray-400">
+                  {" · "}
+                  {nights} night{nights !== 1 ? "s" : ""}
+                </span>
+              </>
+            ) : (
+              <span className="text-gray-400">Pick dates and rate to see total</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              form="new-booking-form"
+              disabled={submitting}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting ? "Creating…" : "Create Booking"}
+            </button>
           </div>
         </div>
       }
     >
-      <form
-        id="new-booking-form"
-        onSubmit={handleSubmit}
-        className="bg-bone bg-grain font-sans text-ink min-h-full"
-      >
-        {/* Close — sits in the bleed area */}
+      {/* Header */}
+      <div className="flex items-start justify-between gap-4 mb-5">
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-gray-900">New Booking</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Manually create a reservation for walk-ins, phone bookings, or owner stays.
+          </p>
+        </div>
         <button
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="absolute top-3 right-3 w-9 h-9 rounded-full text-ash hover:text-ink hover:bg-hairline/50 flex items-center justify-center transition-colors z-10"
+          className="shrink-0 -mt-1 -mr-1 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex items-center justify-center transition-colors"
         >
-          <svg
-            className="w-4 h-4"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path strokeLinecap="round" d="M3 3l10 10M13 3L3 13" />
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
           </svg>
         </button>
+      </div>
 
-        <div className="px-6 sm:px-8 pt-9 pb-7">
-          {/* Eyebrow */}
-          <div className="flex items-baseline justify-between mb-5">
-            <div className="text-[10px] font-medium tracking-[0.22em] uppercase text-clay">
-              New reservation
-            </div>
-            <div className="text-[10px] tracking-[0.18em] uppercase text-ash numerals">
-              File · {new Date().toISOString().slice(0, 10)}
-            </div>
-          </div>
-
-          {/* Display headline */}
-          <h2 className="font-display text-[36px] sm:text-[44px] leading-[0.95] tracking-[-0.01em] text-ink">
-            Book a stay
-          </h2>
-          <p className="font-display italic text-[16px] text-ash mt-1.5 leading-snug">
-            on behalf of a guest.
-          </p>
-
-          {/* Section 01 — Stay */}
-          <Section index="01" label="Stay" />
-
-          <div className="mb-5">
-            <FieldLabel>Room</FieldLabel>
-            <div className="relative">
+      <form id="new-booking-form" onSubmit={handleSubmit} className="space-y-6">
+        {/* Stay */}
+        <section>
+          <h3 className={sectionLabelCls}>Stay</h3>
+          <div className="space-y-3">
+            <div>
+              <label className={fieldLabelCls}>Room {required}</label>
               <select
                 value={roomId}
                 onChange={(e) => handleRoomChange(e.target.value)}
-                className="w-full h-11 pl-0 pr-8 appearance-none bg-transparent border-0 border-b border-ink/80 text-[15px] text-ink focus:outline-none focus:border-clay transition-colors font-medium"
+                className={inputCls}
                 required
               >
                 {roomTypes.map((rt) => {
@@ -327,141 +294,156 @@ export default function NewBookingModal({
                     <optgroup key={rt.id} label={rt.name}>
                       {typeRooms.map((r) => (
                         <option key={r.id} value={r.id}>
-                          Room {r.roomNumber} — {rt.name}
+                          #{r.roomNumber} — {rt.name}
                         </option>
                       ))}
                     </optgroup>
                   );
                 })}
               </select>
-              <svg
-                className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-ash pointer-events-none"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              {selectedRoomType && (
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Sleeps {selectedRoomType.maxOccupancy} ·{" "}
+                  {formatCurrency(selectedRoomType.baseRate, selectedRoomType.currency)}/night base
+                </p>
+              )}
             </div>
-            {selectedRoomType && (
-              <div className="mt-2 flex items-baseline gap-2 text-[11px] text-ash numerals">
-                <span>Sleeps {selectedRoomType.maxOccupancy}</span>
-                <span className="w-1 h-1 rounded-full bg-hairline" />
-                <span>
-                  From{" "}
-                  <span className="text-ink font-medium">
-                    {formatCurrency(selectedRoomType.baseRate, selectedRoomType.currency)}
-                  </span>{" "}
-                  / night
-                </span>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={fieldLabelCls}>Check-in {required}</label>
+                <input
+                  type="date"
+                  value={checkIn}
+                  onChange={(e) => handleCheckInChange(e.target.value)}
+                  className={inputCls}
+                  required
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>Check-out {required}</label>
+                <input
+                  type="date"
+                  value={checkOut}
+                  onChange={(e) => setCheckOut(e.target.value)}
+                  className={inputCls}
+                  required
+                />
+              </div>
+            </div>
+            {nights > 0 && (
+              <p className="text-xs text-gray-500">
+                {nights} night{nights !== 1 ? "s" : ""}
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* Guest */}
+        <section>
+          <h3 className={sectionLabelCls}>Guest</h3>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={fieldLabelCls}>First name {required}</label>
+                <input
+                  type="text"
+                  value={guestFirstName}
+                  onChange={(e) => setGuestFirstName(e.target.value)}
+                  className={inputCls}
+                  required
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>Last name {required}</label>
+                <input
+                  type="text"
+                  value={guestLastName}
+                  onChange={(e) => setGuestLastName(e.target.value)}
+                  className={inputCls}
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={fieldLabelCls}>Email {required}</label>
+                <input
+                  type="email"
+                  value={guestEmail}
+                  onChange={(e) => setGuestEmail(e.target.value)}
+                  placeholder="guest@example.com"
+                  className={inputCls}
+                  required
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>Phone</label>
+                <input
+                  type="tel"
+                  value={guestPhone}
+                  onChange={(e) => setGuestPhone(e.target.value)}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={fieldLabelCls}>Adults</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={selectedRoomType?.maxOccupancy || 10}
+                  value={adults}
+                  onChange={(e) => setAdults(Math.max(1, Number(e.target.value)))}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={fieldLabelCls}>Children</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={children}
+                  onChange={(e) => setChildren(Math.max(0, Number(e.target.value)))}
+                  className={inputCls}
+                />
+              </div>
+            </div>
+            {overOccupancy && selectedRoomType && (
+              <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
+                <svg
+                  className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.168 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                <p className="text-xs text-amber-700">
+                  Max occupancy is {selectedRoomType.maxOccupancy} for this room type — you have{" "}
+                  {totalGuests} guests selected.
+                </p>
               </div>
             )}
           </div>
+        </section>
 
-          <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-3 sm:gap-4">
-            <DateField
-              label="Check-in"
-              value={checkIn}
-              parsed={ci}
-              onChange={handleCheckInChange}
-            />
-            <div className="flex flex-col items-center justify-center px-1 pt-5">
-              <div className="text-[10px] tracking-[0.2em] uppercase text-ash numerals mb-1">
-                {nights > 0 ? `${nights} ${nights === 1 ? "nt" : "nts"}` : "—"}
-              </div>
-              <svg
-                className="w-12 sm:w-16 text-hairline"
-                viewBox="0 0 80 8"
-                fill="none"
-                stroke="currentColor"
-              >
-                <path d="M0 4h70" strokeWidth={1} />
-                <path
-                  d="M64 1l6 3-6 3"
-                  strokeWidth={1}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            <DateField label="Check-out" value={checkOut} parsed={co} onChange={setCheckOut} />
-          </div>
-
-          {/* Section 02 — Guest */}
-          <Section index="02" label="Guest" />
-
-          <div className="grid grid-cols-2 gap-x-5 gap-y-5">
-            <UnderlineInput
-              label="First name"
-              value={guestFirstName}
-              onChange={setGuestFirstName}
-              required
-            />
-            <UnderlineInput
-              label="Last name"
-              value={guestLastName}
-              onChange={setGuestLastName}
-              required
-            />
-            <UnderlineInput
-              label="Email"
-              type="email"
-              value={guestEmail}
-              onChange={setGuestEmail}
-              placeholder="guest@example.com"
-              required
-            />
-            <UnderlineInput
-              label="Phone"
-              type="tel"
-              value={guestPhone}
-              onChange={setGuestPhone}
-              placeholder="+62 …"
-            />
-          </div>
-
-          <div className="mt-6 grid grid-cols-2 gap-px bg-hairline border border-hairline">
-            <OccupancyStepper
-              label="Adults"
-              value={adults}
-              min={1}
-              max={selectedRoomType?.maxOccupancy || 10}
-              onChange={setAdults}
-              over={overOccupancy}
-            />
-            <OccupancyStepper
-              label="Children"
-              value={children}
-              min={0}
-              max={10}
-              onChange={setChildren}
-              over={overOccupancy}
-            />
-          </div>
-          {overOccupancy && selectedRoomType && (
-            <div className="mt-3 flex items-baseline gap-3 border-l-2 border-clay pl-3 py-1">
-              <span className="text-[10px] tracking-[0.18em] uppercase text-clay font-semibold">
-                Note
-              </span>
-              <p className="text-[12px] text-ink leading-snug">
-                Max occupancy is {selectedRoomType.maxOccupancy} for this room type — you have{" "}
-                {totalGuests} guests selected.
-              </p>
-            </div>
-          )}
-
-          {/* Section 03 — Rate & channel */}
-          <Section index="03" label="Rate & channel" />
-
-          <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr] gap-5">
+        {/* Rate & channel */}
+        <section>
+          <h3 className={sectionLabelCls}>Rate & channel</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <FieldLabel>
+              <label className={fieldLabelCls}>
                 Nightly rate
                 {selectedRoomType ? (
-                  <span className="ml-1.5 text-ash/70 numerals">({selectedRoomType.currency})</span>
+                  <span className="text-gray-400 font-normal"> ({selectedRoomType.currency})</span>
                 ) : null}
-              </FieldLabel>
+              </label>
               <input
                 type="number"
                 min={0}
@@ -478,13 +460,13 @@ export default function NewBookingModal({
                       ? String(selectedRoomType.baseRate)
                       : ""
                 }
-                className="w-full h-11 px-0 bg-transparent border-0 border-b border-ink/80 font-display text-[24px] sm:text-[28px] text-ink numerals placeholder:text-ash/40 focus:outline-none focus:border-clay transition-colors"
+                className={inputCls}
               />
               {resolvedRate !== null && selectedRoomType ? (
-                <div className="mt-2 flex items-baseline justify-between gap-2 text-[11px]">
-                  <span className="text-ash numerals">
+                <div className="mt-1.5 flex items-center justify-between gap-2 text-xs">
+                  <span className="text-gray-500">
                     Engine quote{" "}
-                    <span className="text-ink font-medium">
+                    <span className="font-medium text-gray-700">
                       {formatCurrency(resolvedRate, selectedRoomType.currency)}
                     </span>
                   </span>
@@ -495,241 +477,69 @@ export default function NewBookingModal({
                         userEditedRate.current = false;
                         setNightlyRate(String(resolvedRate));
                       }}
-                      className="text-[10px] font-semibold tracking-[0.16em] uppercase text-ink hover:text-clay underline-offset-4 hover:underline transition-colors"
+                      className="text-xs font-medium text-primary-600 hover:text-primary-700 transition-colors"
                     >
                       Reset
                     </button>
                   )}
                 </div>
               ) : (
-                <p className="mt-2 text-[11px] text-ash font-display italic">
-                  Leave blank for the room type default.
+                <p className="mt-1.5 text-xs text-gray-500">
+                  Leave blank for room type default
                 </p>
               )}
             </div>
-
             <div>
-              <FieldLabel>Channel</FieldLabel>
-              <div className="relative">
-                <select
-                  value={channel}
-                  onChange={(e) => setChannel(e.target.value)}
-                  className="w-full h-11 pl-0 pr-8 appearance-none bg-transparent border-0 border-b border-ink/80 text-[15px] text-ink focus:outline-none focus:border-clay transition-colors font-medium"
-                >
-                  {visibleChannels.map((ch) => (
-                    <option key={ch.value} value={ch.value}>
-                      {ch.label}
-                    </option>
-                  ))}
-                </select>
-                <svg
-                  className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-ash pointer-events-none"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </div>
+              <label className={fieldLabelCls}>Channel</label>
+              <select
+                value={channel}
+                onChange={(e) => setChannel(e.target.value)}
+                className={inputCls}
+              >
+                {visibleChannels.map((ch) => (
+                  <option key={ch.value} value={ch.value}>
+                    {ch.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
+        </section>
 
-          {/* Section 04 — Notes */}
-          <Section index="04" label="Notes" meta={<span className="text-ash">optional</span>} />
+        {/* Notes */}
+        <section>
+          <h3 className={sectionLabelCls}>
+            Notes{" "}
+            <span className="text-gray-400 normal-case tracking-normal font-normal">
+              (optional)
+            </span>
+          </h3>
           <textarea
             value={specialRequests}
             onChange={(e) => setSpecialRequests(e.target.value)}
             rows={2}
             placeholder="Late check-in, extra crib, allergies…"
-            className="w-full px-0 py-2 bg-transparent border-0 border-b border-ink/80 text-[14px] text-ink placeholder:text-ash/60 placeholder:font-display placeholder:italic focus:outline-none focus:border-clay transition-colors resize-none leading-relaxed"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
           />
+        </section>
 
-          {error && (
-            <div className="mt-6 flex items-baseline gap-3 border-l-2 border-clay pl-3 py-1">
-              <span className="text-[10px] tracking-[0.18em] uppercase text-clay font-semibold">
-                Err
-              </span>
-              <p className="text-[13px] text-ink leading-snug">{error}</p>
-            </div>
-          )}
-        </div>
+        {error && (
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg">
+            <svg
+              className="w-4 h-4 text-red-500 shrink-0 mt-0.5"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <p className="text-sm text-red-700">{error}</p>
+          </div>
+        )}
       </form>
     </Modal>
-  );
-}
-
-/* ─────────────── Local primitives ─────────────── */
-
-function Section({
-  index,
-  label,
-  meta,
-}: {
-  index: string;
-  label: string;
-  meta?: React.ReactNode;
-}) {
-  return (
-    <div className="mt-9 mb-4 first:mt-10">
-      <div className="flex items-baseline gap-3">
-        <span className="font-display text-[13px] numerals text-clay">{index}</span>
-        <span className="text-[10px] font-semibold tracking-[0.24em] uppercase text-ink">
-          {label}
-        </span>
-        <span className="flex-1 h-px bg-hairline translate-y-[-2px]" />
-        {meta && <span className="text-[11px] text-ash">{meta}</span>}
-      </div>
-    </div>
-  );
-}
-
-function FieldLabel({
-  children,
-  className = "",
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <label
-      className={`block text-[10px] font-medium tracking-[0.2em] uppercase text-ash mb-2 ${className}`}
-    >
-      {children}
-    </label>
-  );
-}
-
-function UnderlineInput({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-  required,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  type?: string;
-  placeholder?: string;
-  required?: boolean;
-}) {
-  return (
-    <div>
-      <FieldLabel>{label}</FieldLabel>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        required={required}
-        className="w-full h-11 px-0 bg-transparent border-0 border-b border-ink/80 text-[15px] text-ink placeholder:text-ash/60 placeholder:font-display placeholder:italic focus:outline-none focus:border-clay transition-colors"
-      />
-    </div>
-  );
-}
-
-function DateField({
-  label,
-  value,
-  parsed,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  parsed: { day: string; month: string; year: string } | null;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div>
-      <FieldLabel>{label}</FieldLabel>
-      <div className="relative h-[88px] bg-ivory border border-ink/80 px-3.5 py-2.5 flex flex-col justify-between hover:border-clay focus-within:border-clay transition-colors">
-        {parsed ? (
-          <>
-            <span className="font-display text-[44px] sm:text-[52px] leading-none numerals text-ink">
-              {parsed.day}
-            </span>
-            <div className="flex items-baseline justify-between">
-              <span className="text-[10px] font-semibold tracking-[0.2em] uppercase text-ink numerals">
-                {parsed.month}
-              </span>
-              <span className="text-[10px] tracking-[0.16em] uppercase text-ash numerals">
-                ’{parsed.year}
-              </span>
-            </div>
-          </>
-        ) : (
-          <>
-            <span className="font-display italic text-[30px] sm:text-[36px] leading-none text-ash">
-              Select
-            </span>
-            <span className="text-[10px] tracking-[0.2em] uppercase text-ash">Pick a date</span>
-          </>
-        )}
-        <input
-          type="date"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="date-overlay"
-          required
-          aria-label={label}
-        />
-      </div>
-    </div>
-  );
-}
-
-function OccupancyStepper({
-  label,
-  value,
-  min,
-  max,
-  onChange,
-  over,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  onChange: (next: number) => void;
-  over?: boolean;
-}) {
-  const dec = () => onChange(Math.max(min, value - 1));
-  const inc = () => onChange(Math.min(max, value + 1));
-  return (
-    <div className={`bg-ivory ${over ? "ring-1 ring-clay/40" : ""}`}>
-      <div className="flex items-baseline justify-between px-3.5 pt-3 pb-1">
-        <span className="text-[10px] font-medium tracking-[0.2em] uppercase text-ash">{label}</span>
-        <span className="text-[9px] tracking-[0.16em] uppercase text-ash numerals">max {max}</span>
-      </div>
-      <div className="flex items-center justify-between px-2 pb-2">
-        <button
-          type="button"
-          onClick={dec}
-          disabled={value <= min}
-          aria-label={`Decrease ${label.toLowerCase()}`}
-          className="h-10 w-10 flex items-center justify-center text-ink disabled:text-hairline hover:text-clay disabled:hover:text-hairline transition-colors"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path d="M2 6h8" strokeLinecap="round" />
-          </svg>
-        </button>
-        <span className="font-display text-[32px] leading-none numerals text-ink min-w-[24px] text-center">
-          {value}
-        </span>
-        <button
-          type="button"
-          onClick={inc}
-          disabled={value >= max}
-          aria-label={`Increase ${label.toLowerCase()}`}
-          className="h-10 w-10 flex items-center justify-center text-ink disabled:text-hairline hover:text-clay disabled:hover:text-hairline transition-colors"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={1.5}>
-            <path d="M6 2v8M2 6h8" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
-    </div>
   );
 }

@@ -14,30 +14,9 @@ interface ModalProps {
    * the action buttons sit within comfortable thumb reach.
    */
   footer?: ReactNode;
-  /**
-   * When true, the built-in 1px top border + padding around the footer are
-   * dropped so the consumer can render its own surface that bleeds to the
-   * panel edges (the calendar modals use this to extend their bone surface
-   * + custom hairline rule across the action bar).
-   */
-  bleedFooter?: boolean;
-  /**
-   * When true, the body's default p-6 is dropped so the consumer can paint
-   * the entire panel interior — including the area normally reserved for
-   * the title/close. The calendar modals use this so their warm surface
-   * extends edge-to-edge.
-   */
-  bleedBody?: boolean;
 }
 
-export default function Modal({
-  onClose,
-  maxWidth = "md",
-  children,
-  footer,
-  bleedFooter = false,
-  bleedBody = false,
-}: ModalProps) {
+export default function Modal({ onClose, maxWidth = "md", children, footer }: ModalProps) {
   const maxWidthClass =
     maxWidth === "xl" ? "max-w-2xl" : maxWidth === "lg" ? "max-w-lg" : "max-w-md";
 
@@ -49,15 +28,12 @@ export default function Modal({
     ? `h-[100dvh] w-full rounded-none sm:h-auto sm:max-h-[90dvh] sm:w-full sm:rounded-xl sm:mx-4 ${maxWidthClass}`
     : `w-full mx-4 rounded-xl max-h-[90dvh] ${maxWidthClass}`;
 
-  const bodyCls = bleedBody ? "flex-1 min-h-0 overflow-y-auto" : "flex-1 min-h-0 overflow-y-auto p-6";
-  const footerWrapCls = bleedFooter ? "shrink-0" : "shrink-0 border-t border-gray-100 p-4 sm:px-6";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className={`relative bg-white shadow-xl flex flex-col overflow-hidden ${panelSizing}`}>
-        <div className={bodyCls}>{children}</div>
-        {footer && <div className={footerWrapCls}>{footer}</div>}
+      <div className={`relative bg-white shadow-xl flex flex-col ${panelSizing}`}>
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">{children}</div>
+        {footer && <div className="shrink-0 border-t border-gray-100 p-4 sm:px-6">{footer}</div>}
       </div>
     </div>
   );

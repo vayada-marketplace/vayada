@@ -20,19 +20,6 @@ module.exports = {
           800: "#0F2095",
           900: "#081172",
         },
-        // Warm editorial palette used by the PMS calendar modals.
-        // Paper colors are slightly off-white so ink-black headlines and
-        // hairline rules read as printed type rather than UI chrome.
-        bone: "#F6F1E7",
-        ivory: "#FBF8F1",
-        ink: "#1A1714",
-        ash: "#6E665A",
-        hairline: "#E5DDCC",
-        clay: "#B8462C",
-      },
-      fontFamily: {
-        display: ["var(--font-display)", "ui-serif", "Georgia", "serif"],
-        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
       },
     },
   },
