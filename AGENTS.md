@@ -37,7 +37,7 @@ npm install -g portless                # requires Node 24+
 ./scripts/portless-setup.sh            # trusts local CA (sudo) + registers the FastAPI aliases
 ```
 
-`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
+`portless trust` adds the local CA to your system trust store so browsers don't show TLS warnings (may prompt for sudo on first run). The proxy then binds **port 443** and requires sudo to do so — accept the prompt when launching an app for the first time. If you skip sudo, portless falls back to **port 1355** and all URLs become `https://<name>.localhost:1355`; functional but loses the "clean URL" payoff. The checked-in frontend defaults assume port 443, so when you are on the 1355 fallback you must override API URLs with the explicit port, e.g. `NEXT_PUBLIC_API_URL=https://api.marketplace.localhost:1355`. To recover, stop the proxy and re-run `portless proxy start` accepting the sudo prompt, or install the proxy as a launch-time service: `portless service install`.
 
 ### Running apps
 
