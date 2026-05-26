@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { Addon } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { useHotel } from "@/contexts/HotelContext";
 
 interface AddonDetailModalProps {
   addon: Addon;
@@ -31,6 +32,7 @@ export default function AddonDetailModal({
 }: AddonDetailModalProps) {
   const [imgIndex, setImgIndex] = useState(0);
   const { formatPrice } = useCurrency();
+  const { hotel } = useHotel();
   const t = useTranslations("addons");
 
   if (!open) return null;
@@ -236,7 +238,7 @@ export default function AddonDetailModal({
                   : t("priceLabel")}
             </p>
             <p className="text-2xl font-bold text-gray-900">
-              {formatPrice(addon.price, addon.currency)}
+              {formatPrice(addon.price, hotel?.currency || "EUR")}
             </p>
           </div>
           <button

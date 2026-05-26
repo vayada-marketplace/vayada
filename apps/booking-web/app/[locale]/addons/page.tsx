@@ -190,7 +190,7 @@ export default function AddonsPage() {
                   <p className="text-sm text-gray-500 mb-4 line-clamp-2">{addon.description}</p>
                   <div className="flex items-center justify-between">
                     <p className="text-lg font-bold text-gray-900">
-                      {formatPrice(addon.price, addon.currency)}
+                      {formatPrice(addon.price, hotel?.currency || "EUR")}
                       {addon.perNight && (
                         <span className="text-xs font-normal text-gray-500"> {tc("perDay")}</span>
                       )}
@@ -376,7 +376,7 @@ export default function AddonsPage() {
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
                         <p className="text-sm font-bold text-gray-900">
-                          {formatPrice(computedPrice, addon.currency)}
+                          {formatPrice(computedPrice, hotel?.currency || "EUR")}
                         </p>
                         <button
                           onClick={() => toggleAddon(addon.id)}
@@ -413,7 +413,7 @@ export default function AddonsPage() {
                     const count = selections[addon.id] ?? 1;
                     const dates = selectedDates[addon.id] ?? [];
                     const linePrice = addon.price * computeMultiplier(addon, count, dates);
-                    total += convertAndRound(linePrice, addon.currency);
+                    total += convertAndRound(linePrice, hotel?.currency || "EUR");
                   }
                   return formatPrice(total, selectedCurrency);
                 })()}
