@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { roomsService, RoomType } from "@/services/rooms";
 import { bookingsService, Booking, BookingAdditionalGuest } from "@/services/bookings";
@@ -450,15 +451,17 @@ function ArrivalQuickView({
 }) {
   const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
   const due = isPaid(booking) ? 0 : booking.totalAmount;
-  return (
-    <div className="fixed inset-0 z-50 bg-gray-950/30" role="dialog" aria-modal="true">
-      <button
-        type="button"
-        aria-label="Close arrival quick view"
-        className="absolute inset-0"
-        onClick={onClose}
-      />
-      <aside className="absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-y-auto rounded-t-2xl bg-white shadow-2xl md:inset-x-auto md:bottom-auto md:right-6 md:top-24 md:w-[420px] md:rounded-2xl">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/30 md:items-center"
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+    >
+      <aside
+        className="w-full max-h-[92dvh] overflow-y-auto rounded-t-2xl bg-white shadow-2xl md:w-[420px] md:max-h-[90dvh] md:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="sticky top-0 flex items-start justify-between gap-4 border-b border-gray-100 bg-white p-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
@@ -537,7 +540,8 @@ function ArrivalQuickView({
           </div>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body
   );
 }
 
