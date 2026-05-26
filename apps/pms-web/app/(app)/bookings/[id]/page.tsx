@@ -1317,6 +1317,23 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
 
+          {/* Add-ons sub-section (only if any) */}
+          {addonRows.length > 0 && (
+            <div className="mb-6">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                Add-ons
+              </p>
+              <div className="space-y-1.5 text-sm">
+                {addonRows.map((row) => (
+                  <div key={row.addonId} className="flex justify-between text-gray-700">
+                    <span>{row.name}</span>
+                    {row.qty && <span className="text-gray-500">{row.qty} × stay</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Pricing sub-section */}
           <div className="mb-6">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
@@ -1415,22 +1432,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
 
-          {/* Add-ons sub-section (only if any) */}
-          {addonRows.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Add-ons
-              </p>
-              <div className="space-y-1.5 text-sm">
-                {addonRows.map((row) => (
-                  <div key={row.addonId} className="flex justify-between text-gray-700">
-                    <span>{row.name}</span>
-                    {row.qty && <span className="text-gray-500">{row.qty} × stay</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* 3. Guest information · booker */}
