@@ -41,6 +41,18 @@ def test_same_day_cutoff_blocks_after_selected_time():
     )
 
 
+def test_same_day_cutoff_blocks_after_boundary_second():
+    now = datetime(2026, 5, 25, 18, 0, 1, tzinfo=ZoneInfo("Europe/Berlin"))
+
+    assert is_same_day_booking_closed(
+        now.date(),
+        same_day_bookings_enabled=True,
+        same_day_booking_cutoff_time="18:00",
+        timezone="Europe/Berlin",
+        now=now,
+    )
+
+
 def test_same_day_cutoff_allows_at_boundary():
     now = datetime(2026, 5, 25, 18, 0, tzinfo=ZoneInfo("Europe/Berlin"))
 
