@@ -13,10 +13,7 @@ import { channexService } from "@/services/channex";
 import { apiClient } from "@/services/api/client";
 import { pmsClient } from "@/services/api/pmsClient";
 import { useTranslation } from "@/lib/i18n";
-import {
-  SettingsLayout,
-  type SettingsNavSection,
-} from "@/components/settings/layout";
+import { SettingsLayout, type SettingsNavSection } from "@/components/settings/layout";
 import { PropertySection } from "@/components/settings/PropertySection";
 import { BookingEngineSection } from "@/components/settings/BookingEngineSection";
 import { CalendarSection } from "@/components/settings/CalendarSection";
@@ -74,14 +71,19 @@ export default function SettingsPage() {
   const [instantBook, setInstantBook] = useState(false);
   const [savingInstantBook, setSavingInstantBook] = useState(false);
   const [sameDayBookingsEnabled, setSameDayBookingsEnabled] = useState(true);
-  const [sameDayBookingCutoffTime, setSameDayBookingCutoffTime] =
-    useState("18:00");
+  const [sameDayBookingCutoffTime, setSameDayBookingCutoffTime] = useState("18:00");
   const [savingSameDay, setSavingSameDay] = useState(false);
   const [channexConnected, setChannexConnected] = useState(false);
 
   // Calendar — VAY-397 auto-rearrange toggle
   const [autoRearrange, setAutoRearrange] = useState(true);
   const [savingAutoRearrange, setSavingAutoRearrange] = useState(false);
+  const [autoOpenEnabled, setAutoOpenEnabled] = useState(false);
+  const [autoOpenMode, setAutoOpenMode] = useState<"rolling" | "fixed">("rolling");
+  const [autoOpenMonths, setAutoOpenMonths] = useState<12 | 18 | 24>(18);
+  const [autoOpenFixedMonth, setAutoOpenFixedMonth] = useState("");
+  const [autoOpenThrough, setAutoOpenThrough] = useState<string | null>(null);
+  const [autoOpenWarnings, setAutoOpenWarnings] = useState<string[]>([]);
 
   useEffect(() => {
     bookingsService
@@ -117,9 +119,7 @@ export default function SettingsPage() {
         if (h.timezone) setTimezone(h.timezone);
         if (h.country) setCountry(h.country);
         setInstantBook(Boolean(h.instant_book ?? h.instantBook));
-        setSameDayBookingsEnabled(
-          h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? true,
-        );
+        setSameDayBookingsEnabled(h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? true);
         setSameDayBookingCutoffTime(
           h.same_day_booking_cutoff_time ?? h.sameDayBookingCutoffTime ?? "18:00",
         );
@@ -132,8 +132,24 @@ export default function SettingsPage() {
       .catch(() => setChannexConnected(false));
 
     pmsClient
-      .get<{ autoRearrangeEnabled: boolean }>("/admin/calendar-settings")
-      .then((s) => setAutoRearrange(Boolean(s.autoRearrangeEnabled)))
+      .get<{
+        autoRearrangeEnabled: boolean;
+        autoOpenEnabled: boolean;
+        autoOpenMode: "rolling" | "fixed";
+        autoOpenMonths: 12 | 18 | 24;
+        autoOpenFixedMonth: string | null;
+        autoOpenThrough: string | null;
+        autoOpenWarnings: string[];
+      }>("/admin/calendar-settings")
+      .then((s) => {
+        setAutoRearrange(Boolean(s.autoRearrangeEnabled));
+        setAutoOpenEnabled(Boolean(s.autoOpenEnabled));
+        setAutoOpenMode(s.autoOpenMode || "rolling");
+        setAutoOpenMonths(s.autoOpenMonths || 18);
+        setAutoOpenFixedMonth(s.autoOpenFixedMonth?.slice(0, 7) || "");
+        setAutoOpenThrough(s.autoOpenThrough || null);
+        setAutoOpenWarnings(s.autoOpenWarnings || []);
+      })
       .catch(() => {});
   }, []);
 
@@ -224,11 +240,45 @@ export default function SettingsPage() {
       );
     } catch (err: any) {
       setAutoRearrange(previous);
+      setError(humanizeApiError(err, "Couldn’t update auto-rearrange setting. Please try again."));
+    } finally {
+      setSavingAutoRearrange(false);
+    }
+  };
+
+  const saveAutoOpen = async () => {
+    setSavingAutoRearrange(true);
+    setError("");
+    setSuccess("");
+    try {
+      const payload: Record<string, unknown> = {
+        autoOpenEnabled,
+        autoOpenMode,
+        autoOpenMonths,
+      };
+      if (autoOpenMode === "fixed" && /^\d{4}-\d{2}$/.test(autoOpenFixedMonth)) {
+        payload.autoOpenFixedMonth = `${autoOpenFixedMonth}-01`;
+      }
+      const saved = await pmsClient.patch<{
+        autoOpenEnabled: boolean;
+        autoOpenMode: "rolling" | "fixed";
+        autoOpenMonths: 12 | 18 | 24;
+        autoOpenFixedMonth: string | null;
+        autoOpenThrough: string | null;
+        autoOpenWarnings: string[];
+      }>("/admin/calendar-settings", payload);
+      setAutoOpenEnabled(Boolean(saved.autoOpenEnabled));
+      setAutoOpenMode(saved.autoOpenMode || "rolling");
+      setAutoOpenMonths(saved.autoOpenMonths || 18);
+      setAutoOpenFixedMonth(saved.autoOpenFixedMonth?.slice(0, 7) || "");
+      setAutoOpenThrough(saved.autoOpenThrough || null);
+      setAutoOpenWarnings(saved.autoOpenWarnings || []);
+      setSuccess(
+        saved.autoOpenEnabled ? "Calendar auto-open settings saved" : "Calendar auto-open disabled",
+      );
+    } catch (err: any) {
       setError(
-        humanizeApiError(
-          err,
-          "Couldn’t update auto-rearrange setting. Please try again.",
-        ),
+        humanizeApiError(err, "Couldn’t update calendar auto-open settings. Please try again."),
       );
     } finally {
       setSavingAutoRearrange(false);
@@ -243,9 +293,7 @@ export default function SettingsPage() {
     setInstantBook(next);
     try {
       await pmsClient.patch("/admin/hotel", { instant_book: next });
-      setSuccess(
-        next ? "Instant booking enabled" : "Booking requests re-enabled",
-      );
+      setSuccess(next ? "Instant booking enabled" : "Booking requests re-enabled");
     } catch (err: any) {
       setInstantBook(previous);
       setError(
@@ -266,9 +314,7 @@ export default function SettingsPage() {
     try {
       const payload = {
         sameDayBookingsEnabled,
-        sameDayBookingCutoffTime: sameDayBookingsEnabled
-          ? sameDayBookingCutoffTime
-          : null,
+        sameDayBookingCutoffTime: sameDayBookingsEnabled ? sameDayBookingCutoffTime : null,
       };
       const h = await pmsClient.patch<any>("/admin/hotel", payload);
       setSameDayBookingsEnabled(
@@ -279,12 +325,7 @@ export default function SettingsPage() {
       );
       setSuccess("Same-day booking cutoff saved");
     } catch (err: any) {
-      setError(
-        humanizeApiError(
-          err,
-          "Couldn’t update same-day booking cutoff. Please try again.",
-        ),
-      );
+      setError(humanizeApiError(err, "Couldn’t update same-day booking cutoff. Please try again."));
     } finally {
       setSavingSameDay(false);
     }
@@ -373,8 +414,19 @@ export default function SettingsPage() {
 
       <CalendarSection
         autoRearrange={autoRearrange}
+        autoOpenEnabled={autoOpenEnabled}
+        autoOpenMode={autoOpenMode}
+        autoOpenMonths={autoOpenMonths}
+        autoOpenFixedMonth={autoOpenFixedMonth}
+        autoOpenThrough={autoOpenThrough}
+        autoOpenWarnings={autoOpenWarnings}
         saving={savingAutoRearrange}
         onToggle={toggleAutoRearrange}
+        onAutoOpenEnabledChange={setAutoOpenEnabled}
+        onAutoOpenModeChange={setAutoOpenMode}
+        onAutoOpenMonthsChange={setAutoOpenMonths}
+        onAutoOpenFixedMonthChange={setAutoOpenFixedMonth}
+        onSaveAutoOpen={saveAutoOpen}
       />
 
       <CheckInOutSection

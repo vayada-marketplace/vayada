@@ -27,7 +27,7 @@ export interface CalendarBooking {
   guestLastName: string;
   checkIn: string;
   checkOut: string;
-  status: "pending" | "confirmed";
+  status: "pending" | "confirmed" | "checked_in" | "in_house";
   roomId: string | null;
   roomNumber: string | null;
   channel: string;

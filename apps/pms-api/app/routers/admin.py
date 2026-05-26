@@ -22,6 +22,7 @@ from app.models.hotel import (
 from app.repositories.channex_mapping_repo import ChannexConnectionRepository
 from app.repositories.hotel_repo import HotelRepository
 from app.services import channex_service, hotel_identity_service
+from app.services.calendar_auto_open_service import apply_auto_open_for_hotel, collect_rate_warnings
 from app.utils import get_hotel_id, parse_jsonb
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,22 @@ async def _sync_same_day_cutoff_to_channex(hotel_id: str, data: dict) -> None:
         api_key,
         str(conn["channex_property_id"]),
         {"settings": settings_payload},
+    )
+
+
+def _calendar_settings_response(
+    row: dict, warnings: list[str] | None = None
+) -> CalendarSettingsResponse:
+    return CalendarSettingsResponse(
+        auto_rearrange_enabled=True
+        if row.get("auto_rearrange_enabled") is None
+        else bool(row.get("auto_rearrange_enabled")),
+        auto_open_enabled=bool(row.get("calendar_auto_open_enabled", False)),
+        auto_open_mode=row.get("calendar_auto_open_mode") or "rolling",
+        auto_open_months=int(row.get("calendar_auto_open_months") or 18),
+        auto_open_fixed_month=row.get("calendar_auto_open_fixed_month"),
+        auto_open_through=row.get("calendar_auto_open_through"),
+        auto_open_warnings=warnings or [],
     )
 
 
@@ -212,13 +229,9 @@ async def update_hotel(
         if "same_day_bookings_enabled" in data:
             data["same_day_bookings_enabled"] = same_day_data["same_day_bookings_enabled"]
         if "sameDayBookingCutoffTime" in data:
-            data["same_day_booking_cutoff_time"] = same_day_data[
-                "same_day_booking_cutoff_time"
-            ]
+            data["same_day_booking_cutoff_time"] = same_day_data["same_day_booking_cutoff_time"]
         if "same_day_booking_cutoff_time" in data:
-            data["same_day_booking_cutoff_time"] = same_day_data[
-                "same_day_booking_cutoff_time"
-            ]
+            data["same_day_booking_cutoff_time"] = same_day_data["same_day_booking_cutoff_time"]
 
     row = await HotelRepository.update_fields(hotel_id, data)
     if not row:
@@ -417,10 +430,17 @@ async def update_guest_form_settings(
 
 @router.get("/calendar-settings", response_model=CalendarSettingsResponse)
 async def get_calendar_settings(user_id: str = Depends(require_hotel_admin)):
-    """Per-hotel calendar settings — currently just the VAY-397 toggle."""
+    """Per-hotel calendar behavior settings."""
     hotel_id = await get_hotel_id(user_id)
-    enabled = await HotelRepository.get_auto_rearrange_enabled(hotel_id)
-    return CalendarSettingsResponse(auto_rearrange_enabled=enabled)
+    row = await HotelRepository.get_calendar_settings(hotel_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+    warnings = await collect_rate_warnings(
+        hotel_id,
+        row.get("calendar_auto_open_through"),
+        row.get("timezone"),
+    )
+    return _calendar_settings_response(row, warnings)
 
 
 @router.patch("/calendar-settings", response_model=CalendarSettingsResponse)
@@ -429,5 +449,60 @@ async def update_calendar_settings(
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)
-    await HotelRepository.set_auto_rearrange_enabled(hotel_id, data.auto_rearrange_enabled)
-    return CalendarSettingsResponse(auto_rearrange_enabled=data.auto_rearrange_enabled)
+    updates = data.model_dump(exclude_unset=True)
+    db_updates = {}
+    if "auto_rearrange_enabled" in updates:
+        db_updates["auto_rearrange_enabled"] = updates["auto_rearrange_enabled"]
+    if "auto_open_enabled" in updates:
+        db_updates["calendar_auto_open_enabled"] = updates["auto_open_enabled"]
+    if "auto_open_mode" in updates:
+        db_updates["calendar_auto_open_mode"] = updates["auto_open_mode"]
+    if "auto_open_months" in updates:
+        db_updates["calendar_auto_open_months"] = updates["auto_open_months"]
+    if "auto_open_fixed_month" in updates:
+        fixed = updates["auto_open_fixed_month"]
+        db_updates["calendar_auto_open_fixed_month"] = fixed.replace(day=1) if fixed else None
+
+    current = await HotelRepository.get_calendar_settings(hotel_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    next_enabled = db_updates.get(
+        "calendar_auto_open_enabled", current.get("calendar_auto_open_enabled", False)
+    )
+    next_mode = db_updates.get(
+        "calendar_auto_open_mode", current.get("calendar_auto_open_mode") or "rolling"
+    )
+    next_fixed_month = db_updates.get(
+        "calendar_auto_open_fixed_month", current.get("calendar_auto_open_fixed_month")
+    )
+    if next_enabled and next_mode == "fixed" and not next_fixed_month:
+        raise HTTPException(status_code=400, detail="Fixed auto-open requires a target month")
+
+    auto_open_fields = {
+        "calendar_auto_open_enabled",
+        "calendar_auto_open_mode",
+        "calendar_auto_open_months",
+        "calendar_auto_open_fixed_month",
+    }
+    auto_open_fields_changed = any(
+        key in db_updates and db_updates[key] != current.get(key) for key in auto_open_fields
+    )
+
+    row = await HotelRepository.update_calendar_settings(hotel_id, db_updates)
+    warnings: list[str] = []
+    if next_enabled and auto_open_fields_changed:
+        applied = await apply_auto_open_for_hotel(hotel_id)
+        row = await HotelRepository.get_calendar_settings(hotel_id)
+        warnings = applied.warnings
+    elif row:
+        warnings = await collect_rate_warnings(
+            hotel_id,
+            row.get("calendar_auto_open_through"),
+            row.get("timezone"),
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    return _calendar_settings_response(row, warnings)

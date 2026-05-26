@@ -1,5 +1,7 @@
 import json
 
+from asyncpg import Connection
+
 from app.database import Database
 
 
@@ -12,8 +14,10 @@ class BookingEventRepository:
         event_type: str,
         payload: dict,
         actor_user_id: str | None = None,
+        conn: Connection | None = None,
     ) -> dict:
-        row = await Database.fetchrow(
+        executor = conn or Database
+        row = await executor.fetchrow(
             """
             INSERT INTO booking_events (
                 booking_id, hotel_id, event_type, payload, actor_user_id

@@ -4,8 +4,10 @@ from datetime import date
 
 from app.database import Database
 from app.models.room_type import RoomTypeResponse
+from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.availability_service import remaining_for_stay
+from app.services.calendar_auto_open_service import is_stay_sellable
 from app.services.occupancy import room_allows_guest_mix
 from app.services.same_day_booking import is_same_day_booking_closed, property_today
 from app.utils import parse_jsonb
@@ -88,6 +90,7 @@ async def get_rooms_for_guest(
     )
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
+    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
     result = []
 
     for room in rooms:
@@ -110,8 +113,11 @@ async def get_rooms_for_guest(
 
         total = room["total_rooms"]
         if check_in and check_out:
-            if same_day_closed or not RoomTypeRepository.is_date_in_operating_periods(
-                room, check_in
+            stay_open = is_stay_sellable(check_in, check_out, room, calendar_settings)
+            if (
+                same_day_closed
+                or not RoomTypeRepository.is_date_in_operating_periods(room, check_in)
+                or not stay_open
             ):
                 remaining = 0
             else:
