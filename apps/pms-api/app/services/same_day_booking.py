@@ -38,4 +38,4 @@ def is_same_day_booking_closed(
         return False
     cutoff_hour, cutoff_minute = (int(part) for part in same_day_booking_cutoff_time.split(":"))
     cutoff = time(cutoff_hour, cutoff_minute)
-    return current.time().replace(second=0, microsecond=0) > cutoff
+    return current.time().replace(microsecond=0) > cutoff
