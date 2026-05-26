@@ -308,7 +308,9 @@ export default function DashboardPage() {
                   </span>
                 </button>
               ))}
-              <p className="pt-3 text-xs font-medium text-gray-500">{t("dashboard.clickGuestToStartCheckIn")}</p>
+              <p className="pt-3 text-xs font-medium text-gray-500">
+                {t("dashboard.clickGuestToStartCheckIn")}
+              </p>
             </div>
           )}
         </div>
@@ -527,7 +529,7 @@ function ArrivalQuickView({
           <div className="grid gap-2">
             <Link
               href={`/check-in/${booking.id}`}
-              className="flex h-11 items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
+              className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
             >
               Start check-in
             </Link>
@@ -541,7 +543,7 @@ function ArrivalQuickView({
         </div>
       </aside>
     </div>,
-    document.body
+    document.body,
   );
 }
 

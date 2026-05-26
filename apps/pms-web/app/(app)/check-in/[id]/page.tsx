@@ -13,6 +13,9 @@ import { formatCurrency } from "@/lib/formatCurrency";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
 
+const primaryActionClass =
+  "rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60";
+
 type BookerDraft = {
   guestFirstName: string;
   guestLastName: string;
@@ -261,10 +264,7 @@ export default function CheckInPage() {
             </div>
           )}
           <div className="mt-6 flex flex-wrap gap-2">
-            <Link
-              href="/dashboard"
-              className="rounded-lg bg-gray-950 px-4 py-2 text-sm font-semibold text-white"
-            >
+            <Link href="/dashboard" className={primaryActionClass}>
               Back to dashboard
             </Link>
             <Link
@@ -481,7 +481,7 @@ export default function CheckInPage() {
                         type="button"
                         onClick={() => saveGuest(index)}
                         disabled={savingGuest === index}
-                        className="mt-3 rounded-lg bg-gray-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        className={`${primaryActionClass} mt-3`}
                       >
                         {savingGuest === index ? "Saving..." : "Save guest"}
                       </button>
@@ -548,7 +548,7 @@ export default function CheckInPage() {
                 type="button"
                 onClick={completeCheckIn}
                 disabled={actionLoading !== null}
-                className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                className={`${primaryActionClass} mt-5 w-full py-3`}
               >
                 {actionLoading === "completeCheckIn" ? "Completing..." : "Complete check-in"}
               </button>
