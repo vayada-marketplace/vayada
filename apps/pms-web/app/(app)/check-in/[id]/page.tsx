@@ -13,6 +13,14 @@ import { formatCurrency } from "@/lib/formatCurrency";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
 
+type BookerDraft = {
+  guestFirstName: string;
+  guestLastName: string;
+  guestEmail: string;
+  guestPhone: string;
+  guestCountry: string;
+};
+
 function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
 }
@@ -25,21 +33,29 @@ function expectedAdditionalGuests(b: Booking) {
   return Math.max(0, totalGuests(b) - 1);
 }
 
-function roomLabel(b: Booking) {
+function roomUnit(b: Booking): string | null {
   if (b.assignedRooms?.length) {
-    return b.assignedRooms
-      .map((r) => (r.roomNumber ? `${b.roomName} ${r.roomNumber}` : b.roomName))
-      .join(", ");
+    const numbers = b.assignedRooms.map((r) => r.roomNumber).filter(Boolean);
+    return numbers.length ? numbers.join(", ") : null;
   }
-  return b.roomNumber ? `${b.roomName} ${b.roomNumber}` : b.roomName;
+  return b.roomNumber || null;
 }
 
-function formatDate(date: string) {
-  return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+function shortDateRange(checkIn: string, checkOut: string) {
+  const ci = new Date(`${checkIn}T12:00:00`);
+  const co = new Date(`${checkOut}T12:00:00`);
+  const mon = (d: Date) => d.toLocaleDateString("en-US", { month: "short" });
+  if (ci.getMonth() === co.getMonth() && ci.getFullYear() === co.getFullYear()) {
+    return `${ci.getDate()}–${co.getDate()} ${mon(ci)}`;
+  }
+  return `${ci.getDate()} ${mon(ci)} – ${co.getDate()} ${mon(co)}`;
+}
+
+function guestsLabel(b: Booking) {
+  const parts: string[] = [];
+  if (b.adults > 0) parts.push(`${b.adults} adult${b.adults === 1 ? "" : "s"}`);
+  if (b.children > 0) parts.push(`${b.children} child${b.children === 1 ? "" : "ren"}`);
+  return parts.join(", ") || `${totalGuests(b)} guest${totalGuests(b) === 1 ? "" : "s"}`;
 }
 
 function isPaid(b: Booking) {
@@ -75,6 +91,26 @@ function pendingFlags(booking: Booking, guests: GuestDraft[]) {
   return flags;
 }
 
+function bookerDraftFrom(b: Booking): BookerDraft {
+  return {
+    guestFirstName: b.guestFirstName,
+    guestLastName: b.guestLastName,
+    guestEmail: b.guestEmail,
+    guestPhone: b.guestPhone,
+    guestCountry: b.guestCountry,
+  };
+}
+
+function bookerDraftChanged(draft: BookerDraft, b: Booking) {
+  return (
+    draft.guestFirstName !== b.guestFirstName ||
+    draft.guestLastName !== b.guestLastName ||
+    draft.guestEmail !== b.guestEmail ||
+    draft.guestPhone !== b.guestPhone ||
+    draft.guestCountry !== b.guestCountry
+  );
+}
+
 export default function CheckInPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -84,11 +120,15 @@ export default function CheckInPage() {
   const [savingGuest, setSavingGuest] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
-  const [chargeOpen, setChargeOpen] = useState(false);
-  const [chargeAmount, setChargeAmount] = useState("");
-  const [actionLoading, setActionLoading] = useState<
-    null | "markPaid" | "addCharge" | "completeCheckIn"
-  >(null);
+  const [actionLoading, setActionLoading] = useState<null | "markPaid" | "completeCheckIn">(null);
+  const [bookerEditOpen, setBookerEditOpen] = useState(false);
+  const [bookerDraft, setBookerDraft] = useState<BookerDraft>({
+    guestFirstName: "",
+    guestLastName: "",
+    guestEmail: "",
+    guestPhone: "",
+    guestCountry: "",
+  });
 
   useEffect(() => {
     if (!id) return;
@@ -96,10 +136,21 @@ export default function CheckInPage() {
       .then(([bookingRes, guestRes]) => {
         setBooking(bookingRes);
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
+        setBookerDraft(bookerDraftFrom(bookingRes));
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // Warn before leaving with unsaved booker edits open
+  useEffect(() => {
+    if (!bookerEditOpen) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [bookerEditOpen]);
 
   const flags = useMemo(() => (booking ? pendingFlags(booking, guests) : []), [booking, guests]);
   const completedGuests = guests.filter(guestComplete).length + 1;
@@ -107,6 +158,13 @@ export default function CheckInPage() {
 
   const updateGuest = (index: number, patch: Partial<GuestDraft>) => {
     setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...g, ...patch } : g)));
+  };
+
+  const addGuest = () => {
+    setGuests((prev) => [
+      ...prev,
+      { position: prev.length + 1, roomPosition: prev[0]?.roomPosition ?? 0 },
+    ]);
   };
 
   const saveGuest = async (index: number) => {
@@ -148,31 +206,18 @@ export default function CheckInPage() {
     }
   };
 
-  const addCharge = async () => {
-    if (!booking || actionLoading) return;
-    const amount = Number(chargeAmount);
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    setActionLoading("addCharge");
-    setError("");
-    try {
-      setBooking(await bookingsService.addArrivalCharge(booking.id, amount, "Arrival charge"));
-      setChargeAmount("");
-      setChargeOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add arrival charge");
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const completeCheckIn = async () => {
     if (!booking || actionLoading) return;
     const carriedFlags = [...flags];
     setActionLoading("completeCheckIn");
     setError("");
     try {
-      const updated = await bookingsService.completeCheckIn(booking.id, carriedFlags);
-      setBooking(updated);
+      if (bookerEditOpen && bookerDraftChanged(bookerDraft, booking)) {
+        const bookerUpdated = await bookingsService.update(booking.id, bookerDraft);
+        setBooking(bookerUpdated);
+      }
+      const checkedIn = await bookingsService.completeCheckIn(booking.id, carriedFlags);
+      setBooking(checkedIn);
       setConfirmationFlags(carriedFlags);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not complete check-in");
@@ -248,19 +293,19 @@ export default function CheckInPage() {
             </Link>
             <div className="min-w-0">
               <p className="text-sm text-gray-500">Dashboard / Check-in</p>
-              <h1 className="truncate text-2xl font-bold text-gray-950 md:text-3xl">
+              <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xl font-bold text-gray-950 md:text-3xl">
                 Check in · {guestName(booking)}
-              </h1>
-              <div className="mt-2 flex flex-wrap gap-2">
                 <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
                   arriving today
                 </span>
-                {ota && (
+              </h1>
+              {ota && (
+                <div className="mt-1">
                   <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
                     OTA fields locked
                   </span>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </header>
@@ -282,43 +327,93 @@ export default function CheckInPage() {
           <div className="space-y-4">
             <Card title="Stay">
               <div className="grid gap-3 text-sm md:grid-cols-3">
-                <Info label="Room" value={roomLabel(booking)} />
+                <Info
+                  label="Room"
+                  value={booking.roomName}
+                  secondary={roomUnit(booking) ?? undefined}
+                />
                 <Info
                   label="Nights"
-                  value={`${booking.nights} · ${formatDate(booking.checkIn)} - ${formatDate(booking.checkOut)}`}
+                  value={`${booking.nights} night${booking.nights === 1 ? "" : "s"}`}
+                  secondary={shortDateRange(booking.checkIn, booking.checkOut)}
                 />
-                <Info
-                  label="Guests"
-                  value={`${totalGuests(booking)} guest${totalGuests(booking) === 1 ? "" : "s"}`}
-                />
+                <Info label="Guests" value={guestsLabel(booking)} />
               </div>
             </Card>
 
             <Card
               title="Guest register"
-              action={`${completedGuests} of ${totalGuests(booking)} complete`}
+              action={`${completedGuests} of ${guests.length + 1} complete`}
             >
               <div className="space-y-3">
                 <div className="rounded-xl border border-green-200 bg-green-50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold text-gray-950">
-                        ✓ {guestName(booking)}{" "}
+                        ✓{" "}
+                        {bookerEditOpen
+                          ? `${bookerDraft.guestFirstName} ${bookerDraft.guestLastName}`.trim() ||
+                            guestName(booking)
+                          : guestName(booking)}{" "}
                         <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-green-700">
                           booker
                         </span>
                       </p>
-                      <p className="mt-1 text-sm text-gray-600">
-                        {booking.guestCountry || "Nationality on file"} · reservation profile
-                      </p>
+                      {!bookerEditOpen && (
+                        <p className="mt-1 text-sm text-gray-600">
+                          {booking.guestCountry || "Nationality on file"} · reservation profile
+                        </p>
+                      )}
                     </div>
-                    <Link
-                      href={`/bookings/${booking.id}`}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!bookerEditOpen) {
+                          setBookerEditOpen(true);
+                        } else {
+                          setBookerDraft(bookerDraftFrom(booking));
+                          setBookerEditOpen(false);
+                        }
+                      }}
                       className="text-sm font-semibold text-blue-600"
                     >
-                      Edit
-                    </Link>
+                      {bookerEditOpen ? "Cancel" : "Edit"}
+                    </button>
                   </div>
+                  {bookerEditOpen && (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <Field
+                        label="First name"
+                        value={bookerDraft.guestFirstName}
+                        disabled={ota && Boolean(booking.guestFirstName)}
+                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestFirstName: v }))}
+                      />
+                      <Field
+                        label="Last name"
+                        value={bookerDraft.guestLastName}
+                        disabled={ota && Boolean(booking.guestLastName)}
+                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestLastName: v }))}
+                      />
+                      <Field
+                        label="Email"
+                        type="email"
+                        value={bookerDraft.guestEmail}
+                        disabled={ota && Boolean(booking.guestEmail)}
+                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestEmail: v }))}
+                      />
+                      <Field
+                        label="Phone"
+                        type="tel"
+                        value={bookerDraft.guestPhone}
+                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestPhone: v }))}
+                      />
+                      <Field
+                        label="Nationality"
+                        value={bookerDraft.guestCountry}
+                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestCountry: v }))}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {guests.map((guest, index) => {
@@ -393,6 +488,14 @@ export default function CheckInPage() {
                     </div>
                   );
                 })}
+
+                <button
+                  type="button"
+                  onClick={addGuest}
+                  className="w-full rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700"
+                >
+                  + Add guest
+                </button>
               </div>
             </Card>
 
@@ -407,7 +510,7 @@ export default function CheckInPage() {
                     ? "Paid at property"
                     : `${formatCurrency(booking.totalAmount, booking.currency)} due at property. Pay at property.`}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3">
                   <button
                     type="button"
                     onClick={markPaid}
@@ -416,37 +519,7 @@ export default function CheckInPage() {
                   >
                     {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setChargeOpen((v) => !v)}
-                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700"
-                  >
-                    Add arrival charge
-                  </button>
                 </div>
-                {chargeOpen && (
-                  <div className="mt-3 flex gap-2">
-                    <label htmlFor="arrival-charge-amount" className="sr-only">
-                      Arrival charge amount
-                    </label>
-                    <input
-                      id="arrival-charge-amount"
-                      value={chargeAmount}
-                      onChange={(e) => setChargeAmount(e.target.value)}
-                      inputMode="decimal"
-                      placeholder="Amount"
-                      className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 px-3 text-sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={addCharge}
-                      disabled={actionLoading !== null}
-                      className="rounded-lg bg-gray-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
-                    >
-                      {actionLoading === "addCharge" ? "Adding..." : "Add"}
-                    </button>
-                  </div>
-                )}
               </div>
             </Card>
           </div>
@@ -468,7 +541,7 @@ export default function CheckInPage() {
                 />
                 <ChecklistItem
                   done={Boolean(booking.assignedRooms?.length || booking.roomId)}
-                  label={`Room · ${roomLabel(booking)}`}
+                  label={`Room · ${booking.roomName}`}
                 />
               </div>
               <button
@@ -516,11 +589,12 @@ function Card({
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({ label, value, secondary }: { label: string; value: string; secondary?: string }) {
   return (
     <div>
       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
       <p className="mt-1 font-semibold text-gray-950">{value}</p>
+      {secondary && <p className="mt-0.5 text-xs text-gray-400">{secondary}</p>}
     </div>
   );
 }
