@@ -5,12 +5,17 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { roomsService, RoomType } from "@/services/rooms";
 import { bookingsService, Booking, BookingAdditionalGuest } from "@/services/bookings";
+import { pmsSettingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
+import {
+  getArrivalsToday,
+  getDeparturesToday,
+  getOccupiedTonight,
+  getPropertyToday,
+  getRemainingArrivals,
+  isCheckedInArrival,
+} from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
-
-function getToday() {
-  return new Date().toISOString().split("T")[0];
-}
 
 const AVATAR_COLORS = [
   "bg-blue-500",
@@ -86,6 +91,7 @@ export default function DashboardPage() {
   const [rooms, setRooms] = useState<RoomType[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [hotelCurrency, setHotelCurrency] = useState("EUR");
+  const [hotelTimezone, setHotelTimezone] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
   const [quickView, setQuickView] = useState<{
@@ -94,18 +100,20 @@ export default function DashboardPage() {
     loading: boolean;
   } | null>(null);
 
-  const today = getToday();
+  const today = getPropertyToday(hotelTimezone);
 
   useEffect(() => {
     Promise.all([
       roomsService.list(),
-      bookingsService.list({ status: "confirmed", limit: 500 }),
+      bookingsService.list({ limit: 500 }),
       bookingsService.getPaymentSettings(),
+      pmsSettingsService.getHotelDetails(),
     ])
-      .then(([roomsList, bookingsRes, settingsRes]) => {
+      .then(([roomsList, bookingsRes, settingsRes, hotelRes]) => {
         setRooms(roomsList);
         setBookings(bookingsRes.bookings);
         setHotelCurrency(settingsRes.paymentSettings.defaultCurrency || "EUR");
+        setHotelTimezone(hotelRes.timezone || null);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -113,20 +121,13 @@ export default function DashboardPage() {
 
   const totalRooms = useMemo(() => rooms.reduce((sum, r) => sum + r.totalRooms, 0), [rooms]);
 
-  const arrivalsToday = useMemo(
-    () => bookings.filter((b) => b.checkIn === today),
-    [bookings, today],
-  );
+  const arrivalsToday = useMemo(() => getArrivalsToday(bookings, today), [bookings, today]);
 
-  const departuresToday = useMemo(
-    () => bookings.filter((b) => b.checkOut === today),
-    [bookings, today],
-  );
+  const departuresToday = useMemo(() => getDeparturesToday(bookings, today), [bookings, today]);
 
-  const occupiedTonight = useMemo(
-    () => bookings.filter((b) => b.checkIn <= today && b.checkOut > today).length,
-    [bookings, today],
-  );
+  const remainingArrivals = useMemo(() => getRemainingArrivals(arrivalsToday), [arrivalsToday]);
+
+  const occupiedTonight = useMemo(() => getOccupiedTonight(bookings, today), [bookings, today]);
 
   const occupancyPct = totalRooms > 0 ? Math.round((occupiedTonight / totalRooms) * 100) : 0;
 
@@ -240,9 +241,10 @@ export default function DashboardPage() {
           label={t("dashboard.arrivalsToday")}
           value={String(arrivalsToday.length)}
           sub={
-            arrivalsToday[0]
-              ? t("dashboard.nextArrival", {
-                  guestName: `${arrivalsToday[0].guestFirstName} ${arrivalsToday[0].guestLastName}`,
+            arrivalsToday.length > 0
+              ? t("dashboard.arrivalsRemaining", {
+                  total: String(arrivalsToday.length),
+                  remaining: String(remainingArrivals),
                 })
               : t("dashboard.noArrivals")
           }
@@ -284,6 +286,14 @@ export default function DashboardPage() {
               {t("dashboard.viewAll")} ↗
             </Link>
           </div>
+          {arrivalsToday.length > 0 && (
+            <p className="mb-2 text-xs text-gray-500">
+              {t("dashboard.arrivalsRemaining", {
+                total: String(arrivalsToday.length),
+                remaining: String(remainingArrivals),
+              })}
+            </p>
+          )}
           {arrivalsToday.length === 0 ? (
             <p className="text-sm text-gray-400 py-6 text-center">{t("dashboard.noArrivals")}</p>
           ) : (
@@ -303,12 +313,20 @@ export default function DashboardPage() {
                       <span className="text-gray-500">{roomLabel(b)}</span>
                     </p>
                   </div>
-                  <span className="shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                    {t("dashboard.confirmed")}
+                  <span
+                    className={`shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                      isCheckedInArrival(b)
+                        ? "bg-sky-100 text-sky-700"
+                        : "bg-green-100 text-green-700"
+                    }`}
+                  >
+                    {isCheckedInArrival(b) ? t("dashboard.checkedIn") : t("dashboard.confirmed")}
                   </span>
                 </button>
               ))}
-              <p className="pt-3 text-xs font-medium text-gray-500">{t("dashboard.clickGuestToStartCheckIn")}</p>
+              <p className="pt-3 text-xs font-medium text-gray-500">
+                {t("dashboard.clickGuestToStartCheckIn")}
+              </p>
             </div>
           )}
         </div>
@@ -541,7 +559,7 @@ function ArrivalQuickView({
         </div>
       </aside>
     </div>,
-    document.body
+    document.body,
   );
 }
 
