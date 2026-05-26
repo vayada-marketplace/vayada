@@ -225,7 +225,7 @@ class BookingAdminResponse(BaseModel):
 class BookingStatusUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    status: str  # 'confirmed', 'checked_in', or 'cancelled'
+    status: str  # 'confirmed' or 'cancelled'. Check-in uses the dedicated endpoint.
 
 
 class BookingCheckInComplete(BaseModel):

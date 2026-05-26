@@ -86,6 +86,9 @@ export default function CheckInPage() {
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
   const [chargeOpen, setChargeOpen] = useState(false);
   const [chargeAmount, setChargeAmount] = useState("");
+  const [actionLoading, setActionLoading] = useState<
+    null | "markPaid" | "addCharge" | "completeCheckIn"
+  >(null);
 
   useEffect(() => {
     if (!id) return;
@@ -133,25 +136,49 @@ export default function CheckInPage() {
   };
 
   const markPaid = async () => {
-    if (!booking) return;
-    setBooking(await bookingsService.markPaid(booking.id));
+    if (!booking || actionLoading) return;
+    setActionLoading("markPaid");
+    setError("");
+    try {
+      setBooking(await bookingsService.markPaid(booking.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not mark payment as paid");
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const addCharge = async () => {
-    if (!booking) return;
+    if (!booking || actionLoading) return;
     const amount = Number(chargeAmount);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    setBooking(await bookingsService.addArrivalCharge(booking.id, amount, "Arrival charge"));
-    setChargeAmount("");
-    setChargeOpen(false);
+    setActionLoading("addCharge");
+    setError("");
+    try {
+      setBooking(await bookingsService.addArrivalCharge(booking.id, amount, "Arrival charge"));
+      setChargeAmount("");
+      setChargeOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add arrival charge");
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   const completeCheckIn = async () => {
-    if (!booking) return;
+    if (!booking || actionLoading) return;
     const carriedFlags = [...flags];
-    const updated = await bookingsService.completeCheckIn(booking.id, carriedFlags);
-    setBooking(updated);
-    setConfirmationFlags(carriedFlags);
+    setActionLoading("completeCheckIn");
+    setError("");
+    try {
+      const updated = await bookingsService.completeCheckIn(booking.id, carriedFlags);
+      setBooking(updated);
+      setConfirmationFlags(carriedFlags);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not complete check-in");
+    } finally {
+      setActionLoading(null);
+    }
   };
 
   if (loading) {
@@ -236,12 +263,6 @@ export default function CheckInPage() {
               </div>
             </div>
           </div>
-          <button
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600"
-            aria-label="More actions"
-          >
-            ...
-          </button>
         </header>
 
         {error && (
@@ -390,9 +411,10 @@ export default function CheckInPage() {
                   <button
                     type="button"
                     onClick={markPaid}
-                    className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white"
+                    disabled={actionLoading !== null}
+                    className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                   >
-                    Mark as paid
+                    {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
                   </button>
                   <button
                     type="button"
@@ -404,7 +426,11 @@ export default function CheckInPage() {
                 </div>
                 {chargeOpen && (
                   <div className="mt-3 flex gap-2">
+                    <label htmlFor="arrival-charge-amount" className="sr-only">
+                      Arrival charge amount
+                    </label>
                     <input
+                      id="arrival-charge-amount"
                       value={chargeAmount}
                       onChange={(e) => setChargeAmount(e.target.value)}
                       inputMode="decimal"
@@ -414,9 +440,10 @@ export default function CheckInPage() {
                     <button
                       type="button"
                       onClick={addCharge}
-                      className="rounded-lg bg-gray-950 px-4 text-sm font-semibold text-white"
+                      disabled={actionLoading !== null}
+                      className="rounded-lg bg-gray-950 px-4 text-sm font-semibold text-white disabled:opacity-60"
                     >
-                      Add
+                      {actionLoading === "addCharge" ? "Adding..." : "Add"}
                     </button>
                   </div>
                 )}
@@ -447,9 +474,10 @@ export default function CheckInPage() {
               <button
                 type="button"
                 onClick={completeCheckIn}
-                className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+                disabled={actionLoading !== null}
+                className="mt-5 w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
               >
-                Complete check-in
+                {actionLoading === "completeCheckIn" ? "Completing..." : "Complete check-in"}
               </button>
               <p className="mt-3 text-center text-sm text-gray-500">
                 {flags.length === 0

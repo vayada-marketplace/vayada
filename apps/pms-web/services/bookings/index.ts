@@ -175,7 +175,7 @@ export const bookingsService = {
     }>,
   ) => pmsClient.patch<Booking>(`/admin/bookings/${id}`, data),
 
-  updateStatus: (id: string, status: "confirmed" | "checked_in" | "cancelled") =>
+  updateStatus: (id: string, status: "confirmed" | "cancelled") =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/status`, { status }),
 
   completeCheckIn: (id: string, pendingFlags: string[]) =>

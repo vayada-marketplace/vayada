@@ -65,7 +65,15 @@ function expectedAdditionalGuests(b: Booking) {
 function incompleteGuestCount(b: Booking, guests: BookingAdditionalGuest[]) {
   const placeholders = Math.max(0, expectedAdditionalGuests(b) - guests.length);
   return (
-    guests.filter((g) => !g.passportNumber || !g.dateOfBirth || !g.gender).length + placeholders
+    guests.filter(
+      (g) =>
+        !g.firstName ||
+        !g.lastName ||
+        !g.gender ||
+        !g.nationality ||
+        !g.dateOfBirth ||
+        !g.passportNumber,
+    ).length + placeholders
   );
 }
 

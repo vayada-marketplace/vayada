@@ -2,6 +2,8 @@ import json
 import secrets
 import string
 
+from asyncpg import Connection
+
 from app.database import Database
 from app.services import hotel_identity_service
 from app.utils import generate_unique_code
@@ -444,8 +446,11 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def add_arrival_charge(booking_id: str, amount: float) -> dict | None:
-        row = await Database.fetchrow(
+    async def add_arrival_charge(
+        booking_id: str, amount: float, conn: Connection | None = None
+    ) -> dict | None:
+        executor = conn or Database
+        row = await executor.fetchrow(
             """
             UPDATE bookings
             SET total_amount = total_amount + $2,

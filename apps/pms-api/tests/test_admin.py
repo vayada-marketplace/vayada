@@ -1225,6 +1225,19 @@ class TestAdminBookings:
         )
         assert resp.status_code == 400
 
+    async def test_checked_in_status_requires_check_in_endpoint(self, client, hotel_with_booking):
+        user = hotel_with_booking["user"]
+        booking = hotel_with_booking["booking"]
+
+        resp = await client.patch(
+            f"/admin/bookings/{booking['id']}/status",
+            json={"status": "checked_in"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        assert resp.status_code == 400
+        assert "check-in endpoint" in resp.json()["detail"]
+
     async def test_list_bookings_pagination(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))

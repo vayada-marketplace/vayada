@@ -4,7 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from app.database import AuthDatabase
+from app.database import AuthDatabase, Database
 from app.dependencies import require_hotel_admin
 from app.models.booking import (
     AdminBookingCreate,
@@ -301,10 +301,15 @@ async def update_booking_status(
     data: BookingStatusUpdate,
     user_id: str = Depends(require_hotel_admin),
 ):
-    if data.status not in ("confirmed", "checked_in", "cancelled"):
+    if data.status == "checked_in":
         raise HTTPException(
             status_code=400,
-            detail="Status must be 'confirmed', 'checked_in', or 'cancelled'",
+            detail="Use the check-in endpoint to mark a booking as checked in",
+        )
+    if data.status not in ("confirmed", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be 'confirmed' or 'cancelled'",
         )
 
     hotel_id = await get_hotel_id(user_id)
@@ -415,17 +420,21 @@ async def add_booking_arrival_charge(
     if not booking or str(booking["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    updated = await BookingRepository.add_arrival_charge(booking_id, data.amount)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Booking not found")
+    pool = await Database.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            updated = await BookingRepository.add_arrival_charge(booking_id, data.amount, conn=conn)
+            if not updated:
+                raise HTTPException(status_code=404, detail="Booking not found")
 
-    await BookingEventRepository.record(
-        booking_id=booking_id,
-        hotel_id=hotel_id,
-        event_type="arrival_charge_added",
-        payload={"amount": data.amount, "description": data.description},
-        actor_user_id=user_id,
-    )
+            await BookingEventRepository.record(
+                booking_id=booking_id,
+                hotel_id=hotel_id,
+                event_type="arrival_charge_added",
+                payload={"amount": data.amount, "description": data.description},
+                actor_user_id=user_id,
+                conn=conn,
+            )
     return await _admin_response(await BookingRepository.get_by_id(booking_id))
 
 
