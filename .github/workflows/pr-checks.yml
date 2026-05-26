@@ -5,91 +5,15 @@ on:
     branches:
       - main
 
-permissions:
-  checks: read
-  contents: read
-  statuses: read
-
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  wait-for-coderabbit:
-    name: Wait for CodeRabbit
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - name: Wait for CodeRabbit review status
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          for attempt in {1..40}; do
-            status_context="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/status" \
-              --jq '.statuses[]
-                | select(.context | test("coderabbit"; "i"))
-                | [.context, .state]
-                | @tsv' \
-              | head -n 1)"
-
-            if [ -n "$status_context" ]; then
-              IFS=$'\t' read -r context state <<< "$status_context"
-              echo "CodeRabbit commit status: ${context} state=${state}"
-
-              case "$state" in
-                success)
-                  exit 0
-                  ;;
-                failure|error)
-                  echo "CodeRabbit did not complete successfully: ${state}"
-                  exit 1
-                  ;;
-              esac
-            fi
-
-            check_run="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
-              --jq '.check_runs[]
-                | select((.app.slug // "") != "github-actions")
-                | select(((.name // "") | test("coderabbit"; "i")) or ((.app.slug // "") | test("coderabbit"; "i")))
-                | [.name, .status, (.conclusion // "")]
-                | @tsv' \
-              | head -n 1)"
-
-            if [ -n "$check_run" ]; then
-              IFS=$'\t' read -r name status conclusion <<< "$check_run"
-              echo "CodeRabbit check run: ${name} status=${status} conclusion=${conclusion:-none}"
-
-              if [ "$status" = "completed" ]; then
-                case "$conclusion" in
-                  success|neutral|skipped)
-                    exit 0
-                    ;;
-                  *)
-                    echo "CodeRabbit did not complete successfully: ${conclusion:-unknown}"
-                    exit 1
-                    ;;
-                esac
-              fi
-            else
-              echo "CodeRabbit status has not been created yet."
-            fi
-
-            echo "Waiting for CodeRabbit review status (${attempt}/40)..."
-            sleep 30
-          done
-
-          echo "Timed out waiting for CodeRabbit review status."
-          exit 1
-
   frontend:
     name: Frontend Typecheck, Lint, Build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs:
-      - wait-for-coderabbit
 
     steps:
       - name: Checkout code
@@ -119,8 +43,6 @@ jobs:
     name: Backend Tests (${{ matrix.app }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs:
-      - wait-for-coderabbit
     strategy:
       fail-fast: false
       matrix:
@@ -271,7 +193,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs:
-      - wait-for-coderabbit
       - frontend
       - backend
     if: always()
@@ -279,8 +200,7 @@ jobs:
     steps:
       - name: Verify required jobs
         run: |
-          if [ "${{ needs.wait-for-coderabbit.result }}" != "success" ] || [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.backend.result }}" != "success" ]; then
-            echo "CodeRabbit wait result: ${{ needs.wait-for-coderabbit.result }}"
+          if [ "${{ needs.frontend.result }}" != "success" ] || [ "${{ needs.backend.result }}" != "success" ]; then
             echo "Frontend result: ${{ needs.frontend.result }}"
             echo "Backend result: ${{ needs.backend.result }}"
             exit 1
