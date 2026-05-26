@@ -205,29 +205,46 @@ export default function InboxPage() {
     }
   };
 
+  const STATUS_TABS: { value: ThreadStatus; label: string }[] = [
+    { value: "open", label: t("inbox.statusOpen") },
+    { value: "closed", label: t("inbox.statusClosed") },
+    { value: "no_reply_needed", label: t("inbox.statusNoReplyNeeded") },
+  ];
+
   return (
     <div className="h-full flex flex-col">
       <div
-        className={`border-b border-gray-200 bg-white px-5 py-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between ${
-          selectedId ? "hidden md:flex" : "flex"
-        }`}
+        className={`bg-white px-5 pt-4 flex flex-col ${selectedId ? "hidden md:flex" : "flex"}`}
       >
-        <h1 className="text-xl font-semibold text-gray-900">{t("layout.sidebar.inbox")}</h1>
-        <div className="flex flex-wrap gap-1 text-sm">
-          {(["open", "closed", "no_reply_needed"] as ThreadStatus[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => {
-                setStatusFilter(s);
-                setSelectedId(null);
-              }}
-              className={`px-3 py-1 rounded-md transition-colors ${
-                statusFilter === s ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-100"
-              }`}
-            >
-              {s === "no_reply_needed" ? "No reply needed" : s.charAt(0).toUpperCase() + s.slice(1)}
-            </button>
-          ))}
+        <div className="mb-4 md:mb-5">
+          <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("inbox.title")}</h1>
+          <p className="text-sm text-gray-500 mt-1">{t("inbox.subtitle")}</p>
+        </div>
+        <div className="relative border-b border-gray-200">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            {STATUS_TABS.map((tab) => {
+              const isActive = statusFilter === tab.value;
+              return (
+                <button
+                  key={tab.value}
+                  onClick={() => {
+                    setStatusFilter(tab.value);
+                    setSelectedId(null);
+                  }}
+                  className={`relative shrink-0 whitespace-nowrap px-3 py-2.5 text-sm transition-colors ${
+                    isActive
+                      ? "text-gray-900 font-semibold"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  {tab.label}
+                  {isActive && (
+                    <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-primary-600 rounded-full" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
