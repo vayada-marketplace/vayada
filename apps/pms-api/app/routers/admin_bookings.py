@@ -12,6 +12,8 @@ from app.models.booking import (
     BookingAdditionalGuestPayload,
     BookingAdditionalGuestResponse,
     BookingAdminResponse,
+    BookingArrivalCharge,
+    BookingCheckInComplete,
     BookingDetailsUpdate,
     BookingNoteCreate,
     BookingNoteResponse,
@@ -108,6 +110,8 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         channel=b.get("channel", "direct"),
         payment_method=b.get("payment_method"),
         payment_status=b.get("payment_status"),
+        check_in_pending_flags=b.get("check_in_pending_flags") or [],
+        checked_in_at=b["checked_in_at"].isoformat() if b.get("checked_in_at") else None,
         host_response_deadline=deadline.isoformat() if deadline else None,
         platform_fee_amount=float(pf) if pf is not None else None,
         affiliate_commission_amount=float(ac) if ac is not None else None,
@@ -297,8 +301,11 @@ async def update_booking_status(
     data: BookingStatusUpdate,
     user_id: str = Depends(require_hotel_admin),
 ):
-    if data.status not in ("confirmed", "cancelled"):
-        raise HTTPException(status_code=400, detail="Status must be 'confirmed' or 'cancelled'")
+    if data.status not in ("confirmed", "checked_in", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail="Status must be 'confirmed', 'checked_in', or 'cancelled'",
+        )
 
     hotel_id = await get_hotel_id(user_id)
     booking = await BookingRepository.get_by_id(booking_id)
@@ -336,6 +343,90 @@ async def update_booking_status(
             )
 
     return await _admin_response(updated)
+
+
+@router.post("/bookings/{booking_id}/check-in", response_model=BookingAdminResponse)
+async def complete_booking_check_in(
+    booking_id: str,
+    data: BookingCheckInComplete,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    if booking["status"] not in ("confirmed", "checked_in"):
+        raise HTTPException(status_code=400, detail="Only confirmed bookings can be checked in")
+
+    updated = await BookingRepository.complete_check_in(booking_id, data.pending_flags)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="guest_checked_in",
+        payload={"pending_flags": data.pending_flags},
+        actor_user_id=user_id,
+    )
+
+    return await _admin_response(await BookingRepository.get_by_id(booking_id))
+
+
+@router.post("/bookings/{booking_id}/mark-paid", response_model=BookingAdminResponse)
+async def mark_booking_paid(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    updated = await BookingRepository.update_payment_status(booking_id, "captured")
+    if not updated:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="arrival_payment_marked_paid",
+        payload={
+            "amount": float(booking.get("total_amount") or 0),
+            "currency": booking.get("currency"),
+        },
+        actor_user_id=user_id,
+    )
+    return await _admin_response(await BookingRepository.get_by_id(booking_id))
+
+
+@router.post("/bookings/{booking_id}/arrival-charge", response_model=BookingAdminResponse)
+async def add_booking_arrival_charge(
+    booking_id: str,
+    data: BookingArrivalCharge,
+    user_id: str = Depends(require_hotel_admin),
+):
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    updated = await BookingRepository.add_arrival_charge(booking_id, data.amount)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="arrival_charge_added",
+        payload={"amount": data.amount, "description": data.description},
+        actor_user_id=user_id,
+    )
+    return await _admin_response(await BookingRepository.get_by_id(booking_id))
 
 
 # ── Room Assignment ───────────────────────────────────────────────

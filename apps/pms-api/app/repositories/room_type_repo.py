@@ -162,7 +162,7 @@ class RoomTypeRepository:
             """
             SELECT COALESCE(SUM(COALESCE(number_of_rooms, 1)), 0) FROM bookings
             WHERE room_type_id = $1
-              AND status IN ('pending', 'confirmed')
+              AND status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND check_in < $3
               AND check_out > $2
               AND NOT (

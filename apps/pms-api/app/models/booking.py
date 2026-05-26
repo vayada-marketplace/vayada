@@ -161,6 +161,8 @@ class BookingAdminResponse(BaseModel):
     channel: str = "direct"
     payment_method: str | None = None
     payment_status: str | None = None
+    check_in_pending_flags: list[str] = []
+    checked_in_at: str | None = None
     host_response_deadline: str | None = None
     platform_fee_amount: float | None = None
     affiliate_commission_amount: float | None = None
@@ -210,11 +212,33 @@ class BookingAdminResponse(BaseModel):
             return {}
         return v
 
+    @field_validator("check_in_pending_flags", mode="before")
+    @classmethod
+    def parse_check_in_pending_flags(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        if v is None:
+            return []
+        return v
+
 
 class BookingStatusUpdate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-    status: str  # 'confirmed' or 'cancelled'
+    status: str  # 'confirmed', 'checked_in', or 'cancelled'
+
+
+class BookingCheckInComplete(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    pending_flags: list[str] = []
+
+
+class BookingArrivalCharge(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    amount: float
+    description: str | None = None
 
 
 class BookingDetailsUpdate(BaseModel):

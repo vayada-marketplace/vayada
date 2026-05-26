@@ -84,7 +84,7 @@ class BookingRoomRepository:
             FROM bookings b
             WHERE b.room_type_id = $1
               AND b.room_id IS NOT NULL
-              AND b.status IN ('pending', 'confirmed')
+              AND b.status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND b.check_in < $3
               AND b.check_out > $2
               AND NOT (
@@ -97,7 +97,7 @@ class BookingRoomRepository:
             FROM booking_rooms br
             JOIN bookings b ON b.id = br.booking_id
             WHERE b.room_type_id = $1
-              AND b.status IN ('pending', 'confirmed')
+              AND b.status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND b.check_in < $3
               AND b.check_out > $2
               AND NOT (

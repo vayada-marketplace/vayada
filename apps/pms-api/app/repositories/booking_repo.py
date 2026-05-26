@@ -232,7 +232,7 @@ class BookingRepository:
             JOIN room_types rt ON rt.id = b.room_type_id
             LEFT JOIN rooms rm ON rm.id = b.room_id
             WHERE b.hotel_id = $1
-              AND b.status IN ('pending', 'confirmed')
+              AND b.status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND b.check_in < $3
               AND b.check_out > $2
             ORDER BY b.check_in
@@ -255,7 +255,7 @@ class BookingRepository:
                 """
                 SELECT COUNT(*) FROM bookings
                 WHERE room_id = $1
-                  AND status IN ('pending', 'confirmed')
+                  AND status IN ('pending', 'confirmed', 'checked_in', 'in_house')
                   AND check_in < $3
                   AND check_out > $2
                   AND id <> $4
@@ -270,7 +270,7 @@ class BookingRepository:
                 """
                 SELECT COUNT(*) FROM bookings
                 WHERE room_id = $1
-                  AND status IN ('pending', 'confirmed')
+                  AND status IN ('pending', 'confirmed', 'checked_in', 'in_house')
                   AND check_in < $3
                   AND check_out > $2
                 """,
@@ -296,7 +296,7 @@ class BookingRepository:
             """
             SELECT COUNT(*) FROM bookings
             WHERE room_id = $1
-              AND status IN ('pending', 'confirmed')
+              AND status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND check_in < $3
               AND check_out > $2
               AND id <> ALL($4::uuid[])
@@ -375,7 +375,7 @@ class BookingRepository:
             SELECT id, room_id, check_in, check_out, status
             FROM bookings
             WHERE room_type_id = $1
-              AND status IN ('pending', 'confirmed')
+              AND status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND check_in < $3
               AND check_out > $2
             """,
@@ -402,7 +402,7 @@ class BookingRepository:
             FROM bookings
             WHERE room_type_id = $1
               AND room_id IS NULL
-              AND status IN ('pending', 'confirmed')
+              AND status IN ('pending', 'confirmed', 'checked_in', 'in_house')
               AND check_in < $3
               AND check_out > $2
             ORDER BY check_in
@@ -423,6 +423,42 @@ class BookingRepository:
             """,
             booking_id,
             new_status,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def complete_check_in(booking_id: str, pending_flags: list[str]) -> dict | None:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings
+            SET status = 'checked_in',
+                check_in_pending_flags = $2::jsonb,
+                checked_in_at = COALESCE(checked_in_at, now()),
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+            json.dumps(pending_flags),
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def add_arrival_charge(booking_id: str, amount: float) -> dict | None:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings
+            SET total_amount = total_amount + $2,
+                payment_status = CASE
+                    WHEN payment_status = 'captured' THEN 'unpaid'
+                    ELSE payment_status
+                END,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
+            amount,
         )
         return dict(row) if row else None
 

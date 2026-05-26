@@ -27,7 +27,14 @@ export interface Booking {
   numberOfRooms: number;
   totalAmount: number;
   currency: string;
-  status: "pending" | "confirmed" | "cancelled" | "declined" | "expired";
+  status:
+    | "pending"
+    | "confirmed"
+    | "checked_in"
+    | "in_house"
+    | "cancelled"
+    | "declined"
+    | "expired";
   roomId: string | null;
   roomNumber: string | null;
   // VAY-403: every physical room the booking occupies — the primary
@@ -36,6 +43,8 @@ export interface Booking {
   channel: string;
   paymentMethod: string | null;
   paymentStatus: string | null;
+  checkInPendingFlags: string[];
+  checkedInAt: string | null;
   hostResponseDeadline: string | null;
   platformFeeAmount: number | null;
   affiliateCommissionAmount: number | null;
@@ -166,8 +175,16 @@ export const bookingsService = {
     }>,
   ) => pmsClient.patch<Booking>(`/admin/bookings/${id}`, data),
 
-  updateStatus: (id: string, status: "confirmed" | "cancelled") =>
+  updateStatus: (id: string, status: "confirmed" | "checked_in" | "cancelled") =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/status`, { status }),
+
+  completeCheckIn: (id: string, pendingFlags: string[]) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/check-in`, { pendingFlags }),
+
+  markPaid: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/mark-paid`, {}),
+
+  addArrivalCharge: (id: string, amount: number, description?: string) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/arrival-charge`, { amount, description }),
 
   acceptBooking: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/accept`, {}),
 
