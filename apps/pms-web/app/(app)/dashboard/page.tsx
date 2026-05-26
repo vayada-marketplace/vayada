@@ -105,13 +105,13 @@ export default function DashboardPage() {
   useEffect(() => {
     Promise.all([
       roomsService.list(),
-      bookingsService.list({ limit: 500 }),
+      bookingsService.listAll(),
       bookingsService.getPaymentSettings(),
       pmsSettingsService.getHotelDetails(),
     ])
-      .then(([roomsList, bookingsRes, settingsRes, hotelRes]) => {
+      .then(([roomsList, bookingsList, settingsRes, hotelRes]) => {
         setRooms(roomsList);
-        setBookings(bookingsRes.bookings);
+        setBookings(bookingsList);
         setHotelCurrency(settingsRes.paymentSettings.defaultCurrency || "EUR");
         setHotelTimezone(hotelRes.timezone || null);
       })

@@ -136,10 +136,9 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   };
 
   useEffect(() => {
-    Promise.all([bookingsService.list({ limit: 500 }), pmsSettingsService.getHotelDetails()])
-      .then(([bookingsRes, hotel]) => {
+    Promise.all([bookingsService.listAll(), pmsSettingsService.getHotelDetails()])
+      .then(([bookings, hotel]) => {
         const today = getPropertyToday(hotel.timezone);
-        const bookings = bookingsRes.bookings;
         const arrivalsToday = getArrivalsToday(bookings, today);
         const departuresToday = getDeparturesToday(bookings, today);
         setStats({
