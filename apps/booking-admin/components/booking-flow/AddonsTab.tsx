@@ -33,6 +33,7 @@ interface AddonsTabProps {
   addons: AddonItem[];
   addonSettings: AddonSettings;
   deletingId: string | null;
+  propertyCurrency: string;
   openCreateModal: () => void;
   openEditModal: (addon: AddonItem) => void;
   handleDeleteAddon: (id: string) => void;
@@ -43,6 +44,7 @@ export default function AddonsTab({
   addons,
   addonSettings,
   deletingId,
+  propertyCurrency,
   openCreateModal,
   openEditModal,
   handleDeleteAddon,
@@ -155,7 +157,7 @@ export default function AddonsTab({
                 {/* Price */}
                 <div className="text-right shrink-0">
                   <p className="text-[13px] font-semibold text-gray-900">
-                    {getCurrencySymbol(addon.currency)}
+                    {getCurrencySymbol(propertyCurrency)}
                     {addon.price.toFixed(2)}
                   </p>
                   {addon.perPerson && <p className="text-[10px] text-gray-400">per person</p>}

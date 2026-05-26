@@ -235,7 +235,7 @@ export default function BookingFlowPage() {
       name: addon.name,
       description: addon.description,
       price: addon.price,
-      currency: addon.currency,
+      currency: defaultCurrency || addon.currency,
       category: addon.category,
       image: addon.image,
       duration: addon.duration || "",
@@ -585,6 +585,7 @@ export default function BookingFlowPage() {
             addons={addons}
             addonSettings={addonSettings}
             deletingId={deletingId}
+            propertyCurrency={defaultCurrency}
             openCreateModal={openCreateModal}
             openEditModal={openEditModal}
             handleDeleteAddon={handleDeleteAddon}
@@ -843,12 +844,12 @@ export default function BookingFlowPage() {
                 />
               </div>
 
-              {/* Price + Currency */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("bookingFlow.addons.modal.priceLabel")}
-                  </label>
+              {/* Price (currency inherited from property settings) */}
+              <div>
+                <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                  {t("bookingFlow.addons.modal.priceLabel")}
+                </label>
+                <div className="flex items-center gap-2">
                   <input
                     type="number"
                     min="0"
@@ -857,24 +858,11 @@ export default function BookingFlowPage() {
                     onChange={(e) =>
                       setFormData({ ...formData, price: parseFloat(e.target.value) || 0 })
                     }
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
-                </div>
-                <div>
-                  <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                    {t("bookingFlow.addons.modal.currencyLabel")}
-                  </label>
-                  <select
-                    value={formData.currency}
-                    onChange={(e) => setFormData({ ...formData, currency: e.target.value })}
-                    className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white"
-                  >
-                    {CURRENCY_OPTIONS.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.code}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="px-2.5 py-1.5 bg-gray-100 border border-gray-200 rounded-lg text-[13px] font-medium text-gray-600 shrink-0">
+                    {formData.currency}
+                  </span>
                 </div>
               </div>
 

@@ -101,7 +101,7 @@ export function usePricing({
         ? Math.max(1, Math.min(dates?.length ?? count ?? nights, nights))
         : 1;
       const items = !addon.perPerson && !addon.perNight ? Math.max(1, count ?? 1) : 1;
-      total += convertAndRound(addon.price * people * days * items, addon.currency);
+      total += convertAndRound(addon.price * people * days * items, roomCurrency);
     }
     return total;
     // selectedKey/quantitiesKey/datesKey are stable identity proxies for the inputs.
