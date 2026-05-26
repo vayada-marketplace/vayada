@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { roomsService, RoomType } from "@/services/rooms";
-import { bookingsService, Booking } from "@/services/bookings";
+import { bookingsService, Booking, BookingAdditionalGuest } from "@/services/bookings";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
 
@@ -34,6 +34,49 @@ function getInitials(first: string, last: string) {
   return `${first[0] || ""}${last[0] || ""}`.toUpperCase();
 }
 
+function guestName(b: Booking) {
+  return `${b.guestFirstName} ${b.guestLastName}`.trim();
+}
+
+function roomLabel(b: Booking) {
+  const assigned = b.assignedRooms?.length
+    ? b.assignedRooms
+        .map((r) => (r.roomNumber ? `${b.roomName} ${r.roomNumber}` : b.roomName))
+        .join(", ")
+    : b.roomNumber
+      ? `${b.roomName} ${b.roomNumber}`
+      : b.roomName;
+  return assigned || "Unassigned";
+}
+
+function arrivalTime(b: Booking) {
+  return b.estimatedArrivalTime || "3:00 PM";
+}
+
+function isPaid(b: Booking) {
+  return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
+}
+
+function expectedAdditionalGuests(b: Booking) {
+  const explicit = b.numberOfGuests ?? b.adults + b.children;
+  return Math.max(0, explicit - 1);
+}
+
+function incompleteGuestCount(b: Booking, guests: BookingAdditionalGuest[]) {
+  const placeholders = Math.max(0, expectedAdditionalGuests(b) - guests.length);
+  return (
+    guests.filter(
+      (g) =>
+        !g.firstName ||
+        !g.lastName ||
+        !g.gender ||
+        !g.nationality ||
+        !g.dateOfBirth ||
+        !g.passportNumber,
+    ).length + placeholders
+  );
+}
+
 const FORECAST_WINDOW_DAYS = 14;
 const FORECAST_MAX_WEEK_OFFSET = 24;
 
@@ -44,6 +87,11 @@ export default function DashboardPage() {
   const [hotelCurrency, setHotelCurrency] = useState("EUR");
   const [loading, setLoading] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [quickView, setQuickView] = useState<{
+    booking: Booking;
+    guests: BookingAdditionalGuest[];
+    loading: boolean;
+  } | null>(null);
 
   const today = getToday();
 
@@ -80,6 +128,24 @@ export default function DashboardPage() {
   );
 
   const occupancyPct = totalRooms > 0 ? Math.round((occupiedTonight / totalRooms) * 100) : 0;
+
+  const openQuickView = (booking: Booking) => {
+    setQuickView({ booking, guests: [], loading: true });
+    bookingsService
+      .listAdditionalGuests(booking.id)
+      .then((res) =>
+        setQuickView((current) =>
+          current?.booking.id === booking.id
+            ? { booking, guests: res.guests, loading: false }
+            : current,
+        ),
+      )
+      .catch(() =>
+        setQuickView((current) =>
+          current?.booking.id === booking.id ? { booking, guests: [], loading: false } : current,
+        ),
+      );
+  };
 
   const monthStartStr = useMemo(() => {
     const d = new Date();
@@ -222,28 +288,26 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {arrivalsToday.map((b) => (
-                <div key={b.id} className="flex items-center gap-3 py-2.5">
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => openQuickView(b)}
+                  className="w-full flex items-center gap-3 py-2.5 text-left rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
                   <Avatar first={b.guestFirstName} last={b.guestLastName} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">
-                      {b.guestFirstName} {b.guestLastName}
-                    </p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{guestName(b)}</p>
                     <p className="text-xs text-gray-400 truncate">
-                      <span className="text-gray-500">3:00 PM</span> ·{" "}
-                      {b.roomNumber ? (
-                        <span className="text-gray-500">#{b.roomNumber}</span>
-                      ) : (
-                        <span className="font-medium text-amber-700">
-                          {t("calendar.unassigned")}
-                        </span>
-                      )}
+                      <span className="text-gray-500">{arrivalTime(b)}</span> ·{" "}
+                      <span className="text-gray-500">{roomLabel(b)}</span>
                     </p>
                   </div>
                   <span className="shrink-0 text-[11px] font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
                     {t("dashboard.confirmed")}
                   </span>
-                </div>
+                </button>
               ))}
+              <p className="pt-3 text-xs font-medium text-gray-500">Click the guest to begin</p>
             </div>
           )}
         </div>
@@ -358,11 +422,124 @@ export default function DashboardPage() {
         </div>
         <ForecastChart days={forecastDays} today={today} currency={hotelCurrency} t={t} />
       </div>
+
+      {quickView && (
+        <ArrivalQuickView
+          booking={quickView.booking}
+          guests={quickView.guests}
+          loading={quickView.loading}
+          onClose={() => setQuickView(null)}
+        />
+      )}
     </div>
   );
 }
 
 /* ── Sub-components ── */
+
+function ArrivalQuickView({
+  booking,
+  guests,
+  loading,
+  onClose,
+}: {
+  booking: Booking;
+  guests: BookingAdditionalGuest[];
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
+  const due = isPaid(booking) ? 0 : booking.totalAmount;
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-950/30" role="dialog" aria-modal="true">
+      <button
+        type="button"
+        aria-label="Close arrival quick view"
+        className="absolute inset-0"
+        onClick={onClose}
+      />
+      <aside className="absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-y-auto rounded-t-2xl bg-white shadow-2xl md:inset-x-auto md:bottom-auto md:right-6 md:top-24 md:w-[420px] md:rounded-2xl">
+        <div className="sticky top-0 flex items-start justify-between gap-4 border-b border-gray-100 bg-white p-5">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+              Arrival quick view
+            </p>
+            <h2 className="mt-1 truncate text-lg font-semibold text-gray-950">
+              {guestName(booking)}
+            </h2>
+            <p className="text-sm text-gray-500">{booking.bookingReference}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="space-y-4 p-5">
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
+              Arriving today
+            </span>
+            {due > 0 && (
+              <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                {formatCurrency(due, booking.currency)} due
+              </span>
+            )}
+            {missingIds > 0 && (
+              <span className="rounded-full bg-orange-100 px-2.5 py-1 text-xs font-semibold text-orange-800">
+                {missingIds} guest{missingIds === 1 ? "" : "s"} ID missing
+              </span>
+            )}
+          </div>
+
+          <dl className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
+            <div>
+              <dt className="text-xs font-medium text-gray-500">Room</dt>
+              <dd className="mt-0.5 font-semibold text-gray-900">{roomLabel(booking)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium text-gray-500">Arrival</dt>
+              <dd className="mt-0.5 font-semibold text-gray-900">
+                Today · {arrivalTime(booking)} · {booking.nights} night
+                {booking.nights === 1 ? "" : "s"} ·{" "}
+                {(booking.numberOfGuests ?? booking.adults + booking.children) || 1} guest
+                {(booking.numberOfGuests ?? booking.adults + booking.children) === 1 ? "" : "s"}
+              </dd>
+            </div>
+          </dl>
+
+          {booking.specialRequests && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                Special request
+              </p>
+              <p className="mt-1 text-sm text-amber-950">{booking.specialRequests}</p>
+            </div>
+          )}
+
+          <div className="grid gap-2">
+            <Link
+              href={`/check-in/${booking.id}`}
+              className="flex h-11 items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Start check-in
+            </Link>
+            <Link
+              href={`/bookings/${booking.id}`}
+              className="flex h-11 items-center justify-center rounded-lg border border-gray-200 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              View full booking
+            </Link>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
 
 function StatCard({
   label,

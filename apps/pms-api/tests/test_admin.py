@@ -1172,6 +1172,48 @@ class TestAdminBookings:
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
+    async def test_complete_check_in_persists_pending_flags(self, client, hotel_with_booking):
+        user = hotel_with_booking["user"]
+        booking = hotel_with_booking["booking"]
+
+        await client.patch(
+            f"/admin/bookings/{booking['id']}/status",
+            json={"status": "confirmed"},
+            headers=get_auth_headers(user["token"]),
+        )
+        resp = await client.post(
+            f"/admin/bookings/{booking['id']}/check-in",
+            json={"pendingFlags": ["Guest 2 ID", "Payment EUR 600"]},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "checked_in"
+        assert body["checkInPendingFlags"] == ["Guest 2 ID", "Payment EUR 600"]
+        assert body["checkedInAt"]
+
+    async def test_mark_paid_and_arrival_charge_update_booking(self, client, hotel_with_booking):
+        user = hotel_with_booking["user"]
+        booking = hotel_with_booking["booking"]
+
+        paid = await client.post(
+            f"/admin/bookings/{booking['id']}/mark-paid",
+            headers=get_auth_headers(user["token"]),
+        )
+        assert paid.status_code == 200
+        assert paid.json()["paymentStatus"] == "captured"
+
+        charged = await client.post(
+            f"/admin/bookings/{booking['id']}/arrival-charge",
+            json={"amount": 25, "description": "Late arrival snack"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        assert charged.status_code == 200
+        assert charged.json()["totalAmount"] == 625
+        assert charged.json()["paymentStatus"] == "unpaid"
+
     async def test_invalid_booking_status(self, client, hotel_with_booking):
         user = hotel_with_booking["user"]
         booking = hotel_with_booking["booking"]
@@ -1182,6 +1224,19 @@ class TestAdminBookings:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.status_code == 400
+
+    async def test_checked_in_status_requires_check_in_endpoint(self, client, hotel_with_booking):
+        user = hotel_with_booking["user"]
+        booking = hotel_with_booking["booking"]
+
+        resp = await client.patch(
+            f"/admin/bookings/{booking['id']}/status",
+            json={"status": "checked_in"},
+            headers=get_auth_headers(user["token"]),
+        )
+
+        assert resp.status_code == 400
+        assert "check-in endpoint" in resp.json()["detail"]
 
     async def test_list_bookings_pagination(self, client, cleanup_database):
         user = await create_test_user()
