@@ -260,6 +260,9 @@ class BookingDetailsUpdate(BaseModel):
     adults: int | None = None
     children: int | None = None
     nightly_rate: float | None = None
+    addon_ids: list[str] | None = None
+    addon_quantities: dict[str, int] | None = None
+    addon_dates: dict[str, list[str]] | None = None
     special_requests: str | None = None
 
 
