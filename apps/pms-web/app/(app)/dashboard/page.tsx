@@ -307,7 +307,7 @@ export default function DashboardPage() {
                   </span>
                 </button>
               ))}
-              <p className="pt-3 text-xs font-medium text-gray-500">Click the guest to begin</p>
+              <p className="pt-3 text-xs font-medium text-gray-500">Click a guest to start check-in</p>
             </div>
           )}
         </div>
