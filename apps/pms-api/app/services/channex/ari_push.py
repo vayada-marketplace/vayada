@@ -64,9 +64,8 @@ async def push_availability_for_room_type(
 
     while current <= end_date:
         next_day = current + timedelta(days=1)
-        if (
-            not is_date_auto_open(calendar_settings, current)
-            or not has_sellable_rate_on_date(room_type, current)
+        if not is_date_auto_open(calendar_settings, current) or not has_sellable_rate_on_date(
+            room_type, current
         ):
             available = 0
         else:

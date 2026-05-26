@@ -15,7 +15,7 @@ Agent guidance for Vayada is split across three layers. Pick the right layer **b
 
 | Layer                       | Lives in                                                                  | Use for                                                                                                                                                                               |
 | --------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Shared skill**            | `.claude/skills/<name>/SKILL.md` in this monorepo                         | Durable workflows that apply across the codebase and across agent tools: writing Linear issues, deployment workflow, validation workflow, coding conventions, Vayada product context. |
+| **Shared skill**            | `.agents/skills/<name>/SKILL.md` in this monorepo                         | Durable workflows that apply across the codebase and across agent tools: writing Linear issues, deployment workflow, validation workflow, coding conventions, Vayada product context. |
 | **Repo-local instructions** | Root `AGENTS.md` (tool-neutral) + root `CLAUDE.md` (thin Claude wrapper). | Exact commands, app paths, layout, local setup, workflow scripts, gotchas, shipping rules.                                                                                            |
 | **Linear issue context**    | The Linear ticket itself                                                  | Task-specific scope, acceptance criteria, decisions made during the ticket.                                                                                                           |
 
@@ -32,17 +32,17 @@ When in doubt, default to repo-local. Promoting to a shared skill later is cheap
 Inside this monorepo:
 
 ```
-.claude/skills/
+.agents/skills/
   <skill-name>/
     SKILL.md           # required — frontmatter + body
     assets/            # optional — examples, templates, fixtures
 ```
 
-- Claude Code reads `.claude/skills/` automatically when running inside the repo. No symlinks, no install step, no user-global setup.
-- `.claude/skills/` is unignored explicitly in `.gitignore`; the rest of `.claude/` stays per-developer.
-- The directory is named `.claude/skills/` purely because that is where Claude Code looks by default. The skill content itself is tool-neutral. If Codex or another agent tool needs to read these skills, point it at the same path via `AGENTS.md` or its own config — do not create a second copy.
+- `.agents/skills/` is the single shared skill directory for this repo. Codex, Claude Code, and any other agent should read from this path.
+- `.codex/` and `.claude/` stay per-developer and are ignored; do not store shared skills there.
+- The directory is named `.agents/skills/` to keep the shared content tool-neutral. If an agent needs explicit configuration to load project skills, point it at this path — do not create a second copy.
 
-There is no separate `vayada-agent-skills` repo. Vayada is one repo; skills live with the code they support. If a second Vayada repo ever needs the same skills, extract `.claude/skills/` to a dedicated repo at that point.
+There is no separate `vayada-agent-skills` repo. Vayada is one repo; skills live with the code they support. If a second Vayada repo ever needs the same skills, extract `.agents/skills/` to a dedicated repo at that point.
 
 ## Writing a new skill
 
@@ -62,7 +62,7 @@ There is no separate `vayada-agent-skills` repo. Vayada is one repo; skills live
 
 ## Anti-patterns
 
-- Duplicating a workflow in `CLAUDE.md` and a skill — pick one layer.
+- Duplicating a workflow in `AGENTS.md` and a skill — pick one layer.
 - Writing a skill whose content is repo-layout-specific (commands, paths, app names) — that is `AGENTS.md` material, even though both live in this monorepo today.
 - Encoding ticket-specific context — it belongs in the Linear issue.
 - Embedding deprecated tooling (e.g. former `vw`-style worktree commands) in a skill — skills are forward-looking; deprecated flows go away with the code.
@@ -72,6 +72,6 @@ There is no separate `vayada-agent-skills` repo. Vayada is one repo; skills live
 ## References
 
 - VAY-442 — Repository strategy decision (monorepo).
-- VAY-448 — Agent instructions and shared skills layout (three-layer model). The original "separate `vayada-agent-skills` repo" recommendation was dropped: Vayada is one repo, skills live with the code at `.claude/skills/`.
+- VAY-448 — Agent instructions and shared skills layout (three-layer model). The original "separate `vayada-agent-skills` repo" recommendation was dropped: Vayada is one repo, skills live with the code at `.agents/skills/`.
 - VAY-459 — Implementation issue for root `AGENTS.md` + slim `CLAUDE.md` (still backlog).
 - VAY-416 — First concrete shared skill to be written: writing Linear issues.

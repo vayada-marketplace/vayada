@@ -2,7 +2,7 @@ terraform.tfvars
 .terraform/
 *.tfplan
 tfplan
-.claude/*
-!.claude/skills/
+.codex/
+.claude/
 node_modules/
 .npm/

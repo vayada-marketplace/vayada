@@ -229,13 +229,9 @@ async def update_hotel(
         if "same_day_bookings_enabled" in data:
             data["same_day_bookings_enabled"] = same_day_data["same_day_bookings_enabled"]
         if "sameDayBookingCutoffTime" in data:
-            data["same_day_booking_cutoff_time"] = same_day_data[
-                "same_day_booking_cutoff_time"
-            ]
+            data["same_day_booking_cutoff_time"] = same_day_data["same_day_booking_cutoff_time"]
         if "same_day_booking_cutoff_time" in data:
-            data["same_day_booking_cutoff_time"] = same_day_data[
-                "same_day_booking_cutoff_time"
-            ]
+            data["same_day_booking_cutoff_time"] = same_day_data["same_day_booking_cutoff_time"]
 
     row = await HotelRepository.update_fields(hotel_id, data)
     if not row:
@@ -465,9 +461,7 @@ async def update_calendar_settings(
         db_updates["calendar_auto_open_months"] = updates["auto_open_months"]
     if "auto_open_fixed_month" in updates:
         fixed = updates["auto_open_fixed_month"]
-        db_updates["calendar_auto_open_fixed_month"] = (
-            fixed.replace(day=1) if fixed else None
-        )
+        db_updates["calendar_auto_open_fixed_month"] = fixed.replace(day=1) if fixed else None
 
     current = await HotelRepository.get_calendar_settings(hotel_id)
     if not current:
@@ -492,8 +486,7 @@ async def update_calendar_settings(
         "calendar_auto_open_fixed_month",
     }
     auto_open_fields_changed = any(
-        key in db_updates and db_updates[key] != current.get(key)
-        for key in auto_open_fields
+        key in db_updates and db_updates[key] != current.get(key) for key in auto_open_fields
     )
 
     row = await HotelRepository.update_calendar_settings(hotel_id, db_updates)

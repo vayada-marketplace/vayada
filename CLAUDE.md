@@ -6,5 +6,5 @@ Claude Code wrapper for the vayada monorepo.
 
 ## Claude-specific notes
 
-- **Skills.** Project skills live at `.claude/skills/<name>/SKILL.md` and are loaded automatically by Claude Code when running inside this repo. The bootstrap skill at `.claude/skills/vayada-skills-storage/SKILL.md` documents where new skills go.
+- **Skills.** Project skills live at `.agents/skills/<name>/SKILL.md`. They are shared with Codex and any other agent rather than duplicated per tool. The bootstrap skill at `.agents/skills/vayada-skills-storage/SKILL.md` documents where new skills go.
 - **Deferred tools.** Many MCP/built-in tools are deferred and not present in the initial tool list. Before claiming a tool is missing, check the deferred-tools system-reminder and load it via `ToolSearch`.

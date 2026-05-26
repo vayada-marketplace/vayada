@@ -13,10 +13,7 @@ import { channexService } from "@/services/channex";
 import { apiClient } from "@/services/api/client";
 import { pmsClient } from "@/services/api/pmsClient";
 import { useTranslation } from "@/lib/i18n";
-import {
-  SettingsLayout,
-  type SettingsNavSection,
-} from "@/components/settings/layout";
+import { SettingsLayout, type SettingsNavSection } from "@/components/settings/layout";
 import { PropertySection } from "@/components/settings/PropertySection";
 import { BookingEngineSection } from "@/components/settings/BookingEngineSection";
 import { CalendarSection } from "@/components/settings/CalendarSection";
@@ -74,8 +71,7 @@ export default function SettingsPage() {
   const [instantBook, setInstantBook] = useState(false);
   const [savingInstantBook, setSavingInstantBook] = useState(false);
   const [sameDayBookingsEnabled, setSameDayBookingsEnabled] = useState(true);
-  const [sameDayBookingCutoffTime, setSameDayBookingCutoffTime] =
-    useState("18:00");
+  const [sameDayBookingCutoffTime, setSameDayBookingCutoffTime] = useState("18:00");
   const [savingSameDay, setSavingSameDay] = useState(false);
   const [channexConnected, setChannexConnected] = useState(false);
 
@@ -123,9 +119,7 @@ export default function SettingsPage() {
         if (h.timezone) setTimezone(h.timezone);
         if (h.country) setCountry(h.country);
         setInstantBook(Boolean(h.instant_book ?? h.instantBook));
-        setSameDayBookingsEnabled(
-          h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? true,
-        );
+        setSameDayBookingsEnabled(h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? true);
         setSameDayBookingCutoffTime(
           h.same_day_booking_cutoff_time ?? h.sameDayBookingCutoffTime ?? "18:00",
         );
@@ -246,12 +240,7 @@ export default function SettingsPage() {
       );
     } catch (err: any) {
       setAutoRearrange(previous);
-      setError(
-        humanizeApiError(
-          err,
-          "Couldn’t update auto-rearrange setting. Please try again.",
-        ),
-      );
+      setError(humanizeApiError(err, "Couldn’t update auto-rearrange setting. Please try again."));
     } finally {
       setSavingAutoRearrange(false);
     }
@@ -285,16 +274,11 @@ export default function SettingsPage() {
       setAutoOpenThrough(saved.autoOpenThrough || null);
       setAutoOpenWarnings(saved.autoOpenWarnings || []);
       setSuccess(
-        saved.autoOpenEnabled
-          ? "Calendar auto-open settings saved"
-          : "Calendar auto-open disabled",
+        saved.autoOpenEnabled ? "Calendar auto-open settings saved" : "Calendar auto-open disabled",
       );
     } catch (err: any) {
       setError(
-        humanizeApiError(
-          err,
-          "Couldn’t update calendar auto-open settings. Please try again.",
-        ),
+        humanizeApiError(err, "Couldn’t update calendar auto-open settings. Please try again."),
       );
     } finally {
       setSavingAutoRearrange(false);
@@ -309,9 +293,7 @@ export default function SettingsPage() {
     setInstantBook(next);
     try {
       await pmsClient.patch("/admin/hotel", { instant_book: next });
-      setSuccess(
-        next ? "Instant booking enabled" : "Booking requests re-enabled",
-      );
+      setSuccess(next ? "Instant booking enabled" : "Booking requests re-enabled");
     } catch (err: any) {
       setInstantBook(previous);
       setError(
@@ -332,9 +314,7 @@ export default function SettingsPage() {
     try {
       const payload = {
         sameDayBookingsEnabled,
-        sameDayBookingCutoffTime: sameDayBookingsEnabled
-          ? sameDayBookingCutoffTime
-          : null,
+        sameDayBookingCutoffTime: sameDayBookingsEnabled ? sameDayBookingCutoffTime : null,
       };
       const h = await pmsClient.patch<any>("/admin/hotel", payload);
       setSameDayBookingsEnabled(
@@ -345,12 +325,7 @@ export default function SettingsPage() {
       );
       setSuccess("Same-day booking cutoff saved");
     } catch (err: any) {
-      setError(
-        humanizeApiError(
-          err,
-          "Couldn’t update same-day booking cutoff. Please try again.",
-        ),
-      );
+      setError(humanizeApiError(err, "Couldn’t update same-day booking cutoff. Please try again."));
     } finally {
       setSavingSameDay(false);
     }

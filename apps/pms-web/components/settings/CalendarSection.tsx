@@ -44,9 +44,7 @@ export function CalendarSection({
       <SettingsCard>
         <div className="flex items-start justify-between gap-4 pb-5 border-b border-gray-100">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">
-              Auto-rearrange room assignments
-            </p>
+            <p className="text-sm font-medium text-gray-900">Auto-rearrange room assignments</p>
             <p className="text-xs text-gray-500 mt-1">
               {autoRearrange
                 ? "On — when a new booking doesn’t fit any single room, the system shuffles future bookings between same-type rooms to free a slot. Checked-in and checked-out guests are never moved. Every shuffle is logged."
@@ -74,11 +72,10 @@ export function CalendarSection({
         <div className="pt-5 space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900">
-                Auto-open future calendar
-              </p>
+              <p className="text-sm font-medium text-gray-900">Auto-open future calendar</p>
               <p className="text-xs text-gray-500 mt-1">
-                Keeps availability open to full month boundaries. Manual blocks and bookings stay in place.
+                Keeps availability open to full month boundaries. Manual blocks and bookings stay in
+                place.
               </p>
             </div>
             <button
@@ -126,9 +123,7 @@ export function CalendarSection({
                   </span>
                   <select
                     value={autoOpenMonths}
-                    onChange={(e) =>
-                      onAutoOpenMonthsChange(Number(e.target.value) as 12 | 18 | 24)
-                    }
+                    onChange={(e) => onAutoOpenMonthsChange(Number(e.target.value) as 12 | 18 | 24)}
                     className="w-full max-w-xs px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
                   >
                     <option value={12}>12 months</option>
@@ -170,7 +165,9 @@ export function CalendarSection({
             <button
               type="button"
               onClick={onSaveAutoOpen}
-              disabled={saving || (autoOpenEnabled && autoOpenMode === "fixed" && !autoOpenFixedMonth)}
+              disabled={
+                saving || (autoOpenEnabled && autoOpenMode === "fixed" && !autoOpenFixedMonth)
+              }
               className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
             >
               {saving ? "Saving..." : "Save calendar settings"}

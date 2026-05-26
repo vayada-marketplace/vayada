@@ -88,9 +88,8 @@ def is_stay_sellable(
 ) -> bool:
     current = check_in
     while current < check_out:
-        if (
-            not is_date_auto_open(calendar_settings, current)
-            or not has_sellable_rate_on_date(room_type, current)
+        if not is_date_auto_open(calendar_settings, current) or not has_sellable_rate_on_date(
+            room_type, current
         ):
             return False
         current += timedelta(days=1)
@@ -161,9 +160,7 @@ async def apply_auto_open_for_hotel(hotel_id: str, *, push_ari: bool = True) -> 
             except Exception:
                 logger.exception("Auto-open ARI push failed for hotel %s", hotel_id)
 
-    warnings = await collect_rate_warnings(
-        hotel_id, next_open_through, settings.get("timezone")
-    )
+    warnings = await collect_rate_warnings(hotel_id, next_open_through, settings.get("timezone"))
     return AutoOpenApplyResult(
         open_through=next_open_through,
         changed=changed,
