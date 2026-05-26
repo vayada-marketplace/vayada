@@ -1,5 +1,7 @@
 import asyncio
+import json
 import logging
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -40,7 +42,12 @@ from app.services.booking_change_service import (
 from app.services.booking_change_service import (
     decline_change as decline_booking_change,
 )
-from app.services.booking_service import host_accept_booking, host_reject_booking
+from app.services.booking_service import (
+    _compute_addon_total,
+    _fetch_hotel_addons,
+    host_accept_booking,
+    host_reject_booking,
+)
 from app.services.channex_sync_service import push_availability_for_room_type
 from app.services.email_service import (
     send_guest_admin_booking_confirmed,
@@ -53,6 +60,23 @@ from app.utils import get_hotel_id
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin-bookings"])
+
+
+def _parse_json_field(value, default):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return default
+    return value
+
+
+def _as_date(value) -> date:
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value))
 
 
 def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminResponse:
@@ -273,6 +297,63 @@ async def update_booking_details(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     updates = data.model_dump(exclude_none=True)
+    should_reprice_addons = any(
+        key in updates
+        for key in (
+            "check_in",
+            "check_out",
+            "adults",
+            "addon_ids",
+            "addon_quantities",
+            "addon_dates",
+        )
+    )
+    current_addon_ids = _parse_json_field(booking.get("addon_ids"), [])
+    next_addon_ids = updates.get("addon_ids", current_addon_ids)
+    if "check_in" in updates or "check_out" in updates:
+        next_check_in = _as_date(updates.get("check_in", booking["check_in"]))
+        next_check_out = _as_date(updates.get("check_out", booking["check_out"]))
+        if next_check_out <= next_check_in:
+            raise HTTPException(status_code=400, detail="check_out must be after check_in")
+    if should_reprice_addons and next_addon_ids:
+        check_in = _as_date(updates.get("check_in", booking["check_in"]))
+        check_out = _as_date(updates.get("check_out", booking["check_out"]))
+        nights = max(1, (check_out - check_in).days)
+        addon_quantities = updates.get(
+            "addon_quantities",
+            _parse_json_field(booking.get("addon_quantities"), {}),
+        )
+        addon_dates = updates.get("addon_dates", _parse_json_field(booking.get("addon_dates"), {}))
+        addon_quantities = {
+            addon_id: addon_quantities[addon_id]
+            for addon_id in next_addon_ids
+            if addon_id in addon_quantities
+        }
+        addon_dates = {
+            addon_id: addon_dates[addon_id]
+            for addon_id in next_addon_ids
+            if addon_id in addon_dates
+        }
+        addon_total, addon_names = await _compute_addon_total(
+            booking["hotel_slug"],
+            next_addon_ids,
+            addon_quantities,
+            booking["currency"],
+            int(updates.get("adults", booking["adults"])),
+            nights,
+            addon_dates,
+        )
+        updates["addon_ids"] = next_addon_ids
+        updates["addon_quantities"] = addon_quantities
+        updates["addon_dates"] = addon_dates
+        updates["addon_names"] = addon_names
+        updates["addon_total"] = addon_total
+    elif "addon_ids" in updates and not updates["addon_ids"]:
+        updates["addon_quantities"] = {}
+        updates["addon_dates"] = {}
+        updates["addon_names"] = []
+        updates["addon_total"] = 0
+
     updated = await BookingRepository.update_details(booking_id, updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -281,8 +362,8 @@ async def update_booking_details(
     if data.check_in is not None or data.check_out is not None:
         old_start = booking["check_in"]
         old_end = booking["check_out"]
-        new_start = data.check_in or old_start
-        new_end = data.check_out or old_end
+        new_start = _as_date(data.check_in) if data.check_in is not None else old_start
+        new_end = _as_date(data.check_out) if data.check_out is not None else old_end
         asyncio.create_task(
             push_availability_for_room_type(
                 hotel_id,
@@ -293,6 +374,18 @@ async def update_booking_details(
         )
 
     return await _admin_response(updated)
+
+
+@router.get("/bookings/{booking_id}/addons")
+async def list_booking_addons(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    booking = await BookingRepository.get_by_id(booking_id)
+    if not booking or str(booking["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return await _fetch_hotel_addons(booking["hotel_slug"])
 
 
 @router.patch("/bookings/{booking_id}/status", response_model=BookingAdminResponse)
@@ -790,7 +883,7 @@ async def accept_booking(
     try:
         updated = await host_accept_booking(booking_id, user_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return await _admin_response(updated)
 
 
@@ -807,7 +900,7 @@ async def reject_booking(
     try:
         updated = await host_reject_booking(booking_id, user_id, reason=body.reason)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return await _admin_response(updated)
 
 
@@ -883,7 +976,7 @@ async def admin_approve_change_request(
     try:
         cr = await approve_booking_change(str(pending["id"]), hotel_id=hotel_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return _change_request_admin(cr)
 
 
@@ -911,7 +1004,7 @@ async def admin_decline_change_request(
             hotel_id=hotel_id,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return _change_request_admin(cr)
 
 

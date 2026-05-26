@@ -18,6 +18,7 @@ import {
 import {
   bookingsService,
   Booking,
+  BookingAddon,
   BookingChangeRequest,
   BookingNote,
   BookingAdditionalGuest,
@@ -749,15 +750,69 @@ function AssignGuestsModal({
 interface ModifyBookingModalProps {
   booking: Booking;
   onClose: () => void;
-  onSave: (checkIn: string, checkOut: string, adults: number, children: number) => Promise<void>;
+  onSave: (payload: {
+    checkIn: string;
+    checkOut: string;
+    adults: number;
+    children: number;
+    nightlyRate: number;
+    addonIds: string[];
+    addonQuantities: Record<string, number>;
+    addonDates: Record<string, string[]>;
+  }) => Promise<void>;
 }
 
 function ModifyBookingModal({ booking, onClose, onSave }: ModifyBookingModalProps) {
   const [checkIn, setCheckIn] = useState(booking.checkIn);
   const [checkOut, setCheckOut] = useState(booking.checkOut);
-  const [totalGuests, setTotalGuests] = useState(String(booking.adults + booking.children));
+  const [adults, setAdults] = useState(String(booking.adults));
+  const [children, setChildren] = useState(String(booking.children));
+  const [nightlyRate, setNightlyRate] = useState(String(booking.nightlyRate));
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>(booking.addonIds);
+  const [addonQuantities, setAddonQuantities] = useState<Record<string, number>>(
+    booking.addonQuantities || {},
+  );
+  const [availableAddons, setAvailableAddons] = useState<BookingAddon[]>([]);
+  const [addonsLoading, setAddonsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    bookingsService
+      .listAvailableAddons(booking.id)
+      .then((addons) => {
+        if (active) setAvailableAddons(addons);
+      })
+      .catch((e) => {
+        if (active) setErr(errMessage(e, "Failed to load add-ons"));
+      })
+      .finally(() => {
+        if (active) setAddonsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [booking.id]);
+
+  const toggleAddon = (addon: BookingAddon, checked: boolean) => {
+    setSelectedAddonIds((prev) =>
+      checked
+        ? prev.includes(addon.id)
+          ? prev
+          : [...prev, addon.id]
+        : prev.filter((id) => id !== addon.id),
+    );
+    setAddonQuantities((prev) => {
+      const next = { ...prev };
+      if (checked) {
+        next[addon.id] = next[addon.id] || 1;
+      } else {
+        delete next[addon.id];
+      }
+      return next;
+    });
+  };
 
   const handleSave = async () => {
     setErr("");
@@ -765,12 +820,41 @@ function ModifyBookingModal({ booking, onClose, onSave }: ModifyBookingModalProp
       setErr("Check-out must be after check-in.");
       return;
     }
-    const total = parseInt(totalGuests, 10);
-    const newChildren = Math.min(booking.children, Math.max(0, total - 1));
-    const newAdults = total - newChildren;
+    const newAdults = parseInt(adults, 10);
+    const newChildren = parseInt(children, 10);
+    const newNightlyRate = Number(nightlyRate);
+    if (!Number.isFinite(newAdults) || newAdults < 1) {
+      setErr("Adults must be at least 1.");
+      return;
+    }
+    if (!Number.isFinite(newChildren) || newChildren < 0) {
+      setErr("Children cannot be negative.");
+      return;
+    }
+    if (!Number.isFinite(newNightlyRate) || newNightlyRate < 0) {
+      setErr("Nightly rate must be a valid amount.");
+      return;
+    }
+    const nextQuantities = selectedAddonIds.reduce<Record<string, number>>((acc, addonId) => {
+      acc[addonId] = Math.max(1, Number(addonQuantities[addonId]) || 1);
+      return acc;
+    }, {});
+    const nextAddonDates = selectedAddonIds.reduce<Record<string, string[]>>((acc, addonId) => {
+      if (booking.addonDates?.[addonId]) acc[addonId] = booking.addonDates[addonId];
+      return acc;
+    }, {});
     setSaving(true);
     try {
-      await onSave(checkIn, checkOut, newAdults, newChildren);
+      await onSave({
+        checkIn,
+        checkOut,
+        adults: newAdults,
+        children: newChildren,
+        nightlyRate: newNightlyRate,
+        addonIds: selectedAddonIds,
+        addonQuantities: nextQuantities,
+        addonDates: nextAddonDates,
+      });
       onClose();
     } catch (e) {
       setErr(errMessage(e, "Failed to modify booking"));
@@ -781,22 +865,82 @@ function ModifyBookingModal({ booking, onClose, onSave }: ModifyBookingModalProp
   return (
     <Modal onClose={onClose}>
       <h3 className="text-lg font-semibold text-gray-900 mb-1">Modify booking</h3>
-      <p className="text-sm text-gray-500 mb-5">Changes apply to all rooms in this booking.</p>
+      <p className="text-sm text-gray-500 mb-5">
+        Changes apply to all rooms in this direct booking. The backend recalculates the total on
+        save.
+      </p>
       <div className="space-y-4 mb-4">
-        <Field label="Check-in" value={checkIn} onChange={setCheckIn} type="date" />
-        <Field label="Check-out" value={checkOut} onChange={setCheckOut} type="date" />
-        <SelectField
-          label="Total guests"
-          value={totalGuests}
-          onChange={setTotalGuests}
-          options={Array.from({ length: 20 }, (_, i) => ({
-            value: String(i + 1),
-            label: `${i + 1} guest${i + 1 !== 1 ? "s" : ""}`,
-          }))}
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Check-in" value={checkIn} onChange={setCheckIn} type="date" />
+          <Field label="Check-out" value={checkOut} onChange={setCheckOut} type="date" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field label="Adults" value={adults} onChange={setAdults} type="number" />
+          <Field label="Children" value={children} onChange={setChildren} type="number" />
+          <Field
+            label={`Nightly rate (${booking.currency})`}
+            value={nightlyRate}
+            onChange={setNightlyRate}
+            type="number"
+          />
+        </div>
+        <div>
+          <p className="block text-xs font-medium text-gray-600 mb-2">Add-ons</p>
+          {addonsLoading ? (
+            <p className="text-sm text-gray-500">Loading add-ons…</p>
+          ) : availableAddons.length === 0 ? (
+            <p className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-2">
+              No add-ons are configured for this property.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-56 overflow-auto pr-1">
+              {availableAddons.map((addon) => {
+                const selected = selectedAddonIds.includes(addon.id);
+                return (
+                  <label
+                    key={addon.id}
+                    className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={(e) => toggleAddon(addon, e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-gray-900 truncate">
+                        {addon.name}
+                      </span>
+                      <span className="block text-xs text-gray-500">
+                        {formatCurrency(addon.price, addon.currency)}
+                        {addon.perPerson ? " · per person" : ""}
+                        {addon.perNight ? " · per night" : ""}
+                      </span>
+                    </span>
+                    {selected && (
+                      <input
+                        type="number"
+                        min={1}
+                        value={addonQuantities[addon.id] || 1}
+                        onChange={(e) =>
+                          setAddonQuantities((prev) => ({
+                            ...prev,
+                            [addon.id]: Math.max(1, Number(e.target.value) || 1),
+                          }))
+                        }
+                        aria-label={`${addon.name} quantity`}
+                        className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                      />
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
       <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-4">
-        ⚠ Changing dates may affect pricing for all rooms.
+        Changing dates, rates, guests, or add-ons may affect pricing for all rooms.
       </p>
       {err && (
         <p className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
@@ -1096,13 +1240,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     setBooking(updated);
   };
 
-  const handleModifyBooking = async (
-    checkIn: string,
-    checkOut: string,
-    adults: number,
-    children: number,
-  ) => {
-    const updated = await bookingsService.update(id, { checkIn, checkOut, adults, children });
+  const handleModifyBooking = async (payload: {
+    checkIn: string;
+    checkOut: string;
+    adults: number;
+    children: number;
+    nightlyRate: number;
+    addonIds: string[];
+    addonQuantities: Record<string, number>;
+    addonDates: Record<string, string[]>;
+  }) => {
+    const updated = await bookingsService.update(id, payload);
     setBooking(updated);
   };
 
@@ -1611,7 +1759,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               </div>
             </div>
           </div>
-
         </div>
 
         {/* 3. Guest information · booker */}

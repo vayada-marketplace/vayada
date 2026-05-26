@@ -486,6 +486,11 @@ class BookingRepository:
             "adults",
             "children",
             "nightly_rate",
+            "addon_ids",
+            "addon_names",
+            "addon_total",
+            "addon_quantities",
+            "addon_dates",
             "special_requests",
         }
         filtered = {k: v for k, v in updates.items() if k in ALLOWED and v is not None}
@@ -496,6 +501,9 @@ class BookingRepository:
         for date_field in ("check_in", "check_out", "guest_date_of_birth"):
             if date_field in filtered and isinstance(filtered[date_field], str):
                 filtered[date_field] = date.fromisoformat(filtered[date_field])
+        for json_field in ("addon_ids", "addon_names", "addon_quantities", "addon_dates"):
+            if json_field in filtered:
+                filtered[json_field] = json.dumps(filtered[json_field])
 
         # Recalculate total if rate or dates changed
         set_clauses = []
@@ -514,7 +522,12 @@ class BookingRepository:
         # booking-creation formula so addons and promo discount survive
         # an admin edit (the last-minute discount is already baked into
         # the stored nightly_rate).
-        if "check_in" in filtered or "check_out" in filtered or "nightly_rate" in filtered:
+        if (
+            "check_in" in filtered
+            or "check_out" in filtered
+            or "nightly_rate" in filtered
+            or "addon_total" in filtered
+        ):
             current = await BookingRepository.get_by_id(booking_id)
             ci = date.fromisoformat(str(current["check_in"]))
             co = date.fromisoformat(str(current["check_out"]))

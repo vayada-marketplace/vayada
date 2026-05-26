@@ -56,11 +56,23 @@ export interface Booking {
   addonNames: string[];
   addonTotal: number;
   addonQuantities: Record<string, number>;
+  addonDates: Record<string, string[]>;
   estimatedArrivalTime: string | null;
   numberOfGuests: number | null;
   guestWithdrawn: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BookingAddon {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  category: string;
+  perPerson?: boolean | null;
+  perNight?: boolean | null;
 }
 
 export interface BookingListResponse {
@@ -177,6 +189,9 @@ export const bookingsService = {
       adults: number;
       children: number;
       nightlyRate: number;
+      addonIds: string[];
+      addonQuantities: Record<string, number>;
+      addonDates: Record<string, string[]>;
       specialRequests: string;
     }>,
   ) => pmsClient.patch<Booking>(`/admin/bookings/${id}`, data),
@@ -251,6 +266,9 @@ export const bookingsService = {
 
   listAdditionalGuests: (id: string) =>
     pmsClient.get<{ guests: BookingAdditionalGuest[] }>(`/admin/bookings/${id}/additional-guests`),
+
+  listAvailableAddons: (id: string) =>
+    pmsClient.get<BookingAddon[]>(`/admin/bookings/${id}/addons`),
 
   createAdditionalGuest: (id: string, data: BookingAdditionalGuestPayload) =>
     pmsClient.post<BookingAdditionalGuest>(`/admin/bookings/${id}/additional-guests`, data),
