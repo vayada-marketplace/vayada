@@ -28,8 +28,31 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           for attempt in {1..40}; do
+            status_context="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/status" \
+              --jq '.statuses[]
+                | select(.context | test("coderabbit"; "i"))
+                | [.context, .state]
+                | @tsv' \
+              | head -n 1)"
+
+            if [ -n "$status_context" ]; then
+              IFS=$'\t' read -r context state <<< "$status_context"
+              echo "CodeRabbit commit status: ${context} state=${state}"
+
+              case "$state" in
+                success)
+                  exit 0
+                  ;;
+                failure|error)
+                  echo "CodeRabbit did not complete successfully: ${state}"
+                  exit 1
+                  ;;
+              esac
+            fi
+
             check_run="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
               --jq '.check_runs[]
+                | select((.app.slug // "") != "github-actions")
                 | select(((.name // "") | test("coderabbit"; "i")) or ((.app.slug // "") | test("coderabbit"; "i")))
                 | [.name, .status, (.conclusion // "")]
                 | @tsv' \
@@ -51,29 +74,7 @@ jobs:
                 esac
               fi
             else
-              status_context="$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/status" \
-                --jq '.statuses[]
-                  | select(.context | test("coderabbit"; "i"))
-                  | [.context, .state]
-                  | @tsv' \
-                | head -n 1)"
-
-              if [ -n "$status_context" ]; then
-                IFS=$'\t' read -r context state <<< "$status_context"
-                echo "CodeRabbit commit status: ${context} state=${state}"
-
-                case "$state" in
-                  success)
-                    exit 0
-                    ;;
-                  failure|error)
-                    echo "CodeRabbit did not complete successfully: ${state}"
-                    exit 1
-                    ;;
-                esac
-              else
-                echo "CodeRabbit status has not been created yet."
-              fi
+              echo "CodeRabbit status has not been created yet."
             fi
 
             echo "Waiting for CodeRabbit review status (${attempt}/40)..."
