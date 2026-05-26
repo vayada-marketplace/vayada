@@ -480,6 +480,9 @@ class BookingRepository:
             "guest_email",
             "guest_phone",
             "guest_country",
+            "guest_gender",
+            "guest_date_of_birth",
+            "guest_passport_number",
             "adults",
             "children",
             "nightly_rate",
@@ -490,7 +493,7 @@ class BookingRepository:
             return await BookingRepository.get_by_id(booking_id)
 
         # Convert date strings to date objects for asyncpg
-        for date_field in ("check_in", "check_out"):
+        for date_field in ("check_in", "check_out", "guest_date_of_birth"):
             if date_field in filtered and isinstance(filtered[date_field], str):
                 filtered[date_field] = date.fromisoformat(filtered[date_field])
 

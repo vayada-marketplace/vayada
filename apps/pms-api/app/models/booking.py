@@ -139,6 +139,9 @@ class BookingAdminResponse(BaseModel):
     guest_email: str
     guest_phone: str
     guest_country: str = ""
+    guest_gender: str = ""
+    guest_date_of_birth: str | None = None
+    guest_passport_number: str = ""
     special_requests: str
     estimated_arrival_time: str | None = None
     number_of_guests: int | None = None
@@ -251,6 +254,9 @@ class BookingDetailsUpdate(BaseModel):
     guest_email: str | None = None
     guest_phone: str | None = None
     guest_country: str | None = None
+    guest_gender: str | None = None
+    guest_date_of_birth: str | None = None
+    guest_passport_number: str | None = None
     adults: int | None = None
     children: int | None = None
     nightly_rate: float | None = None

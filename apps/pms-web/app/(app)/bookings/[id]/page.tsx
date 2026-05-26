@@ -762,6 +762,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     position: number;
     label: string;
   } | null>(null);
+  const [bookerEditing, setBookerEditing] = useState(false);
+  const [bookerSaving, setBookerSaving] = useState(false);
+  const [bookerForm, setBookerForm] = useState({
+    guestFirstName: "",
+    guestLastName: "",
+    guestGender: "",
+    guestCountry: "",
+    guestDateOfBirth: "",
+    guestEmail: "",
+    guestPhone: "",
+    guestPassportNumber: "",
+    specialRequests: "",
+  });
 
   const loadAll = useCallback(async () => {
     try {
@@ -936,6 +949,45 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         }
       },
     });
+  };
+
+  const handleEditBooker = () => {
+    if (!booking) return;
+    setBookerForm({
+      guestFirstName: booking.guestFirstName,
+      guestLastName: booking.guestLastName,
+      guestGender: booking.guestGender,
+      guestCountry: booking.guestCountry,
+      guestDateOfBirth: booking.guestDateOfBirth ?? "",
+      guestEmail: booking.guestEmail,
+      guestPhone: booking.guestPhone,
+      guestPassportNumber: booking.guestPassportNumber,
+      specialRequests: booking.specialRequests,
+    });
+    setBookerEditing(true);
+  };
+
+  const handleSaveBooker = async () => {
+    setBookerSaving(true);
+    try {
+      const updated = await bookingsService.update(id, {
+        guestFirstName: bookerForm.guestFirstName,
+        guestLastName: bookerForm.guestLastName,
+        guestGender: bookerForm.guestGender,
+        guestCountry: bookerForm.guestCountry,
+        guestDateOfBirth: bookerForm.guestDateOfBirth || null,
+        guestEmail: bookerForm.guestEmail,
+        guestPhone: bookerForm.guestPhone,
+        guestPassportNumber: bookerForm.guestPassportNumber,
+        specialRequests: bookerForm.specialRequests,
+      });
+      setBooking(updated);
+      setBookerEditing(false);
+    } catch (err) {
+      setError(errMessage(err, "Failed to save booker information"));
+    } finally {
+      setBookerSaving(false);
+    }
   };
 
   const handleMoveRoom = async (fromRoomId: string | null, toRoomId: string) => {
@@ -1436,42 +1488,166 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
         {/* 3. Guest information · booker */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">Guest information · booker</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="text-xs text-gray-500">Name</p>
-              <p className="font-medium text-gray-900">
-                {booking.guestFirstName} {booking.guestLastName}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Email</p>
-              <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Phone</p>
-              <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-500">Nationality</p>
-              <p className="font-medium text-gray-900">{booking.guestCountry || "—"}</p>
-            </div>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-gray-900">Guest information · booker</h2>
+            {!bookerEditing && (
+              <button
+                onClick={handleEditBooker}
+                className="p-1.5 rounded text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+                aria-label="Edit booker information"
+              >
+                <PencilSquareIcon className="w-4 h-4" />
+              </button>
+            )}
           </div>
-          {(booking.specialRequests || booking.estimatedArrivalTime) && (
-            <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              {booking.specialRequests && (
-                <div>
-                  <p className="text-xs text-gray-500">Special requests</p>
-                  <p className="text-gray-900 whitespace-pre-wrap">{booking.specialRequests}</p>
+          {bookerEditing ? (
+            <div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Field
+                  label="First name"
+                  value={bookerForm.guestFirstName}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestFirstName: v })}
+                />
+                <Field
+                  label="Last name"
+                  value={bookerForm.guestLastName}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestLastName: v })}
+                />
+                <SelectField
+                  label="Gender"
+                  value={bookerForm.guestGender}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestGender: v })}
+                  options={[
+                    { value: "", label: "—" },
+                    { value: "female", label: "Female" },
+                    { value: "male", label: "Male" },
+                    { value: "other", label: "Other" },
+                    { value: "prefer_not_to_say", label: "Prefer not to say" },
+                  ]}
+                />
+                <Field
+                  label="Nationality"
+                  value={bookerForm.guestCountry}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestCountry: v })}
+                />
+                <Field
+                  label="Date of birth"
+                  type="date"
+                  value={bookerForm.guestDateOfBirth}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestDateOfBirth: v })}
+                />
+                <Field
+                  label="Email"
+                  type="email"
+                  value={bookerForm.guestEmail}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestEmail: v })}
+                />
+                <Field
+                  label="Phone (optional)"
+                  type="tel"
+                  value={bookerForm.guestPhone}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestPhone: v })}
+                />
+                <Field
+                  label="Passport / ID (optional)"
+                  value={bookerForm.guestPassportNumber}
+                  onChange={(v) => setBookerForm({ ...bookerForm, guestPassportNumber: v })}
+                />
+                <div className="md:col-span-2">
+                  <label className="block">
+                    <span className="block text-xs font-medium text-gray-600 mb-1">
+                      Special requests
+                    </span>
+                    <textarea
+                      value={bookerForm.specialRequests}
+                      onChange={(e) =>
+                        setBookerForm({ ...bookerForm, specialRequests: e.target.value })
+                      }
+                      rows={3}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-base text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent resize-none"
+                    />
+                  </label>
                 </div>
-              )}
-              {booking.estimatedArrivalTime && (
-                <div>
-                  <p className="text-xs text-gray-500">Estimated arrival time</p>
-                  <p className="font-medium text-gray-900">{booking.estimatedArrivalTime}</p>
-                </div>
-              )}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  onClick={() => setBookerEditing(false)}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 rounded-lg hover:bg-gray-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveBooker}
+                  disabled={bookerSaving}
+                  className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-black disabled:opacity-50"
+                >
+                  {bookerSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
             </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-xs text-gray-500">Name</p>
+                  <p className="font-medium text-gray-900">
+                    {booking.guestFirstName} {booking.guestLastName}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Email</p>
+                  <p className="font-medium text-gray-900 break-words">{booking.guestEmail}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Phone</p>
+                  <p className="font-medium text-gray-900">{booking.guestPhone || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Nationality</p>
+                  <p className="font-medium text-gray-900">{booking.guestCountry || "—"}</p>
+                </div>
+                {booking.guestGender && (
+                  <div>
+                    <p className="text-xs text-gray-500">Gender</p>
+                    <p className="font-medium text-gray-900 capitalize">
+                      {booking.guestGender === "prefer_not_to_say"
+                        ? "Prefer not to say"
+                        : booking.guestGender}
+                    </p>
+                  </div>
+                )}
+                {booking.guestDateOfBirth && (
+                  <div>
+                    <p className="text-xs text-gray-500">Date of birth</p>
+                    <p className="font-medium text-gray-900">
+                      {formatDateLong(booking.guestDateOfBirth)}
+                    </p>
+                  </div>
+                )}
+                {booking.guestPassportNumber && (
+                  <div>
+                    <p className="text-xs text-gray-500">Passport / ID</p>
+                    <p className="font-medium text-gray-900">{booking.guestPassportNumber}</p>
+                  </div>
+                )}
+              </div>
+              {(booking.specialRequests || booking.estimatedArrivalTime) && (
+                <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  {booking.specialRequests && (
+                    <div>
+                      <p className="text-xs text-gray-500">Special requests</p>
+                      <p className="text-gray-900 whitespace-pre-wrap">{booking.specialRequests}</p>
+                    </div>
+                  )}
+                  {booking.estimatedArrivalTime && (
+                    <div>
+                      <p className="text-xs text-gray-500">Estimated arrival time</p>
+                      <p className="font-medium text-gray-900">{booking.estimatedArrivalTime}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
 
