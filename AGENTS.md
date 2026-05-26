@@ -155,9 +155,9 @@ Production runs on AWS ECS Fargate, fronted by an ALB. Each app has a GitHub Act
 
 ## Skills
 
-Shared agent skills live under `.claude/skills/<name>/SKILL.md`. The directory is named for Claude Code's convention; the skill content itself is tool-neutral.
+Shared agent skills live under `.agents/skills/<name>/SKILL.md`. The directory is intentionally tool-neutral; Codex, Claude Code, and any other agent should read the same shared skill content instead of maintaining per-tool copies.
 
-Start with `.claude/skills/vayada-skills-storage/SKILL.md` to understand the three-layer model (shared skill / repo-local instructions / Linear issue) and where new skills should go.
+Start with `.agents/skills/vayada-skills-storage/SKILL.md` to understand the three-layer model (shared skill / repo-local instructions / Linear issue) and where new skills should go.
 
 ## Gotchas
 
