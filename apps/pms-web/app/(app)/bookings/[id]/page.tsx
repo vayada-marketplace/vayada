@@ -744,6 +744,84 @@ function AssignGuestsModal({
   );
 }
 
+// ─── Modify-booking modal ─────────────────────────────────────────────
+
+interface ModifyBookingModalProps {
+  booking: Booking;
+  onClose: () => void;
+  onSave: (checkIn: string, checkOut: string, adults: number, children: number) => Promise<void>;
+}
+
+function ModifyBookingModal({ booking, onClose, onSave }: ModifyBookingModalProps) {
+  const [checkIn, setCheckIn] = useState(booking.checkIn);
+  const [checkOut, setCheckOut] = useState(booking.checkOut);
+  const [totalGuests, setTotalGuests] = useState(String(booking.adults + booking.children));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const handleSave = async () => {
+    setErr("");
+    if (checkOut <= checkIn) {
+      setErr("Check-out must be after check-in.");
+      return;
+    }
+    const total = parseInt(totalGuests, 10);
+    const newChildren = Math.min(booking.children, Math.max(0, total - 1));
+    const newAdults = total - newChildren;
+    setSaving(true);
+    try {
+      await onSave(checkIn, checkOut, newAdults, newChildren);
+      onClose();
+    } catch (e) {
+      setErr(errMessage(e, "Failed to modify booking"));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h3 className="text-lg font-semibold text-gray-900 mb-1">Modify booking</h3>
+      <p className="text-sm text-gray-500 mb-5">Changes apply to all rooms in this booking.</p>
+      <div className="space-y-4 mb-4">
+        <Field label="Check-in" value={checkIn} onChange={setCheckIn} type="date" />
+        <Field label="Check-out" value={checkOut} onChange={setCheckOut} type="date" />
+        <SelectField
+          label="Total guests"
+          value={totalGuests}
+          onChange={setTotalGuests}
+          options={Array.from({ length: 20 }, (_, i) => ({
+            value: String(i + 1),
+            label: `${i + 1} guest${i + 1 !== 1 ? "s" : ""}`,
+          }))}
+        />
+      </div>
+      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-4">
+        ⚠ Changing dates may affect pricing for all rooms.
+      </p>
+      {err && (
+        <p className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+          {err}
+        </p>
+      )}
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-black rounded-lg disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -794,6 +872,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     guestPassportNumber: "",
     specialRequests: "",
   });
+  const [modifyOpen, setModifyOpen] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -1017,6 +1096,16 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     setBooking(updated);
   };
 
+  const handleModifyBooking = async (
+    checkIn: string,
+    checkOut: string,
+    adults: number,
+    children: number,
+  ) => {
+    const updated = await bookingsService.update(id, { checkIn, checkOut, adults, children });
+    setBooking(updated);
+  };
+
   const handleAssignGuests = async (changes: Record<string, number | null>) => {
     // Issue PATCH calls in parallel; build a fresh list from the updated
     // rows so the UI doesn't go through a stale render.
@@ -1090,6 +1179,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   // for read-only/disabled UI affordances — the booking is terminal.
   const isCancelled =
     booking.status === "cancelled" || booking.status === "declined" || booking.status === "expired";
+  const isDirectBooking = normalizeChannelKey(booking.channel) === "direct";
   const hasDeadline = isPending && booking.hostResponseDeadline;
   const totalParty = booking.adults + booking.children;
   const additionalCapacity = Math.max(0, totalParty - 1);
@@ -1291,9 +1381,28 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             <h2 className="text-sm font-semibold text-gray-900">Stay details</h2>
             {/* Booking-level Modify (dates / guest count for whole booking) */}
             <button
-              disabled
-              title="Use the guest's change-request flow to modify dates or add-ons"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-lg cursor-not-allowed"
+              disabled={isCancelled || !isDirectBooking}
+              onClick={() => setModifyOpen(true)}
+              title={
+                isCancelled
+                  ? "Cancelled bookings cannot be modified"
+                  : !isDirectBooking
+                    ? `OTA bookings can't be edited here. Manage changes via ${getChannelLabel(booking.channel)}.`
+                    : "Modify booking dates and guest count"
+              }
+              aria-label={
+                isCancelled
+                  ? "Modify booking disabled: Cancelled bookings cannot be modified"
+                  : !isDirectBooking
+                    ? `Modify booking disabled: OTA bookings can't be edited here. Manage changes via ${getChannelLabel(booking.channel)}.`
+                    : "Modify booking dates and guest count"
+              }
+              aria-disabled={isCancelled || !isDirectBooking}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border rounded-lg ${
+                isCancelled || !isDirectBooking
+                  ? "text-gray-500 bg-gray-50 border-gray-200 cursor-not-allowed"
+                  : "text-gray-700 bg-white border-gray-300 hover:bg-gray-50"
+              }`}
             >
               <PencilSquareIcon className="w-4 h-4" />
               Modify
@@ -2017,6 +2126,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           guests={guests}
           onClose={() => setAssignTarget(null)}
           onSave={handleAssignGuests}
+        />
+      )}
+
+      {modifyOpen && (
+        <ModifyBookingModal
+          booking={booking}
+          onClose={() => setModifyOpen(false)}
+          onSave={handleModifyBooking}
         />
       )}
     </div>
