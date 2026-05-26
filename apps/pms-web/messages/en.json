@@ -147,6 +147,7 @@
   "dashboard.revenueThisMonth": "Revenue This Month",
   "dashboard.monthToDate": "Month to date",
   "dashboard.viewAll": "View all",
+  "dashboard.clickGuestToStartCheckIn": "Click a guest to start check-in",
   "dashboard.confirmed": "Confirmed",
   "dashboard.settled": "Settled",
   "dashboard.occupancyForecast": "Occupancy Forecast",
