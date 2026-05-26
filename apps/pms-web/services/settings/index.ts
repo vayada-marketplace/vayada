@@ -15,6 +15,10 @@ export interface HotelSummary {
   country: string;
 }
 
+export interface HotelDetails extends HotelSummary {
+  timezone: string;
+}
+
 // Slice of the booking-engine PropertySettings the PMS reads/writes —
 // shared with BE Admin so the currency selector hits the same field.
 export interface PropertySettings {
@@ -27,6 +31,8 @@ export const pmsSettingsService = {
   getSetupStatus: () => pmsClient.get<PmsSetupStatus>("/admin/setup-status"),
 
   listHotels: () => apiClient.get<HotelSummary[]>("/admin/hotels"),
+
+  getHotelDetails: () => pmsClient.get<HotelDetails>("/admin/hotel"),
 };
 
 export const settingsService = {
