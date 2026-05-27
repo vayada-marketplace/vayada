@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheckIcon, KeyIcon, ClockIcon } from "@heroicons/react/24/outline";
+import QRCode from "react-qr-code";
 import { authService } from "@/services/auth";
 import { FeedbackAlert } from "@/components/ui";
 import { useTranslation } from "@/lib/i18n";
@@ -160,10 +161,13 @@ export function TotpSettings() {
           </button>
         )}
 
-        {/* Step 1: show secret + otpauth link */}
+        {/* Step 1: show QR code + secret + otpauth link */}
         {step === "setup" && (
           <div className="space-y-4 max-w-sm">
             <p className="text-[13px] text-gray-700">{t("settings.totp.scanInstructions")}</p>
+            <div className="bg-white rounded-lg border border-gray-200 p-3 w-fit">
+              <QRCode value={otpauthUri} size={160} />
+            </div>
             <a
               href={otpauthUri}
               className="inline-block text-[13px] text-primary-600 hover:underline break-all"
