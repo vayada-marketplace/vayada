@@ -422,8 +422,11 @@ export default function SetupPage() {
           await pmsClient.patch("/admin/hotel", {
             last_minute_discount: lastMinuteConfig,
           });
-        } catch {
-          // Non-fatal: can be configured later from Booking Flow
+        } catch (err) {
+          console.error("Failed to persist last-minute discount config:", err);
+          throw new Error(
+            "Last-minute discount settings could not be saved. Please try again before completing setup.",
+          );
         }
       }
 
