@@ -114,7 +114,7 @@ async def require_hotel_admin(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> str:
-    user = await _authenticate(credentials, request, columns="id, type")
+    user = await _authenticate(credentials, request, columns="id, type, status")
     if user["type"] != "hotel":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
