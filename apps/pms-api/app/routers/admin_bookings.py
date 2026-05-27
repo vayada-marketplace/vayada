@@ -117,6 +117,11 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         guest_email=b["guest_email"],
         guest_phone=b["guest_phone"],
         guest_country=b.get("guest_country") or "",
+        guest_gender=b.get("guest_gender") or "",
+        guest_date_of_birth=(
+            str(b["guest_date_of_birth"]) if b.get("guest_date_of_birth") else None
+        ),
+        guest_passport_number=b.get("guest_passport_number") or "",
         special_requests=b["special_requests"],
         check_in=str(ci),
         check_out=str(co),

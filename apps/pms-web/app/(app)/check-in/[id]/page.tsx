@@ -16,13 +16,17 @@ type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: numbe
 const primaryActionClass =
   "rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60";
 
-type BookerDraft = {
-  guestFirstName: string;
-  guestLastName: string;
-  guestEmail: string;
-  guestPhone: string;
-  guestCountry: string;
-};
+type GuestRegistrationDraft = Pick<
+  BookingAdditionalGuestPayload,
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "phone"
+  | "gender"
+  | "nationality"
+  | "dateOfBirth"
+  | "passportNumber"
+>;
 
 function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
@@ -73,9 +77,35 @@ function normalizeGuests(booking: Booking, guests: BookingAdditionalGuest[]): Gu
   return rows;
 }
 
-function guestComplete(g: GuestDraft) {
+function bookerDraftFromBooking(booking: Booking): GuestRegistrationDraft {
+  return {
+    firstName: booking.guestFirstName || "",
+    lastName: booking.guestLastName || "",
+    email: booking.guestEmail || "",
+    phone: booking.guestPhone || "",
+    gender: booking.guestGender || "",
+    nationality: booking.guestCountry || "",
+    dateOfBirth: booking.guestDateOfBirth || null,
+    passportNumber: booking.guestPassportNumber || "",
+  };
+}
+
+function guestComplete(g: GuestRegistrationDraft) {
   return Boolean(
     g.firstName && g.lastName && g.gender && g.nationality && g.dateOfBirth && g.passportNumber,
+  );
+}
+
+function bookerDraftChanged(draft: GuestRegistrationDraft, b: Booking) {
+  return (
+    draft.firstName !== (b.guestFirstName || "") ||
+    draft.lastName !== (b.guestLastName || "") ||
+    draft.email !== (b.guestEmail || "") ||
+    draft.phone !== (b.guestPhone || "") ||
+    draft.gender !== (b.guestGender || "") ||
+    draft.nationality !== (b.guestCountry || "") ||
+    draft.dateOfBirth !== (b.guestDateOfBirth || null) ||
+    draft.passportNumber !== (b.guestPassportNumber || "")
   );
 }
 
@@ -83,8 +113,9 @@ function channelIsOta(channel: string | null | undefined) {
   return Boolean(channel && channel.toLowerCase() !== "direct");
 }
 
-function pendingFlags(booking: Booking, guests: GuestDraft[]) {
+function pendingFlags(booking: Booking, booker: GuestRegistrationDraft, guests: GuestDraft[]) {
   const flags: string[] = [];
+  if (!guestComplete(booker)) flags.push("Booker ID");
   guests.forEach((guest, idx) => {
     if (!guestComplete(guest)) flags.push(`Guest ${idx + 2} ID`);
   });
@@ -94,70 +125,41 @@ function pendingFlags(booking: Booking, guests: GuestDraft[]) {
   return flags;
 }
 
-function bookerDraftFrom(b: Booking): BookerDraft {
-  return {
-    guestFirstName: b.guestFirstName,
-    guestLastName: b.guestLastName,
-    guestEmail: b.guestEmail,
-    guestPhone: b.guestPhone,
-    guestCountry: b.guestCountry,
-  };
-}
-
-function bookerDraftChanged(draft: BookerDraft, b: Booking) {
-  return (
-    draft.guestFirstName !== b.guestFirstName ||
-    draft.guestLastName !== b.guestLastName ||
-    draft.guestEmail !== b.guestEmail ||
-    draft.guestPhone !== b.guestPhone ||
-    draft.guestCountry !== b.guestCountry
-  );
-}
-
 export default function CheckInPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [booking, setBooking] = useState<Booking | null>(null);
+  const [booker, setBooker] = useState<GuestRegistrationDraft | null>(null);
   const [guests, setGuests] = useState<GuestDraft[]>([]);
   const [loading, setLoading] = useState(true);
-  const [savingGuest, setSavingGuest] = useState<number | null>(null);
+  const [savingGuest, setSavingGuest] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
   const [actionLoading, setActionLoading] = useState<null | "markPaid" | "completeCheckIn">(null);
-  const [bookerEditOpen, setBookerEditOpen] = useState(false);
-  const [bookerDraft, setBookerDraft] = useState<BookerDraft>({
-    guestFirstName: "",
-    guestLastName: "",
-    guestEmail: "",
-    guestPhone: "",
-    guestCountry: "",
-  });
 
   useEffect(() => {
     if (!id) return;
     Promise.all([bookingsService.get(id), bookingsService.listAdditionalGuests(id)])
       .then(([bookingRes, guestRes]) => {
         setBooking(bookingRes);
+        setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
-        setBookerDraft(bookerDraftFrom(bookingRes));
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Warn before leaving with unsaved booker edits open
-  useEffect(() => {
-    if (!bookerEditOpen) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [bookerEditOpen]);
-
-  const flags = useMemo(() => (booking ? pendingFlags(booking, guests) : []), [booking, guests]);
-  const completedGuests = guests.filter(guestComplete).length + 1;
+  const flags = useMemo(
+    () => (booking && booker ? pendingFlags(booking, booker, guests) : []),
+    [booking, booker, guests],
+  );
+  const completedGuests =
+    guests.filter(guestComplete).length + (booker && guestComplete(booker) ? 1 : 0);
   const ota = channelIsOta(booking?.channel);
+
+  const updateBooker = (patch: Partial<GuestRegistrationDraft>) => {
+    setBooker((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
 
   const updateGuest = (index: number, patch: Partial<GuestDraft>) => {
     setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...g, ...patch } : g)));
@@ -172,13 +174,15 @@ export default function CheckInPage() {
 
   const saveGuest = async (index: number) => {
     if (!booking) return;
-    setSavingGuest(index);
+    setSavingGuest(`guest-${index}`);
     setError("");
     try {
       const draft = guests[index];
       const payload: BookingAdditionalGuestPayload = {
         firstName: draft.firstName || "",
         lastName: draft.lastName || "",
+        email: draft.email || "",
+        phone: draft.phone || "",
         gender: draft.gender || "",
         nationality: draft.nationality || "",
         dateOfBirth: draft.dateOfBirth || null,
@@ -191,6 +195,30 @@ export default function CheckInPage() {
       setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...saved } : g)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save guest");
+    } finally {
+      setSavingGuest(null);
+    }
+  };
+
+  const saveBooker = async () => {
+    if (!booking || !booker) return;
+    setSavingGuest("booker");
+    setError("");
+    try {
+      const updated = await bookingsService.update(booking.id, {
+        guestFirstName: booker.firstName || "",
+        guestLastName: booker.lastName || "",
+        guestEmail: booker.email || "",
+        guestPhone: booker.phone || "",
+        guestCountry: booker.nationality || "",
+        guestGender: booker.gender || "",
+        guestDateOfBirth: booker.dateOfBirth || null,
+        guestPassportNumber: booker.passportNumber || "",
+      });
+      setBooking(updated);
+      setBooker(bookerDraftFromBooking(updated));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save booker");
     } finally {
       setSavingGuest(null);
     }
@@ -210,14 +238,24 @@ export default function CheckInPage() {
   };
 
   const completeCheckIn = async () => {
-    if (!booking || actionLoading) return;
+    if (!booking || !booker || actionLoading) return;
     const carriedFlags = [...flags];
     setActionLoading("completeCheckIn");
     setError("");
     try {
-      if (bookerEditOpen && bookerDraftChanged(bookerDraft, booking)) {
-        const bookerUpdated = await bookingsService.update(booking.id, bookerDraft);
-        setBooking(bookerUpdated);
+      if (bookerDraftChanged(booker, booking)) {
+        const updated = await bookingsService.update(booking.id, {
+          guestFirstName: booker.firstName || "",
+          guestLastName: booker.lastName || "",
+          guestEmail: booker.email || "",
+          guestPhone: booker.phone || "",
+          guestCountry: booker.nationality || "",
+          guestGender: booker.gender || "",
+          guestDateOfBirth: booker.dateOfBirth || null,
+          guestPassportNumber: booker.passportNumber || "",
+        });
+        setBooking(updated);
+        setBooker(bookerDraftFromBooking(updated));
       }
       const checkedIn = await bookingsService.completeCheckIn(booking.id, carriedFlags);
       setBooking(checkedIn);
@@ -233,7 +271,7 @@ export default function CheckInPage() {
     return <div className="p-4 md:p-6 text-sm text-gray-500">Loading check-in...</div>;
   }
 
-  if (!booking) {
+  if (!booking || !booker) {
     return (
       <div className="p-4 md:p-6">
         <p className="text-sm text-red-600">{error || "Booking not found."}</p>
@@ -316,10 +354,11 @@ export default function CheckInPage() {
           </p>
         )}
 
-        {guests.some((g) => !guestComplete(g)) && (
+        {completedGuests < totalGuests(booking) && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            {guests.filter((g) => !guestComplete(g)).length} of {totalGuests(booking)} guests
-            missing passport / ID. Required for police registration. Check in now, complete later.
+            {totalGuests(booking) - completedGuests} of {totalGuests(booking)} guests missing
+            registration details / passport / ID. Required for police registration. Check in now,
+            complete later.
           </div>
         )}
 
@@ -346,146 +385,31 @@ export default function CheckInPage() {
               action={`${completedGuests} of ${guests.length + 1} complete`}
             >
               <div className="space-y-3">
-                <div className="rounded-xl border border-green-200 bg-green-50 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-gray-950">
-                        ✓{" "}
-                        {bookerEditOpen
-                          ? `${bookerDraft.guestFirstName} ${bookerDraft.guestLastName}`.trim() ||
-                            guestName(booking)
-                          : guestName(booking)}{" "}
-                        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-green-700">
-                          booker
-                        </span>
-                      </p>
-                      {!bookerEditOpen && (
-                        <p className="mt-1 text-sm text-gray-600">
-                          {booking.guestCountry || "Nationality on file"} · reservation profile
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!bookerEditOpen) {
-                          setBookerEditOpen(true);
-                        } else {
-                          setBookerDraft(bookerDraftFrom(booking));
-                          setBookerEditOpen(false);
-                        }
-                      }}
-                      className="text-sm font-semibold text-blue-600"
-                    >
-                      {bookerEditOpen ? "Cancel" : "Edit"}
-                    </button>
-                  </div>
-                  {bookerEditOpen && (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <Field
-                        label="First name"
-                        value={bookerDraft.guestFirstName}
-                        disabled={ota && Boolean(booking.guestFirstName)}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestFirstName: v }))}
-                      />
-                      <Field
-                        label="Last name"
-                        value={bookerDraft.guestLastName}
-                        disabled={ota && Boolean(booking.guestLastName)}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestLastName: v }))}
-                      />
-                      <Field
-                        label="Email"
-                        type="email"
-                        value={bookerDraft.guestEmail}
-                        disabled={ota && Boolean(booking.guestEmail)}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestEmail: v }))}
-                      />
-                      <Field
-                        label="Phone"
-                        type="tel"
-                        value={bookerDraft.guestPhone}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestPhone: v }))}
-                      />
-                      <Field
-                        label="Nationality"
-                        value={bookerDraft.guestCountry}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestCountry: v }))}
-                      />
-                    </div>
-                  )}
-                </div>
+                <GuestRegistrationCard
+                  title={guestName(booking) || "Booker"}
+                  badge="booker"
+                  guest={booker}
+                  complete={guestComplete(booker)}
+                  ota={ota}
+                  onChange={updateBooker}
+                  onSave={saveBooker}
+                  saving={savingGuest === "booker"}
+                  saveLabel="Save booker"
+                />
 
                 {guests.map((guest, index) => {
                   const complete = guestComplete(guest);
                   return (
-                    <div
+                    <GuestRegistrationCard
                       key={guest.id || `new-${index}`}
-                      className={`rounded-xl border p-4 ${complete ? "border-green-200 bg-green-50" : "border-amber-200 bg-white"}`}
-                    >
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-gray-950">
-                            {complete ? "✓" : "!"} Guest {index + 2}
-                          </p>
-                          <p
-                            className={`text-sm ${complete ? "text-green-700" : "text-amber-700"}`}
-                          >
-                            {complete ? "Registration complete" : "Missing passport / ID"}
-                          </p>
-                        </div>
-                        {ota && (
-                          <span className="text-xs font-medium text-gray-500">
-                            Imported fields locked where supplied
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <Field
-                          label="First name"
-                          value={guest.firstName || ""}
-                          disabled={ota && Boolean(guest.firstName)}
-                          onChange={(v) => updateGuest(index, { firstName: v })}
-                        />
-                        <Field
-                          label="Last name"
-                          value={guest.lastName || ""}
-                          disabled={ota && Boolean(guest.lastName)}
-                          onChange={(v) => updateGuest(index, { lastName: v })}
-                        />
-                        <SelectField
-                          label="Gender"
-                          value={guest.gender || ""}
-                          onChange={(v) => updateGuest(index, { gender: v })}
-                        />
-                        <Field
-                          label="Nationality"
-                          value={guest.nationality || ""}
-                          disabled={ota && Boolean(guest.nationality)}
-                          onChange={(v) => updateGuest(index, { nationality: v })}
-                        />
-                        <Field
-                          label="Date of birth"
-                          type="date"
-                          value={guest.dateOfBirth || ""}
-                          onChange={(v) => updateGuest(index, { dateOfBirth: v || null })}
-                        />
-                        <Field
-                          label="Passport / ID number"
-                          value={guest.passportNumber || ""}
-                          placeholder="needed for police report"
-                          onChange={(v) => updateGuest(index, { passportNumber: v })}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => saveGuest(index)}
-                        disabled={savingGuest === index}
-                        className={`${primaryActionClass} mt-3`}
-                      >
-                        {savingGuest === index ? "Saving..." : "Save guest"}
-                      </button>
-                    </div>
+                      title={`Guest ${index + 2}`}
+                      guest={guest}
+                      complete={complete}
+                      ota={ota}
+                      onChange={(patch) => updateGuest(index, patch)}
+                      onSave={() => saveGuest(index)}
+                      saving={savingGuest === `guest-${index}`}
+                    />
                   );
                 })}
 
@@ -527,7 +451,7 @@ export default function CheckInPage() {
           <aside className="lg:sticky lg:top-6 lg:self-start">
             <Card title="Checklist">
               <div className="space-y-3">
-                <ChecklistItem done label="Booker registered" />
+                <ChecklistItem done={guestComplete(booker)} label="Booker ID" />
                 {guests.map((guest, idx) => (
                   <ChecklistItem
                     key={guest.id || idx}
@@ -562,6 +486,118 @@ export default function CheckInPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function GuestRegistrationCard({
+  title,
+  badge,
+  guest,
+  complete,
+  ota,
+  onChange,
+  onSave,
+  saving,
+  saveLabel = "Save guest",
+}: {
+  title: string;
+  badge?: string;
+  guest: GuestRegistrationDraft;
+  complete: boolean;
+  ota: boolean;
+  onChange: (patch: Partial<GuestRegistrationDraft>) => void;
+  onSave: () => void;
+  saving: boolean;
+  saveLabel?: string;
+}) {
+  const contactLocked = (value: string | null | undefined) => ota && Boolean(value);
+
+  return (
+    <div
+      className={`rounded-xl border p-4 ${
+        complete ? "border-green-200 bg-green-50" : "border-amber-200 bg-white"
+      }`}
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-gray-950">
+            {complete ? "✓" : "!"} {title}{" "}
+            {badge && (
+              <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-green-700">
+                {badge}
+              </span>
+            )}
+          </p>
+          <p className={`text-sm ${complete ? "text-green-700" : "text-amber-700"}`}>
+            {complete ? "Registration complete" : "Missing passport / ID"}
+          </p>
+        </div>
+        {ota && (
+          <span className="text-right text-xs font-medium text-gray-500">
+            Imported fields locked where supplied
+          </span>
+        )}
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field
+          label="First name"
+          value={guest.firstName || ""}
+          disabled={contactLocked(guest.firstName)}
+          onChange={(v) => onChange({ firstName: v })}
+        />
+        <Field
+          label="Last name"
+          value={guest.lastName || ""}
+          disabled={contactLocked(guest.lastName)}
+          onChange={(v) => onChange({ lastName: v })}
+        />
+        <Field
+          label="Email"
+          type="email"
+          value={guest.email || ""}
+          disabled={contactLocked(guest.email)}
+          onChange={(v) => onChange({ email: v })}
+        />
+        <Field
+          label="Phone"
+          type="tel"
+          value={guest.phone || ""}
+          disabled={contactLocked(guest.phone)}
+          onChange={(v) => onChange({ phone: v })}
+        />
+        <SelectField
+          label="Gender"
+          value={guest.gender || ""}
+          onChange={(v) => onChange({ gender: v })}
+        />
+        <Field
+          label="Nationality"
+          value={guest.nationality || ""}
+          disabled={contactLocked(guest.nationality)}
+          onChange={(v) => onChange({ nationality: v })}
+        />
+        <Field
+          label="Date of birth"
+          type="date"
+          value={guest.dateOfBirth || ""}
+          onChange={(v) => onChange({ dateOfBirth: v || null })}
+        />
+        <Field
+          label="Passport / ID number"
+          value={guest.passportNumber || ""}
+          placeholder="needed for police report"
+          onChange={(v) => onChange({ passportNumber: v })}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        className={`${primaryActionClass} mt-3`}
+      >
+        {saving ? "Saving..." : saveLabel}
+      </button>
+    </div>
   );
 }
 
