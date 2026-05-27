@@ -211,7 +211,6 @@ async def login(http_request: Request, request: LoginRequest, response: Response
         access_token=access_token,
         expires_in=get_token_expiration_seconds(),
         message="Login successful",
-        is_superadmin=bool(user.get("is_superadmin", False)),
     )
 
 
@@ -239,7 +238,7 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
             },
         )
 
-    user = await UserRepository.get_by_id(user_id, columns="id, email, name, type, status, is_superadmin")
+    user = await UserRepository.get_by_id(user_id, columns="id, email, name, type, status")
     if not user or user["status"] == "suspended":
         raise HTTPException(status_code=401, detail="Invalid session")
 
@@ -288,7 +287,6 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
         access_token=access_token,
         expires_in=get_token_expiration_seconds(),
         message="Login successful",
-        is_superadmin=bool(user.get("is_superadmin", False)),
     )
 
 
