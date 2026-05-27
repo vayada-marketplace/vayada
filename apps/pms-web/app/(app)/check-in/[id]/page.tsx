@@ -96,6 +96,19 @@ function guestComplete(g: GuestRegistrationDraft) {
   );
 }
 
+function bookerDraftChanged(draft: GuestRegistrationDraft, b: Booking) {
+  return (
+    draft.firstName !== (b.guestFirstName || "") ||
+    draft.lastName !== (b.guestLastName || "") ||
+    draft.email !== (b.guestEmail || "") ||
+    draft.phone !== (b.guestPhone || "") ||
+    draft.gender !== (b.guestGender || "") ||
+    draft.nationality !== (b.guestCountry || "") ||
+    draft.dateOfBirth !== (b.guestDateOfBirth || null) ||
+    draft.passportNumber !== (b.guestPassportNumber || "")
+  );
+}
+
 function channelIsOta(channel: string | null | undefined) {
   return Boolean(channel && channel.toLowerCase() !== "direct");
 }
@@ -225,11 +238,25 @@ export default function CheckInPage() {
   };
 
   const completeCheckIn = async () => {
-    if (!booking || actionLoading) return;
+    if (!booking || !booker || actionLoading) return;
     const carriedFlags = [...flags];
     setActionLoading("completeCheckIn");
     setError("");
     try {
+      if (bookerDraftChanged(booker, booking)) {
+        const updated = await bookingsService.update(booking.id, {
+          guestFirstName: booker.firstName || "",
+          guestLastName: booker.lastName || "",
+          guestEmail: booker.email || "",
+          guestPhone: booker.phone || "",
+          guestCountry: booker.nationality || "",
+          guestGender: booker.gender || "",
+          guestDateOfBirth: booker.dateOfBirth || null,
+          guestPassportNumber: booker.passportNumber || "",
+        });
+        setBooking(updated);
+        setBooker(bookerDraftFromBooking(updated));
+      }
       const checkedIn = await bookingsService.completeCheckIn(booking.id, carriedFlags);
       setBooking(checkedIn);
       setConfirmationFlags(carriedFlags);
@@ -367,6 +394,7 @@ export default function CheckInPage() {
                   onChange={updateBooker}
                   onSave={saveBooker}
                   saving={savingGuest === "booker"}
+                  saveLabel="Save booker"
                 />
 
                 {guests.map((guest, index) => {
@@ -470,6 +498,7 @@ function GuestRegistrationCard({
   onChange,
   onSave,
   saving,
+  saveLabel = "Save guest",
 }: {
   title: string;
   badge?: string;
@@ -479,6 +508,7 @@ function GuestRegistrationCard({
   onChange: (patch: Partial<GuestRegistrationDraft>) => void;
   onSave: () => void;
   saving: boolean;
+  saveLabel?: string;
 }) {
   const contactLocked = (value: string | null | undefined) => ota && Boolean(value);
 
@@ -565,7 +595,7 @@ function GuestRegistrationCard({
         disabled={saving}
         className={`${primaryActionClass} mt-3`}
       >
-        {saving ? "Saving..." : "Save guest"}
+        {saving ? "Saving..." : saveLabel}
       </button>
     </div>
   );
