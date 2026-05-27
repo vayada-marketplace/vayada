@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { bookingsService } from "@/services/bookings";
 import { pmsSettingsService, settingsService, HotelSummary } from "@/services/settings";
+import {
+  getArrivalsToday,
+  getDeparturesToday,
+  getPropertyToday,
+  getRemainingArrivals,
+} from "@/lib/dashboardBookings";
 import { useTranslation, SUPPORTED_LANGUAGES } from "@/lib/i18n";
 import { CURRENCY_OPTIONS } from "@/lib/constants/options";
 import SearchModal from "./SearchModal";
@@ -28,6 +34,7 @@ function buildHandoffUrl(baseUrl: string, path: string = ""): string {
 
 interface DayStats {
   arrivals: number;
+  remainingArrivals: number;
   departures: number;
 }
 
@@ -46,7 +53,11 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
 
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
-  const [stats, setStats] = useState<DayStats>({ arrivals: 0, departures: 0 });
+  const [stats, setStats] = useState<DayStats>({
+    arrivals: 0,
+    remainingArrivals: 0,
+    departures: 0,
+  });
   const profileRef = useRef<HTMLDivElement>(null);
   const propertyRef = useRef<HTMLDivElement>(null);
 
@@ -125,15 +136,16 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   };
 
   useEffect(() => {
-    const today = new Date().toISOString().split("T")[0];
-
-    bookingsService
-      .list({ status: "confirmed", limit: 500 })
-      .then((bookingsRes) => {
-        const bookings = bookingsRes.bookings;
-        const arrivals = bookings.filter((b) => b.checkIn === today).length;
-        const departures = bookings.filter((b) => b.checkOut === today).length;
-        setStats({ arrivals, departures });
+    Promise.all([bookingsService.listAll(), pmsSettingsService.getHotelDetails()])
+      .then(([bookings, hotel]) => {
+        const today = getPropertyToday(hotel.timezone);
+        const arrivalsToday = getArrivalsToday(bookings, today);
+        const departuresToday = getDeparturesToday(bookings, today);
+        setStats({
+          arrivals: arrivalsToday.length,
+          remainingArrivals: getRemainingArrivals(arrivalsToday),
+          departures: departuresToday.length,
+        });
       })
       .catch(console.error);
   }, []);
@@ -251,8 +263,8 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
         <div className="hidden md:flex flex-col justify-center">
           <p className="text-[12px] font-semibold text-gray-900 leading-tight">{dateStr}</p>
           <p className="text-[10px] text-gray-400 leading-tight">
-            {stats.arrivals} {t("layout.header.arrivals")} · {stats.departures}{" "}
-            {t("layout.header.departures")}
+            {stats.arrivals} {t("layout.header.arrivals")} · {stats.remainingArrivals}{" "}
+            {t("layout.header.remaining")} · {stats.departures} {t("layout.header.departures")}
           </p>
         </div>
       </div>

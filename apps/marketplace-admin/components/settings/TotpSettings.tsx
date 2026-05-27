@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ShieldCheckIcon, KeyIcon, ClockIcon } from "@heroicons/react/24/outline";
+import QRCode from "react-qr-code";
 import { authService } from "@/services/auth";
 
 type Step = "idle" | "setup" | "confirm" | "recovery" | "regen";
@@ -165,8 +166,11 @@ export function TotpSettings() {
           <div className="space-y-4 max-w-sm mt-3">
             <p className="text-[13px] text-gray-700">
               Open your authenticator app (Google Authenticator, Authy, 1Password, etc.) and scan
-              the link below, or enter the key manually.
+              the QR code below, or enter the key manually.
             </p>
+            <div className="bg-white rounded-lg border border-gray-200 p-3 w-fit">
+              <QRCode value={otpauthUri} size={160} />
+            </div>
             <a
               href={otpauthUri}
               className="inline-block text-[13px] text-primary-600 hover:underline break-all"

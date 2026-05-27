@@ -82,6 +82,13 @@ export interface BookingListResponse {
   offset: number;
 }
 
+export type BookingListParams = Record<string, string | number | undefined> & {
+  status?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+};
+
 export interface PaymentSettings {
   stripeConnectAccountId: string | null;
   stripeConnectOnboarded: boolean;
@@ -166,9 +173,26 @@ export interface BookingChangeRequest {
 }
 
 export const bookingsService = {
-  list: (params?: { status?: string; search?: string; limit?: number; offset?: number }) => {
+  list: (params?: BookingListParams) => {
     const qs = buildQueryString(params);
     return pmsClient.get<BookingListResponse>(`/admin/bookings${qs}`);
+  },
+
+  listAll: async (params?: Omit<BookingListParams, "limit" | "offset">) => {
+    const limit = 500;
+    let offset = 0;
+    const bookings: Booking[] = [];
+
+    while (true) {
+      const page = await bookingsService.list({ ...params, limit, offset });
+      bookings.push(...page.bookings);
+
+      if (bookings.length >= page.total || page.bookings.length < limit) {
+        return bookings;
+      }
+
+      offset += page.bookings.length;
+    }
   },
 
   get: (id: string) => pmsClient.get<Booking>(`/admin/bookings/${id}`),
