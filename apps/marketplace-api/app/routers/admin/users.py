@@ -22,6 +22,7 @@ from app.models.admin import (
     CreateUserRequest,
     CreatorProfileDetail,
     HotelProfileDetail,
+    SetSuperadminRequest,
     UpdateUserRequest,
     UserDetailResponse,
     UserListResponse,
@@ -880,4 +881,35 @@ async def delete_user(user_id: str, admin_id: str = Depends(get_admin_user)):
         logger.error(f"Error deleting user: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete user"
+        )
+
+
+@router.patch("/users/{user_id}/superadmin", status_code=http_status.HTTP_200_OK)
+async def set_superadmin(
+    user_id: str, request: SetSuperadminRequest, admin_id: str = Depends(get_admin_user)
+):
+    """Toggle the is_superadmin flag for a user (admin-gated)."""
+    try:
+        user = await UserRepository.get_by_id(user_id, columns="id, email, type")
+        if not user:
+            raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found")
+
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = $1, updated_at = now() WHERE id = $2",
+            request.is_superadmin,
+            user_id,
+        )
+
+        logger.info(
+            f"Admin {admin_id} set is_superadmin={request.is_superadmin} for user {user_id}"
+        )
+        return {"user_id": user_id, "is_superadmin": request.is_superadmin}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating superadmin flag for {user_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update superadmin flag",
         )
