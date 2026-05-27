@@ -1,9 +1,5 @@
 """Billing helpers — plan-switch scheduling, projected-fee math, and the
 PMS room-count read that drives the Fixed-plan quote.
-
-Pulled out of ``routers/admin/settings.py`` so a sibling router
-(``superadmin``) can use them without importing private symbols across
-router files.
 """
 
 import logging

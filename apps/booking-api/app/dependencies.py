@@ -110,48 +110,31 @@ async def get_current_user_id(
     return str(user["id"])
 
 
-async def get_current_user_with_admin_flag(
+async def require_hotel_admin(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
-) -> dict:
-    user = await _authenticate(credentials, request, columns="id, type, status, is_superadmin")
-    return {
-        "user_id": str(user["id"]),
-        "type": user["type"],
-        "is_superadmin": bool(user.get("is_superadmin", False)),
-    }
-
-
-async def require_hotel_admin(
-    user_info: dict = Depends(get_current_user_with_admin_flag),
 ) -> str:
-    if user_info["is_superadmin"]:
-        return user_info["user_id"]
-    if user_info["type"] != "hotel":
+    user = await _authenticate(credentials, request, columns="id, type, status")
+    if user["type"] != "hotel":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This endpoint is only available for hotel administrators",
         )
-    return user_info["user_id"]
+    return str(user["id"])
 
 
 async def get_current_hotel(
     request: Request,
-    user_info: dict = Depends(get_current_user_with_admin_flag),
     user_id: str = Depends(require_hotel_admin),
 ) -> dict | None:
     """
     Resolve hotel context from X-Hotel-Id header.
     Falls back to first hotel if header is absent (backwards compat).
-    Super admins bypass ownership check.
     """
     hotel_id = request.headers.get("x-hotel-id")
 
     if hotel_id:
-        if user_info["is_superadmin"]:
-            hotel = await BookingHotelRepository.get_by_id(hotel_id)
-        else:
-            hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel_id, user_id)
+        hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel_id, user_id)
         if not hotel:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -180,12 +163,3 @@ async def require_current_hotel(
     return hotel
 
 
-async def require_superadmin(
-    user_info: dict = Depends(get_current_user_with_admin_flag),
-) -> str:
-    if not user_info["is_superadmin"]:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Super admin access required",
-        )
-    return user_info["user_id"]
