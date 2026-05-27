@@ -38,6 +38,7 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     """When requires_totp=True, only message/requires_totp/totp_session are set."""
+
     id: str | None = None
     email: str | None = None
     name: str | None = None

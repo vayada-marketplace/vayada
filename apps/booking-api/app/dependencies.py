@@ -161,5 +161,3 @@ async def require_current_hotel(
             detail="No hotel found. Please complete property setup first.",
         )
     return hotel
-
-

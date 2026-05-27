@@ -89,5 +89,3 @@ class TestUpdateBenefits:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.json() == {"benefits": ["Complimentary sunset cocktail"]}
-
-

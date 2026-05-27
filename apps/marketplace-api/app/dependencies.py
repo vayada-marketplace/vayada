@@ -121,8 +121,8 @@ async def get_current_user_id_allow_pending(
 
 
 async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
-    """Verify that the current user is an admin and not suspended."""
-    user = await UserRepository.get_by_id(user_id, columns="id, type, status")
+    """Verify that the current user is an admin (or superadmin) and not suspended."""
+    user = await UserRepository.get_by_id(user_id, columns="id, type, status, is_superadmin")
 
     if not user:
         raise HTTPException(
@@ -130,7 +130,7 @@ async def get_admin_user(user_id: str = Depends(get_current_user_id)) -> str:
             detail="User not found",
         )
 
-    if user["type"] != "admin":
+    if user["type"] != "admin" and not user.get("is_superadmin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

@@ -334,7 +334,8 @@ async def login(http_request: Request, request: LoginRequest):
 
         await RateLimitRepository.clear(request.email)
 
-        if user["type"] == "admin" and await TotpRepository.is_enrolled(str(user["id"])):
+        is_admin = user["type"] == "admin" or user.get("is_superadmin")
+        if is_admin and await TotpRepository.is_enrolled(str(user["id"])):
             totp_session = create_totp_session_token(
                 str(user["id"]), user["email"], user["type"]
             )
@@ -452,8 +453,8 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
 @router.post("/totp/setup", response_model=TotpSetupResponse, status_code=status.HTTP_200_OK)
 async def totp_setup(user_id: str = Depends(get_current_user_id)):
     """Generate a new TOTP secret and return the otpauth URI for QR display. Does not enroll yet."""
-    user = await UserRepository.get_by_id(user_id, columns="id, email, type")
-    if not user or user["type"] != "admin":
+    user = await UserRepository.get_by_id(user_id, columns="id, email, type, is_superadmin")
+    if not user or (user["type"] != "admin" and not user.get("is_superadmin")):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     secret = generate_totp_secret()
