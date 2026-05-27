@@ -43,6 +43,7 @@ class LoginAuditRepository:
                    ip_address, user_agent, created_at
             FROM login_audit_log
             WHERE user_id = $1
+              AND failure_reason IS DISTINCT FROM 'totp_required'
             ORDER BY created_at DESC
             LIMIT $2
             """,

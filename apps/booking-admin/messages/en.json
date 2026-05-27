@@ -637,7 +637,7 @@
   "settings.totp.description": "Add an extra layer of security to your account with an authenticator app.",
   "settings.totp.enable": "Enable 2FA",
   "settings.totp.enabling": "Setting up...",
-  "settings.totp.scanInstructions": "Open your authenticator app (Google Authenticator, Authy, 1Password, etc.) and scan the link below, or enter the secret key manually.",
+  "settings.totp.scanInstructions": "Open your authenticator app (Google Authenticator, Authy, 1Password, etc.) and scan the QR code below, or enter the secret key manually.",
   "settings.totp.openInApp": "Open in authenticator app",
   "settings.totp.manualKey": "Or enter this key manually:",
   "settings.totp.confirmLabel": "Enter the 6-digit code from your app to confirm setup",
