@@ -244,7 +244,7 @@ export default function CheckInPage() {
     setError("");
     try {
       // Flush any unsaved guest drafts that have data
-      const flushedGuests = await Promise.all(
+      const flushResults = await Promise.allSettled(
         guests.map(async (draft) => {
           if (!draft.firstName && !draft.lastName) return draft;
           const payload: BookingAdditionalGuestPayload = {
@@ -264,7 +264,15 @@ export default function CheckInPage() {
           return { ...draft, ...saved };
         }),
       );
+      const flushedGuests = guests.map((draft, index) => {
+        const result = flushResults[index];
+        return result.status === "fulfilled" ? result.value : draft;
+      });
       setGuests(flushedGuests);
+
+      if (flushResults.some((result) => result.status === "rejected")) {
+        throw new Error("Some guest drafts could not be saved. Please retry.");
+      }
 
       if (bookerDraftChanged(booker, booking)) {
         const updated = await bookingsService.update(booking.id, {

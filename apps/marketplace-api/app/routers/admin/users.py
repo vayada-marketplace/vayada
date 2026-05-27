@@ -912,4 +912,4 @@ async def set_superadmin(
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update superadmin flag",
-        )
+        ) from e
