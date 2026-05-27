@@ -243,6 +243,29 @@ export default function CheckInPage() {
     setActionLoading("completeCheckIn");
     setError("");
     try {
+      // Flush any unsaved guest drafts that have data
+      const flushedGuests = await Promise.all(
+        guests.map(async (draft) => {
+          if (!draft.firstName && !draft.lastName) return draft;
+          const payload: BookingAdditionalGuestPayload = {
+            firstName: draft.firstName || "",
+            lastName: draft.lastName || "",
+            email: draft.email || "",
+            phone: draft.phone || "",
+            gender: draft.gender || "",
+            nationality: draft.nationality || "",
+            dateOfBirth: draft.dateOfBirth || null,
+            passportNumber: draft.passportNumber || "",
+            roomPosition: draft.roomPosition ?? 0,
+          };
+          const saved = draft.id
+            ? await bookingsService.updateAdditionalGuest(booking.id, draft.id, payload)
+            : await bookingsService.createAdditionalGuest(booking.id, payload);
+          return { ...draft, ...saved };
+        }),
+      );
+      setGuests(flushedGuests);
+
       if (bookerDraftChanged(booker, booking)) {
         const updated = await bookingsService.update(booking.id, {
           guestFirstName: booker.firstName || "",
