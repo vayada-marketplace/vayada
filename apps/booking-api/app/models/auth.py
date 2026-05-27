@@ -38,6 +38,7 @@ class LoginRequest(BaseModel):
 
 class LoginResponse(BaseModel):
     """When requires_totp=True, only message/requires_totp/totp_session are set."""
+
     id: str | None = None
     email: str | None = None
     name: str | None = None
@@ -47,7 +48,6 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int | None = None
     message: str
-    is_superadmin: bool = False
     requires_totp: bool = False
     totp_session: str | None = None
 
