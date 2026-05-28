@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
+from app.models.checkin import CheckinPendingFlag, CheckinStepResult
+
 
 def to_camel(string: str) -> str:
     parts = string.split("_")
@@ -240,6 +242,8 @@ class BookingCheckInComplete(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     pending_flags: list[str] = []
+    step_results: list[CheckinStepResult] = []
+    pending_flag_details: list[CheckinPendingFlag] = []
 
 
 class BookingArrivalCharge(BaseModel):

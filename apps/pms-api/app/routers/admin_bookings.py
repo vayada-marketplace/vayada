@@ -33,6 +33,7 @@ from app.repositories.booking_event_repo import BookingEventRepository
 from app.repositories.booking_note_repo import BookingNoteRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_room_repo import BookingRoomRepository
+from app.repositories.checkin_checklist_repo import CheckinChecklistRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.room_repo import RoomRepository
@@ -582,17 +583,47 @@ async def complete_booking_check_in(
     if booking["status"] not in ("confirmed", "checked_in"):
         raise HTTPException(status_code=400, detail="Only confirmed bookings can be checked in")
 
-    updated = await BookingRepository.complete_check_in(booking_id, data.pending_flags)
-    if not updated:
-        raise HTTPException(status_code=404, detail="Booking not found")
-
-    await BookingEventRepository.record(
-        booking_id=booking_id,
-        hotel_id=hotel_id,
-        event_type="guest_checked_in",
-        payload={"pending_flags": data.pending_flags},
-        actor_user_id=user_id,
+    pending_flag_details = (
+        [flag.model_dump(mode="json") for flag in data.pending_flag_details]
+        if data.pending_flag_details
+        else [{"step_id": flag, "label": flag} for flag in data.pending_flags]
     )
+    if data.pending_flag_details:
+        labels_from_details = {flag["label"] for flag in pending_flag_details}
+        labels_from_flags = set(data.pending_flags)
+        if labels_from_details != labels_from_flags:
+            raise HTTPException(
+                status_code=400, detail="pendingFlagDetails must match pendingFlags"
+            )
+
+    pool = await Database.get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            updated = await BookingRepository.complete_check_in(
+                booking_id, data.pending_flags, conn=conn
+            )
+            if not updated:
+                raise HTTPException(status_code=404, detail="Booking not found")
+
+            await CheckinChecklistRepository.create_record(
+                booking_id=booking_id,
+                completed_by=user_id,
+                step_results=[result.model_dump(mode="json") for result in data.step_results],
+                pending_flags=pending_flag_details,
+                conn=conn,
+            )
+
+            await BookingEventRepository.record(
+                booking_id=booking_id,
+                hotel_id=hotel_id,
+                event_type="guest_checked_in",
+                payload={
+                    "pending_flags": data.pending_flags,
+                    "pending_flag_details": pending_flag_details,
+                },
+                actor_user_id=user_id,
+                conn=conn,
+            )
 
     return await _admin_response(await BookingRepository.get_by_id(booking_id))
 
