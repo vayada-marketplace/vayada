@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 from datetime import date
 from typing import Any
@@ -51,6 +52,9 @@ _PROPERTY_FIELD_MAP = {
     "pay_at_hotel_methods": "pay_at_hotel_methods",
     "online_card_payment": "online_card_payment",
     "bank_transfer": "bank_transfer",
+    "paypal_enabled": "paypal_enabled",
+    "paypal_email": "paypal_email",
+    "paypal_payment_window_hours": "paypal_payment_window_hours",
     "free_cancellation_days": "free_cancellation_days",
     "email_notifications": "email_notifications",
     "new_booking_alerts": "new_booking_alerts",
@@ -132,6 +136,9 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         ),
         online_card_payment=_coalesce(hotel, "online_card_payment"),
         bank_transfer=_coalesce(hotel, "bank_transfer"),
+        paypal_enabled=_coalesce(hotel, "paypal_enabled"),
+        paypal_email=_coalesce(hotel, "paypal_email"),
+        paypal_payment_window_hours=_coalesce(hotel, "paypal_payment_window_hours"),
         free_cancellation_days=_coalesce(hotel, "free_cancellation_days"),
         email_notifications=_coalesce(hotel, "email_notifications"),
         new_booking_alerts=_coalesce(hotel, "new_booking_alerts"),
@@ -240,6 +247,15 @@ async def _create_hotel_from_settings(
     (multi-hotel-safe) and the legacy auto-create branch in
     PATCH /admin/settings/property.
     """
+    _validate_paypal_settings(
+        enabled=data.paypal_enabled if data.paypal_enabled is not None else False,
+        email=data.paypal_email or "",
+        window_hours=(
+            data.paypal_payment_window_hours
+            if data.paypal_payment_window_hours is not None
+            else hotel_default("paypal_payment_window_hours")
+        ),
+    )
     name = data.property_name or ""
     create_kwargs = dict(
         name=name,
@@ -264,6 +280,11 @@ async def _create_hotel_from_settings(
         ),
         online_card_payment=_api_to_db_value(data.online_card_payment, "online_card_payment"),
         bank_transfer=_api_to_db_value(data.bank_transfer, "bank_transfer"),
+        paypal_enabled=_api_to_db_value(data.paypal_enabled, "paypal_enabled"),
+        paypal_email=data.paypal_email or "",
+        paypal_payment_window_hours=_api_to_db_value(
+            data.paypal_payment_window_hours, "paypal_payment_window_hours"
+        ),
         free_cancellation_days=_api_to_db_value(
             data.free_cancellation_days, "free_cancellation_days"
         ),
@@ -400,6 +421,15 @@ async def update_property_settings(
             if value is not None:
                 updates[db_col] = value
 
+        _validate_paypal_settings(
+            enabled=updates.get("paypal_enabled", hotel.get("paypal_enabled", False)),
+            email=updates.get("paypal_email", hotel.get("paypal_email") or ""),
+            window_hours=updates.get(
+                "paypal_payment_window_hours",
+                hotel.get("paypal_payment_window_hours") or 24,
+            ),
+        )
+
         schedule_pending_plan_switch(updates, date.today())
 
         # VAY-394: when the property name changes, regenerate the URL slug
@@ -428,6 +458,24 @@ async def update_property_settings(
         result = await _create_hotel_from_settings(data, user_id)
 
     return await _hotel_to_property_settings(result)
+
+
+def _validate_paypal_settings(
+    *,
+    enabled: bool,
+    email: str,
+    window_hours: int,
+) -> None:
+    if window_hours < 1 or window_hours > 168:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="PayPal payment window must be between 1 and 168 hours",
+        )
+    if enabled and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A valid PayPal email is required when PayPal is enabled",
+        )
 
 
 async def _maybe_rotate_slug_on_rename(

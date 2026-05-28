@@ -20,7 +20,7 @@ from app.repositories.hotel_repo import HotelRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.services import stripe_service, xendit_service
+from app.services import hotel_identity_service, stripe_service, xendit_service
 from app.services.availability_service import compute_stay_pricing, remaining_for_stay
 from app.services.calendar_auto_open_service import is_stay_sellable
 from app.services.channex.ari_push import push_availability_for_room_type
@@ -60,6 +60,15 @@ from app.utils import get_hotel_id
 logger = logging.getLogger(__name__)
 
 HOST_RESPONSE_HOURS = 24
+
+
+def _log_background_task_result(task: asyncio.Task, label: str) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Background task failed: %s", label)
 
 
 def _nights(check_in: date, check_out: date) -> int:
@@ -834,6 +843,22 @@ async def _process_payment_method(
         booking = await BookingRepository.get_by_id(booking_id)
         asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
 
+    elif payment_method == "paypal":
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="paypal",
+        )
+        await BookingRepository.update_payment_status(booking_id, "awaiting_paypal")
+        booking = await BookingRepository.get_by_id(booking_id)
+        task = asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+        task.add_done_callback(
+            lambda t: _log_background_task_result(t, "send_booking_request_notification")
+        )
+
     else:
         # Pay at property
         await PaymentRepository.create(
@@ -944,6 +969,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # ── Validate hotel-level payment-method enablement ─────────────
     payment_method = data.payment_method
     hotel_settings = None
+    be_payment_info = None
     if payment_method in ("pay_at_property", "xendit", "card", "bank_transfer"):
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     if payment_method == "pay_at_property":
@@ -955,13 +981,28 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     elif payment_method == "bank_transfer":
         if not hotel_settings or not hotel_settings.get("bank_transfer"):
             raise ValueError("Bank transfer is not enabled for this hotel")
+    elif payment_method == "paypal":
+        be_payment_flags = await hotel_identity_service.get_payment_flags_by_slug(slug)
+        be_payment_info = await hotel_identity_service.get_guest_payment_info_by_slug(slug)
+        if (
+            not be_payment_flags
+            or not be_payment_flags.get("paypal_enabled")
+            or not be_payment_info
+            or not be_payment_info.get("paypal_email")
+        ):
+            raise ValueError("PayPal is not enabled for this hotel")
 
-    # Bank transfer is the only path that always stays in the request flow,
+    # Manual off-platform methods always stay in the request flow,
     # even when instant_book is on — there's no money yet, so we can't
     # auto-confirm.
-    use_request_flow = (not instant_book) or payment_method == "bank_transfer"
+    use_request_flow = (not instant_book) or payment_method in ("bank_transfer", "paypal")
+    payment_window_hours = (
+        int(be_payment_info.get("paypal_payment_window_hours") or HOST_RESPONSE_HOURS)
+        if payment_method == "paypal"
+        else HOST_RESPONSE_HOURS
+    )
     deadline = (
-        datetime.now(UTC) + timedelta(hours=HOST_RESPONSE_HOURS) if use_request_flow else None
+        datetime.now(UTC) + timedelta(hours=payment_window_hours) if use_request_flow else None
     )
     capture_method = "manual" if use_request_flow else "automatic"
 
@@ -1069,6 +1110,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     # ── Build response + side effects ──────────────────────────────
     booking = await BookingRepository.get_by_id(booking_id)
+    if payment_method == "paypal" and be_payment_info:
+        booking = dict(booking)
+        booking["paypal_email"] = be_payment_info.get("paypal_email") or ""
     response = _booking_to_response(booking)
 
     # Guest "request received" email only for the request flow;
@@ -1184,6 +1228,12 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
             await PaymentRepository.update_status(
                 str(payment["id"]), "captured", captured_at=datetime.now(UTC)
             )
+    elif payment_method == "paypal":
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment["status"] != "captured":
+            await PaymentRepository.update_status(
+                str(payment["id"]), "captured", captured_at=datetime.now(UTC)
+            )
 
     billing = await fetch_billing_config(hotel_id)
 
@@ -1208,7 +1258,7 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
         effective_affiliate_commission_pct=affiliate_commission_pct,
     )
 
-    if payment_method in ("card", "xendit"):
+    if payment_method in ("card", "xendit", "paypal"):
         new_payment_status = "captured"
     else:
         new_payment_status = "pay_at_property"
@@ -1299,6 +1349,9 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
                 await xendit_service.expire_invoice(payment["xendit_invoice_id"])
             except Exception as e:
                 logger.warning("Failed to expire Xendit invoice for booking %s: %s", booking_id, e)
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "paypal":
+        if payment:
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
     # VAY-404: host-rejected requests are stored as 'declined' so the UI can
@@ -1555,6 +1608,9 @@ async def expire_booking(booking_id: str) -> None:
                 logger.warning(
                     "Failed to expire Xendit invoice for expired booking %s: %s", booking_id, e
                 )
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "paypal":
+        if payment:
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
     await BookingRepository.update_status(booking_id, "expired")

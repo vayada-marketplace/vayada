@@ -23,6 +23,7 @@ export const PAYMENT_STATUS_STYLES: Record<string, string> = {
   partially_refunded: "bg-purple-100 text-purple-700",
   failed: "bg-red-100 text-red-600",
   pay_at_property: "bg-amber-100 text-amber-700",
+  awaiting_paypal: "bg-blue-100 text-blue-700",
 };
 
 export function getPaymentStatusLabel(status: string | null | undefined): string {
@@ -36,6 +37,7 @@ export function getPaymentStatusLabel(status: string | null | undefined): string
     partially_refunded: "Partially refunded",
     failed: "Failed",
     pay_at_property: "Will pay at property",
+    awaiting_paypal: "Awaiting PayPal",
   };
   if (labels[status]) return labels[status];
   const spaced = status.replace(/_/g, " ");

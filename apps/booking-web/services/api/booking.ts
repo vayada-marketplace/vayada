@@ -28,6 +28,9 @@ export interface PaymentSettings {
   payAtPropertyEnabled: boolean;
   onlineCardPayment?: boolean;
   bankTransfer?: boolean;
+  paypalEnabled?: boolean;
+  paypalEmail?: string;
+  paypalPaymentWindowHours?: number;
   bankDetails?: BankDetails;
   xenditPaymentsEnabled?: boolean;
   payAtHotelMethods?: string[];

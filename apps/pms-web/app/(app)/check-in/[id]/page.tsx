@@ -582,8 +582,12 @@ export default function CheckInPage() {
                   className={`font-semibold ${isPaid(booking) ? "text-green-800" : "text-amber-950"}`}
                 >
                   {isPaid(booking)
-                    ? "Paid at property"
-                    : `${formatCurrency(booking.totalAmount, booking.currency)} due at property. Pay at property.`}
+                    ? booking.paymentMethod === "paypal"
+                      ? "PayPal payment received"
+                      : "Paid at property"
+                    : booking.paymentMethod === "paypal"
+                      ? `${formatCurrency(booking.totalAmount, booking.currency)} awaiting PayPal payment.`
+                      : `${formatCurrency(booking.totalAmount, booking.currency)} due at property. Pay at property.`}
                 </p>
                 <div className="mt-3">
                   <button

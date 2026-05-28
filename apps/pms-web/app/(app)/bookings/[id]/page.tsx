@@ -1127,6 +1127,17 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     });
   };
 
+  const handleMarkPaid = () => {
+    setConfirmDialog({
+      message: "Confirm that the PayPal payment has been received?",
+      confirmLabel: "Mark as paid",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        doAction(() => bookingsService.markPaid(id), "Failed to mark booking paid");
+      },
+    });
+  };
+
   const handleSaveNote = async () => {
     const body = noteDraft.trim();
     if (!body) return;
@@ -1729,9 +1740,13 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 <p className="font-medium text-gray-900">
                   {booking.paymentMethod === "card"
                     ? "Card"
-                    : booking.paymentMethod === "pay_at_property"
-                      ? "Pay at property"
-                      : booking.paymentMethod || "—"}
+                    : booking.paymentMethod === "paypal"
+                      ? "PayPal"
+                      : booking.paymentMethod === "bank_transfer"
+                        ? "Bank transfer"
+                        : booking.paymentMethod === "pay_at_property"
+                          ? "Pay at property"
+                          : booking.paymentMethod || "—"}
                 </p>
               </div>
               <div>
@@ -2050,21 +2065,32 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             most urgent action stays visible without scrolling further. */}
         {isPending && booking.hostResponseDeadline && (
           <div className="flex gap-3 flex-wrap">
-            <button
-              onClick={handleAccept}
-              disabled={updating}
-              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
-            >
-              <CheckCircleIcon className="w-4 h-4" />
-              Accept booking
-            </button>
+            {booking.paymentMethod === "paypal" ? (
+              <button
+                onClick={handleMarkPaid}
+                disabled={updating}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                <CheckCircleIcon className="w-4 h-4" />
+                Mark as paid
+              </button>
+            ) : (
+              <button
+                onClick={handleAccept}
+                disabled={updating}
+                className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50"
+              >
+                <CheckCircleIcon className="w-4 h-4" />
+                Accept booking
+              </button>
+            )}
             <button
               onClick={handleReject}
               disabled={updating}
               className="inline-flex items-center gap-1.5 px-5 py-2.5 border border-red-200 text-red-600 text-sm font-medium rounded-lg hover:bg-red-50 disabled:opacity-50"
             >
               <XCircleIcon className="w-4 h-4" />
-              Reject booking
+              {booking.paymentMethod === "paypal" ? "Cancel - not received" : "Reject booking"}
             </button>
           </div>
         )}
@@ -2202,9 +2228,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       {rejectOpen && (
         <Modal onClose={() => setRejectOpen(false)}>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Reject booking</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            {booking?.paymentMethod === "paypal"
+              ? "Cancel - payment not received"
+              : "Reject booking"}
+          </h3>
           <p className="text-sm text-gray-600 mb-4">
-            Are you sure you want to reject this booking? The payment hold will be released.
+            {booking?.paymentMethod === "paypal"
+              ? "Are you sure you want to cancel this PayPal booking because payment was not received? No automatic payment hold applies."
+              : "Are you sure you want to reject this booking? The payment hold will be released."}
           </p>
           <textarea
             value={rejectReason}
@@ -2224,7 +2256,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               onClick={confirmReject}
               className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
             >
-              Reject
+              {booking?.paymentMethod === "paypal" ? "Cancel booking" : "Reject"}
             </button>
           </div>
         </Modal>

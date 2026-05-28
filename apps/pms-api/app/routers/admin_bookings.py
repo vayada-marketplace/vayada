@@ -491,6 +491,13 @@ async def mark_booking_paid(
     if not booking or str(booking["hotel_id"]) != hotel_id:
         raise HTTPException(status_code=404, detail="Booking not found")
 
+    if booking.get("payment_method") == "paypal" and booking.get("status") == "pending":
+        try:
+            updated = await host_accept_booking(booking_id, user_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return await _admin_response(updated)
+
     updated = await BookingRepository.update_payment_status(booking_id, "captured")
     if not updated:
         raise HTTPException(status_code=404, detail="Booking not found")
