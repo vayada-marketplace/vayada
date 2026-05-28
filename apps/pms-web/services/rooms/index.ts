@@ -30,6 +30,8 @@ export interface RoomType {
   description: string;
   shortDescription: string;
   maxOccupancy: number;
+  maxAdults: number | null;
+  maxChildren: number | null;
   bedrooms: number;
   bathrooms: number;
   size: number;
@@ -79,6 +81,8 @@ export interface RoomTypeCreate {
   description?: string;
   shortDescription?: string;
   maxOccupancy?: number;
+  maxAdults?: number | null;
+  maxChildren?: number | null;
   bedrooms?: number;
   bathrooms?: number;
   size?: number;
