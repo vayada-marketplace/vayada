@@ -27,6 +27,23 @@ export interface PropertySettings {
 
 export type PropertySettingsUpdate = Partial<PropertySettings>;
 
+export type CheckinChecklistStepType = "checkbox" | "text" | "amount";
+
+export interface CheckinChecklistStep {
+  id: string;
+  label: string;
+  type: CheckinChecklistStepType;
+  required: boolean;
+  system?: boolean;
+  position: number;
+}
+
+export interface CheckinChecklistTemplate {
+  steps: CheckinChecklistStep[];
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
 export const pmsSettingsService = {
   getSetupStatus: () => pmsClient.get<PmsSetupStatus>("/admin/setup-status"),
 
@@ -40,4 +57,9 @@ export const settingsService = {
 
   updatePropertySettings: (data: PropertySettingsUpdate) =>
     apiClient.patch<PropertySettings>("/admin/settings/property", data),
+
+  getCheckinChecklist: () => pmsClient.get<CheckinChecklistTemplate>("/admin/check-in-checklist"),
+
+  updateCheckinChecklist: (steps: CheckinChecklistStep[]) =>
+    pmsClient.put<CheckinChecklistTemplate>("/admin/check-in-checklist", { steps }),
 };

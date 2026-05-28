@@ -6,6 +6,7 @@ import {
   BoltIcon,
   CalendarDaysIcon,
   ClockIcon,
+  ClipboardDocumentCheckIcon,
   GlobeAltIcon,
 } from "@heroicons/react/24/outline";
 import { bookingsService } from "@/services/bookings";
@@ -357,6 +358,12 @@ export default function SettingsPage() {
       id: "check-in-out",
       label: t("settings.checkInCheckOut"),
       icon: ClockIcon,
+    },
+    {
+      id: "checkin-checklist",
+      label: "Check-in checklist",
+      icon: ClipboardDocumentCheckIcon,
+      href: "/settings/checkin-checklist",
     },
     { id: "localization", label: "Localization", icon: GlobeAltIcon },
   ];

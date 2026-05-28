@@ -1437,6 +1437,16 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
+      {booking.status === "checked_in" && booking.checkInPendingFlags.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-950">
+            Check-in completed with {booking.checkInPendingFlags.length} required step
+            {booking.checkInPendingFlags.length === 1 ? "" : "s"} incomplete
+          </p>
+          <p className="mt-1 text-xs text-amber-800">{booking.checkInPendingFlags.join(", ")}</p>
+        </div>
+      )}
+
       {changeRequest && changeRequest.status === "pending" && (
         <div className="mb-4 p-5 bg-blue-50 border border-blue-200 rounded-xl">
           <div className="mb-3">

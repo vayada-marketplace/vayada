@@ -33,6 +33,7 @@ from app.repositories.booking_event_repo import BookingEventRepository
 from app.repositories.booking_note_repo import BookingNoteRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_room_repo import BookingRoomRepository
+from app.repositories.checkin_checklist_repo import CheckinChecklistRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.room_type_repo import RoomTypeRepository
@@ -466,11 +467,26 @@ async def complete_booking_check_in(
     if not updated:
         raise HTTPException(status_code=404, detail="Booking not found")
 
+    pending_flag_details = (
+        [flag.model_dump(mode="json") for flag in data.pending_flag_details]
+        if data.pending_flag_details
+        else [{"step_id": flag, "label": flag} for flag in data.pending_flags]
+    )
+    await CheckinChecklistRepository.create_record(
+        booking_id=booking_id,
+        completed_by=user_id,
+        step_results=[result.model_dump(mode="json") for result in data.step_results],
+        pending_flags=pending_flag_details,
+    )
+
     await BookingEventRepository.record(
         booking_id=booking_id,
         hotel_id=hotel_id,
         event_type="guest_checked_in",
-        payload={"pending_flags": data.pending_flags},
+        payload={
+            "pending_flags": data.pending_flags,
+            "pending_flag_details": pending_flag_details,
+        },
         actor_user_id=user_id,
     )
 
