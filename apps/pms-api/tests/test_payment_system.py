@@ -287,6 +287,153 @@ class TestCreateBookingRequest:
         )
         assert resp.status_code == 400
 
+    async def test_bank_transfer_uses_booking_engine_flags_when_pms_settings_lag(
+        self, client, cleanup_database
+    ):
+        """Booking creation must validate Bank Transfer against the same
+        Booking Engine source that checkout uses to render the option."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=False)
+
+        bank_info = {
+            "pay_at_hotel_methods": '["cash"]',
+            "payout_account_holder": "Hotel Sunshine GmbH",
+            "payout_account_type": "iban",
+            "payout_iban": "DE89370400440532013000",
+            "payout_account_number": "",
+            "payout_bank_name": "Vayada Bank",
+            "payout_swift": "VAYADEF0",
+            "terms_text": "",
+            "cancellation_policy_text": "",
+        }
+
+        with (
+            patch(
+                "app.services.booking_service.hotel_identity_service.get_payment_flags_by_slug",
+                new_callable=AsyncMock,
+            ) as mock_flags,
+            patch(
+                "app.services.booking_service.hotel_identity_service.get_guest_payment_info_by_slug",
+                new_callable=AsyncMock,
+            ) as mock_info,
+        ):
+            mock_flags.return_value = {
+                "pay_at_property_enabled": False,
+                "online_card_payment": False,
+                "bank_transfer": True,
+            }
+            mock_info.return_value = bank_info
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings",
+                json={
+                    "roomTypeId": str(room["id"]),
+                    "guestFirstName": "Berta",
+                    "guestLastName": "Transfer",
+                    "guestEmail": "berta@test.com",
+                    "guestPhone": "+491234",
+                    "checkIn": "2026-09-10",
+                    "checkOut": "2026-09-12",
+                    "adults": 1,
+                    "paymentMethod": "bank_transfer",
+                },
+            )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["paymentMethod"] == "bank_transfer"
+        assert body["clientSecret"] is None
+        assert body["booking"]["status"] == "pending"
+        assert body["booking"]["paymentStatus"] == "awaiting_transfer"
+
+    async def test_bank_transfer_rejected_when_booking_engine_details_incomplete(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=False)
+
+        with (
+            patch(
+                "app.services.booking_service.hotel_identity_service.get_payment_flags_by_slug",
+                new_callable=AsyncMock,
+            ) as mock_flags,
+            patch(
+                "app.services.booking_service.hotel_identity_service.get_guest_payment_info_by_slug",
+                new_callable=AsyncMock,
+            ) as mock_info,
+        ):
+            mock_flags.return_value = {
+                "pay_at_property_enabled": False,
+                "online_card_payment": False,
+                "bank_transfer": True,
+            }
+            mock_info.return_value = {
+                "payout_account_holder": "Hotel Sunshine GmbH",
+                "payout_account_type": "iban",
+                "payout_iban": "",
+                "payout_account_number": "",
+                "payout_bank_name": "Vayada Bank",
+                "payout_swift": "VAYADEF0",
+            }
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings",
+                json={
+                    "roomTypeId": str(room["id"]),
+                    "guestFirstName": "Berta",
+                    "guestLastName": "Transfer",
+                    "guestEmail": "berta2@test.com",
+                    "guestPhone": "+491234",
+                    "checkIn": "2026-10-10",
+                    "checkOut": "2026-10-12",
+                    "adults": 1,
+                    "paymentMethod": "bank_transfer",
+                },
+            )
+
+        assert resp.status_code == 400
+        assert "details are incomplete" in resp.json()["detail"]
+
+    async def test_payment_settings_hide_bank_transfer_without_complete_details(
+        self, client, hotel_with_rooms
+    ):
+        hotel = hotel_with_rooms["hotel"]
+
+        with (
+            patch(
+                "app.routers.bookings.hotel_identity_service.get_payment_flags_by_slug",
+                new_callable=AsyncMock,
+            ) as mock_flags,
+            patch(
+                "app.routers.bookings.hotel_identity_service.get_guest_payment_info_by_slug",
+                new_callable=AsyncMock,
+            ) as mock_info,
+        ):
+            mock_flags.return_value = {
+                "pay_at_property_enabled": False,
+                "online_card_payment": False,
+                "bank_transfer": True,
+            }
+            mock_info.return_value = {
+                "pay_at_hotel_methods": '["cash"]',
+                "payout_account_holder": "Hotel Sunshine GmbH",
+                "payout_account_type": "iban",
+                "payout_iban": "",
+                "payout_account_number": "",
+                "payout_bank_name": "Vayada Bank",
+                "payout_swift": "VAYADEF0",
+                "terms_text": "",
+                "cancellation_policy_text": "",
+            }
+            resp = await client.get(f"/api/hotels/{hotel['slug']}/payment-settings")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["bankTransfer"] is False
+        assert "bankDetails" not in body
+
 
 # ── Confirm Authorization ────────────────────────────────────────
 

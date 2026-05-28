@@ -416,11 +416,13 @@ export default function BookingConfirmationPage({
                   <span className="font-medium text-gray-900">
                     {booking.paymentMethod === "card"
                       ? "Card"
-                      : booking.paymentMethod === "paypal"
-                        ? "PayPal"
-                        : booking.paymentMethod === "bank_transfer"
-                          ? "Bank transfer"
-                          : booking.paymentMethod || "Other"}
+                      : booking.paymentMethod === "bank_transfer"
+                        ? "Bank Transfer"
+                        : booking.paymentMethod === "xendit"
+                          ? "Xendit"
+                          : booking.paymentMethod === "paypal"
+                            ? "PayPal"
+                            : "Pay at Property"}
                   </span>
                 </div>
               )}
