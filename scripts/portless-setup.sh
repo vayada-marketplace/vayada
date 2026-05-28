@@ -21,6 +21,7 @@
 #     pms.localhost                      pms-web                (port 3004)
 #     affiliate.localhost                affiliate-dashboard    (port 3005)
 #     landing.localhost                  landing                (port 3006)
+#     admin.localhost                    platform-admin         (port 3007)
 #
 #   Backends (FastAPI, registered here as static aliases):
 #     api.marketplace.localhost          marketplace-api        (port 8000)

@@ -22,6 +22,7 @@ from app.routers.admin_rooms import router as admin_rooms_router
 from app.routers.affiliate_dashboard import router as affiliate_dashboard_router
 from app.routers.affiliates import router as affiliates_router
 from app.routers.bookings import router as bookings_router
+from app.routers.platform_admin import router as platform_admin_router
 from app.routers.rooms import router as rooms_router
 from app.routers.super_admin_bookings import router as super_admin_bookings_router
 from app.routers.super_admin_payouts import router as super_admin_payouts_router
@@ -130,6 +131,7 @@ app.include_router(webhooks_router)
 app.include_router(affiliate_dashboard_router)
 app.include_router(super_admin_payouts_router)
 app.include_router(super_admin_bookings_router)
+app.include_router(platform_admin_router)
 
 
 @app.get("/health")

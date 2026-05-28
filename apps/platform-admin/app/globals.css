@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f7f4ed;
+  color: #15130f;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.dashboard-grid {
+  background-image:
+    linear-gradient(rgba(21, 19, 15, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(21, 19, 15, 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
