@@ -1130,7 +1130,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     deadline = (
         datetime.now(UTC) + timedelta(hours=payment_window_hours) if use_request_flow else None
     )
-    capture_method = "manual" if use_request_flow else "automatic"
+    # Deposit card payments are captured immediately even in request-flow
+    # hotels — the guest pays the deposit upfront and it is refunded on rejection.
+    capture_method = "manual" if (use_request_flow and not deposit.required) else "automatic"
 
     # ── Card path: defer the booking row until Stripe authorizes ──
     # VAY-388: an unauthorized card-payment booking must not exist in
