@@ -55,6 +55,14 @@ type Section =
 
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
 
+const hasValidCoordinatePair = (latitude: number, longitude: number) =>
+  Number.isFinite(latitude) &&
+  Number.isFinite(longitude) &&
+  latitude >= -90 &&
+  latitude <= 90 &&
+  longitude >= -180 &&
+  longitude <= 180;
+
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: "",
   property_name: "",
@@ -326,8 +334,7 @@ export default function SettingsPage() {
       (poi) =>
         !poi.label.trim() ||
         !poi.travelTime.trim() ||
-        typeof poi.latitude !== "number" ||
-        typeof poi.longitude !== "number",
+        !hasValidCoordinatePair(poi.latitude, poi.longitude),
     );
     if (invalidPoi) {
       setFeedback({
@@ -969,10 +976,13 @@ export default function SettingsPage() {
                         Latitude
                         <input
                           type="number"
-                          value={poi.latitude}
+                          value={Number.isFinite(poi.latitude) ? poi.latitude : ""}
                           step="0.0000001"
                           onChange={(event) =>
-                            patchPoi(poi.id, { latitude: Number(event.target.value) })
+                            patchPoi(poi.id, {
+                              latitude:
+                                event.target.value === "" ? Number.NaN : event.target.valueAsNumber,
+                            })
                           }
                           className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
                         />
@@ -981,10 +991,13 @@ export default function SettingsPage() {
                         Longitude
                         <input
                           type="number"
-                          value={poi.longitude}
+                          value={Number.isFinite(poi.longitude) ? poi.longitude : ""}
                           step="0.0000001"
                           onChange={(event) =>
-                            patchPoi(poi.id, { longitude: Number(event.target.value) })
+                            patchPoi(poi.id, {
+                              longitude:
+                                event.target.value === "" ? Number.NaN : event.target.valueAsNumber,
+                            })
                           }
                           className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
                         />

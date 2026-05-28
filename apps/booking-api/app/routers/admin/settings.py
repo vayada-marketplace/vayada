@@ -11,6 +11,7 @@ from app.dependencies import get_current_hotel, require_hotel_admin
 from app.models.settings import (
     PropertySettingsResponse,
     PropertySettingsUpdate,
+    SettingsPointOfInterest,
     hotel_default,
 )
 from app.models.utils import parse_json, slugify
@@ -213,6 +214,12 @@ def _api_to_db_value(api_value, db_column: str):
     return hotel_default(db_column)
 
 
+def _serialize_points_of_interest(
+    points: list[SettingsPointOfInterest] | None,
+) -> list[dict[str, Any]]:
+    return [point.model_dump() for point in (points or [])]
+
+
 async def _resolve_unique_slug(
     name: str, user_id: str, *, exclude_hotel_id: str | None = None
 ) -> str:
@@ -315,6 +322,10 @@ async def _create_hotel_from_settings(
         payout_account_number=data.payout_account_number or "",
         payout_bank_name=data.payout_bank_name or "",
         payout_swift=data.payout_swift or "",
+        show_room_detail_map=_api_to_db_value(data.show_room_detail_map, "show_room_detail_map"),
+        points_of_interest=_serialize_points_of_interest(
+            _api_to_db_value(data.points_of_interest, "points_of_interest")
+        ),
     )
     slug = await _resolve_unique_slug(name, user_id)
     try:
@@ -425,6 +436,8 @@ async def update_property_settings(
         for api_field, db_col in _PROPERTY_FIELD_MAP.items():
             value = getattr(data, api_field)
             if value is not None:
+                if api_field == "points_of_interest":
+                    value = _serialize_points_of_interest(value)
                 updates[db_col] = value
 
         _validate_paypal_settings(

@@ -1,3 +1,5 @@
+import math
+
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 MAX_ROOM_SIZE = 15000
@@ -118,6 +120,18 @@ def _validate_rate_deposit_settings(settings: dict | None) -> dict | None:
             raise ValueError("deposit percentage must be between 1 and 100")
         normalized[rate_key] = {"enabled": True, "percentage": pct}
     return normalized
+
+
+def _validate_latitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -90 or value > 90):
+        raise ValueError("latitude must be between -90 and 90")
+    return value
+
+
+def _validate_longitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -180 or value > 180):
+        raise ValueError("longitude must be between -180 and 180")
+    return value
 
 
 def _validate_operating_periods(periods: list) -> list:
@@ -330,6 +344,16 @@ class RoomTypeCreate(BaseModel):
             raise ValueError("max_children must be at least 0")
         return v
 
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v: float | None) -> float | None:
+        return _validate_latitude(v)
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v: float | None) -> float | None:
+        return _validate_longitude(v)
+
     @field_validator("meal_plans")
     @classmethod
     def validate_meal_plans(cls, v: list[dict]) -> list[dict]:
@@ -452,6 +476,23 @@ class RoomTypeUpdate(BaseModel):
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
         return v
+
+    @field_validator("location_address")
+    @classmethod
+    def validate_location_address(cls, v: str | None) -> str | None:
+        if v is None:
+            return ""
+        return v
+
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v: float | None) -> float | None:
+        return _validate_latitude(v)
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v: float | None) -> float | None:
+        return _validate_longitude(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod

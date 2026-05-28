@@ -1,6 +1,7 @@
+import math
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Single source of truth for property defaults, keyed by booking_hotels
 # DB column name. Used by the GET (filling NULLs in the row), the
@@ -51,6 +52,47 @@ def hotel_default(column: str, fallback: Any = "") -> Any:
     or ``fallback`` (empty string) for unmapped columns — most string
     fields default to empty so listing each one is noise."""
     return HOTEL_FIELD_DEFAULTS.get(column, fallback)
+
+
+class SettingsPointOfInterest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+    travelTime: str
+    color: str
+    latitude: float
+    longitude: float
+    position: int = 0
+
+    @field_validator("id", "label", "travelTime", "color")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("must not be empty")
+        return trimmed
+
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, value: float) -> float:
+        if not math.isfinite(value) or value < -90 or value > 90:
+            raise ValueError("latitude must be between -90 and 90")
+        return value
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, value: float) -> float:
+        if not math.isfinite(value) or value < -180 or value > 180:
+            raise ValueError("longitude must be between -180 and 180")
+        return value
+
+    @field_validator("position")
+    @classmethod
+    def validate_position(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("position must be non-negative")
+        return value
 
 
 class PropertySettingsResponse(BaseModel):
@@ -123,7 +165,7 @@ class PropertySettingsResponse(BaseModel):
     terms_text: str = ""
     cancellation_policy_text: str = ""
     show_room_detail_map: bool = False
-    points_of_interest: list[dict[str, Any]] = []
+    points_of_interest: list[SettingsPointOfInterest] = Field(default_factory=list, max_length=10)
 
 
 class PropertySettingsUpdate(BaseModel):
@@ -182,4 +224,4 @@ class PropertySettingsUpdate(BaseModel):
     terms_text: str | None = None
     cancellation_policy_text: str | None = None
     show_room_detail_map: bool | None = None
-    points_of_interest: list[dict[str, Any]] | None = None
+    points_of_interest: list[SettingsPointOfInterest] | None = Field(default=None, max_length=10)

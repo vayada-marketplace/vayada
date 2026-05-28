@@ -74,8 +74,7 @@ export default function RoomDetailModal({
   const tc = useTranslations("common");
 
   const hasMultipleImages = room.images.length > 1;
-  const hasRoomCoordinates =
-    typeof room.latitude === "number" && typeof room.longitude === "number";
+  const hasRoomCoordinates = Number.isFinite(room.latitude) && Number.isFinite(room.longitude);
   const goPrevImage = () => setImgIndex((i) => (i - 1 + room.images.length) % room.images.length);
   const goNextImage = () => setImgIndex((i) => (i + 1) % room.images.length);
   const handleTouchStart = (e: React.TouchEvent) => setTouchStartX(e.touches[0].clientX);
