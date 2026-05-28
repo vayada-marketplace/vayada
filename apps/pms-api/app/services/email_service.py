@@ -161,6 +161,7 @@ _PAYMENT_LABELS = {
     "card": "Card (authorization hold)",
     "pay_at_property": "Pay at property",
     "bank_transfer": "Bank transfer",
+    "paypal": "PayPal",
     "xendit": "Online payment (Xendit)",
 }
 
@@ -337,6 +338,30 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
 
 async def send_guest_booking_requested(guest_email: str, booking: dict):
     """Confirm to guest that their booking request has been submitted."""
+    if booking.get("payment_method") == "paypal":
+        deadline = booking.get("host_response_deadline")
+        paypal_email = booking.get("paypal_email") or ""
+        deadline_html = (
+            f'<p class="detail"><strong>Payment deadline:</strong> {deadline}</p>'
+            if deadline
+            else ""
+        )
+        subject = f"Action needed: complete your PayPal payment for booking {booking['booking_reference']}"
+        content = f"""
+        <h2>PayPal Payment Pending</h2>
+        <p class="detail">Your booking at <strong>{booking["hotel_name"]}</strong> is not confirmed yet.</p>
+        {f'<p class="detail"><strong>Send payment to:</strong> {paypal_email}</p>' if paypal_email else ""}
+        <p class="detail">Please send the total amount by PayPal and include your booking reference in the PayPal note so the property can match it.</p>
+        <hr class="divider">
+        {_booking_details_html(booking)}
+        {deadline_html}
+        <hr class="divider">
+        <p class="detail">The property will confirm your booking once they verify the payment. If payment is not received by the deadline, the booking will be cancelled automatically.</p>
+        {_my_booking_button_html(booking, guest_email)}
+        """
+        await _send_email(guest_email, subject, _wrap_html(content))
+        return
+
     subject = f"Booking Request Submitted — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Submitted</h2>

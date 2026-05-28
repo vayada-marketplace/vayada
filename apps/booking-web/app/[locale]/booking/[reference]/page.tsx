@@ -62,6 +62,10 @@ export default function BookingConfirmationPage({
   const [hydrating, setHydrating] = useState(false);
   const [hydrateError, setHydrateError] = useState(false);
   const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
+  const [paypalInfo, setPaypalInfo] = useState<{
+    email: string;
+    windowHours: number;
+  } | null>(null);
 
   // Booking details are written to sessionStorage on the checkout flow, but
   // sessionStorage is per-tab, so a guest who opens the "View My Booking" link
@@ -102,6 +106,21 @@ export default function BookingConfirmationPage({
       cancelled = true;
     };
   }, [reference, emailParam, slug]);
+
+  useEffect(() => {
+    if (booking?.paymentMethod !== "paypal") return;
+    bookingService
+      .getPaymentSettings(slug)
+      .then((settings) => {
+        if (settings.paypalEmail) {
+          setPaypalInfo({
+            email: settings.paypalEmail,
+            windowHours: settings.paypalPaymentWindowHours || 24,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [booking?.paymentMethod, slug]);
 
   // Fetch any existing change request once we know the booking + email.
   useEffect(() => {
@@ -399,10 +418,41 @@ export default function BookingConfirmationPage({
                       ? "Card"
                       : booking.paymentMethod === "bank_transfer"
                         ? "Bank Transfer"
-                        : "Pay at Property"}
+                        : booking.paymentMethod === "xendit"
+                          ? "Xendit"
+                          : booking.paymentMethod === "paypal"
+                            ? "PayPal"
+                            : "Pay at Property"}
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {isPending && booking?.paymentMethod === "paypal" && paypalInfo && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
+              <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
+              <p className="text-xs text-blue-700 mt-1">
+                Send {booking.currency} {booking.totalAmount} to {paypalInfo.email} and include{" "}
+                {booking.bookingReference} in the PayPal note so the property can match it. Payment
+                must be confirmed within {paypalInfo.windowHours} hours.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(paypalInfo.email)}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                >
+                  Copy email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(booking.bookingReference)}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                >
+                  Copy booking reference
+                </button>
+              </div>
             </div>
           )}
 

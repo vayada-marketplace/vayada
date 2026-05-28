@@ -23,12 +23,13 @@ class BookingNoteRepository:
         author_user_id: str,
         author_name: str,
         body: str,
+        source: str | None = None,
     ) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO booking_notes
-                (booking_id, hotel_id, author_user_id, author_name, body)
-            VALUES ($1, $2, $3, $4, $5)
+                (booking_id, hotel_id, author_user_id, author_name, body, source)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             """,
             booking_id,
@@ -36,6 +37,7 @@ class BookingNoteRepository:
             author_user_id,
             author_name,
             body,
+            source,
         )
         return dict(row)
 
