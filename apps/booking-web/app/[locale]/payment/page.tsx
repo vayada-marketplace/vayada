@@ -48,7 +48,7 @@ function PaymentPageContent() {
   // from a navigation, which remounts), so reading them from a closure is
   // safe. refetchRooms is intentionally omitted because it isn't memoized
   // by HotelContext and would re-fire on every render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam);
   }, []);
@@ -78,12 +78,15 @@ function PaymentPageContent() {
       promoCode: promoCodeParam,
     });
   const [paymentMethod, setPaymentMethod] = useState<
-    "card" | "pay_at_property" | "xendit" | "bank_transfer"
+    "card" | "pay_at_property" | "xendit" | "bank_transfer" | "paypal"
   >("pay_at_property");
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false);
   const [onlineCardPayment, setOnlineCardPayment] = useState(false);
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false);
   const [bankTransferEnabled, setBankTransferEnabled] = useState(false);
+  const [paypalEnabled, setPaypalEnabled] = useState(false);
+  const [paypalEmail, setPaypalEmail] = useState("");
+  const [paypalPaymentWindowHours, setPaypalPaymentWindowHours] = useState(24);
   const [bankDetails, setBankDetails] = useState<{
     accountHolder: string;
     accountType?: "iban" | "account_number";
@@ -139,15 +142,20 @@ function PaymentPageContent() {
         setCancellationPolicyText(settings.cancellationPolicyText || "");
         // Default to first available payment method, honoring the rate-level
         // allow-list if one is set on this room.
-        const preference: ("card" | "pay_at_property" | "bank_transfer" | "xendit")[] = [
+        setPaypalEnabled(!!settings.paypalEnabled && !!settings.paypalEmail);
+        setPaypalEmail(settings.paypalEmail || "");
+        setPaypalPaymentWindowHours(settings.paypalPaymentWindowHours || 24);
+        const preference: ("card" | "pay_at_property" | "paypal" | "bank_transfer" | "xendit")[] = [
           "card",
           "pay_at_property",
+          "paypal",
           "bank_transfer",
           "xendit",
         ];
         const hotelEnabled: Record<string, boolean> = {
           card: !!settings.onlineCardPayment,
           pay_at_property: !!settings.payAtPropertyEnabled,
+          paypal: !!settings.paypalEnabled && !!settings.paypalEmail,
           bank_transfer: !!settings.bankTransfer,
           xendit: !!settings.xenditPaymentsEnabled,
         };
@@ -545,6 +553,47 @@ function PaymentPageContent() {
                     </div>
                   </button>
                 )}
+                {paypalEnabled && isMethodAllowedForRate("paypal") && (
+                  <button
+                    onClick={() => setPaymentMethod("paypal")}
+                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
+                      paymentMethod === "paypal"
+                        ? "border-primary-600 bg-primary-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${paymentMethod === "paypal" ? "border-primary-600" : "border-gray-300"}`}
+                      >
+                        {paymentMethod === "paypal" && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <svg
+                            className="w-5 h-5 text-gray-700"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 6v12m-4-8h5a3 3 0 010 6H8V6h6a2 2 0 010 4H8"
+                            />
+                          </svg>
+                          <span className="font-semibold text-sm text-gray-900">Pay by PayPal</span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">
+                          Send payment manually; the property confirms it once received.
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                )}
               </div>
 
               {/* Hint when the rate restricts some hotel-enabled methods */}
@@ -627,6 +676,30 @@ function PaymentPageContent() {
                         )}
                       </div>
                     )}
+                </div>
+              ) : paymentMethod === "paypal" ? (
+                <div className="space-y-3">
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                    Send payment to the PayPal email below and include your booking reference in the
+                    PayPal note after your booking is created. Your booking will be confirmed once
+                    the property verifies the payment, typically within {paypalPaymentWindowHours}{" "}
+                    hours.
+                  </div>
+                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                    <p className="text-sm text-gray-700">
+                      <strong>PayPal email:</strong> {paypalEmail}
+                    </p>
+                    <p className="text-sm text-gray-700">
+                      <strong>Amount:</strong> {formatPrice(grandTotal, selectedCurrency)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(paypalEmail)}
+                      className="text-xs font-semibold text-primary-600 hover:text-primary-700"
+                    >
+                      Copy email
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">

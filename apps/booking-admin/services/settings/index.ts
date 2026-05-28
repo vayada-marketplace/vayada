@@ -32,6 +32,9 @@ export interface PropertySettings {
   pay_at_hotel_methods: string[];
   online_card_payment?: boolean;
   bank_transfer?: boolean;
+  paypal_enabled?: boolean;
+  paypal_email?: string;
+  paypal_payment_window_hours?: number;
   special_requests_enabled?: boolean;
   arrival_time_enabled?: boolean;
   guest_count_enabled?: boolean;

@@ -268,10 +268,12 @@ async def get_payment_settings(slug: str):
         pay_at_property = be_payment_flags.get("pay_at_property_enabled", False)
         online_card = be_payment_flags.get("online_card_payment", False)
         bank_transfer = be_payment_flags.get("bank_transfer", False)
+        paypal_enabled = be_payment_flags.get("paypal_enabled", False)
     else:
         pay_at_property = settings["pay_at_property_enabled"] if settings else False
         online_card = settings.get("online_card_payment", False) if settings else False
         bank_transfer = settings.get("bank_transfer", False) if settings else False
+        paypal_enabled = False
 
     # Gate onlineCardPayment on the PMS side actually being able to charge.
     # The admin toggle in booking_hotels only says "the hotel *wants* online
@@ -299,6 +301,7 @@ async def get_payment_settings(slug: str):
         "payAtPropertyEnabled": pay_at_property,
         "onlineCardPayment": online_card,
         "bankTransfer": bank_transfer,
+        "paypalEnabled": paypal_enabled,
         "xenditPaymentsEnabled": settings.get("xendit_payments_enabled", False)
         if settings
         else False,
@@ -321,6 +324,8 @@ async def get_payment_settings(slug: str):
         result["payAtHotelMethods"] = methods or ["cash", "card"]
         result["termsText"] = be_hotel.get("terms_text") or ""
         result["cancellationPolicyText"] = be_hotel.get("cancellation_policy_text") or ""
+        result["paypalEmail"] = be_hotel.get("paypal_email") or ""
+        result["paypalPaymentWindowHours"] = be_hotel.get("paypal_payment_window_hours") or 24
         if bank_transfer:
             result["bankDetails"] = {
                 "accountHolder": be_hotel.get("payout_account_holder") or "",
@@ -332,5 +337,7 @@ async def get_payment_settings(slug: str):
         result["payAtHotelMethods"] = ["cash", "card"]
         result["termsText"] = ""
         result["cancellationPolicyText"] = ""
+        result["paypalEmail"] = ""
+        result["paypalPaymentWindowHours"] = 24
 
     return result
