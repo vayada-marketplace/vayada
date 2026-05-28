@@ -416,18 +416,17 @@ export default function SetupPage() {
           // Non-fatal
         }
 
-        // 5b. Save last-minute discount config on the hotel.
-        // Only PATCH when enabled — otherwise the hotel keeps whatever
-        // default the PMS has (typically null/off), avoiding an empty
-        // overwrite if the user skipped the step.
-        if (lastMinuteConfig.enabled) {
-          try {
-            await pmsClient.patch("/admin/hotel", {
-              last_minute_discount: lastMinuteConfig,
-            });
-          } catch {
-            // Non-fatal: can be configured later from Booking Flow
-          }
+        // 5b. Save last-minute discount config on the hotel. Persist disabled
+        // too, otherwise a stale enabled config can continue discounting rooms.
+        try {
+          await pmsClient.patch("/admin/hotel", {
+            last_minute_discount: lastMinuteConfig,
+          });
+        } catch (err) {
+          console.error("Failed to persist last-minute discount config:", err);
+          throw new Error(
+            "Last-minute discount settings could not be saved. Please try again before completing setup.",
+          );
         }
       }
 
