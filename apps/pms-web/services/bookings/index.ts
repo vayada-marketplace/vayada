@@ -1,5 +1,6 @@
 import { pmsClient } from "../api/pmsClient";
 import { buildQueryString } from "@/lib/utils/queryString";
+import type { CheckinStepType } from "@/services/settings";
 
 export interface AssignedRoom {
   roomId: string | null;
@@ -172,12 +173,10 @@ export interface BookingChangeRequest {
   createdAt: string;
 }
 
-export type CheckinStepResultType = "checkbox" | "text" | "amount";
-
 export interface CheckinStepResult {
   stepId: string;
   label: string;
-  type: CheckinStepResultType;
+  type: CheckinStepType;
   value: string | number | boolean | null;
   completedAt: string | null;
 }

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -59,7 +60,7 @@ class CheckinStepResult(BaseModel):
     label: str
     type: ChecklistStepType
     value: Any = None
-    completed_at: str | None = None
+    completed_at: datetime | None = None
 
 
 class CheckinPendingFlag(BaseModel):

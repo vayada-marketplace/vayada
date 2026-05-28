@@ -30,6 +30,7 @@ type SectionId =
   | "booking-engine"
   | "calendar"
   | "check-in-out"
+  | "checkin-checklist"
   | "localization";
 
 // Anchors used by SearchModal (apps/pms-web/components/layout/SearchModal.tsx)
@@ -39,6 +40,7 @@ const ANCHOR_TO_SECTION: Record<string, SectionId> = {
   "booking-engine": "booking-engine",
   calendar: "calendar",
   "check-in-out": "check-in-out",
+  "checkin-checklist": "checkin-checklist",
   currency: "localization",
   language: "localization",
 };

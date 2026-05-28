@@ -160,7 +160,7 @@ export default function CheckInPage() {
     Promise.all([
       bookingsService.get(id),
       bookingsService.listAdditionalGuests(id),
-      settingsService.getCheckinChecklist(),
+      settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
     ])
       .then(([bookingRes, guestRes, checklistRes]) => {
         setBooking(bookingRes);
@@ -827,6 +827,8 @@ function CustomChecklistItem({
   onChange: (value: string | boolean) => void;
 }) {
   const done = customStepDone(step, value);
+  const controlId = `checklist-${step.id}`;
+  const labelId = `checklist-label-${step.id}`;
   const indicatorClass = done
     ? "bg-green-100 text-green-700"
     : step.required
@@ -843,7 +845,9 @@ function CustomChecklistItem({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="break-words text-sm font-medium text-gray-900">{step.label}</span>
+            <span id={labelId} className="break-words text-sm font-medium text-gray-900">
+              {step.label}
+            </span>
             {step.required && (
               <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
                 required
@@ -854,20 +858,24 @@ function CustomChecklistItem({
           {step.type === "checkbox" && (
             <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
               <input
+                id={controlId}
                 type="checkbox"
                 checked={value === true}
                 onChange={(event) => onChange(event.target.checked)}
+                aria-labelledby={`${labelId} ${controlId}-suffix`}
                 className="h-4 w-4 rounded border-gray-300"
               />
-              Done
+              <span id={`${controlId}-suffix`}>Done</span>
             </label>
           )}
 
           {step.type === "text" && (
             <input
+              id={controlId}
               value={typeof value === "string" ? value : ""}
               onChange={(event) => onChange(event.target.value)}
               placeholder="Add note"
+              aria-labelledby={labelId}
               className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm"
             />
           )}
@@ -878,12 +886,14 @@ function CustomChecklistItem({
                 {currency}
               </span>
               <input
+                id={controlId}
                 type="number"
                 min="0"
                 step="0.01"
                 value={typeof value === "string" ? value : ""}
                 onChange={(event) => onChange(event.target.value)}
                 placeholder="0.00"
+                aria-labelledby={labelId}
                 className="min-w-0 flex-1 rounded-r-lg px-3 text-sm outline-none"
               />
             </div>

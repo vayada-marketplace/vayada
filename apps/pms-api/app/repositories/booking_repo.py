@@ -429,8 +429,11 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def complete_check_in(booking_id: str, pending_flags: list[str]) -> dict | None:
-        row = await Database.fetchrow(
+    async def complete_check_in(
+        booking_id: str, pending_flags: list[str], conn: Connection | None = None
+    ) -> dict | None:
+        executor = conn or Database
+        row = await executor.fetchrow(
             """
             UPDATE bookings
             SET status = 'checked_in',

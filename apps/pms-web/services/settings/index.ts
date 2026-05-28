@@ -27,7 +27,8 @@ export interface PropertySettings {
 
 export type PropertySettingsUpdate = Partial<PropertySettings>;
 
-export type CheckinChecklistStepType = "checkbox" | "text" | "amount";
+export type CheckinStepType = "checkbox" | "text" | "amount";
+export type CheckinChecklistStepType = CheckinStepType;
 
 export interface CheckinChecklistStep {
   id: string;

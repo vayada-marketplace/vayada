@@ -1,5 +1,7 @@
 import json
 
+from asyncpg import Connection
+
 from app.database import Database
 
 
@@ -40,8 +42,10 @@ class CheckinChecklistRepository:
         completed_by: str,
         step_results: list[dict],
         pending_flags: list[dict],
+        conn: Connection | None = None,
     ) -> dict:
-        row = await Database.fetchrow(
+        executor = conn or Database
+        row = await executor.fetchrow(
             """
             INSERT INTO booking_checkin_records (
                 booking_id,

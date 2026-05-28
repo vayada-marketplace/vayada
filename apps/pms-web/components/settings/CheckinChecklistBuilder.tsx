@@ -305,76 +305,121 @@ export function CheckinChecklistBuilder() {
                   </div>
                 )}
 
-                {normalizedSteps.map((step) => (
-                  <div
-                    key={step.id}
-                    draggable
-                    onDragStart={() => setDraggingId(step.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      if (draggingId) moveStep(draggingId, step.id);
-                      setDraggingId(null);
-                    }}
-                    className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
-                  >
-                    <div className="grid gap-3 md:grid-cols-[32px_96px_minmax(0,1fr)_150px_40px] md:items-start">
-                      <button
-                        type="button"
-                        className="flex h-9 w-9 cursor-grab items-center justify-center rounded-lg text-gray-400 hover:bg-gray-50"
-                        aria-label="Drag to reorder"
-                      >
-                        <Bars3Icon className="h-5 w-5" />
-                      </button>
-                      <label className="flex items-center gap-2 pt-2 text-sm font-medium text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={step.required}
+                {normalizedSteps.map((step, index) => {
+                  const previousStep = normalizedSteps[index - 1];
+                  const nextStep = normalizedSteps[index + 1];
+
+                  return (
+                    <div
+                      key={step.id}
+                      draggable
+                      onDragStart={() => setDraggingId(step.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => {
+                        if (draggingId) moveStep(draggingId, step.id);
+                        setDraggingId(null);
+                      }}
+                      className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
+                    >
+                      <div className="grid gap-3 md:grid-cols-[88px_96px_minmax(0,1fr)_150px_40px] md:items-start">
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowUp" && previousStep) {
+                                event.preventDefault();
+                                moveStep(step.id, previousStep.id);
+                              }
+                              if (event.key === "ArrowDown" && nextStep) {
+                                event.preventDefault();
+                                moveStep(step.id, nextStep.id);
+                              }
+                              if (event.key === "Home" && normalizedSteps[0]) {
+                                event.preventDefault();
+                                moveStep(step.id, normalizedSteps[0].id);
+                              }
+                              if (event.key === "End" && normalizedSteps.at(-1)) {
+                                event.preventDefault();
+                                moveStep(step.id, normalizedSteps.at(-1)!.id);
+                              }
+                            }}
+                            className="flex h-9 w-9 cursor-grab items-center justify-center rounded-lg text-gray-400 hover:bg-gray-50"
+                            aria-label="Drag to reorder. Use arrow keys to move this step."
+                          >
+                            <Bars3Icon className="h-5 w-5" />
+                          </button>
+                          <div className="flex flex-col">
+                            <button
+                              type="button"
+                              onClick={() => previousStep && moveStep(step.id, previousStep.id)}
+                              disabled={!previousStep}
+                              className="flex h-4 w-7 items-center justify-center rounded text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-30"
+                              aria-label="Move step up"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => nextStep && moveStep(step.id, nextStep.id)}
+                              disabled={!nextStep}
+                              className="flex h-4 w-7 items-center justify-center rounded text-xs text-gray-500 hover:bg-gray-50 disabled:opacity-30"
+                              aria-label="Move step down"
+                            >
+                              ↓
+                            </button>
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-2 pt-2 text-sm font-medium text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={step.required}
+                            onChange={(event) =>
+                              updateStep(step.id, { required: event.target.checked })
+                            }
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          Required
+                        </label>
+                        <div>
+                          <input
+                            data-step-label={step.id}
+                            value={step.label}
+                            maxLength={120}
+                            onChange={(event) => updateStep(step.id, { label: event.target.value })}
+                            placeholder="Step label"
+                            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-gray-400 ${
+                              errors[step.id] ? "border-red-300 bg-red-50" : "border-gray-200"
+                            }`}
+                          />
+                          {errors[step.id] && (
+                            <p className="mt-1 text-xs text-red-600">{errors[step.id]}</p>
+                          )}
+                        </div>
+                        <select
+                          value={step.type}
                           onChange={(event) =>
-                            updateStep(step.id, { required: event.target.checked })
+                            updateStep(step.id, {
+                              type: event.target.value as CheckinChecklistStepType,
+                            })
                           }
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        Required
-                      </label>
-                      <div>
-                        <input
-                          data-step-label={step.id}
-                          value={step.label}
-                          maxLength={120}
-                          onChange={(event) => updateStep(step.id, { label: event.target.value })}
-                          placeholder="Step label"
-                          className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-gray-400 ${
-                            errors[step.id] ? "border-red-300 bg-red-50" : "border-gray-200"
-                          }`}
-                        />
-                        {errors[step.id] && (
-                          <p className="mt-1 text-xs text-red-600">{errors[step.id]}</p>
-                        )}
+                          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+                        >
+                          <option value="checkbox">Checkbox</option>
+                          <option value="text">Text input</option>
+                          <option value="amount">Amount</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => removeStep(step.id)}
+                          className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"
+                          aria-label="Delete step"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
                       </div>
-                      <select
-                        value={step.type}
-                        onChange={(event) =>
-                          updateStep(step.id, {
-                            type: event.target.value as CheckinChecklistStepType,
-                          })
-                        }
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
-                      >
-                        <option value="checkbox">Checkbox</option>
-                        <option value="text">Text input</option>
-                        <option value="amount">Amount</option>
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => removeStep(step.id)}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600"
-                        aria-label="Delete step"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 <button
                   type="button"
@@ -420,7 +465,22 @@ export function readChecklistPreviewDraft(): CheckinChecklistStep[] | null {
   const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const isStep = (value: unknown): value is CheckinChecklistStep => {
+      if (!value || typeof value !== "object") return false;
+      const candidate = value as Record<string, unknown>;
+      return (
+        typeof candidate.id === "string" &&
+        typeof candidate.label === "string" &&
+        (candidate.type === "checkbox" ||
+          candidate.type === "text" ||
+          candidate.type === "amount") &&
+        typeof candidate.required === "boolean" &&
+        typeof candidate.position === "number"
+      );
+    };
+    return parsed.every(isStep) ? parsed : null;
   } catch {
     return null;
   }
