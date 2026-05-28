@@ -11,6 +11,7 @@ from app.routers.admin import router as admin_router
 from app.routers.admin_affiliates import router as admin_affiliates_router
 from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.admin_channex import router as admin_channex_router
+from app.routers.admin_checkin_checklist import router as admin_checkin_checklist_router
 from app.routers.admin_financials import router as admin_financials_router
 from app.routers.admin_import import router as admin_import_router
 from app.routers.admin_messaging import router as admin_messaging_router
@@ -116,6 +117,7 @@ app.include_router(admin_room_types_router, dependencies=_admin_deps)
 app.include_router(admin_rooms_router, dependencies=_admin_deps)
 app.include_router(admin_room_blocks_router, dependencies=_admin_deps)
 app.include_router(admin_bookings_router, dependencies=_admin_deps)
+app.include_router(admin_checkin_checklist_router, dependencies=_admin_deps)
 app.include_router(admin_payments_router, dependencies=_admin_deps)
 app.include_router(admin_financials_router, dependencies=_admin_deps)
 app.include_router(admin_affiliates_router, dependencies=_admin_deps)

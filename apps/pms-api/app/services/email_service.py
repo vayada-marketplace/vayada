@@ -304,6 +304,42 @@ def _booking_request_reply_to(booking: dict) -> str:
     return settings.VAYADA_OPS_EMAIL
 
 
+def _bank_transfer_details_html(booking: dict) -> str:
+    details = booking.get("bank_details") or {}
+    if booking.get("payment_method") != "bank_transfer" or not details:
+        return ""
+
+    from html import escape
+
+    account_type = details.get("payout_account_type") or details.get("account_type") or "iban"
+    account_label = "Account Number" if account_type == "account_number" else "IBAN"
+    if account_type == "account_number":
+        account_value = details.get("payout_account_number") or details.get("account_number")
+    else:
+        account_value = details.get("payout_iban") or details.get("iban")
+    rows = [
+        ("Bank", details.get("payout_bank_name") or details.get("bank_name")),
+        ("Account Holder", details.get("payout_account_holder") or details.get("account_holder")),
+        (account_label, account_value),
+        ("BIC/SWIFT", details.get("payout_swift") or details.get("swift")),
+    ]
+    rows_html = "\n".join(
+        f'<p class="detail"><strong>{label}:</strong> {escape(str(value).strip())}</p>'
+        for label, value in rows
+        if str(value or "").strip()
+    )
+    if not rows_html:
+        return ""
+    reference = escape(str(booking.get("booking_reference") or ""))
+    amount = escape(f"{booking.get('currency', '')} {float(booking.get('total_amount') or 0):.2f}")
+    return f"""
+    <h3>Bank Transfer Details</h3>
+    <p class="detail">Please include your booking reference <strong>{reference}</strong> with the transfer.</p>
+    <p class="detail"><strong>Amount:</strong> {amount}</p>
+    {rows_html}
+    """
+
+
 async def send_booking_request_notification(hotel_email: str, booking: dict):
     """Notify host of new booking request with Accept/Reject actions."""
     subject, html_body = _render_request_status_email(booking, "pending")
@@ -342,6 +378,7 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
     <h2>Booking Request Submitted</h2>
     <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
     <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
+    {_bank_transfer_details_html(booking)}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">

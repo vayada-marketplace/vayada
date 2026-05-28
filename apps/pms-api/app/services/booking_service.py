@@ -76,6 +76,24 @@ def _create_task(coro) -> asyncio.Task:
 HOST_RESPONSE_HOURS = 24
 
 
+def _bank_details_complete(details: dict | None) -> bool:
+    if not details:
+        return False
+    account_type = details.get("payout_account_type") or "iban"
+    account_identifier = (
+        details.get("payout_account_number")
+        if account_type == "account_number"
+        else details.get("payout_iban")
+    )
+    required = [
+        details.get("payout_bank_name"),
+        details.get("payout_account_holder"),
+        account_identifier,
+        details.get("payout_swift"),
+    ]
+    return all(bool(str(value or "").strip()) for value in required)
+
+
 def _log_background_task_result(task: asyncio.Task, label: str) -> None:
     try:
         task.result()
@@ -1091,24 +1109,38 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # ── Validate hotel-level payment-method enablement ─────────────
     payment_method = data.payment_method
     hotel_settings = None
+    bank_transfer_info = None
     be_payment_info = None
     if payment_method in ("pay_at_property", "xendit", "card", "bank_transfer"):
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
+    be_payment_flags = await hotel_identity_service.get_payment_flags_by_slug(slug)
+    pay_at_property_enabled = (
+        be_payment_flags.get("pay_at_property_enabled")
+        if be_payment_flags is not None
+        else (hotel_settings["pay_at_property_enabled"] if hotel_settings else False)
+    )
+    bank_transfer_enabled = (
+        be_payment_flags.get("bank_transfer")
+        if be_payment_flags is not None
+        else (hotel_settings.get("bank_transfer") if hotel_settings else False)
+    )
     if payment_method == "pay_at_property":
         if deposit.required:
             raise ValueError(
                 "Pay at property is not available because this rate requires a deposit"
             )
-        if not hotel_settings or not hotel_settings["pay_at_property_enabled"]:
+        if not pay_at_property_enabled:
             raise ValueError("Pay at property is not enabled for this hotel")
     elif payment_method == "xendit":
         if not hotel_settings or not hotel_settings.get("xendit_payments_enabled"):
             raise ValueError("Xendit payments are not enabled for this hotel")
     elif payment_method == "bank_transfer":
-        if not hotel_settings or not hotel_settings.get("bank_transfer"):
+        if not bank_transfer_enabled:
             raise ValueError("Bank transfer is not enabled for this hotel")
+        bank_transfer_info = await hotel_identity_service.get_guest_payment_info_by_slug(slug)
+        if not _bank_details_complete(bank_transfer_info):
+            raise ValueError("Bank transfer details are incomplete for this hotel")
     elif payment_method == "paypal":
-        be_payment_flags = await hotel_identity_service.get_payment_flags_by_slug(slug)
         be_payment_info = await hotel_identity_service.get_guest_payment_info_by_slug(slug)
         if (
             not be_payment_flags
@@ -1249,7 +1281,10 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # Guest "request received" email only for the request flow;
     # _finalize_accepted_booking sends the equivalent under instant-book.
     if use_request_flow:
-        _create_task(send_guest_booking_requested(data.guest_email, booking))
+        guest_email_booking = booking
+        if payment_method == "bank_transfer" and bank_transfer_info:
+            guest_email_booking = {**booking, "bank_details": bank_transfer_info}
+        _create_task(send_guest_booking_requested(data.guest_email, guest_email_booking))
 
     # Push updated availability to Channex so OTAs reflect the reduced inventory
     _create_task(push_availability_for_room_type(hotel_id, data.room_type_id))

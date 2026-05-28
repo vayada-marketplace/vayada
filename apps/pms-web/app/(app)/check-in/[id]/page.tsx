@@ -8,8 +8,11 @@ import {
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
   BookingNote,
+  CheckinPendingFlag,
+  CheckinStepResult,
   bookingsService,
 } from "@/services/bookings";
+import { CheckinChecklistStep, settingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
@@ -170,6 +173,18 @@ function pendingFlags(booking: Booking, booker: GuestRegistrationDraft, guests: 
   return flags;
 }
 
+function customStepDone(step: CheckinChecklistStep, value: string | boolean | undefined) {
+  if (step.type === "checkbox") return value === true;
+  if (step.type === "amount") return Number(value || 0) > 0;
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function customStepValueForRecord(step: CheckinChecklistStep, value: string | boolean | undefined) {
+  if (step.type === "checkbox") return value === true;
+  if (step.type === "amount") return value ? Number(value) : 0;
+  return typeof value === "string" ? value : "";
+}
+
 export default function CheckInPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -185,14 +200,22 @@ export default function CheckInPage() {
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
   const [actionLoading, setActionLoading] = useState<null | "markPaid" | "completeCheckIn">(null);
+  const [customSteps, setCustomSteps] = useState<CheckinChecklistStep[]>([]);
+  const [customValues, setCustomValues] = useState<Record<string, string | boolean>>({});
+  const [requiredWarning, setRequiredWarning] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([bookingsService.get(id), bookingsService.listAdditionalGuests(id)])
-      .then(async ([bookingRes, guestRes]) => {
+    Promise.all([
+      bookingsService.get(id),
+      bookingsService.listAdditionalGuests(id),
+      settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
+    ])
+      .then(async ([bookingRes, guestRes, checklistRes]) => {
         setBooking(bookingRes);
         setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
+        setCustomSteps(checklistRes.steps || []);
         try {
           const noteRes = await bookingsService.listNotes(id);
           setNotes(noteRes.notes);
@@ -204,9 +227,20 @@ export default function CheckInPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const flags = useMemo(
+  const systemFlags = useMemo(
     () => (booking && booker ? pendingFlags(booking, booker, guests) : []),
     [booking, booker, guests],
+  );
+  const customPending = useMemo(
+    () =>
+      customSteps
+        .filter((step) => step.required && !customStepDone(step, customValues[step.id]))
+        .map((step) => ({ stepId: step.id, label: step.label })),
+    [customSteps, customValues],
+  );
+  const flags = useMemo(
+    () => [...systemFlags, ...customPending.map((flag) => flag.label)],
+    [systemFlags, customPending],
   );
   const completedGuests =
     guests.filter(guestComplete).length + (booker && guestComplete(booker) ? 1 : 0);
@@ -222,6 +256,11 @@ export default function CheckInPage() {
 
   const updateGuest = (index: number, patch: Partial<GuestDraft>) => {
     setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...g, ...patch } : g)));
+  };
+
+  const updateCustomValue = (stepId: string, value: string | boolean) => {
+    setRequiredWarning(false);
+    setCustomValues((prev) => ({ ...prev, [stepId]: value }));
   };
 
   const addGuest = () => {
@@ -345,6 +384,10 @@ export default function CheckInPage() {
   const completeCheckIn = async () => {
     if (!booking || !booker || actionLoading) return;
     const carriedFlags = [...flags];
+    if (customPending.length > 0 && !requiredWarning) {
+      setRequiredWarning(true);
+      return;
+    }
     setActionLoading("completeCheckIn");
     setError("");
     try {
@@ -394,7 +437,28 @@ export default function CheckInPage() {
         setBooking(updated);
         setBooker(bookerDraftFromBooking(updated));
       }
-      const checkedIn = await bookingsService.completeCheckIn(booking.id, carriedFlags);
+      const completedAt = new Date().toISOString();
+      const systemFlagDetails: CheckinPendingFlag[] = systemFlags.map((label) => ({
+        stepId: `system-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        label,
+      }));
+      const customResults: CheckinStepResult[] = customSteps.map((step) => {
+        const value = customValues[step.id];
+        const done = customStepDone(step, value);
+        return {
+          stepId: step.id,
+          label: step.label,
+          type: step.type,
+          value: customStepValueForRecord(step, value),
+          completedAt: done ? completedAt : null,
+        };
+      });
+      const checkedIn = await bookingsService.completeCheckIn(
+        booking.id,
+        carriedFlags,
+        customResults,
+        [...systemFlagDetails, ...customPending],
+      );
       setBooking(checkedIn);
       setConfirmationFlags(carriedFlags);
     } catch (err) {
@@ -690,7 +754,22 @@ export default function CheckInPage() {
                   done={Boolean(booking.assignedRooms?.length || booking.roomId)}
                   label={`Room · ${booking.roomName}`}
                 />
+                {customSteps.map((step) => (
+                  <CustomChecklistItem
+                    key={step.id}
+                    step={step}
+                    value={customValues[step.id]}
+                    currency={booking.currency}
+                    onChange={(value) => updateCustomValue(step.id, value)}
+                  />
+                ))}
               </div>
+              {requiredWarning && customPending.length > 0 && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  {customPending.length} required step{customPending.length === 1 ? "" : "s"}{" "}
+                  incomplete - you can still check in, but these will remain flagged on the booking.
+                </div>
+              )}
               <button
                 type="button"
                 onClick={completeCheckIn}
@@ -940,6 +1019,95 @@ function ChecklistItem({ done, label }: { done: boolean; label: string }) {
         {done ? "✓" : "!"}
       </span>
       <span className="min-w-0 text-sm font-medium text-gray-800">{label}</span>
+    </div>
+  );
+}
+
+function CustomChecklistItem({
+  step,
+  value,
+  currency,
+  onChange,
+}: {
+  step: CheckinChecklistStep;
+  value: string | boolean | undefined;
+  currency: string;
+  onChange: (value: string | boolean) => void;
+}) {
+  const done = customStepDone(step, value);
+  const controlId = `checklist-${step.id}`;
+  const labelId = `checklist-label-${step.id}`;
+  const indicatorClass = done
+    ? "bg-green-100 text-green-700"
+    : step.required
+      ? "bg-red-100 text-red-700"
+      : "bg-gray-100 text-gray-500";
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <div className="flex items-start gap-3">
+        <span
+          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ${indicatorClass}`}
+        >
+          {done ? "✓" : step.required ? "!" : "•"}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span id={labelId} className="break-words text-sm font-medium text-gray-900">
+              {step.label}
+            </span>
+            {step.required && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                required
+              </span>
+            )}
+          </div>
+
+          {step.type === "checkbox" && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+              <input
+                id={controlId}
+                type="checkbox"
+                checked={value === true}
+                onChange={(event) => onChange(event.target.checked)}
+                aria-labelledby={`${labelId} ${controlId}-suffix`}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <span id={`${controlId}-suffix`}>Done</span>
+            </label>
+          )}
+
+          {step.type === "text" && (
+            <input
+              id={controlId}
+              value={typeof value === "string" ? value : ""}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder="Add note"
+              aria-labelledby={labelId}
+              className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm"
+            />
+          )}
+
+          {step.type === "amount" && (
+            <div className="mt-2 flex h-10 rounded-lg border border-gray-200 bg-white">
+              <span className="flex items-center border-r border-gray-200 px-3 text-xs font-semibold text-gray-500">
+                {currency}
+              </span>
+              <input
+                id={controlId}
+                type="number"
+                min="0"
+                step="0.01"
+                value={typeof value === "string" ? value : ""}
+                onChange={(event) => onChange(event.target.value)}
+                placeholder="0.00"
+                aria-labelledby={labelId}
+                className="min-w-0 flex-1 rounded-r-lg px-3 text-sm outline-none"
+              />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

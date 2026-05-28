@@ -1,5 +1,6 @@
 import { pmsClient } from "../api/pmsClient";
 import { buildQueryString } from "@/lib/utils/queryString";
+import type { CheckinStepType } from "@/services/settings";
 
 export interface AssignedRoom {
   roomId: string | null;
@@ -179,6 +180,19 @@ export interface BookingChangeRequest {
   createdAt: string;
 }
 
+export interface CheckinStepResult {
+  stepId: string;
+  label: string;
+  type: CheckinStepType;
+  value: string | number | boolean | null;
+  completedAt: string | null;
+}
+
+export interface CheckinPendingFlag {
+  stepId: string;
+  label: string;
+}
+
 export const bookingsService = {
   list: (params?: BookingListParams) => {
     const qs = buildQueryString(params);
@@ -230,8 +244,17 @@ export const bookingsService = {
   updateStatus: (id: string, status: "confirmed" | "cancelled") =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/status`, { status }),
 
-  completeCheckIn: (id: string, pendingFlags: string[]) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/check-in`, { pendingFlags }),
+  completeCheckIn: (
+    id: string,
+    pendingFlags: string[],
+    stepResults: CheckinStepResult[] = [],
+    pendingFlagDetails: CheckinPendingFlag[] = [],
+  ) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/check-in`, {
+      pendingFlags,
+      stepResults,
+      pendingFlagDetails,
+    }),
 
   markPaid: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/mark-paid`, {}),
 

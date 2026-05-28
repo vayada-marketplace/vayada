@@ -42,6 +42,24 @@ class GuestActionRequest(BaseModel):
     guest_email: EmailStr
 
 
+def _bank_details_complete(details: dict | None) -> bool:
+    if not details:
+        return False
+    account_type = details.get("payout_account_type") or "iban"
+    account_identifier = (
+        details.get("payout_account_number")
+        if account_type == "account_number"
+        else details.get("payout_iban")
+    )
+    required = [
+        details.get("payout_bank_name"),
+        details.get("payout_account_holder"),
+        account_identifier,
+        details.get("payout_swift"),
+    ]
+    return all(bool(str(value or "").strip()) for value in required)
+
+
 @router.post("/{slug}/bookings")
 async def post_booking(slug: str, data: BookingCreate):
     """Create a booking request with payment (card or pay-at-property)."""
@@ -328,18 +346,24 @@ async def get_payment_settings(slug: str):
         result["paypalPaymentWindowHours"] = (
             (be_hotel.get("paypal_payment_window_hours") or 24) if paypal_enabled else 24
         )
-        if bank_transfer:
+        if bank_transfer and _bank_details_complete(be_hotel):
             result["bankDetails"] = {
                 "accountHolder": be_hotel.get("payout_account_holder") or "",
+                "accountType": be_hotel.get("payout_account_type") or "iban",
                 "iban": be_hotel.get("payout_iban") or "",
+                "accountNumber": be_hotel.get("payout_account_number") or "",
                 "bankName": be_hotel.get("payout_bank_name") or "",
                 "swift": be_hotel.get("payout_swift") or "",
             }
+        else:
+            result["bankTransfer"] = False
     else:
         result["payAtHotelMethods"] = ["cash", "card"]
         result["termsText"] = ""
         result["cancellationPolicyText"] = ""
         result["paypalEmail"] = ""
         result["paypalPaymentWindowHours"] = 24
+        if bank_transfer:
+            result["bankTransfer"] = False
 
     return result
