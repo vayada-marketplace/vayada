@@ -176,6 +176,7 @@
     "bankTransferExplanation": "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment.",
     "bankName": "Bank",
     "accountHolder": "Account Holder",
+    "accountNumber": "Account Number",
     "cardholderName": "Cardholder Name",
     "nameOnCard": "Name on card",
     "cardNumber": "Card Number",

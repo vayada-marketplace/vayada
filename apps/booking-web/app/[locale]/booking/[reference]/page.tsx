@@ -395,7 +395,11 @@ export default function BookingConfirmationPage({
                 <div className="flex justify-between py-3">
                   <span className="text-gray-600">{t("paymentMethodLabel") || "Payment"}</span>
                   <span className="font-medium text-gray-900">
-                    {booking.paymentMethod === "card" ? "Card" : "Pay at Property"}
+                    {booking.paymentMethod === "card"
+                      ? "Card"
+                      : booking.paymentMethod === "bank_transfer"
+                        ? "Bank Transfer"
+                        : "Pay at Property"}
                   </span>
                 </div>
               )}

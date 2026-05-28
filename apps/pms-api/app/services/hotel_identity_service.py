@@ -107,7 +107,8 @@ async def get_guest_payment_info_by_slug(slug: str) -> dict | None:
     try:
         row = await BookingEngineDatabase.fetchrow(
             "SELECT pay_at_hotel_methods, payout_account_holder, payout_iban, "
-            "payout_bank_name, payout_swift, terms_text, cancellation_policy_text "
+            "payout_account_type, payout_account_number, payout_bank_name, "
+            "payout_swift, terms_text, cancellation_policy_text "
             "FROM booking_hotels WHERE slug = $1",
             slug,
         )

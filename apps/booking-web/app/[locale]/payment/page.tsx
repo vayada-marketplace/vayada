@@ -22,6 +22,40 @@ import { usePricing } from "@/lib/hooks/usePricing";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { GuestDetailsDraft, readGuestDetails, saveLastBooking } from "@/lib/storage/bookingDraft";
 
+type CheckoutBankDetails = {
+  accountHolder: string;
+  accountType?: "iban" | "account_number";
+  iban: string;
+  accountNumber?: string;
+  bankName: string;
+  swift: string;
+};
+
+const compact = (value?: string | null) => (value || "").trim();
+
+function getBankIdentifier(details: CheckoutBankDetails | null) {
+  if (!details) return { label: "IBAN", value: "" };
+  if (details.accountType === "account_number") {
+    return { label: "Account Number", value: compact(details.accountNumber) };
+  }
+  return { label: "IBAN", value: compact(details.iban) };
+}
+
+function formatIban(value: string) {
+  return value
+    .replace(/\s+/g, "")
+    .replace(/(.{4})/g, "$1 ")
+    .trim();
+}
+
+function isBankDetailsComplete(details?: CheckoutBankDetails | null) {
+  if (!details) return false;
+  const identifier = getBankIdentifier(details).value;
+  return [details.bankName, details.accountHolder, identifier, details.swift].every((value) =>
+    Boolean(compact(value)),
+  );
+}
+
 function PaymentPageContent() {
   const router = useRouter();
   const locale = useLocale();
@@ -48,9 +82,9 @@ function PaymentPageContent() {
   // from a navigation, which remounts), so reading them from a closure is
   // safe. refetchRooms is intentionally omitted because it isn't memoized
   // by HotelContext and would re-fire on every render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const roomsParam = parseInt(searchParams.get("rooms") || "1");
   const { steps: STEPS, currentStep } = useBookingSteps("payment");
@@ -84,14 +118,8 @@ function PaymentPageContent() {
   const [onlineCardPayment, setOnlineCardPayment] = useState(false);
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false);
   const [bankTransferEnabled, setBankTransferEnabled] = useState(false);
-  const [bankDetails, setBankDetails] = useState<{
-    accountHolder: string;
-    accountType?: "iban" | "account_number";
-    iban: string;
-    accountNumber?: string;
-    bankName: string;
-    swift: string;
-  } | null>(null);
+  const [bankDetails, setBankDetails] = useState<CheckoutBankDetails | null>(null);
+  const [copiedBankIdentifier, setCopiedBankIdentifier] = useState(false);
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(["cash", "card"]);
   const [termsText, setTermsText] = useState("");
   const [cancellationPolicyText, setCancellationPolicyText] = useState("");
@@ -132,8 +160,9 @@ function PaymentPageContent() {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled);
         setOnlineCardPayment(settings.onlineCardPayment || false);
         setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false);
-        setBankTransferEnabled(settings.bankTransfer || false);
-        if (settings.bankDetails) setBankDetails(settings.bankDetails);
+        const hasCompleteBankDetails = isBankDetailsComplete(settings.bankDetails);
+        setBankTransferEnabled((settings.bankTransfer || false) && hasCompleteBankDetails);
+        setBankDetails(settings.bankDetails || null);
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods);
         setTermsText(settings.termsText || "");
         setCancellationPolicyText(settings.cancellationPolicyText || "");
@@ -148,7 +177,7 @@ function PaymentPageContent() {
         const hotelEnabled: Record<string, boolean> = {
           card: !!settings.onlineCardPayment,
           pay_at_property: !!settings.payAtPropertyEnabled,
-          bank_transfer: !!settings.bankTransfer,
+          bank_transfer: !!settings.bankTransfer && hasCompleteBankDetails,
           xendit: !!settings.xenditPaymentsEnabled,
         };
         for (const m of preference) {
@@ -279,6 +308,18 @@ function PaymentPageContent() {
       </StripeProvider>
     );
   }
+
+  const bankIdentifier = getBankIdentifier(bankDetails);
+  const bankIdentifierDisplay =
+    bankDetails?.accountType === "account_number"
+      ? bankIdentifier.value
+      : formatIban(bankIdentifier.value);
+  const copyBankIdentifier = async () => {
+    if (!bankIdentifier.value || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(bankIdentifier.value);
+    setCopiedBankIdentifier(true);
+    window.setTimeout(() => setCopiedBankIdentifier(false), 1800);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -593,40 +634,51 @@ function PaymentPageContent() {
                     {t("bankTransferExplanation") ||
                       "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
                   </div>
-                  {bankDetails &&
-                    (bankDetails.iban ||
-                      bankDetails.accountNumber ||
-                      bankDetails.accountHolder) && (
-                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
-                        {bankDetails.bankName && (
-                          <p className="text-sm text-gray-700">
-                            <strong>{t("bankName") || "Bank"}:</strong> {bankDetails.bankName}
-                          </p>
-                        )}
-                        {bankDetails.accountHolder && (
-                          <p className="text-sm text-gray-700">
-                            <strong>{t("accountHolder") || "Account Holder"}:</strong>{" "}
-                            {bankDetails.accountHolder}
-                          </p>
-                        )}
-                        {bankDetails.accountType === "account_number" &&
-                        bankDetails.accountNumber ? (
-                          <p className="text-sm text-gray-700">
-                            <strong>{t("accountNumber") || "Account Number"}:</strong>{" "}
-                            {bankDetails.accountNumber}
-                          </p>
-                        ) : bankDetails.iban ? (
-                          <p className="text-sm text-gray-700">
-                            <strong>IBAN:</strong> {bankDetails.iban}
-                          </p>
-                        ) : null}
-                        {bankDetails.swift && (
-                          <p className="text-sm text-gray-700">
-                            <strong>BIC/SWIFT:</strong> {bankDetails.swift}
-                          </p>
-                        )}
+                  {bankDetails && isBankDetailsComplete(bankDetails) && (
+                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                      <p className="text-sm text-gray-700">
+                        <strong>{t("bankName") || "Bank"}:</strong> {bankDetails.bankName}
+                      </p>
+                      <p className="text-sm text-gray-700">
+                        <strong>{t("accountHolder") || "Account Holder"}:</strong>{" "}
+                        {bankDetails.accountHolder}
+                      </p>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-700">
+                        <p className="min-w-0 break-words">
+                          <strong>
+                            {bankIdentifier.label === "Account Number"
+                              ? t("accountNumber") || "Account Number"
+                              : "IBAN"}
+                            :
+                          </strong>{" "}
+                          {bankIdentifierDisplay}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={copyBankIdentifier}
+                          className="self-start sm:self-auto inline-flex items-center gap-1.5 rounded-full border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-white transition-colors"
+                        >
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                            />
+                          </svg>
+                          {copiedBankIdentifier ? "Copied" : "Copy"}
+                        </button>
                       </div>
-                    )}
+                      <p className="text-sm text-gray-700">
+                        <strong>BIC/SWIFT:</strong> {bankDetails.swift}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">

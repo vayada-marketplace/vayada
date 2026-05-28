@@ -198,6 +198,7 @@
     "bankTransferExplanation": "Silakan transfer jumlah total ke rekening bank di bawah ini. Pemesanan Anda akan dikonfirmasi setelah hotel memverifikasi pembayaran.",
     "bankName": "Bank",
     "accountHolder": "Pemegang Rekening",
+    "accountNumber": "Nomor Rekening",
     "submitRequest": "Kirim Permintaan Pemesanan",
     "processing": "Memproses...",
     "confirmPayment": "Konfirmasi Pembayaran",

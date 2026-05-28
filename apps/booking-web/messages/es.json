@@ -198,6 +198,7 @@
     "bankTransferExplanation": "Por favor, transfiere el monto total a la cuenta bancaria indicada abajo. Tu reserva será confirmada una vez que el hotel verifique el pago.",
     "bankName": "Banco",
     "accountHolder": "Titular de la cuenta",
+    "accountNumber": "Número de cuenta",
     "submitRequest": "Enviar solicitud de reserva",
     "processing": "Procesando...",
     "confirmPayment": "Confirmar pago",
