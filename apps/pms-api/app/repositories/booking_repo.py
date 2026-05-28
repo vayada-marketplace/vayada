@@ -66,13 +66,15 @@ class BookingRepository:
                 addon_dates,
                 promo_code, promo_discount,
                 last_minute_discount_percent, last_minute_discount_amount,
-                guest_country, number_of_rooms
+                guest_country, number_of_rooms,
+                deposit_required, deposit_percentage, deposit_amount, balance_amount
             ) VALUES (
                 COALESCE($37::uuid, uuid_generate_v4()),
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                 $11, $12, $13, $14, $15, $16, $17, $18, $19,
                 $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                $31, $32, $33, $34, $35, $36, $38
+                $31, $32, $33, $34, $35, $36, $38,
+                $39, $40, $41, $42
             ) RETURNING *
             """,
             data["hotel_id"],
@@ -113,6 +115,10 @@ class BookingRepository:
             data.get("guest_country", ""),
             data.get("id"),
             data.get("number_of_rooms", 1),
+            data.get("deposit_required", False),
+            data.get("deposit_percentage"),
+            data.get("deposit_amount", 0),
+            data.get("balance_amount", data["total_amount"]),
         )
         booking = dict(row)
 
@@ -461,6 +467,7 @@ class BookingRepository:
             """
             UPDATE bookings
             SET total_amount = total_amount + $2,
+                balance_amount = balance_amount + $2,
                 payment_status = CASE
                     WHEN payment_status = 'captured' THEN 'unpaid'
                     ELSE payment_status
@@ -545,7 +552,11 @@ class BookingRepository:
             promo_discount = float(current.get("promo_discount") or 0)
             total = round(rate * nights * rooms + addon_total - promo_discount, 2)
             await Database.execute(
-                "UPDATE bookings SET total_amount = $2, updated_at = now() WHERE id = $1",
+                """UPDATE bookings
+SET total_amount = $2,
+    balance_amount = GREATEST($2 - COALESCE(deposit_amount, 0), 0),
+    updated_at = now()
+WHERE id = $1""",
                 booking_id,
                 total,
             )
@@ -585,6 +596,7 @@ class BookingRepository:
                 addon_names = $8::jsonb,
                 addon_total = $9,
                 total_amount = $10,
+                balance_amount = GREATEST($10 - COALESCE(deposit_amount, 0), 0),
                 updated_at = now()
             WHERE id = $1
             RETURNING *
@@ -612,6 +624,21 @@ class BookingRepository:
             """,
             booking_id,
             payment_status,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def mark_balance_paid(booking_id: str) -> dict | None:
+        row = await Database.fetchrow(
+            """
+            UPDATE bookings
+            SET payment_status = 'captured',
+                balance_amount = 0,
+                updated_at = now()
+            WHERE id = $1
+            RETURNING *
+            """,
+            booking_id,
         )
         return dict(row) if row else None
 

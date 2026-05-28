@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from app.models.room_type import _validate_partial_refund_tiers
-from app.services.booking_service import _compute_cancellation_refund
+from app.services.booking_service import _compute_cancellation_outcome, _compute_cancellation_refund
 
 
 def _booking(rate_type: str, days_to_checkin: int = 30, total: float = 200.0) -> dict:
@@ -24,6 +24,28 @@ def _booking(rate_type: str, days_to_checkin: int = 30, total: float = 200.0) ->
         "total_amount": total,
         "rate_type": rate_type,
     }
+
+
+def _deposit_booking(
+    *,
+    days_to_checkin: int,
+    total: float = 500.0,
+    deposit: float = 250.0,
+    payment_method: str = "card",
+    payment_status: str = "captured",
+) -> dict:
+    booking = _booking("flexible", days_to_checkin=days_to_checkin, total=total)
+    booking.update(
+        {
+            "deposit_required": True,
+            "deposit_percentage": round(deposit / total * 100),
+            "deposit_amount": deposit,
+            "balance_amount": max(total - deposit, 0),
+            "payment_method": payment_method,
+            "payment_status": payment_status,
+        }
+    )
+    return booking
 
 
 async def test_nonrefundable_returns_zero_refund_well_outside_free_window():
@@ -160,6 +182,101 @@ async def test_flexible_partial_refund_falls_back_to_legacy_single_tier_when_tie
     assert amount == 100.0
     assert pct == 50.0
     assert threshold == 30
+
+
+async def test_deposit_booking_refunds_paid_deposit_inside_free_window():
+    policy = {"free_cancellation_days": 7, "partial_refund_pct": 0}
+    with (
+        patch(
+            "app.services.booking_service.CancellationPolicyRepository.get_by_hotel_id",
+            new=AsyncMock(return_value=policy),
+        ),
+        patch(
+            "app.services.booking_service.RoomTypeRepository.get_by_id",
+            new=AsyncMock(return_value={"flexible_cancellation_type": "free"}),
+        ),
+    ):
+        outcome = await _compute_cancellation_outcome(
+            _deposit_booking(days_to_checkin=14, total=500, deposit=250)
+        )
+
+    assert outcome.refund_amount == 250
+    assert outcome.cancellation_charge == 0
+    assert outcome.deposit_retained == 0
+    assert outcome.additional_amount_due == 0
+
+
+async def test_deposit_booking_retains_deposit_when_policy_penalty_is_lower():
+    policy = {"free_cancellation_days": 7, "partial_refund_pct": 70}
+    with (
+        patch(
+            "app.services.booking_service.CancellationPolicyRepository.get_by_hotel_id",
+            new=AsyncMock(return_value=policy),
+        ),
+        patch(
+            "app.services.booking_service.RoomTypeRepository.get_by_id",
+            new=AsyncMock(return_value={"flexible_cancellation_type": "free"}),
+        ),
+    ):
+        outcome = await _compute_cancellation_outcome(
+            _deposit_booking(days_to_checkin=1, total=500, deposit=250)
+        )
+
+    assert outcome.policy_penalty == 150
+    assert outcome.cancellation_charge == 250
+    assert outcome.deposit_retained == 250
+    assert outcome.refund_amount == 0
+    assert outcome.additional_amount_due == 0
+
+
+async def test_deposit_booking_exposes_additional_due_when_policy_penalty_is_higher():
+    policy = {"free_cancellation_days": 7, "partial_refund_pct": 0}
+    with (
+        patch(
+            "app.services.booking_service.CancellationPolicyRepository.get_by_hotel_id",
+            new=AsyncMock(return_value=policy),
+        ),
+        patch(
+            "app.services.booking_service.RoomTypeRepository.get_by_id",
+            new=AsyncMock(return_value={"flexible_cancellation_type": "free"}),
+        ),
+    ):
+        outcome = await _compute_cancellation_outcome(
+            _deposit_booking(days_to_checkin=1, total=500, deposit=250)
+        )
+
+    assert outcome.policy_penalty == 500
+    assert outcome.cancellation_charge == 500
+    assert outcome.deposit_retained == 250
+    assert outcome.refund_amount == 0
+    assert outcome.additional_amount_due == 250
+
+
+async def test_pending_manual_deposit_has_no_refund_or_retained_amount():
+    policy = {"free_cancellation_days": 7, "partial_refund_pct": 0}
+    with (
+        patch(
+            "app.services.booking_service.CancellationPolicyRepository.get_by_hotel_id",
+            new=AsyncMock(return_value=policy),
+        ),
+        patch(
+            "app.services.booking_service.RoomTypeRepository.get_by_id",
+            new=AsyncMock(return_value={"flexible_cancellation_type": "free"}),
+        ),
+    ):
+        outcome = await _compute_cancellation_outcome(
+            _deposit_booking(
+                days_to_checkin=1,
+                total=500,
+                deposit=250,
+                payment_method="bank_transfer",
+                payment_status="awaiting_transfer",
+            )
+        )
+
+    assert outcome.refund_amount == 0
+    assert outcome.deposit_retained == 0
+    assert outcome.additional_amount_due == 0
 
 
 def test_partial_refund_tiers_validator_rejects_duplicate_days():

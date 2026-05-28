@@ -88,6 +88,9 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(
             parse_jsonb(room.get("rate_payment_methods"))
         ),
+        rate_deposit_settings=(lambda v: v if isinstance(v, dict) else None)(
+            parse_jsonb(room.get("rate_deposit_settings"))
+        ),
         meal_plans=parse_jsonb(room.get("meal_plans", [])),
         created_at=room["created_at"].isoformat(),
         updated_at=room["updated_at"].isoformat(),
@@ -479,6 +482,9 @@ async def duplicate_room_type(
         ),
         "rate_payment_methods": (lambda v: v if isinstance(v, dict) else None)(
             parse_jsonb(existing.get("rate_payment_methods"))
+        ),
+        "rate_deposit_settings": (lambda v: v if isinstance(v, dict) else None)(
+            parse_jsonb(existing.get("rate_deposit_settings"))
         ),
         "meal_plans": parse_jsonb(existing.get("meal_plans", [])),
     }

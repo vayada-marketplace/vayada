@@ -403,11 +403,11 @@ async def create_test_booking(
             hotel_id, room_type_id, booking_reference,
             guest_first_name, guest_last_name, guest_email, guest_phone,
             special_requests, check_in, check_out,
-            adults, children, nightly_rate, total_amount, currency, status,
+            adults, children, nightly_rate, total_amount, balance_amount, currency, status,
             channel, payment_status
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            $17, $18
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+            $18, $19
         ) RETURNING *
         """,
         hotel_id,
@@ -423,6 +423,7 @@ async def create_test_booking(
         2,
         0,
         nightly_rate,
+        total,
         total,
         "EUR",
         status,
@@ -627,11 +628,11 @@ async def create_test_booking_with_payment(
             hotel_id, room_type_id, booking_reference,
             guest_first_name, guest_last_name, guest_email, guest_phone,
             special_requests, check_in, check_out,
-            adults, children, nightly_rate, total_amount, currency, status,
+            adults, children, nightly_rate, total_amount, balance_amount, currency, status,
             payment_method, payment_status, host_response_deadline
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-            $17, $18, $19
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+            $18, $19, $20
         ) RETURNING *
         """,
         hotel_id,
@@ -647,6 +648,7 @@ async def create_test_booking_with_payment(
         2,
         0,
         nightly_rate,
+        total,
         total,
         "EUR",
         status,

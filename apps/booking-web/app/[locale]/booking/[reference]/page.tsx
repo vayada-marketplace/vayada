@@ -405,11 +405,35 @@ export default function BookingConfirmationPage({
                 </div>
               )}
               <div className="flex justify-between py-3">
-                <span className="text-gray-600">{t("totalPaid")}</span>
+                <span className="text-gray-600">
+                  {booking?.depositRequired ? "Booking total" : t("totalPaid")}
+                </span>
                 <span className="font-bold text-gray-900 text-lg">
                   {booking ? formatPrice(booking.totalAmount, booking.currency) : "—"}
                 </span>
               </div>
+              {booking?.depositRequired && (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">
+                      {booking.paymentStatus === "captured"
+                        ? "Deposit paid"
+                        : booking.paymentStatus === "refunded"
+                          ? "Deposit refunded"
+                          : "Deposit pending"}
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {formatPrice(booking.depositAmount || 0, booking.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Remaining balance due at check-in</span>
+                    <span className="font-semibold text-gray-900">
+                      {formatPrice(booking.balanceAmount || 0, booking.currency)}
+                    </span>
+                  </div>
+                </div>
+              )}
               {booking?.paymentMethod && (
                 <div className="flex justify-between py-3">
                   <span className="text-gray-600">{t("paymentMethodLabel") || "Payment"}</span>
@@ -420,7 +444,9 @@ export default function BookingConfirmationPage({
                         ? "PayPal"
                         : booking.paymentMethod === "bank_transfer"
                           ? "Bank transfer"
-                          : booking.paymentMethod || "Other"}
+                          : booking.paymentMethod === "xendit"
+                            ? "Xendit"
+                            : booking.paymentMethod || "Other"}
                   </span>
                 </div>
               )}

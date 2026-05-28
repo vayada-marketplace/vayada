@@ -11,14 +11,15 @@ class PaymentRepository:
         stripe_pi_id: str | None = None,
         xendit_invoice_id: str | None = None,
         xendit_invoice_url: str | None = None,
+        payment_purpose: str = "booking",
     ) -> dict:
         row = await Database.fetchrow(
             """
             INSERT INTO payments (
                 booking_id, amount, currency, payment_method,
                 stripe_payment_intent_id, xendit_invoice_id,
-                xendit_invoice_url, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                xendit_invoice_url, status, payment_purpose
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *
             """,
             booking_id,
@@ -29,6 +30,7 @@ class PaymentRepository:
             xendit_invoice_id,
             xendit_invoice_url,
             "pending",
+            payment_purpose,
         )
         return dict(row)
 
@@ -36,6 +38,20 @@ class PaymentRepository:
     async def get_by_booking_id(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             "SELECT * FROM payments WHERE booking_id = $1 ORDER BY created_at DESC LIMIT 1",
+            booking_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
+    async def get_deposit_by_booking_id(booking_id: str) -> dict | None:
+        row = await Database.fetchrow(
+            """
+            SELECT * FROM payments
+            WHERE booking_id = $1
+              AND payment_purpose = 'deposit'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
             booking_id,
         )
         return dict(row) if row else None
@@ -113,6 +129,7 @@ class PaymentRepository:
         payment_method: str,
         reference: str | None = None,
         recorded_by: str | None = None,
+        payment_purpose: str = "booking",
     ) -> dict:
         """Record a payment that was made offline (cash, bank transfer, …).
 
@@ -123,8 +140,8 @@ class PaymentRepository:
             """
             INSERT INTO payments (
                 booking_id, amount, currency, payment_method,
-                status, reference, recorded_by, captured_at
-            ) VALUES ($1, $2, $3, $4, 'captured', $5, $6, now())
+                status, reference, recorded_by, captured_at, payment_purpose
+            ) VALUES ($1, $2, $3, $4, 'captured', $5, $6, now(), $7)
             RETURNING *
             """,
             booking_id,
@@ -133,6 +150,7 @@ class PaymentRepository:
             payment_method,
             reference,
             recorded_by,
+            payment_purpose,
         )
         return dict(row)
 
