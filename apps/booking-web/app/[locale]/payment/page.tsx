@@ -48,7 +48,7 @@ function PaymentPageContent() {
   // from a navigation, which remounts), so reading them from a closure is
   // safe. refetchRooms is intentionally omitted because it isn't memoized
   // by HotelContext and would re-fire on every render.
-   
+
   useEffect(() => {
     if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam);
   }, []);
@@ -585,11 +585,11 @@ function PaymentPageContent() {
                               d="M12 6v12m-4-8h5a3 3 0 010 6H8V6h6a2 2 0 010 4H8"
                             />
                           </svg>
-                          <span className="font-semibold text-sm text-gray-900">Pay by PayPal</span>
+                          <span className="font-semibold text-sm text-gray-900">
+                            {t("paypalLabel")}
+                          </span>
                         </div>
-                        <p className="text-xs text-gray-500 ml-7">
-                          Send payment manually; the property confirms it once received.
-                        </p>
+                        <p className="text-xs text-gray-500 ml-7">{t("paypalHelper")}</p>
                       </div>
                     </div>
                   </button>
@@ -680,24 +680,22 @@ function PaymentPageContent() {
               ) : paymentMethod === "paypal" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    Send payment to the PayPal email below and include your booking reference in the
-                    PayPal note after your booking is created. Your booking will be confirmed once
-                    the property verifies the payment, typically within {paypalPaymentWindowHours}{" "}
-                    hours.
+                    {t("paypalInstructions", { hours: paypalPaymentWindowHours })}
                   </div>
                   <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
                     <p className="text-sm text-gray-700">
-                      <strong>PayPal email:</strong> {paypalEmail}
+                      <strong>{t("paypalEmailLabel")}:</strong> {paypalEmail}
                     </p>
                     <p className="text-sm text-gray-700">
-                      <strong>Amount:</strong> {formatPrice(grandTotal, selectedCurrency)}
+                      <strong>{t("amountLabel")}:</strong>{" "}
+                      {formatPrice(grandTotal, selectedCurrency)}
                     </p>
                     <button
                       type="button"
                       onClick={() => navigator.clipboard?.writeText(paypalEmail)}
                       className="text-xs font-semibold text-primary-600 hover:text-primary-700"
                     >
-                      Copy email
+                      {t("copyEmail")}
                     </button>
                   </div>
                 </div>

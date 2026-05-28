@@ -62,6 +62,15 @@ logger = logging.getLogger(__name__)
 HOST_RESPONSE_HOURS = 24
 
 
+def _log_background_task_result(task: asyncio.Task, label: str) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Background task failed: %s", label)
+
+
 def _nights(check_in: date, check_out: date) -> int:
     return (check_out - check_in).days
 
@@ -843,7 +852,12 @@ async def _process_payment_method(
         )
         await BookingRepository.update_payment_status(booking_id, "awaiting_paypal")
         booking = await BookingRepository.get_by_id(booking_id)
-        asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        task = asyncio.create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+        task.add_done_callback(
+            lambda t: _log_background_task_result(t, "send_booking_request_notification")
+        )
 
     else:
         # Pay at property
@@ -955,6 +969,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # ── Validate hotel-level payment-method enablement ─────────────
     payment_method = data.payment_method
     hotel_settings = None
+    be_payment_info = None
     if payment_method in ("pay_at_property", "xendit", "card", "bank_transfer"):
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     if payment_method == "pay_at_property":
@@ -1095,6 +1110,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     # ── Build response + side effects ──────────────────────────────
     booking = await BookingRepository.get_by_id(booking_id)
+    if payment_method == "paypal" and be_payment_info:
+        booking = dict(booking)
+        booking["paypal_email"] = be_payment_info.get("paypal_email") or ""
     response = _booking_to_response(booking)
 
     # Guest "request received" email only for the request flow;

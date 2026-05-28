@@ -70,6 +70,7 @@ async def get_payment_settings(slug: str):
     if not hotel:
         raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
     bank_transfer = bool(hotel.get("bank_transfer", False))
+    paypal_enabled = bool(hotel.get("paypal_enabled", False))
     return PaymentSettingsResponse(
         pay_at_property_enabled=hotel.get("pay_at_property_enabled", False),
         pay_at_hotel_methods=parse_json(
@@ -77,9 +78,11 @@ async def get_payment_settings(slug: str):
         ),
         online_card_payment=hotel.get("online_card_payment", False),
         bank_transfer=bank_transfer,
-        paypal_enabled=hotel.get("paypal_enabled", False),
-        paypal_email=hotel.get("paypal_email") or "",
-        paypal_payment_window_hours=hotel.get("paypal_payment_window_hours") or 24,
+        paypal_enabled=paypal_enabled,
+        paypal_email=(hotel.get("paypal_email") or "") if paypal_enabled else "",
+        paypal_payment_window_hours=(
+            (hotel.get("paypal_payment_window_hours") or 24) if paypal_enabled else 24
+        ),
         free_cancellation_days=hotel.get("free_cancellation_days", 7),
         special_requests_enabled=hotel.get("special_requests_enabled", True),
         arrival_time_enabled=hotel.get("arrival_time_enabled", False),

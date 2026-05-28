@@ -2223,9 +2223,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
       {rejectOpen && (
         <Modal onClose={() => setRejectOpen(false)}>
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Reject booking</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            {booking?.paymentMethod === "paypal"
+              ? "Cancel - payment not received"
+              : "Reject booking"}
+          </h3>
           <p className="text-sm text-gray-600 mb-4">
-            Are you sure you want to reject this booking? The payment hold will be released.
+            {booking?.paymentMethod === "paypal"
+              ? "Are you sure you want to cancel this PayPal booking because payment was not received? No automatic payment hold applies."
+              : "Are you sure you want to reject this booking? The payment hold will be released."}
           </p>
           <textarea
             value={rejectReason}
@@ -2245,7 +2251,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               onClick={confirmReject}
               className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg"
             >
-              Reject
+              {booking?.paymentMethod === "paypal" ? "Cancel booking" : "Reject"}
             </button>
           </div>
         </Modal>

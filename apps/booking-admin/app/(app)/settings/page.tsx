@@ -280,8 +280,12 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
+    const paypalEmail = (settings.paypal_email || "").trim();
+    const normalizedSettings =
+      paypalEmail === (settings.paypal_email || "")
+        ? settings
+        : { ...settings, paypal_email: paypalEmail };
     if (settings.paypal_enabled) {
-      const paypalEmail = (settings.paypal_email || "").trim();
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(paypalEmail)) {
         setFeedback({ type: "error", message: "Enter a valid PayPal email to enable PayPal." });
         setActiveSection("billing");
@@ -303,7 +307,7 @@ export default function SettingsPage() {
     try {
       setSaving(true);
       setFeedback(null);
-      const data = await settingsService.updatePropertySettings(settings);
+      const data = await settingsService.updatePropertySettings(normalizedSettings);
       setSettings(data);
       // Sync slug, name, and payment methods to PMS
       try {

@@ -304,6 +304,7 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
     """Confirm to guest that their booking request has been submitted."""
     if booking.get("payment_method") == "paypal":
         deadline = booking.get("host_response_deadline")
+        paypal_email = booking.get("paypal_email") or ""
         deadline_html = (
             f'<p class="detail"><strong>Payment deadline:</strong> {deadline}</p>'
             if deadline
@@ -313,6 +314,7 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
         content = f"""
         <h2>PayPal Payment Pending</h2>
         <p class="detail">Your booking at <strong>{booking["hotel_name"]}</strong> is not confirmed yet.</p>
+        {f'<p class="detail"><strong>Send payment to:</strong> {paypal_email}</p>' if paypal_email else ""}
         <p class="detail">Please send the total amount by PayPal and include your booking reference in the PayPal note so the property can match it.</p>
         <hr class="divider">
         {_booking_details_html(booking)}

@@ -324,8 +324,10 @@ async def get_payment_settings(slug: str):
         result["payAtHotelMethods"] = methods or ["cash", "card"]
         result["termsText"] = be_hotel.get("terms_text") or ""
         result["cancellationPolicyText"] = be_hotel.get("cancellation_policy_text") or ""
-        result["paypalEmail"] = be_hotel.get("paypal_email") or ""
-        result["paypalPaymentWindowHours"] = be_hotel.get("paypal_payment_window_hours") or 24
+        result["paypalEmail"] = (be_hotel.get("paypal_email") or "") if paypal_enabled else ""
+        result["paypalPaymentWindowHours"] = (
+            (be_hotel.get("paypal_payment_window_hours") or 24) if paypal_enabled else 24
+        )
         if bank_transfer:
             result["bankDetails"] = {
                 "accountHolder": be_hotel.get("payout_account_holder") or "",

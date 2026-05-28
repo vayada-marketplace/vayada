@@ -420,7 +420,7 @@ export default function BookingConfirmationPage({
                         ? "PayPal"
                         : booking.paymentMethod === "bank_transfer"
                           ? "Bank transfer"
-                          : "Pay at Property"}
+                          : booking.paymentMethod || "Other"}
                   </span>
                 </div>
               )}
