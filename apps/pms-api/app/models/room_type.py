@@ -278,6 +278,9 @@ class RoomTypeCreate(BaseModel):
     base_rate: float = 0
     non_refundable_rate: float | None = None
     currency: str = "EUR"
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str] = []
     images: list[str] = []
     bed_type: str = ""
@@ -398,6 +401,9 @@ class RoomTypeUpdate(BaseModel):
     base_rate: float | None = None
     non_refundable_rate: float | None = None
     currency: str | None = None
+    location_address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str] | None = None
     images: list[str] | None = None
     bed_type: str | None = None
@@ -534,6 +540,9 @@ class RoomTypeResponse(BaseModel):
     original_rate: float | None = None
     last_minute_discount_percent: int | None = None
     currency: str
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str]
     images: list[str]
     bed_type: str
@@ -569,6 +578,9 @@ class RoomTypeAdminResponse(BaseModel):
     base_rate: float
     non_refundable_rate: float | None = None
     currency: str
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str]
     images: list[str]
     bed_type: str

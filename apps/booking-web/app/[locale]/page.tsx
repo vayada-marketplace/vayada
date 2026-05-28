@@ -221,7 +221,7 @@ function HomePageContent() {
 
   // Filter rooms using filterRooms mapping (room ID based) with fallback to text matching
   const filteredRooms = (() => {
-    let result =
+    const result =
       activeFilters.length === 0
         ? [...rooms]
         : rooms.filter((room) =>
@@ -662,6 +662,9 @@ function HomePageContent() {
               checkOutTime={hotel.checkOutTime}
               checkIn={committedCheckIn}
               hotelTimezone={hotel.timezone}
+              propertyName={hotel.name}
+              showLocationMap={hotel.showRoomDetailMap}
+              pointsOfInterest={hotel.pointsOfInterest || []}
               onSelectRate={(rateType) => {
                 if (modalSoldOut) return;
                 const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;

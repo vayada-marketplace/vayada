@@ -41,6 +41,8 @@ HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
     "fixed_base_fee": 30,
     "fixed_rooms_included": 1,
     "fixed_per_extra_room_fee": 5,
+    "show_room_detail_map": False,
+    "points_of_interest": [],
 }
 
 
@@ -120,6 +122,8 @@ class PropertySettingsResponse(BaseModel):
     payout_swift: str
     terms_text: str = ""
     cancellation_policy_text: str = ""
+    show_room_detail_map: bool = False
+    points_of_interest: list[dict[str, Any]] = []
 
 
 class PropertySettingsUpdate(BaseModel):
@@ -177,3 +181,5 @@ class PropertySettingsUpdate(BaseModel):
     payout_swift: str | None = None
     terms_text: str | None = None
     cancellation_policy_text: str | None = None
+    show_room_detail_map: bool | None = None
+    points_of_interest: list[dict[str, Any]] | None = None

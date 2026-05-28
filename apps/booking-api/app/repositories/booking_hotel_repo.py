@@ -248,6 +248,7 @@ class BookingHotelRepository:
             "filter_rooms",
             "pay_at_hotel_methods",
             "benefits",
+            "points_of_interest",
         )
         for col, val in updates.items():
             if col in json_columns:

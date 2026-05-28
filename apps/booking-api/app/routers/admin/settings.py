@@ -82,6 +82,8 @@ _PROPERTY_FIELD_MAP = {
     "refer_a_guest_enabled": "refer_a_guest_enabled",
     "terms_text": "terms_text",
     "cancellation_policy_text": "cancellation_policy_text",
+    "show_room_detail_map": "show_room_detail_map",
+    "points_of_interest": "points_of_interest",
 }
 
 
@@ -176,6 +178,10 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         payout_swift=_coalesce(hotel, "payout_swift"),
         terms_text=_coalesce(hotel, "terms_text"),
         cancellation_policy_text=_coalesce(hotel, "cancellation_policy_text"),
+        show_room_detail_map=_coalesce(hotel, "show_room_detail_map"),
+        points_of_interest=parse_json(
+            hotel.get("points_of_interest"), default=hotel_default("points_of_interest")
+        ),
     )
 
 

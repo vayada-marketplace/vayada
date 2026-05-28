@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
+import type { PointOfInterest } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import LocationMap from "@/components/booking/LocationMap";
 import {
   getNonRefundableRate,
   getFreeCancellationDays,
@@ -26,6 +28,9 @@ interface RoomDetailModalProps {
   checkOutTime?: string;
   checkIn: string;
   hotelTimezone?: string;
+  propertyName: string;
+  showLocationMap?: boolean;
+  pointsOfInterest?: PointOfInterest[];
 }
 
 export default function RoomDetailModal({
@@ -43,6 +48,9 @@ export default function RoomDetailModal({
   checkOutTime,
   checkIn,
   hotelTimezone,
+  propertyName,
+  showLocationMap = false,
+  pointsOfInterest = [],
 }: RoomDetailModalProps) {
   const flexibleExpired = isFlexibleCancellationExpired(checkIn, room, hotelTimezone);
   // VAY-370: hide Flexible Rate when its cancellation deadline has passed, unless there is
@@ -66,6 +74,8 @@ export default function RoomDetailModal({
   const tc = useTranslations("common");
 
   const hasMultipleImages = room.images.length > 1;
+  const hasRoomCoordinates =
+    typeof room.latitude === "number" && typeof room.longitude === "number";
   const goPrevImage = () => setImgIndex((i) => (i - 1 + room.images.length) % room.images.length);
   const goNextImage = () => setImgIndex((i) => (i + 1) % room.images.length);
   const handleTouchStart = (e: React.TouchEvent) => setTouchStartX(e.touches[0].clientX);
@@ -151,9 +161,7 @@ export default function RoomDetailModal({
               <div className="min-w-0">
                 <p className="text-sm font-bold text-gray-900">Flexible Rate</p>
                 {flexibleExpired ? (
-                  <p className="text-xs text-gray-500">
-                    Cancellation no longer available
-                  </p>
+                  <p className="text-xs text-gray-500">Cancellation no longer available</p>
                 ) : room.flexibleCancellationType === "partial_refund" ? (
                   (() => {
                     const tiers =
@@ -501,6 +509,19 @@ export default function RoomDetailModal({
                       {a}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {showLocationMap && hasRoomCoordinates && (
+                <div className="mb-4 border-t border-gray-100 pt-4">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                    Location
+                  </p>
+                  <LocationMap
+                    propertyName={propertyName}
+                    property={{ latitude: room.latitude!, longitude: room.longitude! }}
+                    pois={pointsOfInterest}
+                  />
                 </div>
               )}
 

@@ -20,6 +20,16 @@ export interface HotelBranding {
   faviconUrl?: string;
 }
 
+export interface PointOfInterest {
+  id: string;
+  label: string;
+  travelTime: string;
+  color: string;
+  latitude: number;
+  longitude: number;
+  position: number;
+}
+
 export interface Hotel {
   id: string;
   name: string;
@@ -46,6 +56,8 @@ export interface Hotel {
   supportedLanguages: string[];
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
+  showRoomDetailMap?: boolean;
+  pointsOfInterest?: PointOfInterest[];
 }
 
 export interface RoomType {
@@ -61,6 +73,9 @@ export interface RoomType {
   baseRate: number;
   nonRefundableRate: number | null;
   currency: string;
+  locationAddress?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   amenities: string[];
   images: string[];
   bedType: string;
