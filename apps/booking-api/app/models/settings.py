@@ -23,6 +23,7 @@ HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
     "ota_booking_alerts": False,
     "weekly_reports": False,
     "refer_a_guest_enabled": False,
+    "map_view_enabled": False,
     "special_requests_enabled": True,
     "arrival_time_enabled": False,
     "guest_count_enabled": False,
@@ -89,6 +90,7 @@ class PropertySettingsResponse(BaseModel):
     ota_booking_alerts: bool
     weekly_reports: bool
     refer_a_guest_enabled: bool
+    map_view_enabled: bool = False
     special_requests_enabled: bool
     arrival_time_enabled: bool
     guest_count_enabled: bool
@@ -156,6 +158,7 @@ class PropertySettingsUpdate(BaseModel):
     ota_booking_alerts: bool | None = None
     weekly_reports: bool | None = None
     refer_a_guest_enabled: bool | None = None
+    map_view_enabled: bool | None = None
     special_requests_enabled: bool | None = None
     arrival_time_enabled: bool | None = None
     guest_count_enabled: bool | None = None

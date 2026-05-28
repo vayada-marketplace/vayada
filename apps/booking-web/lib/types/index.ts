@@ -46,6 +46,7 @@ export interface Hotel {
   supportedLanguages: string[];
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
+  mapViewEnabled?: boolean;
 }
 
 export interface RoomType {
@@ -61,6 +62,9 @@ export interface RoomType {
   baseRate: number;
   nonRefundableRate: number | null;
   currency: string;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   amenities: string[];
   images: string[];
   bedType: string;

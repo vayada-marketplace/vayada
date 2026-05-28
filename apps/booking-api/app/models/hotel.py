@@ -59,6 +59,7 @@ class HotelResponse(BaseModel):
     supported_languages: list[str] = ["en"]
     refer_a_guest_enabled: bool = False
     instant_book: bool = False
+    map_view_enabled: bool = False
 
 
 class BankDetails(BaseModel):

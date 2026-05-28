@@ -80,6 +80,7 @@ _PROPERTY_FIELD_MAP = {
     "payout_bank_name": "payout_bank_name",
     "payout_swift": "payout_swift",
     "refer_a_guest_enabled": "refer_a_guest_enabled",
+    "map_view_enabled": "map_view_enabled",
     "terms_text": "terms_text",
     "cancellation_policy_text": "cancellation_policy_text",
 }
@@ -146,6 +147,7 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         ota_booking_alerts=_coalesce(hotel, "ota_booking_alerts"),
         weekly_reports=_coalesce(hotel, "weekly_reports"),
         refer_a_guest_enabled=_coalesce(hotel, "refer_a_guest_enabled"),
+        map_view_enabled=_coalesce(hotel, "map_view_enabled"),
         special_requests_enabled=_coalesce(hotel, "special_requests_enabled"),
         arrival_time_enabled=_coalesce(hotel, "arrival_time_enabled"),
         guest_count_enabled=_coalesce(hotel, "guest_count_enabled"),
@@ -299,6 +301,7 @@ async def _create_hotel_from_settings(
         arrival_time_enabled=_api_to_db_value(data.arrival_time_enabled, "arrival_time_enabled"),
         guest_count_enabled=_api_to_db_value(data.guest_count_enabled, "guest_count_enabled"),
         refer_a_guest_enabled=_api_to_db_value(data.refer_a_guest_enabled, "refer_a_guest_enabled"),
+        map_view_enabled=_api_to_db_value(data.map_view_enabled, "map_view_enabled"),
         social_instagram=data.instagram or "",
         social_facebook=data.facebook or "",
         social_tiktok=data.tiktok or "",
@@ -352,7 +355,7 @@ async def get_hotel_deletion_impact(
         if e.status_code in (403, 404):
             return {"upcomingBookingsCount": 0, "connectedChannelsCount": 0}
         logger.error("Failed to fetch deletion impact for hotel %s: %s", hotel_id, e)
-        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact")
+        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact") from e
 
 
 @router.delete("/hotels/{hotel_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -375,7 +378,7 @@ async def delete_hotel(
         raise HTTPException(
             status_code=502,
             detail="Failed to delete the property's PMS data. Please retry.",
-        )
+        ) from e
 
     deleted = await BookingHotelRepository.delete(hotel_id)
     if not deleted:
@@ -447,7 +450,7 @@ async def update_property_settings(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="A property with this name or slug already exists. Please choose a different value.",
-                )
+                ) from None
         else:
             result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
     else:

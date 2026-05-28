@@ -58,6 +58,9 @@ def _room_to_admin(room: dict) -> RoomTypeAdminResponse:
         base_rate=float(room["base_rate"]),
         non_refundable_rate=float(nr_rate) if nr_rate is not None else None,
         currency=room["currency"],
+        address=room.get("address") or "",
+        latitude=room.get("latitude"),
+        longitude=room.get("longitude"),
         amenities=parse_jsonb(room["amenities"]),
         images=parse_jsonb(room["images"]),
         bed_type=room["bed_type"],
@@ -282,8 +285,8 @@ async def get_room_type_resolved_rate(
         raise HTTPException(status_code=404, detail="Room type not found")
     try:
         check_in_date = date.fromisoformat(check_in)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="check_in must be YYYY-MM-DD")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="check_in must be YYYY-MM-DD") from e
     nightly_rate, _ = RoomTypeRepository.resolve_rate(room, check_in_date)
     return {"nightlyRate": float(nightly_rate), "currency": room["currency"]}
 
@@ -454,6 +457,9 @@ async def duplicate_room_type(
         if existing.get("non_refundable_rate") is not None
         else None,
         "currency": existing["currency"],
+        "address": existing.get("address") or "",
+        "latitude": existing.get("latitude"),
+        "longitude": existing.get("longitude"),
         "amenities": parse_jsonb(existing["amenities"]),
         "images": parse_jsonb(existing["images"]),
         "bed_type": existing["bed_type"],
@@ -510,8 +516,8 @@ async def delete_room_type(
 
     try:
         await RoomTypeRepository.delete(room_type_id)
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=409,
             detail="Cannot delete room type with existing bookings",
-        )
+        ) from e

@@ -1620,6 +1620,111 @@ export default function RoomTypeForm({
             </select>
           </div>
 
+          {/* Location */}
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/60 p-4">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-[12px] font-bold text-gray-900 uppercase tracking-widest">
+                  Location
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Saved per room type. Guests see this address and pin when map view is enabled.
+                </p>
+              </div>
+              {!(form.latitude != null && form.longitude != null) && (
+                <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+                  No location set - this room type won't appear on the map.
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-3 space-y-3">
+                <div>
+                  <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+                    Search address
+                  </label>
+                  <input
+                    type="text"
+                    value={form.address || ""}
+                    onChange={(e) => updateForm({ address: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                    placeholder="Street, area, city, country"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Provider autocomplete/geocoding plugs in here; coordinates are stored so the
+                    Booking Engine never geocodes on page load.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+                      Latitude
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min={-90}
+                      max={90}
+                      value={form.latitude ?? ""}
+                      onChange={(e) =>
+                        updateForm({
+                          latitude: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                      placeholder="-8.670458"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+                      Longitude
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min={-180}
+                      max={180}
+                      value={form.longitude ?? ""}
+                      onChange={(e) =>
+                        updateForm({
+                          longitude: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                      placeholder="115.212629"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-2 min-h-[180px] rounded-xl border border-gray-200 bg-white relative overflow-hidden">
+                <div className="absolute inset-0 opacity-70 bg-[linear-gradient(90deg,#e5e7eb_1px,transparent_1px),linear-gradient(0deg,#e5e7eb_1px,transparent_1px)] bg-[size:28px_28px]" />
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-sky-50" />
+                {form.latitude != null && form.longitude != null ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="relative">
+                      <div className="absolute -inset-5 rounded-full bg-primary-500/10 animate-pulse" />
+                      <div className="relative rounded-full bg-primary-600 text-white text-[11px] font-bold px-3 py-1.5 shadow-lg">
+                        Pin preview
+                      </div>
+                    </div>
+                    <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 border border-gray-200 px-3 py-2 text-[11px] text-gray-600 shadow-sm">
+                      {Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                    <p className="text-[12px] font-medium text-gray-500">
+                      Enter coordinates to verify the guest-facing pin.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Sort Order & Active */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
             <div>
