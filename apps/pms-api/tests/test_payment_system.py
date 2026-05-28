@@ -1558,13 +1558,13 @@ class TestPaymentSettingsAdmin:
                 hotel_id, room_type_id, booking_reference,
                 guest_first_name, guest_last_name, guest_email, guest_phone,
                 special_requests, check_in, check_out,
-                adults, children, nightly_rate, total_amount, currency, status,
+                adults, children, nightly_rate, total_amount, balance_amount, currency, status,
                 addon_total, promo_discount, last_minute_discount_amount
             ) VALUES (
                 $1, $2, 'VAY-USD145',
                 'Alice', 'Tester', 'alice@test.com', '+1',
                 '', '2026-06-01', '2026-06-02',
-                1, 0, 145.00, 145.00, 'USD', 'confirmed',
+                1, 0, 145.00, 145.00, 145.00, 'USD', 'confirmed',
                 0, 0, 0
             )
             """,
@@ -1631,12 +1631,12 @@ class TestPaymentSettingsAdmin:
                 hotel_id, room_type_id, booking_reference,
                 guest_first_name, guest_last_name, guest_email, guest_phone,
                 special_requests, check_in, check_out,
-                adults, children, nightly_rate, total_amount, currency, status
+                adults, children, nightly_rate, total_amount, balance_amount, currency, status
             ) VALUES (
                 $1, $2, 'VAY-IDRSKIP',
                 'Bob', 'Local', 'bob@test.com', '+1',
                 '', '2026-06-01', '2026-06-02',
-                1, 0, 1500000.00, 1500000.00, 'IDR', 'confirmed'
+                1, 0, 1500000.00, 1500000.00, 1500000.00, 'IDR', 'confirmed'
             )
             """,
             str(hotel["id"]),
