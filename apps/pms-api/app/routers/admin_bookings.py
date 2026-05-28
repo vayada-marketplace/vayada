@@ -204,6 +204,12 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         nightly_rate=float(b["nightly_rate"]),
         number_of_rooms=number_of_rooms,
         total_amount=float(b["total_amount"]),
+        deposit_required=bool(b.get("deposit_required", False)),
+        deposit_percentage=b.get("deposit_percentage"),
+        deposit_amount=float(b.get("deposit_amount") or 0),
+        balance_amount=float(
+            b.get("balance_amount") if b.get("balance_amount") is not None else b["total_amount"]
+        ),
         currency=b["currency"],
         status=b["status"],
         room_id=str(room_id) if room_id else None,
@@ -645,7 +651,7 @@ async def mark_booking_paid(
             raise HTTPException(status_code=400, detail=str(e)) from e
         return await _admin_response(updated)
 
-    updated = await BookingRepository.update_payment_status(booking_id, "captured")
+    updated = await BookingRepository.mark_balance_paid(booking_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Booking not found")
 
@@ -654,7 +660,11 @@ async def mark_booking_paid(
         hotel_id=hotel_id,
         event_type="arrival_payment_marked_paid",
         payload={
-            "amount": float(booking.get("total_amount") or 0),
+            "amount": float(
+                booking.get("balance_amount")
+                if booking.get("balance_amount") is not None
+                else booking.get("total_amount") or 0
+            ),
             "currency": booking.get("currency"),
         },
         actor_user_id=user_id,

@@ -2010,6 +2010,52 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 )}
               </div>
             </div>
+            {booking.depositRequired && (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-semibold text-gray-900">
+                      Deposit: {formatCurrency(booking.depositAmount, booking.currency)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {booking.depositPercentage}% of booking total ·{" "}
+                      {booking.paymentStatus === "captured"
+                        ? `Paid via ${booking.paymentMethod === "card" ? "Stripe" : booking.paymentMethod || "manual method"}`
+                        : booking.paymentStatus === "refunded"
+                          ? "Deposit was refunded"
+                          : `Pending (${booking.paymentMethod || "manual method"})`}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                      booking.paymentStatus === "captured"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : booking.paymentStatus === "refunded"
+                          ? "bg-gray-100 text-gray-600 border border-gray-200"
+                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                    }`}
+                  >
+                    {booking.paymentStatus === "captured"
+                      ? "Deposit paid"
+                      : booking.paymentStatus === "refunded"
+                        ? "Deposit refunded"
+                        : "Deposit pending"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4 border-t border-gray-200 pt-3">
+                  <p className="font-semibold text-gray-900">
+                    Balance: {formatCurrency(booking.balanceAmount, booking.currency)}
+                  </p>
+                  <p className="text-xs text-gray-500">Due at property</p>
+                </div>
+                {booking.depositAmount > booking.totalAmount && (
+                  <p className="text-xs text-amber-700">
+                    Deposit exceeds current total by{" "}
+                    {formatCurrency(booking.depositAmount - booking.totalAmount, booking.currency)}.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

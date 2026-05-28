@@ -9,6 +9,7 @@ import {
   MealPlan,
   MealPlanCode,
   PartialRefundTier,
+  RateDepositSetting,
 } from "@/services/rooms";
 import ImageUpload from "@/components/ImageUpload";
 import {
@@ -567,7 +568,7 @@ function RatePaymentMethodsSection({
     <div>
       <div className="flex items-start gap-3 mb-2">
         <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-          7
+          8
         </span>
         <div className="flex-1">
           <h3 className="text-[13px] font-semibold text-gray-900">
@@ -630,6 +631,114 @@ function RatePaymentMethodsSection({
             Enable at least one rate type above to configure payment methods.
           </p>
         )}
+      </div>
+    </div>
+  );
+}
+
+function RateDepositSection({
+  value,
+  flexibleRateEnabled,
+  nonRefundableEnabled,
+  baseRate,
+  currency,
+  onChange,
+}: {
+  value: Record<string, RateDepositSetting> | null;
+  flexibleRateEnabled: boolean;
+  nonRefundableEnabled: boolean;
+  baseRate: number;
+  currency: string;
+  onChange: (next: Record<string, RateDepositSetting> | null) => void;
+}) {
+  const rates: { key: string; label: string; shown: boolean }[] = [
+    { key: "flexible", label: "Flexible rate", shown: flexibleRateEnabled },
+    { key: "nonrefundable", label: "Non-refundable rate", shown: nonRefundableEnabled },
+  ];
+
+  const updateRate = (rateKey: string, patch: Partial<RateDepositSetting>) => {
+    const current = value ?? {};
+    const previous = current[rateKey] ?? { enabled: false, percentage: null };
+    const nextRate = { ...previous, ...patch };
+    if (nextRate.enabled && !nextRate.percentage) nextRate.percentage = 50;
+    const next = { ...current, [rateKey]: nextRate };
+    onChange(next);
+  };
+
+  return (
+    <div>
+      <div className="flex items-start gap-3 mb-2">
+        <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+          7
+        </span>
+        <div className="flex-1">
+          <h3 className="text-[13px] font-semibold text-gray-900">Deposit at booking</h3>
+          <p className="text-[11px] text-gray-400">
+            Collect a percentage now; the remaining balance is due at the property on arrival.
+          </p>
+        </div>
+      </div>
+      <div className="ml-4 md:ml-9 space-y-3">
+        {rates
+          .filter((r) => r.shown)
+          .map((rate) => {
+            const setting = value?.[rate.key] ?? { enabled: false, percentage: null };
+            const percentage = setting.percentage ?? 50;
+            const deposit = Math.round((baseRate || 0) * percentage) / 100;
+            const balance = Math.max((baseRate || 0) - deposit, 0);
+            return (
+              <div
+                key={rate.key}
+                className={`rounded-xl border p-4 ${setting.enabled ? "border-primary-200 bg-primary-50/30" : "border-gray-200 bg-white"}`}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => updateRate(rate.key, { enabled: !setting.enabled })}
+                    className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${setting.enabled ? "bg-primary-500" : "bg-gray-300"}`}
+                    aria-label={`Toggle deposit for ${rate.label}`}
+                  >
+                    <span
+                      className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${setting.enabled ? "left-[20px]" : "left-[2px]"}`}
+                    />
+                  </button>
+                  <div className="min-w-[150px] flex-1">
+                    <div className="text-[12px] font-semibold text-gray-900">{rate.label}</div>
+                    <div className="text-[11px] text-gray-500">
+                      {setting.enabled && percentage === 100
+                        ? "Full payment at booking"
+                        : setting.enabled
+                          ? "Deposit required"
+                          : "No deposit"}
+                    </div>
+                  </div>
+                  {setting.enabled && (
+                    <div className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={percentage}
+                        onChange={(e) =>
+                          updateRate(rate.key, {
+                            percentage: clampNumberInput(e.target.value, 1, 100),
+                          })
+                        }
+                        className="w-14 px-1 text-[12px] font-semibold text-gray-900 bg-transparent outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <span className="text-[12px] font-semibold text-gray-900">%</span>
+                    </div>
+                  )}
+                </div>
+                {setting.enabled && (
+                  <p className="mt-3 text-[11px] text-gray-500">
+                    Guest pays {percentage}% ({formatCurrency(deposit, currency)}) at booking,{" "}
+                    {formatCurrency(balance, currency)} due at arrival.
+                  </p>
+                )}
+              </div>
+            );
+          })}
       </div>
     </div>
   );
@@ -2764,7 +2873,17 @@ export default function RoomTypeForm({
               </div>
             </div>
 
-            {/* Section 7: Allowed payment methods per rate */}
+            {/* Section 7: Deposit settings per rate */}
+            <RateDepositSection
+              value={form.rateDepositSettings ?? null}
+              flexibleRateEnabled={flexibleRateEnabled}
+              nonRefundableEnabled={nonRefundableEnabled}
+              baseRate={form.baseRate || 0}
+              currency={form.currency || "EUR"}
+              onChange={(next) => updateForm({ rateDepositSettings: next })}
+            />
+
+            {/* Section 8: Allowed payment methods per rate */}
             <RatePaymentMethodsSection
               value={form.ratePaymentMethods ?? null}
               flexibleRateEnabled={flexibleRateEnabled}

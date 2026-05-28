@@ -59,6 +59,20 @@ from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
+# Holds strong references to fire-and-forget tasks so they are not garbage
+# collected before completion. Entries are discarded automatically via the
+# done callback added in _create_task.
+_background_tasks: set = set()
+
+
+def _create_task(coro) -> asyncio.Task:
+    """Schedule a coroutine as a background task, keeping a strong reference."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 HOST_RESPONSE_HOURS = 24
 
 
@@ -113,6 +127,14 @@ def _booking_to_response(booking: dict) -> BookingResponse:
         nightly_rate=float(booking["nightly_rate"]),
         number_of_rooms=int(booking.get("number_of_rooms") or 1),
         total_amount=float(booking["total_amount"]),
+        deposit_required=bool(booking.get("deposit_required", False)),
+        deposit_percentage=booking.get("deposit_percentage"),
+        deposit_amount=float(booking.get("deposit_amount") or 0),
+        balance_amount=float(
+            booking.get("balance_amount")
+            if booking.get("balance_amount") is not None
+            else booking["total_amount"]
+        ),
         addon_total=float(booking.get("addon_total") or 0),
         addon_ids=booking.get("addon_ids") or [],
         addon_names=booking.get("addon_names") or [],
@@ -144,11 +166,76 @@ class BookingPricing:
 
 
 @dataclass
+class DepositSnapshot:
+    required: bool
+    percentage: int | None
+    amount: float
+    balance: float
+
+
+@dataclass
+class CancellationOutcome:
+    refund_amount: float
+    refund_pct: float
+    free_days_for_display: int
+    cancellation_charge: float
+    policy_penalty: float
+    deposit_retained: float
+    additional_amount_due: float
+    manual_refund_required: bool = False
+
+
+@dataclass
 class PaymentOutcome:
     """Result of dispatching the chosen payment method."""
 
     client_secret: str | None = None
     xendit_invoice_url: str | None = None
+
+
+def _parse_rate_deposit_settings(raw) -> dict:
+    if not raw:
+        return {}
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+    else:
+        decoded = raw
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _resolve_deposit_snapshot(room: dict, rate_type: str, total_amount: float) -> DepositSnapshot:
+    settings = _parse_rate_deposit_settings(room.get("rate_deposit_settings"))
+    config = settings.get(rate_type) if isinstance(settings, dict) else None
+    if not isinstance(config, dict) or not config.get("enabled"):
+        return DepositSnapshot(False, None, 0.0, round(float(total_amount), 2))
+
+    try:
+        pct = int(config.get("percentage") or 50)
+    except (TypeError, ValueError):
+        pct = 50
+    pct = max(1, min(100, pct))
+    deposit = round(float(total_amount) * pct / 100, 2)
+    balance = round(max(float(total_amount) - deposit, 0), 2)
+    return DepositSnapshot(True, pct, deposit, balance)
+
+
+def _apply_deposit_snapshot(data: dict, deposit: DepositSnapshot) -> dict:
+    data["deposit_required"] = deposit.required
+    data["deposit_percentage"] = deposit.percentage
+    data["deposit_amount"] = deposit.amount
+    data["balance_amount"] = deposit.balance
+    return data
+
+
+def _payment_amount_for_booking(total_amount: float, deposit: DepositSnapshot) -> float:
+    return deposit.amount if deposit.required else round(float(total_amount), 2)
+
+
+def _payment_purpose_for_booking(deposit: DepositSnapshot) -> str:
+    return "deposit" if deposit.required else "booking"
 
 
 async def _assign_room_unit(room_type_id: str, check_in: date, check_out: date) -> str | None:
@@ -437,7 +524,7 @@ async def _create_card_payment_intent_for_draft(
     hotel_id: str,
     hotel_settings: dict | None,
     currency: str,
-    total_amount: float,
+    charge_amount: float,
     capture_method: str,
     booking_reference: str,
 ) -> tuple[str, str]:
@@ -449,7 +536,7 @@ async def _create_card_payment_intent_for_draft(
     the draft and materialize the booking lazily.
     """
     provider, stripe_account = await _resolve_card_provider(hotel_settings)
-    amount_cents = int(math.ceil(total_amount * 100))
+    amount_cents = int(math.ceil(charge_amount * 100))
     metadata = {
         "booking_reference": booking_reference,
         "hotel_id": hotel_id,
@@ -483,6 +570,7 @@ def _booking_draft_payload(
     affiliate_id: str | None,
     payment_method: str,
     deadline: datetime | None,
+    deposit: DepositSnapshot,
 ) -> dict:
     """Snapshot every field needed to materialize the booking later. Stored
     as JSONB on the draft so the materializer never has to re-resolve
@@ -520,6 +608,10 @@ def _booking_draft_payload(
         "promo_discount": pricing.promo_discount,
         "last_minute_discount_percent": pricing.last_minute_discount_pct,
         "last_minute_discount_amount": pricing.last_minute_discount_amount,
+        "deposit_required": deposit.required,
+        "deposit_percentage": deposit.percentage,
+        "deposit_amount": deposit.amount,
+        "balance_amount": deposit.balance,
     }
 
 
@@ -532,6 +624,7 @@ def _draft_preview_response(
     data: BookingCreate,
     pricing: BookingPricing,
     deadline: datetime | None,
+    deposit: DepositSnapshot,
 ) -> dict:
     """Booking-shaped placeholder returned to the frontend before the real
     row exists. The fields that the booking-engine reads on the payment
@@ -554,6 +647,10 @@ def _draft_preview_response(
         "nightlyRate": pricing.nightly_rate,
         "numberOfRooms": data.number_of_rooms,
         "totalAmount": pricing.total_amount,
+        "depositRequired": deposit.required,
+        "depositPercentage": deposit.percentage,
+        "depositAmount": deposit.amount,
+        "balanceAmount": deposit.balance,
         "addonTotal": pricing.addon_total,
         "currency": room["currency"],
         "status": "draft",
@@ -578,6 +675,7 @@ async def _create_booking_draft(
     deadline: datetime | None,
     capture_method: str,
     instant_book: bool,
+    deposit: DepositSnapshot,
 ) -> dict:
     """Card-path branch of create_booking_request. Skips the booking row
     entirely (no inventory commit, no Channex push, no host email) and
@@ -593,7 +691,7 @@ async def _create_booking_draft(
         hotel_id=hotel_id,
         hotel_settings=hotel_settings,
         currency=room["currency"],
-        total_amount=pricing.total_amount,
+        charge_amount=_payment_amount_for_booking(pricing.total_amount, deposit),
         capture_method=capture_method,
         booking_reference=booking_reference,
     )
@@ -606,6 +704,7 @@ async def _create_booking_draft(
         affiliate_id=affiliate_id,
         payment_method="card",
         deadline=deadline,
+        deposit=deposit,
     )
 
     draft = await BookingDraftRepository.create(
@@ -630,6 +729,7 @@ async def _create_booking_draft(
         data=data,
         pricing=pricing,
         deadline=deadline,
+        deposit=deposit,
     )
     return {
         "booking": preview,
@@ -685,9 +785,13 @@ async def materialize_draft(
         datetime.fromisoformat(deadline_str) if deadline_str else None
     )
     booking_data["payment_status"] = (
-        "authorized" if payment_status in ("authorized", "captured") else payment_status
+        "authorized" if payment_status == "authorized" else payment_status
     )
-    booking_data["status"] = "pending"
+    booking_data["status"] = (
+        "confirmed"
+        if booking_data.get("deposit_required") and payment_status == "captured"
+        else "pending"
+    )
 
     # The draft already pre-allocated a reference; reuse it so the
     # PaymentIntent metadata + any guest-side links stay consistent.
@@ -735,10 +839,19 @@ async def materialize_draft(
 
     await PaymentRepository.create(
         booking_id=booking_id,
-        amount=float(booking_data["total_amount"]),
+        amount=_payment_amount_for_booking(
+            float(booking_data["total_amount"]),
+            DepositSnapshot(
+                required=bool(booking_data.get("deposit_required")),
+                percentage=booking_data.get("deposit_percentage"),
+                amount=float(booking_data.get("deposit_amount") or 0),
+                balance=float(booking_data.get("balance_amount") or 0),
+            ),
+        ),
         currency=booking_data["currency"],
         payment_method="card",
         stripe_pi_id=claimed["stripe_payment_intent_id"],
+        payment_purpose="deposit" if booking_data.get("deposit_required") else "booking",
     )
     if payment_status == "authorized":
         payment = await PaymentRepository.get_by_stripe_pi(claimed["stripe_payment_intent_id"])
@@ -754,11 +867,14 @@ async def materialize_draft(
     # Side effects equivalent to what create_booking_request used to do
     # at row-insert time, but now correctly delayed until Stripe
     # confirms there's a real commitment behind the booking.
-    asyncio.create_task(send_guest_booking_requested(booking_data["guest_email"], booking))
-    asyncio.create_task(
+    if booking_data.get("deposit_required") and payment_status == "captured":
+        _create_task(send_guest_booking_accepted(booking_data["guest_email"], booking))
+    else:
+        _create_task(send_guest_booking_requested(booking_data["guest_email"], booking))
+    _create_task(
         push_availability_for_room_type(booking_data["hotel_id"], booking_data["room_type_id"])
     )
-    if booking_data.get("host_response_deadline"):
+    if booking_data.get("host_response_deadline") and booking_data.get("status") != "confirmed":
         # Request flow — host needs to accept/reject. Instant-book skips
         # this; the caller will run _finalize_accepted_booking instead.
         hotel = await Database.fetchrow(
@@ -766,7 +882,7 @@ async def materialize_draft(
             booking_data["hotel_id"],
         )
         if hotel:
-            asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+            _create_task(send_booking_request_notification(hotel["contact_email"], booking))
 
     return booking
 
@@ -777,15 +893,16 @@ async def _create_xendit_payment(
     hotel: dict,
     hotel_id: str,
     currency: str,
-    total_amount: float,
+    charge_amount: float,
     guest_email: str,
+    deposit: DepositSnapshot,
 ) -> str:
     """Create a Xendit invoice, store the payment record, and return the
     hosted-checkout URL. Cleans up the booking on Xendit failure."""
     try:
         invoice = await xendit_service.create_invoice(
             external_id=f"booking-{booking_id}",
-            amount=total_amount,
+            amount=charge_amount,
             currency=currency,
             payer_email=guest_email,
             description=f"Booking {booking_reference} at {hotel['name']}",
@@ -803,11 +920,12 @@ async def _create_xendit_payment(
 
     await PaymentRepository.create(
         booking_id=booking_id,
-        amount=total_amount,
+        amount=charge_amount,
         currency=currency,
         payment_method="xendit",
         xendit_invoice_id=invoice["id"],
         xendit_invoice_url=invoice["invoice_url"],
+        payment_purpose=_payment_purpose_for_booking(deposit),
     )
     return invoice["invoice_url"]
 
@@ -824,6 +942,7 @@ async def _process_payment_method(
     guest_email: str,
     use_request_flow: bool,
     capture_method: str,
+    deposit: DepositSnapshot,
 ) -> PaymentOutcome:
     """Dispatch the payment-method-specific work after the booking row
     exists. Xendit raises (and cleans up) on provider failure;
@@ -843,8 +962,9 @@ async def _process_payment_method(
             hotel,
             hotel_id,
             currency,
-            total_amount,
+            _payment_amount_for_booking(total_amount, deposit),
             guest_email,
+            deposit,
         )
 
     elif payment_method == "bank_transfer":
@@ -853,13 +973,14 @@ async def _process_payment_method(
         # auto-confirm even when the hotel has instant-book on).
         await PaymentRepository.create(
             booking_id=booking_id,
-            amount=total_amount,
+            amount=_payment_amount_for_booking(total_amount, deposit),
             currency=currency,
             payment_method="bank_transfer",
+            payment_purpose=_payment_purpose_for_booking(deposit),
         )
         await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
         booking = await BookingRepository.get_by_id(booking_id)
-        asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        _create_task(send_booking_request_notification(hotel["contact_email"], booking))
 
     elif payment_method == "paypal":
         await PaymentRepository.create(
@@ -870,7 +991,7 @@ async def _process_payment_method(
         )
         await BookingRepository.update_payment_status(booking_id, "awaiting_paypal")
         booking = await BookingRepository.get_by_id(booking_id)
-        task = asyncio.create_task(
+        task = _create_task(
             send_booking_request_notification(hotel["contact_email"], booking)
         )
         task.add_done_callback(
@@ -888,7 +1009,7 @@ async def _process_payment_method(
         await BookingRepository.update_payment_status(booking_id, "pay_at_property")
         if use_request_flow:
             booking = await BookingRepository.get_by_id(booking_id)
-            asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+            _create_task(send_booking_request_notification(hotel["contact_email"], booking))
         else:
             # Instant-book: confirm right away. _finalize_accepted_booking
             # sends the host + guest "accepted" emails.
@@ -971,6 +1092,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     # ── Compute pricing (rooms + addons + promo + last-minute discount) ──
     pricing = await _compute_booking_pricing(slug, data, hotel, room, nights)
+    deposit = _resolve_deposit_snapshot(room, data.rate_type, pricing.total_amount)
 
     # ── Resolve affiliate ──────────────────────────────────────────
     affiliate_id = None
@@ -1003,6 +1125,10 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         else (hotel_settings.get("bank_transfer") if hotel_settings else False)
     )
     if payment_method == "pay_at_property":
+        if deposit.required:
+            raise ValueError(
+                "Pay at property is not available because this rate requires a deposit"
+            )
         if not pay_at_property_enabled:
             raise ValueError("Pay at property is not enabled for this hotel")
     elif payment_method == "xendit":
@@ -1036,7 +1162,9 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     deadline = (
         datetime.now(UTC) + timedelta(hours=payment_window_hours) if use_request_flow else None
     )
-    capture_method = "manual" if use_request_flow else "automatic"
+    # Deposit card payments are captured immediately even in request-flow
+    # hotels — the guest pays the deposit upfront and it is refunded on rejection.
+    capture_method = "manual" if (use_request_flow and not deposit.required) else "automatic"
 
     # ── Card path: defer the booking row until Stripe authorizes ──
     # VAY-388: an unauthorized card-payment booking must not exist in
@@ -1055,6 +1183,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
             deadline=deadline,
             capture_method=capture_method,
             instant_book=instant_book,
+            deposit=deposit,
         )
 
     # ── Persist booking row + auto-assign a room unit ──────────────
@@ -1093,6 +1222,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         "last_minute_discount_percent": pricing.last_minute_discount_pct,
         "last_minute_discount_amount": pricing.last_minute_discount_amount,
     }
+    _apply_deposit_snapshot(booking_data, deposit)
     # VAY-397: same auto-rearrange path as the draft-materialize flow.
     # VAY-403: assign one physical room per booked room, not just one.
     room_id, extra_room_ids, rearrange_moves = await resolve_room_assignments(
@@ -1138,6 +1268,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         guest_email=data.guest_email,
         use_request_flow=use_request_flow,
         capture_method=capture_method,
+        deposit=deposit,
     )
 
     # ── Build response + side effects ──────────────────────────────
@@ -1153,11 +1284,10 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         guest_email_booking = booking
         if payment_method == "bank_transfer" and bank_transfer_info:
             guest_email_booking = {**booking, "bank_details": bank_transfer_info}
-        _t = asyncio.create_task(send_guest_booking_requested(data.guest_email, guest_email_booking))
-        _t.add_done_callback(lambda t: _log_background_task_result(t, "send_guest_booking_requested"))
+        _create_task(send_guest_booking_requested(data.guest_email, guest_email_booking))
 
     # Push updated availability to Channex so OTAs reflect the reduced inventory
-    asyncio.create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
+    _create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
 
     return {
         "booking": response.model_dump(by_alias=True),
@@ -1190,7 +1320,19 @@ async def confirm_payment_authorized(handle: str) -> dict:
                 raise ValueError("Booking not found")
             return _booking_to_response(booking).model_dump(by_alias=True)
 
-        booking = await materialize_draft(draft, payment_status="authorized")
+        payload = draft.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                payload = {}
+        draft_requires_deposit = (
+            bool(payload.get("deposit_required")) if isinstance(payload, dict) else False
+        )
+        booking = await materialize_draft(
+            draft,
+            payment_status="captured" if draft_requires_deposit else "authorized",
+        )
         if booking is None:
             # Lost the claim to a concurrent caller — load the booking
             # that the winner just created (link is now set on the draft).
@@ -1227,7 +1369,7 @@ async def confirm_payment_authorized(handle: str) -> dict:
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        _create_task(send_booking_request_notification(hotel["contact_email"], booking))
 
     booking = await BookingRepository.get_by_id(handle)
     return _booking_to_response(booking).model_dump(by_alias=True)
@@ -1319,14 +1461,14 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
         )
 
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(send_guest_booking_accepted(updated["guest_email"], updated))
+    _create_task(send_guest_booking_accepted(updated["guest_email"], updated))
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(send_host_booking_accepted(hotel["contact_email"], updated))
+        _create_task(send_host_booking_accepted(hotel["contact_email"], updated))
 
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
 
     return updated
 
@@ -1340,7 +1482,7 @@ def _schedule_unassigned_sweep(booking: dict) -> None:
     """
     if not booking or not booking.get("room_id"):
         return
-    asyncio.create_task(
+    _create_task(
         try_place_unassigned_after_cancellation(
             str(booking["hotel_id"]),
             str(booking["room_type_id"]),
@@ -1399,18 +1541,18 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
 
     # Notify guest, host, and ops
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(send_guest_booking_rejected(updated["guest_email"], updated, reason=reason))
+    _create_task(send_guest_booking_rejected(updated["guest_email"], updated, reason=reason))
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(
+        _create_task(
             send_host_booking_rejected(hotel["contact_email"], updated, reason=reason)
         )
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    asyncio.create_task(channex_handle_cancellation(booking_id))
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(channex_handle_cancellation(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
     _schedule_unassigned_sweep(booking)
 
     return updated
@@ -1446,12 +1588,12 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     )
     updated = await BookingRepository.get_by_id(booking_id)
     if hotel:
-        asyncio.create_task(send_host_booking_withdrawn(hotel["contact_email"], updated))
-    asyncio.create_task(send_guest_booking_withdrawn(updated["guest_email"], updated))
+        _create_task(send_host_booking_withdrawn(hotel["contact_email"], updated))
+    _create_task(send_guest_booking_withdrawn(updated["guest_email"], updated))
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    asyncio.create_task(channex_handle_cancellation(booking_id))
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(channex_handle_cancellation(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
     _schedule_unassigned_sweep(booking)
 
     return updated
@@ -1497,8 +1639,8 @@ def _resolve_tier_refund(tiers: list[dict], days_until: int) -> tuple[float, int
     return 0.0, 0
 
 
-async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int]:
-    """Compute (refund_amount, refund_pct, free_days_for_display) for a booking.
+async def _compute_policy_refund(booking: dict) -> tuple[float, float, int]:
+    """Compute the cancellation-policy refund before deposit overrides.
 
     Non-refundable rate plans always return 0 refund — the guest accepted that
     in exchange for the discounted price. For flexible bookings with the room's
@@ -1538,6 +1680,90 @@ async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int
     return 0.0, 0.0, free_days
 
 
+def _is_deposit_settled(booking: dict) -> bool:
+    status = booking.get("payment_status")
+    method = booking.get("payment_method")
+    if status in ("captured", "refunded", "partially_refunded"):
+        return True
+    if method == "card" and status == "authorized":
+        return True
+    return False
+
+
+async def _compute_cancellation_outcome(booking: dict) -> CancellationOutcome:
+    """Compute refund/charge semantics for cancellation.
+
+    For normal bookings, this is the existing policy refund. For deposit
+    bookings, the booking's paid exposure is the deposit amount: free
+    cancellation refunds that deposit, while paid cancellations retain the
+    deposit unless the policy penalty is higher.
+    """
+    policy_refund, policy_pct, free_days = await _compute_policy_refund(booking)
+    total_amount = round(float(booking["total_amount"]), 2)
+    policy_penalty = round(max(total_amount - policy_refund, 0), 2)
+
+    if not booking.get("deposit_required"):
+        return CancellationOutcome(
+            refund_amount=policy_refund,
+            refund_pct=policy_pct,
+            free_days_for_display=free_days,
+            cancellation_charge=policy_penalty,
+            policy_penalty=policy_penalty,
+            deposit_retained=0.0,
+            additional_amount_due=0.0,
+        )
+
+    deposit_amount = round(float(booking.get("deposit_amount") or 0), 2)
+    paid_deposit = deposit_amount if _is_deposit_settled(booking) else 0.0
+    if paid_deposit <= 0:
+        return CancellationOutcome(
+            refund_amount=0.0,
+            refund_pct=0.0,
+            free_days_for_display=free_days,
+            cancellation_charge=0.0,
+            policy_penalty=policy_penalty,
+            deposit_retained=0.0,
+            additional_amount_due=0.0,
+        )
+    is_free_cancellation = policy_penalty <= 0.01
+
+    if is_free_cancellation:
+        refund_amount = paid_deposit
+        return CancellationOutcome(
+            refund_amount=refund_amount,
+            refund_pct=100.0 if refund_amount > 0 else 0.0,
+            free_days_for_display=free_days,
+            cancellation_charge=0.0,
+            policy_penalty=0.0,
+            deposit_retained=0.0,
+            additional_amount_due=0.0,
+            manual_refund_required=refund_amount > 0 and booking.get("payment_method") != "card",
+        )
+
+    cancellation_charge = round(max(deposit_amount, policy_penalty), 2)
+    deposit_retained = round(min(paid_deposit, cancellation_charge), 2)
+    additional_due = round(max(cancellation_charge - deposit_retained, 0), 2)
+    refund_amount = round(max(paid_deposit - cancellation_charge, 0), 2)
+    refund_pct = round(refund_amount / paid_deposit * 100, 2) if paid_deposit > 0 else 0.0
+
+    return CancellationOutcome(
+        refund_amount=refund_amount,
+        refund_pct=refund_pct,
+        free_days_for_display=free_days,
+        cancellation_charge=cancellation_charge,
+        policy_penalty=policy_penalty,
+        deposit_retained=deposit_retained,
+        additional_amount_due=additional_due,
+        manual_refund_required=refund_amount > 0 and booking.get("payment_method") != "card",
+    )
+
+
+async def _compute_cancellation_refund(booking: dict) -> tuple[float, float, int]:
+    """Backward-compatible tuple API for existing callers/tests."""
+    outcome = await _compute_cancellation_outcome(booking)
+    return outcome.refund_amount, outcome.refund_pct, outcome.free_days_for_display
+
+
 async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
     """Calculate refund details without actually cancelling."""
     booking = await BookingRepository.get_by_id(booking_id)
@@ -1548,15 +1774,20 @@ async def get_cancellation_preview(booking_id: str, guest_email: str) -> dict:
     if booking["guest_email"].lower() != guest_email.lower():
         raise ValueError("Email does not match booking")
 
-    refund_amount, refund_pct, free_days = await _compute_cancellation_refund(booking)
+    outcome = await _compute_cancellation_outcome(booking)
     days_until = (booking["check_in"] - date.today()).days
 
     return {
-        "refundAmount": refund_amount,
-        "refundPercentage": refund_pct,
-        "freeCancellationDays": free_days,
+        "refundAmount": outcome.refund_amount,
+        "refundPercentage": outcome.refund_pct,
+        "freeCancellationDays": outcome.free_days_for_display,
         "daysUntilCheckIn": days_until,
         "currency": booking["currency"],
+        "cancellationCharge": outcome.cancellation_charge,
+        "policyPenalty": outcome.policy_penalty,
+        "depositRetained": outcome.deposit_retained,
+        "additionalAmountDue": outcome.additional_amount_due,
+        "manualRefundRequired": outcome.manual_refund_required,
     }
 
 
@@ -1570,24 +1801,32 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
     if booking["guest_email"].lower() != guest_email.lower():
         raise ValueError("Email does not match booking")
 
-    refund_amount, refund_pct, _ = await _compute_cancellation_refund(booking)
+    outcome = await _compute_cancellation_outcome(booking)
 
     # Process refund if card payment
-    if booking.get("payment_method") == "card" and refund_amount > 0:
-        payment = await PaymentRepository.get_by_booking_id(booking_id)
+    if booking.get("payment_method") == "card" and outcome.refund_amount > 0:
+        payment = (
+            await PaymentRepository.get_deposit_by_booking_id(booking_id)
+            if booking.get("deposit_required")
+            else await PaymentRepository.get_by_booking_id(booking_id)
+        )
         if payment and payment.get("stripe_payment_intent_id"):
             try:
-                refund_cents = int(math.ceil(refund_amount * 100)) if refund_pct < 100 else None
+                refund_cents = (
+                    int(math.ceil(outcome.refund_amount * 100))
+                    if outcome.refund_pct < 100
+                    else None
+                )
                 await stripe_service.create_refund(
                     payment["stripe_payment_intent_id"],
                     amount=refund_cents,
                 )
-                new_status = "refunded" if refund_pct >= 100 else "partially_refunded"
+                new_status = "refunded" if outcome.refund_pct >= 100 else "partially_refunded"
                 await PaymentRepository.update_status(
                     str(payment["id"]),
                     new_status,
                     refunded_at=datetime.now(UTC),
-                    refund_amount=refund_amount,
+                    refund_amount=outcome.refund_amount,
                 )
             except Exception as e:
                 logger.error("Failed to refund booking %s: %s", booking_id, e)
@@ -1595,27 +1834,42 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
     await BookingRepository.update_status(booking_id, "cancelled")
     new_payment_status = (
         "refunded"
-        if refund_pct >= 100
+        if outcome.refund_pct >= 100 and outcome.refund_amount > 0
         else (
-            "partially_refunded" if refund_amount > 0 else booking.get("payment_status", "captured")
+            "partially_refunded"
+            if outcome.refund_amount > 0
+            else (
+                "captured"
+                if outcome.deposit_retained > 0
+                else (
+                    "cancelled"
+                    if booking.get("deposit_required")
+                    else booking.get("payment_status", "captured")
+                )
+            )
         )
     )
     await BookingRepository.update_payment_status(booking_id, new_payment_status)
     await PayoutRepository.cancel_by_booking(booking_id)
 
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(
-        send_guest_cancellation_refund(updated["guest_email"], updated, refund_amount, refund_pct)
+    _create_task(
+        send_guest_cancellation_refund(
+            updated["guest_email"],
+            updated,
+            outcome.refund_amount,
+            outcome.refund_pct,
+        )
     )
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(send_host_guest_cancelled(hotel["contact_email"], updated))
+        _create_task(send_host_guest_cancelled(hotel["contact_email"], updated))
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    asyncio.create_task(channex_handle_cancellation(booking_id))
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(channex_handle_cancellation(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
     _schedule_unassigned_sweep(booking)
 
     return updated
@@ -1657,9 +1911,9 @@ async def expire_booking(booking_id: str) -> None:
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(send_guest_booking_expired(updated["guest_email"], updated))
+    _create_task(send_guest_booking_expired(updated["guest_email"], updated))
     if hotel:
-        asyncio.create_task(send_host_booking_expired(hotel["contact_email"], updated))
+        _create_task(send_host_booking_expired(hotel["contact_email"], updated))
     _schedule_unassigned_sweep(booking)
 
 

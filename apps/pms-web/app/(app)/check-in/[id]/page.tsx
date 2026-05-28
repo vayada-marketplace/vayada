@@ -81,6 +81,7 @@ function guestsLabel(b: Booking) {
 }
 
 function isPaid(b: Booking) {
+  if (b.depositRequired) return b.balanceAmount <= 0;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
 
@@ -162,7 +163,12 @@ function pendingFlags(booking: Booking, booker: GuestRegistrationDraft, guests: 
     if (!guestComplete(guest)) flags.push(`Guest ${idx + 2} ID`);
   });
   if (!isPaid(booking))
-    flags.push(`Payment ${formatCurrency(booking.totalAmount, booking.currency)}`);
+    flags.push(
+      `Payment ${formatCurrency(
+        booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
+        booking.currency,
+      )}`,
+    );
   if (!booking.assignedRooms?.length && !booking.roomId) flags.push("Room assignment");
   return flags;
 }
@@ -639,6 +645,16 @@ export default function CheckInPage() {
             </Card>
 
             <Card title="Payment on arrival">
+              {booking.depositRequired && (
+                <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
+                  <p className="font-semibold text-gray-900">
+                    Deposit: {formatCurrency(booking.depositAmount, booking.currency)}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {booking.paymentStatus === "captured" ? "Paid" : "Pending"} before arrival
+                  </p>
+                </div>
+              )}
               <div
                 className={`rounded-xl border p-4 ${isPaid(booking) ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}
               >
@@ -651,18 +667,23 @@ export default function CheckInPage() {
                       : "Paid at property"
                     : booking.paymentMethod === "paypal"
                       ? `${formatCurrency(booking.totalAmount, booking.currency)} awaiting PayPal payment.`
-                      : `${formatCurrency(booking.totalAmount, booking.currency)} due at property. Pay at property.`}
+                      : `${formatCurrency(
+                          booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
+                          booking.currency,
+                        )} due at property. Pay at property.`}
                 </p>
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={markPaid}
-                    disabled={actionLoading !== null}
-                    className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  >
-                    {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
-                  </button>
-                </div>
+                {(!booking.depositRequired || booking.balanceAmount > 0) && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={markPaid}
+                      disabled={actionLoading !== null}
+                      className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
+                    </button>
+                  </div>
+                )}
               </div>
             </Card>
 
@@ -722,7 +743,12 @@ export default function CheckInPage() {
                 ))}
                 <ChecklistItem
                   done={isPaid(booking)}
-                  label={`Payment ${formatCurrency(booking.totalAmount, booking.currency)}`}
+                  label={`Payment ${formatCurrency(
+                    booking.depositRequired && booking.balanceAmount > 0
+                      ? booking.balanceAmount
+                      : booking.totalAmount,
+                    booking.currency,
+                  )}`}
                 />
                 <ChecklistItem
                   done={Boolean(booking.assignedRooms?.length || booking.roomId)}
