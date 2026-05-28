@@ -7,6 +7,7 @@ import {
   Booking,
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
+  BookingNote,
   bookingsService,
 } from "@/services/bookings";
 import { formatCurrency } from "@/lib/formatCurrency";
@@ -40,6 +41,17 @@ function expectedAdditionalGuests(b: Booking) {
   return Math.max(0, totalGuests(b) - 1);
 }
 
+function totalRoomCapacity(b: Booking) {
+  return Math.max(
+    1,
+    b.totalRoomCapacity ?? (b.roomMaxOccupancy || 1) * Math.max(1, b.numberOfRooms || 1),
+  );
+}
+
+function additionalGuestCapacity(b: Booking) {
+  return Math.max(0, totalRoomCapacity(b) - 1);
+}
+
 function roomUnit(b: Booking): string | null {
   if (b.assignedRooms?.length) {
     const numbers = b.assignedRooms.map((r) => r.roomNumber).filter(Boolean);
@@ -71,7 +83,11 @@ function isPaid(b: Booking) {
 
 function normalizeGuests(booking: Booking, guests: BookingAdditionalGuest[]): GuestDraft[] {
   const rows: GuestDraft[] = guests.map((g) => ({ ...g }));
-  for (let idx = rows.length; idx < expectedAdditionalGuests(booking); idx += 1) {
+  const expectedRows = Math.min(
+    expectedAdditionalGuests(booking),
+    additionalGuestCapacity(booking),
+  );
+  for (let idx = rows.length; idx < expectedRows; idx += 1) {
     rows.push({ position: idx + 1, roomPosition: rows[0]?.roomPosition ?? 0 });
   }
   return rows;
@@ -94,6 +110,29 @@ function guestComplete(g: GuestRegistrationDraft) {
   return Boolean(
     g.firstName && g.lastName && g.gender && g.nationality && g.dateOfBirth && g.passportNumber,
   );
+}
+
+function guestHasData(g: GuestRegistrationDraft) {
+  return Boolean(
+    g.firstName ||
+    g.lastName ||
+    g.email ||
+    g.phone ||
+    g.gender ||
+    g.nationality ||
+    g.dateOfBirth ||
+    g.passportNumber,
+  );
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function bookerDraftChanged(draft: GuestRegistrationDraft, b: Booking) {
@@ -131,19 +170,28 @@ export default function CheckInPage() {
   const [booking, setBooking] = useState<Booking | null>(null);
   const [booker, setBooker] = useState<GuestRegistrationDraft | null>(null);
   const [guests, setGuests] = useState<GuestDraft[]>([]);
+  const [notes, setNotes] = useState<BookingNote[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingGuest, setSavingGuest] = useState<string | null>(null);
+  const [removingGuest, setRemovingGuest] = useState<string | null>(null);
+  const [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
   const [actionLoading, setActionLoading] = useState<null | "markPaid" | "completeCheckIn">(null);
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([bookingsService.get(id), bookingsService.listAdditionalGuests(id)])
-      .then(([bookingRes, guestRes]) => {
+    Promise.all([
+      bookingsService.get(id),
+      bookingsService.listAdditionalGuests(id),
+      bookingsService.listNotes(id),
+    ])
+      .then(([bookingRes, guestRes, noteRes]) => {
         setBooking(bookingRes);
         setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
+        setNotes(noteRes.notes);
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));
@@ -156,6 +204,10 @@ export default function CheckInPage() {
   const completedGuests =
     guests.filter(guestComplete).length + (booker && guestComplete(booker) ? 1 : 0);
   const ota = channelIsOta(booking?.channel);
+  const maxGuests = booking ? totalRoomCapacity(booking) : 1;
+  const remainingGuestSlots = booking ? Math.max(0, maxGuests - (guests.length + 1)) : 0;
+  const overCapacityBy = booking ? Math.max(0, guests.length + 1 - maxGuests) : 0;
+  const capacityReached = remainingGuestSlots === 0;
 
   const updateBooker = (patch: Partial<GuestRegistrationDraft>) => {
     setBooker((prev) => (prev ? { ...prev, ...patch } : prev));
@@ -166,10 +218,56 @@ export default function CheckInPage() {
   };
 
   const addGuest = () => {
+    if (capacityReached) return;
     setGuests((prev) => [
       ...prev,
       { position: prev.length + 1, roomPosition: prev[0]?.roomPosition ?? 0 },
     ]);
+  };
+
+  const removeGuest = async (index: number) => {
+    if (!booking) return;
+    const draft = guests[index];
+    if (!draft) return;
+    if (guestHasData(draft)) {
+      const confirmed = window.confirm(
+        `Remove Guest ${index + 2}? Their registration data will be deleted.`,
+      );
+      if (!confirmed) return;
+    }
+    setRemovingGuest(`guest-${index}`);
+    setError("");
+    try {
+      if (draft.id) {
+        await bookingsService.deleteAdditionalGuest(booking.id, draft.id);
+      }
+      setGuests((prev) =>
+        prev
+          .filter((_, idx) => idx !== index)
+          .map((guest, idx) => ({ ...guest, position: guest.id ? guest.position : idx + 1 })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove guest");
+    } finally {
+      setRemovingGuest(null);
+    }
+  };
+
+  const saveNote = async () => {
+    if (!booking) return;
+    const body = noteDraft.trim();
+    if (!body) return;
+    setSavingNote(true);
+    setError("");
+    try {
+      const saved = await bookingsService.createNote(booking.id, body, "check-in");
+      setNotes((prev) => [saved, ...prev]);
+      setNoteDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save note");
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   const saveGuest = async (index: number) => {
@@ -245,7 +343,8 @@ export default function CheckInPage() {
     try {
       // Flush any unsaved guest drafts that have data
       const flushResults = await Promise.allSettled(
-        guests.map(async (draft) => {
+        guests.map(async (draft, index) => {
+          if (index >= additionalGuestCapacity(booking)) return draft;
           if (!draft.firstName && !draft.lastName) return draft;
           const payload: BookingAdditionalGuestPayload = {
             firstName: draft.firstName || "",
@@ -416,6 +515,21 @@ export default function CheckInPage() {
               action={`${completedGuests} of ${guests.length + 1} complete`}
             >
               <div className="space-y-3">
+                <div
+                  className={`rounded-xl border p-3 text-sm ${
+                    overCapacityBy > 0
+                      ? "border-red-200 bg-red-50 text-red-800"
+                      : capacityReached
+                        ? "border-amber-200 bg-amber-50 text-amber-900"
+                        : "border-blue-200 bg-blue-50 text-blue-900"
+                  }`}
+                >
+                  {overCapacityBy > 0
+                    ? `Over capacity by ${overCapacityBy} guest${overCapacityBy === 1 ? "" : "s"}. Room capacity reached (${maxGuests} guests maximum).`
+                    : capacityReached
+                      ? `Room capacity reached (${maxGuests} guests maximum).`
+                      : `This booking allows ${remainingGuestSlots} additional guest${remainingGuestSlots === 1 ? "" : "s"}.`}
+                </div>
                 <GuestRegistrationCard
                   title={guestName(booking) || "Booker"}
                   badge="booker"
@@ -440,6 +554,8 @@ export default function CheckInPage() {
                       onChange={(patch) => updateGuest(index, patch)}
                       onSave={() => saveGuest(index)}
                       saving={savingGuest === `guest-${index}`}
+                      onRemove={() => removeGuest(index)}
+                      removing={removingGuest === `guest-${index}`}
                     />
                   );
                 })}
@@ -447,9 +563,12 @@ export default function CheckInPage() {
                 <button
                   type="button"
                   onClick={addGuest}
-                  className="w-full rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700"
+                  disabled={capacityReached}
+                  className="w-full rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
                 >
-                  + Add guest
+                  {capacityReached
+                    ? `Room capacity reached (${maxGuests} guests maximum).`
+                    : "+ Add guest"}
                 </button>
               </div>
             </Card>
@@ -475,6 +594,48 @@ export default function CheckInPage() {
                     {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
                   </button>
                 </div>
+              </div>
+            </Card>
+
+            <Card title="Notes">
+              <div className="space-y-4">
+                {notes.length > 0 && (
+                  <div className="space-y-3">
+                    {notes.map((note) => (
+                      <div key={note.id} className="rounded-lg border border-gray-200 p-3">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                          <span className="font-medium text-gray-700">
+                            {note.authorName || "Unknown"}
+                          </span>
+                          <span>{formatDateTime(note.createdAt)}</span>
+                          {note.source === "check-in" && (
+                            <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                              Check-in
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-900">
+                          {note.body}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  placeholder="Add a note (visible on the reservation)."
+                  rows={3}
+                  className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-950 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                />
+                <button
+                  type="button"
+                  onClick={saveNote}
+                  disabled={savingNote || !noteDraft.trim()}
+                  className={primaryActionClass}
+                >
+                  {savingNote ? "Saving..." : "Save note"}
+                </button>
               </div>
             </Card>
           </div>
@@ -529,6 +690,8 @@ function GuestRegistrationCard({
   onChange,
   onSave,
   saving,
+  onRemove,
+  removing,
   saveLabel = "Save guest",
 }: {
   title: string;
@@ -539,6 +702,8 @@ function GuestRegistrationCard({
   onChange: (patch: Partial<GuestRegistrationDraft>) => void;
   onSave: () => void;
   saving: boolean;
+  onRemove?: () => void;
+  removing?: boolean;
   saveLabel?: string;
 }) {
   const contactLocked = (value: string | null | undefined) => ota && Boolean(value);
@@ -563,11 +728,23 @@ function GuestRegistrationCard({
             {complete ? "Registration complete" : "Missing passport / ID"}
           </p>
         </div>
-        {ota && (
-          <span className="text-right text-xs font-medium text-gray-500">
-            Imported fields locked where supplied
-          </span>
-        )}
+        <div className="flex shrink-0 items-center gap-2">
+          {ota && (
+            <span className="text-right text-xs font-medium text-gray-500">
+              Imported fields locked where supplied
+            </span>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={removing}
+              className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+            >
+              {removing ? "Removing..." : "Remove"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <Field

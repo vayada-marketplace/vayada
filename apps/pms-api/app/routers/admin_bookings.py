@@ -85,6 +85,8 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
     nights = (co - ci).days
     room_id = b.get("room_id")
     deadline = b.get("host_response_deadline")
+    room_max_occupancy = max(1, int(b.get("room_max_occupancy") or 1))
+    number_of_rooms = max(1, int(b.get("number_of_rooms") or 1))
 
     # Full assigned-room list: primary (position 0) + any extras (VAY-403).
     assigned_rooms: list[AssignedRoom] = []
@@ -112,6 +114,8 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         booking_reference=b["booking_reference"],
         room_type_id=str(b["room_type_id"]),
         room_name=b["room_name"],
+        room_max_occupancy=room_max_occupancy,
+        total_room_capacity=room_max_occupancy * number_of_rooms,
         guest_first_name=b["guest_first_name"],
         guest_last_name=b["guest_last_name"],
         guest_email=b["guest_email"],
@@ -129,7 +133,7 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         adults=b["adults"],
         children=b["children"],
         nightly_rate=float(b["nightly_rate"]),
-        number_of_rooms=int(b.get("number_of_rooms") or 1),
+        number_of_rooms=number_of_rooms,
         total_amount=float(b["total_amount"]),
         currency=b["currency"],
         status=b["status"],
@@ -1023,6 +1027,7 @@ def _note_to_response(n: dict) -> BookingNoteResponse:
         author_user_id=str(n["author_user_id"]),
         author_name=n.get("author_name") or "",
         body=n["body"],
+        source=n.get("source"),
         created_at=n["created_at"].isoformat(),
     )
 
@@ -1097,6 +1102,7 @@ async def create_booking_note(
         author_user_id=user_id,
         author_name=author_name,
         body=body,
+        source=data.source,
     )
     return _note_to_response(note)
 
@@ -1135,13 +1141,14 @@ async def create_additional_guest(
     user_id: str = Depends(require_hotel_admin),
 ):
     booking, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
-    # Cap at booked-count minus the booker (lead guest), per the ticket.
-    capacity = max(0, int(booking.get("adults") or 0) + int(booking.get("children") or 0) - 1)
+    room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
+    room_capacity = max(1, int((room_type or {}).get("max_occupancy") or 1))
+    capacity = max(0, room_capacity * max(1, int(booking.get("number_of_rooms") or 1)) - 1)
     existing = await BookingAdditionalGuestRepository.list_for_booking(booking_id)
     if len(existing) >= capacity:
         raise HTTPException(
             status_code=400,
-            detail=f"This booking only allows {capacity} additional guest(s).",
+            detail=f"Room capacity reached ({capacity + 1} guests maximum).",
         )
     position = await BookingAdditionalGuestRepository.next_position(booking_id)
     payload = data.model_dump(exclude_unset=True)
@@ -1222,6 +1229,7 @@ async def cancel_booking_with_reason(
         author_user_id=user_id,
         author_name=author_name,
         body=f"Cancellation reason: {reason}",
+        source="booking-detail",
     )
 
     await BookingRepository.update_status(booking_id, "cancelled")

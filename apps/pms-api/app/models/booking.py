@@ -134,6 +134,8 @@ class BookingAdminResponse(BaseModel):
     booking_reference: str
     room_type_id: str
     room_name: str
+    room_max_occupancy: int = 1
+    total_room_capacity: int = 1
     guest_first_name: str
     guest_last_name: str
     guest_email: str
@@ -377,6 +379,7 @@ class BookingNoteCreate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     body: str
+    source: str | None = None
 
 
 class BookingNoteResponse(BaseModel):
@@ -387,6 +390,7 @@ class BookingNoteResponse(BaseModel):
     author_user_id: str
     author_name: str
     body: str
+    source: str | None = None
     created_at: str
 
 

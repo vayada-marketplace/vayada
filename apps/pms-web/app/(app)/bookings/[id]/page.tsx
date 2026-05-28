@@ -2025,6 +2025,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                     <div className="text-xs text-gray-500">
                       <span className="font-medium text-gray-700">{n.authorName || "Unknown"}</span>{" "}
                       · {formatDateTime(n.createdAt)}
+                      {n.source === "check-in" && (
+                        <span className="ml-2 rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                          Check-in
+                        </span>
+                      )}
                     </div>
                     <button
                       onClick={() => handleDeleteNote(n.id)}

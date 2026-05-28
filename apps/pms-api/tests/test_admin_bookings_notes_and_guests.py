@@ -96,29 +96,61 @@ class TestBookingNotes:
 
 
 class TestAdditionalGuests:
-    async def test_capacity_capped_at_adults_minus_booker(self, client, hotel_with_booking):
-        """A 2-adult booking has 1 booker + 1 additional guest slot."""
+    async def test_capacity_capped_at_room_capacity_minus_booker(self, client, hotel_with_booking):
+        """A room that sleeps 4 allows the booker + 3 additional registered guests."""
         token = hotel_with_booking["user"]["token"]
         booking_id = str(hotel_with_booking["booking"]["id"])
 
         await Database.execute(
-            "UPDATE bookings SET adults = 2, children = 0 WHERE id = $1",
+            "UPDATE room_types SET max_occupancy = 4 WHERE id = $1",
+            hotel_with_booking["room"]["id"],
+        )
+        await Database.execute(
+            "UPDATE bookings SET adults = 1, children = 0 WHERE id = $1",
             hotel_with_booking["booking"]["id"],
         )
 
-        # First add succeeds.
+        for idx, name in enumerate(["Alex", "Beta", "Casey"], start=1):
+            resp = await client.post(
+                f"/admin/bookings/{booking_id}/additional-guests",
+                json={"firstName": name},
+                headers=get_auth_headers(token),
+            )
+            assert resp.status_code == 201, resp.text
+            assert resp.json()["position"] == idx
+
         resp = await client.post(
             f"/admin/bookings/{booking_id}/additional-guests",
-            json={"firstName": "Alex", "lastName": "Doe"},
+            json={"firstName": "Delta"},
             headers=get_auth_headers(token),
         )
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["position"] == 1
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "Room capacity reached (4 guests maximum)."
 
-        # Second add hits the cap.
+    async def test_multi_room_capacity_sums_room_type_capacity(self, client, hotel_with_booking):
+        token = hotel_with_booking["user"]["token"]
+        booking_id = str(hotel_with_booking["booking"]["id"])
+
+        await Database.execute(
+            "UPDATE room_types SET max_occupancy = 2 WHERE id = $1",
+            hotel_with_booking["room"]["id"],
+        )
+        await Database.execute(
+            "UPDATE bookings SET adults = 1, children = 0, number_of_rooms = 2 WHERE id = $1",
+            hotel_with_booking["booking"]["id"],
+        )
+
+        for name in ["Alex", "Beta", "Casey"]:
+            resp = await client.post(
+                f"/admin/bookings/{booking_id}/additional-guests",
+                json={"firstName": name},
+                headers=get_auth_headers(token),
+            )
+            assert resp.status_code == 201, resp.text
+
         resp = await client.post(
             f"/admin/bookings/{booking_id}/additional-guests",
-            json={"firstName": "Beta"},
+            json={"firstName": "Delta"},
             headers=get_auth_headers(token),
         )
         assert resp.status_code == 400
