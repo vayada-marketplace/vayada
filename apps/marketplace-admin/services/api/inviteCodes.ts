@@ -41,6 +41,8 @@ export interface InviteData {
     name: string;
     beds: Array<{ type: string; count: number }>;
     maxOccupancy: number;
+    maxAdults: number | null;
+    maxChildren: number | null;
     bedrooms: number;
     bathrooms: number;
     roomSize: string;
