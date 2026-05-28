@@ -191,21 +191,42 @@ class TestCreateBookingRequest:
             str(room["id"]),
         )
 
-        resp = await client.post(
-            f"/api/hotels/{hotel['slug']}/bookings",
-            json={
-                "roomTypeId": str(room["id"]),
-                "guestFirstName": "Manny",
-                "guestLastName": "Manual",
-                "guestEmail": "manny@test.com",
-                "guestPhone": "+1234567890",
-                "checkIn": "2026-09-01",
-                "checkOut": "2026-09-05",
-                "adults": 2,
-                "paymentMethod": "bank_transfer",
-                "rateType": "flexible",
-            },
-        )
+        bank_info = {
+            "payout_account_holder": "Test Hotel GmbH",
+            "payout_account_type": "iban",
+            "payout_iban": "DE89370400440532013000",
+            "payout_account_number": "",
+            "payout_bank_name": "Test Bank",
+            "payout_swift": "TESTDEF0",
+        }
+
+        with (
+            patch(
+                "app.services.booking_service.hotel_identity_service.get_payment_flags_by_slug",
+                new_callable=AsyncMock,
+                return_value={"bank_transfer": True, "pay_at_property_enabled": False},
+            ),
+            patch(
+                "app.services.booking_service.hotel_identity_service.get_guest_payment_info_by_slug",
+                new_callable=AsyncMock,
+                return_value=bank_info,
+            ),
+        ):
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings",
+                json={
+                    "roomTypeId": str(room["id"]),
+                    "guestFirstName": "Manny",
+                    "guestLastName": "Manual",
+                    "guestEmail": "manny@test.com",
+                    "guestPhone": "+1234567890",
+                    "checkIn": "2026-09-01",
+                    "checkOut": "2026-09-05",
+                    "adults": 2,
+                    "paymentMethod": "bank_transfer",
+                    "rateType": "flexible",
+                },
+            )
 
         assert resp.status_code == 200
         booking = resp.json()["booking"]
