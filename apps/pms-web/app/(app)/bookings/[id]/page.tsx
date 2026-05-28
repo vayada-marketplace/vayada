@@ -30,6 +30,13 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import Modal from "@/components/Modal";
 import { formatCurrency } from "@/lib/formatCurrency";
 import {
+  AddOnListPicker,
+  SelectedAddOnSummary,
+  addOnUnitLabel,
+  calculateAddOnsTotal,
+  clampAddOnQuantity,
+} from "@/components/bookings/AddOnListPicker";
+import {
   BOOKING_STATUS_STYLES,
   PAYMENT_STATUS_STYLES,
   getPaymentStatusLabel,
@@ -93,6 +100,12 @@ function totalGuestsLabel(adults: number, children: number): string {
     parts.push(`${children} child${children !== 1 ? "ren" : ""}`);
   }
   return parts.join(", ");
+}
+
+function addOnsLockedAfterPayment(booking: Booking): boolean {
+  return ["captured", "paid", "refunded", "partially_refunded"].includes(
+    booking.paymentStatus || "",
+  );
 }
 
 function CountdownTimer({ deadline }: { deadline: string }) {
@@ -966,6 +979,174 @@ function ModifyBookingModal({ booking, onClose, onSave }: ModifyBookingModalProp
   );
 }
 
+function EditAddOnsModal({
+  booking,
+  onClose,
+  onSave,
+}: {
+  booking: Booking;
+  onClose: () => void;
+  onSave: (payload: {
+    addonIds: string[];
+    addonQuantities: Record<string, number>;
+    addonDates: Record<string, string[]>;
+  }) => Promise<void>;
+}) {
+  const [availableAddons, setAvailableAddons] = useState<BookingAddon[]>([]);
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>(booking.addonIds || []);
+  const [addonQuantities, setAddonQuantities] = useState<Record<string, number>>(
+    booking.addonQuantities || {},
+  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    bookingsService
+      .listAvailableAddons(booking.id)
+      .then((addons) => {
+        if (!active) return;
+        setAvailableAddons(addons);
+        const availableIds = new Set(addons.map((addon) => addon.id));
+        setSelectedAddonIds((prev) => prev.filter((id) => availableIds.has(id)));
+        setAddonQuantities((prev) =>
+          Object.fromEntries(Object.entries(prev).filter(([id]) => availableIds.has(id))),
+        );
+      })
+      .catch((e) => {
+        if (active) setErr(errMessage(e, "Failed to load add-ons"));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [booking.id]);
+
+  const nextAddonTotal = calculateAddOnsTotal(
+    availableAddons,
+    selectedAddonIds,
+    addonQuantities,
+    booking.nights,
+    booking.adults,
+  );
+  const nextTotal = booking.nightlyRate * booking.nights * booking.numberOfRooms + nextAddonTotal;
+
+  const handleSave = async () => {
+    setErr("");
+    setSaving(true);
+    const addonMap = new Map(availableAddons.map((addon) => [addon.id, addon]));
+    const nextQuantities = selectedAddonIds.reduce<Record<string, number>>((acc, addonId) => {
+      const addon = addonMap.get(addonId);
+      if (addon) {
+        acc[addonId] = clampAddOnQuantity(
+          addon,
+          addonQuantities[addonId] || 1,
+          booking.nights || 1,
+          booking.adults,
+        );
+      }
+      return acc;
+    }, {});
+    const nextAddonDates = selectedAddonIds.reduce<Record<string, string[]>>((acc, addonId) => {
+      if (booking.addonDates?.[addonId]) acc[addonId] = booking.addonDates[addonId];
+      return acc;
+    }, {});
+    try {
+      await onSave({
+        addonIds: selectedAddonIds,
+        addonQuantities: nextQuantities,
+        addonDates: nextAddonDates,
+      });
+      onClose();
+    } catch (e) {
+      setErr(errMessage(e, "Failed to save add-ons"));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h3 className="text-lg font-semibold text-gray-900 mb-1">Edit add-ons</h3>
+      <p className="text-sm text-gray-500 mb-5">
+        Update selected add-ons for this unpaid direct booking.
+      </p>
+      {loading ? (
+        <p className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-2">
+          Loading add-ons…
+        </p>
+      ) : availableAddons.length === 0 ? (
+        <p className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-2">
+          No add-ons are configured for this property.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          <AddOnListPicker
+            addons={availableAddons}
+            selectedIds={selectedAddonIds}
+            quantities={addonQuantities}
+            currency={booking.currency}
+            nights={booking.nights || 1}
+            adults={booking.adults}
+            onChange={(ids, quantities) => {
+              setSelectedAddonIds(ids);
+              setAddonQuantities(quantities);
+            }}
+          />
+          <SelectedAddOnSummary
+            addons={availableAddons}
+            selectedIds={selectedAddonIds}
+            quantities={addonQuantities}
+            currency={booking.currency}
+            nights={booking.nights || 1}
+            adults={booking.adults}
+            onRemove={(addonId) => {
+              setSelectedAddonIds((prev) => prev.filter((id) => id !== addonId));
+              setAddonQuantities((prev) => {
+                const next = { ...prev };
+                delete next[addonId];
+                return next;
+              });
+            }}
+          />
+          <div className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2 text-sm">
+            <div className="flex justify-between text-gray-600">
+              <span>Add-ons</span>
+              <span>{formatCurrency(nextAddonTotal, booking.currency)}</span>
+            </div>
+            <div className="flex justify-between font-semibold text-gray-900 pt-1 mt-1 border-t border-gray-200">
+              <span>Projected total</span>
+              <span>{formatCurrency(nextTotal, booking.currency)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {err && (
+        <p className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+          {err}
+        </p>
+      )}
+      <div className="flex justify-end gap-3 mt-5">
+        <button
+          onClick={onClose}
+          className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving || loading}
+          className="px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-black rounded-lg disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save add-ons"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default function BookingDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -974,6 +1155,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [policy, setPolicy] = useState<CancellationPolicy | null>(null);
   const [notes, setNotes] = useState<BookingNote[]>([]);
   const [guests, setGuests] = useState<BookingAdditionalGuest[]>([]);
+  const [detailAvailableAddons, setDetailAvailableAddons] = useState<BookingAddon[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState("");
@@ -1017,6 +1199,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     specialRequests: "",
   });
   const [modifyOpen, setModifyOpen] = useState(false);
+  const [addonEditOpen, setAddonEditOpen] = useState(false);
 
   const loadAll = useCallback(async () => {
     try {
@@ -1037,6 +1220,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .listAdditionalGuests(id)
         .then((r) => setGuests(r.guests))
         .catch(console.error),
+      bookingsService.listAvailableAddons(id).then(setDetailAvailableAddons).catch(console.error),
       bookingsService
         .getPaymentSettings()
         .then((r) => setPolicy(r.cancellationPolicy))
@@ -1265,6 +1449,15 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     setBooking(updated);
   };
 
+  const handleSaveAddOns = async (payload: {
+    addonIds: string[];
+    addonQuantities: Record<string, number>;
+    addonDates: Record<string, string[]>;
+  }) => {
+    const updated = await bookingsService.update(id, payload);
+    setBooking(updated);
+  };
+
   const handleAssignGuests = async (changes: Record<string, number | null>) => {
     // Issue PATCH calls in parallel; build a fresh list from the updated
     // rows so the UI doesn't go through a stale render.
@@ -1339,6 +1532,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const isCancelled =
     booking.status === "cancelled" || booking.status === "declined" || booking.status === "expired";
   const isDirectBooking = normalizeChannelKey(booking.channel) === "direct";
+  const addOnsLocked = addOnsLockedAfterPayment(booking);
+  const canEditAddOns = !isCancelled && isDirectBooking && !addOnsLocked;
   const hasDeadline = isPending && booking.hostResponseDeadline;
   const totalParty = booking.adults + booking.children;
   const additionalCapacity = Math.max(0, totalParty - 1);
@@ -1656,19 +1851,51 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
 
-          {/* Add-ons sub-section (only if any) */}
-          {addonRows.length > 0 && (
+          {/* Add-ons sub-section (only if configured or already selected) */}
+          {(detailAvailableAddons.length > 0 || addonRows.length > 0) && (
             <div className="mb-6">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Add-ons
-              </p>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Add-ons
+                </p>
+                {canEditAddOns ? (
+                  <button
+                    type="button"
+                    onClick={() => setAddonEditOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    <PencilSquareIcon className="w-3.5 h-3.5" />
+                    Edit add-ons
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-500">
+                    {addOnsLocked
+                      ? "Add-ons locked after payment"
+                      : !isDirectBooking
+                        ? "OTA add-ons are locked"
+                        : "Add-ons locked"}
+                  </span>
+                )}
+              </div>
               <div className="space-y-1.5 text-sm">
-                {addonRows.map((row) => (
-                  <div key={row.addonId} className="flex justify-between text-gray-700">
-                    <span>{row.name}</span>
-                    {row.qty && <span className="text-gray-500">{row.qty} × stay</span>}
-                  </div>
-                ))}
+                {addonRows.length > 0 ? (
+                  addonRows.map((row) => {
+                    const addon = detailAvailableAddons.find((item) => item.id === row.addonId);
+                    const unitLabel = addon ? addOnUnitLabel(addon) : "stay";
+                    return (
+                      <div key={row.addonId} className="flex justify-between text-gray-700">
+                        <span>{row.name}</span>
+                        {row.qty && (
+                          <span className="text-gray-500">
+                            {row.qty} × {unitLabel}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-sm text-gray-500">No add-ons selected.</p>
+                )}
               </div>
             </div>
           )}
@@ -2318,6 +2545,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           booking={booking}
           onClose={() => setModifyOpen(false)}
           onSave={handleModifyBooking}
+        />
+      )}
+
+      {addonEditOpen && (
+        <EditAddOnsModal
+          booking={booking}
+          onClose={() => setAddonEditOpen(false)}
+          onSave={handleSaveAddOns}
         />
       )}
     </div>

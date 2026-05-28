@@ -33,6 +33,7 @@ from app.repositories.booking_event_repo import BookingEventRepository
 from app.repositories.booking_note_repo import BookingNoteRepository
 from app.repositories.booking_repo import BookingRepository
 from app.repositories.booking_room_repo import BookingRoomRepository
+from app.repositories.payment_repo import PaymentRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.room_type_repo import RoomTypeRepository
@@ -61,6 +62,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin-bookings"])
 
+ADDON_LOCK_PAYMENT_STATUSES = {"captured", "refunded", "partially_refunded", "paid"}
+
 
 def _parse_json_field(value, default):
     if value is None:
@@ -77,6 +80,71 @@ def _as_date(value) -> date:
     if isinstance(value, date):
         return value
     return date.fromisoformat(str(value))
+
+
+def _is_direct_channel(channel: str | None) -> bool:
+    return (channel or "direct").strip().lower() in {"direct", "website", "booking_engine"}
+
+
+async def _has_captured_payment(booking: dict) -> bool:
+    if (booking.get("payment_status") or "").lower() in ADDON_LOCK_PAYMENT_STATUSES:
+        return True
+    payments = await PaymentRepository.list_by_booking_ids([str(booking["id"])])
+    return any((p.get("status") or "").lower() in ADDON_LOCK_PAYMENT_STATUSES for p in payments)
+
+
+def _addons_changed(booking: dict, updates: dict) -> bool:
+    current_ids = _parse_json_field(booking.get("addon_ids"), [])
+    current_quantities = _parse_json_field(booking.get("addon_quantities"), {})
+    current_dates = _parse_json_field(booking.get("addon_dates"), {})
+    ids_changed = "addon_ids" in updates and updates["addon_ids"] != current_ids
+    quantities_changed = (
+        "addon_quantities" in updates and updates["addon_quantities"] != current_quantities
+    )
+    dates_changed = "addon_dates" in updates and updates["addon_dates"] != current_dates
+    return ids_changed or quantities_changed or dates_changed
+
+
+async def _normalize_addon_selection(
+    *,
+    slug: str,
+    addon_ids: list[str],
+    addon_quantities: dict,
+    adults: int,
+    nights: int,
+    addon_dates: dict | None = None,
+) -> tuple[list[str], dict[str, int]]:
+    if not addon_ids:
+        return [], {}
+
+    all_addons = await _fetch_hotel_addons(slug)
+    addon_map = {addon["id"]: addon for addon in all_addons}
+    unknown_ids = [addon_id for addon_id in addon_ids if addon_id not in addon_map]
+    if unknown_ids:
+        raise HTTPException(status_code=400, detail="Unknown add-on selected")
+
+    normalized_quantities: dict[str, int] = {}
+    addon_dates = addon_dates or {}
+    for addon_id in addon_ids:
+        addon = addon_map[addon_id]
+        per_person = bool(addon.get("perPerson"))
+        per_night = bool(addon.get("perNight"))
+        if per_person:
+            fallback = max(1, adults)
+            maximum = max(1, adults)
+        elif per_night:
+            fallback = len(addon_dates.get(addon_id) or []) or max(1, nights)
+            maximum = max(1, nights)
+        else:
+            fallback = 1
+            maximum = 99
+        raw_quantity = addon_quantities.get(addon_id, fallback)
+        try:
+            quantity = int(raw_quantity)
+        except (TypeError, ValueError):
+            quantity = fallback
+        normalized_quantities[addon_id] = max(1, min(quantity, maximum))
+    return addon_ids, normalized_quantities
 
 
 def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminResponse:
@@ -203,7 +271,24 @@ async def create_admin_booking(
         resolved_base, _ = RoomTypeRepository.resolve_rate(room_type, data.check_in)
         nightly_rate = resolved_base
     nights = (data.check_out - data.check_in).days
-    total_amount = nightly_rate * nights
+    hotel_slug = await Database.fetchval("SELECT slug FROM hotels WHERE id = $1", hotel_id)
+    addon_ids, addon_quantities = await _normalize_addon_selection(
+        slug=hotel_slug,
+        addon_ids=data.addon_ids or [],
+        addon_quantities=data.addon_quantities or {},
+        adults=data.adults,
+        nights=nights,
+    )
+    addon_total, addon_names = await _compute_addon_total(
+        hotel_slug,
+        addon_ids,
+        addon_quantities,
+        room_type["currency"],
+        data.adults,
+        nights,
+        {},
+    )
+    total_amount = nightly_rate * nights + addon_total
 
     booking = await BookingRepository.create(
         {
@@ -225,6 +310,10 @@ async def create_admin_booking(
             "room_id": data.room_id,
             "channel": data.channel,
             "status": "confirmed",
+            "addon_ids": addon_ids,
+            "addon_names": addon_names,
+            "addon_quantities": addon_quantities,
+            "addon_total": addon_total,
         }
     )
 
@@ -306,6 +395,12 @@ async def update_booking_details(
         raise HTTPException(status_code=404, detail="Booking not found")
 
     updates = data.model_dump(exclude_none=True)
+    if _addons_changed(booking, updates):
+        if not _is_direct_channel(booking.get("channel")):
+            raise HTTPException(status_code=400, detail="OTA bookings cannot edit add-ons in PMS")
+        if await _has_captured_payment(booking):
+            raise HTTPException(status_code=400, detail="Add-ons locked after payment")
+
     should_reprice_addons = any(
         key in updates
         for key in (
@@ -343,6 +438,14 @@ async def update_booking_details(
             for addon_id in next_addon_ids
             if addon_id in addon_dates
         }
+        next_addon_ids, addon_quantities = await _normalize_addon_selection(
+            slug=booking["hotel_slug"],
+            addon_ids=next_addon_ids,
+            addon_quantities=addon_quantities,
+            adults=int(updates.get("adults", booking["adults"])),
+            nights=nights,
+            addon_dates=addon_dates,
+        )
         addon_total, addon_names = await _compute_addon_total(
             booking["hotel_slug"],
             next_addon_ids,
@@ -383,6 +486,19 @@ async def update_booking_details(
         )
 
     return await _admin_response(updated)
+
+
+@router.get("/bookings/addons/available")
+async def list_available_addons_for_new_booking(
+    room_id: str = Query(...),
+    user_id: str = Depends(require_hotel_admin),
+):
+    hotel_id = await get_hotel_id(user_id)
+    room = await RoomRepository.get_by_id(room_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise HTTPException(status_code=404, detail="Room not found")
+    slug = await Database.fetchval("SELECT slug FROM hotels WHERE id = $1", hotel_id)
+    return await _fetch_hotel_addons(slug)
 
 
 @router.get("/bookings/{booking_id}/addons")

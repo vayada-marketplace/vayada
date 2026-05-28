@@ -114,6 +114,8 @@ class AdminBookingCreate(BaseModel):
     children: int = 0
     nightly_rate: float | None = None
     channel: str = "direct"
+    addon_ids: list[str] = []
+    addon_quantities: dict[str, int] = {}
 
 
 class AssignedRoom(BaseModel):
