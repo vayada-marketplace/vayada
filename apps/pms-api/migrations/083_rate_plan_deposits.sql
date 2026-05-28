@@ -35,7 +35,10 @@ ALTER TABLE payments
 
 ALTER TABLE payments DROP CONSTRAINT IF EXISTS payments_payment_method_check;
 ALTER TABLE payments ADD CONSTRAINT payments_payment_method_check
-    CHECK (payment_method IN ('card', 'pay_at_property', 'xendit', 'bank_transfer'));
+    CHECK (payment_method IN (
+        'card', 'pay_at_property', 'xendit',
+        'cash', 'bank_transfer', 'manual_card', 'other'
+    ));
 
 ALTER TABLE bookings DROP CONSTRAINT IF EXISTS bookings_payment_method_check;
 ALTER TABLE bookings ADD CONSTRAINT bookings_payment_method_check
