@@ -38,7 +38,7 @@ def _deposit_booking(
     booking.update(
         {
             "deposit_required": True,
-            "deposit_percentage": int(round(deposit / total * 100)),
+            "deposit_percentage": round(deposit / total * 100),
             "deposit_amount": deposit,
             "balance_amount": max(total - deposit, 0),
             "payment_method": payment_method,

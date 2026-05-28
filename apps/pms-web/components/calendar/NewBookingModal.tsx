@@ -9,6 +9,13 @@ import {
 } from "@/services/calendar";
 import { formatCurrency } from "@/lib/formatCurrency";
 import Modal from "@/components/Modal";
+import { BookingAddon } from "@/services/bookings";
+import {
+  AddOnListPicker,
+  SelectedAddOnSummary,
+  calculateAddOnsTotal,
+  clampAddOnQuantity,
+} from "@/components/bookings/AddOnListPicker";
 
 interface NewBookingModalProps {
   roomTypes: CalendarRoomType[];
@@ -89,6 +96,12 @@ export default function NewBookingModal({
   const userEditedRate = useRef(false);
   const [channel, setChannel] = useState("direct");
   const [specialRequests, setSpecialRequests] = useState("");
+  const [availableAddons, setAvailableAddons] = useState<BookingAddon[]>([]);
+  const [addonsLoading, setAddonsLoading] = useState(false);
+  const [addonsOpen, setAddonsOpen] = useState(false);
+  const [selectedAddonIds, setSelectedAddonIds] = useState<string[]>([]);
+  const [addonQuantities, setAddonQuantities] = useState<Record<string, number>>({});
+  const [addonNotice, setAddonNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -123,6 +136,47 @@ export default function NewBookingModal({
     };
   }, [selectedRoomType?.id, checkIn]);
 
+  useEffect(() => {
+    if (!roomId) {
+      setAvailableAddons([]);
+      setSelectedAddonIds([]);
+      setAddonQuantities({});
+      return;
+    }
+    let cancelled = false;
+    setAddonsLoading(true);
+    calendarService
+      .listAvailableAddons(roomId)
+      .then((addons) => {
+        if (cancelled) return;
+        setAvailableAddons(addons);
+        const availableIds = new Set(addons.map((addon) => addon.id));
+        setSelectedAddonIds((prev) => {
+          const next = prev.filter((id) => availableIds.has(id));
+          if (next.length !== prev.length) {
+            setAddonNotice("Unavailable add-ons were removed for the selected room.");
+          }
+          return next;
+        });
+        setAddonQuantities((prev) =>
+          Object.fromEntries(Object.entries(prev).filter(([id]) => availableIds.has(id))),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAvailableAddons([]);
+        setSelectedAddonIds([]);
+        setAddonQuantities({});
+        setAddonNotice("Unavailable add-ons were removed for the selected room.");
+      })
+      .finally(() => {
+        if (!cancelled) setAddonsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, checkIn, checkOut]);
+
   const handleRoomChange = (newRoomId: string) => {
     setRoomId(newRoomId);
   };
@@ -146,9 +200,12 @@ export default function NewBookingModal({
   const overOccupancy = selectedRoomType != null && totalGuests > selectedRoomType.maxOccupancy;
   const rateNum = nightlyRate ? parseFloat(nightlyRate) : null;
   const total = useMemo(() => {
-    if (!rateNum || nights === 0) return null;
-    return rateNum * nights;
-  }, [rateNum, nights]);
+    if (rateNum === null || Number.isNaN(rateNum) || nights === 0) return null;
+    return (
+      rateNum * nights +
+      calculateAddOnsTotal(availableAddons, selectedAddonIds, addonQuantities, nights, adults)
+    );
+  }, [rateNum, nights, availableAddons, selectedAddonIds, addonQuantities, adults]);
   const rateMatchesResolved =
     resolvedRate !== null && rateNum !== null && Math.abs(rateNum - resolvedRate) < 0.005;
 
@@ -192,6 +249,19 @@ export default function NewBookingModal({
         children,
         nightlyRate: nightlyRate ? parseFloat(nightlyRate) : null,
         channel,
+        addonIds: selectedAddonIds,
+        addonQuantities: selectedAddonIds.reduce<Record<string, number>>((acc, addonId) => {
+          const addon = availableAddons.find((item) => item.id === addonId);
+          if (addon) {
+            acc[addonId] = clampAddOnQuantity(
+              addon,
+              addonQuantities[addonId] || 1,
+              nights || 1,
+              adults,
+            );
+          }
+          return acc;
+        }, {}),
       });
     } catch (err: any) {
       setError(err?.message || "Failed to create booking");
@@ -203,8 +273,7 @@ export default function NewBookingModal({
   const inputCls =
     "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent";
   const fieldLabelCls = "block text-xs font-medium text-gray-700 mb-1";
-  const sectionLabelCls =
-    "block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2";
+  const sectionLabelCls = "block text-xs font-medium text-gray-500 uppercase tracking-wide mb-2";
   const required = <span className="text-red-500 font-normal">*</span>;
 
   return (
@@ -484,9 +553,7 @@ export default function NewBookingModal({
                   )}
                 </div>
               ) : (
-                <p className="mt-1.5 text-xs text-gray-500">
-                  Leave blank for room type default
-                </p>
+                <p className="mt-1.5 text-xs text-gray-500">Leave blank for room type default</p>
               )}
             </div>
             <div>
@@ -505,6 +572,59 @@ export default function NewBookingModal({
             </div>
           </div>
         </section>
+
+        {/* Add-ons */}
+        {availableAddons.length > 0 && (
+          <section>
+            <h3 className={sectionLabelCls}>Add-ons</h3>
+            <button
+              type="button"
+              onClick={() => setAddonsOpen((open) => !open)}
+              disabled={addonsLoading}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-primary-700 border border-primary-200 rounded-lg hover:bg-primary-50 disabled:opacity-50"
+            >
+              + Add add-ons
+            </button>
+            {addonNotice && (
+              <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {addonNotice}
+              </p>
+            )}
+            {addonsOpen && (
+              <div className="mt-3">
+                <AddOnListPicker
+                  addons={availableAddons}
+                  selectedIds={selectedAddonIds}
+                  quantities={addonQuantities}
+                  currency={selectedRoomType?.currency || "EUR"}
+                  nights={nights || 1}
+                  adults={adults}
+                  onChange={(ids, quantities) => {
+                    setSelectedAddonIds(ids);
+                    setAddonQuantities(quantities);
+                  }}
+                  onDone={() => setAddonsOpen(false)}
+                />
+              </div>
+            )}
+            <SelectedAddOnSummary
+              addons={availableAddons}
+              selectedIds={selectedAddonIds}
+              quantities={addonQuantities}
+              currency={selectedRoomType?.currency || "EUR"}
+              nights={nights || 1}
+              adults={adults}
+              onRemove={(addonId) => {
+                setSelectedAddonIds((prev) => prev.filter((id) => id !== addonId));
+                setAddonQuantities((prev) => {
+                  const next = { ...prev };
+                  delete next[addonId];
+                  return next;
+                });
+              }}
+            />
+          </section>
+        )}
 
         {/* Notes */}
         <section>

@@ -20,7 +20,7 @@ from app.repositories.hotel_repo import HotelRepository
 from app.repositories.payment_repo import PaymentRepository
 from app.repositories.payout_repo import PayoutRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.services import stripe_service, xendit_service
+from app.services import hotel_identity_service, stripe_service, xendit_service
 from app.services.availability_service import compute_stay_pricing, remaining_for_stay
 from app.services.calendar_auto_open_service import is_stay_sellable
 from app.services.channex.ari_push import push_availability_for_room_type
@@ -59,7 +59,30 @@ from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
 
+# Holds strong references to fire-and-forget tasks so they are not garbage
+# collected before completion. Entries are discarded automatically via the
+# done callback added in _create_task.
+_background_tasks: set = set()
+
+
+def _create_task(coro) -> asyncio.Task:
+    """Schedule a coroutine as a background task, keeping a strong reference."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
 HOST_RESPONSE_HOURS = 24
+
+
+def _log_background_task_result(task: asyncio.Task, label: str) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Background task failed: %s", label)
 
 
 def _nights(check_in: date, check_out: date) -> int:
@@ -744,7 +767,7 @@ async def materialize_draft(
         datetime.fromisoformat(deadline_str) if deadline_str else None
     )
     booking_data["payment_status"] = (
-        "authorized" if payment_status in ("authorized", "captured") else payment_status
+        "authorized" if payment_status == "authorized" else payment_status
     )
     booking_data["status"] = (
         "confirmed"
@@ -827,10 +850,10 @@ async def materialize_draft(
     # at row-insert time, but now correctly delayed until Stripe
     # confirms there's a real commitment behind the booking.
     if booking_data.get("deposit_required") and payment_status == "captured":
-        asyncio.create_task(send_guest_booking_accepted(booking_data["guest_email"], booking))
+        _create_task(send_guest_booking_accepted(booking_data["guest_email"], booking))
     else:
-        asyncio.create_task(send_guest_booking_requested(booking_data["guest_email"], booking))
-    asyncio.create_task(
+        _create_task(send_guest_booking_requested(booking_data["guest_email"], booking))
+    _create_task(
         push_availability_for_room_type(booking_data["hotel_id"], booking_data["room_type_id"])
     )
     if booking_data.get("host_response_deadline") and booking_data.get("status") != "confirmed":
@@ -841,7 +864,7 @@ async def materialize_draft(
             booking_data["hotel_id"],
         )
         if hotel:
-            asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+            _create_task(send_booking_request_notification(hotel["contact_email"], booking))
 
     return booking
 
@@ -939,7 +962,23 @@ async def _process_payment_method(
         )
         await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
         booking = await BookingRepository.get_by_id(booking_id)
-        asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        _create_task(send_booking_request_notification(hotel["contact_email"], booking))
+
+    elif payment_method == "paypal":
+        await PaymentRepository.create(
+            booking_id=booking_id,
+            amount=total_amount,
+            currency=currency,
+            payment_method="paypal",
+        )
+        await BookingRepository.update_payment_status(booking_id, "awaiting_paypal")
+        booking = await BookingRepository.get_by_id(booking_id)
+        task = _create_task(
+            send_booking_request_notification(hotel["contact_email"], booking)
+        )
+        task.add_done_callback(
+            lambda t: _log_background_task_result(t, "send_booking_request_notification")
+        )
 
     else:
         # Pay at property
@@ -952,7 +991,7 @@ async def _process_payment_method(
         await BookingRepository.update_payment_status(booking_id, "pay_at_property")
         if use_request_flow:
             booking = await BookingRepository.get_by_id(booking_id)
-            asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+            _create_task(send_booking_request_notification(hotel["contact_email"], booking))
         else:
             # Instant-book: confirm right away. _finalize_accepted_booking
             # sends the host + guest "accepted" emails.
@@ -1052,6 +1091,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # ── Validate hotel-level payment-method enablement ─────────────
     payment_method = data.payment_method
     hotel_settings = None
+    be_payment_info = None
     if payment_method in ("pay_at_property", "xendit", "card", "bank_transfer"):
         hotel_settings = await HotelPaymentSettingsRepository.get_by_hotel_id(hotel_id)
     if payment_method == "pay_at_property":
@@ -1067,15 +1107,28 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     elif payment_method == "bank_transfer":
         if not hotel_settings or not hotel_settings.get("bank_transfer"):
             raise ValueError("Bank transfer is not enabled for this hotel")
+    elif payment_method == "paypal":
+        be_payment_flags = await hotel_identity_service.get_payment_flags_by_slug(slug)
+        be_payment_info = await hotel_identity_service.get_guest_payment_info_by_slug(slug)
+        if (
+            not be_payment_flags
+            or not be_payment_flags.get("paypal_enabled")
+            or not be_payment_info
+            or not be_payment_info.get("paypal_email")
+        ):
+            raise ValueError("PayPal is not enabled for this hotel")
 
-    # Bank transfer is the only path that always stays in the request flow,
+    # Manual off-platform methods always stay in the request flow,
     # even when instant_book is on — there's no money yet, so we can't
     # auto-confirm.
-    use_request_flow = (not instant_book) or payment_method == "bank_transfer"
-    if deposit.required and payment_method == "card":
-        use_request_flow = False
+    use_request_flow = (not instant_book) or payment_method in ("bank_transfer", "paypal")
+    payment_window_hours = (
+        int(be_payment_info.get("paypal_payment_window_hours") or HOST_RESPONSE_HOURS)
+        if payment_method == "paypal"
+        else HOST_RESPONSE_HOURS
+    )
     deadline = (
-        datetime.now(UTC) + timedelta(hours=HOST_RESPONSE_HOURS) if use_request_flow else None
+        datetime.now(UTC) + timedelta(hours=payment_window_hours) if use_request_flow else None
     )
     capture_method = "manual" if use_request_flow else "automatic"
 
@@ -1186,15 +1239,18 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
 
     # ── Build response + side effects ──────────────────────────────
     booking = await BookingRepository.get_by_id(booking_id)
+    if payment_method == "paypal" and be_payment_info:
+        booking = dict(booking)
+        booking["paypal_email"] = be_payment_info.get("paypal_email") or ""
     response = _booking_to_response(booking)
 
     # Guest "request received" email only for the request flow;
     # _finalize_accepted_booking sends the equivalent under instant-book.
     if use_request_flow:
-        asyncio.create_task(send_guest_booking_requested(data.guest_email, booking))
+        _create_task(send_guest_booking_requested(data.guest_email, booking))
 
     # Push updated availability to Channex so OTAs reflect the reduced inventory
-    asyncio.create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
+    _create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
 
     return {
         "booking": response.model_dump(by_alias=True),
@@ -1276,7 +1332,7 @@ async def confirm_payment_authorized(handle: str) -> dict:
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        _create_task(send_booking_request_notification(hotel["contact_email"], booking))
 
     booking = await BookingRepository.get_by_id(handle)
     return _booking_to_response(booking).model_dump(by_alias=True)
@@ -1313,6 +1369,12 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
             await PaymentRepository.update_status(
                 str(payment["id"]), "captured", captured_at=datetime.now(UTC)
             )
+    elif payment_method == "paypal":
+        payment = await PaymentRepository.get_by_booking_id(booking_id)
+        if payment and payment["status"] != "captured":
+            await PaymentRepository.update_status(
+                str(payment["id"]), "captured", captured_at=datetime.now(UTC)
+            )
 
     billing = await fetch_billing_config(hotel_id)
 
@@ -1337,7 +1399,7 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
         effective_affiliate_commission_pct=affiliate_commission_pct,
     )
 
-    if payment_method in ("card", "xendit"):
+    if payment_method in ("card", "xendit", "paypal"):
         new_payment_status = "captured"
     else:
         new_payment_status = "pay_at_property"
@@ -1362,14 +1424,14 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
         )
 
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(send_guest_booking_accepted(updated["guest_email"], updated))
+    _create_task(send_guest_booking_accepted(updated["guest_email"], updated))
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(send_host_booking_accepted(hotel["contact_email"], updated))
+        _create_task(send_host_booking_accepted(hotel["contact_email"], updated))
 
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
 
     return updated
 
@@ -1383,7 +1445,7 @@ def _schedule_unassigned_sweep(booking: dict) -> None:
     """
     if not booking or not booking.get("room_id"):
         return
-    asyncio.create_task(
+    _create_task(
         try_place_unassigned_after_cancellation(
             str(booking["hotel_id"]),
             str(booking["room_type_id"]),
@@ -1429,6 +1491,9 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
             except Exception as e:
                 logger.warning("Failed to expire Xendit invoice for booking %s: %s", booking_id, e)
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "paypal":
+        if payment:
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
     # VAY-404: host-rejected requests are stored as 'declined' so the UI can
     # distinguish them from guest-driven cancellations ('cancelled' covers
@@ -1439,18 +1504,18 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
 
     # Notify guest, host, and ops
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(send_guest_booking_rejected(updated["guest_email"], updated, reason=reason))
+    _create_task(send_guest_booking_rejected(updated["guest_email"], updated, reason=reason))
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(
+        _create_task(
             send_host_booking_rejected(hotel["contact_email"], updated, reason=reason)
         )
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    asyncio.create_task(channex_handle_cancellation(booking_id))
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(channex_handle_cancellation(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
     _schedule_unassigned_sweep(booking)
 
     return updated
@@ -1486,12 +1551,12 @@ async def guest_withdraw_booking(booking_id: str, guest_email: str) -> dict:
     )
     updated = await BookingRepository.get_by_id(booking_id)
     if hotel:
-        asyncio.create_task(send_host_booking_withdrawn(hotel["contact_email"], updated))
-    asyncio.create_task(send_guest_booking_withdrawn(updated["guest_email"], updated))
+        _create_task(send_host_booking_withdrawn(hotel["contact_email"], updated))
+    _create_task(send_guest_booking_withdrawn(updated["guest_email"], updated))
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    asyncio.create_task(channex_handle_cancellation(booking_id))
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(channex_handle_cancellation(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
     _schedule_unassigned_sweep(booking)
 
     return updated
@@ -1751,7 +1816,7 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
     await PayoutRepository.cancel_by_booking(booking_id)
 
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(
+    _create_task(
         send_guest_cancellation_refund(
             updated["guest_email"],
             updated,
@@ -1763,11 +1828,11 @@ async def handle_guest_cancellation(booking_id: str, guest_email: str) -> dict:
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        asyncio.create_task(send_host_guest_cancelled(hotel["contact_email"], updated))
+        _create_task(send_host_guest_cancelled(hotel["contact_email"], updated))
 
     # Sync cancellation and availability to Channex (fire-and-forget)
-    asyncio.create_task(channex_handle_cancellation(booking_id))
-    asyncio.create_task(push_ari_for_booking(booking_id))
+    _create_task(channex_handle_cancellation(booking_id))
+    _create_task(push_ari_for_booking(booking_id))
     _schedule_unassigned_sweep(booking)
 
     return updated
@@ -1797,6 +1862,9 @@ async def expire_booking(booking_id: str) -> None:
                     "Failed to expire Xendit invoice for expired booking %s: %s", booking_id, e
                 )
             await PaymentRepository.update_status(str(payment["id"]), "cancelled")
+    elif booking.get("payment_method") == "paypal":
+        if payment:
+            await PaymentRepository.update_status(str(payment["id"]), "cancelled")
 
     await BookingRepository.update_status(booking_id, "expired")
     await BookingRepository.update_payment_status(booking_id, "cancelled")
@@ -1806,9 +1874,9 @@ async def expire_booking(booking_id: str) -> None:
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     updated = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(send_guest_booking_expired(updated["guest_email"], updated))
+    _create_task(send_guest_booking_expired(updated["guest_email"], updated))
     if hotel:
-        asyncio.create_task(send_host_booking_expired(hotel["contact_email"], updated))
+        _create_task(send_host_booking_expired(hotel["contact_email"], updated))
     _schedule_unassigned_sweep(booking)
 
 

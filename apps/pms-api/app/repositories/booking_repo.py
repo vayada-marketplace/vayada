@@ -137,7 +137,8 @@ class BookingRepository:
     async def get_by_id(booking_id: str) -> dict | None:
         row = await Database.fetchrow(
             """
-            SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
+            SELECT b.*, rt.name AS room_name, rt.max_occupancy AS room_max_occupancy,
+                   h.name AS hotel_name,
                    h.slug AS hotel_slug, rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
@@ -155,7 +156,8 @@ class BookingRepository:
     async def lookup(booking_reference: str, guest_email: str) -> dict | None:
         row = await Database.fetchrow(
             """
-            SELECT b.*, rt.name AS room_name, h.name AS hotel_name,
+            SELECT b.*, rt.name AS room_name, rt.max_occupancy AS room_max_occupancy,
+                   h.name AS hotel_name,
                    h.slug AS hotel_slug, rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
@@ -205,7 +207,8 @@ class BookingRepository:
         args.extend([limit, offset])
         rows = await Database.fetch(
             f"""
-            SELECT b.*, rt.name AS room_name, rm.room_number
+            SELECT b.*, rt.name AS room_name, rt.max_occupancy AS room_max_occupancy,
+                   rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
             LEFT JOIN rooms rm ON rm.id = b.room_id
@@ -235,7 +238,8 @@ class BookingRepository:
     async def list_by_hotel_in_range(hotel_id: str, start_date, end_date) -> list[dict]:
         rows = await Database.fetch(
             """
-            SELECT b.*, rt.name AS room_name, rm.room_number
+            SELECT b.*, rt.name AS room_name, rt.max_occupancy AS room_max_occupancy,
+                   rm.room_number
             FROM bookings b
             JOIN room_types rt ON rt.id = b.room_type_id
             LEFT JOIN rooms rm ON rm.id = b.room_id
@@ -545,7 +549,11 @@ class BookingRepository:
             promo_discount = float(current.get("promo_discount") or 0)
             total = round(rate * nights * rooms + addon_total - promo_discount, 2)
             await Database.execute(
-                "UPDATE bookings SET total_amount = $2, updated_at = now() WHERE id = $1",
+                """UPDATE bookings
+SET total_amount = $2,
+    balance_amount = GREATEST($2 - COALESCE(deposit_amount, 0), 0),
+    updated_at = now()
+WHERE id = $1""",
                 booking_id,
                 total,
             )

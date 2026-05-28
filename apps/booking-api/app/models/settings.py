@@ -29,6 +29,8 @@ HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
     "pay_at_property_enabled": False,
     "online_card_payment": False,
     "bank_transfer": False,
+    "paypal_enabled": False,
+    "paypal_payment_window_hours": 24,
     "payout_account_type": "iban",
     "billing_active_plan": "commission",
     "billing_commission_rate": 5,
@@ -77,6 +79,9 @@ class PropertySettingsResponse(BaseModel):
     pay_at_hotel_methods: list[str]
     online_card_payment: bool
     bank_transfer: bool
+    paypal_enabled: bool
+    paypal_email: str
+    paypal_payment_window_hours: int
     free_cancellation_days: int
     email_notifications: bool
     new_booking_alerts: bool
@@ -141,6 +146,9 @@ class PropertySettingsUpdate(BaseModel):
     pay_at_hotel_methods: list[str] | None = None
     online_card_payment: bool | None = None
     bank_transfer: bool | None = None
+    paypal_enabled: bool | None = None
+    paypal_email: str | None = None
+    paypal_payment_window_hours: int | None = None
     free_cancellation_days: int | None = None
     email_notifications: bool | None = None
     new_booking_alerts: bool | None = None

@@ -22,6 +22,11 @@ UPDATE bookings
 SET balance_amount = total_amount
 WHERE balance_amount IS NULL;
 
+ALTER TABLE bookings ALTER COLUMN balance_amount SET NOT NULL;
+
+ALTER TABLE bookings ADD CONSTRAINT bookings_deposit_consistency_check
+    CHECK (NOT deposit_required OR (deposit_percentage IS NOT NULL AND deposit_percentage BETWEEN 1 AND 100) OR deposit_amount > 0);
+
 ALTER TABLE bookings
     ADD CONSTRAINT bookings_deposit_percentage_check
         CHECK (deposit_percentage IS NULL OR deposit_percentage BETWEEN 1 AND 100),

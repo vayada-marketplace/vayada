@@ -85,6 +85,9 @@ class PaymentSettingsResponse(BaseModel):
     pay_at_hotel_methods: list[str] = []
     online_card_payment: bool = False
     bank_transfer: bool = False
+    paypal_enabled: bool = False
+    paypal_email: str = ""
+    paypal_payment_window_hours: int = 24
     free_cancellation_days: int = 7
     special_requests_enabled: bool = True
     arrival_time_enabled: bool = False

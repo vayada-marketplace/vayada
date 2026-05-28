@@ -351,14 +351,23 @@ export default function ReservationsPage() {
                         {source.letter}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(
-                          b.depositRequired ? b.balanceAmount : b.totalAmount,
-                          b.currency,
-                        )}
+                        {formatCurrency(b.totalAmount, b.currency)}
                       </span>
                       {b.depositRequired && (
-                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-                          {b.paymentStatus === "captured" ? "Deposit paid" : "Deposit pending"}
+                        <span
+                          className={`text-[10px] font-semibold rounded-full px-2 py-0.5 ${
+                            b.paymentStatus === "captured"
+                              ? "text-emerald-700 bg-emerald-50 border border-emerald-200"
+                              : b.paymentStatus === "refunded"
+                                ? "text-gray-600 bg-gray-100 border border-gray-200"
+                                : "text-amber-700 bg-amber-50 border border-amber-200"
+                          }`}
+                        >
+                          {b.paymentStatus === "captured"
+                            ? "Deposit paid"
+                            : b.paymentStatus === "refunded"
+                              ? "Deposit refunded"
+                              : "Deposit pending"}
                         </span>
                       )}
                     </div>
@@ -520,13 +529,22 @@ export default function ReservationsPage() {
 
                       {/* Total */}
                       <td className="px-4 py-4 text-right text-[13px] font-semibold text-gray-900">
-                        {formatCurrency(
-                          b.depositRequired ? b.balanceAmount : b.totalAmount,
-                          b.currency,
-                        )}
+                        {formatCurrency(b.totalAmount, b.currency)}
                         {b.depositRequired && (
-                          <div className="mt-1 text-[10px] font-medium text-emerald-700">
-                            {b.paymentStatus === "captured" ? "Deposit paid" : "Deposit pending"}
+                          <div
+                            className={`mt-1 text-[10px] font-medium ${
+                              b.paymentStatus === "captured"
+                                ? "text-emerald-700"
+                                : b.paymentStatus === "refunded"
+                                  ? "text-gray-500"
+                                  : "text-amber-700"
+                            }`}
+                          >
+                            {b.paymentStatus === "captured"
+                              ? "Deposit paid"
+                              : b.paymentStatus === "refunded"
+                                ? "Deposit refunded"
+                                : "Deposit pending"}
                           </div>
                         )}
                       </td>

@@ -102,15 +102,18 @@ def _validate_rate_deposit_settings(settings: dict | None) -> dict | None:
             continue
         if not isinstance(raw, dict):
             raise ValueError("rate_deposit_settings entries must be objects")
-        enabled = bool(raw.get("enabled", False))
+        val = raw.get("enabled", False)
+        if not isinstance(val, bool):
+            raise ValueError("enabled must be a boolean")
+        enabled = val
         percentage = raw.get("percentage", 50 if enabled else None)
         if not enabled:
             normalized[rate_key] = {"enabled": False, "percentage": None}
             continue
         try:
             pct = int(percentage)
-        except (TypeError, ValueError):
-            raise ValueError("deposit percentage must be an integer")
+        except (TypeError, ValueError) as e:
+            raise ValueError("deposit percentage must be an integer") from e
         if pct < 1 or pct > 100:
             raise ValueError("deposit percentage must be between 1 and 100")
         normalized[rate_key] = {"enabled": True, "percentage": pct}

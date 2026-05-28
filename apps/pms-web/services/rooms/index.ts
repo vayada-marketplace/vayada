@@ -22,6 +22,8 @@ export interface PartialRefundTier {
   refundPercent: number;
 }
 
+export type RatePlanKey = "flexible" | "nonrefundable";
+
 export interface RateDepositSetting {
   enabled: boolean;
   percentage: number | null;
@@ -35,6 +37,8 @@ export interface RoomType {
   description: string;
   shortDescription: string;
   maxOccupancy: number;
+  maxAdults: number | null;
+  maxChildren: number | null;
   bedrooms: number;
   bathrooms: number;
   size: number;
@@ -73,7 +77,7 @@ export interface RoomType {
   nonRefundableCancellationPolicy: string;
   minimumAdvanceDays: number;
   ratePaymentMethods: Record<string, string[]> | null;
-  rateDepositSettings: Record<string, RateDepositSetting> | null;
+  rateDepositSettings: Partial<Record<RatePlanKey, RateDepositSetting>> | null;
   mealPlans: MealPlan[];
   createdAt: string;
   updatedAt: string;
@@ -85,6 +89,8 @@ export interface RoomTypeCreate {
   description?: string;
   shortDescription?: string;
   maxOccupancy?: number;
+  maxAdults?: number | null;
+  maxChildren?: number | null;
   bedrooms?: number;
   bathrooms?: number;
   size?: number;
@@ -123,7 +129,7 @@ export interface RoomTypeCreate {
   nonRefundableCancellationPolicy?: string;
   minimumAdvanceDays?: number;
   ratePaymentMethods?: Record<string, string[]> | null;
-  rateDepositSettings?: Record<string, RateDepositSetting> | null;
+  rateDepositSettings?: Partial<Record<RatePlanKey, RateDepositSetting>> | null;
   mealPlans?: MealPlan[];
 }
 

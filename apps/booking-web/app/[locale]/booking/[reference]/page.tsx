@@ -62,6 +62,10 @@ export default function BookingConfirmationPage({
   const [hydrating, setHydrating] = useState(false);
   const [hydrateError, setHydrateError] = useState(false);
   const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
+  const [paypalInfo, setPaypalInfo] = useState<{
+    email: string;
+    windowHours: number;
+  } | null>(null);
 
   // Booking details are written to sessionStorage on the checkout flow, but
   // sessionStorage is per-tab, so a guest who opens the "View My Booking" link
@@ -102,6 +106,21 @@ export default function BookingConfirmationPage({
       cancelled = true;
     };
   }, [reference, emailParam, slug]);
+
+  useEffect(() => {
+    if (booking?.paymentMethod !== "paypal") return;
+    bookingService
+      .getPaymentSettings(slug)
+      .then((settings) => {
+        if (settings.paypalEmail) {
+          setPaypalInfo({
+            email: settings.paypalEmail,
+            windowHours: settings.paypalPaymentWindowHours || 24,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [booking?.paymentMethod, slug]);
 
   // Fetch any existing change request once we know the booking + email.
   useEffect(() => {
@@ -397,7 +416,11 @@ export default function BookingConfirmationPage({
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-600">
-                      {booking.paymentStatus === "captured" ? "Deposit paid" : "Deposit pending"}
+                      {booking.paymentStatus === "captured"
+                        ? "Deposit paid"
+                        : booking.paymentStatus === "refunded"
+                          ? "Deposit refunded"
+                          : "Deposit pending"}
                     </span>
                     <span className="font-semibold text-gray-900">
                       {formatPrice(booking.depositAmount || 0, booking.currency)}
@@ -417,14 +440,43 @@ export default function BookingConfirmationPage({
                   <span className="font-medium text-gray-900">
                     {booking.paymentMethod === "card"
                       ? "Card"
-                      : booking.paymentMethod === "bank_transfer"
-                        ? "Bank transfer"
-                        : booking.paymentMethod === "xendit"
-                          ? "Xendit"
-                          : "Pay at Property"}
+                      : booking.paymentMethod === "paypal"
+                        ? "PayPal"
+                        : booking.paymentMethod === "bank_transfer"
+                          ? "Bank transfer"
+                          : booking.paymentMethod === "xendit"
+                            ? "Xendit"
+                            : booking.paymentMethod || "Other"}
                   </span>
                 </div>
               )}
+            </div>
+          )}
+
+          {isPending && booking?.paymentMethod === "paypal" && paypalInfo && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
+              <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
+              <p className="text-xs text-blue-700 mt-1">
+                Send {booking.currency} {booking.totalAmount} to {paypalInfo.email} and include{" "}
+                {booking.bookingReference} in the PayPal note so the property can match it. Payment
+                must be confirmed within {paypalInfo.windowHours} hours.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(paypalInfo.email)}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                >
+                  Copy email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(booking.bookingReference)}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                >
+                  Copy booking reference
+                </button>
+              </div>
             </div>
           )}
 
