@@ -114,6 +114,146 @@ class TestCreateBookingRequest:
         assert body["booking"]["totalAmount"] == 450.0  # 150 * 3 nights
         assert body["draftId"]
         mock_pi.assert_called_once()
+        assert mock_pi.call_args.kwargs["amount"] == 45000
+
+    async def test_create_booking_card_deposit_charges_deposit_amount(
+        self, client, cleanup_database
+    ):
+        """Card deposit rates create the PaymentIntent for the deposit only."""
+        import json as _json
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(
+            str(hotel["id"]),
+            stripe_connect_account_id="acct_test_deposit",
+            stripe_connect_onboarded=True,
+        )
+        await Database.execute(
+            "UPDATE room_types SET rate_deposit_settings = $1::jsonb WHERE id = $2",
+            _json.dumps({"flexible": {"enabled": True, "percentage": 50}}),
+            str(room["id"]),
+        )
+
+        with patch(
+            "app.services.stripe_service.create_payment_intent", new_callable=AsyncMock
+        ) as mock_pi:
+            mock_pi.return_value = {
+                "id": "pi_test_deposit",
+                "client_secret": "pi_test_deposit_secret",
+                "status": "requires_payment_method",
+            }
+
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings",
+                json={
+                    "roomTypeId": str(room["id"]),
+                    "guestFirstName": "Dana",
+                    "guestLastName": "Deposit",
+                    "guestEmail": "dana@test.com",
+                    "guestPhone": "+1234567890",
+                    "checkIn": "2026-09-01",
+                    "checkOut": "2026-09-05",
+                    "adults": 2,
+                    "paymentMethod": "card",
+                    "rateType": "flexible",
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["booking"]["totalAmount"] == 600.0
+        assert body["booking"]["depositRequired"] is True
+        assert body["booking"]["depositPercentage"] == 50
+        assert body["booking"]["depositAmount"] == 300.0
+        assert body["booking"]["balanceAmount"] == 300.0
+        assert mock_pi.call_args.kwargs["amount"] == 30000
+        assert mock_pi.call_args.kwargs["capture_method"] == "automatic"
+
+    async def test_create_booking_manual_deposit_records_deposit_payment(
+        self, client, cleanup_database
+    ):
+        """Manual deposit rates create a pending payment for the deposit only."""
+        import json as _json
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]))
+        await Database.execute(
+            "UPDATE hotel_payment_settings SET bank_transfer = true WHERE hotel_id = $1",
+            str(hotel["id"]),
+        )
+        await Database.execute(
+            "UPDATE room_types SET rate_deposit_settings = $1::jsonb WHERE id = $2",
+            _json.dumps({"flexible": {"enabled": True, "percentage": 50}}),
+            str(room["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Manny",
+                "guestLastName": "Manual",
+                "guestEmail": "manny@test.com",
+                "guestPhone": "+1234567890",
+                "checkIn": "2026-09-01",
+                "checkOut": "2026-09-05",
+                "adults": 2,
+                "paymentMethod": "bank_transfer",
+                "rateType": "flexible",
+            },
+        )
+
+        assert resp.status_code == 200
+        booking = resp.json()["booking"]
+        assert booking["depositRequired"] is True
+        assert booking["depositAmount"] == 300.0
+        assert booking["balanceAmount"] == 300.0
+
+        payment = await Database.fetchrow(
+            "SELECT amount, payment_method, payment_purpose, status FROM payments WHERE booking_id = $1",
+            booking["id"],
+        )
+        assert float(payment["amount"]) == 300.0
+        assert payment["payment_method"] == "bank_transfer"
+        assert payment["payment_purpose"] == "deposit"
+        assert payment["status"] == "pending"
+
+    async def test_create_booking_deposit_rejects_pay_at_property(self, client, cleanup_database):
+        """A deposit-required rate cannot be booked with pay-at-property."""
+        import json as _json
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await Database.execute(
+            "UPDATE room_types SET rate_deposit_settings = $1::jsonb WHERE id = $2",
+            _json.dumps({"flexible": {"enabled": True, "percentage": 50}}),
+            str(room["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Pat",
+                "guestLastName": "Property",
+                "guestEmail": "pat@test.com",
+                "guestPhone": "+1234567890",
+                "checkIn": "2026-09-01",
+                "checkOut": "2026-09-05",
+                "adults": 2,
+                "paymentMethod": "pay_at_property",
+                "rateType": "flexible",
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "requires a deposit" in resp.json()["detail"].lower()
 
     async def test_create_booking_pay_at_property(self, client, cleanup_database):
         """Pay-at-property booking requires the setting to be enabled."""
@@ -890,6 +1030,217 @@ class TestGuestCancellation:
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
         mock_refund.assert_called_once()
+
+    async def test_cancel_card_deposit_inside_free_window_refunds_deposit(
+        self, client, cleanup_database
+    ):
+        """Free cancellation on a deposit booking refunds the paid deposit."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(str(hotel["id"]), free_cancellation_days=7)
+
+        check_in = (date.today() + timedelta(days=14)).isoformat()
+        check_out = (date.today() + timedelta(days=18)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
+            guest_email="deposit-free@test.com",
+        )
+        await Database.execute(
+            """
+            UPDATE bookings
+            SET deposit_required = true,
+                deposit_percentage = 50,
+                deposit_amount = 300,
+                balance_amount = 300
+            WHERE id = $1
+            """,
+            str(booking["id"]),
+        )
+        await Database.execute(
+            """
+            INSERT INTO payments (
+                booking_id, amount, currency, payment_method,
+                stripe_payment_intent_id, status, payment_purpose
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            str(booking["id"]),
+            300.0,
+            "EUR",
+            "card",
+            "pi_test_deposit_refund",
+            "captured",
+            "deposit",
+        )
+
+        with patch(
+            "app.services.stripe_service.create_refund", new_callable=AsyncMock
+        ) as mock_refund:
+            mock_refund.return_value = {"id": "re_deposit", "status": "succeeded"}
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel",
+                json={"guest_email": "deposit-free@test.com"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+        mock_refund.assert_called_once_with("pi_test_deposit_refund", amount=None)
+        payment = await Database.fetchrow(
+            "SELECT status, refund_amount FROM payments WHERE booking_id = $1 AND payment_purpose = 'deposit'",
+            str(booking["id"]),
+        )
+        assert payment["status"] == "refunded"
+        assert float(payment["refund_amount"]) == 300.0
+
+    async def test_cancel_preview_deposit_retained_when_policy_penalty_lower(
+        self, client, cleanup_database
+    ):
+        """Outside free cancellation, deposit is retained when it exceeds policy penalty."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(
+            str(hotel["id"]), free_cancellation_days=7, partial_refund_pct=70
+        )
+
+        check_in = (date.today() + timedelta(days=1)).isoformat()
+        check_out = (date.today() + timedelta(days=5)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
+            guest_email="deposit-retain@test.com",
+        )
+        await Database.execute(
+            """
+            UPDATE bookings
+            SET deposit_required = true,
+                deposit_percentage = 50,
+                deposit_amount = 300,
+                balance_amount = 300
+            WHERE id = $1
+            """,
+            str(booking["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel-preview",
+            json={"guest_email": "deposit-retain@test.com"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["refundAmount"] == 0
+        assert body["policyPenalty"] == 180.0
+        assert body["cancellationCharge"] == 300.0
+        assert body["depositRetained"] == 300.0
+        assert body["additionalAmountDue"] == 0
+
+    async def test_cancel_preview_deposit_reports_extra_due_when_policy_penalty_higher(
+        self, client, cleanup_database
+    ):
+        """If policy penalty exceeds the deposit, preview exposes the extra due."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(
+            str(hotel["id"]), free_cancellation_days=7, partial_refund_pct=0
+        )
+
+        check_in = (date.today() + timedelta(days=1)).isoformat()
+        check_out = (date.today() + timedelta(days=5)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="card",
+            payment_status="captured",
+            guest_email="deposit-extra@test.com",
+        )
+        await Database.execute(
+            """
+            UPDATE bookings
+            SET deposit_required = true,
+                deposit_percentage = 50,
+                deposit_amount = 300,
+                balance_amount = 300
+            WHERE id = $1
+            """,
+            str(booking["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel-preview",
+            json={"guest_email": "deposit-extra@test.com"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["policyPenalty"] == 600.0
+        assert body["cancellationCharge"] == 600.0
+        assert body["depositRetained"] == 300.0
+        assert body["additionalAmountDue"] == 300.0
+
+    async def test_cancel_pending_manual_deposit_does_not_refund(self, client, cleanup_database):
+        """Pending manual deposits cancel without Stripe refund work."""
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+        await create_test_cancellation_policy(
+            str(hotel["id"]), free_cancellation_days=7, partial_refund_pct=0
+        )
+
+        check_in = (date.today() + timedelta(days=1)).isoformat()
+        check_out = (date.today() + timedelta(days=5)).isoformat()
+        booking = await create_test_booking_with_payment(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in=check_in,
+            check_out=check_out,
+            status="confirmed",
+            payment_method="bank_transfer",
+            payment_status="awaiting_transfer",
+            guest_email="manual-pending@test.com",
+        )
+        await Database.execute(
+            """
+            UPDATE bookings
+            SET deposit_required = true,
+                deposit_percentage = 50,
+                deposit_amount = 300,
+                balance_amount = 300
+            WHERE id = $1
+            """,
+            str(booking["id"]),
+        )
+
+        with patch(
+            "app.services.stripe_service.create_refund", new_callable=AsyncMock
+        ) as mock_refund:
+            resp = await client.post(
+                f"/api/hotels/{hotel['slug']}/bookings/{booking['id']}/cancel",
+                json={"guest_email": "manual-pending@test.com"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+        mock_refund.assert_not_called()
+        updated = await Database.fetchrow(
+            "SELECT payment_status FROM bookings WHERE id = $1", str(booking["id"])
+        )
+        assert updated["payment_status"] == "cancelled"
 
     async def test_cancel_pending_fails(self, client, cleanup_database):
         """Cannot cancel a pending booking (use withdraw instead)."""

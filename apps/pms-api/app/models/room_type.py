@@ -88,6 +88,35 @@ def _validate_meal_plans(plans: list) -> list:
     return plans
 
 
+def _validate_rate_deposit_settings(settings: dict | None) -> dict | None:
+    if settings is None:
+        return None
+    if not isinstance(settings, dict):
+        raise ValueError("rate_deposit_settings must be an object")
+
+    normalized: dict[str, dict] = {}
+    for rate_key, raw in settings.items():
+        if rate_key not in ("flexible", "nonrefundable"):
+            raise ValueError("rate_deposit_settings keys must be 'flexible' or 'nonrefundable'")
+        if raw is None:
+            continue
+        if not isinstance(raw, dict):
+            raise ValueError("rate_deposit_settings entries must be objects")
+        enabled = bool(raw.get("enabled", False))
+        percentage = raw.get("percentage", 50 if enabled else None)
+        if not enabled:
+            normalized[rate_key] = {"enabled": False, "percentage": None}
+            continue
+        try:
+            pct = int(percentage)
+        except (TypeError, ValueError):
+            raise ValueError("deposit percentage must be an integer")
+        if pct < 1 or pct > 100:
+            raise ValueError("deposit percentage must be between 1 and 100")
+        normalized[rate_key] = {"enabled": True, "percentage": pct}
+    return normalized
+
+
 def _validate_operating_periods(periods: list) -> list:
     """Raise ValueError if any operating period has end date before start date."""
     for p in periods:
@@ -271,6 +300,7 @@ class RoomTypeCreate(BaseModel):
     last_minute_discount: dict | None = None
     minimum_advance_days: int = 0
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] = []
 
     @field_validator("size")
@@ -298,6 +328,11 @@ class RoomTypeCreate(BaseModel):
     @classmethod
     def validate_meal_plans(cls, v: list[dict]) -> list[dict]:
         return _validate_meal_plans(v)
+
+    @field_validator("rate_deposit_settings")
+    @classmethod
+    def validate_rate_deposit_settings(cls, v: dict[str, dict] | None) -> dict | None:
+        return _validate_rate_deposit_settings(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod
@@ -385,6 +420,7 @@ class RoomTypeUpdate(BaseModel):
     last_minute_discount: dict | None = None
     minimum_advance_days: int | None = None
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] | None = None
 
     @field_validator("size")
@@ -468,6 +504,11 @@ class RoomTypeUpdate(BaseModel):
             _validate_meal_plans(v)
         return v
 
+    @field_validator("rate_deposit_settings")
+    @classmethod
+    def validate_rate_deposit_settings(cls, v: dict[str, dict] | None) -> dict | None:
+        return _validate_rate_deposit_settings(v)
+
 
 class RoomTypeResponse(BaseModel):
     """Guest-facing response — includes availability."""
@@ -504,6 +545,7 @@ class RoomTypeResponse(BaseModel):
     partial_refund_tiers: list[dict] = []
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
 
 
 class RoomTypeAdminResponse(BaseModel):
@@ -549,6 +591,7 @@ class RoomTypeAdminResponse(BaseModel):
     last_minute_discount: dict | None = None
     minimum_advance_days: int = 0
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] = []
     created_at: str
     updated_at: str

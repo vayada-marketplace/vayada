@@ -38,6 +38,10 @@ interface StripeConfirmStepProps {
   roomsParam: number;
   selectedCurrency: string;
   convertAndRound: (amount: number, fromCurrency: string) => number;
+  depositRequired: boolean;
+  depositPercentage: number;
+  depositAmount: number;
+  remainingBalance: number;
 }
 
 export default function StripeConfirmStep({
@@ -63,6 +67,10 @@ export default function StripeConfirmStep({
   roomsParam,
   selectedCurrency,
   convertAndRound,
+  depositRequired,
+  depositPercentage,
+  depositAmount,
+  remainingBalance,
 }: StripeConfirmStepProps) {
   const stripe = useStripe();
   const elements = useElements();
@@ -99,7 +107,7 @@ export default function StripeConfirmStep({
       saveLastBooking({
         ...materialized,
         paymentMethod: "card",
-        paymentStatus: "authorized",
+        paymentStatus: depositRequired ? "captured" : "authorized",
       });
       router.push(`/booking/${materialized.bookingReference}`);
     } catch (err: any) {
@@ -180,6 +188,24 @@ export default function StripeConfirmStep({
                 {formatPrice(grandTotal, selectedCurrency)}
               </span>
             </div>
+            {depositRequired && (
+              <div className="space-y-2 pt-2 border-t border-gray-200">
+                <div className="flex justify-between text-sm">
+                  <span className="font-semibold text-gray-900">
+                    Deposit due now ({depositPercentage}%)
+                  </span>
+                  <span className="font-bold text-gray-900">
+                    {formatPrice(depositAmount, selectedCurrency)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Remaining due at arrival</span>
+                  <span className="font-semibold text-gray-900">
+                    {formatPrice(remainingBalance, selectedCurrency)}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -203,12 +229,16 @@ export default function StripeConfirmStep({
           >
             {submitting
               ? t("processing") || "Processing..."
-              : t("authorizePayment") || `Authorize ${formatPrice(grandTotal, selectedCurrency)}`}
+              : depositRequired
+                ? `Pay deposit ${formatPrice(depositAmount, selectedCurrency)}`
+                : t("authorizePayment") || `Authorize ${formatPrice(grandTotal, selectedCurrency)}`}
           </button>
 
           <p className="text-xs text-gray-500 text-center mt-3">
-            {t("authorizationNote") ||
-              "Your card will only be charged if the host accepts your booking within 24 hours."}
+            {depositRequired
+              ? `Your card is charged ${formatPrice(depositAmount, selectedCurrency)} now. The remaining balance is paid at the property.`
+              : t("authorizationNote") ||
+                "Your card will only be charged if the host accepts your booking within 24 hours."}
           </p>
         </div>
       </div>

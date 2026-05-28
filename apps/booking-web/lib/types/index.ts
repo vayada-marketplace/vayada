@@ -76,6 +76,13 @@ export interface RoomType {
   originalRate?: number | null;
   lastMinuteDiscountPercent?: number | null;
   ratePaymentMethods?: Record<string, string[]> | null;
+  rateDepositSettings?: Record<
+    string,
+    {
+      enabled: boolean;
+      percentage: number | null;
+    }
+  > | null;
 }
 
 export interface SearchParams {
@@ -104,6 +111,10 @@ export interface Booking {
   // compatibility with cached/legacy booking shapes; treat missing as 1.
   numberOfRooms?: number;
   totalAmount: number;
+  depositRequired?: boolean;
+  depositPercentage?: number | null;
+  depositAmount?: number;
+  balanceAmount?: number;
   addonTotal?: number;
   // Selected add-ons snapshot from booking creation. Names are cached at
   // booking time so historical bookings still show the correct name even

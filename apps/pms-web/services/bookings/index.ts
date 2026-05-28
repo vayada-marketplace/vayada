@@ -29,6 +29,10 @@ export interface Booking {
   nightlyRate: number;
   numberOfRooms: number;
   totalAmount: number;
+  depositRequired: boolean;
+  depositPercentage: number | null;
+  depositAmount: number;
+  balanceAmount: number;
   currency: string;
   status:
     | "pending"

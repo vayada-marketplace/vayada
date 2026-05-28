@@ -48,7 +48,7 @@ function PaymentPageContent() {
   // from a navigation, which remounts), so reading them from a closure is
   // safe. refetchRooms is intentionally omitted because it isn't memoized
   // by HotelContext and would re-fire on every render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   useEffect(() => {
     if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam);
   }, []);
@@ -122,8 +122,19 @@ function PaymentPageContent() {
     room?.ratePaymentMethods?.[rateType] && Array.isArray(room.ratePaymentMethods[rateType])
       ? room.ratePaymentMethods[rateType]
       : null;
+  const depositSetting = room?.rateDepositSettings?.[rateType];
+  const depositRequired = !!depositSetting?.enabled && !!depositSetting.percentage;
+  const depositPercentage = depositSetting?.percentage ?? 0;
+  const depositAmount = depositRequired
+    ? Math.round(((grandTotal * depositPercentage) / 100) * 100) / 100
+    : 0;
+  const remainingBalance = depositRequired ? Math.max(grandTotal - depositAmount, 0) : grandTotal;
   const isMethodAllowedForRate = (method: string) =>
-    rateAllowList === null ? true : rateAllowList.includes(method);
+    depositRequired && method === "pay_at_property"
+      ? false
+      : rateAllowList === null
+        ? true
+        : rateAllowList.includes(method);
 
   // Check if pay-at-property is enabled
   useEffect(() => {
@@ -147,7 +158,7 @@ function PaymentPageContent() {
         ];
         const hotelEnabled: Record<string, boolean> = {
           card: !!settings.onlineCardPayment,
-          pay_at_property: !!settings.payAtPropertyEnabled,
+          pay_at_property: !!settings.payAtPropertyEnabled && !depositRequired,
           bank_transfer: !!settings.bankTransfer,
           xendit: !!settings.xenditPaymentsEnabled,
         };
@@ -275,6 +286,10 @@ function PaymentPageContent() {
           roomsParam={roomsParam}
           selectedCurrency={selectedCurrency}
           convertAndRound={convertAndRound}
+          depositRequired={depositRequired}
+          depositPercentage={depositPercentage}
+          depositAmount={depositAmount}
+          remainingBalance={remainingBalance}
         />
       </StripeProvider>
     );
@@ -557,12 +572,35 @@ function PaymentPageContent() {
                   </p>
                 )}
 
+              {depositRequired && (
+                <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="font-semibold text-emerald-900">
+                      Deposit due now: {depositPercentage}%
+                    </span>
+                    <span className="font-bold text-emerald-900">
+                      {formatPrice(depositAmount, selectedCurrency)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-emerald-700">
+                      Remaining balance due at the property upon arrival
+                    </span>
+                    <span className="font-semibold text-emerald-900">
+                      {formatPrice(remainingBalance, selectedCurrency)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Payment method info */}
               {paymentMethod === "card" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    {t("cardAuthExplanation") ||
-                      "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires."}
+                    {depositRequired
+                      ? `You will be charged ${formatPrice(depositAmount, selectedCurrency)} now. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                      : t("cardAuthExplanation") ||
+                        "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires."}
                   </div>
                   <div className="flex items-center gap-2 p-3 bg-accent rounded-xl text-sm text-gray-600">
                     <svg
@@ -590,8 +628,10 @@ function PaymentPageContent() {
               ) : paymentMethod === "bank_transfer" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    {t("bankTransferExplanation") ||
-                      "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
+                    {depositRequired
+                      ? `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                      : t("bankTransferExplanation") ||
+                        "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
                   </div>
                   {bankDetails &&
                     (bankDetails.iban ||
@@ -694,7 +734,10 @@ function PaymentPageContent() {
                       ? t.rich("agreeTerms", {
                           terms: renderTermsLink,
                           cancellation: renderCancellationLink,
-                          amount: formatPrice(grandTotal, selectedCurrency),
+                          amount: formatPrice(
+                            depositRequired ? depositAmount : grandTotal,
+                            selectedCurrency,
+                          ),
                         })
                       : t.rich("agreeTermsProperty", {
                           terms: renderTermsLink,
@@ -928,6 +971,22 @@ function PaymentPageContent() {
                     <p className="text-xs text-gray-500">{tc("includesTaxes")}</p>
                   </div>
                 </div>
+                {depositRequired && (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Due now</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatPrice(depositAmount, selectedCurrency)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Due at arrival</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatPrice(remainingBalance, selectedCurrency)}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

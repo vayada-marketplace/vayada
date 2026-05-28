@@ -47,6 +47,10 @@ const SOURCE_ICONS: Record<string, { bg: string; letter: string; title: string }
 function getBalanceStatus(b: Booking): string {
   if (b.status === "cancelled" || b.status === "declined")
     return b.paymentStatus === "refunded" ? "refunded" : "due";
+  if (b.depositRequired && b.depositAmount > 0) {
+    if (b.balanceAmount <= 0) return "paid";
+    return b.paymentStatus === "captured" ? "partial" : "due";
+  }
   if (b.paymentStatus === "captured") return "paid";
   if (b.paymentStatus === "authorized") return "partial";
   if (b.paymentMethod === "pay_at_property") return "due";
@@ -347,8 +351,16 @@ export default function ReservationsPage() {
                         {source.letter}
                       </span>
                       <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrency(b.totalAmount, b.currency)}
+                        {formatCurrency(
+                          b.depositRequired ? b.balanceAmount : b.totalAmount,
+                          b.currency,
+                        )}
                       </span>
+                      {b.depositRequired && (
+                        <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                          {b.paymentStatus === "captured" ? "Deposit paid" : "Deposit pending"}
+                        </span>
+                      )}
                     </div>
                     <span
                       className={`shrink-0 inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${BALANCE_STYLES[balance] || BALANCE_STYLES["due"]}`}
@@ -508,7 +520,15 @@ export default function ReservationsPage() {
 
                       {/* Total */}
                       <td className="px-4 py-4 text-right text-[13px] font-semibold text-gray-900">
-                        {formatCurrency(b.totalAmount, b.currency)}
+                        {formatCurrency(
+                          b.depositRequired ? b.balanceAmount : b.totalAmount,
+                          b.currency,
+                        )}
+                        {b.depositRequired && (
+                          <div className="mt-1 text-[10px] font-medium text-emerald-700">
+                            {b.paymentStatus === "captured" ? "Deposit paid" : "Deposit pending"}
+                          </div>
+                        )}
                       </td>
 
                       {/* Balance */}

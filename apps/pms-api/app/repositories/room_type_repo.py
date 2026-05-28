@@ -42,7 +42,8 @@ class RoomTypeRepository:
                 partial_refund_cancel_window_days,
                 partial_refund_amount_percent,
                 partial_refund_tiers,
-                meal_plans
+                meal_plans,
+                rate_deposit_settings
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
                 $12, $13, $14,
@@ -50,7 +51,7 @@ class RoomTypeRepository:
                 $20, $21, $22, $23::jsonb, $24::jsonb,
                 $25::jsonb, $26::jsonb, $27, $28, $29, $30,
                 $31, $32::jsonb, $33, $34::jsonb, $35,
-                $36, $37, $38, $39::jsonb, $40::jsonb
+                $36, $37, $38, $39::jsonb, $40::jsonb, $41::jsonb
             ) RETURNING *
             """,
             hotel_id,
@@ -97,6 +98,9 @@ class RoomTypeRepository:
             data.get("partial_refund_amount_percent", 50),
             json.dumps(data.get("partial_refund_tiers", [])),
             json.dumps(data.get("meal_plans", [])),
+            json.dumps(data.get("rate_deposit_settings"))
+            if data.get("rate_deposit_settings") is not None
+            else None,
         )
         return dict(row)
 
@@ -120,6 +124,7 @@ class RoomTypeRepository:
                 "seasons",
                 "last_minute_discount",
                 "rate_payment_methods",
+                "rate_deposit_settings",
                 "meal_plans",
                 "partial_refund_tiers",
             ):

@@ -73,13 +73,24 @@ def _booking_details_html(booking: dict) -> str:
     # not a bare singular, so the guest/host see how many rooms are booked.
     rooms = int(booking.get("number_of_rooms") or 1)
     accommodation = f"{rooms}× {booking['room_name']}" if rooms > 1 else booking["room_name"]
+    deposit_html = ""
+    if booking.get("deposit_required"):
+        deposit_status = (
+            "Deposit paid"
+            if booking.get("payment_status") in ("captured", "refunded", "partially_refunded")
+            else "Deposit pending"
+        )
+        deposit_html = f"""
+    <p class="detail"><strong>{deposit_status}:</strong> {booking["currency"]} {booking.get("deposit_amount", 0)}</p>
+    <p class="detail"><strong>Remaining balance:</strong> {booking["currency"]} {booking.get("balance_amount", 0)} — due at the property upon check-in</p>
+    """
     return f"""
     <p class="detail"><strong>Reference:</strong> {booking["booking_reference"]}</p>
     <p class="detail"><strong>Accommodation:</strong> {accommodation}</p>
     <p class="detail"><strong>Check-in:</strong> {booking["check_in"]}</p>
     <p class="detail"><strong>Check-out:</strong> {booking["check_out"]}</p>
     <p class="detail"><strong>Guests:</strong> {booking["adults"]} adults, {booking["children"]} children</p>{addons_html}
-    <p class="detail"><strong>Total:</strong> {booking["currency"]} {booking["total_amount"]}</p>
+    <p class="detail"><strong>Total:</strong> {booking["currency"]} {booking["total_amount"]}</p>{deposit_html}
     """
 
 

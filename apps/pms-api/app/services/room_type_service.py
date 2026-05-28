@@ -206,6 +206,9 @@ async def get_rooms_for_guest(
                 rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(
                     parse_jsonb(room.get("rate_payment_methods"))
                 ),
+                rate_deposit_settings=(lambda v: v if isinstance(v, dict) else None)(
+                    parse_jsonb(room.get("rate_deposit_settings"))
+                ),
             )
         )
 

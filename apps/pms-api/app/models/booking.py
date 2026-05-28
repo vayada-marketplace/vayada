@@ -66,6 +66,10 @@ class BookingResponse(BaseModel):
     status: str
     payment_method: str | None = None
     payment_status: str | None = None
+    deposit_required: bool = False
+    deposit_percentage: int | None = None
+    deposit_amount: float = 0
+    balance_amount: float = 0
     host_response_deadline: str | None = None
     created_at: str
 
@@ -164,6 +168,10 @@ class BookingAdminResponse(BaseModel):
     channel: str = "direct"
     payment_method: str | None = None
     payment_status: str | None = None
+    deposit_required: bool = False
+    deposit_percentage: int | None = None
+    deposit_amount: float = 0
+    balance_amount: float = 0
     check_in_pending_flags: list[str] = []
     checked_in_at: str | None = None
     host_response_deadline: str | None = None
