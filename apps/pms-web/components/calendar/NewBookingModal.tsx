@@ -14,6 +14,7 @@ import {
   AddOnListPicker,
   SelectedAddOnSummary,
   calculateAddOnsTotal,
+  clampAddOnQuantity,
 } from "@/components/bookings/AddOnListPicker";
 
 interface NewBookingModalProps {
@@ -138,6 +139,8 @@ export default function NewBookingModal({
   useEffect(() => {
     if (!roomId) {
       setAvailableAddons([]);
+      setSelectedAddonIds([]);
+      setAddonQuantities({});
       return;
     }
     let cancelled = false;
@@ -162,6 +165,9 @@ export default function NewBookingModal({
       .catch(() => {
         if (cancelled) return;
         setAvailableAddons([]);
+        setSelectedAddonIds([]);
+        setAddonQuantities({});
+        setAddonNotice("Unavailable add-ons were removed for the selected room.");
       })
       .finally(() => {
         if (!cancelled) setAddonsLoading(false);
@@ -194,7 +200,7 @@ export default function NewBookingModal({
   const overOccupancy = selectedRoomType != null && totalGuests > selectedRoomType.maxOccupancy;
   const rateNum = nightlyRate ? parseFloat(nightlyRate) : null;
   const total = useMemo(() => {
-    if (!rateNum || nights === 0) return null;
+    if (rateNum === null || Number.isNaN(rateNum) || nights === 0) return null;
     return (
       rateNum * nights +
       calculateAddOnsTotal(availableAddons, selectedAddonIds, addonQuantities, nights, adults)
@@ -245,7 +251,15 @@ export default function NewBookingModal({
         channel,
         addonIds: selectedAddonIds,
         addonQuantities: selectedAddonIds.reduce<Record<string, number>>((acc, addonId) => {
-          acc[addonId] = Math.max(1, Number(addonQuantities[addonId]) || 1);
+          const addon = availableAddons.find((item) => item.id === addonId);
+          if (addon) {
+            acc[addonId] = clampAddOnQuantity(
+              addon,
+              addonQuantities[addonId] || 1,
+              nights || 1,
+              adults,
+            );
+          }
           return acc;
         }, {}),
       });

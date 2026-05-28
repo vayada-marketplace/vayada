@@ -53,6 +53,21 @@ export function calculateAddOnLineTotal(
   return addon.price * qty;
 }
 
+export function clampAddOnQuantity(
+  addon: BookingAddon,
+  quantity: number,
+  nights: number,
+  adults: number,
+): number {
+  const max =
+    addon.perNight && !addon.perPerson
+      ? Math.max(1, nights)
+      : addon.perPerson
+        ? Math.max(1, adults)
+        : 99;
+  return Math.max(1, Math.min(max, Number(quantity) || 1));
+}
+
 export function calculateAddOnsTotal(
   addons: BookingAddon[],
   selectedIds: string[],
@@ -75,13 +90,7 @@ function nextQuantity(
   nights: number,
   adults: number,
 ) {
-  const max =
-    addon.perNight && !addon.perPerson
-      ? Math.max(1, nights)
-      : addon.perPerson
-        ? Math.max(1, adults)
-        : 99;
-  return Math.max(1, Math.min(max, current + delta));
+  return clampAddOnQuantity(addon, current + delta, nights, adults);
 }
 
 export function AddOnListPicker({

@@ -90,7 +90,7 @@ async def _has_captured_payment(booking: dict) -> bool:
     if (booking.get("payment_status") or "").lower() in ADDON_LOCK_PAYMENT_STATUSES:
         return True
     payments = await PaymentRepository.list_by_booking_ids([str(booking["id"])])
-    return any((p.get("status") or "").lower() == "captured" for p in payments)
+    return any((p.get("status") or "").lower() in ADDON_LOCK_PAYMENT_STATUSES for p in payments)
 
 
 def _addons_changed(booking: dict, updates: dict) -> bool:
@@ -103,6 +103,48 @@ def _addons_changed(booking: dict, updates: dict) -> bool:
     )
     dates_changed = "addon_dates" in updates and updates["addon_dates"] != current_dates
     return ids_changed or quantities_changed or dates_changed
+
+
+async def _normalize_addon_selection(
+    *,
+    slug: str,
+    addon_ids: list[str],
+    addon_quantities: dict,
+    adults: int,
+    nights: int,
+    addon_dates: dict | None = None,
+) -> tuple[list[str], dict[str, int]]:
+    if not addon_ids:
+        return [], {}
+
+    all_addons = await _fetch_hotel_addons(slug)
+    addon_map = {addon["id"]: addon for addon in all_addons}
+    unknown_ids = [addon_id for addon_id in addon_ids if addon_id not in addon_map]
+    if unknown_ids:
+        raise HTTPException(status_code=400, detail="Unknown add-on selected")
+
+    normalized_quantities: dict[str, int] = {}
+    addon_dates = addon_dates or {}
+    for addon_id in addon_ids:
+        addon = addon_map[addon_id]
+        per_person = bool(addon.get("perPerson"))
+        per_night = bool(addon.get("perNight"))
+        if per_person:
+            fallback = max(1, adults)
+            maximum = max(1, adults)
+        elif per_night:
+            fallback = len(addon_dates.get(addon_id) or []) or max(1, nights)
+            maximum = max(1, nights)
+        else:
+            fallback = 1
+            maximum = 99
+        raw_quantity = addon_quantities.get(addon_id, fallback)
+        try:
+            quantity = int(raw_quantity)
+        except (TypeError, ValueError):
+            quantity = fallback
+        normalized_quantities[addon_id] = max(1, min(quantity, maximum))
+    return addon_ids, normalized_quantities
 
 
 def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminResponse:
@@ -226,18 +268,22 @@ async def create_admin_booking(
         nightly_rate = resolved_base
     nights = (data.check_out - data.check_in).days
     hotel_slug = await Database.fetchval("SELECT slug FROM hotels WHERE id = $1", hotel_id)
+    addon_ids, addon_quantities = await _normalize_addon_selection(
+        slug=hotel_slug,
+        addon_ids=data.addon_ids or [],
+        addon_quantities=data.addon_quantities or {},
+        adults=data.adults,
+        nights=nights,
+    )
     addon_total, addon_names = await _compute_addon_total(
         hotel_slug,
-        data.addon_ids or [],
-        data.addon_quantities or {},
+        addon_ids,
+        addon_quantities,
         room_type["currency"],
         data.adults,
         nights,
         {},
     )
-    addon_quantities = {
-        addon_id: max(1, int(data.addon_quantities.get(addon_id, 1))) for addon_id in data.addon_ids
-    }
     total_amount = nightly_rate * nights + addon_total
 
     booking = await BookingRepository.create(
@@ -260,7 +306,7 @@ async def create_admin_booking(
             "room_id": data.room_id,
             "channel": data.channel,
             "status": "confirmed",
-            "addon_ids": data.addon_ids,
+            "addon_ids": addon_ids,
             "addon_names": addon_names,
             "addon_quantities": addon_quantities,
             "addon_total": addon_total,
@@ -388,6 +434,14 @@ async def update_booking_details(
             for addon_id in next_addon_ids
             if addon_id in addon_dates
         }
+        next_addon_ids, addon_quantities = await _normalize_addon_selection(
+            slug=booking["hotel_slug"],
+            addon_ids=next_addon_ids,
+            addon_quantities=addon_quantities,
+            adults=int(updates.get("adults", booking["adults"])),
+            nights=nights,
+            addon_dates=addon_dates,
+        )
         addon_total, addon_names = await _compute_addon_total(
             booking["hotel_slug"],
             next_addon_ids,

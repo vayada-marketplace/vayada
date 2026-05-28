@@ -32,7 +32,9 @@ import { formatCurrency } from "@/lib/formatCurrency";
 import {
   AddOnListPicker,
   SelectedAddOnSummary,
+  addOnUnitLabel,
   calculateAddOnsTotal,
+  clampAddOnQuantity,
 } from "@/components/bookings/AddOnListPicker";
 import {
   BOOKING_STATUS_STYLES,
@@ -1035,15 +1037,28 @@ function EditAddOnsModal({
   const handleSave = async () => {
     setErr("");
     setSaving(true);
+    const addonMap = new Map(availableAddons.map((addon) => [addon.id, addon]));
     const nextQuantities = selectedAddonIds.reduce<Record<string, number>>((acc, addonId) => {
-      acc[addonId] = Math.max(1, Number(addonQuantities[addonId]) || 1);
+      const addon = addonMap.get(addonId);
+      if (addon) {
+        acc[addonId] = clampAddOnQuantity(
+          addon,
+          addonQuantities[addonId] || 1,
+          booking.nights || 1,
+          booking.adults,
+        );
+      }
+      return acc;
+    }, {});
+    const nextAddonDates = selectedAddonIds.reduce<Record<string, string[]>>((acc, addonId) => {
+      if (booking.addonDates?.[addonId]) acc[addonId] = booking.addonDates[addonId];
       return acc;
     }, {});
     try {
       await onSave({
         addonIds: selectedAddonIds,
         addonQuantities: nextQuantities,
-        addonDates: {},
+        addonDates: nextAddonDates,
       });
       onClose();
     } catch (e) {
@@ -1853,12 +1868,20 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <div className="space-y-1.5 text-sm">
                 {addonRows.length > 0 ? (
-                  addonRows.map((row) => (
-                    <div key={row.addonId} className="flex justify-between text-gray-700">
-                      <span>{row.name}</span>
-                      {row.qty && <span className="text-gray-500">{row.qty} × stay</span>}
-                    </div>
-                  ))
+                  addonRows.map((row) => {
+                    const addon = detailAvailableAddons.find((item) => item.id === row.addonId);
+                    const unitLabel = addon ? addOnUnitLabel(addon) : "stay";
+                    return (
+                      <div key={row.addonId} className="flex justify-between text-gray-700">
+                        <span>{row.name}</span>
+                        {row.qty && (
+                          <span className="text-gray-500">
+                            {row.qty} × {unitLabel}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })
                 ) : (
                   <p className="text-sm text-gray-500">No add-ons selected.</p>
                 )}
