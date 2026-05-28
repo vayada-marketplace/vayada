@@ -39,14 +39,7 @@ import { useTranslation } from "@/lib/i18n";
 // - "payments" is new — Stripe Connect + Xendit moved out of billing into
 //   their own section (billing = what hotel pays Vayada; payments = how hotel
 //   collects from guests).
-type Section =
-  | "property"
-  | "booking"
-  | "notifications"
-  | "account"
-  | "billing"
-  | "payments";
-
+type Section = "property" | "booking" | "notifications" | "account" | "billing" | "payments";
 
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: "",
@@ -65,6 +58,9 @@ const DEFAULT_SETTINGS: PropertySettings = {
   pay_at_hotel_methods: ["cash", "card"],
   online_card_payment: false,
   bank_transfer: false,
+  paypal_enabled: false,
+  paypal_email: "",
+  paypal_payment_window_hours: 24,
   free_cancellation_days: 7,
   email_notifications: true,
   new_booking_alerts: true,
@@ -284,10 +280,34 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
+    const paypalEmail = (settings.paypal_email || "").trim();
+    const normalizedSettings =
+      paypalEmail === (settings.paypal_email || "")
+        ? settings
+        : { ...settings, paypal_email: paypalEmail };
+    if (settings.paypal_enabled) {
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(paypalEmail)) {
+        setFeedback({ type: "error", message: "Enter a valid PayPal email to enable PayPal." });
+        setActiveSection("billing");
+        return;
+      }
+      if (
+        !settings.paypal_payment_window_hours ||
+        settings.paypal_payment_window_hours < 1 ||
+        settings.paypal_payment_window_hours > 168
+      ) {
+        setFeedback({
+          type: "error",
+          message: "PayPal payment window must be between 1 and 168 hours.",
+        });
+        setActiveSection("billing");
+        return;
+      }
+    }
     try {
       setSaving(true);
       setFeedback(null);
-      const data = await settingsService.updatePropertySettings(settings);
+      const data = await settingsService.updatePropertySettings(normalizedSettings);
       setSettings(data);
       // Sync slug, name, and payment methods to PMS
       try {
@@ -1108,7 +1128,7 @@ export default function SettingsPage() {
             <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
               {t("settings.billing.paymentMethodsDesc")}
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
               {/* Online Card Payment */}
               <button
                 onClick={() => updateSetting("online_card_payment", !settings.online_card_payment)}
@@ -1223,6 +1243,97 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </button>
+
+              {/* PayPal */}
+              <div
+                className={`relative flex flex-col p-4 rounded-xl border-2 transition-all text-left ${
+                  settings.paypal_enabled
+                    ? "border-primary-500 bg-primary-50/30"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => updateSetting("paypal_enabled", !settings.paypal_enabled)}
+                  className="text-left"
+                >
+                  <div
+                    className={`absolute top-3 right-3 w-5 h-5 rounded-full border-2 flex items-center justify-center ${settings.paypal_enabled ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                  >
+                    {settings.paypal_enabled && (
+                      <svg
+                        className="w-3 h-3 text-white"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={3}
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    )}
+                  </div>
+                  <svg
+                    className="w-6 h-6 text-gray-700 mb-2"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={1.5}
+                      d="M12 6v12m-4-8h5a3 3 0 010 6H8V6h6a2 2 0 010 4H8"
+                    />
+                  </svg>
+                  <span className="text-[13px] font-semibold text-gray-900">PayPal</span>
+                  <p className="text-[11px] text-gray-500 mt-1 mb-3">
+                    Guests send payment manually to your PayPal email. Confirm it in PMS once
+                    received.
+                  </p>
+                </button>
+                {settings.paypal_enabled && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-1">
+                        PayPal email
+                      </label>
+                      <input
+                        type="email"
+                        value={settings.paypal_email || ""}
+                        onChange={(e) => updateSetting("paypal_email", e.target.value)}
+                        placeholder="payments@yourproperty.com"
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-medium text-gray-600 mb-1">
+                        Payment window (hours)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={168}
+                        value={settings.paypal_payment_window_hours || 24}
+                        onChange={(e) =>
+                          updateSetting(
+                            "paypal_payment_window_hours",
+                            Math.max(1, Number(e.target.value) || 24),
+                          )
+                        }
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-[12px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500"
+                      />
+                      <p className="mt-1 text-[10px] text-gray-500">
+                        Bookings will be auto-cancelled if PayPal payment isn&apos;t confirmed
+                        within this window.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {/* Pay at Hotel */}
               <div
@@ -1493,7 +1604,6 @@ export default function SettingsPage() {
             </div>
           </div>
 
-
           {/* Payout Details */}
           {(settings.pay_at_property_enabled || settings.bank_transfer) && (
             <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5 space-y-3">
@@ -1641,273 +1751,274 @@ export default function SettingsPage() {
             </SettingsCard>
           ) : (
             <>
-            <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
-              <h2 className="text-sm font-semibold text-gray-900">
-                {t("settings.billing.paymentProvider")}
-              </h2>
-              <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
-                {t("settings.billing.paymentProviderDesc")}
-              </p>
+              <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
+                <h2 className="text-sm font-semibold text-gray-900">
+                  {t("settings.billing.paymentProvider")}
+                </h2>
+                <p className="text-[12px] text-gray-500 mt-0.5 mb-4">
+                  {t("settings.billing.paymentProviderDesc")}
+                </p>
 
-              {paymentError && (
-                <FeedbackAlert type="error" message={paymentError} className="mb-3" />
-              )}
-              {paymentSuccess && (
-                <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
-              )}
+                {paymentError && (
+                  <FeedbackAlert type="error" message={paymentError} className="mb-3" />
+                )}
+                {paymentSuccess && (
+                  <FeedbackAlert type="success" message={paymentSuccess} className="mb-3" />
+                )}
 
-              {/* Provider selector */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
-                <button
-                  type="button"
-                  onClick={() => setPaymentProvider("vayada")}
-                  className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
-                    paymentProvider === "vayada"
-                      ? "border-primary-500 bg-primary-50/30"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <div
-                    className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "vayada" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                {/* Provider selector */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentProvider("vayada")}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                      paymentProvider === "vayada"
+                        ? "border-primary-500 bg-primary-50/30"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
                   >
-                    {paymentProvider === "vayada" && (
-                      <svg
-                        className="w-2.5 h-2.5 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={3}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
-                  </div>
-                  <span className="text-[13px] font-semibold text-gray-900">
-                    {t("settings.billing.providerVayada")}
-                  </span>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    {t("settings.billing.providerVayadaDesc")}
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentProvider("stripe")}
-                  className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
-                    paymentProvider === "stripe"
-                      ? "border-primary-500 bg-primary-50/30"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <div
-                    className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "stripe" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                  >
-                    {paymentProvider === "stripe" && (
-                      <svg
-                        className="w-2.5 h-2.5 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={3}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
-                  </div>
-                  <span className="text-[13px] font-semibold text-gray-900">
-                    {t("settings.billing.providerStripe")}
-                  </span>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    {t("settings.billing.providerStripeDesc")}
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentProvider("xendit")}
-                  className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
-                    paymentProvider === "xendit"
-                      ? "border-primary-500 bg-primary-50/30"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <div
-                    className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "xendit" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
-                  >
-                    {paymentProvider === "xendit" && (
-                      <svg
-                        className="w-2.5 h-2.5 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={3}
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
-                    )}
-                  </div>
-                  <span className="text-[13px] font-semibold text-gray-900">
-                    {t("settings.billing.providerXendit")}
-                  </span>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    {t("settings.billing.providerXenditDesc")}
-                  </p>
-                </button>
-              </div>
-
-              {/* Provider-specific content */}
-              {paymentProvider === "vayada" ? (
-                <div className="space-y-3">
-                  <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                    <p className="text-[13px] text-green-800 font-medium">
-                      {t("settings.billing.vayadaNoSetupTitle")}
+                    <div
+                      className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "vayada" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                    >
+                      {paymentProvider === "vayada" && (
+                        <svg
+                          className="w-2.5 h-2.5 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      )}
+                    </div>
+                    <span className="text-[13px] font-semibold text-gray-900">
+                      {t("settings.billing.providerVayada")}
+                    </span>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {t("settings.billing.providerVayadaDesc")}
                     </p>
-                    <p className="text-[12px] text-green-700 mt-1">
-                      {t("settings.billing.vayadaNoSetupDesc")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentProvider("stripe")}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                      paymentProvider === "stripe"
+                        ? "border-primary-500 bg-primary-50/30"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "stripe" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                    >
+                      {paymentProvider === "stripe" && (
+                        <svg
+                          className="w-2.5 h-2.5 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      )}
+                    </div>
+                    <span className="text-[13px] font-semibold text-gray-900">
+                      {t("settings.billing.providerStripe")}
+                    </span>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {t("settings.billing.providerStripeDesc")}
                     </p>
-                  </div>
-                  <div className="flex justify-end pt-2">
-                    <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
-                      {t("common.save")}
-                    </SaveButton>
-                  </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentProvider("xendit")}
+                    className={`relative flex flex-col p-3 rounded-xl border-2 transition-all text-left ${
+                      paymentProvider === "xendit"
+                        ? "border-primary-500 bg-primary-50/30"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div
+                      className={`absolute top-2.5 right-2.5 w-4 h-4 rounded-full border-2 flex items-center justify-center ${paymentProvider === "xendit" ? "border-primary-500 bg-primary-500" : "border-gray-300"}`}
+                    >
+                      {paymentProvider === "xendit" && (
+                        <svg
+                          className="w-2.5 h-2.5 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
+                      )}
+                    </div>
+                    <span className="text-[13px] font-semibold text-gray-900">
+                      {t("settings.billing.providerXendit")}
+                    </span>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      {t("settings.billing.providerXenditDesc")}
+                    </p>
+                  </button>
                 </div>
-              ) : paymentProvider === "xendit" ? (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                        {t("settings.billing.bankLabel")}
-                      </label>
-                      <select
-                        value={xenditChannelCode}
-                        onChange={(e) => setXenditChannelCode(e.target.value)}
-                        className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        <option value="ID_BCA">BCA</option>
-                        <option value="ID_MANDIRI">Mandiri</option>
-                        <option value="ID_BNI">BNI</option>
-                        <option value="ID_BRI">BRI</option>
-                        <option value="ID_PERMATA">Permata</option>
-                        <option value="ID_CIMB">CIMB Niaga</option>
-                      </select>
+
+                {/* Provider-specific content */}
+                {paymentProvider === "vayada" ? (
+                  <div className="space-y-3">
+                    <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                      <p className="text-[13px] text-green-800 font-medium">
+                        {t("settings.billing.vayadaNoSetupTitle")}
+                      </p>
+                      <p className="text-[12px] text-green-700 mt-1">
+                        {t("settings.billing.vayadaNoSetupDesc")}
+                      </p>
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
+                        {t("common.save")}
+                      </SaveButton>
+                    </div>
+                  </div>
+                ) : paymentProvider === "xendit" ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                          {t("settings.billing.bankLabel")}
+                        </label>
+                        <select
+                          value={xenditChannelCode}
+                          onChange={(e) => setXenditChannelCode(e.target.value)}
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                          <option value="ID_BCA">BCA</option>
+                          <option value="ID_MANDIRI">Mandiri</option>
+                          <option value="ID_BNI">BNI</option>
+                          <option value="ID_BRI">BRI</option>
+                          <option value="ID_PERMATA">Permata</option>
+                          <option value="ID_CIMB">CIMB Niaga</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                          {t("settings.billing.accountNumberLabel")}
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={20}
+                          value={xenditAccountNumber}
+                          onChange={(e) =>
+                            setXenditAccountNumber(e.target.value.replace(/\D/g, ""))
+                          }
+                          placeholder="1234567890"
+                          className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                        {t("settings.billing.accountNumberLabel")}
+                        {t("settings.billing.accountHolderNameLabel")}
                       </label>
                       <input
                         type="text"
-                        inputMode="numeric"
-                        maxLength={20}
-                        value={xenditAccountNumber}
-                        onChange={(e) => setXenditAccountNumber(e.target.value.replace(/\D/g, ""))}
-                        placeholder="1234567890"
+                        value={xenditAccountHolderName}
+                        onChange={(e) => setXenditAccountHolderName(e.target.value)}
+                        placeholder={t("settings.billing.accountHolderPlaceholderXendit")}
                         className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
                       />
                     </div>
-                  </div>
-                  <div>
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                      {t("settings.billing.accountHolderNameLabel")}
-                    </label>
-                    <input
-                      type="text"
-                      value={xenditAccountHolderName}
-                      onChange={(e) => setXenditAccountHolderName(e.target.value)}
-                      placeholder={t("settings.billing.accountHolderPlaceholderXendit")}
-                      className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                  <div className="flex justify-end pt-2">
-                    <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
-                      {t("common.save")}
-                    </SaveButton>
-                  </div>
-                </div>
-              ) : stripeAccountId ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[12px] font-semibold text-gray-700">
-                      {t("settings.billing.stripe")}
-                    </span>
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
-                    >
-                      {stripeOnboarded
-                        ? t("settings.billing.connected")
-                        : t("settings.billing.pendingOnboarding")}
-                    </span>
-                  </div>
-                  {!stripeOnboarded && (
-                    <div>
-                      <p className="text-[13px] text-gray-600 mb-2">
-                        {t("settings.billing.completeOnboardingDesc")}
-                      </p>
-                      <button
-                        onClick={handleOnboarding}
-                        className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
-                      >
-                        {t("settings.billing.completeOnboarding")}
-                      </button>
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
+                        {t("common.save")}
+                      </SaveButton>
                     </div>
-                  )}
-                  <div className="flex justify-end pt-2">
-                    <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
-                      {t("common.save")}
-                    </SaveButton>
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-1">
+                ) : stripeAccountId ? (
+                  <div className="space-y-3">
                     <div className="flex items-center gap-2">
-                      <svg className="h-5" viewBox="0 0 60 25" fill="none">
-                        <path
-                          fillRule="evenodd"
-                          clipRule="evenodd"
-                          d="M60 12.8C60 8.5 57.9 5 54.4 5c-3.5 0-5.9 3.5-5.9 7.8s2.2 7.8 5.8 7.8c1.7 0 3-.4 4-1.1v-2.7c-1 .5-2.1.9-3.5.9-1.4 0-2.6-.5-2.8-2.2h6.9c0-.2.1-1 .1-1.7zm-7-1.4c0-1.6 1-2.3 1.9-2.3.9 0 1.8.7 1.8 2.3h-3.7zm-7.5-6.4c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.1v19.7l3.5-.7.1-4.8c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5 0-4.1-2.4-6.8-4.8-6.8zm-.8 10.5c-.8 0-1.3-.3-1.7-.7l-.1-5.4c.4-.4.9-.7 1.7-.7 1.3 0 2.2 1.5 2.2 3.4.1 2-.9 3.4-2.1 3.4zM35.2 5l3.5-.8V1.5l-3.5.7V5zm0 .5h3.5v14.2h-3.5V5.5zM31.3 6.3l-.2-1H28v14.2h3.5V9.1c.8-1.1 2.2-.9 2.6-.7V5.5c-.5-.2-2.2-.5-2.8 1zm-7.4-3.8l-3.4.7-.1 13c0 2.4 1.8 4.2 4.2 4.2 1.3 0 2.3-.2 2.8-.5v-2.8c-.5.2-3.1.9-3.1-1.4V8.3h3.1V5.5h-3.1l-.4-3zm-8.8 8c0-.6.5-.8 1.3-.8 1.1 0 2.5.3 3.7 1V7.4c-1.2-.5-2.5-.7-3.7-.7-3 0-5 1.6-5 4.2 0 4.1 5.7 3.5 5.7 5.2 0 .7-.6.9-1.5.9-1.3 0-2.9-.5-4.2-1.2v3.2c1.4.6 2.9.9 4.2.9 3.1 0 5.2-1.5 5.2-4.2-.1-4.5-5.7-3.7-5.7-5.3z"
-                          fill="#635BFF"
-                        />
-                      </svg>
-                      <p className="text-[11px] text-gray-500">
-                        {t("settings.billing.stripeBlurb")}
-                      </p>
+                      <span className="text-[12px] font-semibold text-gray-700">
+                        {t("settings.billing.stripe")}
+                      </span>
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${stripeOnboarded ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}
+                      >
+                        {stripeOnboarded
+                          ? t("settings.billing.connected")
+                          : t("settings.billing.pendingOnboarding")}
+                      </span>
+                    </div>
+                    {!stripeOnboarded && (
+                      <div>
+                        <p className="text-[13px] text-gray-600 mb-2">
+                          {t("settings.billing.completeOnboardingDesc")}
+                        </p>
+                        <button
+                          onClick={handleOnboarding}
+                          className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                        >
+                          {t("settings.billing.completeOnboarding")}
+                        </button>
+                      </div>
+                    )}
+                    <div className="flex justify-end pt-2">
+                      <SaveButton onClick={savePaymentProviderSettings} saving={savingPayment}>
+                        {t("common.save")}
+                      </SaveButton>
                     </div>
                   </div>
-                  <div className="max-w-xs">
-                    <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
-                      {t("settings.billing.countryLabel")}
-                    </label>
-                    <CountrySelect value={connectCountry} onChange={setConnectCountry} t={t} />
+                ) : (
+                  <div className="space-y-3">
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <svg className="h-5" viewBox="0 0 60 25" fill="none">
+                          <path
+                            fillRule="evenodd"
+                            clipRule="evenodd"
+                            d="M60 12.8C60 8.5 57.9 5 54.4 5c-3.5 0-5.9 3.5-5.9 7.8s2.2 7.8 5.8 7.8c1.7 0 3-.4 4-1.1v-2.7c-1 .5-2.1.9-3.5.9-1.4 0-2.6-.5-2.8-2.2h6.9c0-.2.1-1 .1-1.7zm-7-1.4c0-1.6 1-2.3 1.9-2.3.9 0 1.8.7 1.8 2.3h-3.7zm-7.5-6.4c-1.4 0-2.3.7-2.8 1.1l-.2-.9h-3.1v19.7l3.5-.7.1-4.8c.5.4 1.3.9 2.5.9 2.5 0 4.8-2 4.8-6.5 0-4.1-2.4-6.8-4.8-6.8zm-.8 10.5c-.8 0-1.3-.3-1.7-.7l-.1-5.4c.4-.4.9-.7 1.7-.7 1.3 0 2.2 1.5 2.2 3.4.1 2-.9 3.4-2.1 3.4zM35.2 5l3.5-.8V1.5l-3.5.7V5zm0 .5h3.5v14.2h-3.5V5.5zM31.3 6.3l-.2-1H28v14.2h3.5V9.1c.8-1.1 2.2-.9 2.6-.7V5.5c-.5-.2-2.2-.5-2.8 1zm-7.4-3.8l-3.4.7-.1 13c0 2.4 1.8 4.2 4.2 4.2 1.3 0 2.3-.2 2.8-.5v-2.8c-.5.2-3.1.9-3.1-1.4V8.3h3.1V5.5h-3.1l-.4-3zm-8.8 8c0-.6.5-.8 1.3-.8 1.1 0 2.5.3 3.7 1V7.4c-1.2-.5-2.5-.7-3.7-.7-3 0-5 1.6-5 4.2 0 4.1 5.7 3.5 5.7 5.2 0 .7-.6.9-1.5.9-1.3 0-2.9-.5-4.2-1.2v3.2c1.4.6 2.9.9 4.2.9 3.1 0 5.2-1.5 5.2-4.2-.1-4.5-5.7-3.7-5.7-5.3z"
+                            fill="#635BFF"
+                          />
+                        </svg>
+                        <p className="text-[11px] text-gray-500">
+                          {t("settings.billing.stripeBlurb")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="max-w-xs">
+                      <label className="block text-[12px] font-medium text-gray-700 mb-0.5">
+                        {t("settings.billing.countryLabel")}
+                      </label>
+                      <CountrySelect value={connectCountry} onChange={setConnectCountry} t={t} />
+                    </div>
+                    <button
+                      onClick={handleCreateStripeAccount}
+                      disabled={creatingAccount || !connectEmail}
+                      className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
+                    >
+                      {creatingAccount
+                        ? t("settings.billing.connectingAccount")
+                        : t("settings.billing.connectPaymentAccount")}
+                    </button>
                   </div>
-                  <button
-                    onClick={handleCreateStripeAccount}
-                    disabled={creatingAccount || !connectEmail}
-                    className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition-colors"
-                  >
-                    {creatingAccount
-                      ? t("settings.billing.connectingAccount")
-                      : t("settings.billing.connectPaymentAccount")}
-                  </button>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
             </>
           )}
         </SettingsSection>
       )}
-
     </SettingsLayout>
   );
 }

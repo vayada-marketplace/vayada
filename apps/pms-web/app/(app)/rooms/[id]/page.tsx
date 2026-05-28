@@ -36,6 +36,8 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
           description: r.description,
           shortDescription: r.shortDescription,
           maxOccupancy: r.maxOccupancy,
+          maxAdults: r.maxAdults,
+          maxChildren: r.maxChildren,
           bedrooms: r.bedrooms ?? 1,
           bathrooms: r.bathrooms ?? 1,
           size: r.size,

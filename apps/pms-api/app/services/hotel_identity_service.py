@@ -22,6 +22,7 @@ _PAYMENT_FLAG_COLUMNS = {
     "pay_at_property_enabled",
     "online_card_payment",
     "bank_transfer",
+    "paypal_enabled",
 }
 
 
@@ -82,7 +83,7 @@ async def get_currency(hotel_id: str) -> str:
 
 
 async def get_payment_flags_by_slug(slug: str) -> dict | None:
-    """Read pay_at_property_enabled / online_card_payment / bank_transfer
+    """Read payment-method flags from the Booking Engine DB
     for a hotel by slug. Returns ``None`` if BE-DB is unconfigured, the
     row is missing, or the query fails (failure is logged)."""
     if not _is_configured():
@@ -90,6 +91,7 @@ async def get_payment_flags_by_slug(slug: str) -> dict | None:
     try:
         row = await BookingEngineDatabase.fetchrow(
             "SELECT pay_at_property_enabled, online_card_payment, bank_transfer "
+            ", paypal_enabled "
             "FROM booking_hotels WHERE slug = $1",
             slug,
         )
@@ -107,7 +109,8 @@ async def get_guest_payment_info_by_slug(slug: str) -> dict | None:
     try:
         row = await BookingEngineDatabase.fetchrow(
             "SELECT pay_at_hotel_methods, payout_account_holder, payout_iban, "
-            "payout_bank_name, payout_swift, terms_text, cancellation_policy_text "
+            "payout_bank_name, payout_swift, terms_text, cancellation_policy_text, "
+            "paypal_email, paypal_payment_window_hours "
             "FROM booking_hotels WHERE slug = $1",
             slug,
         )
