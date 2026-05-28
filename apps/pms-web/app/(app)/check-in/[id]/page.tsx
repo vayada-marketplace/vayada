@@ -182,16 +182,17 @@ export default function CheckInPage() {
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([
-      bookingsService.get(id),
-      bookingsService.listAdditionalGuests(id),
-      bookingsService.listNotes(id),
-    ])
-      .then(([bookingRes, guestRes, noteRes]) => {
+    Promise.all([bookingsService.get(id), bookingsService.listAdditionalGuests(id)])
+      .then(async ([bookingRes, guestRes]) => {
         setBooking(bookingRes);
         setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
-        setNotes(noteRes.notes);
+        try {
+          const noteRes = await bookingsService.listNotes(id);
+          setNotes(noteRes.notes);
+        } catch {
+          setNotes([]);
+        }
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));
@@ -345,7 +346,7 @@ export default function CheckInPage() {
       const flushResults = await Promise.allSettled(
         guests.map(async (draft, index) => {
           if (index >= additionalGuestCapacity(booking)) return draft;
-          if (!draft.firstName && !draft.lastName) return draft;
+          if (!guestHasData(draft)) return draft;
           const payload: BookingAdditionalGuestPayload = {
             firstName: draft.firstName || "",
             lastName: draft.lastName || "",

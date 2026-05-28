@@ -124,7 +124,7 @@ export interface BookingNote {
   authorUserId: string;
   authorName: string;
   body: string;
-  source: string | null;
+  source: "check-in" | "booking-detail" | null;
   createdAt: string;
 }
 
@@ -285,7 +285,7 @@ export const bookingsService = {
   // VAY-495 booking detail — internal notes, additional guests, cancel-with-reason.
   listNotes: (id: string) => pmsClient.get<{ notes: BookingNote[] }>(`/admin/bookings/${id}/notes`),
 
-  createNote: (id: string, body: string, source?: string) =>
+  createNote: (id: string, body: string, source?: BookingNote["source"]) =>
     pmsClient.post<BookingNote>(`/admin/bookings/${id}/notes`, { body, source }),
 
   deleteNote: (id: string, noteId: string) =>

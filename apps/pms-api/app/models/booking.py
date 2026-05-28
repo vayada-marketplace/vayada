@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
@@ -379,7 +380,7 @@ class BookingNoteCreate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     body: str
-    source: str | None = None
+    source: Literal["check-in", "booking-detail"] | None = None
 
 
 class BookingNoteResponse(BaseModel):

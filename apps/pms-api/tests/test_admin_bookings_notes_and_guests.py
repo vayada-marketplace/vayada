@@ -103,7 +103,7 @@ class TestAdditionalGuests:
 
         await Database.execute(
             "UPDATE room_types SET max_occupancy = 4 WHERE id = $1",
-            hotel_with_booking["room"]["id"],
+            hotel_with_booking["booking"]["room_type_id"],
         )
         await Database.execute(
             "UPDATE bookings SET adults = 1, children = 0 WHERE id = $1",
@@ -133,7 +133,7 @@ class TestAdditionalGuests:
 
         await Database.execute(
             "UPDATE room_types SET max_occupancy = 2 WHERE id = $1",
-            hotel_with_booking["room"]["id"],
+            hotel_with_booking["booking"]["room_type_id"],
         )
         await Database.execute(
             "UPDATE bookings SET adults = 1, children = 0, number_of_rooms = 2 WHERE id = $1",
