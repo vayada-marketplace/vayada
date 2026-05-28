@@ -9,6 +9,12 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        ink: "#15130f",
+        bone: "#f7f4ed",
+        reed: "#72846b",
+        brass: "#b08d4a",
+        ember: "#c46b4f",
+        lagoon: "#246f78",
         primary: {
           50: "#EFF2FF",
           100: "#DFE5FF",
@@ -21,6 +27,9 @@ module.exports = {
           800: "#0F2095",
           900: "#081172",
         },
+      },
+      boxShadow: {
+        panel: "0 18px 70px rgba(35, 31, 24, 0.10)",
       },
     },
   },
