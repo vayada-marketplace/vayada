@@ -136,9 +136,9 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 ## Linear workflow
 
 - Ticket → **In Progress** when implementation starts (via the `linear` MCP).
-- Ticket → **In Review** when the PR is opened and ready for CodeRabbit/human review.
-- Ticket → **Done** when implementation is merged and no required follow-up remains.
-- Shipping/merging does **not** auto-transition any status. Move to `Done` because implementation is merged and complete, not just because code landed in `main`.
+- Ticket stays **In Progress** when the agent finishes implementation, pushes the branch, and opens the PR.
+- Ticket → **Done** only after the human merges the PR, smoke tests the shipped change, and confirms no required follow-up remains.
+- Shipping/merging does **not** auto-transition any status. Move to `Done` because the merged work has been smoke tested and accepted, not just because code landed in `main`.
 - If QA later finds an issue, the human reopens the ticket (back to `In Progress`) or opens a follow-up.
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.
