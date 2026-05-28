@@ -181,6 +181,7 @@ class BookingAdminResponse(BaseModel):
     balance_amount: float = 0
     check_in_pending_flags: list[str] = []
     checked_in_at: str | None = None
+    checked_out_at: str | None = None
     host_response_deadline: str | None = None
     platform_fee_amount: float | None = None
     affiliate_commission_amount: float | None = None
@@ -394,7 +395,7 @@ class BookingNoteCreate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     body: str
-    source: Literal["check-in", "booking-detail"] | None = None
+    source: Literal["check-in", "check-out", "booking-detail"] | None = None
 
 
 class BookingNoteResponse(BaseModel):

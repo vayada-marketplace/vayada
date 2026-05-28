@@ -31,6 +31,7 @@ type SectionId =
   | "calendar"
   | "check-in-out"
   | "checkin-checklist"
+  | "checkout-inspection"
   | "localization";
 
 // Anchors used by SearchModal (apps/pms-web/components/layout/SearchModal.tsx)
@@ -41,6 +42,7 @@ const ANCHOR_TO_SECTION: Record<string, SectionId> = {
   calendar: "calendar",
   "check-in-out": "check-in-out",
   "checkin-checklist": "checkin-checklist",
+  "checkout-inspection": "checkout-inspection",
   currency: "localization",
   language: "localization",
 };
@@ -366,6 +368,12 @@ export default function SettingsPage() {
       label: "Check-in checklist",
       icon: ClipboardDocumentCheckIcon,
       href: "/settings/checkin-checklist",
+    },
+    {
+      id: "checkout-inspection",
+      label: "Check-out inspection",
+      icon: ClipboardDocumentCheckIcon,
+      href: "/settings/checkout-inspection",
     },
     { id: "localization", label: "Localization", icon: GlobeAltIcon },
   ];

@@ -3,6 +3,7 @@ export const BOOKING_STATUS_STYLES: Record<string, string> = {
   confirmed: "bg-green-100 text-green-700",
   checked_in: "bg-sky-100 text-sky-700",
   in_house: "bg-blue-100 text-blue-700",
+  checked_out: "bg-slate-100 text-slate-700",
   cancelled: "bg-red-100 text-red-600",
   // VAY-404 — host-rejected request. Visually distinct from guest cancel
   // so the property doesn't think a guest pulled out when they didn't.
