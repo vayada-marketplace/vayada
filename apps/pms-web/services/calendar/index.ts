@@ -1,4 +1,5 @@
 import { pmsClient } from "../api/pmsClient";
+import { BookingAddon } from "../bookings";
 
 export interface CalendarRoomType {
   id: string;
@@ -85,6 +86,8 @@ export interface CreateAdminBookingPayload {
   children: number;
   nightlyRate: number | null;
   channel: string;
+  addonIds?: string[];
+  addonQuantities?: Record<string, number>;
 }
 
 export const calendarService = {
@@ -100,6 +103,9 @@ export const calendarService = {
   deleteRoomBlock: (blockId: string) => pmsClient.delete(`/admin/room-blocks/${blockId}`),
 
   createAdminBooking: (data: CreateAdminBookingPayload) => pmsClient.post("/admin/bookings", data),
+
+  listAvailableAddons: (roomId: string) =>
+    pmsClient.get<BookingAddon[]>(`/admin/bookings/addons/available?room_id=${roomId}`),
 
   // Booking-engine-equivalent nightly rate for the given room type and check-in
   // date — used by the New Booking modal so the pre-filled rate matches what
