@@ -756,6 +756,12 @@ export default function RoomTypeForm({
   // the committed numeric values so the user can fully clear a field before typing a new
   // number — onChange writes the raw string, onBlur clamps to [min, max] and rewrites it.
   const [maxOccupancyInput, setMaxOccupancyInput] = useState(String(form.maxOccupancy ?? 2));
+  const [maxAdultsInput, setMaxAdultsInput] = useState(
+    form.maxAdults == null ? "" : String(form.maxAdults),
+  );
+  const [maxChildrenInput, setMaxChildrenInput] = useState(
+    form.maxChildren == null ? "" : String(form.maxChildren),
+  );
   const [bedroomsInput, setBedroomsInput] = useState(String(form.bedrooms ?? 1));
   const [bathroomsInput, setBathroomsInput] = useState(String(form.bathrooms ?? 1));
   const [sizeInput, setSizeInput] = useState(String(form.size ?? 1));
@@ -1253,34 +1259,103 @@ export default function RoomTypeForm({
             </button>
           </div>
 
-          {/* Max Occupancy */}
+          {/* Occupancy */}
           <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <label className="text-[12px] font-semibold text-gray-900">
-                Max Occupancy <span className="text-red-500">*</span>
-              </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <label className="text-[12px] font-semibold text-gray-900">
+                    Total Max Occupancy <span className="text-red-500">*</span>
+                  </label>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  value={maxOccupancyInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMaxOccupancyInput(v);
+                    if (v !== "") {
+                      const n = Number(v);
+                      if (Number.isFinite(n) && n >= 1) updateForm({ maxOccupancy: n });
+                    }
+                  }}
+                  onBlur={() => {
+                    const n = clampNumberInput(maxOccupancyInput, 1);
+                    setMaxOccupancyInput(String(n));
+                    updateForm({ maxOccupancy: n });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <label className="text-[12px] font-semibold text-gray-900">Max Adults</label>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Any"
+                  value={maxAdultsInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMaxAdultsInput(v);
+                    if (v === "") {
+                      updateForm({ maxAdults: null });
+                      return;
+                    }
+                    const n = Number(v);
+                    if (Number.isFinite(n) && n >= 1) updateForm({ maxAdults: n });
+                  }}
+                  onBlur={() => {
+                    if (maxAdultsInput === "") {
+                      updateForm({ maxAdults: null });
+                      return;
+                    }
+                    const n = clampNumberInput(maxAdultsInput, 1);
+                    setMaxAdultsInput(String(n));
+                    updateForm({ maxAdults: n });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <label className="text-[12px] font-semibold text-gray-900">Max Children</label>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Any"
+                  value={maxChildrenInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMaxChildrenInput(v);
+                    if (v === "") {
+                      updateForm({ maxChildren: null });
+                      return;
+                    }
+                    const n = Number(v);
+                    if (Number.isFinite(n) && n >= 0) updateForm({ maxChildren: n });
+                  }}
+                  onBlur={() => {
+                    if (maxChildrenInput === "") {
+                      updateForm({ maxChildren: null });
+                      return;
+                    }
+                    const n = clampNumberInput(maxChildrenInput, 0);
+                    setMaxChildrenInput(String(n));
+                    updateForm({ maxChildren: n });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                />
+              </div>
             </div>
-            <input
-              type="number"
-              min={1}
-              value={maxOccupancyInput}
-              onChange={(e) => {
-                const v = e.target.value;
-                setMaxOccupancyInput(v);
-                if (v !== "") {
-                  const n = Number(v);
-                  if (Number.isFinite(n) && n >= 1) updateForm({ maxOccupancy: n });
-                }
-              }}
-              onBlur={() => {
-                const n = clampNumberInput(maxOccupancyInput, 1);
-                setMaxOccupancyInput(String(n));
-                updateForm({ maxOccupancy: n });
-              }}
-              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-            />
             <p className="text-[10px] text-gray-400 mt-1">
-              Shows as &quot;Up to X guests&quot; on room card
+              Total occupancy still controls the room card. Adult and child limits refine booking
+              availability when set.
             </p>
           </div>
 
