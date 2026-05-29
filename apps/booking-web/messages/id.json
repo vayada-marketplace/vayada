@@ -87,17 +87,17 @@
     "selectThisRate": "Pilih Tarif Ini",
     "soldOut": "Habis Terjual",
     "mobileView": {
-      "list": "List",
-      "map": "Map"
+      "list": "Daftar",
+      "map": "Peta"
     },
     "roomMap": {
-      "noLocations": "No locations available",
-      "noLocationsDesc": "Room types without saved coordinates still appear in the list.",
-      "locations": "{count, plural, one {# location} other {# locations}}",
-      "perNight": "/ night",
-      "view": "View →",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out"
+      "noLocations": "Tidak ada lokasi tersedia",
+      "noLocationsDesc": "Tipe kamar tanpa koordinat yang disimpan masih muncul di daftar.",
+      "locations": "{count, plural, one {# lokasi} other {# lokasi}}",
+      "perNight": "/ malam",
+      "view": "Lihat →",
+      "zoomIn": "Perbesar",
+      "zoomOut": "Perkecil"
     }
   },
   "rooms": {

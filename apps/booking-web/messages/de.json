@@ -87,17 +87,17 @@
     "selectThisRate": "Diesen Tarif wählen",
     "soldOut": "Ausgebucht",
     "mobileView": {
-      "list": "List",
-      "map": "Map"
+      "list": "Liste",
+      "map": "Karte"
     },
     "roomMap": {
-      "noLocations": "No locations available",
-      "noLocationsDesc": "Room types without saved coordinates still appear in the list.",
-      "locations": "{count, plural, one {# location} other {# locations}}",
-      "perNight": "/ night",
-      "view": "View →",
-      "zoomIn": "Zoom in",
-      "zoomOut": "Zoom out"
+      "noLocations": "Keine Standorte verfügbar",
+      "noLocationsDesc": "Zimmertypen ohne gespeicherte Koordinaten werden weiterhin in der Liste angezeigt.",
+      "locations": "{count, plural, one {# Standort} other {# Standorte}}",
+      "perNight": "/ Nacht",
+      "view": "Ansehen →",
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern"
     }
   },
   "rooms": {
