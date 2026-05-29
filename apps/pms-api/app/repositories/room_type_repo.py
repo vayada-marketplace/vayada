@@ -30,7 +30,8 @@ class RoomTypeRepository:
             INSERT INTO room_types (
                 hotel_id, name, category, description, short_description,
                 max_occupancy, max_adults, max_children, bedrooms, bathrooms, size,
-                base_rate, non_refundable_rate, currency, address, latitude, longitude,
+                base_rate, non_refundable_rate, currency,
+                location_address, latitude, longitude,
                 amenities, images, bed_type, features, benefits,
                 total_rooms, is_active, sort_order, monthly_rates, daily_rates,
                 operating_periods, seasons, weekend_surcharge,
@@ -68,7 +69,7 @@ class RoomTypeRepository:
             data.get("base_rate", 0),
             data.get("non_refundable_rate"),
             data.get("currency", "EUR"),
-            data.get("address", ""),
+            data.get("location_address", ""),
             data.get("latitude"),
             data.get("longitude"),
             json.dumps(data.get("amenities", [])),

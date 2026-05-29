@@ -63,6 +63,18 @@ export interface PropertySettings {
   payout_swift?: string;
   terms_text?: string;
   cancellation_policy_text?: string;
+  show_room_detail_map?: boolean;
+  points_of_interest?: PointOfInterest[];
+}
+
+export interface PointOfInterest {
+  id: string;
+  label: string;
+  travelTime: string;
+  color: string;
+  latitude: number;
+  longitude: number;
+  position: number;
 }
 
 export type PropertySettingsUpdate = Partial<PropertySettings>;

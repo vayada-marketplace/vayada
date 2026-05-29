@@ -31,6 +31,18 @@ class HotelBranding(BaseModel):
     favicon_url: str | None = None
 
 
+class PointOfInterest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    label: str
+    travel_time: str
+    color: str
+    latitude: float
+    longitude: float
+    position: int = 0
+
+
 class HotelResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -60,6 +72,8 @@ class HotelResponse(BaseModel):
     refer_a_guest_enabled: bool = False
     instant_book: bool = False
     map_view_enabled: bool = False
+    show_room_detail_map: bool = False
+    points_of_interest: list[PointOfInterest] = []
 
 
 class BankDetails(BaseModel):

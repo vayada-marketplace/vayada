@@ -1648,8 +1648,8 @@ export default function RoomTypeForm({
                   </label>
                   <input
                     type="text"
-                    value={form.address || ""}
-                    onChange={(e) => updateForm({ address: e.target.value })}
+                    value={form.locationAddress || ""}
+                    onChange={(e) => updateForm({ locationAddress: e.target.value })}
                     className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
                     placeholder="Street, area, city, country"
                   />

@@ -735,6 +735,9 @@ function HomePageContent() {
               checkOutTime={hotel.checkOutTime}
               checkIn={committedCheckIn}
               hotelTimezone={hotel.timezone}
+              propertyName={hotel.name}
+              showLocationMap={hotel.showRoomDetailMap}
+              pointsOfInterest={hotel.pointsOfInterest || []}
               onSelectRate={(rateType) => {
                 if (modalSoldOut) return;
                 const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;

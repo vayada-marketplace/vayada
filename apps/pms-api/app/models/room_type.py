@@ -1,3 +1,5 @@
+import math
+
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 MAX_ROOM_SIZE = 15000
@@ -118,6 +120,18 @@ def _validate_rate_deposit_settings(settings: dict | None) -> dict | None:
             raise ValueError("deposit percentage must be between 1 and 100")
         normalized[rate_key] = {"enabled": True, "percentage": pct}
     return normalized
+
+
+def _validate_latitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -90 or value > 90):
+        raise ValueError("latitude must be between -90 and 90")
+    return value
+
+
+def _validate_longitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -180 or value > 180):
+        raise ValueError("longitude must be between -180 and 180")
+    return value
 
 
 def _validate_operating_periods(periods: list) -> list:
@@ -278,7 +292,7 @@ class RoomTypeCreate(BaseModel):
     base_rate: float = 0
     non_refundable_rate: float | None = None
     currency: str = "EUR"
-    address: str = ""
+    location_address: str = ""
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str] = []
@@ -333,16 +347,12 @@ class RoomTypeCreate(BaseModel):
     @field_validator("latitude")
     @classmethod
     def validate_latitude(cls, v: float | None) -> float | None:
-        if v is not None and (v < -90 or v > 90):
-            raise ValueError("latitude must be between -90 and 90")
-        return v
+        return _validate_latitude(v)
 
     @field_validator("longitude")
     @classmethod
     def validate_longitude(cls, v: float | None) -> float | None:
-        if v is not None and (v < -180 or v > 180):
-            raise ValueError("longitude must be between -180 and 180")
-        return v
+        return _validate_longitude(v)
 
     @field_validator("meal_plans")
     @classmethod
@@ -415,7 +425,7 @@ class RoomTypeUpdate(BaseModel):
     base_rate: float | None = None
     non_refundable_rate: float | None = None
     currency: str | None = None
-    address: str | None = None
+    location_address: str | None = None
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str] | None = None
@@ -446,11 +456,11 @@ class RoomTypeUpdate(BaseModel):
     rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] | None = None
 
-    @field_validator("address")
+    @field_validator("location_address")
     @classmethod
-    def validate_address(cls, v: str | None) -> str | None:
+    def validate_location_address(cls, v: str | None) -> str | None:
         if v is None:
-            raise ValueError("address cannot be set to null")
+            return ""
         return v
 
     @field_validator("size")
@@ -477,16 +487,12 @@ class RoomTypeUpdate(BaseModel):
     @field_validator("latitude")
     @classmethod
     def validate_latitude(cls, v: float | None) -> float | None:
-        if v is not None and (v < -90 or v > 90):
-            raise ValueError("latitude must be between -90 and 90")
-        return v
+        return _validate_latitude(v)
 
     @field_validator("longitude")
     @classmethod
     def validate_longitude(cls, v: float | None) -> float | None:
-        if v is not None and (v < -180 or v > 180):
-            raise ValueError("longitude must be between -180 and 180")
-        return v
+        return _validate_longitude(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod
@@ -575,7 +581,7 @@ class RoomTypeResponse(BaseModel):
     original_rate: float | None = None
     last_minute_discount_percent: int | None = None
     currency: str
-    address: str = ""
+    location_address: str = ""
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str]
@@ -613,7 +619,7 @@ class RoomTypeAdminResponse(BaseModel):
     base_rate: float
     non_refundable_rate: float | None = None
     currency: str
-    address: str = ""
+    location_address: str = ""
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str]

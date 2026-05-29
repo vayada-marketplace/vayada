@@ -18,6 +18,7 @@
     "dev:landing": "npm --workspace vayada-landing run dev",
     "dev:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run dev",
     "dev:marketplace-web": "npm --workspace vayada-creator-marketplace run dev",
+    "dev:platform-admin": "npm --workspace vayada-platform-admin run dev",
     "dev:pms-web": "npm --workspace vayada-pms-frontend run dev",
     "build": "npm --workspaces --if-present run build",
     "lint": "npm --workspaces --if-present run lint",
@@ -32,6 +33,7 @@
     "build:landing": "npm --workspace vayada-landing run build",
     "build:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run build",
     "build:marketplace-web": "npm --workspace vayada-creator-marketplace run build",
+    "build:platform-admin": "npm --workspace vayada-platform-admin run build",
     "build:pms-web": "npm --workspace vayada-pms-frontend run build",
     "lint:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run lint",
     "lint:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run lint",
@@ -39,6 +41,7 @@
     "lint:landing": "npm --workspace vayada-landing run lint",
     "lint:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run lint",
     "lint:marketplace-web": "npm --workspace vayada-creator-marketplace run lint",
+    "lint:platform-admin": "npm --workspace vayada-platform-admin run lint",
     "lint:pms-web": "npm --workspace vayada-pms-frontend run lint",
     "prepare": "husky"
   },
