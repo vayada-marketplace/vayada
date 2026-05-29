@@ -99,9 +99,9 @@ export function PropertySelector({
                   checked={selected.has(property.id)}
                   onChange={(event) => {
                     if (event.target.checked) {
-                      setDraftIds([...draftIds, property.id]);
+                      setDraftIds((prev) => [...prev, property.id]);
                     } else {
-                      setDraftIds(draftIds.filter((id) => id !== property.id));
+                      setDraftIds((prev) => prev.filter((id) => id !== property.id));
                     }
                   }}
                   className="h-4 w-4 accent-lagoon"

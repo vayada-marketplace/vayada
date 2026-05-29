@@ -38,7 +38,8 @@ function getToken() {
   const token = localStorage.getItem(TOKEN_KEY);
   const expiresAt = localStorage.getItem(EXPIRES_AT_KEY);
   if (!token || !expiresAt) return null;
-  if (Date.now() >= Number(expiresAt)) {
+  const expiresAtMs = Number(expiresAt);
+  if (!Number.isFinite(expiresAtMs) || Date.now() >= expiresAtMs) {
     clearAuthData();
     return null;
   }
@@ -49,6 +50,8 @@ export class ApiClient {
   constructor(private baseURL: string) {}
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string> | undefined),
@@ -58,10 +61,21 @@ export class ApiClient {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${this.baseURL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseURL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error("Request timed out");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     const contentType = response.headers.get("content-type");
     const data = contentType?.includes("application/json")
       ? await response.json()

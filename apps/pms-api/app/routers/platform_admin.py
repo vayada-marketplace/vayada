@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import require_super_admin
@@ -29,11 +31,11 @@ async def get_growth_dashboard(
 
 @router.patch("/properties/{property_id}/status", response_model=PlatformProperty)
 async def update_property_status(
-    property_id: str,
+    property_id: UUID,
     request: UpdatePlatformPropertyStatusRequest,
     user_id: str = Depends(require_super_admin),
 ):
-    property_row = await PlatformAdminRepository.update_property_status(property_id, request.status)
+    property_row = await PlatformAdminRepository.update_property_status(str(property_id), request.status)
     if not property_row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
@@ -135,13 +134,13 @@ class PlatformAdminRepository:
             UUID(property_id),
             status,
         )
+        if not row:
+            return {}
         if status == "test":
             await Database.execute(
                 "UPDATE bookings SET is_test_booking = TRUE WHERE hotel_id = $1",
                 UUID(property_id),
             )
-        if not row:
-            return {}
         return {
             "id": str(row["id"]),
             "name": row["name"],
@@ -279,8 +278,8 @@ class PlatformAdminRepository:
                 FROM booking_events
                 WHERE hotel_slug = ANY($1::text[])
                   AND event_type = 'page_visit'
-                  AND created_at::date >= $2
-                  AND created_at::date <= $3
+                  AND created_at >= $2::date
+                  AND created_at < ($3::date + INTERVAL '1 day')
                 """,
                 slugs,
                 start,
@@ -301,8 +300,8 @@ class PlatformAdminRepository:
                 SELECT COUNT(*)
                 FROM bookings
                 WHERE hotel_id = ANY($1::uuid[])
-                  AND created_at::date >= $2
-                  AND created_at::date <= $3
+                  AND created_at >= $2::date
+                  AND created_at < ($3::date + INTERVAL '1 day')
                   AND ($4::boolean = FALSE OR is_test_booking = FALSE)
                 """,
                 [UUID(hid) for hid in hotel_ids],
@@ -325,8 +324,8 @@ class PlatformAdminRepository:
                 FROM booking_events
                 WHERE hotel_slug = ANY($1::text[])
                   AND event_type = 'page_visit'
-                  AND created_at::date >= $2
-                  AND created_at::date <= $3
+                  AND created_at >= $2::date
+                  AND created_at < ($3::date + INTERVAL '1 day')
                 GROUP BY created_at::date
                 """,
                 slugs,
@@ -350,8 +349,8 @@ class PlatformAdminRepository:
                 SELECT created_at::date AS d, COUNT(*) AS count
                 FROM bookings
                 WHERE hotel_id = ANY($1::uuid[])
-                  AND created_at::date >= $2
-                  AND created_at::date <= $3
+                  AND created_at >= $2::date
+                  AND created_at < ($3::date + INTERVAL '1 day')
                   AND ($4::boolean = FALSE OR is_test_booking = FALSE)
                 GROUP BY created_at::date
                 """,
@@ -368,17 +367,18 @@ class PlatformAdminRepository:
 
     @staticmethod
     def _live_property_timeline(properties: list[dict], buckets: list[Bucket]) -> list[dict]:
-        live_months: dict[str, int] = defaultdict(int)
-        for prop in properties:
-            if prop["status"] != "live":
-                continue
-            created_month = _month_start(datetime.fromisoformat(prop["created_at"]).date())
-            live_months[created_month.isoformat()] += 1
+        created_dates = sorted(
+            datetime.fromisoformat(prop["created_at"]).date()
+            for prop in properties
+            if prop["status"] == "live"
+        )
 
         running = 0
+        idx = 0
         points = []
         for bucket in buckets:
-            month_key = _month_start(bucket.start).isoformat()
-            running += live_months[month_key]
+            while idx < len(created_dates) and created_dates[idx] <= bucket.end:
+                running += 1
+                idx += 1
             points.append({"key": bucket.key, "label": bucket.label, "value": running})
         return points

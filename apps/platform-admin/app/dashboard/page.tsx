@@ -47,16 +47,20 @@ export default function DashboardPage() {
     }
     const stored = sessionStorage.getItem(STORAGE_KEY);
     if (stored) {
-      const filters = JSON.parse(stored) as {
-        selectedIds?: string[];
-        excludeTestData?: boolean;
-        granularity?: Granularity;
-        bookingPropertyId?: string;
-      };
-      setSelectedIds(filters.selectedIds || []);
-      setExcludeTestData(filters.excludeTestData ?? true);
-      setGranularity(filters.granularity || "weekly");
-      setBookingPropertyId(filters.bookingPropertyId || "");
+      try {
+        const filters = JSON.parse(stored) as {
+          selectedIds?: string[];
+          excludeTestData?: boolean;
+          granularity?: Granularity;
+          bookingPropertyId?: string;
+        };
+        setSelectedIds(filters.selectedIds || []);
+        setExcludeTestData(filters.excludeTestData ?? true);
+        setGranularity(filters.granularity || "weekly");
+        setBookingPropertyId(filters.bookingPropertyId || "");
+      } catch {
+        sessionStorage.removeItem(STORAGE_KEY);
+      }
     }
     setIsAuthorized(true);
   }, []);

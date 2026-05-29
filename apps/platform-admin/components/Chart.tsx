@@ -34,8 +34,12 @@ export function LineChart({
     <div className="relative min-h-[260px] overflow-hidden rounded-md border border-ink/10 bg-white">
       {points.length === 0 ? <EmptyChart /> : null}
       <svg viewBox={`0 0 ${width} ${height}`} className="h-[260px] w-full" role="img">
-        <path d={area} fill={stroke} opacity="0.12" />
-        <path d={line} fill="none" stroke={stroke} strokeLinecap="round" strokeWidth="3" />
+        {points.length > 0 ? (
+          <>
+            <path d={area} fill={stroke} opacity="0.12" />
+            <path d={line} fill="none" stroke={stroke} strokeLinecap="round" strokeWidth="3" />
+          </>
+        ) : null}
         {points.map((point, index) => {
           const step = points.length > 1 ? (width - pad * 2) / (points.length - 1) : 0;
           const x = pad + index * step;
