@@ -45,6 +45,22 @@ export interface CheckinChecklistTemplate {
   updatedBy: string | null;
 }
 
+export interface CheckoutInspectionStep {
+  id: string;
+  label: string;
+  okLabel: string;
+  negativeLabel: string;
+  notePrompt: string;
+  required: boolean;
+  position: number;
+}
+
+export interface CheckoutInspectionTemplate {
+  steps: CheckoutInspectionStep[];
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
 export const pmsSettingsService = {
   getSetupStatus: () => pmsClient.get<PmsSetupStatus>("/admin/setup-status"),
 
@@ -63,4 +79,10 @@ export const settingsService = {
 
   updateCheckinChecklist: (steps: CheckinChecklistStep[]) =>
     pmsClient.put<CheckinChecklistTemplate>("/admin/check-in-checklist", { steps }),
+
+  getCheckoutInspection: () =>
+    pmsClient.get<CheckoutInspectionTemplate>("/admin/check-out-inspection"),
+
+  updateCheckoutInspection: (steps: CheckoutInspectionStep[]) =>
+    pmsClient.put<CheckoutInspectionTemplate>("/admin/check-out-inspection", { steps }),
 };
