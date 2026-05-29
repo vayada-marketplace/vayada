@@ -280,6 +280,7 @@ The auth database (`auth-db/`) provides centralized user management for all serv
    | Booking Engine Frontend | http://localhost:3002      |
    | Booking Engine Admin    | http://localhost:3003      |
    | PMS Frontend            | http://localhost:3004      |
+   | Platform Admin          | http://localhost:3007      |
    | Marketplace API Docs    | http://localhost:8000/docs |
    | Booking Engine API Docs | http://localhost:8001/docs |
    | PMS API Docs            | http://localhost:8002/docs |
@@ -297,6 +298,7 @@ The auth database (`auth-db/`) provides centralized user management for all serv
 | Booking Frontend        | 3002 | Guest-facing booking site              |
 | Booking Admin           | 3003 | Hotel admin dashboard                  |
 | PMS Frontend            | 3004 | Hotel property management              |
+| Platform Admin          | 3007 | Super-admin platform growth dashboard  |
 | Marketplace Backend API | 8000 | Marketplace REST API                   |
 | Booking Backend API     | 8001 | Booking engine REST API                |
 | PMS Backend API         | 8002 | PMS REST API                           |
