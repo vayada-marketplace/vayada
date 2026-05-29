@@ -11,6 +11,7 @@ from app.dependencies import get_current_hotel, require_hotel_admin
 from app.models.settings import (
     PropertySettingsResponse,
     PropertySettingsUpdate,
+    SettingsPointOfInterest,
     hotel_default,
 )
 from app.models.utils import parse_json, slugify
@@ -82,6 +83,8 @@ _PROPERTY_FIELD_MAP = {
     "refer_a_guest_enabled": "refer_a_guest_enabled",
     "terms_text": "terms_text",
     "cancellation_policy_text": "cancellation_policy_text",
+    "show_room_detail_map": "show_room_detail_map",
+    "points_of_interest": "points_of_interest",
 }
 
 
@@ -176,6 +179,10 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         payout_swift=_coalesce(hotel, "payout_swift"),
         terms_text=_coalesce(hotel, "terms_text"),
         cancellation_policy_text=_coalesce(hotel, "cancellation_policy_text"),
+        show_room_detail_map=_coalesce(hotel, "show_room_detail_map"),
+        points_of_interest=parse_json(
+            hotel.get("points_of_interest"), default=hotel_default("points_of_interest")
+        ),
     )
 
 
@@ -205,6 +212,12 @@ def _api_to_db_value(api_value, db_column: str):
     if api_value is not None:
         return api_value
     return hotel_default(db_column)
+
+
+def _serialize_points_of_interest(
+    points: list[SettingsPointOfInterest] | None,
+) -> list[dict[str, Any]]:
+    return [point.model_dump() for point in (points or [])]
 
 
 async def _resolve_unique_slug(
@@ -309,6 +322,10 @@ async def _create_hotel_from_settings(
         payout_account_number=data.payout_account_number or "",
         payout_bank_name=data.payout_bank_name or "",
         payout_swift=data.payout_swift or "",
+        show_room_detail_map=_api_to_db_value(data.show_room_detail_map, "show_room_detail_map"),
+        points_of_interest=_serialize_points_of_interest(
+            _api_to_db_value(data.points_of_interest, "points_of_interest")
+        ),
     )
     slug = await _resolve_unique_slug(name, user_id)
     try:
@@ -419,6 +436,8 @@ async def update_property_settings(
         for api_field, db_col in _PROPERTY_FIELD_MAP.items():
             value = getattr(data, api_field)
             if value is not None:
+                if api_field == "points_of_interest":
+                    value = _serialize_points_of_interest(value)
                 updates[db_col] = value
 
         _validate_paypal_settings(
