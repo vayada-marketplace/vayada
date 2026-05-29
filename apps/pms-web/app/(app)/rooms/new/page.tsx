@@ -27,7 +27,7 @@ export default function NewRoomPage() {
     baseRate: 0,
     nonRefundableRate: null,
     currency: "EUR",
-    address: "",
+    locationAddress: "",
     latitude: null,
     longitude: null,
     bedType: "",

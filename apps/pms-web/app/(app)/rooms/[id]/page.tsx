@@ -44,7 +44,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
           baseRate: r.baseRate,
           nonRefundableRate: r.nonRefundableRate,
           currency: r.currency,
-          address: r.address || "",
+          locationAddress: r.locationAddress || "",
           latitude: r.latitude,
           longitude: r.longitude,
           bedType: r.bedType,
