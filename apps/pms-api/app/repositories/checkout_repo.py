@@ -70,7 +70,10 @@ class CheckoutRepository:
                 original_amount,
                 created_by
             )
-            VALUES ($1, $2, $3, $4, $4, $5)
+            SELECT $1, $2, $3, $4, $4, $5
+            WHERE EXISTS (
+                SELECT 1 FROM bookings WHERE id = $1 AND status IN ('checked_in', 'in_house')
+            )
             RETURNING *
             """,
             booking_id,

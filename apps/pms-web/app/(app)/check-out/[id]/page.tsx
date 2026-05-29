@@ -257,6 +257,33 @@ export default function CheckOutPage() {
     );
   }
 
+  if (booking.status === "checked_out" && !confirmationFlags) {
+    return (
+      <main className="mx-auto max-w-3xl p-4 md:p-6">
+        <div className="rounded-2xl border border-green-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-semibold uppercase tracking-wide text-green-700">
+            Checked out
+          </p>
+          <h1 className="mt-2 text-2xl font-bold text-gray-950">{guestName(booking)}</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            This booking has already been checked out.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Link href="/dashboard" className={primaryActionClass}>
+              Back to dashboard
+            </Link>
+            <Link
+              href={`/bookings/${booking.id}`}
+              className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700"
+            >
+              Open booking
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   if (confirmationFlags) {
     return (
       <main className="mx-auto max-w-3xl p-4 md:p-6">

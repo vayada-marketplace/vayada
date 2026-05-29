@@ -252,6 +252,7 @@ export function CheckoutInspectionBuilder() {
                       <Field
                         value={step.label}
                         placeholder="Label"
+                        maxLength={120}
                         error={errors[step.id]}
                         dataStepLabel={step.id}
                         onChange={(value) => updateStep(step.id, { label: value })}
@@ -259,12 +260,14 @@ export function CheckoutInspectionBuilder() {
                       <Field
                         value={step.okLabel}
                         placeholder="OK label"
+                        maxLength={40}
                         error={errors[`${step.id}-ok`]}
                         onChange={(value) => updateStep(step.id, { okLabel: value })}
                       />
                       <Field
                         value={step.negativeLabel}
                         placeholder="Negative"
+                        maxLength={40}
                         error={errors[`${step.id}-negative`]}
                         onChange={(value) => updateStep(step.id, { negativeLabel: value })}
                       />
@@ -346,12 +349,14 @@ function Field({
   placeholder,
   error,
   dataStepLabel,
+  maxLength = 160,
   onChange,
 }: {
   value: string;
   placeholder: string;
   error?: string;
   dataStepLabel?: string;
+  maxLength?: number;
   onChange: (value: string) => void;
 }) {
   return (
@@ -359,7 +364,7 @@ function Field({
       <input
         data-step-label={dataStepLabel}
         value={value}
-        maxLength={160}
+        maxLength={maxLength}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-gray-400 ${

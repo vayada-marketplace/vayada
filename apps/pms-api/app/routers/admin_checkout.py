@@ -156,7 +156,7 @@ async def create_checkout_charge(
     hotel_id = await get_hotel_id(user_id)
     booking = await _require_booking(booking_id, hotel_id)
     if booking["status"] not in ("checked_in", "in_house"):
-        raise HTTPException(status_code=400, detail="Only checked-in bookings can receive charges")
+        raise HTTPException(status_code=400, detail="Only checked-in or in-house bookings can receive charges")
 
     pool = await Database.get_pool()
     async with pool.acquire() as conn:
@@ -271,7 +271,7 @@ async def complete_booking_check_out(
             )
 
     refreshed = await BookingRepository.get_by_id(booking_id)
-    asyncio.create_task(
+    _sync_task = asyncio.create_task(
         push_availability_for_room_type(
             hotel_id,
             str(booking["room_type_id"]),

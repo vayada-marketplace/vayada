@@ -470,6 +470,7 @@ class BookingRepository:
                 checked_out_at = COALESCE(checked_out_at, now()),
                 updated_at = now()
             WHERE id = $1
+              AND status IN ('checked_in', 'in_house')
             RETURNING *
             """,
             booking_id,
