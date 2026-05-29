@@ -85,7 +85,20 @@
     "freeWifi": "WiFi gratuito",
     "airportTransfer": "Traslado al aeropuerto",
     "selectThisRate": "Seleccionar Esta Tarifa",
-    "soldOut": "Agotado"
+    "soldOut": "Agotado",
+    "mobileView": {
+      "list": "Lista",
+      "map": "Mapa"
+    },
+    "roomMap": {
+      "noLocations": "No hay ubicaciones disponibles",
+      "noLocationsDesc": "Los tipos de habitación sin coordenadas guardadas aún aparecen en la lista.",
+      "locations": "{count, plural, one {# ubicación} other {# ubicaciones}}",
+      "perNight": "/ noche",
+      "view": "Ver →",
+      "zoomIn": "Acercar",
+      "zoomOut": "Alejar"
+    }
   },
   "rooms": {
     "title": "Nuestras Habitaciones",

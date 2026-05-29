@@ -91,6 +91,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> HotelResponse | No
         supported_languages=parse_json(row.get("supported_languages"), default=["en"]),
         refer_a_guest_enabled=row.get("refer_a_guest_enabled", False),
         instant_book=row.get("instant_book", False),
+        map_view_enabled=row.get("map_view_enabled", False),
         show_room_detail_map=row.get("show_room_detail_map", False),
         points_of_interest=parse_json(row.get("points_of_interest"), default=[]),
     )

@@ -39,6 +39,7 @@ export interface PropertySettings {
   arrival_time_enabled?: boolean;
   guest_count_enabled?: boolean;
   refer_a_guest_enabled?: boolean;
+  map_view_enabled?: boolean;
   free_cancellation_days: number;
   email_notifications: boolean;
   new_booking_alerts: boolean;

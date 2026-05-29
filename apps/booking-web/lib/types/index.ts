@@ -56,6 +56,7 @@ export interface Hotel {
   supportedLanguages: string[];
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
+  mapViewEnabled?: boolean;
   showRoomDetailMap?: boolean;
   pointsOfInterest?: PointOfInterest[];
 }

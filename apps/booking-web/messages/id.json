@@ -85,7 +85,20 @@
     "freeWifi": "WiFi gratis",
     "airportTransfer": "Transfer bandara",
     "selectThisRate": "Pilih Tarif Ini",
-    "soldOut": "Habis Terjual"
+    "soldOut": "Habis Terjual",
+    "mobileView": {
+      "list": "Daftar",
+      "map": "Peta"
+    },
+    "roomMap": {
+      "noLocations": "Tidak ada lokasi tersedia",
+      "noLocationsDesc": "Tipe kamar tanpa koordinat yang disimpan masih muncul di daftar.",
+      "locations": "{count, plural, one {# lokasi} other {# lokasi}}",
+      "perNight": "/ malam",
+      "view": "Lihat →",
+      "zoomIn": "Perbesar",
+      "zoomOut": "Perkecil"
+    }
   },
   "rooms": {
     "title": "Kamar Kami",

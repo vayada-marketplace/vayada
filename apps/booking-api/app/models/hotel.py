@@ -71,6 +71,7 @@ class HotelResponse(BaseModel):
     supported_languages: list[str] = ["en"]
     refer_a_guest_enabled: bool = False
     instant_book: bool = False
+    map_view_enabled: bool = False
     show_room_detail_map: bool = False
     points_of_interest: list[PointOfInterest] = []
 

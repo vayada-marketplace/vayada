@@ -100,6 +100,7 @@ const DEFAULT_SETTINGS: PropertySettings = {
   payout_bank_name: "",
   payout_swift: "",
   refer_a_guest_enabled: false,
+  map_view_enabled: false,
   terms_text: "",
   cancellation_policy_text: "",
   show_room_detail_map: false,
@@ -695,6 +696,16 @@ export default function SettingsPage() {
       {/* Booking tab */}
       {activeSection === "booking" && (
         <div className="mt-5 space-y-4">
+          {/* Map View */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
+            <ToggleSwitch
+              enabled={settings.map_view_enabled ?? false}
+              onChange={() => updateSetting("map_view_enabled", !settings.map_view_enabled)}
+              label={t("settings.booking.mapViewLabel")}
+              description={t("settings.booking.mapViewDesc")}
+            />
+          </div>
+
           {/* Refer a Guest */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <ToggleSwitch

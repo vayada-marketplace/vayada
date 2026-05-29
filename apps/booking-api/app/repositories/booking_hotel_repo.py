@@ -150,6 +150,7 @@ class BookingHotelRepository:
         arrival_time_enabled: bool = _D["arrival_time_enabled"],
         guest_count_enabled: bool = _D["guest_count_enabled"],
         refer_a_guest_enabled: bool = _D["refer_a_guest_enabled"],
+        map_view_enabled: bool = _D["map_view_enabled"],
         social_instagram: str = "",
         social_facebook: str = "",
         social_tiktok: str = "",
@@ -174,6 +175,7 @@ class BookingHotelRepository:
                 free_cancellation_days,
                 email_notifications, new_booking_alerts, payment_alerts, ota_booking_alerts, weekly_reports,
                 special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
+                map_view_enabled,
                 social_instagram, social_facebook, social_tiktok, social_youtube,
                 payout_account_holder, payout_account_type, payout_iban, payout_account_number,
                 payout_bank_name, payout_swift, show_room_detail_map, points_of_interest
@@ -183,7 +185,7 @@ class BookingHotelRepository:
                 $19, $20, $21, $22, $23, $24,
                 $25, $26, $27, $28, $29, $30,
                 $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
-                $45, $46::jsonb
+                $45, $46, $47::jsonb
             ) RETURNING *
         """
         row = await Database.fetchrow(
@@ -222,6 +224,7 @@ class BookingHotelRepository:
             arrival_time_enabled,
             guest_count_enabled,
             refer_a_guest_enabled,
+            map_view_enabled,
             social_instagram,
             social_facebook,
             social_tiktok,

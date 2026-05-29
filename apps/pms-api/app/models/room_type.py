@@ -41,8 +41,8 @@ def _validate_partial_refund_tiers(tiers: list) -> list:
         try:
             days_int = int(days)
             percent_int = int(percent)
-        except (TypeError, ValueError):
-            raise ValueError("partial_refund_tiers entries must be integers")
+        except (TypeError, ValueError) as e:
+            raise ValueError("partial_refund_tiers entries must be integers") from e
         if days_int < 0 or days_int > 365:
             raise ValueError(
                 "partial_refund_tiers[].min_days_before_check_in must be between 0 and 365"
@@ -456,6 +456,13 @@ class RoomTypeUpdate(BaseModel):
     rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] | None = None
 
+    @field_validator("location_address")
+    @classmethod
+    def validate_location_address(cls, v: str | None) -> str | None:
+        if v is None:
+            return ""
+        return v
+
     @field_validator("size")
     @classmethod
     def validate_size(cls, v: int | None) -> int | None:
@@ -475,13 +482,6 @@ class RoomTypeUpdate(BaseModel):
     def validate_max_children(cls, v: int | None) -> int | None:
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
-        return v
-
-    @field_validator("location_address")
-    @classmethod
-    def validate_location_address(cls, v: str | None) -> str | None:
-        if v is None:
-            return ""
         return v
 
     @field_validator("latitude")
