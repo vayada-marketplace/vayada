@@ -3,6 +3,8 @@ import json
 import logging
 from datetime import date
 
+import asyncpg
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import Database
@@ -516,8 +518,11 @@ async def delete_room_type(
 
     try:
         await RoomTypeRepository.delete(room_type_id)
-    except Exception as e:
+    except asyncpg.ForeignKeyViolationError as e:
         raise HTTPException(
             status_code=409,
             detail="Cannot delete room type with existing bookings",
         ) from e
+    except Exception as e:
+        logger.exception("Unexpected error deleting room type %s", room_type_id)
+        raise HTTPException(status_code=500, detail="Internal server error") from e

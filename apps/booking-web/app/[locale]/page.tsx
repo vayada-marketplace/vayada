@@ -605,7 +605,7 @@ function HomePageContent() {
                     : "text-gray-500 hover:text-gray-900"
                 }`}
               >
-                {view}
+                {t(`mobileView.${view}`)}
               </button>
             ))}
           </div>

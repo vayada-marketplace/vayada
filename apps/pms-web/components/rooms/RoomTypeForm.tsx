@@ -760,6 +760,8 @@ export default function RoomTypeForm({
   const previousCurrencyRef = useRef(form.currency || "EUR");
   const [activeTab, setActiveTab] = useState<RoomTab>("details");
   const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0));
+  const [latitudeInput, setLatitudeInput] = useState<string>(form.latitude != null ? String(form.latitude) : "");
+  const [longitudeInput, setLongitudeInput] = useState<string>(form.longitude != null ? String(form.longitude) : "");
   const [amenityInput, setAmenityInput] = useState("");
   const [featureInput, setFeatureInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
@@ -1667,12 +1669,17 @@ export default function RoomTypeForm({
                       step="0.000001"
                       min={-90}
                       max={90}
-                      value={form.latitude ?? ""}
-                      onChange={(e) =>
-                        updateForm({
-                          latitude: e.target.value === "" ? null : Number(e.target.value),
-                        })
-                      }
+                      value={latitudeInput}
+                      onChange={(e) => setLatitudeInput(e.target.value)}
+                      onBlur={() => {
+                        if (latitudeInput === "") {
+                          updateForm({ latitude: null });
+                        } else {
+                          const v = Math.max(-90, Math.min(90, Number(latitudeInput)));
+                          setLatitudeInput(String(v));
+                          updateForm({ latitude: v });
+                        }
+                      }}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
                       placeholder="-8.670458"
                     />
@@ -1686,12 +1693,17 @@ export default function RoomTypeForm({
                       step="0.000001"
                       min={-180}
                       max={180}
-                      value={form.longitude ?? ""}
-                      onChange={(e) =>
-                        updateForm({
-                          longitude: e.target.value === "" ? null : Number(e.target.value),
-                        })
-                      }
+                      value={longitudeInput}
+                      onChange={(e) => setLongitudeInput(e.target.value)}
+                      onBlur={() => {
+                        if (longitudeInput === "") {
+                          updateForm({ longitude: null });
+                        } else {
+                          const v = Math.max(-180, Math.min(180, Number(longitudeInput)));
+                          setLongitudeInput(String(v));
+                          updateForm({ longitude: v });
+                        }
+                      }}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
                       placeholder="115.212629"
                     />

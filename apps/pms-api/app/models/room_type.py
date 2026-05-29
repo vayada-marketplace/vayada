@@ -446,6 +446,13 @@ class RoomTypeUpdate(BaseModel):
     rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] | None = None
 
+    @field_validator("address")
+    @classmethod
+    def validate_address(cls, v: str | None) -> str | None:
+        if v is None:
+            raise ValueError("address cannot be set to null")
+        return v
+
     @field_validator("size")
     @classmethod
     def validate_size(cls, v: int | None) -> int | None:

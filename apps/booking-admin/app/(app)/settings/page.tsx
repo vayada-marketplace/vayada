@@ -603,8 +603,8 @@ export default function SettingsPage() {
             <ToggleSwitch
               enabled={settings.map_view_enabled ?? false}
               onChange={() => updateSetting("map_view_enabled", !settings.map_view_enabled)}
-              label="Enable map view"
-              description="Show an interactive map alongside your room list. Each room type with a saved location will appear as a price pin on the map."
+              label={t("settings.booking.mapViewLabel")}
+              description={t("settings.booking.mapViewDesc")}
             />
           </div>
 

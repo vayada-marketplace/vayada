@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
 
@@ -16,7 +17,7 @@ interface RoomMapPanelProps {
 function hasCoordinates(
   room: RoomType,
 ): room is RoomType & { latitude: number; longitude: number } {
-  return typeof room.latitude === "number" && typeof room.longitude === "number";
+  return Number.isFinite(room.latitude) && Number.isFinite(room.longitude);
 }
 
 function compactCurrency(amount: number, currency: string): string {
@@ -36,6 +37,7 @@ export default function RoomMapPanel({
   onSelectRoom,
   className = "",
 }: RoomMapPanelProps) {
+  const t = useTranslations("home");
   const { convertAndRound, selectedCurrency } = useCurrency();
   const mappedRooms = rooms.filter(hasCoordinates);
 
@@ -45,10 +47,8 @@ export default function RoomMapPanel({
         className={`min-h-[360px] rounded-2xl border border-dashed border-gray-300 bg-gray-50 flex items-center justify-center p-8 text-center ${className}`}
       >
         <div>
-          <p className="text-sm font-semibold text-gray-900">No locations available</p>
-          <p className="mt-1 text-sm text-gray-500">
-            Room types without saved coordinates still appear in the list.
-          </p>
+          <p className="text-sm font-semibold text-gray-900">{t("roomMap.noLocations")}</p>
+          <p className="mt-1 text-sm text-gray-500">{t("roomMap.noLocationsDesc")}</p>
         </div>
       </div>
     );
@@ -82,13 +82,13 @@ export default function RoomMapPanel({
       <div className="absolute -right-16 bottom-20 h-40 w-[65%] rotate-12 rounded-full border-y border-emerald-300/60" />
 
       <div className="absolute left-4 top-4 rounded-xl bg-white/90 px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm border border-white">
-        {mappedRooms.length} location{mappedRooms.length === 1 ? "" : "s"}
+        {t("roomMap.locations", { count: mappedRooms.length })}
       </div>
 
       <div className="absolute right-4 top-4 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/90 shadow-sm">
-        <button className="h-9 w-9 text-lg font-semibold text-gray-700 hover:bg-gray-50">+</button>
+        <div aria-label={t("roomMap.zoomIn")} className="h-9 w-9 text-lg font-semibold text-gray-300 flex items-center justify-center select-none cursor-default">+</div>
         <div className="h-px bg-gray-200" />
-        <button className="h-9 w-9 text-lg font-semibold text-gray-700 hover:bg-gray-50">-</button>
+        <div aria-label={t("roomMap.zoomOut")} className="h-9 w-9 text-lg font-semibold text-gray-300 flex items-center justify-center select-none cursor-default">-</div>
       </div>
 
       {mappedRooms.map((room) => {
@@ -128,13 +128,13 @@ export default function RoomMapPanel({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-gray-900">{room.name}</p>
-                    <p className="text-xs text-gray-500">{displayPrice} / night</p>
+                    <p className="text-xs text-gray-500">{displayPrice} {t("roomMap.perNight")}</p>
                     <button
                       type="button"
                       onClick={() => onSelectRoom(room.id)}
                       className="mt-2 text-xs font-semibold text-primary-700 hover:text-primary-800"
                     >
-                      View -&gt;
+                      {t("roomMap.view")}
                     </button>
                   </div>
                 </div>

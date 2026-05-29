@@ -102,9 +102,17 @@ export default function RoomCard({
 
   return (
     <div
+      role="button"
+      tabIndex={0}
       onMouseEnter={() => onHover?.(true)}
       onMouseLeave={() => onHover?.(false)}
       onClick={onSelectCard}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelectCard?.();
+        }
+      }}
       className={`bg-white border rounded-2xl overflow-hidden transition-all ${
         active || highlighted
           ? "border-primary-400 shadow-[0_0_0_3px_rgba(99,102,241,0.14)]"
