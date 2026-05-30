@@ -7,6 +7,7 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  allowedDevOrigins: ["127.0.0.1", "hotel-alpenrose.booking.localhost", "*.booking.localhost"],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },
