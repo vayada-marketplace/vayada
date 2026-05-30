@@ -262,6 +262,8 @@ services:
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
       BOOKING_ENGINE_DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@booking-postgres:5432/vayada_booking_db
       BOOKING_ENGINE_API_URL: http://booking-backend:8001
+      JWT_SECRET_KEY: your-secret-key-change-in-production
+      JWT_ALGORITHM: HS256
       CORS_ORIGINS: http://localhost:3002,http://localhost:3003,http://localhost:3004
       API_HOST: "0.0.0.0"
       API_PORT: "8002"
