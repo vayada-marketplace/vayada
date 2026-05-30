@@ -75,7 +75,7 @@ vayada/
 ├── apps/                               # Product applications
 │   ├── marketplace-api/                      # FastAPI backend
 │   ├── marketplace-web/                      # Next.js authenticated marketplace app
-│   ├── marketplace-admin/                    # Next.js marketplace admin dashboard
+│   ├── vayada-admin/                    # Next.js Vayada admin dashboard
 │   ├── booking-api/                          # FastAPI booking backend
 │   ├── booking-web/                          # Next.js guest booking frontend
 │   ├── booking-admin/                        # Next.js booking admin dashboard
@@ -147,7 +147,7 @@ The marketplace connects travel creators and influencers with hotels for paid co
 - GDPR compliance: data export, deletion requests, consent tracking
 - Email notifications
 
-**Admin Panel** (`apps/marketplace-admin/`) — Port 3001
+**Admin Panel** (`apps/vayada-admin/`) — Port 3001
 
 - Sidebar navigation: Users, Hotels, Marketplace, Collaborations, Invite Codes
 - User management (view, edit, approve, reject creators and hotels)
@@ -276,11 +276,10 @@ The auth database (`auth-db/`) provides centralized user management for all serv
    | ----------------------- | -------------------------- |
    | Marketplace Frontend    | http://localhost:3000      |
    | Marketing / Landing     | http://localhost:3006      |
-   | Marketplace Admin       | http://localhost:3001      |
+   | Vayada Admin            | http://localhost:3001      |
    | Booking Engine Frontend | http://localhost:3002      |
    | Booking Engine Admin    | http://localhost:3003      |
    | PMS Frontend            | http://localhost:3004      |
-   | Platform Admin          | http://localhost:3007      |
    | Marketplace API Docs    | http://localhost:8000/docs |
    | Booking Engine API Docs | http://localhost:8001/docs |
    | PMS API Docs            | http://localhost:8002/docs |
@@ -294,11 +293,10 @@ The auth database (`auth-db/`) provides centralized user management for all serv
 | ----------------------- | ---- | -------------------------------------- |
 | Marketplace Frontend    | 3000 | Authenticated creator marketplace app  |
 | Marketing / Landing     | 3006 | Public marketing site (vayada-landing) |
-| Marketplace Admin       | 3001 | vayada admin dashboard                 |
+| Vayada Admin            | 3001 | Platform-wide admin dashboard          |
 | Booking Frontend        | 3002 | Guest-facing booking site              |
 | Booking Admin           | 3003 | Hotel admin dashboard                  |
 | PMS Frontend            | 3004 | Hotel property management              |
-| Platform Admin          | 3007 | Super-admin platform growth dashboard  |
 | Marketplace Backend API | 8000 | Marketplace REST API                   |
 | Booking Backend API     | 8001 | Booking engine REST API                |
 | PMS Backend API         | 8002 | PMS REST API                           |
@@ -345,7 +343,7 @@ Production domains:
 - `booking-api.vayada.com` — Booking API
 - `pms-api.vayada.com` — PMS API
 - `api.vayada.com` — Marketplace API
-- `admin.vayada.com` — Marketplace admin
+- `admin.vayada.com` — Vayada admin
 
 ---
 
@@ -371,18 +369,18 @@ Product apps are normal directories under `apps/`. The old app repositories were
 imported with path-scoped history. The old standalone repositories are archived
 in GitHub; the legacy root product directories were removed from this repo.
 
-| Old path                                                | New monorepo path          |
-| ------------------------------------------------------- | -------------------------- |
-| `marketplace/vayada-creator-marketplace-backend`        | `apps/marketplace-api`     |
-| `marketplace/vayada-creator-marketplace-frontend`       | `apps/marketplace-web`     |
-| `marketplace/vayada-creator-marketplace-frontend-admin` | `apps/marketplace-admin`   |
-| `booking-engine/vayada-booking-engine-backend`          | `apps/booking-api`         |
-| `booking-engine/vayada-booking-engine-frontend`         | `apps/booking-web`         |
-| `booking-engine/vayada-booking-engine-frontend-admin`   | `apps/booking-admin`       |
-| `pms/vayada-pms-backend`                                | `apps/pms-api`             |
-| `pms/vayada-pms-frontend`                               | `apps/pms-web`             |
-| `affiliate/vayada-affiliate-dashboard`                  | `apps/affiliate-dashboard` |
-| `marketing/vayada-landing`                              | `apps/landing`             |
+| Old path                                              | New monorepo path          |
+| ----------------------------------------------------- | -------------------------- |
+| `marketplace/vayada-creator-marketplace-backend`      | `apps/marketplace-api`     |
+| `marketplace/vayada-creator-marketplace-frontend`     | `apps/marketplace-web`     |
+| `marketplace/vayada-admin`                            | `apps/vayada-admin`        |
+| `booking-engine/vayada-booking-engine-backend`        | `apps/booking-api`         |
+| `booking-engine/vayada-booking-engine-frontend`       | `apps/booking-web`         |
+| `booking-engine/vayada-booking-engine-frontend-admin` | `apps/booking-admin`       |
+| `pms/vayada-pms-backend`                              | `apps/pms-api`             |
+| `pms/vayada-pms-frontend`                             | `apps/pms-web`             |
+| `affiliate/vayada-affiliate-dashboard`                | `apps/affiliate-dashboard` |
+| `marketing/vayada-landing`                            | `apps/landing`             |
 
 ---
 

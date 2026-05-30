@@ -15,13 +15,12 @@
 #
 #   Frontends (Next.js, registered via package.json):
 #     marketplace.localhost              marketplace-web        (port 3000)
-#     admin.marketplace.localhost        marketplace-admin      (port 3001)
+#     admin.localhost                    vayada-admin           (port 3001)
 #     booking.localhost                  booking-web            (port 3002)
 #     admin.booking.localhost            booking-admin          (port 3003)
 #     pms.localhost                      pms-web                (port 3004)
 #     affiliate.localhost                affiliate-dashboard    (port 3005)
 #     landing.localhost                  landing                (port 3006)
-#     admin.localhost                    platform-admin         (port 3007)
 #
 #   Backends (FastAPI, registered here as static aliases):
 #     api.marketplace.localhost          marketplace-api        (port 8000)

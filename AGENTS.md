@@ -8,19 +8,18 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                       | Stack      | Port | Local URL                             |
-| -------------------------- | ---------- | ---- | ------------------------------------- |
-| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost`   |
-| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`       |
-| `apps/marketplace-admin`   | Next.js 14 | 3001 | `https://admin.marketplace.localhost` |
-| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`       |
-| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`           |
-| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`     |
-| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`           |
-| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`               |
-| `apps/affiliate-dashboard` | Next.js 14 | 3005 | `https://affiliate.localhost`         |
-| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`           |
-| `apps/platform-admin`      | Next.js 14 | 3007 | `https://admin.localhost`             |
+| Path                       | Stack      | Port | Local URL                           |
+| -------------------------- | ---------- | ---- | ----------------------------------- |
+| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost` |
+| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`     |
+| `apps/vayada-admin`        | Next.js 14 | 3001 | `https://admin.localhost`           |
+| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`     |
+| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`         |
+| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
+| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`         |
+| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`             |
+| `apps/affiliate-dashboard` | Next.js 14 | 3005 | `https://affiliate.localhost`       |
+| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`         |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
@@ -72,7 +71,7 @@ Plain-port fallback still works: `cd apps/booking-web && npm run dev` and reach 
 
 ### Plain-port fallback
 
-Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000–3007), and uvicorn binds to 8000/8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
+Without portless, `npm run dev` in each Next.js app binds to its conventional port (3000–3006), and uvicorn binds to 8000/8001/8002 as before. To make the frontends talk to plain-port backends, override the API URLs in `apps/<name>/.env.local` — each `apps/*/.env.example` lists the plain-port URL alongside the portless default.
 
 ### Pre-1.0 caveat
 
@@ -94,7 +93,7 @@ uvicorn app.main:app --reload --port <P> # P = port from table above
 ```bash
 cd apps/<web>
 npm install
-npm run dev      # plain-port (3000–3007); use `portless` for HTTPS named URL — see Local dev
+npm run dev      # plain-port (3000–3006); use `portless` for HTTPS named URL — see Local dev
 npm run build    # always run before declaring a frontend change done
 npm run lint
 ```

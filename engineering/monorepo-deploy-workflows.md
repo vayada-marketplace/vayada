@@ -20,7 +20,7 @@ Docs-only changes should not deploy apps.
 | -------------------------- | -------------------------------------------------- | ----------------------------------------------------------- |
 | `apps/marketplace-api`     | `.github/workflows/deploy-marketplace-api.yml`     | `apps/marketplace-api/**`, `packages/**`, workflow file     |
 | `apps/marketplace-web`     | `.github/workflows/deploy-marketplace-web.yml`     | `apps/marketplace-web/**`, `packages/**`, workflow file     |
-| `apps/marketplace-admin`   | `.github/workflows/deploy-marketplace-admin.yml`   | `apps/marketplace-admin/**`, `packages/**`, workflow file   |
+| `apps/vayada-admin`        | `.github/workflows/deploy-vayada-admin.yml`        | `apps/vayada-admin/**`, `packages/**`, workflow file        |
 | `apps/booking-api`         | `.github/workflows/deploy-booking-api.yml`         | `apps/booking-api/**`, `packages/**`, workflow file         |
 | `apps/booking-web`         | `.github/workflows/deploy-booking-web.yml`         | `apps/booking-web/**`, `packages/**`, workflow file         |
 | `apps/booking-admin`       | `.github/workflows/deploy-booking-admin.yml`       | `apps/booking-admin/**`, `packages/**`, workflow file       |

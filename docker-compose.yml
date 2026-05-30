@@ -11,7 +11,7 @@
 #
 # Ports:
 #   3000  Marketplace frontend
-#   3001  Marketplace admin frontend
+#   3001  Vayada admin frontend
 #   3002  Booking engine frontend
 #   3003  Booking engine admin frontend
 #   3004  PMS frontend
@@ -324,11 +324,11 @@ services:
     networks:
       - vayada-network
 
-  marketplace-admin-frontend:
+  vayada-admin-frontend:
     build:
-      context: ./apps/marketplace-admin
+      context: ./apps/vayada-admin
       dockerfile: Dockerfile.dev
-    container_name: vayada-marketplace-admin-frontend
+    container_name: vayada-admin-frontend
     ports:
       - "3001:3001"
     environment:
@@ -339,7 +339,7 @@ services:
       - NEXT_PUBLIC_PMS_URL=http://localhost:8002
       - NEXT_PUBLIC_BOOKING_URL_TEMPLATE=http://{slug}.localhost:3002
     volumes:
-      - ./apps/marketplace-admin:/app
+      - ./apps/vayada-admin:/app
       - /app/node_modules
       - /app/.next
     depends_on:
