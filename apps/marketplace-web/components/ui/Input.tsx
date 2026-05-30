@@ -17,7 +17,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-base font-medium text-gray-900 mb-2">
+          <label className="mb-1.5 block text-sm font-medium text-gray-700">
             {label}
             {props.required && <span className="text-red-500 ml-1">*</span>}
           </label>
@@ -32,11 +32,11 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             type={type}
             ref={ref}
             className={cn(
-              "w-full px-4 py-3 rounded-lg border transition-colors text-base text-gray-900 bg-gray-50",
+              "w-full rounded-md border bg-white px-3 py-2.5 text-sm text-gray-900 transition-colors",
               "focus:outline-none focus:ring-2 focus:ring-offset-0",
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              "placeholder:text-gray-500",
-              leadingIcon ? "pl-11" : "",
+              "placeholder:text-gray-400",
+              leadingIcon ? "pl-10" : "",
               error
                 ? "border-red-300 focus:border-red-500 focus:ring-red-500"
                 : "border-gray-300 focus:border-primary-500 focus:ring-primary-500",
@@ -45,8 +45,8 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             {...props}
           />
         </div>
-        {error && <p className="mt-1 text-sm text-red-600 font-medium">{error}</p>}
-        {helperText && !error && <p className="mt-1 text-sm text-gray-700">{helperText}</p>}
+        {error && <p className="mt-1 text-xs font-medium text-red-600">{error}</p>}
+        {helperText && !error && <p className="mt-1 text-xs text-gray-500">{helperText}</p>}
       </div>
     );
   },

@@ -16,7 +16,7 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="mb-1.5 block text-sm font-medium text-gray-700">
             {label}
             {props.required && <span className="text-red-500 ml-1">*</span>}
           </label>
@@ -24,8 +24,8 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         <textarea
           ref={ref}
           className={cn(
-            "w-full px-4 py-3 rounded-lg border transition-colors resize-none text-gray-900 bg-gray-50",
-            "focus:outline-none focus:ring-2 focus:ring-offset-0 placeholder:text-gray-500",
+            "w-full resize-none rounded-md border bg-white px-3 py-2.5 text-sm text-gray-900 transition-colors",
+            "focus:outline-none focus:ring-2 focus:ring-offset-0 placeholder:text-gray-400",
             "disabled:opacity-50 disabled:cursor-not-allowed",
             error
               ? "border-red-300 focus:border-red-500 focus:ring-red-500"
@@ -34,8 +34,8 @@ const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           )}
           {...props}
         />
-        {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
-        {helperText && !error && <p className="mt-1 text-sm text-gray-500">{helperText}</p>}
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+        {helperText && !error && <p className="mt-1 text-xs text-gray-500">{helperText}</p>}
       </div>
     );
   },

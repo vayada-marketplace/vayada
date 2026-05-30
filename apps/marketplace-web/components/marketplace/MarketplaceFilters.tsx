@@ -102,7 +102,7 @@ export function MarketplaceFilters({
   const showCreatorFilters = viewType === "all" || viewType === "creators";
 
   return (
-    <div className="mb-8">
+    <div>
       <SearchBar
         value={searchQuery}
         onChange={onSearchChange}
