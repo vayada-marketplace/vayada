@@ -1,9 +1,9 @@
 import type { Page, TestInfo } from "@playwright/test";
 
 const ignoredConsoleErrorPatterns = [
-  /favicon/i,
-  /failed to load resource/i,
-  /net::ERR_ABORTED/i,
+  /favicon\.ico/i,
+  /favicon.*failed to load resource/i,
+  /favicon.*net::ERR_ABORTED/i,
   /webpack-hmr/i,
   /WebSocket connection .* failed/i,
 ];

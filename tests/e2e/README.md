@@ -64,6 +64,6 @@ Traces are retained on failure locally and on first retry in CI.
 
 ## Agent Guidance
 
-Agents should report the exact browser flow they exercised. Starting a dev server is not browser validation.
+Agents should report the exact browser flow they exercised. Starting a dev server alone is not browser validation.
 
-Use Playwright Test for committed regression coverage. Use Playwright CLI or the Codex in-app browser for quick exploratory checks. Use Playwright MCP only when deeper browser control, persistent state, or accessibility snapshots are worth the extra setup.
+Playwright Test is for committed regression coverage. For quick exploratory checks, prefer the Playwright CLI or Codex in-app browser. Reserve Playwright MCP for cases requiring deeper browser control, persistent state, or accessibility snapshots.

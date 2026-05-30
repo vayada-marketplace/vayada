@@ -14,8 +14,16 @@
  *     client-side resolution from `?slug=` / localStorage so a single
  *     dev container can serve any hotel
  */
+function normalizeHost(hostname: string): string {
+  const normalized = hostname.trim().toLowerCase();
+  if (normalized.startsWith("[")) {
+    return normalized.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
+  }
+  return normalized.replace(/:\d+$/, "");
+}
+
 export async function resolveSlugFromHost(hostname: string): Promise<string | null | undefined> {
-  const host = hostname.toLowerCase().split(":")[0];
+  const host = normalizeHost(hostname);
 
   if (host.endsWith(".booking.localhost")) {
     const parts = host.split(".");
@@ -25,11 +33,12 @@ export async function resolveSlugFromHost(hostname: string): Promise<string | nu
 
   if (host.endsWith(".localhost")) {
     const parts = host.split(".");
-    const sub = parts.length === 2 && parts[0] !== "www" ? parts[0] : null;
+    const sub =
+      parts.length === 2 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0] : null;
     return sub || undefined;
   }
 
-  const isLocalhost = host === "localhost" || host.startsWith("127.0.0.1");
+  const isLocalhost = host === "localhost" || host.startsWith("127.0.0.1") || host === "::1";
   if (isLocalhost) return undefined;
 
   const isSubdomain = host.endsWith(".booking.vayada.com");

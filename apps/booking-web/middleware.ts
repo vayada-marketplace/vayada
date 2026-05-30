@@ -6,8 +6,16 @@ const intlMiddleware = createMiddleware(routing);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 
+function normalizeHost(hostname: string): string {
+  const normalized = hostname.trim().toLowerCase();
+  if (normalized.startsWith("[")) {
+    return normalized.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
+  }
+  return normalized.replace(/:\d+$/, "");
+}
+
 function getKnownSubdomainSlug(hostname: string): string | null {
-  const host = hostname.toLowerCase().split(":")[0];
+  const host = normalizeHost(hostname);
   const parts = host.split(".");
 
   if (host.endsWith(".booking.vayada.com") || host.endsWith(".booking.localhost")) {
@@ -15,10 +23,14 @@ function getKnownSubdomainSlug(hostname: string): string | null {
   }
 
   if (host.endsWith(".localhost")) {
-    return parts.length === 2 && parts[0] !== "www" ? parts[0] : null;
+    return parts.length === 2 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0] : null;
   }
 
   return null;
+}
+
+function isLocalHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname.startsWith("127.0.0.1") || hostname === "::1";
 }
 
 export default async function middleware(request: NextRequest) {
@@ -27,15 +39,20 @@ export default async function middleware(request: NextRequest) {
   // Hostnames are case-insensitive per RFC 1035 §2.3.3 but the backend
   // lookup keys are stored lowercased — normalize here so a stray
   // uppercase Host header still resolves.
-  const hostname = (request.headers.get("host") || "").toLowerCase();
+  const hostname = normalizeHost(request.headers.get("host") || "");
 
   let slug = getKnownSubdomainSlug(hostname);
 
-  if (!slug && !hostname.includes("localhost") && !hostname.endsWith(".booking.vayada.com")) {
+  if (
+    !slug &&
+    !hostname.includes("localhost") &&
+    !isLocalHost(hostname) &&
+    !hostname.endsWith(".booking.vayada.com")
+  ) {
     // Custom domain: resolve slug via API
     try {
       const res = await fetch(
-        `${API_URL}/api/resolve-domain?domain=${encodeURIComponent(hostname.split(":")[0])}`,
+        `${API_URL}/api/resolve-domain?domain=${encodeURIComponent(hostname)}`,
       );
       if (res.ok) {
         const data = await res.json();
