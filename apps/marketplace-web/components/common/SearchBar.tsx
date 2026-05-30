@@ -21,15 +21,15 @@ export function SearchBar({
   showSort = true,
 }: SearchBarProps) {
   return (
-    <div className="mb-4 flex gap-4 items-center">
+    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
       <div className="relative flex-1">
-        <MagnifyingGlassIcon className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <Input
           type="text"
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="pl-12 pr-4 py-3 w-full"
+          className="h-10 w-full rounded-md border-gray-200 bg-gray-50 pl-9 pr-3 text-sm focus:bg-white"
         />
       </div>
       {showSort && onSortChange && (
@@ -37,7 +37,7 @@ export function SearchBar({
           <select
             value={sortOption}
             onChange={(e) => onSortChange(e.target.value)}
-            className="px-4 py-3 border border-gray-300 rounded-lg bg-white text-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 min-w-[150px]"
+            className="h-10 w-full min-w-[150px] rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 sm:w-auto"
           >
             <option value="relevance">Relevance</option>
             <option value="name-asc">Name (A-Z)</option>
