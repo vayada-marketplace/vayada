@@ -1,7 +1,7 @@
 """
 vayada-staff-only route for listing every booking across the platform.
 
-Used by the marketplace admin (admin.vayada.com) to review booking
+Used by the Vayada admin (admin.vayada.com) to review booking
 requests and their accept/reject history in one place.
 """
 

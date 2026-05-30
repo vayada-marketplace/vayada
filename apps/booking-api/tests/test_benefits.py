@@ -77,7 +77,7 @@ class TestUpdateBenefits:
 
     async def test_custom_string_round_trips(self, client, hotel_with_property):
         """Owner-typed benefits (not in the predefined list) must round-trip
-        verbatim — the marketplace admin needs to see them too."""
+        verbatim — the Vayada admin needs to see them too."""
         user = hotel_with_property["user"]
         await client.put(
             "/admin/benefits",

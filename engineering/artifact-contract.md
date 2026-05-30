@@ -22,7 +22,7 @@ ECR repositories are created and owned by `vayada-platform` (via `ecr.tf`). The 
 | `apps/pms-api`         | `vayada-pms-backend`              | ECS Fargate          |
 | `apps/pms-web`         | `vayada-pms-frontend`             | ECS Fargate          |
 | `apps/marketplace-api` | `vayada-creator-marketplace-backend` | ECS Fargate       |
-| `apps/marketplace-admin` | `vayada-admin-frontend`         | ECS Fargate          |
+| `apps/vayada-admin` | `vayada-admin-frontend`         | ECS Fargate          |
 | `apps/affiliate-dashboard` | `vayada-affiliate-dashboard`  | ECS Fargate          |
 | `apps/landing`         | `vayada-landing`                  | App Runner           |
 

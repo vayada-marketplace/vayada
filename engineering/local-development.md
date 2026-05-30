@@ -17,7 +17,7 @@ On first run, `docker compose up` also runs `auth-db-migrate` — a one-shot ser
 |---|---|---|
 | `marketplace-api` | 8000 | FastAPI |
 | `marketplace-web` | 3000 | Next.js |
-| `marketplace-admin` | 3001 | Next.js |
+| `vayada-admin` | 3001 | Next.js |
 | `booking-api` | 8001 | FastAPI |
 | `booking-web` | 3002 | Next.js |
 | `booking-admin` | 3003 | Next.js |
