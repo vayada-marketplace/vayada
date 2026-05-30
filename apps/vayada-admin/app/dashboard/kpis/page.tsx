@@ -144,67 +144,30 @@ export default function KpiDashboardPage() {
     () => data?.properties.filter((property) => property.status === "live") || [],
     [data],
   );
+  const selectedPropertiesLabel =
+    selectedIds.length === 0
+      ? "No properties selected"
+      : selectedIds.length === (data?.properties.length || 0)
+        ? "All properties"
+        : `${selectedIds.length} selected`;
 
   return (
-    <div className="min-h-screen bg-bone text-ink">
-      <header className="border-b border-ink/10 bg-bone/85 px-4 py-4 backdrop-blur md:px-6">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brass">
-                Growth dashboard · Admin · vayada platform
-              </p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-normal md:text-3xl">
-                Platform growth
-              </h1>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span
-                className={`rounded-md px-3 py-2 text-sm font-semibold ${
-                  excludeTestData ? "bg-reed/15 text-reed" : "bg-brass/20 text-brass"
-                }`}
-              >
-                {excludeTestData ? "Showing real bookings only" : "Including test data"}
-              </span>
-              <button
-                type="button"
-                onClick={() => setExcludeTestData((value) => !value)}
-                className={`flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-semibold ${
-                  excludeTestData
-                    ? "border-reed/30 bg-white text-reed"
-                    : "border-brass/40 bg-white text-brass"
-                }`}
-              >
-                <span
-                  className={`h-4 w-7 rounded-full p-0.5 ${
-                    excludeTestData ? "bg-reed" : "bg-brass"
-                  }`}
-                >
-                  <span
-                    className={`block h-3 w-3 rounded-full bg-white transition ${
-                      excludeTestData ? "translate-x-3" : ""
-                    }`}
-                  />
-                </span>
-                Exclude test data
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectorOpen(true)}
-                className="flex h-10 items-center gap-2 rounded-md border border-ink/10 bg-white px-3 text-sm font-semibold hover:border-lagoon hover:text-lagoon"
-              >
-                <BuildingOffice2Icon className="h-4 w-4" aria-hidden="true" />
-                Properties ({selectedIds.length})
-              </button>
-            </div>
-          </div>
-          <nav className="flex gap-2 overflow-x-auto" aria-label="Dashboard tabs">
+    <div className="p-4 md:p-8 max-w-[1400px] text-gray-900">
+      <div className="mb-5 md:mb-6 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="mt-1 text-[13px] text-gray-500">
+            Growth signals across properties, traffic, and booking demand
+          </p>
+          <nav className="mt-4 flex flex-wrap gap-2" aria-label="Dashboard views">
             {tabs.map((tab) => (
               <button
                 key={tab.name}
                 type="button"
-                className={`h-9 rounded-md px-3 text-sm font-semibold ${
-                  tab.active ? "bg-ink text-bone" : "bg-white text-ink/60"
+                className={`rounded-full border px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                  tab.active
+                    ? "border-gray-900 bg-gray-900 text-white"
+                    : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
                 }`}
               >
                 {tab.name}
@@ -212,51 +175,90 @@ export default function KpiDashboardPage() {
             ))}
           </nav>
         </div>
-      </header>
 
-      <div className="px-4 py-5 md:px-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setExcludeTestData((value) => !value)}
+            aria-pressed={excludeTestData}
+            className="flex h-10 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 sm:justify-start"
+          >
+            <span
+              className={`flex h-5 w-9 rounded-full p-0.5 transition-colors ${
+                excludeTestData ? "bg-gray-900" : "bg-gray-300"
+              }`}
+            >
+              <span
+                className={`block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                  excludeTestData ? "translate-x-4" : ""
+                }`}
+              />
+            </span>
+            {excludeTestData ? "Real bookings only" : "Including test data"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectorOpen(true)}
+            className="flex h-10 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 sm:justify-start"
+          >
+            <span className="flex items-center gap-2">
+              <BuildingOffice2Icon className="h-4 w-4 text-gray-400" aria-hidden="true" />
+              Properties
+            </span>
+            <span className="text-gray-400">{selectedPropertiesLabel}</span>
+          </button>
+        </div>
+      </div>
+
+      <div>
         {error ? (
-          <div className="mb-4 rounded-md border border-ember/25 bg-ember/10 px-4 py-3 text-sm font-medium text-ember">
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-[13px] font-medium text-red-700">
             {error}
           </div>
         ) : null}
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {(data?.metrics || []).map((metric) => (
-            <article
-              key={metric.key}
-              className="rounded-lg border border-ink/10 bg-white p-4 shadow-sm"
-            >
-              <div className="mb-5 flex items-center justify-between">
-                <p className="text-sm font-medium text-ink/55">{metric.label}</p>
-                <MetricIcon metricKey={metric.key} />
-              </div>
-              <p className="text-3xl font-semibold">{isLoading ? "..." : metric.value}</p>
-              <p className="mt-2 text-sm text-ink/50">{metric.delta?.label || ""}</p>
-            </article>
-          ))}
+          {isLoading && !data
+            ? Array.from({ length: 4 }).map((_, index) => <MetricSkeleton key={index} />)
+            : (data?.metrics || []).map((metric) => (
+                <article
+                  key={metric.key}
+                  className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <p className="text-[13px] font-medium text-gray-500">{metric.label}</p>
+                    <MetricIcon metricKey={metric.key} />
+                  </div>
+                  <p className="text-3xl font-semibold tracking-normal text-gray-900">
+                    {isLoading ? "..." : metric.value}
+                  </p>
+                  <p className="mt-2 text-[12px] text-gray-500">{metric.delta?.label || ""}</p>
+                </article>
+              ))}
         </div>
 
-        <section className="mt-4 rounded-lg border border-ink/10 bg-bone/80 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {granularityOptions.map((option) => (
-              <button
-                type="button"
-                key={option}
-                onClick={() => setGranularity(option)}
-                className={`h-9 rounded-md px-3 text-sm font-semibold capitalize ${
-                  granularity === option
-                    ? "bg-ink text-bone"
-                    : "bg-white text-ink/60 hover:text-ink"
-                }`}
-              >
-                {option}
-              </button>
-            ))}
+        <section className="mt-4 rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {granularityOptions.map((option) => (
+                <button
+                  type="button"
+                  key={option}
+                  onClick={() => setGranularity(option)}
+                  className={`rounded-full border px-3 py-1.5 text-[12px] font-medium capitalize transition-colors ${
+                    granularity === option
+                      ? "border-gray-900 bg-gray-900 text-white"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
             <select
               value={bookingPropertyId}
               onChange={(event) => setBookingPropertyId(event.target.value)}
-              className="ml-auto h-9 min-w-52 rounded-md border border-ink/10 bg-white px-3 text-sm font-medium outline-none"
+              className="h-10 min-w-0 rounded-lg border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 outline-none focus:ring-2 focus:ring-gray-200 sm:min-w-72"
               aria-label="Booking requests property"
             >
               <option value="">All properties</option>
@@ -270,12 +272,12 @@ export default function KpiDashboardPage() {
         </section>
 
         {data?.emptyMessage ? (
-          <div className="mt-4 rounded-md border border-brass/30 bg-brass/10 px-4 py-3 text-sm font-medium text-brass">
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-700">
             {data.emptyMessage}
           </div>
         ) : null}
 
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <ChartPanel
             title="Page views"
             subtitle="All selected properties"
@@ -318,11 +320,24 @@ export default function KpiDashboardPage() {
 }
 
 function MetricIcon({ metricKey }: { metricKey: string }) {
-  const className = "h-5 w-5";
+  const className = "h-5 w-5 text-gray-400";
   if (metricKey === "live_properties") return <BuildingOffice2Icon className={className} />;
   if (metricKey === "page_views") return <PresentationChartLineIcon className={className} />;
   if (metricKey === "booking_requests") return <ChartBarIcon className={className} />;
   return <ArrowPathIcon className={className} />;
+}
+
+function MetricSkeleton() {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <div className="mb-5 flex items-center justify-between">
+        <div className="h-4 w-28 animate-pulse rounded bg-gray-100" />
+        <div className="h-5 w-5 animate-pulse rounded bg-gray-100" />
+      </div>
+      <div className="h-8 w-20 animate-pulse rounded bg-gray-100" />
+      <div className="mt-3 h-3 w-32 animate-pulse rounded bg-gray-100" />
+    </div>
+  );
 }
 
 function ChartPanel({
@@ -337,13 +352,13 @@ function ChartPanel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-ink/10 bg-white/70 p-4 shadow-sm">
+    <section className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <p className="text-sm text-ink/50">{subtitle}</p>
+          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+          <p className="mt-0.5 text-[13px] text-gray-500">{subtitle}</p>
         </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-ink text-bone">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-gray-50 text-gray-500">
           {icon}
         </div>
       </div>
