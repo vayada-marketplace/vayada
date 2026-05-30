@@ -324,12 +324,6 @@ export default function MarketplacePage() {
     }
   }, [filteredCreators, sortOption]);
 
-  const resultCount = userType === "creator" ? sortedHotels.length : sortedCreators.length;
-  const resultLabel = userType === "creator" ? "hotels" : "creators";
-  const activeFilterCount = Object.values(filters).filter((value) =>
-    Array.isArray(value) ? value.length > 0 : value !== undefined && value !== "",
-  ).length;
-
   return (
     <main className="min-h-screen bg-gray-50">
       <AuthenticatedNavigation />
@@ -340,7 +334,7 @@ export default function MarketplacePage() {
 
         <div className="mx-auto max-w-7xl px-4 py-4 md:px-6 md:py-6">
           {/* Header */}
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="mb-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Creator hotel network
@@ -353,41 +347,32 @@ export default function MarketplacePage() {
                 conversation.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:flex">
-              <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[11px] font-medium text-gray-500">Results</p>
-                <p className="text-lg font-semibold leading-tight text-gray-950">
-                  {loading ? "..." : resultCount}
-                </p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[11px] font-medium text-gray-500">Active filters</p>
-                <p className="text-lg font-semibold leading-tight text-gray-950">
-                  {activeFilterCount}
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* Filters */}
-          <section className="mb-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm md:p-4">
-            <div className="mb-3 flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
-              <div>
-                <h2 className="text-sm font-semibold text-gray-950">Explore matches</h2>
-                <p className="text-xs text-gray-500">
-                  Showing {userType === "creator" ? "hotel stays" : "creator partners"} sorted by
-                  fit.
-                </p>
+          <section className="mb-5 rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-gray-500">
+                Showing {userType === "creator" ? "hotel stays" : "creator partners"} sorted by fit
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                <select
+                  value={sortOption}
+                  onChange={(e) => setSortOption(e.target.value)}
+                  className="h-8 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 focus:border-gray-300 focus:ring-2 focus:ring-gray-100"
+                  aria-label="Sort marketplace results"
+                >
+                  <option value="relevance">Relevance</option>
+                  <option value="name-asc">Name (A-Z)</option>
+                  <option value="name-desc">Name (Z-A)</option>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                </select>
               </div>
-              <span className="hidden rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 sm:inline-flex">
-                {loading ? "Loading" : `${resultCount} ${resultLabel}`}
-              </span>
             </div>
             <MarketplaceFilters
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
-              sortOption={sortOption}
-              onSortChange={setSortOption}
               filters={filters}
               onFiltersChange={setFilters}
               viewType={
@@ -455,7 +440,7 @@ export default function MarketplacePage() {
               {userType === "hotel" && (
                 <div>
                   {sortedCreators.length > 0 ? (
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {sortedCreators.map((creator) => (
                         <CreatorCard key={creator.id} creator={creator} />
                       ))}

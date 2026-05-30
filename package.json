@@ -20,6 +20,7 @@
     "dev:marketplace-web": "npm --workspace vayada-creator-marketplace run dev",
     "dev:portless": "./scripts/dev-portless.sh",
     "dev:pms-web": "npm --workspace vayada-pms-frontend run dev",
+    "seed:test-data": "./scripts/seed_test_data.sh",
     "build": "npm --workspaces --if-present run build",
     "lint": "npm --workspaces --if-present run lint",
     "typecheck": "npm --workspaces --if-present run typecheck",

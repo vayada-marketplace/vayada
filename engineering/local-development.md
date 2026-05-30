@@ -79,7 +79,8 @@ This script temporarily opens the RDS security group to your IP, runs the migrat
 Populate local databases with mock data:
 
 ```bash
-python scripts/seed_all.py     # users → marketplace → booking (recommended)
+npm run seed:test-data         # users → marketplace → booking (recommended)
+python scripts/seed_all.py     # direct Python runner
 python scripts/seed_users.py   # auth DB only
 python scripts/seed_marketplace.py
 python scripts/seed_booking.py

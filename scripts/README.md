@@ -49,7 +49,7 @@ default to `localhost` Postgres URLs; override via `DATABASE_URL`,
 | `seed_all.py`         | Runs the three above in order (`users → marketplace → booking`) and prints credentials at the end.                 |
 
 ```sh
-python scripts/seed_all.py
+npm run seed:test-data
 ```
 
 Default credentials after seeding:

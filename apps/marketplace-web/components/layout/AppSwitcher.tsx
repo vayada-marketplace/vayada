@@ -27,7 +27,13 @@ function buildHandoffUrl(baseUrl: string): string {
   return `${baseUrl}/handoff#${params.toString()}`;
 }
 
-export function AppSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
+export function AppSwitcher({
+  isCollapsed,
+  placement = "nav",
+}: {
+  isCollapsed: boolean;
+  placement?: "brand" | "nav";
+}) {
   const [open, setOpen] = useState(false);
   const [userType, setUserType] = useState<UserType | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -57,12 +63,19 @@ export function AppSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
   };
 
   return (
-    <div ref={rootRef} className="relative border-b border-gray-100">
+    <div
+      ref={rootRef}
+      className={`relative ${placement === "nav" ? "border-b border-gray-100" : "w-full"}`}
+    >
       <button
         type="button"
-        onClick={() => !isCollapsed && setOpen((v) => !v)}
+        onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center transition-colors hover:bg-gray-50 ${
-          isCollapsed ? "justify-center px-2 py-3" : "gap-2.5 px-3 py-3"
+          isCollapsed
+            ? "h-12 justify-center px-2"
+            : placement === "brand"
+              ? "h-12 gap-2.5 px-3"
+              : "gap-2.5 px-3 py-3"
         }`}
         title={isCollapsed ? "Switch app" : undefined}
       >
@@ -100,8 +113,12 @@ export function AppSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
         )}
       </button>
 
-      {open && !isCollapsed && (
-        <div className="absolute top-full left-2 right-2 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1.5">
+      {open && (
+        <div
+          className={`absolute top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1.5 ${
+            isCollapsed ? "left-2 w-56" : "left-2 right-2"
+          }`}
+        >
           <p className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
             <svg
               className="w-3 h-3"
