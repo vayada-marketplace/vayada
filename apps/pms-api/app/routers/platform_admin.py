@@ -35,7 +35,9 @@ async def update_property_status(
     request: UpdatePlatformPropertyStatusRequest,
     user_id: str = Depends(require_super_admin),
 ):
-    property_row = await PlatformAdminRepository.update_property_status(str(property_id), request.status)
+    property_row = await PlatformAdminRepository.update_property_status(
+        str(property_id), request.status
+    )
     if not property_row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

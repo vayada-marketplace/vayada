@@ -459,9 +459,7 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
-    async def complete_check_out(
-        booking_id: str, conn: Connection | None = None
-    ) -> dict | None:
+    async def complete_check_out(booking_id: str, conn: Connection | None = None) -> dict | None:
         executor = conn or Database
         row = await executor.fetchrow(
             """

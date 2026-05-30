@@ -11,8 +11,8 @@ from app.routers.admin import router as admin_router
 from app.routers.admin_affiliates import router as admin_affiliates_router
 from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.admin_channex import router as admin_channex_router
-from app.routers.admin_checkout import router as admin_checkout_router
 from app.routers.admin_checkin_checklist import router as admin_checkin_checklist_router
+from app.routers.admin_checkout import router as admin_checkout_router
 from app.routers.admin_financials import router as admin_financials_router
 from app.routers.admin_import import router as admin_import_router
 from app.routers.admin_messaging import router as admin_messaging_router

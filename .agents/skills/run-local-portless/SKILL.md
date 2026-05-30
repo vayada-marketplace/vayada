@@ -1,0 +1,44 @@
+---
+name: run-local-portless
+description: Use when a user asks to deploy, run, start, boot, launch, or test the Vayada monorepo locally, even if they do not mention portless or Docker.
+---
+
+# Run Vayada Locally
+
+Use this as the default local deployment workflow for Vayada. Do not require the
+user to mention portless or Docker; those are implementation details handled by
+the repo script.
+
+From the repo root:
+
+```sh
+npm run dev:portless
+```
+
+Equivalent direct command:
+
+```sh
+./scripts/dev-portless.sh
+```
+
+What this does:
+
+- Starts Docker databases, MinIO, auth migrations, and the three FastAPI backends in the background.
+- Applies `docker-compose.portless.yml` so backend CORS allows portless frontend origins.
+- Registers the `api.marketplace`, `api.booking`, and `api.pms` portless aliases.
+- Runs `portless` in the foreground for all Next.js frontends.
+
+To stop the Docker backend services started by this workflow:
+
+```sh
+./scripts/dev-portless.sh --stop
+```
+
+If `portless` is missing, tell the user to run:
+
+```sh
+npm install -g portless
+./scripts/portless-setup.sh
+```
+
+Do not recommend manually starting every frontend/API unless the script fails or the user specifically asks for the lower-level commands.

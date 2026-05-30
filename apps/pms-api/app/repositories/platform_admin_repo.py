@@ -222,7 +222,9 @@ class PlatformAdminRepository:
             "selected_property_ids": selected_ids,
             "exclude_test_data": exclude_test_data,
             "granularity": granularity,
-            "booking_property_id": booking_property_id if booking_property_id in metric_ids else None,
+            "booking_property_id": booking_property_id
+            if booking_property_id in metric_ids
+            else None,
             "metrics": [
                 {
                     "key": "live_properties",

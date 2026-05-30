@@ -156,7 +156,9 @@ async def create_checkout_charge(
     hotel_id = await get_hotel_id(user_id)
     booking = await _require_booking(booking_id, hotel_id)
     if booking["status"] not in ("checked_in", "in_house"):
-        raise HTTPException(status_code=400, detail="Only checked-in or in-house bookings can receive charges")
+        raise HTTPException(
+            status_code=400, detail="Only checked-in or in-house bookings can receive charges"
+        )
 
     pool = await Database.get_pool()
     async with pool.acquire() as conn:

@@ -265,9 +265,7 @@ export default function CheckOutPage() {
             Checked out
           </p>
           <h1 className="mt-2 text-2xl font-bold text-gray-950">{guestName(booking)}</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            This booking has already been checked out.
-          </p>
+          <p className="mt-1 text-sm text-gray-500">This booking has already been checked out.</p>
           <div className="mt-6 flex flex-wrap gap-2">
             <Link href="/dashboard" className={primaryActionClass}>
               Back to dashboard

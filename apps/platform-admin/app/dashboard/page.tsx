@@ -12,11 +12,7 @@ import {
 import { BarChart, LineChart } from "@/components/Chart";
 import { PropertySelector } from "@/components/PropertySelector";
 import { authService } from "@/services/auth";
-import {
-  getGrowthDashboard,
-  Granularity,
-  GrowthDashboard,
-} from "@/services/platformAdmin";
+import { getGrowthDashboard, Granularity, GrowthDashboard } from "@/services/platformAdmin";
 
 const STORAGE_KEY = "platformAdminGrowthFilters";
 

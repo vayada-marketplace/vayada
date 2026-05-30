@@ -86,9 +86,19 @@ export default function RoomMapPanel({
       </div>
 
       <div className="absolute right-4 top-4 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/90 shadow-sm">
-        <div aria-label={t("roomMap.zoomIn")} className="h-9 w-9 text-lg font-semibold text-gray-300 flex items-center justify-center select-none cursor-default">+</div>
+        <div
+          aria-label={t("roomMap.zoomIn")}
+          className="h-9 w-9 text-lg font-semibold text-gray-300 flex items-center justify-center select-none cursor-default"
+        >
+          +
+        </div>
         <div className="h-px bg-gray-200" />
-        <div aria-label={t("roomMap.zoomOut")} className="h-9 w-9 text-lg font-semibold text-gray-300 flex items-center justify-center select-none cursor-default">-</div>
+        <div
+          aria-label={t("roomMap.zoomOut")}
+          className="h-9 w-9 text-lg font-semibold text-gray-300 flex items-center justify-center select-none cursor-default"
+        >
+          -
+        </div>
       </div>
 
       {mappedRooms.map((room) => {
@@ -128,7 +138,9 @@ export default function RoomMapPanel({
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-gray-900">{room.name}</p>
-                    <p className="text-xs text-gray-500">{displayPrice} {t("roomMap.perNight")}</p>
+                    <p className="text-xs text-gray-500">
+                      {displayPrice} {t("roomMap.perNight")}
+                    </p>
                     <button
                       type="button"
                       onClick={() => onSelectRoom(room.id)}

@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.models.checkin import to_camel
 
-
 CheckoutInspectionStatus = Literal["ok", "issue", "neutral"]
 CheckoutChargeStatus = Literal["pending", "paid", "waived"]
 

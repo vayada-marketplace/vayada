@@ -18,6 +18,7 @@
     "dev:landing": "npm --workspace vayada-landing run dev",
     "dev:marketplace-admin": "npm --workspace vayada-creator-marketplace-frontend-admin run dev",
     "dev:marketplace-web": "npm --workspace vayada-creator-marketplace run dev",
+    "dev:portless": "./scripts/dev-portless.sh",
     "dev:platform-admin": "npm --workspace vayada-platform-admin run dev",
     "dev:pms-web": "npm --workspace vayada-pms-frontend run dev",
     "build": "npm --workspaces --if-present run build",

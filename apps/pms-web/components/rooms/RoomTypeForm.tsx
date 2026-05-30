@@ -760,8 +760,12 @@ export default function RoomTypeForm({
   const previousCurrencyRef = useRef(form.currency || "EUR");
   const [activeTab, setActiveTab] = useState<RoomTab>("details");
   const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0));
-  const [latitudeInput, setLatitudeInput] = useState<string>(form.latitude != null ? String(form.latitude) : "");
-  const [longitudeInput, setLongitudeInput] = useState<string>(form.longitude != null ? String(form.longitude) : "");
+  const [latitudeInput, setLatitudeInput] = useState<string>(
+    form.latitude != null ? String(form.latitude) : "",
+  );
+  const [longitudeInput, setLongitudeInput] = useState<string>(
+    form.longitude != null ? String(form.longitude) : "",
+  );
   const [amenityInput, setAmenityInput] = useState("");
   const [featureInput, setFeatureInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([

@@ -4,7 +4,6 @@ import logging
 from datetime import date
 
 import asyncpg
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import Database
