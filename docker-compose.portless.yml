@@ -1,12 +1,12 @@
 services:
   marketplace-backend:
     environment:
-      CORS_ORIGINS: https://marketplace.localhost,https://admin.marketplace.localhost,https://booking.localhost,https://admin.booking.localhost,https://pms.localhost,https://affiliate.localhost,https://landing.localhost,https://admin.localhost
+      CORS_ORIGINS: https://marketplace.localhost,https://admin.localhost,https://booking.localhost,https://admin.booking.localhost,https://pms.localhost,https://affiliate.localhost,https://landing.localhost
 
   booking-backend:
     environment:
-      CORS_ORIGINS: https://booking.localhost,https://admin.booking.localhost,https://pms.localhost,https://admin.marketplace.localhost,https://admin.localhost
+      CORS_ORIGINS: https://booking.localhost,https://admin.booking.localhost,https://pms.localhost,https://admin.localhost
 
   pms-backend:
     environment:
-      CORS_ORIGINS: https://pms.localhost,https://booking.localhost,https://admin.booking.localhost,https://admin.marketplace.localhost,https://admin.localhost
+      CORS_ORIGINS: https://pms.localhost,https://booking.localhost,https://admin.booking.localhost,https://admin.localhost
