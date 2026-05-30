@@ -1,14 +1,24 @@
 import createMiddleware from "next-intl/middleware";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 
 const intlMiddleware = createMiddleware(routing);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 
-function isKnownSubdomain(hostname: string): boolean {
-  // Matches *.booking.vayada.com or *.localhost (local dev)
-  return hostname.endsWith(".booking.vayada.com") || hostname.includes("localhost");
+function getKnownSubdomainSlug(hostname: string): string | null {
+  const host = hostname.toLowerCase().split(":")[0];
+  const parts = host.split(".");
+
+  if (host.endsWith(".booking.vayada.com") || host.endsWith(".booking.localhost")) {
+    return parts.length >= 3 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0] : null;
+  }
+
+  if (host.endsWith(".localhost")) {
+    return parts.length === 2 && parts[0] !== "www" ? parts[0] : null;
+  }
+
+  return null;
 }
 
 export default async function middleware(request: NextRequest) {
@@ -18,18 +28,10 @@ export default async function middleware(request: NextRequest) {
   // lookup keys are stored lowercased — normalize here so a stray
   // uppercase Host header still resolves.
   const hostname = (request.headers.get("host") || "").toLowerCase();
-  const parts = hostname.split(".");
 
-  let slug: string | null = null;
+  let slug = getKnownSubdomainSlug(hostname);
 
-  if (isKnownSubdomain(hostname)) {
-    // Existing behavior: extract slug from subdomain
-    if (parts.length >= 3 && parts[0] !== "www") {
-      slug = parts[0];
-    } else if (parts.length === 2 && !parts[0].includes("localhost")) {
-      slug = parts[0];
-    }
-  } else {
+  if (!slug && !hostname.includes("localhost") && !hostname.endsWith(".booking.vayada.com")) {
     // Custom domain: resolve slug via API
     try {
       const res = await fetch(
