@@ -128,6 +128,7 @@ function LoginContent() {
             submitError={submitError}
             onErrorClear={() => setSubmitError("")}
             sessionExpired={sessionExpired}
+            showRegister={false}
           />
         )}
       </div>

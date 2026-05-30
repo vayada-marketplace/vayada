@@ -165,12 +165,8 @@ async def cleanup_database(init_database):
 
     # Clean up rate limit and audit log for all test emails (including static ones like
     # "nonexistent@example.com" used by login tests)
-    await AuthDatabase.execute(
-        "DELETE FROM login_rate_limit WHERE email LIKE '%@example.com'"
-    )
-    await AuthDatabase.execute(
-        "DELETE FROM login_audit_log WHERE email LIKE '%@example.com'"
-    )
+    await AuthDatabase.execute("DELETE FROM login_rate_limit WHERE email LIKE '%@example.com'")
+    await AuthDatabase.execute("DELETE FROM login_audit_log WHERE email LIKE '%@example.com'")
 
 
 @pytest.fixture(autouse=True)
@@ -362,21 +358,23 @@ async def create_test_hotel(
 async def create_test_admin(
     email: str | None = None, password: str = "AdminPassword123!", name: str = "Test Admin"
 ) -> dict:
-    """Create a test admin user."""
+    """Create a test user with superadmin access."""
     user = await create_test_user(
         email=email,
         password=password,
         name=name,
-        user_type="admin",
+        user_type="creator",
         status="verified",
         email_verified=True,
     )
+    await AuthDatabase.execute("UPDATE users SET is_superadmin = true WHERE id = $1", user["id"])
+    user["is_superadmin"] = True
 
     return {
         "user": user,
         "password": password,
         "token": create_access_token(
-            {"sub": str(user["id"]), "email": user["email"], "type": "admin"}
+            {"sub": str(user["id"]), "email": user["email"], "type": user["type"]}
         ),
     }
 

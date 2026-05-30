@@ -14,6 +14,9 @@ interface LoginResponse {
 export const authService = {
   async login(email: string, password: string) {
     const response = await authApi.post<LoginResponse>("/auth/login", { email, password });
+    if (!response.is_superadmin) {
+      throw new Error("Access denied. Superadmin account required.");
+    }
     if (typeof window !== "undefined") {
       localStorage.setItem("access_token", response.access_token);
       localStorage.setItem("token_expires_at", String(Date.now() + response.expires_in * 1000));
@@ -23,6 +26,7 @@ export const authService = {
       localStorage.setItem("userName", response.name);
       localStorage.setItem("userType", response.type);
       localStorage.setItem("userStatus", response.status);
+      localStorage.setItem("isSuperAdmin", "true");
       localStorage.setItem("user", JSON.stringify(response));
     }
     return response;

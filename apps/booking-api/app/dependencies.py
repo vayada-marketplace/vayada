@@ -114,8 +114,8 @@ async def require_hotel_admin(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> str:
-    user = await _authenticate(credentials, request, columns="id, type, status")
-    if user["type"] != "hotel":
+    user = await _authenticate(credentials, request, columns="id, type, status, is_superadmin")
+    if user["type"] != "hotel" and not user.get("is_superadmin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This endpoint is only available for hotel administrators",
@@ -132,9 +132,15 @@ async def get_current_hotel(
     Falls back to first hotel if header is absent (backwards compat).
     """
     hotel_id = request.headers.get("x-hotel-id")
+    user = await UserRepository.get_by_id(user_id, columns="id, is_superadmin")
+    is_superadmin = bool(user and user.get("is_superadmin"))
 
     if hotel_id:
-        hotel = await BookingHotelRepository.get_by_id_and_user_id(hotel_id, user_id)
+        hotel = (
+            await BookingHotelRepository.get_by_id(hotel_id)
+            if is_superadmin
+            else await BookingHotelRepository.get_by_id_and_user_id(hotel_id, user_id)
+        )
         if not hotel:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

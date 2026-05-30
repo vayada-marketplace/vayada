@@ -31,6 +31,7 @@ function clearAuthData() {
   localStorage.removeItem("userName");
   localStorage.removeItem("userType");
   localStorage.removeItem("userStatus");
+  localStorage.removeItem("isSuperAdmin");
 }
 
 function getToken() {
