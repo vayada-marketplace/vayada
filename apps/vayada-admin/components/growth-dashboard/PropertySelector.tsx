@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
 import { PlatformProperty } from "@/services/api/growthDashboard";
 
@@ -25,11 +25,13 @@ export function PropertySelector({
 }) {
   const [query, setQuery] = useState("");
   const [draftIds, setDraftIds] = useState(selectedIds);
+  const dialogRef = useRef<HTMLElement | null>(null);
   const selected = new Set(draftIds);
 
   useEffect(() => {
     if (open) {
       setDraftIds(selectedIds);
+      requestAnimationFrame(() => dialogRef.current?.focus());
     }
   }, [open, selectedIds]);
   const filtered = useMemo(() => {
@@ -44,11 +46,20 @@ export function PropertySelector({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-gray-900/35">
-      <aside className="flex h-full w-full max-w-lg flex-col bg-gray-50 shadow-xl">
+      <aside
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="property-selector-title"
+        tabIndex={-1}
+        className="flex h-full w-full max-w-lg flex-col bg-gray-50 shadow-xl outline-none"
+      >
         <div className="border-b border-gray-200 bg-white px-5 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Properties</h2>
+              <h2 id="property-selector-title" className="text-xl font-semibold text-gray-900">
+                Properties
+              </h2>
               <p className="mt-1 text-[13px] text-gray-500">
                 Choose which properties feed the dashboard
               </p>

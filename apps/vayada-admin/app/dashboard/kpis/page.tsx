@@ -180,6 +180,7 @@ export default function KpiDashboardPage() {
           <button
             type="button"
             onClick={() => setExcludeTestData((value) => !value)}
+            aria-pressed={excludeTestData}
             className="flex h-10 items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 sm:justify-start"
           >
             <span
