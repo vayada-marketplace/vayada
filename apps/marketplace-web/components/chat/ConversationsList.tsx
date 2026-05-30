@@ -45,28 +45,26 @@ export function ConversationsList({
   return (
     <>
       {/* Tabs */}
-      <div className="flex items-center border-b border-gray-200 sticky top-0 bg-white z-10">
+      <div className="sticky top-0 z-10 flex items-center border-b border-gray-200 bg-white p-2">
         <button
           onClick={() => setActiveTab("Active")}
-          className={`flex-1 py-3 text-sm font-medium text-center relative ${
-            activeTab === "Active" ? "text-blue-600" : "text-gray-500 hover:text-gray-800"
+          className={`relative flex-1 rounded-md py-2 text-center text-sm font-medium transition-colors ${
+            activeTab === "Active"
+              ? "bg-gray-100 text-gray-950"
+              : "text-gray-500 hover:text-gray-800"
           }`}
         >
           Active
-          {activeTab === "Active" && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
-          )}
         </button>
         <button
           onClick={() => setActiveTab("Archived")}
-          className={`flex-1 py-3 text-sm font-medium text-center relative ${
-            activeTab === "Archived" ? "text-blue-600" : "text-gray-500 hover:text-gray-800"
+          className={`relative flex-1 rounded-md py-2 text-center text-sm font-medium transition-colors ${
+            activeTab === "Archived"
+              ? "bg-gray-100 text-gray-950"
+              : "text-gray-500 hover:text-gray-800"
           }`}
         >
           Archived
-          {activeTab === "Archived" && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
-          )}
         </button>
       </div>
 
@@ -85,9 +83,9 @@ export function ConversationsList({
             <div
               key={chat.collaboration_id}
               onClick={() => onSelectChat(chat.collaboration_id)}
-              className={`p-4 hover:bg-blue-50/50 cursor-pointer transition-colors relative ${
+              className={`relative cursor-pointer p-4 transition-colors hover:bg-gray-50 ${
                 selectedChatId === chat.collaboration_id
-                  ? "bg-blue-50/80 border-r-2 border-blue-600"
+                  ? "border-r-2 border-gray-900 bg-gray-50"
                   : ""
               }`}
             >

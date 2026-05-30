@@ -5,7 +5,7 @@ import type { StepIndicatorProps } from "./types";
 
 export function StepIndicators({ steps, currentStep, onStepClick }: StepIndicatorProps) {
   return (
-    <div className="flex items-center">
+    <div className="flex flex-wrap items-center justify-center gap-y-2">
       {steps.map((step, index) => {
         const stepNumber = index + 1;
         const isActive = currentStep === stepNumber;
@@ -15,9 +15,9 @@ export function StepIndicators({ steps, currentStep, onStepClick }: StepIndicato
           <div key={index} className="flex items-center">
             <div className="flex flex-col items-center">
               <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
+                className={`flex h-7 w-7 items-center justify-center rounded-md text-xs font-semibold transition-colors ${
                   isActive
-                    ? "bg-primary-600 text-white shadow-md"
+                    ? "bg-primary-600 text-white"
                     : isCompleted
                       ? "bg-primary-600 text-white"
                       : "bg-gray-100 text-gray-400"
@@ -30,7 +30,7 @@ export function StepIndicators({ steps, currentStep, onStepClick }: StepIndicato
               </div>
               <span
                 className={`mt-1 text-[10px] font-medium uppercase tracking-wide ${
-                  isActive ? "text-primary-700" : isCompleted ? "text-primary-700" : "text-gray-400"
+                  isActive ? "text-gray-950" : isCompleted ? "text-gray-700" : "text-gray-400"
                 }`}
               >
                 {step}
@@ -38,9 +38,7 @@ export function StepIndicators({ steps, currentStep, onStepClick }: StepIndicato
             </div>
             {index < steps.length - 1 && (
               <div
-                className={`w-8 h-0.5 mx-2 mb-3.5 ${
-                  isCompleted ? "bg-primary-200" : "bg-gray-100"
-                }`}
+                className={`mx-2 mb-3.5 h-0.5 w-8 ${isCompleted ? "bg-primary-200" : "bg-gray-100"}`}
               />
             )}
           </div>

@@ -160,7 +160,7 @@ export function ChatMessageArea({
   return (
     <>
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
+      <div className="flex-1 overflow-y-auto bg-gray-50 p-4 md:p-5">
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
@@ -172,7 +172,7 @@ export function ChatMessageArea({
                 <button
                   onClick={onLoadMore}
                   disabled={isLoadingMore}
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 bg-blue-50 px-4 py-2 rounded-full border border-blue-100 transition-all disabled:opacity-50"
+                  className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-50"
                 >
                   {isLoadingMore ? "Loading older messages..." : "Load older messages"}
                 </button>
@@ -226,10 +226,10 @@ export function ChatMessageArea({
                           )}
                           <div>
                             <div
-                              className={`p-4 rounded-2xl text-sm leading-relaxed ${
+                              className={`rounded-lg p-3 text-sm leading-relaxed ${
                                 isMe
-                                  ? "bg-blue-600 text-white rounded-br-none"
-                                  : "bg-white border border-gray-100 text-gray-700 rounded-bl-none shadow-sm"
+                                  ? "rounded-br-sm bg-primary-600 text-white"
+                                  : "rounded-bl-sm border border-gray-200 bg-white text-gray-700 shadow-sm"
                               }`}
                             >
                               {msg.content_type === "image" ? (
@@ -270,7 +270,7 @@ export function ChatMessageArea({
       </div>
 
       {/* Fixed Footer: Message Input */}
-      <div className="p-4 bg-white border-t border-gray-100 flex-shrink-0">
+      <div className="flex-shrink-0 border-t border-gray-100 bg-white p-3">
         {/* Image Preview */}
         {imagePreview && (
           <div className="mb-3 relative inline-block">
@@ -325,7 +325,7 @@ export function ChatMessageArea({
               value={messageInput}
               onChange={(e) => onMessageInputChange(e.target.value)}
               disabled={isUploading}
-              className="w-full bg-gray-50 border border-gray-200 rounded-full pl-4 pr-10 py-3 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:opacity-50"
+              className="h-10 w-full rounded-md border border-gray-200 bg-gray-50 pl-3 pr-10 text-sm text-gray-900 transition-colors focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
             />
           </div>
 
@@ -353,7 +353,7 @@ export function ChatMessageArea({
           <button
             type="submit"
             disabled={!canSend || isUploading}
-            className="p-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-full transition-colors shadow-sm"
+            className="rounded-md bg-primary-600 p-2.5 text-white shadow-sm transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isUploading ? (
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>

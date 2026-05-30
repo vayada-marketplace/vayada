@@ -44,9 +44,7 @@ export function HotelProfile() {
     isSavingHotelProfile,
     showHotelPictureModal,
     setShowHotelPictureModal,
-    hotelPicturePreview,
     setHotelPicturePreview,
-    hotelProfilePictureFile,
     setHotelProfilePictureFile,
     hotelEditFormData,
     setHotelEditFormData,
@@ -58,18 +56,20 @@ export function HotelProfile() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-20">
-        <div className="relative">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-100"></div>
-          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-primary-600 absolute top-0 left-0"></div>
-        </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-40 animate-pulse rounded-lg border border-gray-200 bg-white shadow-sm"
+          />
+        ))}
       </div>
     );
   }
 
   if (isProfileIncomplete) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+      <div className="rounded-lg border border-gray-200 bg-white p-10 text-center shadow-sm">
         <div className="max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
             <svg
@@ -102,7 +102,7 @@ export function HotelProfile() {
 
   if (!hotelProfile) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+      <div className="rounded-lg border border-gray-200 bg-white p-10 text-center shadow-sm">
         <div className="max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
             <svg
@@ -135,24 +135,24 @@ export function HotelProfile() {
   return (
     <>
       {/* Tab Navigation with Edit Button */}
-      <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
-        <div className="flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
           <button
             onClick={() => setActiveHotelTab("overview")}
-            className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
               activeHotelTab === "overview"
-                ? "bg-primary-600 text-white"
-                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                ? "bg-white text-gray-950 shadow-sm"
+                : "text-gray-500 hover:text-gray-900"
             }`}
           >
             Overview
           </button>
           <button
             onClick={() => setActiveHotelTab("listings")}
-            className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
               activeHotelTab === "listings"
-                ? "bg-primary-600 text-white"
-                : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                ? "bg-white text-gray-950 shadow-sm"
+                : "text-gray-500 hover:text-gray-900"
             }`}
           >
             Listings
@@ -162,7 +162,7 @@ export function HotelProfile() {
           <>
             {!isEditingHotelProfile ? (
               <Button
-                className="p-2.5 rounded-lg bg-white text-primary-600 border border-primary-600 hover:bg-primary-50 transition-all duration-200 flex items-center justify-center"
+                className="flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
                 onClick={() => setIsEditingHotelProfile(true)}
                 title="Edit Profile"
               >
@@ -192,7 +192,7 @@ export function HotelProfile() {
       </div>
 
       {/* Tab Content */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+      <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:p-5">
         {activeHotelTab === "overview" && (
           <HotelOverviewTab
             profile={hotelProfile}
@@ -210,7 +210,7 @@ export function HotelProfile() {
           />
         )}
         {activeHotelTab === "listings" && (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 md:p-5">
             {/* Section Header */}
             <div className="mb-4">
               <div className="flex items-start gap-3">
@@ -238,7 +238,7 @@ export function HotelProfile() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between mb-1">
-                    <h2 className="text-2xl font-bold text-gray-900">Property Listings</h2>
+                    <h2 className="text-base font-semibold text-gray-950">Property Listings</h2>
                     {hotelProfile.listings && hotelProfile.listings.length > 0 && (
                       <span className="px-2 py-0.5 bg-gray-200 text-gray-700 rounded-full text-xs font-semibold">
                         {hotelProfile.listings.length} listing

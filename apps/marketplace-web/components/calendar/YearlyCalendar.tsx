@@ -100,51 +100,51 @@ export function YearlyCalendar({
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 overflow-hidden">
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:p-5">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
+      <div className="mb-4 flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">
+          <h2 className="text-base font-semibold text-gray-950">
             {userType === "creator" ? "My Calendar" : "Collaboration Calendar"}
           </h2>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="mt-1 text-sm text-gray-500">
             {userType === "creator"
               ? "Manage your trips and collaborations"
               : "View all creator collaborations for the year"}
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-2">
           {/* View Toggle */}
-          <div className="bg-gray-100 p-1 rounded-lg flex items-center text-sm font-medium">
+          <div className="flex items-center rounded-lg bg-gray-100 p-1 text-sm font-medium">
             <button
               onClick={() => setView("month")}
-              className={`px-3 py-1.5 rounded-md transition-all ${view === "month" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}
+              className={`rounded-md px-3 py-1.5 transition-colors ${view === "month" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}
             >
               Month
             </button>
             <button
               onClick={() => setView("year")}
-              className={`px-3 py-1.5 rounded-md transition-all ${view === "year" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}
+              className={`rounded-md px-3 py-1.5 transition-colors ${view === "year" ? "bg-white text-gray-950 shadow-sm" : "text-gray-500 hover:text-gray-900"}`}
             >
               Year
             </button>
           </div>
 
           {/* Navigation */}
-          <div className="flex items-center gap-4 bg-gray-50 rounded-lg p-1 border border-gray-200">
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-1">
             <button
               onClick={handlePrev}
-              className="p-1 hover:bg-white hover:shadow-sm rounded-md transition-all text-gray-500 hover:text-gray-900"
+              className="rounded-md p-1 text-gray-500 transition-colors hover:bg-white hover:text-gray-900"
             >
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
-            <span className="font-bold text-gray-900 min-w-[3rem] text-center whitespace-nowrap px-2">
+            <span className="min-w-[3rem] whitespace-nowrap px-2 text-center text-sm font-semibold text-gray-950">
               {view === "year" ? year : `${MONTHS_ABBR[month]} ${year}`}
             </span>
             <button
               onClick={handleNext}
-              className="p-1 hover:bg-white hover:shadow-sm rounded-md transition-all text-gray-500 hover:text-gray-900"
+              className="rounded-md p-1 text-gray-500 transition-colors hover:bg-white hover:text-gray-900"
             >
               <ChevronRightIcon className="w-5 h-5" />
             </button>
@@ -153,11 +153,11 @@ export function YearlyCalendar({
       </div>
 
       {/* Legend & Actions Row */}
-      <div className="flex flex-col md:flex-row justify-between items-center gap-6 mb-8">
-        <div className="flex flex-wrap items-center gap-6 text-xs font-medium text-gray-600">
+      <div className="mb-5 flex flex-col items-center justify-between gap-4 border-y border-gray-100 py-3 md:flex-row">
+        <div className="flex flex-wrap items-center gap-4 text-xs font-medium text-gray-600">
           <span className="text-gray-400">Status:</span>
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#64748b]"></span>
+            <span className="h-2.5 w-2.5 rounded-full bg-[#64748b]"></span>
             <span>Negotiating</span>
           </div>
           <div className="flex items-center gap-2">
@@ -187,7 +187,7 @@ export function YearlyCalendar({
           {userType === "creator" && (
             <button
               onClick={() => setIsTripModalOpen(true)}
-              className="flex items-center gap-2 bg-white hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-gray-200 shadow-sm"
+              className="flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -208,7 +208,7 @@ export function YearlyCalendar({
           )}
           <button
             onClick={() => (userType === "creator" ? setIsAddModalOpen(true) : null)}
-            className="flex items-center gap-2 bg-primary-600 hover:bg-primary-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm"
+            className="flex items-center gap-2 rounded-md bg-primary-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary-700"
           >
             {userType === "creator" ? (
               <>
