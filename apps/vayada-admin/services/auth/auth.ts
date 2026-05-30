@@ -28,6 +28,7 @@ function storeUserData(data: {
   name: string;
   type: string;
   status: string;
+  is_superadmin?: boolean;
 }): void {
   if (typeof window === "undefined") return;
 
@@ -37,6 +38,7 @@ function storeUserData(data: {
   localStorage.setItem("userName", data.name);
   localStorage.setItem("userType", data.type);
   localStorage.setItem("userStatus", data.status);
+  localStorage.setItem("isSuperAdmin", data.is_superadmin ? "true" : "false");
 
   localStorage.setItem(
     "user",
@@ -46,6 +48,7 @@ function storeUserData(data: {
       name: data.name,
       type: data.type,
       status: data.status,
+      is_superadmin: data.is_superadmin || false,
     }),
   );
 }
@@ -63,6 +66,7 @@ function clearAuthData(): void {
   localStorage.removeItem("userName");
   localStorage.removeItem("userType");
   localStorage.removeItem("userStatus");
+  localStorage.removeItem("isSuperAdmin");
   localStorage.removeItem("user");
   localStorage.setItem("isLoggedIn", "false");
 }
@@ -101,21 +105,13 @@ export interface RegisterResponse {
 
 export const authService = {
   /**
-   * Register a new admin user
+   * Superadmin access is granted by toggling users.is_superadmin in the auth DB.
    */
   register: async (data: RegisterRequest): Promise<RegisterResponse> => {
-    try {
-      const response = await apiClient.post<RegisterResponse>("/auth/register", {
-        ...data,
-        type: "admin",
-      });
-      return response;
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        throw error;
-      }
-      throw error;
-    }
+    void data;
+    throw new Error(
+      "Admin self-registration is disabled. Grant is_superadmin on an existing user.",
+    );
   },
 
   /**
@@ -130,9 +126,9 @@ export const authService = {
         return response;
       }
 
-      // Verify user is admin
-      if (response.type !== "admin") {
-        throw new Error("Access denied. Admin account required.");
+      // Verify user has platform staff access.
+      if (!response.is_superadmin) {
+        throw new Error("Access denied. Superadmin account required.");
       }
 
       storeToken(response.access_token!, response.expires_in!);
@@ -142,6 +138,7 @@ export const authService = {
         name: response.name!,
         type: response.type!,
         status: response.status!,
+        is_superadmin: response.is_superadmin,
       });
 
       return response;
@@ -162,8 +159,8 @@ export const authService = {
       code,
     });
 
-    if (response.type !== "admin") {
-      throw new Error("Access denied. Admin account required.");
+    if (!response.is_superadmin) {
+      throw new Error("Access denied. Superadmin account required.");
     }
 
     storeToken(response.access_token!, response.expires_in!);
@@ -173,6 +170,7 @@ export const authService = {
       name: response.name!,
       type: response.type!,
       status: response.status!,
+      is_superadmin: response.is_superadmin,
     });
 
     return response;
@@ -212,12 +210,11 @@ export const authService = {
   },
 
   /**
-   * Check if current user is admin
+   * Check if current user is a superadmin
    */
   isAdmin: (): boolean => {
     if (typeof window === "undefined") return false;
-    const userType = localStorage.getItem("userType");
-    return userType === "admin";
+    return localStorage.getItem("isSuperAdmin") === "true";
   },
 
   /**

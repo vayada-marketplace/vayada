@@ -13,6 +13,7 @@ export interface AuthState {
   userName: string | null;
   userType: UserType | null;
   userStatus: UserStatus | null;
+  isSuperAdmin: boolean;
   profileComplete: boolean;
   hasProfile: boolean;
   isLoading: boolean;
@@ -23,7 +24,7 @@ export interface UseAuthReturn extends AuthState {
   clearAuth: () => void;
   isHotel: boolean;
   isCreator: boolean;
-  isAdmin: boolean;
+  isSuperAdmin: boolean;
 }
 
 export function useAuth(): UseAuthReturn {
@@ -35,6 +36,7 @@ export function useAuth(): UseAuthReturn {
     userName: null,
     userType: null,
     userStatus: null,
+    isSuperAdmin: false,
     profileComplete: false,
     hasProfile: false,
   });
@@ -52,6 +54,7 @@ export function useAuth(): UseAuthReturn {
       const userName = localStorage.getItem(STORAGE_KEYS.USER_NAME);
       const userType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
       const userStatus = localStorage.getItem(STORAGE_KEYS.USER_STATUS) as UserStatus | null;
+      const isSuperAdmin = localStorage.getItem(STORAGE_KEYS.IS_SUPERADMIN) === "true";
       const profileComplete = localStorage.getItem(STORAGE_KEYS.PROFILE_COMPLETE) === "true";
       const hasProfile = localStorage.getItem(STORAGE_KEYS.HAS_PROFILE) === "true";
 
@@ -62,6 +65,7 @@ export function useAuth(): UseAuthReturn {
         userName,
         userType,
         userStatus,
+        isSuperAdmin,
         profileComplete,
         hasProfile,
       });
@@ -88,6 +92,7 @@ export function useAuth(): UseAuthReturn {
         const userName = localStorage.getItem(STORAGE_KEYS.USER_NAME);
         const userType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
         const userStatus = localStorage.getItem(STORAGE_KEYS.USER_STATUS) as UserStatus | null;
+        const isSuperAdmin = localStorage.getItem(STORAGE_KEYS.IS_SUPERADMIN) === "true";
         const profileComplete = localStorage.getItem(STORAGE_KEYS.PROFILE_COMPLETE) === "true";
         const hasProfile = localStorage.getItem(STORAGE_KEYS.HAS_PROFILE) === "true";
 
@@ -98,6 +103,7 @@ export function useAuth(): UseAuthReturn {
           userName,
           userType,
           userStatus,
+          isSuperAdmin,
           profileComplete,
           hasProfile,
         });
@@ -153,6 +159,9 @@ export function useAuth(): UseAuthReturn {
           localStorage.removeItem(STORAGE_KEYS.USER_STATUS);
         }
       }
+      if (state.isSuperAdmin !== undefined) {
+        localStorage.setItem(STORAGE_KEYS.IS_SUPERADMIN, String(state.isSuperAdmin));
+      }
       if (state.profileComplete !== undefined) {
         localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, String(state.profileComplete));
       }
@@ -179,6 +188,7 @@ export function useAuth(): UseAuthReturn {
       localStorage.removeItem(STORAGE_KEYS.USER_NAME);
       localStorage.removeItem(STORAGE_KEYS.USER_TYPE);
       localStorage.removeItem(STORAGE_KEYS.USER_STATUS);
+      localStorage.removeItem(STORAGE_KEYS.IS_SUPERADMIN);
       localStorage.removeItem(STORAGE_KEYS.PROFILE_COMPLETE);
       localStorage.removeItem(STORAGE_KEYS.HAS_PROFILE);
       localStorage.removeItem(STORAGE_KEYS.USER);
@@ -190,6 +200,7 @@ export function useAuth(): UseAuthReturn {
         userName: null,
         userType: null,
         userStatus: null,
+        isSuperAdmin: false,
         profileComplete: false,
         hasProfile: false,
       });
@@ -205,6 +216,6 @@ export function useAuth(): UseAuthReturn {
     clearAuth,
     isHotel: authState.userType === "hotel",
     isCreator: authState.userType === "creator",
-    isAdmin: authState.userType === "admin",
+    isSuperAdmin: authState.isSuperAdmin,
   };
 }

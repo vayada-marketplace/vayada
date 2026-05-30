@@ -4,7 +4,7 @@ from contextvars import ContextVar
 
 from fastapi import HTTPException
 
-from app.database import Database
+from app.database import AuthDatabase, Database
 
 # Per-request override for the "current hotel" resolution. Populated
 # by the capture_hotel_header dependency (see dependencies.py), read
@@ -46,11 +46,18 @@ async def get_hotel_id(user_id: str) -> str:
     """
     override = _current_hotel_id_override.get()
     if override:
-        row = await Database.fetchrow(
-            "SELECT id FROM hotels WHERE id = $1 AND user_id = $2",
-            override,
+        user = await AuthDatabase.fetchrow(
+            "SELECT is_superadmin FROM users WHERE id = $1",
             user_id,
         )
+        if user and user["is_superadmin"]:
+            row = await Database.fetchrow("SELECT id FROM hotels WHERE id = $1", override)
+        else:
+            row = await Database.fetchrow(
+                "SELECT id FROM hotels WHERE id = $1 AND user_id = $2",
+                override,
+                user_id,
+            )
         if not row:
             raise HTTPException(
                 status_code=403,

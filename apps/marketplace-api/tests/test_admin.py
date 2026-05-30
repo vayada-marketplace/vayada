@@ -4,9 +4,8 @@ Tests for admin management endpoints.
 
 import pytest
 from app.database import AuthDatabase, Database
-from httpx import AsyncClient
-
 from app.jwt_utils import create_access_token
+from httpx import AsyncClient
 
 from tests.conftest import (
     create_test_admin,
@@ -39,7 +38,7 @@ class TestGetUsers:
     ):
         """Test pagination of users list."""
         # Create multiple users
-        for i in range(5):
+        for _ in range(5):
             await create_test_creator()
 
         response = await client.get(
@@ -1028,10 +1027,13 @@ class TestAdminAuthorization:
     async def test_suspended_admin_cannot_access(
         self, client: AsyncClient, cleanup_database, init_database
     ):
-        """Test that suspended admin cannot access endpoints."""
-        admin_user = await create_test_user(user_type="admin", status="suspended")
+        """Test that suspended superadmin cannot access endpoints."""
+        admin_user = await create_test_user(user_type="creator", status="suspended")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", admin_user["id"]
+        )
         token = create_access_token(
-            {"sub": str(admin_user["id"]), "email": admin_user["email"], "type": "admin"}
+            {"sub": str(admin_user["id"]), "email": admin_user["email"], "type": admin_user["type"]}
         )
 
         response = await client.get("/admin/users", headers=get_auth_headers(token))

@@ -14,17 +14,17 @@ ECR repositories are created and owned by `vayada-platform` (via `ecr.tf`). The 
 
 ## Services
 
-| App directory          | ECR repository                    | Deploy target        |
-|------------------------|-----------------------------------|----------------------|
-| `apps/booking-api`     | `vayada-booking-backend`          | ECS Fargate          |
-| `apps/booking-web`     | `vayada-booking-frontend`         | ECS Fargate          |
-| `apps/booking-admin`   | `vayada-booking-admin-frontend`   | ECS Fargate          |
-| `apps/pms-api`         | `vayada-pms-backend`              | ECS Fargate          |
-| `apps/pms-web`         | `vayada-pms-frontend`             | ECS Fargate          |
-| `apps/marketplace-api` | `vayada-creator-marketplace-backend` | ECS Fargate       |
-| `apps/vayada-admin` | `vayada-admin-frontend`         | ECS Fargate          |
-| `apps/affiliate-dashboard` | `vayada-affiliate-dashboard`  | ECS Fargate          |
-| `apps/landing`         | `vayada-landing`                  | App Runner           |
+| App directory              | ECR repository                       | Deploy target |
+| -------------------------- | ------------------------------------ | ------------- |
+| `apps/booking-api`         | `vayada-booking-backend`             | ECS Fargate   |
+| `apps/booking-web`         | `vayada-booking-frontend`            | ECS Fargate   |
+| `apps/booking-admin`       | `vayada-booking-admin-frontend`      | ECS Fargate   |
+| `apps/pms-api`             | `vayada-pms-backend`                 | ECS Fargate   |
+| `apps/pms-web`             | `vayada-pms-frontend`                | ECS Fargate   |
+| `apps/marketplace-api`     | `vayada-creator-marketplace-backend` | ECS Fargate   |
+| `apps/vayada-admin`        | `vayada-admin-frontend`              | ECS Fargate   |
+| `apps/affiliate-dashboard` | `vayada-affiliate-dashboard`         | ECS Fargate   |
+| `apps/landing`             | `vayada-landing`                     | App Runner    |
 
 ## Image tagging
 
@@ -89,11 +89,11 @@ Each repo should only hold the permissions it needs. Platform repo does not need
 
 Configuration is split across both repositories:
 
-| Type | Owner | Location |
-|------|-------|----------|
-| Plaintext environment variables | Platform | `ecs.tf` `environment` blocks |
-| Secrets | Platform | AWS SSM Parameter Store at `/vayada/prod/*` |
-| Required env var names | App | Each service's README or `.env.example` |
+| Type                            | Owner    | Location                                    |
+| ------------------------------- | -------- | ------------------------------------------- |
+| Plaintext environment variables | Platform | `ecs.tf` `environment` blocks               |
+| Secrets                         | Platform | AWS SSM Parameter Store at `/vayada/prod/*` |
+| Required env var names          | App      | Each service's README or `.env.example`     |
 
 The app repository documents which environment variables each service requires. The platform repository owns the values and how they are injected.
 

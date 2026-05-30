@@ -186,7 +186,10 @@ async def login(http_request: Request, request: LoginRequest, response: Response
 
     await RateLimitRepository.clear(request.email)
 
-    if user["type"] in ("admin", "hotel") and await TotpRepository.is_enrolled(str(user["id"])):
+    is_superadmin = bool(user.get("is_superadmin"))
+    if (user["type"] == "hotel" or is_superadmin) and await TotpRepository.is_enrolled(
+        str(user["id"])
+    ):
         totp_session = create_totp_session_token(str(user["id"]), user["email"], user["type"])
         await LoginAuditRepository.log(
             email=request.email,
@@ -223,6 +226,7 @@ async def login(http_request: Request, request: LoginRequest, response: Response
         status=user["status"],
         access_token=access_token,
         expires_in=get_token_expiration_seconds(),
+        is_superadmin=is_superadmin,
         message="Login successful",
     )
 
@@ -251,7 +255,9 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
             },
         )
 
-    user = await UserRepository.get_by_id(user_id, columns="id, email, name, type, status")
+    user = await UserRepository.get_by_id(
+        user_id, columns="id, email, name, type, status, is_superadmin"
+    )
     if not user or user["status"] == "suspended":
         raise HTTPException(status_code=401, detail="Invalid session")
 
@@ -306,6 +312,7 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
         status=user["status"],
         access_token=access_token,
         expires_in=get_token_expiration_seconds(),
+        is_superadmin=bool(user.get("is_superadmin")),
         message="Login successful",
     )
 
@@ -313,8 +320,8 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
 @router.post("/totp/setup", response_model=TotpSetupResponse, status_code=status.HTTP_200_OK)
 async def totp_setup(user_id: str = Depends(get_current_user_id)):
     """Generate a new TOTP secret and return the otpauth URI for QR display. Does not enroll yet."""
-    user = await UserRepository.get_by_id(user_id, columns="id, email, type")
-    if not user or user["type"] not in ("admin", "hotel"):
+    user = await UserRepository.get_by_id(user_id, columns="id, email, type, is_superadmin")
+    if not user or (user["type"] != "hotel" and not user.get("is_superadmin")):
         raise HTTPException(status_code=403, detail="Admin access required")
 
     secret = generate_totp_secret()

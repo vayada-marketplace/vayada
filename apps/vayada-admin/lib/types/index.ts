@@ -85,6 +85,7 @@ export interface LoginResponse {
   access_token?: string;
   token_type?: string;
   expires_in?: number;
+  is_superadmin?: boolean;
   message: string;
   requires_totp?: boolean;
   totp_session?: string;

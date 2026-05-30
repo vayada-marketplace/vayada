@@ -47,6 +47,7 @@ class LoginResponse(BaseModel):
     access_token: str | None = None
     token_type: str = "bearer"
     expires_in: int | None = None
+    is_superadmin: bool = False
     message: str
     requires_totp: bool = False
     totp_session: str | None = None

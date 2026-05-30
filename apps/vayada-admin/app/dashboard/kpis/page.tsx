@@ -10,11 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { BarChart, LineChart } from "@/components/growth-dashboard/Chart";
 import { PropertySelector } from "@/components/growth-dashboard/PropertySelector";
-import {
-  getGrowthDashboard,
-  Granularity,
-  GrowthDashboard,
-} from "@/services/api/growthDashboard";
+import { getGrowthDashboard, Granularity, GrowthDashboard } from "@/services/api/growthDashboard";
 
 const STORAGE_KEY = "vayadaAdminGrowthFilters";
 
@@ -249,7 +245,9 @@ export default function KpiDashboardPage() {
                 key={option}
                 onClick={() => setGranularity(option)}
                 className={`h-9 rounded-md px-3 text-sm font-semibold capitalize ${
-                  granularity === option ? "bg-ink text-bone" : "bg-white text-ink/60 hover:text-ink"
+                  granularity === option
+                    ? "bg-ink text-bone"
+                    : "bg-white text-ink/60 hover:text-ink"
                 }`}
               >
                 {option}

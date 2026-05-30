@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   USER_NAME: "userName",
   USER_TYPE: "userType",
   USER_STATUS: "userStatus",
+  IS_SUPERADMIN: "isSuperAdmin",
   USER: "user",
 
   // Profile state

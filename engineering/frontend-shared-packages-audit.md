@@ -41,32 +41,32 @@ Both are the strongest signal in the audit. `client.ts` between marketplace-web 
 
 Concrete duplicates likely 80–100% the same; need a per-file diff before extraction.
 
-| File                                                     | Apps                                                                         |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| File                                                     | Apps                                                                    |
+| -------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `lib/utils/getCurrencySymbol.ts`                         | marketplace-web, vayada-admin, landing                                  |
-| `lib/utils/accessControl.ts`                             | marketplace-web, landing                                                     |
-| `lib/utils/months.ts`                                    | marketplace-web, landing                                                     |
-| `lib/utils/profileStatus.ts`                             | marketplace-web, landing                                                     |
-| `lib/utils/colors.ts`                                    | booking-web, booking-admin                                                   |
-| `lib/utils/setupStatus.ts`                               | booking-admin, pms-web                                                       |
+| `lib/utils/accessControl.ts`                             | marketplace-web, landing                                                |
+| `lib/utils/months.ts`                                    | marketplace-web, landing                                                |
+| `lib/utils/profileStatus.ts`                             | marketplace-web, landing                                                |
+| `lib/utils/colors.ts`                                    | booking-web, booking-admin                                              |
+| `lib/utils/setupStatus.ts`                               | booking-admin, pms-web                                                  |
 | `lib/utils/uploadImage.ts`                               | vayada-admin, booking-admin                                             |
 | `lib/constants/options.ts`                               | marketplace-web, vayada-admin, booking-admin, pms-web, landing (5 apps) |
 | `lib/constants/booking.ts`                               | vayada-admin, booking-web                                               |
-| `lib/constants/countries.ts`                             | booking-web, pms-web                                                         |
+| `lib/constants/countries.ts`                             | booking-web, pms-web                                                    |
 | `lib/constants/branding.ts`                              | vayada-admin, booking-admin                                             |
-| `lib/constants/{colors,content,routes,sections,storage}` | marketplace-web, landing                                                     |
+| `lib/constants/{colors,content,routes,sections,storage}` | marketplace-web, landing                                                |
 
 ## Tier 4 — Structural duplication (bigger payoff, more risk)
 
 Same subdirectory exists across many apps; content varies by per-app theme/design tokens. Worth extracting but needs careful design:
 
-| Subdir                | Apps                                                                                      | Notes                                                                                           |
-| --------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Subdir                | Apps                                                                                 | Notes                                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
 | `components/ui/`      | marketplace-web, vayada-admin, booking-admin, landing                                | Likely shadcn-style primitives. Strongest candidate for a `@vayada/ui` package.                 |
 | `components/auth/`    | marketplace-web, vayada-admin, booking-admin, pms-web, affiliate-dashboard (5 apps)  | Login / register forms. Share if the auth flow is consistent; otherwise a hook + headless API.  |
 | `components/layout/`  | marketplace-web, vayada-admin, booking-web, booking-admin, pms-web, landing (6 apps) | Navigation/Footer; CLAUDE.md notes marketplace ↔ landing duplication is intentionally deferred. |
-| `components/consent/` | marketplace-web, landing                                                                  | GDPR/cookie banner — clearly shared.                                                            |
-| `components/landing/` | marketplace-web, landing                                                                  | Effectively the same surface.                                                                   |
+| `components/consent/` | marketplace-web, landing                                                             | GDPR/cookie banner — clearly shared.                                                            |
+| `components/landing/` | marketplace-web, landing                                                             | Effectively the same surface.                                                                   |
 
 ## Tier 5 — Setup wizard (biggest single duplication target)
 
@@ -78,14 +78,14 @@ Usage:
 - `apps/vayada-admin/app/dashboard/invite-codes/page.tsx` — Vayada admin pre-configures via invite code.
 
 | Step             | booking-admin | vayada-admin | diff lines |
-| ---------------- | ------------- | ----------------- | ---------- |
-| `RoomsStep`      | 2299          | 1654              | 1009       |
-| `PropertyStep`   | 590           | 589               | 186        |
-| `PoliciesStep`   | 574           | 518               | 159        |
-| `AddonsStep`     | 467           | 458               | 140        |
-| `BrandMediaStep` | 371           | 391               | 64         |
-| `LastMinuteStep` | 262           | 262               | 12         |
-| `BenefitsStep`   | 162           | 162               | 12         |
+| ---------------- | ------------- | ------------ | ---------- |
+| `RoomsStep`      | 2299          | 1654         | 1009       |
+| `PropertyStep`   | 590           | 589          | 186        |
+| `PoliciesStep`   | 574           | 518          | 159        |
+| `AddonsStep`     | 467           | 458          | 140        |
+| `BrandMediaStep` | 371           | 391          | 64         |
+| `LastMinuteStep` | 262           | 262          | 12         |
+| `BenefitsStep`   | 162           | 162          | 12         |
 
 ~4700 lines of wizard code with ~1500 lines of accumulated drift. Bugs fixed on one side don't propagate. **This is the largest single concentration of avoidable duplication in the frontend codebase.**
 

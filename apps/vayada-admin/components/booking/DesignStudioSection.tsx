@@ -182,7 +182,7 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      { }
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
 
       {/* Feedback banner */}

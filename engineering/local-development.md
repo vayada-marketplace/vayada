@@ -13,22 +13,22 @@ On first run, `docker compose up` also runs `auth-db-migrate` — a one-shot ser
 
 ## What Docker Compose starts
 
-| Service | Port | Notes |
-|---|---|---|
-| `marketplace-api` | 8000 | FastAPI |
-| `marketplace-web` | 3000 | Next.js |
-| `vayada-admin` | 3001 | Next.js |
-| `booking-api` | 8001 | FastAPI |
-| `booking-web` | 3002 | Next.js |
-| `booking-admin` | 3003 | Next.js |
-| `pms-api` | 8002 | FastAPI |
-| `pms-web` | 3004 | Next.js |
-| `affiliate-dashboard` | 3005 | Next.js |
-| `landing` | 3006 | Next.js |
-| `auth-db` | 5432 | Postgres — shared auth |
-| `marketplace-db` | 5433 | Postgres — marketplace |
-| `booking-db` | 5434 | Postgres — booking engine |
-| `pms-db` | 5435 | Postgres — PMS |
+| Service               | Port | Notes                     |
+| --------------------- | ---- | ------------------------- |
+| `marketplace-api`     | 8000 | FastAPI                   |
+| `marketplace-web`     | 3000 | Next.js                   |
+| `vayada-admin`        | 3001 | Next.js                   |
+| `booking-api`         | 8001 | FastAPI                   |
+| `booking-web`         | 3002 | Next.js                   |
+| `booking-admin`       | 3003 | Next.js                   |
+| `pms-api`             | 8002 | FastAPI                   |
+| `pms-web`             | 3004 | Next.js                   |
+| `affiliate-dashboard` | 3005 | Next.js                   |
+| `landing`             | 3006 | Next.js                   |
+| `auth-db`             | 5432 | Postgres — shared auth    |
+| `marketplace-db`      | 5433 | Postgres — marketplace    |
+| `booking-db`          | 5434 | Postgres — booking engine |
+| `pms-db`              | 5435 | Postgres — PMS            |
 
 ## Environment variables
 
@@ -36,13 +36,13 @@ Copy `.env.example` to `.env`. The example contains safe placeholder values for 
 
 The app repository documents which environment variables each service requires. Production values and SSM references live in `vayada-platform`.
 
-| Variable category | Local source | Production source |
-|---|---|---|
-| DB connection strings | `.env` (localhost Postgres) | AWS SSM `/vayada/prod/db-*` |
-| JWT secret | `.env` (any local string) | AWS SSM `/vayada/prod/jwt-secret-key` |
-| Stripe keys | `.env` (Stripe test keys) | AWS SSM via `vayada-platform` |
-| SMTP | `.env` (mailhog or skip) | AWS SSM `/vayada/prod/smtp-*` |
-| Third-party APIs | `.env` (dev keys or skip) | AWS SSM via `vayada-platform` |
+| Variable category     | Local source                | Production source                     |
+| --------------------- | --------------------------- | ------------------------------------- |
+| DB connection strings | `.env` (localhost Postgres) | AWS SSM `/vayada/prod/db-*`           |
+| JWT secret            | `.env` (any local string)   | AWS SSM `/vayada/prod/jwt-secret-key` |
+| Stripe keys           | `.env` (Stripe test keys)   | AWS SSM via `vayada-platform`         |
+| SMTP                  | `.env` (mailhog or skip)    | AWS SSM `/vayada/prod/smtp-*`         |
+| Third-party APIs      | `.env` (dev keys or skip)   | AWS SSM via `vayada-platform`         |
 
 ## Running a single service without Docker Compose
 
@@ -86,6 +86,7 @@ python scripts/seed_booking.py
 ```
 
 Default credentials after seeding:
+
 - Admin: `admin@vayada.com` / `Vayada123`
 - Hotels: `hotel[1-5]@mock.com` / `Test1234`
 - Creators: `creator[1-4]@mock.com` / `Test1234`
