@@ -43,12 +43,12 @@ def notify_vayada_team(subject: str, html_body: str) -> None:
 
 
 def notify_marketplace_admin(subject: str, html_body: str) -> None:
-    """Send a copy of marketplace activity to the marketplace admin."""
+    """Send a copy of marketplace activity to the Vayada admin."""
     send_email_background(MARKETPLACE_ADMIN_EMAIL, f"[Marketplace] {subject}", html_body)
 
 
 async def notify_marketplace_admin_sync(subject: str, html_body: str) -> bool:
-    """Send the marketplace admin notification within the request lifecycle.
+    """Send the Vayada admin notification within the request lifecycle.
 
     Unlike the fire-and-forget helpers, this awaits the SMTP send so the
     delivery cannot be silently lost when the event loop / worker is torn
@@ -67,13 +67,13 @@ async def notify_marketplace_admin_sync(subject: str, html_body: str) -> bool:
         sent = await send_email(MARKETPLACE_ADMIN_EMAIL, full_subject, html_body)
     except Exception as e:
         logger.error(
-            f"Marketplace admin notification to {MARKETPLACE_ADMIN_EMAIL} "
+            f"Vayada admin notification to {MARKETPLACE_ADMIN_EMAIL} "
             f"raised {e!r} (subject={full_subject!r})"
         )
         return False
     if not sent:
         logger.error(
-            f"Marketplace admin notification to {MARKETPLACE_ADMIN_EMAIL} was "
+            f"Vayada admin notification to {MARKETPLACE_ADMIN_EMAIL} was "
             f"NOT delivered (send_email returned False — check EMAIL_ENABLED / "
             f"SMTP config) (subject={full_subject!r})"
         )
