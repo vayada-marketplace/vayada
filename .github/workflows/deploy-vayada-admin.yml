@@ -69,7 +69,7 @@ jobs:
           event-type: app-image-published
           client-payload: |
             {
-              "service": "vayada-admin",
+              "service": "marketplace-admin",
               "ecr_repo": "${{ env.ECR_REPOSITORY }}",
               "image_sha": "${{ github.sha }}",
               "environment": "production"
