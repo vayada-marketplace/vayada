@@ -27,7 +27,7 @@ export function LineChart({
   const pad = 24;
   if (points.length === 0) {
     return (
-      <div className="relative min-h-[260px] overflow-hidden rounded-md border border-ink/10 bg-white">
+      <div className="relative min-h-[260px] overflow-hidden rounded-lg border border-gray-200 bg-white">
         <EmptyChart />
       </div>
     );
@@ -36,13 +36,13 @@ export function LineChart({
   const max = Math.max(...points.map((p) => p.value), 1);
   const line = pointsPath(points, width, height, pad);
   const area = `${line} L ${width - pad} ${height - pad} L ${pad} ${height - pad} Z`;
-  const stroke = tone === "brass" ? "#b08d4a" : "#246f78";
+  const stroke = tone === "brass" ? "#d97706" : "#374151";
 
   return (
-    <div className="relative min-h-[260px] overflow-hidden rounded-md border border-ink/10 bg-white">
+    <div className="relative min-h-[260px] overflow-hidden rounded-lg border border-gray-200 bg-white">
       <svg viewBox={`0 0 ${width} ${height}`} className="h-[260px] w-full" role="img">
         <path d={area} fill={stroke} opacity="0.12" />
-        <path d={line} fill="none" stroke={stroke} strokeLinecap="round" strokeWidth="3" />
+        <path d={line} fill="none" stroke={stroke} strokeLinecap="round" strokeWidth="2.5" />
         {points.map((point, index) => {
           const step = points.length > 1 ? (width - pad * 2) / (points.length - 1) : 0;
           const x = pad + index * step;
@@ -64,7 +64,7 @@ export function LineChart({
 export function BarChart({ points }: { points: ChartPoint[] }) {
   if (points.length === 0) {
     return (
-      <div className="relative min-h-[260px] rounded-md border border-ink/10 bg-white px-4 pb-8 pt-5">
+      <div className="relative min-h-[260px] rounded-lg border border-gray-200 bg-white px-4 pb-8 pt-5">
         <EmptyChart />
       </div>
     );
@@ -72,12 +72,12 @@ export function BarChart({ points }: { points: ChartPoint[] }) {
 
   const max = Math.max(...points.map((p) => p.value), 1);
   return (
-    <div className="relative min-h-[260px] rounded-md border border-ink/10 bg-white px-4 pb-8 pt-5">
+    <div className="relative min-h-[260px] rounded-lg border border-gray-200 bg-white px-4 pb-8 pt-5">
       <div className="flex h-[210px] items-end gap-2">
         {points.map((point) => (
           <div key={point.key} className="group flex h-full min-w-7 flex-1 items-end">
             <div
-              className="w-full rounded-t bg-reed transition group-hover:bg-lagoon"
+              className="w-full rounded-t bg-gray-500 transition group-hover:bg-gray-700"
               style={{ height: `${Math.max((point.value / max) * 100, point.value ? 6 : 1)}%` }}
               title={`${point.label}: ${point.value}`}
             />
@@ -95,7 +95,7 @@ function AxisLabels({ points }: { points: ChartPoint[] }) {
     return index === 0 || index === points.length - 1 || index % 5 === 0;
   });
   return (
-    <div className="absolute inset-x-4 bottom-2 flex justify-between text-[11px] text-ink/45">
+    <div className="absolute inset-x-4 bottom-2 flex justify-between text-[11px] text-gray-400">
       {visible.map((point) => (
         <span key={point.key}>{point.label}</span>
       ))}
@@ -105,7 +105,7 @@ function AxisLabels({ points }: { points: ChartPoint[] }) {
 
 function EmptyChart() {
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/80 text-sm text-ink/55">
+    <div className="absolute inset-0 z-10 flex items-center justify-center gap-2 bg-white/80 text-[13px] text-gray-500">
       <ChartBarIcon className="h-5 w-5" aria-hidden="true" />
       No chart data
     </div>
