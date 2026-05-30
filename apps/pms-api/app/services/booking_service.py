@@ -991,9 +991,7 @@ async def _process_payment_method(
         )
         await BookingRepository.update_payment_status(booking_id, "awaiting_paypal")
         booking = await BookingRepository.get_by_id(booking_id)
-        task = _create_task(
-            send_booking_request_notification(hotel["contact_email"], booking)
-        )
+        task = _create_task(send_booking_request_notification(hotel["contact_email"], booking))
         task.add_done_callback(
             lambda t: _log_background_task_result(t, "send_booking_request_notification")
         )
@@ -1546,9 +1544,7 @@ async def host_reject_booking(booking_id: str, user_id: str, reason: str | None 
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )
     if hotel:
-        _create_task(
-            send_host_booking_rejected(hotel["contact_email"], updated, reason=reason)
-        )
+        _create_task(send_host_booking_rejected(hotel["contact_email"], updated, reason=reason))
 
     # Sync cancellation and availability to Channex (fire-and-forget)
     _create_task(channex_handle_cancellation(booking_id))

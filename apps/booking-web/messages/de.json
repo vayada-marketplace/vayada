@@ -85,7 +85,20 @@
     "freeWifi": "Kostenloses WLAN",
     "airportTransfer": "Flughafentransfer",
     "selectThisRate": "Diesen Tarif wählen",
-    "soldOut": "Ausgebucht"
+    "soldOut": "Ausgebucht",
+    "mobileView": {
+      "list": "Liste",
+      "map": "Karte"
+    },
+    "roomMap": {
+      "noLocations": "Keine Standorte verfügbar",
+      "noLocationsDesc": "Zimmertypen ohne gespeicherte Koordinaten werden weiterhin in der Liste angezeigt.",
+      "locations": "{count, plural, one {# Standort} other {# Standorte}}",
+      "perNight": "/ Nacht",
+      "view": "Ansehen →",
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern"
+    }
   },
   "rooms": {
     "title": "Unsere Zimmer",

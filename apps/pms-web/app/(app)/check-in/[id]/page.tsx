@@ -210,18 +210,14 @@ export default function CheckInPage() {
       bookingsService.get(id),
       bookingsService.listAdditionalGuests(id),
       settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
+      bookingsService.listNotes(id).catch(() => ({ notes: [] })),
     ])
-      .then(async ([bookingRes, guestRes, checklistRes]) => {
+      .then(([bookingRes, guestRes, checklistRes, noteRes]) => {
         setBooking(bookingRes);
         setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
         setCustomSteps(checklistRes.steps || []);
-        try {
-          const noteRes = await bookingsService.listNotes(id);
-          setNotes(noteRes.notes);
-        } catch {
-          setNotes([]);
-        }
+        setNotes(noteRes.notes || []);
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));

@@ -228,7 +228,9 @@ async def test_booking_request_sets_reply_to_guest_email():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("bad_email", [None, "", "   ", "not-an-email", "missing@nodot", "a b@c.com"])
+@pytest.mark.parametrize(
+    "bad_email", [None, "", "   ", "not-an-email", "missing@nodot", "a b@c.com"]
+)
 async def test_booking_request_falls_back_to_ops_when_guest_email_invalid(bad_email, caplog):
     """Don't silently route Reply to noreply@ when the guest email is bad."""
     sent = []

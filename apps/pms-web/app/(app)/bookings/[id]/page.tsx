@@ -21,6 +21,7 @@ import {
   BookingAddon,
   BookingChangeRequest,
   BookingNote,
+  CheckoutRecord,
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
   CancellationPolicy,
@@ -1154,6 +1155,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [booking, setBooking] = useState<Booking | null>(null);
   const [policy, setPolicy] = useState<CancellationPolicy | null>(null);
   const [notes, setNotes] = useState<BookingNote[]>([]);
+  const [checkoutRecord, setCheckoutRecord] = useState<CheckoutRecord | null>(null);
   const [guests, setGuests] = useState<BookingAdditionalGuest[]>([]);
   const [detailAvailableAddons, setDetailAvailableAddons] = useState<BookingAddon[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1220,6 +1222,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
         .listAdditionalGuests(id)
         .then((r) => setGuests(r.guests))
         .catch(console.error),
+      bookingsService.getCheckoutRecord(id).then(setCheckoutRecord).catch(console.error),
       bookingsService.listAvailableAddons(id).then(setDetailAvailableAddons).catch(console.error),
       bookingsService
         .getPaymentSettings()
@@ -2328,6 +2331,11 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                           Check-in
                         </span>
                       )}
+                      {n.source === "check-out" && (
+                        <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700">
+                          Check-out
+                        </span>
+                      )}
                     </div>
                     <button
                       onClick={() => handleDeleteNote(n.id)}
@@ -2343,6 +2351,59 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
             </div>
           )}
         </div>
+
+        {checkoutRecord && (
+          <div className="bg-white border border-gray-200 rounded-xl p-5 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Check-out record</h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  Completed {formatDateTime(checkoutRecord.completedAt)}
+                </p>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                Checked out
+              </span>
+            </div>
+            {checkoutRecord.pendingFlags.length > 0 ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <p className="text-sm font-semibold text-amber-950">Inspection flags</p>
+                <ul className="mt-2 list-disc pl-5 text-sm text-amber-900">
+                  {checkoutRecord.pendingFlags.map((flag) => (
+                    <li key={flag.stepId}>
+                      {flag.label}
+                      {flag.note ? ` - ${flag.note}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-800">
+                All inspection items completed without flags.
+              </p>
+            )}
+            {checkoutRecord.chargesSettled.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Charges settled
+                </p>
+                <div className="mt-2 space-y-2">
+                  {checkoutRecord.chargesSettled.map((charge) => (
+                    <div
+                      key={charge.id}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 text-sm"
+                    >
+                      <span className="font-medium text-gray-900">{charge.label}</span>
+                      <span className="text-gray-600">
+                        {formatCurrency(charge.amount, booking.currency)} · {charge.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Pending-booking accept/reject — kept above the cancel card so the
             most urgent action stays visible without scrolling further. */}

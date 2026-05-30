@@ -1,3 +1,5 @@
+import math
+
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 MAX_ROOM_SIZE = 15000
@@ -39,8 +41,8 @@ def _validate_partial_refund_tiers(tiers: list) -> list:
         try:
             days_int = int(days)
             percent_int = int(percent)
-        except (TypeError, ValueError):
-            raise ValueError("partial_refund_tiers entries must be integers")
+        except (TypeError, ValueError) as e:
+            raise ValueError("partial_refund_tiers entries must be integers") from e
         if days_int < 0 or days_int > 365:
             raise ValueError(
                 "partial_refund_tiers[].min_days_before_check_in must be between 0 and 365"
@@ -118,6 +120,18 @@ def _validate_rate_deposit_settings(settings: dict | None) -> dict | None:
             raise ValueError("deposit percentage must be between 1 and 100")
         normalized[rate_key] = {"enabled": True, "percentage": pct}
     return normalized
+
+
+def _validate_latitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -90 or value > 90):
+        raise ValueError("latitude must be between -90 and 90")
+    return value
+
+
+def _validate_longitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -180 or value > 180):
+        raise ValueError("longitude must be between -180 and 180")
+    return value
 
 
 def _validate_operating_periods(periods: list) -> list:
@@ -278,6 +292,9 @@ class RoomTypeCreate(BaseModel):
     base_rate: float = 0
     non_refundable_rate: float | None = None
     currency: str = "EUR"
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str] = []
     images: list[str] = []
     bed_type: str = ""
@@ -326,6 +343,16 @@ class RoomTypeCreate(BaseModel):
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
         return v
+
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v: float | None) -> float | None:
+        return _validate_latitude(v)
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v: float | None) -> float | None:
+        return _validate_longitude(v)
 
     @field_validator("meal_plans")
     @classmethod
@@ -398,6 +425,9 @@ class RoomTypeUpdate(BaseModel):
     base_rate: float | None = None
     non_refundable_rate: float | None = None
     currency: str | None = None
+    location_address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str] | None = None
     images: list[str] | None = None
     bed_type: str | None = None
@@ -426,6 +456,13 @@ class RoomTypeUpdate(BaseModel):
     rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] | None = None
 
+    @field_validator("location_address")
+    @classmethod
+    def validate_location_address(cls, v: str | None) -> str | None:
+        if v is None:
+            return ""
+        return v
+
     @field_validator("size")
     @classmethod
     def validate_size(cls, v: int | None) -> int | None:
@@ -446,6 +483,16 @@ class RoomTypeUpdate(BaseModel):
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
         return v
+
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v: float | None) -> float | None:
+        return _validate_latitude(v)
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v: float | None) -> float | None:
+        return _validate_longitude(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod
@@ -534,6 +581,9 @@ class RoomTypeResponse(BaseModel):
     original_rate: float | None = None
     last_minute_discount_percent: int | None = None
     currency: str
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str]
     images: list[str]
     bed_type: str
@@ -569,6 +619,9 @@ class RoomTypeAdminResponse(BaseModel):
     base_rate: float
     non_refundable_rate: float | None = None
     currency: str
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str]
     images: list[str]
     bed_type: str

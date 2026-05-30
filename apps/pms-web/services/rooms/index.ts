@@ -45,6 +45,9 @@ export interface RoomType {
   baseRate: number;
   nonRefundableRate: number | null;
   currency: string;
+  locationAddress: string;
+  latitude: number | null;
+  longitude: number | null;
   amenities: string[];
   images: string[];
   bedType: string;
@@ -97,6 +100,9 @@ export interface RoomTypeCreate {
   baseRate?: number;
   nonRefundableRate?: number | null;
   currency?: string;
+  locationAddress?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   amenities?: string[];
   images?: string[];
   bedType?: string;

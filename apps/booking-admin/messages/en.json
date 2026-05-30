@@ -407,6 +407,8 @@
   "settings.property.facebookLabel": "Facebook",
   "settings.property.tiktokLabel": "TikTok",
   "settings.property.youtubeLabel": "YouTube",
+  "settings.booking.mapViewLabel": "Enable map view",
+  "settings.booking.mapViewDesc": "Show an interactive map alongside your room list. Each room type with a saved location will appear as a price pin on the map.",
   "settings.booking.referAGuest": "\"Refer a Guest\" Feature",
   "settings.booking.referAGuestDesc": "Allow guests to refer friends and earn rewards through your booking page",
   "settings.booking.customDomain": "Custom Domain",

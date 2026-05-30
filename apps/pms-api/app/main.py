@@ -12,6 +12,7 @@ from app.routers.admin_affiliates import router as admin_affiliates_router
 from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.admin_channex import router as admin_channex_router
 from app.routers.admin_checkin_checklist import router as admin_checkin_checklist_router
+from app.routers.admin_checkout import router as admin_checkout_router
 from app.routers.admin_financials import router as admin_financials_router
 from app.routers.admin_import import router as admin_import_router
 from app.routers.admin_messaging import router as admin_messaging_router
@@ -22,6 +23,7 @@ from app.routers.admin_rooms import router as admin_rooms_router
 from app.routers.affiliate_dashboard import router as affiliate_dashboard_router
 from app.routers.affiliates import router as affiliates_router
 from app.routers.bookings import router as bookings_router
+from app.routers.platform_admin import router as platform_admin_router
 from app.routers.rooms import router as rooms_router
 from app.routers.super_admin_bookings import router as super_admin_bookings_router
 from app.routers.super_admin_payouts import router as super_admin_payouts_router
@@ -117,6 +119,7 @@ app.include_router(admin_room_types_router, dependencies=_admin_deps)
 app.include_router(admin_rooms_router, dependencies=_admin_deps)
 app.include_router(admin_room_blocks_router, dependencies=_admin_deps)
 app.include_router(admin_bookings_router, dependencies=_admin_deps)
+app.include_router(admin_checkout_router, dependencies=_admin_deps)
 app.include_router(admin_checkin_checklist_router, dependencies=_admin_deps)
 app.include_router(admin_payments_router, dependencies=_admin_deps)
 app.include_router(admin_financials_router, dependencies=_admin_deps)
@@ -130,6 +133,7 @@ app.include_router(webhooks_router)
 app.include_router(affiliate_dashboard_router)
 app.include_router(super_admin_payouts_router)
 app.include_router(super_admin_bookings_router)
+app.include_router(platform_admin_router)
 
 
 @app.get("/health")

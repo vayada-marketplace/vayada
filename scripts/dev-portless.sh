@@ -45,7 +45,7 @@ portless alias api.pms 8002
 
 echo
 echo "==> Starting portless frontends"
-echo "    Frontends: https://marketplace.localhost, https://booking.localhost, https://pms.localhost"
+echo "    Frontends: https://marketplace.localhost, https://booking.localhost, https://pms.localhost, https://admin.localhost"
 echo "    Stop frontends with Ctrl-C. Stop Docker backends with: $0 --stop"
 echo
 

@@ -220,6 +220,7 @@ def _booking_to_admin(b: dict, extra_rooms: list | None = None) -> BookingAdminR
         payment_status=b.get("payment_status"),
         check_in_pending_flags=b.get("check_in_pending_flags") or [],
         checked_in_at=b["checked_in_at"].isoformat() if b.get("checked_in_at") else None,
+        checked_out_at=b.get("checked_out_at").isoformat() if b.get("checked_out_at") else None,
         host_response_deadline=deadline.isoformat() if deadline else None,
         platform_fee_amount=float(pf) if pf is not None else None,
         affiliate_commission_amount=float(ac) if ac is not None else None,

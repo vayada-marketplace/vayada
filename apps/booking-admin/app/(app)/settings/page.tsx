@@ -15,6 +15,10 @@ import {
   EnvelopeIcon,
   MapPinIcon,
   LockClosedIcon,
+  PlusIcon,
+  TrashIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
 } from "@heroicons/react/24/outline";
 import {
   settingsService,
@@ -31,6 +35,7 @@ import {
   SettingsCard,
   type SettingsNavSection,
 } from "@/components/settings/layout";
+import { LocationMapPreview } from "@/components/settings/LocationMapPreview";
 import { useTranslation } from "@/lib/i18n";
 
 // Audit-driven section IDs (VAY-400):
@@ -39,7 +44,24 @@ import { useTranslation } from "@/lib/i18n";
 // - "payments" is new — Stripe Connect + Xendit moved out of billing into
 //   their own section (billing = what hotel pays Vayada; payments = how hotel
 //   collects from guests).
-type Section = "property" | "booking" | "notifications" | "account" | "billing" | "payments";
+type Section =
+  | "property"
+  | "booking"
+  | "location"
+  | "notifications"
+  | "account"
+  | "billing"
+  | "payments";
+
+const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
+
+const hasValidCoordinatePair = (latitude: number, longitude: number) =>
+  Number.isFinite(latitude) &&
+  Number.isFinite(longitude) &&
+  latitude >= -90 &&
+  latitude <= 90 &&
+  longitude >= -180 &&
+  longitude <= 180;
 
 const DEFAULT_SETTINGS: PropertySettings = {
   slug: "",
@@ -78,8 +100,11 @@ const DEFAULT_SETTINGS: PropertySettings = {
   payout_bank_name: "",
   payout_swift: "",
   refer_a_guest_enabled: false,
+  map_view_enabled: false,
   terms_text: "",
   cancellation_policy_text: "",
+  show_room_detail_map: false,
+  points_of_interest: [],
 };
 
 export default function SettingsPage() {
@@ -132,6 +157,7 @@ export default function SettingsPage() {
   const [paymentError, setPaymentError] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
 
   const handleChangeEmail = async () => {
     try {
@@ -304,6 +330,21 @@ export default function SettingsPage() {
         return;
       }
     }
+    const pois = settings.points_of_interest || [];
+    const invalidPoi = pois.find(
+      (poi) =>
+        !poi.label.trim() ||
+        !poi.travelTime.trim() ||
+        !hasValidCoordinatePair(poi.latitude, poi.longitude),
+    );
+    if (invalidPoi) {
+      setFeedback({
+        type: "error",
+        message: "Every point of interest needs a label, travel time, latitude, and longitude.",
+      });
+      setActiveSection("location");
+      return;
+    }
     try {
       setSaving(true);
       setFeedback(null);
@@ -336,6 +377,63 @@ export default function SettingsPage() {
 
   const updateSetting = <K extends keyof PropertySettings>(key: K, value: PropertySettings[K]) => {
     setSettings({ ...settings, [key]: value });
+  };
+
+  const updatePois = (pois: NonNullable<PropertySettings["points_of_interest"]>) => {
+    updateSetting(
+      "points_of_interest",
+      pois.map((poi, position) => ({ ...poi, position })),
+    );
+  };
+
+  const addPoi = () => {
+    const pois = settings.points_of_interest || [];
+    if (pois.length >= 10) {
+      setFeedback({ type: "error", message: "Maximum 10 points of interest." });
+      return;
+    }
+    const used = new Set(pois.map((poi) => poi.color));
+    const color = POI_COLORS.find((candidate) => !used.has(candidate)) || POI_COLORS[0];
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `poi-${Date.now()}`;
+    const newPoi = {
+      id,
+      label: "",
+      travelTime: "",
+      color,
+      latitude: -8.65,
+      longitude: 115.22,
+      position: pois.length,
+    };
+    updatePois([...pois, newPoi]);
+    setSelectedPoiId(id);
+  };
+
+  const patchPoi = (
+    id: string,
+    patch: Partial<NonNullable<PropertySettings["points_of_interest"]>[number]>,
+  ) => {
+    updatePois(
+      (settings.points_of_interest || []).map((poi) =>
+        poi.id === id ? { ...poi, ...patch } : poi,
+      ),
+    );
+  };
+
+  const deletePoi = (id: string) => {
+    updatePois((settings.points_of_interest || []).filter((poi) => poi.id !== id));
+    if (selectedPoiId === id) setSelectedPoiId(null);
+  };
+
+  const movePoi = (id: string, direction: -1 | 1) => {
+    const pois = [...(settings.points_of_interest || [])];
+    const index = pois.findIndex((poi) => poi.id === id);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= pois.length) return;
+    [pois[index], pois[next]] = [pois[next], pois[index]];
+    updatePois(pois);
   };
 
   const handleConnectDomain = async () => {
@@ -387,6 +485,7 @@ export default function SettingsPage() {
   const sections: SettingsNavSection[] = [
     { id: "property", label: t("settings.tabs.property"), icon: BuildingOffice2Icon },
     { id: "booking", label: t("settings.tabs.booking"), icon: CalendarDaysIcon },
+    { id: "location", label: "Location map", icon: MapPinIcon },
     {
       id: "notifications",
       label: t("settings.tabs.notifications"),
@@ -597,6 +696,16 @@ export default function SettingsPage() {
       {/* Booking tab */}
       {activeSection === "booking" && (
         <div className="mt-5 space-y-4">
+          {/* Map View */}
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
+            <ToggleSwitch
+              enabled={settings.map_view_enabled ?? false}
+              onChange={() => updateSetting("map_view_enabled", !settings.map_view_enabled)}
+              label={t("settings.booking.mapViewLabel")}
+              description={t("settings.booking.mapViewDesc")}
+            />
+          </div>
+
           {/* Refer a Guest */}
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
             <ToggleSwitch
@@ -750,6 +859,195 @@ export default function SettingsPage() {
           </div>
 
           {/* Save button */}
+          <div className="flex justify-end">
+            <SaveButton onClick={handleSave} saving={saving}>
+              {t("common.save")}
+            </SaveButton>
+          </div>
+        </div>
+      )}
+
+      {/* Location map tab */}
+      {activeSection === "location" && (
+        <div className="mt-5 space-y-4">
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
+            <ToggleSwitch
+              enabled={settings.show_room_detail_map ?? false}
+              onChange={() => updateSetting("show_room_detail_map", !settings.show_room_detail_map)}
+              label="Show location map on room detail"
+              description="Guests see the property and nearby points of interest before selecting a rate."
+            />
+          </div>
+
+          <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Points of interest</h2>
+                <p className="text-[13px] text-gray-500 mt-0.5">Up to 10 map pins per property.</p>
+              </div>
+              <button
+                type="button"
+                onClick={addPoi}
+                disabled={(settings.points_of_interest || []).length >= 10}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-2 text-[13px] font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add point of interest
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+              <div className="space-y-3">
+                {(settings.points_of_interest || []).length === 0 && (
+                  <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-[13px] text-gray-500">
+                    No points of interest yet.
+                  </div>
+                )}
+                {(settings.points_of_interest || []).map((poi, index) => (
+                  <div
+                    key={poi.id}
+                    className={`rounded-lg border p-3 ${
+                      selectedPoiId === poi.id
+                        ? "border-primary-300 bg-primary-50/40"
+                        : "border-gray-200"
+                    }`}
+                    onClick={() => setSelectedPoiId(poi.id)}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-4 w-4 rounded-full border border-white shadow-sm"
+                          style={{ backgroundColor: poi.color }}
+                        />
+                        <span className="text-[13px] font-semibold text-gray-900">
+                          Point {index + 1}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            movePoi(poi.id, -1);
+                          }}
+                          disabled={index === 0}
+                          className="rounded-md p-1.5 text-gray-500 hover:bg-white disabled:opacity-40"
+                          aria-label="Move point up"
+                        >
+                          <ArrowUpIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            movePoi(poi.id, 1);
+                          }}
+                          disabled={index === (settings.points_of_interest || []).length - 1}
+                          className="rounded-md p-1.5 text-gray-500 hover:bg-white disabled:opacity-40"
+                          aria-label="Move point down"
+                        >
+                          <ArrowDownIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deletePoi(poi.id);
+                          }}
+                          className="rounded-md p-1.5 text-red-500 hover:bg-red-50"
+                          aria-label="Delete point"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="block text-[13px] font-medium text-gray-700">
+                        Label
+                        <input
+                          type="text"
+                          value={poi.label}
+                          onChange={(event) => patchPoi(poi.id, { label: event.target.value })}
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          placeholder="Kuta Beach"
+                        />
+                      </label>
+                      <label className="block text-[13px] font-medium text-gray-700">
+                        Travel time
+                        <input
+                          type="text"
+                          value={poi.travelTime}
+                          onChange={(event) => patchPoi(poi.id, { travelTime: event.target.value })}
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          placeholder="3 min walk"
+                        />
+                      </label>
+                      <label className="block text-[13px] font-medium text-gray-700">
+                        Latitude
+                        <input
+                          type="number"
+                          value={Number.isFinite(poi.latitude) ? poi.latitude : ""}
+                          step="0.0000001"
+                          onChange={(event) =>
+                            patchPoi(poi.id, {
+                              latitude:
+                                event.target.value === "" ? Number.NaN : event.target.valueAsNumber,
+                            })
+                          }
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      </label>
+                      <label className="block text-[13px] font-medium text-gray-700">
+                        Longitude
+                        <input
+                          type="number"
+                          value={Number.isFinite(poi.longitude) ? poi.longitude : ""}
+                          step="0.0000001"
+                          onChange={(event) =>
+                            patchPoi(poi.id, {
+                              longitude:
+                                event.target.value === "" ? Number.NaN : event.target.valueAsNumber,
+                            })
+                          }
+                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {POI_COLORS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          onClick={() => patchPoi(poi.id, { color })}
+                          className={`h-7 w-7 rounded-full border-2 ${
+                            poi.color === color ? "border-gray-900" : "border-white"
+                          } shadow-sm`}
+                          style={{ backgroundColor: color }}
+                          aria-label={`Use pin color ${color}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="lg:sticky lg:top-5 lg:self-start">
+                <LocationMapPreview
+                  propertyName={settings.property_name}
+                  pois={settings.points_of_interest || []}
+                  selectedPoiId={selectedPoiId}
+                  onPlacePoi={
+                    selectedPoiId
+                      ? (latitude, longitude) => patchPoi(selectedPoiId, { latitude, longitude })
+                      : undefined
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="flex justify-end">
             <SaveButton onClick={handleSave} saving={saving}>
               {t("common.save")}

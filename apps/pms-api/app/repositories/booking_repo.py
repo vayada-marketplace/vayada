@@ -459,6 +459,23 @@ class BookingRepository:
         return dict(row) if row else None
 
     @staticmethod
+    async def complete_check_out(booking_id: str, conn: Connection | None = None) -> dict | None:
+        executor = conn or Database
+        row = await executor.fetchrow(
+            """
+            UPDATE bookings
+            SET status = 'checked_out',
+                checked_out_at = COALESCE(checked_out_at, now()),
+                updated_at = now()
+            WHERE id = $1
+              AND status IN ('checked_in', 'in_house')
+            RETURNING *
+            """,
+            booking_id,
+        )
+        return dict(row) if row else None
+
+    @staticmethod
     async def add_arrival_charge(
         booking_id: str, amount: float, conn: Connection | None = None
     ) -> dict | None:

@@ -11,6 +11,7 @@ from app.dependencies import get_current_hotel, require_hotel_admin
 from app.models.settings import (
     PropertySettingsResponse,
     PropertySettingsUpdate,
+    SettingsPointOfInterest,
     hotel_default,
 )
 from app.models.utils import parse_json, slugify
@@ -80,8 +81,11 @@ _PROPERTY_FIELD_MAP = {
     "payout_bank_name": "payout_bank_name",
     "payout_swift": "payout_swift",
     "refer_a_guest_enabled": "refer_a_guest_enabled",
+    "map_view_enabled": "map_view_enabled",
     "terms_text": "terms_text",
     "cancellation_policy_text": "cancellation_policy_text",
+    "show_room_detail_map": "show_room_detail_map",
+    "points_of_interest": "points_of_interest",
 }
 
 
@@ -146,6 +150,7 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         ota_booking_alerts=_coalesce(hotel, "ota_booking_alerts"),
         weekly_reports=_coalesce(hotel, "weekly_reports"),
         refer_a_guest_enabled=_coalesce(hotel, "refer_a_guest_enabled"),
+        map_view_enabled=_coalesce(hotel, "map_view_enabled"),
         special_requests_enabled=_coalesce(hotel, "special_requests_enabled"),
         arrival_time_enabled=_coalesce(hotel, "arrival_time_enabled"),
         guest_count_enabled=_coalesce(hotel, "guest_count_enabled"),
@@ -176,6 +181,10 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         payout_swift=_coalesce(hotel, "payout_swift"),
         terms_text=_coalesce(hotel, "terms_text"),
         cancellation_policy_text=_coalesce(hotel, "cancellation_policy_text"),
+        show_room_detail_map=_coalesce(hotel, "show_room_detail_map"),
+        points_of_interest=parse_json(
+            hotel.get("points_of_interest"), default=hotel_default("points_of_interest")
+        ),
     )
 
 
@@ -205,6 +214,12 @@ def _api_to_db_value(api_value, db_column: str):
     if api_value is not None:
         return api_value
     return hotel_default(db_column)
+
+
+def _serialize_points_of_interest(
+    points: list[SettingsPointOfInterest] | None,
+) -> list[dict[str, Any]]:
+    return [point.model_dump() for point in (points or [])]
 
 
 async def _resolve_unique_slug(
@@ -299,6 +314,7 @@ async def _create_hotel_from_settings(
         arrival_time_enabled=_api_to_db_value(data.arrival_time_enabled, "arrival_time_enabled"),
         guest_count_enabled=_api_to_db_value(data.guest_count_enabled, "guest_count_enabled"),
         refer_a_guest_enabled=_api_to_db_value(data.refer_a_guest_enabled, "refer_a_guest_enabled"),
+        map_view_enabled=_api_to_db_value(data.map_view_enabled, "map_view_enabled"),
         social_instagram=data.instagram or "",
         social_facebook=data.facebook or "",
         social_tiktok=data.tiktok or "",
@@ -309,6 +325,10 @@ async def _create_hotel_from_settings(
         payout_account_number=data.payout_account_number or "",
         payout_bank_name=data.payout_bank_name or "",
         payout_swift=data.payout_swift or "",
+        show_room_detail_map=_api_to_db_value(data.show_room_detail_map, "show_room_detail_map"),
+        points_of_interest=_serialize_points_of_interest(
+            _api_to_db_value(data.points_of_interest, "points_of_interest")
+        ),
     )
     slug = await _resolve_unique_slug(name, user_id)
     try:
@@ -352,7 +372,7 @@ async def get_hotel_deletion_impact(
         if e.status_code in (403, 404):
             return {"upcomingBookingsCount": 0, "connectedChannelsCount": 0}
         logger.error("Failed to fetch deletion impact for hotel %s: %s", hotel_id, e)
-        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact")
+        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact") from e
 
 
 @router.delete("/hotels/{hotel_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -375,7 +395,7 @@ async def delete_hotel(
         raise HTTPException(
             status_code=502,
             detail="Failed to delete the property's PMS data. Please retry.",
-        )
+        ) from e
 
     deleted = await BookingHotelRepository.delete(hotel_id)
     if not deleted:
@@ -419,6 +439,8 @@ async def update_property_settings(
         for api_field, db_col in _PROPERTY_FIELD_MAP.items():
             value = getattr(data, api_field)
             if value is not None:
+                if api_field == "points_of_interest":
+                    value = _serialize_points_of_interest(value)
                 updates[db_col] = value
 
         _validate_paypal_settings(
@@ -447,7 +469,7 @@ async def update_property_settings(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="A property with this name or slug already exists. Please choose a different value.",
-                )
+                ) from None
         else:
             result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
     else:
