@@ -28,6 +28,12 @@
     "format:check": "prettier --check .",
     "lint:python": "ruff check .",
     "format:python": "ruff format .",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed",
+    "e2e:landing": "playwright test --project=landing-chromium",
+    "e2e:booking-web": "playwright test --project=booking-web-chromium",
+    "e2e:report": "playwright show-report",
     "build:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run build",
     "build:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run build",
     "build:booking-web": "npm --workspace vayada-booking-engine-frontend run build",
@@ -61,6 +67,7 @@
     ]
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.6",
     "husky": "^9.1.7",

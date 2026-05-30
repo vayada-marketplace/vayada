@@ -6,3 +6,6 @@ tfplan
 .claude/
 node_modules/
 .npm/
+playwright/.auth/
+playwright-report/
+test-results/
