@@ -28,6 +28,19 @@ What this does:
 - Registers the `api.marketplace`, `api.booking`, and `api.pms` portless aliases.
 - Runs `portless` in the foreground for all Next.js frontends.
 
+After the Docker databases/backends are healthy, seed the local test data from a
+second shell/tool call:
+
+```sh
+npm run seed:test-data
+```
+
+This seeds auth users, marketplace demo profiles/listings/collaborations, booking
+engine hotels/translations, and PMS hotels/room types/sample bookings. The seed
+runner is intended to be rerunnable for local development. If `asyncpg` or
+`bcrypt` is missing, follow the wrapper's install message and rerun the same npm
+command.
+
 To stop the Docker backend services started by this workflow:
 
 ```sh

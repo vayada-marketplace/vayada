@@ -955,51 +955,68 @@ async def main():
                 continue
             existing = await conn.fetchrow("SELECT id FROM hotel_profiles WHERE user_id = $1", uid)
             if existing:
-                hotel_db_ids[email] = existing["id"]
+                hotel_id = existing["id"]
                 print(f"  Skipped: {email} (profile exists)")
-                continue
-            row = await conn.fetchrow(
-                """
-                INSERT INTO hotel_profiles (user_id, name, location, about, website, phone,
-                                            picture, profile_complete, profile_completed_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
-                        CASE WHEN $8 = true THEN now() ELSE NULL END)
-                RETURNING id
-                """,
-                uid,
-                profile["name"],
-                profile["location"],
-                profile["about"],
-                profile["website"],
-                profile["phone"],
-                profile["picture"],
-                profile["profile_complete"],
-            )
-            hotel_db_ids[email] = row["id"]
+            else:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO hotel_profiles (user_id, name, location, about, website, phone,
+                                                picture, profile_complete, profile_completed_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+                            CASE WHEN $8 = true THEN now() ELSE NULL END)
+                    RETURNING id
+                    """,
+                    uid,
+                    profile["name"],
+                    profile["location"],
+                    profile["about"],
+                    profile["website"],
+                    profile["phone"],
+                    profile["picture"],
+                    profile["profile_complete"],
+                )
+                hotel_id = row["id"]
+                print(f"  Created: {email} ({len(profile['listings'])} listings)")
+            hotel_db_ids[email] = hotel_id
 
             for listing in profile["listings"]:
                 lr = await conn.fetchrow(
-                    """
-                    INSERT INTO hotel_listings
-                        (hotel_profile_id, name, location, description, accommodation_type, images, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    RETURNING id
-                    """,
-                    row["id"],
+                    "SELECT id FROM hotel_listings WHERE hotel_profile_id = $1 AND name = $2",
+                    hotel_id,
                     listing["name"],
-                    listing["location"],
-                    listing["description"],
-                    listing.get("accommodation_type"),
-                    listing.get("images", []),
-                    listing.get("status", "pending"),
+                )
+                if not lr:
+                    lr = await conn.fetchrow(
+                        """
+                        INSERT INTO hotel_listings
+                            (hotel_profile_id, name, location, description, accommodation_type, images, status)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        RETURNING id
+                        """,
+                        hotel_id,
+                        listing["name"],
+                        listing["location"],
+                        listing["description"],
+                        listing.get("accommodation_type"),
+                        listing.get("images", []),
+                        listing.get("status", "pending"),
+                    )
+                default_min_followers = (listing.get("creator_requirements") or {}).get(
+                    "min_followers"
                 )
                 for off in listing.get("collaboration_offerings", []):
-                    await conn.execute(
+                    existing_offering = await conn.fetchval(
                         """
-                        INSERT INTO listing_collaboration_offerings
-                            (listing_id, collaboration_type, availability_months, platforms,
-                             free_stay_min_nights, free_stay_max_nights, paid_max_amount, discount_percentage)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        SELECT 1
+                        FROM listing_collaboration_offerings
+                        WHERE listing_id = $1
+                          AND collaboration_type = $2
+                          AND availability_months = $3
+                          AND platforms = $4
+                          AND COALESCE(free_stay_min_nights, -1) = COALESCE($5, -1)
+                          AND COALESCE(free_stay_max_nights, -1) = COALESCE($6, -1)
+                          AND COALESCE(paid_max_amount, -1) = COALESCE($7, -1)
+                          AND COALESCE(discount_percentage, -1) = COALESCE($8, -1)
                         """,
                         lr["id"],
                         off["collaboration_type"],
@@ -1010,25 +1027,50 @@ async def main():
                         off.get("paid_max_amount"),
                         off.get("discount_percentage"),
                     )
+                    if not existing_offering:
+                        await conn.execute(
+                            """
+                            INSERT INTO listing_collaboration_offerings
+                                (listing_id, collaboration_type, availability_months, platforms,
+                                 free_stay_min_nights, free_stay_max_nights, paid_max_amount,
+                                 discount_percentage, min_followers)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                            """,
+                            lr["id"],
+                            off["collaboration_type"],
+                            off["availability_months"],
+                            off["platforms"],
+                            off.get("free_stay_min_nights"),
+                            off.get("free_stay_max_nights"),
+                            off.get("paid_max_amount"),
+                            off.get("discount_percentage"),
+                            off.get("min_followers", default_min_followers),
+                        )
                 if listing.get("creator_requirements"):
                     req = listing["creator_requirements"]
                     await conn.execute(
                         """
                         INSERT INTO listing_creator_requirements
-                            (listing_id, platforms, min_followers, target_countries,
+                            (listing_id, platforms, target_countries,
                              target_age_min, target_age_max, target_age_groups, creator_types)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (listing_id) DO UPDATE SET
+                            platforms = EXCLUDED.platforms,
+                            target_countries = EXCLUDED.target_countries,
+                            target_age_min = EXCLUDED.target_age_min,
+                            target_age_max = EXCLUDED.target_age_max,
+                            target_age_groups = EXCLUDED.target_age_groups,
+                            creator_types = EXCLUDED.creator_types,
+                            updated_at = now()
                         """,
                         lr["id"],
                         req["platforms"],
-                        req.get("min_followers"),
                         req["target_countries"],
                         req.get("target_age_min"),
                         req.get("target_age_max"),
                         req.get("target_age_groups"),
                         req.get("creator_types", []),
                     )
-            print(f"  Created: {email} ({len(profile['listings'])} listings)")
 
         # ------------------------------------------------------------------
         # 4. Collaborations
@@ -1076,63 +1118,94 @@ async def main():
 
             row = await conn.fetchrow(
                 """
-                INSERT INTO collaborations (
-                    initiator_type, creator_id, hotel_id, listing_id, status,
-                    why_great_fit, collaboration_type,
-                    free_stay_min_nights, free_stay_max_nights,
-                    paid_amount, discount_percentage,
-                    travel_date_from, travel_date_to,
-                    preferred_date_from, preferred_date_to,
-                    preferred_months, consent,
-                    responded_at, completed_at,
-                    hotel_agreed_at, creator_agreed_at, term_last_updated_at,
-                    creator_fee, affiliate_referral_code, affiliate_link
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
-                RETURNING id
+                SELECT id
+                FROM collaborations
+                WHERE creator_id = $1
+                  AND hotel_id = $2
+                  AND listing_id = $3
+                  AND status = $4
+                  AND COALESCE(collaboration_type, '') = COALESCE($5, '')
+                  AND COALESCE(why_great_fit, '') = COALESCE($6, '')
                 """,
-                c["initiator_type"],
                 creator_id,
                 listing_row["hotel_id"],
                 listing_row["id"],
                 c["status"],
-                c.get("why_great_fit"),
                 c.get("collaboration_type"),
-                c.get("free_stay_min_nights"),
-                c.get("free_stay_max_nights"),
-                c.get("paid_amount"),
-                c.get("discount_percentage"),
-                c.get("travel_date_from"),
-                c.get("travel_date_to"),
-                c.get("preferred_date_from"),
-                c.get("preferred_date_to"),
-                c.get("preferred_months"),
-                c.get("consent"),
-                c.get("responded_at"),
-                c.get("completed_at"),
-                c.get("hotel_agreed_at"),
-                c.get("creator_agreed_at"),
-                c.get("term_last_updated_at", datetime.now()),
-                c.get("creator_fee"),
-                c.get("affiliate_referral_code"),
-                c.get("affiliate_link"),
+                c.get("why_great_fit"),
             )
+            if row:
+                print(f"  Skipped: {c['creator_email']} <-> {c['hotel_email']} ({c['status']})")
+            else:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO collaborations (
+                        initiator_type, creator_id, hotel_id, listing_id, status,
+                        why_great_fit, collaboration_type,
+                        free_stay_min_nights, free_stay_max_nights,
+                        paid_amount, discount_percentage,
+                        travel_date_from, travel_date_to,
+                        preferred_date_from, preferred_date_to,
+                        preferred_months, consent,
+                        responded_at, completed_at,
+                        hotel_agreed_at, creator_agreed_at, term_last_updated_at,
+                        creator_fee, affiliate_referral_code, affiliate_link
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
+                    RETURNING id
+                    """,
+                    c["initiator_type"],
+                    creator_id,
+                    listing_row["hotel_id"],
+                    listing_row["id"],
+                    c["status"],
+                    c.get("why_great_fit"),
+                    c.get("collaboration_type"),
+                    c.get("free_stay_min_nights"),
+                    c.get("free_stay_max_nights"),
+                    c.get("paid_amount"),
+                    c.get("discount_percentage"),
+                    c.get("travel_date_from"),
+                    c.get("travel_date_to"),
+                    c.get("preferred_date_from"),
+                    c.get("preferred_date_to"),
+                    c.get("preferred_months"),
+                    c.get("consent"),
+                    c.get("responded_at"),
+                    c.get("completed_at"),
+                    c.get("hotel_agreed_at"),
+                    c.get("creator_agreed_at"),
+                    c.get("term_last_updated_at", datetime.now()),
+                    c.get("creator_fee"),
+                    c.get("affiliate_referral_code"),
+                    c.get("affiliate_link"),
+                )
+                collab_count += 1
+                print(f"  Created: {c['creator_email']} <-> {c['hotel_email']} ({c['status']})")
 
             for pi in c["platform_deliverables"]:
                 for d in pi["deliverables"]:
-                    await conn.execute(
+                    exists = await conn.fetchval(
                         """
-                        INSERT INTO collaboration_deliverables
-                            (collaboration_id, platform, type, quantity, status)
-                        VALUES ($1, $2, $3, $4, $5)
+                        SELECT 1 FROM collaboration_deliverables
+                        WHERE collaboration_id = $1 AND platform = $2 AND type = $3
                         """,
                         row["id"],
                         pi["platform"],
                         d["type"],
-                        d["quantity"],
-                        "completed" if c["status"] == "completed" else "pending",
                     )
-            collab_count += 1
-            print(f"  Created: {c['creator_email']} <-> {c['hotel_email']} ({c['status']})")
+                    if not exists:
+                        await conn.execute(
+                            """
+                            INSERT INTO collaboration_deliverables
+                                (collaboration_id, platform, type, quantity, status)
+                            VALUES ($1, $2, $3, $4, $5)
+                            """,
+                            row["id"],
+                            pi["platform"],
+                            d["type"],
+                            d["quantity"],
+                            "completed" if c["status"] == "completed" else "pending",
+                        )
 
         # ------------------------------------------------------------------
         # 5. Trips & External Collaborations
@@ -1146,20 +1219,28 @@ async def main():
                 print(f"  Skipped trip: creator {t['creator_email']} not found")
                 continue
             row = await conn.fetchrow(
-                """
-                INSERT INTO trips (creator_id, name, location, start_date, end_date, notes)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id
-                """,
+                "SELECT id FROM trips WHERE creator_id = $1 AND name = $2",
                 cid,
                 t["name"],
-                t.get("location"),
-                t["start_date"],
-                t["end_date"],
-                t.get("notes"),
             )
+            if not row:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO trips (creator_id, name, location, start_date, end_date, notes)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id
+                    """,
+                    cid,
+                    t["name"],
+                    t.get("location"),
+                    t["start_date"],
+                    t["end_date"],
+                    t.get("notes"),
+                )
+                print(f"  Created trip: {t['name']} ({t['creator_email']})")
+            else:
+                print(f"  Skipped trip: {t['name']} ({t['creator_email']})")
             trip_db_ids[(t["creator_email"], t["name"])] = row["id"]
-            print(f"  Created trip: {t['name']} ({t['creator_email']})")
 
         for ec in EXTERNAL_COLLABORATIONS:
             cid = creator_db_ids.get(ec["creator_email"])
@@ -1167,25 +1248,37 @@ async def main():
             if not cid:
                 print(f"  Skipped external collab: creator {ec['creator_email']} not found")
                 continue
-            await conn.execute(
+            exists = await conn.fetchval(
                 """
-                INSERT INTO external_collaborations
-                    (creator_id, trip_id, title, hotel_name, location,
-                     collaboration_type, start_date, end_date, deliverables, notes)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                SELECT 1 FROM external_collaborations
+                WHERE creator_id = $1 AND title = $2 AND start_date = $3
                 """,
                 cid,
-                trip_id,
                 ec["title"],
-                ec.get("hotel_name"),
-                ec.get("location"),
-                ec.get("collaboration_type"),
                 ec["start_date"],
-                ec["end_date"],
-                ec.get("deliverables"),
-                ec.get("notes"),
             )
-            print(f"  Created external collab: {ec['title']}")
+            if exists:
+                print(f"  Skipped external collab: {ec['title']}")
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO external_collaborations
+                        (creator_id, trip_id, title, hotel_name, location,
+                         collaboration_type, start_date, end_date, deliverables, notes)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    """,
+                    cid,
+                    trip_id,
+                    ec["title"],
+                    ec.get("hotel_name"),
+                    ec.get("location"),
+                    ec.get("collaboration_type"),
+                    ec["start_date"],
+                    ec["end_date"],
+                    ec.get("deliverables"),
+                    ec.get("notes"),
+                )
+                print(f"  Created external collab: {ec['title']}")
 
         # ------------------------------------------------------------------
         #  Chat messages
@@ -1251,17 +1344,34 @@ async def main():
                     (None, "Hotel has declined the collaboration request.", "system"),
                 ]
             for sender, content, mtype in msgs:
-                await conn.execute(
+                exists = await conn.fetchval(
                     """
-                    INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type, created_at)
-                    VALUES ($1, $2, $3, $4, now() - interval '1 day')
+                    SELECT 1 FROM chat_messages
+                    WHERE collaboration_id = $1
+                      AND (
+                        (sender_id IS NULL AND $2::uuid IS NULL)
+                        OR sender_id = $2::uuid
+                      )
+                      AND content = $3
+                      AND message_type = $4
                     """,
                     collab["id"],
                     sender,
                     content,
                     mtype,
                 )
-                chat_count += 1
+                if not exists:
+                    await conn.execute(
+                        """
+                        INSERT INTO chat_messages (collaboration_id, sender_id, content, message_type, created_at)
+                        VALUES ($1, $2, $3, $4, now() - interval '1 day')
+                        """,
+                        collab["id"],
+                        sender,
+                        content,
+                        mtype,
+                    )
+                    chat_count += 1
         print(f"  Created {chat_count} messages")
 
         # ------------------------------------------------------------------

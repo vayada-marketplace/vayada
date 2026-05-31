@@ -49,7 +49,7 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
     <>
       <div className="group flex h-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-colors hover:border-gray-300">
         <div className="flex gap-4 border-b border-gray-100 p-4">
-          <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
+          <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-100">
             {creator.profilePicture && !imageError ? (
               <Image
                 src={creator.profilePicture}
@@ -66,7 +66,7 @@ export function CreatorCard({ creator, isPublic = false }: CreatorCardProps) {
             )}
             {creator.status === "verified" && (
               <div className="absolute bottom-1 right-1 rounded-full bg-white p-0.5 shadow-sm">
-                <CheckBadgeIcon className="h-4 w-4 text-primary-600" />
+                <CheckBadgeIcon className="h-5 w-5 text-primary-600" />
               </div>
             )}
           </div>

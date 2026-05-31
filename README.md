@@ -266,8 +266,7 @@ The auth database (`auth-db/`) provides centralized user management for all serv
 3. **Seed test data:**
 
    ```bash
-   pip install asyncpg bcrypt
-   python scripts/seed_all.py
+   npm run seed:test-data
    ```
 
 4. **Access the applications:**
@@ -422,13 +421,14 @@ See `engineering/workspace-package-manager.md` for the decision record.
 
 ## Scripts
 
-| Script                | Description                                               |
-| --------------------- | --------------------------------------------------------- |
-| `seed_all.py`         | Runs all seeds in sequence (users, marketplace, booking)  |
-| `seed_users.py`       | Creates admin, creator, and hotel users in auth DB        |
-| `seed_marketplace.py` | Creates creator profiles, hotel listings, collaborations  |
-| `seed_booking.py`     | Creates hotels, room types, translations, sample bookings |
-| `run_migration.sh`    | Runs migrations against AWS RDS for a given service       |
+| Script                | Description                                                 |
+| --------------------- | ----------------------------------------------------------- |
+| `seed_test_data.sh`   | Checks local seed dependencies and runs all test-data seeds |
+| `seed_all.py`         | Runs all seeds in sequence (users, marketplace, booking)    |
+| `seed_users.py`       | Creates admin, creator, and hotel users in auth DB          |
+| `seed_marketplace.py` | Creates creator profiles, hotel listings, collaborations    |
+| `seed_booking.py`     | Creates hotels, room types, translations, sample bookings   |
+| `run_migration.sh`    | Runs migrations against AWS RDS for a given service         |
 
 All seed scripts use `asyncpg` and are idempotent (safe to run multiple times).
 
@@ -436,11 +436,11 @@ All seed scripts use `asyncpg` and are idempotent (safe to run multiple times).
 
 ## Test Accounts
 
-After running `python scripts/seed_all.py`:
+After running `npm run seed:test-data`:
 
 | Email             | Password  | Type    | Notes                        |
 | ----------------- | --------- | ------- | ---------------------------- |
-| admin@vayada.com  | vayada123 | admin   | Full admin access            |
+| admin@vayada.com  | Vayada123 | admin   | Full admin access            |
 | creator1@mock.com | Test1234  | creator | Verified, with platforms     |
 | creator2@mock.com | Test1234  | creator | Verified                     |
 | creator3@mock.com | Test1234  | creator | Pending                      |

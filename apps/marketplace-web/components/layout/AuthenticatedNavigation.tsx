@@ -9,6 +9,7 @@ import { authService } from "@/services/auth";
 import { HotelIcon, ProfileIcon, CalendarIcon, MessageIcon } from "@/components/ui";
 import { ArrowRightOnRectangleIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { AppSwitcher } from "./AppSwitcher";
+import type { UserType } from "@/lib/types";
 
 // Context for sidebar collapsed state
 const SidebarContext = createContext<{
@@ -24,6 +25,7 @@ export const useSidebar = () => useContext(SidebarContext);
 export default function AuthenticatedNavigation() {
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(true);
+  const [userType, setUserType] = useState<UserType | null>(null);
 
   // Load collapsed state from localStorage on mount
   useEffect(() => {
@@ -34,6 +36,7 @@ export default function AuthenticatedNavigation() {
       // Default to collapsed if no saved preference
       setIsCollapsed(true);
     }
+    setUserType(localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null);
   }, []);
 
   // Save collapsed state to localStorage
@@ -95,23 +98,24 @@ export default function AuthenticatedNavigation() {
       >
         {/* Sidebar Logo */}
         <div className="h-12 flex items-center justify-center border-b border-gray-200">
-          <Link
-            href={ROUTES.MARKETPLACE}
-            className="flex items-center justify-center transition-opacity hover:opacity-80"
-          >
-            <Image
-              src="/vayada-logo-navbar.png"
-              alt="vayada"
-              width={isCollapsed ? 28 : 96}
-              height={28}
-              className={`object-contain transition-all duration-200 ${isCollapsed ? "w-7 h-7" : "h-7 w-auto"}`}
-              priority
-            />
-          </Link>
+          {userType === "hotel" ? (
+            <AppSwitcher isCollapsed={isCollapsed} placement="brand" />
+          ) : (
+            <Link
+              href={ROUTES.MARKETPLACE}
+              className="flex items-center justify-center transition-opacity hover:opacity-80"
+            >
+              <Image
+                src="/vayada-logo-navbar.png"
+                alt="vayada"
+                width={isCollapsed ? 28 : 96}
+                height={28}
+                className={`object-contain transition-all duration-200 ${isCollapsed ? "w-7 h-7" : "h-7 w-auto"}`}
+                priority
+              />
+            </Link>
+          )}
         </div>
-
-        {/* App Switcher — lets hotel users hop back to PMS / Booking Engine. */}
-        <AppSwitcher isCollapsed={isCollapsed} />
 
         {/* Navigation Links */}
         <nav className="flex-1 p-2.5 space-y-1 overflow-y-auto">
@@ -138,8 +142,18 @@ export default function AuthenticatedNavigation() {
           })}
         </nav>
 
-        {/* Logout Button - Bottom Left */}
-        <div className="mt-auto p-2.5 border-t border-gray-200">
+        {/* Sidebar utility actions */}
+        <div className="mt-auto p-2.5 border-t border-gray-200 space-y-1">
+          <button
+            onClick={toggleSidebar}
+            className={`flex items-center rounded-md text-[13px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors w-full ${
+              isCollapsed ? "justify-center px-2 py-2.5" : "gap-2.5 px-3 py-2.5 justify-start"
+            }`}
+            title={isCollapsed ? "Expand sidebar" : undefined}
+          >
+            <ViewColumnsIcon className="w-5 h-5 flex-shrink-0" />
+            {!isCollapsed && <span className="text-sm">Collapse</span>}
+          </button>
           <button
             onClick={handleLogout}
             className={`flex items-center rounded-md text-[13px] font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition-colors w-full ${
@@ -163,8 +177,8 @@ export default function AuthenticatedNavigation() {
           <div className="flex items-center gap-3">
             <button
               onClick={toggleSidebar}
-              className="p-2 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-              title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="p-2 rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors md:hidden"
+              title="Open navigation"
             >
               <ViewColumnsIcon className="w-5 h-5" />
             </button>

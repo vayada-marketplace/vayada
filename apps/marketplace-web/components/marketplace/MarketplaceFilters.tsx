@@ -10,8 +10,6 @@ export interface MarketplaceFiltersState extends HotelFiltersState, CreatorFilte
 interface MarketplaceFiltersProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
-  sortOption?: string;
-  onSortChange?: (sort: string) => void;
   filters: MarketplaceFiltersState;
   onFiltersChange: (filters: MarketplaceFiltersState) => void;
   viewType: "all" | "hotels" | "creators";
@@ -20,8 +18,6 @@ interface MarketplaceFiltersProps {
 export function MarketplaceFilters({
   searchQuery,
   onSearchChange,
-  sortOption = "relevance",
-  onSortChange,
   filters,
   onFiltersChange,
   viewType,
@@ -29,11 +25,11 @@ export function MarketplaceFilters({
   const getPlaceholder = () => {
     switch (viewType) {
       case "hotels":
-        return "Search hotels by name or location...";
+        return "Search hotels or locations";
       case "creators":
-        return "Search creators by name or location...";
+        return "Search creators or locations";
       default:
-        return "Hotels, Creator suchen...";
+        return "Search marketplace";
     }
   };
 
@@ -103,13 +99,7 @@ export function MarketplaceFilters({
 
   return (
     <div>
-      <SearchBar
-        value={searchQuery}
-        onChange={onSearchChange}
-        placeholder={getPlaceholder()}
-        sortOption={sortOption}
-        onSortChange={onSortChange}
-      />
+      <SearchBar value={searchQuery} onChange={onSearchChange} placeholder={getPlaceholder()} />
 
       {showHotelFilters && (
         <HotelFilters
