@@ -20,6 +20,8 @@ export function PoiSearchInput({ onSelect }: PoiSearchInputProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,19 +31,34 @@ export function PoiSearchInput({ onSelect }: PoiSearchInputProps) {
       }
     };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      abortRef.current?.abort();
+    };
   }, []);
 
   const search = async (q: string) => {
+    const requestId = ++requestIdRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     try {
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5&addressdetails=0`,
-        { headers: { "Accept-Language": "en" } },
+        { headers: { "Accept-Language": "en" }, signal: controller.signal },
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (requestId === requestIdRef.current) {
+          setSuggestions([]);
+          setOpen(false);
+        }
+        return;
+      }
       const data: { place_id: number; display_name: string; lat: string; lon: string }[] =
         await res.json();
+      if (requestId !== requestIdRef.current) return;
       setSuggestions(
         data.map((d) => ({
           placeId: String(d.place_id),
@@ -51,10 +68,13 @@ export function PoiSearchInput({ onSelect }: PoiSearchInputProps) {
         })),
       );
       setOpen(true);
-    } catch {
-      // silently ignore network errors — fall back to click-to-place
+    } catch (error) {
+      if ((error as DOMException).name !== "AbortError" && requestId === requestIdRef.current) {
+        setSuggestions([]);
+        setOpen(false);
+      }
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   };
 

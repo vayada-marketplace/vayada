@@ -492,7 +492,6 @@ export default function SettingsPage() {
 
   const loadPropertyCoordinate = useCallback(async () => {
     if (propertyCoordinateLoaded) return;
-    setPropertyCoordinateLoaded(true);
     try {
       const roomTypes = await pmsClient.get<
         { latitude: number | null; longitude: number | null }[]
@@ -504,14 +503,18 @@ export default function SettingsPage() {
           Number.isFinite(rt.latitude) &&
           Number.isFinite(rt.longitude),
       );
-      if (withCoords.length === 0) return;
+      if (withCoords.length === 0) {
+        setPropertyCoordinateLoaded(true);
+        return;
+      }
       const centroid = {
         latitude: withCoords.reduce((s, rt) => s + rt.latitude!, 0) / withCoords.length,
         longitude: withCoords.reduce((s, rt) => s + rt.longitude!, 0) / withCoords.length,
       };
       setPropertyCoordinate(centroid);
+      setPropertyCoordinateLoaded(true);
     } catch {
-      // non-fatal — map falls back to POI centroid or Denpasar default
+      // transient failure — leave propertyCoordinateLoaded false so next navigation retries
     }
   }, [propertyCoordinateLoaded]);
 
@@ -1027,8 +1030,11 @@ export default function SettingsPage() {
                       </label>
                       <PoiSearchInput
                         onSelect={(latitude, longitude, name) => {
-                          patchPoi(poi.id, { latitude, longitude });
-                          if (!poi.label.trim()) patchPoi(poi.id, { label: name });
+                          patchPoi(poi.id, {
+                            latitude,
+                            longitude,
+                            ...(!poi.label.trim() ? { label: name } : {}),
+                          });
                           setSelectedPoiId(poi.id);
                         }}
                       />
