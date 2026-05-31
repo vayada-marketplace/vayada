@@ -277,6 +277,7 @@ async def find_assignment_for_window(
     is trying to re-place out of the input set (it's the "new" booking here).
     """
     from app.repositories.booking_repo import BookingRepository
+    from app.repositories.room_block_repo import RoomBlockRepository
     from app.repositories.room_repo import RoomRepository
 
     rooms = await RoomRepository.list_for_room_type(room_type_id)
@@ -284,6 +285,9 @@ async def find_assignment_for_window(
         return None
 
     overlapping = await BookingRepository.list_movable_for_room_type(
+        room_type_id, check_in, check_out
+    )
+    blocks = await RoomBlockRepository.list_blocked_rooms_for_room_type(
         room_type_id, check_in, check_out
     )
 
@@ -309,6 +313,19 @@ async def find_assignment_for_window(
                 check_in=b["check_in"],
                 check_out=b["check_out"],
                 movable=movable,
+            )
+        )
+
+    # Manual blocks are treated as immovable occupants so the solver never
+    # places a new booking (or rearranges an existing one) into a blocked room.
+    for block in blocks:
+        booking_slots.append(
+            BookingSlot(
+                booking_id=f"block_{block['id']}",
+                original_room_id=str(block["room_id"]),
+                check_in=block["start_date"],
+                check_out=block["end_date"],
+                movable=False,
             )
         )
 
@@ -392,6 +409,7 @@ async def resolve_room_assignments(
         return room_id, [], moves
 
     from app.repositories.booking_room_repo import BookingRoomRepository
+    from app.repositories.room_block_repo import RoomBlockRepository
     from app.repositories.room_repo import RoomRepository
 
     rooms = await RoomRepository.list_for_room_type(room_type_id)
@@ -401,6 +419,10 @@ async def resolve_room_assignments(
     occupied = await BookingRoomRepository.occupied_room_ids_for_room_type(
         room_type_id, check_in, check_out
     )
+    blocks = await RoomBlockRepository.list_blocked_rooms_for_room_type(
+        room_type_id, check_in, check_out
+    )
+    occupied = occupied | {str(b["room_id"]) for b in blocks}
 
     chosen: list[str] = []
     for r in rooms:
