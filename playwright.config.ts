@@ -13,6 +13,26 @@ const bookingBaseURL =
     ? "http://hotel-alpenrose.booking.localhost:3002"
     : "https://hotel-alpenrose.booking.localhost");
 
+const affiliateDashboardBaseURL =
+  process.env.E2E_AFFILIATE_BASE_URL ||
+  (startServers ? "http://127.0.0.1:3005" : "https://affiliate.localhost");
+
+const bookingAdminBaseURL =
+  process.env.E2E_BOOKING_ADMIN_BASE_URL ||
+  (startServers ? "http://127.0.0.1:3003" : "https://admin.booking.localhost");
+
+const marketplaceWebBaseURL =
+  process.env.E2E_MARKETPLACE_BASE_URL ||
+  (startServers ? "http://127.0.0.1:3000" : "https://marketplace.localhost");
+
+const pmsWebBaseURL =
+  process.env.E2E_PMS_BASE_URL ||
+  (startServers ? "http://127.0.0.1:3004" : "https://pms.localhost");
+
+const vayadaAdminBaseURL =
+  process.env.E2E_VAYADA_ADMIN_BASE_URL ||
+  (startServers ? "http://127.0.0.1:3001" : "https://admin.localhost");
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: true,
@@ -41,6 +61,36 @@ export default defineConfig({
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
         },
+        {
+          command: "PORT=3005 npm run dev:affiliate-dashboard",
+          url: "http://127.0.0.1:3005",
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+        {
+          command: "PORT=3003 npm run dev:booking-admin",
+          url: "http://127.0.0.1:3003",
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+        {
+          command: "PORT=3000 npm run dev:marketplace-web",
+          url: "http://127.0.0.1:3000",
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+        {
+          command: "PORT=3004 npm run dev:pms-web",
+          url: "http://127.0.0.1:3004",
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+        {
+          command: "PORT=3001 npm run dev:vayada-admin",
+          url: "http://127.0.0.1:3001",
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
       ]
     : undefined,
   projects: [
@@ -58,6 +108,46 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         baseURL: bookingBaseURL,
+      },
+    },
+    {
+      name: "affiliate-dashboard-chromium",
+      testMatch: /affiliate-dashboard\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: affiliateDashboardBaseURL,
+      },
+    },
+    {
+      name: "booking-admin-chromium",
+      testMatch: /booking-admin\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: bookingAdminBaseURL,
+      },
+    },
+    {
+      name: "marketplace-web-chromium",
+      testMatch: /marketplace-web\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: marketplaceWebBaseURL,
+      },
+    },
+    {
+      name: "pms-web-chromium",
+      testMatch: /pms-web\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: pmsWebBaseURL,
+      },
+    },
+    {
+      name: "vayada-admin-chromium",
+      testMatch: /vayada-admin\/.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        baseURL: vayadaAdminBaseURL,
       },
     },
   ],
