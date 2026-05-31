@@ -13,11 +13,13 @@ import json as _json
 from app.database import Database
 from app.services.room_assignment import (
     resolve_assignment,
+    resolve_room_assignments,
     try_place_unassigned_after_cancellation,
 )
 
 from tests.conftest import (
     create_test_booking,
+    create_test_room_block,
 )
 
 
@@ -123,6 +125,176 @@ class TestResolveAssignment:
         # 5 rooms with overlapping but coverable windows — packing should
         # exist.
         assert target_on is not None
+
+
+class TestBlockedRoomExclusion:
+    """VAY-564: manual room blocks must be treated as unavailable inventory."""
+
+    async def test_blocked_room_skipped_available_room_chosen(self, client, hotel_with_rooms):
+        """Exact repro from the bug report: rooms[0] blocked, rooms[1] free →
+        assignment must land on rooms[1], not the blocked rooms[0]."""
+        from datetime import date
+
+        hotel = hotel_with_rooms["hotel"]
+        rt = hotel_with_rooms["room"]
+        rooms = hotel_with_rooms["rooms"]
+
+        await create_test_room_block(
+            str(hotel["id"]),
+            str(rt["id"]),
+            start_date="2026-07-11",
+            end_date="2026-07-19",
+            room_id=str(rooms[0]["id"]),
+            reason="Liz",
+        )
+
+        target, moves = await resolve_assignment(
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 7, 13),
+            date(2026, 7, 19),
+        )
+
+        assert target is not None
+        assert target != str(rooms[0]["id"]), "must not assign into the blocked room"
+        assert moves == []
+
+    async def test_partial_overlap_still_excluded(self, client, hotel_with_rooms):
+        """Block Jul 11–19, booking Jul 18–25: single-night overlap still excludes."""
+        from datetime import date
+
+        hotel = hotel_with_rooms["hotel"]
+        rt = hotel_with_rooms["room"]
+        rooms = hotel_with_rooms["rooms"]
+
+        await create_test_room_block(
+            str(hotel["id"]),
+            str(rt["id"]),
+            start_date="2026-07-11",
+            end_date="2026-07-19",
+            room_id=str(rooms[0]["id"]),
+        )
+
+        target, moves = await resolve_assignment(
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 7, 18),
+            date(2026, 7, 25),
+        )
+
+        assert target is not None
+        assert target != str(rooms[0]["id"])
+
+    async def test_all_rooms_blocked_returns_none(self, client, hotel_with_rooms):
+        """All units blocked for the window → no room available → returns None."""
+        from datetime import date
+
+        hotel = hotel_with_rooms["hotel"]
+        rt = hotel_with_rooms["room"]
+        rooms = hotel_with_rooms["rooms"]
+
+        for room in rooms:
+            await create_test_room_block(
+                str(hotel["id"]),
+                str(rt["id"]),
+                start_date="2026-07-13",
+                end_date="2026-07-19",
+                room_id=str(room["id"]),
+            )
+
+        target, moves = await resolve_assignment(
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 7, 13),
+            date(2026, 7, 19),
+        )
+
+        assert target is None
+
+    async def test_auto_rearrange_never_moves_into_blocked_room(self, client, hotel_with_rooms):
+        """Solver must not shuffle an existing booking into a blocked room
+        even when that is the only way to place the new booking."""
+        from datetime import date
+
+        hotel = hotel_with_rooms["hotel"]
+        rt = hotel_with_rooms["room"]
+        rooms = hotel_with_rooms["rooms"]
+
+        # Enable rearrange so the solver is allowed to shuffle.
+        await Database.execute(
+            "UPDATE hotels SET auto_rearrange_enabled = TRUE WHERE id = $1",
+            hotel["id"],
+        )
+
+        # Place a booking on rooms[1] that spans the new booking's window.
+        existing = await create_test_booking(
+            str(hotel["id"]),
+            str(rt["id"]),
+            check_in="2026-07-10",
+            check_out="2026-07-20",
+            status="confirmed",
+        )
+        await Database.execute(
+            "UPDATE bookings SET room_id = $1 WHERE id = $2",
+            rooms[1]["id"],
+            existing["id"],
+        )
+
+        # Block rooms[0] — the only other room that could host the existing
+        # booking if the solver tried to move it there to free up rooms[1].
+        for room in rooms:
+            if room["id"] != rooms[1]["id"]:
+                await create_test_room_block(
+                    str(hotel["id"]),
+                    str(rt["id"]),
+                    start_date="2026-07-10",
+                    end_date="2026-07-20",
+                    room_id=str(room["id"]),
+                )
+
+        # No valid packing exists — the solver must not move the booking into
+        # a blocked room and must return None instead.
+        target, moves = await resolve_assignment(
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 7, 13),
+            date(2026, 7, 19),
+        )
+
+        assert target is None or target == str(rooms[1]["id"]), (
+            "solver must not place the booking into a blocked room"
+        )
+
+    async def test_multi_room_path_skips_blocked_room(self, client, hotel_with_rooms):
+        """resolve_room_assignments (count>1) must also honour blocks."""
+        from datetime import date
+
+        hotel = hotel_with_rooms["hotel"]
+        rt = hotel_with_rooms["room"]
+        rooms = hotel_with_rooms["rooms"]
+
+        # Block rooms[0].
+        await create_test_room_block(
+            str(hotel["id"]),
+            str(rt["id"]),
+            start_date="2026-07-13",
+            end_date="2026-07-19",
+            room_id=str(rooms[0]["id"]),
+        )
+
+        primary, extras, moves = await resolve_room_assignments(
+            str(hotel["id"]),
+            str(rt["id"]),
+            date(2026, 7, 13),
+            date(2026, 7, 19),
+            count=2,
+        )
+
+        assert primary is not None
+        all_chosen = ([primary] + extras) if primary else []
+        assert str(rooms[0]["id"]) not in all_chosen, (
+            "multi-room path must not assign into a blocked room"
+        )
 
 
 class TestUnassignedSweep:

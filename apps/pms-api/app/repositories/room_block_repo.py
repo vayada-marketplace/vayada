@@ -104,3 +104,31 @@ class RoomBlockRepository:
     async def delete(block_id: str) -> bool:
         result = await Database.execute("DELETE FROM room_blocks WHERE id = $1", block_id)
         return result == "DELETE 1"
+
+    @staticmethod
+    async def list_blocked_rooms_for_room_type(
+        room_type_id: str,
+        window_start: date,
+        window_end: date,
+    ) -> list[dict]:
+        """Per-room blocks of a room type overlapping [window_start, window_end).
+
+        Only returns rows where room_id IS NOT NULL (per-room blocks introduced
+        in migration 050). Legacy room-type-level blocks (room_id IS NULL) are
+        not included here; they affect channel availability counts but the
+        assignment solver handles them via a separate code path.
+        """
+        rows = await Database.fetch(
+            """
+            SELECT id, room_id, start_date, end_date
+            FROM room_blocks
+            WHERE room_type_id = $1
+              AND room_id IS NOT NULL
+              AND start_date < $3
+              AND end_date > $2
+            """,
+            room_type_id,
+            window_start,
+            window_end,
+        )
+        return [dict(r) for r in rows]
