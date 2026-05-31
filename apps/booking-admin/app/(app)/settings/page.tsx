@@ -1104,6 +1104,7 @@ export default function SettingsPage() {
                       ? (latitude, longitude) => patchPoi(selectedPoiId, { latitude, longitude })
                       : undefined
                   }
+                  onMovePoi={(id, latitude, longitude) => patchPoi(id, { latitude, longitude })}
                 />
               </div>
             </div>
