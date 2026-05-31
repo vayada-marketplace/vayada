@@ -173,6 +173,7 @@
   "bookings.statusCancelled": "已取消",
   "bookings.statusDeclined": "已拒绝",
   "bookings.statusExpired": "已过期",
+  "bookings.statusNoShow": "未到访",
   "bookings.tableGuest": "客人",
   "bookings.tableStatus": "状态",
   "bookings.tableRoom": "房间",

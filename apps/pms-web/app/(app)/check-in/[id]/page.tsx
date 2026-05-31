@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   Booking,
   BookingAdditionalGuest,
@@ -188,6 +188,8 @@ function customStepValueForRecord(step: CheckinChecklistStep, value: string | bo
 export default function CheckInPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const searchParams = useSearchParams();
+  const nextAfterCheckin = searchParams.get("next");
   const [booking, setBooking] = useState<Booking | null>(null);
   const [booker, setBooker] = useState<GuestRegistrationDraft | null>(null);
   const [guests, setGuests] = useState<GuestDraft[]>([]);
@@ -499,9 +501,15 @@ export default function CheckInPage() {
             </div>
           )}
           <div className="mt-6 flex flex-wrap gap-2">
-            <Link href="/dashboard" className={primaryActionClass}>
-              Back to dashboard
-            </Link>
+            {nextAfterCheckin === "checkout" ? (
+              <Link href={`/check-out/${booking.id}`} className={primaryActionClass}>
+                Continue to check-out
+              </Link>
+            ) : (
+              <Link href="/dashboard" className={primaryActionClass}>
+                Back to dashboard
+              </Link>
+            )}
             <Link
               href={`/bookings/${booking.id}`}
               className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700"

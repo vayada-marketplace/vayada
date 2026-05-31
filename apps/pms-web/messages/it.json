@@ -173,6 +173,7 @@
   "bookings.statusCancelled": "Cancellata",
   "bookings.statusDeclined": "Rifiutata",
   "bookings.statusExpired": "Scaduta",
+  "bookings.statusNoShow": "No-show",
   "bookings.tableGuest": "Ospite",
   "bookings.tableStatus": "Stato",
   "bookings.tableRoom": "Camera",

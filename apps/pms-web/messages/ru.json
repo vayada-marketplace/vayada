@@ -173,6 +173,7 @@
   "bookings.statusCancelled": "Отменено",
   "bookings.statusDeclined": "Отклонено",
   "bookings.statusExpired": "Истекло",
+  "bookings.statusNoShow": "Неявка",
   "bookings.tableGuest": "Гость",
   "bookings.tableStatus": "Статус",
   "bookings.tableRoom": "Номер",

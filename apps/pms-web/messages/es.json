@@ -177,6 +177,7 @@
   "bookings.statusCancelled": "Cancelada",
   "bookings.statusDeclined": "Rechazada",
   "bookings.statusExpired": "Expirada",
+  "bookings.statusNoShow": "No presentado",
   "bookings.tableGuest": "Huesped",
   "bookings.tableStatus": "Estado",
   "bookings.tableRoom": "Habitacion",

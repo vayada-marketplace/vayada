@@ -173,6 +173,7 @@
   "bookings.statusCancelled": "Annulee",
   "bookings.statusDeclined": "Refusee",
   "bookings.statusExpired": "Expiree",
+  "bookings.statusNoShow": "Non-présentation",
   "bookings.tableGuest": "Voyageur",
   "bookings.tableStatus": "Statut",
   "bookings.tableRoom": "Chambre",

@@ -45,7 +45,8 @@ export interface Booking {
     | "checked_out"
     | "cancelled"
     | "declined"
-    | "expired";
+    | "expired"
+    | "no_show";
   roomId: string | null;
   roomNumber: string | null;
   // VAY-403: every physical room the booking occupies — the primary
@@ -400,4 +401,7 @@ export const bookingsService = {
 
   cancelWithReason: (id: string, reason: string) =>
     pmsClient.post<Booking>(`/admin/bookings/${id}/cancel`, { reason }),
+
+  markNoShow: (id: string) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/no-show`, {}),
 };

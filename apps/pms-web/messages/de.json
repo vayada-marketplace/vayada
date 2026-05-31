@@ -173,6 +173,7 @@
   "bookings.statusCancelled": "Storniert",
   "bookings.statusDeclined": "Abgelehnt",
   "bookings.statusExpired": "Abgelaufen",
+  "bookings.statusNoShow": "No-Show",
   "bookings.tableGuest": "Gast",
   "bookings.tableStatus": "Status",
   "bookings.tableRoom": "Zimmer",

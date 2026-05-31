@@ -16,6 +16,7 @@ import {
   getRemainingDepartures,
   isCheckedInArrival,
   isCheckedOutDeparture,
+  isNotCheckedInDeparture,
 } from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
 
@@ -163,6 +164,12 @@ export default function DashboardPage() {
             : current,
         ),
       );
+  };
+
+  const handleNoShow = async (bookingId: string) => {
+    await bookingsService.markNoShow(bookingId);
+    setBookings((prev) => prev.filter((b) => b.id !== bookingId));
+    setQuickView(null);
   };
 
   const monthStartStr = useMemo(() => {
@@ -398,10 +405,16 @@ export default function DashboardPage() {
                       className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                         isCheckedOutDeparture(b)
                           ? "bg-slate-100 text-slate-700"
-                          : "bg-sky-100 text-sky-700"
+                          : isNotCheckedInDeparture(b)
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-sky-100 text-sky-700"
                       }`}
                     >
-                      {isCheckedOutDeparture(b) ? "Checked out" : "Checked in"}
+                      {isCheckedOutDeparture(b)
+                        ? "Checked out"
+                        : isNotCheckedInDeparture(b)
+                          ? "Not checked in"
+                          : "Checked in"}
                     </span>
                     <span className="text-gray-300">›</span>
                   </div>
@@ -484,6 +497,7 @@ export default function DashboardPage() {
           loading={quickView.loading}
           mode={quickView.mode}
           onClose={() => setQuickView(null)}
+          onNoShow={handleNoShow}
         />
       )}
     </div>
@@ -499,6 +513,7 @@ function ArrivalQuickView({
   loading,
   mode,
   onClose,
+  onNoShow,
 }: {
   booking: Booking;
   guests: BookingAdditionalGuest[];
@@ -506,11 +521,25 @@ function ArrivalQuickView({
   loading: boolean;
   mode: "arrival" | "departure";
   onClose: () => void;
+  onNoShow?: (bookingId: string) => Promise<void>;
 }) {
+  const [noShowLoading, setNoShowLoading] = useState(false);
   const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
   const due = isPaid(booking) ? 0 : booking.totalAmount;
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
   const isDeparture = mode === "departure";
+  const isNotCheckedIn = isDeparture && isNotCheckedInDeparture(booking);
+
+  async function handleNoShow() {
+    if (!onNoShow) return;
+    setNoShowLoading(true);
+    try {
+      await onNoShow(booking.id);
+    } finally {
+      setNoShowLoading(false);
+    }
+  }
+
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/30 md:items-center"
@@ -543,9 +572,23 @@ function ArrivalQuickView({
         </div>
 
         <div className="space-y-4 p-5">
+          {isNotCheckedIn && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              This guest hasn&apos;t been checked in yet. Check them in to proceed with check-out,
+              or mark as a no-show if the guest didn&apos;t arrive.
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
-            <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
-              {isDeparture ? "Checked in" : "Arriving today"}
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                isNotCheckedIn
+                  ? "bg-amber-100 text-amber-800"
+                  : isDeparture
+                    ? "bg-green-100 text-green-700"
+                    : "bg-blue-100 text-blue-700"
+              }`}
+            >
+              {isNotCheckedIn ? "Not checked in" : isDeparture ? "Checked in" : "Arriving today"}
             </span>
             {due > 0 && (
               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
@@ -597,12 +640,31 @@ function ArrivalQuickView({
           )}
 
           <div className="grid gap-2">
-            <Link
-              href={isDeparture ? `/check-out/${booking.id}` : `/check-in/${booking.id}`}
-              className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
-            >
-              {isDeparture ? "Start check-out" : "Start check-in"}
-            </Link>
+            {isNotCheckedIn ? (
+              <>
+                <Link
+                  href={`/check-in/${booking.id}?next=checkout`}
+                  className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
+                >
+                  Check in now
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleNoShow}
+                  disabled={noShowLoading}
+                  className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                >
+                  {noShowLoading ? "Marking…" : "Mark as no-show"}
+                </button>
+              </>
+            ) : (
+              <Link
+                href={isDeparture ? `/check-out/${booking.id}` : `/check-in/${booking.id}`}
+                className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
+              >
+                {isDeparture ? "Start check-out" : "Start check-in"}
+              </Link>
+            )}
             <Link
               href={`/bookings/${booking.id}`}
               className="flex h-11 items-center justify-center rounded-lg border border-gray-200 px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
