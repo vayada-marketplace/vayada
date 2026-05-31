@@ -29,24 +29,25 @@ export default function ProfilePage() {
   }, []);
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: "#f9f8f6" }}>
+    <main className="min-h-screen bg-gray-50">
       <AuthenticatedNavigation />
-      <div className={`transition-all duration-300 ${isCollapsed ? "md:pl-20" : "md:pl-64"} pt-16`}>
+      <div className={`pt-12 transition-all duration-200 ${isCollapsed ? "md:pl-14" : "md:pl-52"}`}>
         <div className="pt-4">
           <ProfileWarningBanner />
         </div>
 
-        <div
-          className="max-w-7xl mx-auto pt-4 pb-8"
-          style={{ paddingLeft: "clamp(0.5rem, 3%, 3rem)", paddingRight: "2rem" }}
-        >
+        <div className="mx-auto max-w-7xl px-4 py-4 md:px-6 md:py-6">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-5xl font-extrabold bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent mb-3">
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Account workspace
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-normal text-gray-950 md:text-3xl">
               Profile
             </h1>
-            <p className="text-lg text-gray-600 font-medium mb-6">
-              Manage your profile information
+            <p className="mt-1 text-sm text-gray-500">
+              Manage the profile details used for matching, collaboration requests, and trust
+              signals.
             </p>
           </div>
 

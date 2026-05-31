@@ -85,7 +85,20 @@
     "freeWifi": "Free WiFi",
     "airportTransfer": "Airport transfer",
     "selectThisRate": "Select This Rate",
-    "soldOut": "Sold Out"
+    "soldOut": "Sold Out",
+    "mobileView": {
+      "list": "List",
+      "map": "Map"
+    },
+    "roomMap": {
+      "noLocations": "No locations available",
+      "noLocationsDesc": "Room types without saved coordinates still appear in the list.",
+      "locations": "{count, plural, one {# location} other {# locations}}",
+      "perNight": "/ night",
+      "view": "View →",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
+    }
   },
   "rooms": {
     "title": "Our Rooms",
@@ -174,8 +187,17 @@
     "bankTransferNote": "Transfer directly to the hotel's bank account",
     "nonRefundablePaymentHint": "Pay at Property and Bank Transfer are not available for non-refundable rates.",
     "bankTransferExplanation": "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment.",
+    "paypalLabel": "Pay by PayPal",
+    "paypalHelper": "Send payment manually; the property confirms it once received.",
+    "paypalInstructions": "Send payment to the PayPal email below and include your booking reference in the PayPal note after your booking is created. Your booking will be confirmed once the property verifies the payment, typically within {hours} hours.",
+    "paypalEmailLabel": "PayPal email",
+    "amountLabel": "Amount",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyEmail": "Copy email",
     "bankName": "Bank",
     "accountHolder": "Account Holder",
+    "accountNumber": "Account Number",
     "cardholderName": "Cardholder Name",
     "nameOnCard": "Name on card",
     "cardNumber": "Card Number",

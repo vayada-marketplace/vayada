@@ -15,7 +15,7 @@
 #
 #   Frontends (Next.js, registered via package.json):
 #     marketplace.localhost              marketplace-web        (port 3000)
-#     admin.marketplace.localhost        marketplace-admin      (port 3001)
+#     admin.localhost                    vayada-admin           (port 3001)
 #     booking.localhost                  booking-web            (port 3002)
 #     admin.booking.localhost            booking-admin          (port 3003)
 #     pms.localhost                      pms-web                (port 3004)

@@ -22,6 +22,40 @@ import { usePricing } from "@/lib/hooks/usePricing";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { GuestDetailsDraft, readGuestDetails, saveLastBooking } from "@/lib/storage/bookingDraft";
 
+type CheckoutBankDetails = {
+  accountHolder: string;
+  accountType?: "iban" | "account_number";
+  iban: string;
+  accountNumber?: string;
+  bankName: string;
+  swift: string;
+};
+
+const compact = (value?: string | null) => (value || "").trim();
+
+function getBankIdentifier(details: CheckoutBankDetails | null) {
+  if (!details) return { label: "IBAN", value: "" };
+  if (details.accountType === "account_number") {
+    return { label: "Account Number", value: compact(details.accountNumber) };
+  }
+  return { label: "IBAN", value: compact(details.iban) };
+}
+
+function formatIban(value: string) {
+  return value
+    .replace(/\s+/g, "")
+    .replace(/(.{4})/g, "$1 ")
+    .trim();
+}
+
+function isBankDetailsComplete(details?: CheckoutBankDetails | null) {
+  if (!details) return false;
+  const identifier = getBankIdentifier(details).value;
+  return [details.bankName, details.accountHolder, identifier, details.swift].every((value) =>
+    Boolean(compact(value)),
+  );
+}
+
 function PaymentPageContent() {
   const router = useRouter();
   const locale = useLocale();
@@ -48,9 +82,10 @@ function PaymentPageContent() {
   // from a navigation, which remounts), so reading them from a closure is
   // safe. refetchRooms is intentionally omitted because it isn't memoized
   // by HotelContext and would re-fire on every render.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const roomsParam = parseInt(searchParams.get("rooms") || "1");
   const { steps: STEPS, currentStep } = useBookingSteps("payment");
@@ -78,20 +113,17 @@ function PaymentPageContent() {
       promoCode: promoCodeParam,
     });
   const [paymentMethod, setPaymentMethod] = useState<
-    "card" | "pay_at_property" | "xendit" | "bank_transfer"
+    "card" | "pay_at_property" | "xendit" | "bank_transfer" | "paypal"
   >("pay_at_property");
   const [payAtPropertyEnabled, setPayAtPropertyEnabled] = useState(false);
   const [onlineCardPayment, setOnlineCardPayment] = useState(false);
   const [xenditPaymentsEnabled, setXenditPaymentsEnabled] = useState(false);
   const [bankTransferEnabled, setBankTransferEnabled] = useState(false);
-  const [bankDetails, setBankDetails] = useState<{
-    accountHolder: string;
-    accountType?: "iban" | "account_number";
-    iban: string;
-    accountNumber?: string;
-    bankName: string;
-    swift: string;
-  } | null>(null);
+  const [paypalEnabled, setPaypalEnabled] = useState(false);
+  const [paypalEmail, setPaypalEmail] = useState("");
+  const [paypalPaymentWindowHours, setPaypalPaymentWindowHours] = useState(24);
+  const [bankDetails, setBankDetails] = useState<CheckoutBankDetails | null>(null);
+  const [copiedBankIdentifier, setCopiedBankIdentifier] = useState(false);
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(["cash", "card"]);
   const [termsText, setTermsText] = useState("");
   const [cancellationPolicyText, setCancellationPolicyText] = useState("");
@@ -122,8 +154,19 @@ function PaymentPageContent() {
     room?.ratePaymentMethods?.[rateType] && Array.isArray(room.ratePaymentMethods[rateType])
       ? room.ratePaymentMethods[rateType]
       : null;
+  const depositSetting = room?.rateDepositSettings?.[rateType];
+  const depositRequired = !!depositSetting?.enabled && !!depositSetting.percentage;
+  const depositPercentage = depositSetting?.percentage ?? 0;
+  const depositAmount = depositRequired
+    ? Math.round(((grandTotal * depositPercentage) / 100) * 100) / 100
+    : 0;
+  const remainingBalance = depositRequired ? Math.max(grandTotal - depositAmount, 0) : grandTotal;
   const isMethodAllowedForRate = (method: string) =>
-    rateAllowList === null ? true : rateAllowList.includes(method);
+    depositRequired && method === "pay_at_property"
+      ? false
+      : rateAllowList === null
+        ? true
+        : rateAllowList.includes(method);
 
   // Check if pay-at-property is enabled
   useEffect(() => {
@@ -132,23 +175,29 @@ function PaymentPageContent() {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled);
         setOnlineCardPayment(settings.onlineCardPayment || false);
         setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false);
-        setBankTransferEnabled(settings.bankTransfer || false);
-        if (settings.bankDetails) setBankDetails(settings.bankDetails);
+        const hasCompleteBankDetails = isBankDetailsComplete(settings.bankDetails);
+        setBankTransferEnabled((settings.bankTransfer || false) && hasCompleteBankDetails);
+        setBankDetails(settings.bankDetails || null);
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods);
         setTermsText(settings.termsText || "");
         setCancellationPolicyText(settings.cancellationPolicyText || "");
         // Default to first available payment method, honoring the rate-level
         // allow-list if one is set on this room.
-        const preference: ("card" | "pay_at_property" | "bank_transfer" | "xendit")[] = [
+        setPaypalEnabled(!!settings.paypalEnabled && !!settings.paypalEmail);
+        setPaypalEmail(settings.paypalEmail || "");
+        setPaypalPaymentWindowHours(settings.paypalPaymentWindowHours || 24);
+        const preference: ("card" | "pay_at_property" | "paypal" | "bank_transfer" | "xendit")[] = [
           "card",
           "pay_at_property",
+          "paypal",
           "bank_transfer",
           "xendit",
         ];
         const hotelEnabled: Record<string, boolean> = {
           card: !!settings.onlineCardPayment,
-          pay_at_property: !!settings.payAtPropertyEnabled,
-          bank_transfer: !!settings.bankTransfer,
+          pay_at_property: !!settings.payAtPropertyEnabled && !depositRequired,
+          paypal: !!settings.paypalEnabled && !!settings.paypalEmail,
+          bank_transfer: !!settings.bankTransfer && hasCompleteBankDetails,
           xendit: !!settings.xenditPaymentsEnabled,
         };
         for (const m of preference) {
@@ -275,10 +324,30 @@ function PaymentPageContent() {
           roomsParam={roomsParam}
           selectedCurrency={selectedCurrency}
           convertAndRound={convertAndRound}
+          depositRequired={depositRequired}
+          depositPercentage={depositPercentage}
+          depositAmount={depositAmount}
+          remainingBalance={remainingBalance}
         />
       </StripeProvider>
     );
   }
+
+  const bankIdentifier = getBankIdentifier(bankDetails);
+  const bankIdentifierDisplay =
+    bankDetails?.accountType === "account_number"
+      ? bankIdentifier.value
+      : formatIban(bankIdentifier.value);
+  const copyBankIdentifier = async () => {
+    if (!bankIdentifier.value || !navigator.clipboard) return;
+    try {
+      await navigator.clipboard.writeText(bankIdentifier.value);
+      setCopiedBankIdentifier(true);
+      window.setTimeout(() => setCopiedBankIdentifier(false), 1800);
+    } catch {
+      // ignore clipboard failures (e.g. blocked permissions / insecure context)
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -545,6 +614,47 @@ function PaymentPageContent() {
                     </div>
                   </button>
                 )}
+                {paypalEnabled && isMethodAllowedForRate("paypal") && (
+                  <button
+                    onClick={() => setPaymentMethod("paypal")}
+                    className={`w-full p-4 rounded-xl border-2 transition-colors text-left ${
+                      paymentMethod === "paypal"
+                        ? "border-primary-600 bg-primary-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${paymentMethod === "paypal" ? "border-primary-600" : "border-gray-300"}`}
+                      >
+                        {paymentMethod === "paypal" && (
+                          <div className="w-2.5 h-2.5 rounded-full bg-primary-600" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <svg
+                            className="w-5 h-5 text-gray-700"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 6v12m-4-8h5a3 3 0 010 6H8V6h6a2 2 0 010 4H8"
+                            />
+                          </svg>
+                          <span className="font-semibold text-sm text-gray-900">
+                            {t("paypalLabel")}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 ml-7">{t("paypalHelper")}</p>
+                      </div>
+                    </div>
+                  </button>
+                )}
               </div>
 
               {/* Hint when the rate restricts some hotel-enabled methods */}
@@ -557,12 +667,35 @@ function PaymentPageContent() {
                   </p>
                 )}
 
+              {depositRequired && (
+                <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="font-semibold text-emerald-900">
+                      Deposit due now: {depositPercentage}%
+                    </span>
+                    <span className="font-bold text-emerald-900">
+                      {formatPrice(depositAmount, selectedCurrency)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 text-sm">
+                    <span className="text-emerald-700">
+                      Remaining balance due at the property upon arrival
+                    </span>
+                    <span className="font-semibold text-emerald-900">
+                      {formatPrice(remainingBalance, selectedCurrency)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Payment method info */}
               {paymentMethod === "card" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    {t("cardAuthExplanation") ||
-                      "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires."}
+                    {depositRequired
+                      ? `You will be charged ${formatPrice(depositAmount, selectedCurrency)} now. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                      : t("cardAuthExplanation") ||
+                        "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires."}
                   </div>
                   <div className="flex items-center gap-2 p-3 bg-accent rounded-xl text-sm text-gray-600">
                     <svg
@@ -590,43 +723,78 @@ function PaymentPageContent() {
               ) : paymentMethod === "bank_transfer" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    {t("bankTransferExplanation") ||
-                      "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
+                    {depositRequired
+                      ? `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                      : t("bankTransferExplanation") ||
+                        "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
                   </div>
-                  {bankDetails &&
-                    (bankDetails.iban ||
-                      bankDetails.accountNumber ||
-                      bankDetails.accountHolder) && (
-                      <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
-                        {bankDetails.bankName && (
-                          <p className="text-sm text-gray-700">
-                            <strong>{t("bankName") || "Bank"}:</strong> {bankDetails.bankName}
-                          </p>
-                        )}
-                        {bankDetails.accountHolder && (
-                          <p className="text-sm text-gray-700">
-                            <strong>{t("accountHolder") || "Account Holder"}:</strong>{" "}
-                            {bankDetails.accountHolder}
-                          </p>
-                        )}
-                        {bankDetails.accountType === "account_number" &&
-                        bankDetails.accountNumber ? (
-                          <p className="text-sm text-gray-700">
-                            <strong>{t("accountNumber") || "Account Number"}:</strong>{" "}
-                            {bankDetails.accountNumber}
-                          </p>
-                        ) : bankDetails.iban ? (
-                          <p className="text-sm text-gray-700">
-                            <strong>IBAN:</strong> {bankDetails.iban}
-                          </p>
-                        ) : null}
-                        {bankDetails.swift && (
-                          <p className="text-sm text-gray-700">
-                            <strong>BIC/SWIFT:</strong> {bankDetails.swift}
-                          </p>
-                        )}
+                  {bankDetails && isBankDetailsComplete(bankDetails) && (
+                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                      <p className="text-sm text-gray-700">
+                        <strong>{t("bankName") || "Bank"}:</strong> {bankDetails.bankName}
+                      </p>
+                      <p className="text-sm text-gray-700">
+                        <strong>{t("accountHolder") || "Account Holder"}:</strong>{" "}
+                        {bankDetails.accountHolder}
+                      </p>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-700">
+                        <p className="min-w-0 break-words">
+                          <strong>
+                            {bankIdentifier.label === "Account Number"
+                              ? t("accountNumber") || "Account Number"
+                              : "IBAN"}
+                            :
+                          </strong>{" "}
+                          {bankIdentifierDisplay}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={copyBankIdentifier}
+                          className="self-start sm:self-auto inline-flex items-center gap-1.5 rounded-full border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-white transition-colors"
+                        >
+                          <svg
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                            />
+                          </svg>
+                          {copiedBankIdentifier ? t("copied") : t("copy")}
+                        </button>
                       </div>
-                    )}
+                      <p className="text-sm text-gray-700">
+                        <strong>BIC/SWIFT:</strong> {bankDetails.swift}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : paymentMethod === "paypal" ? (
+                <div className="space-y-3">
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+                    {t("paypalInstructions", { hours: paypalPaymentWindowHours })}
+                  </div>
+                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
+                    <p className="text-sm text-gray-700">
+                      <strong>{t("paypalEmailLabel")}:</strong> {paypalEmail}
+                    </p>
+                    <p className="text-sm text-gray-700">
+                      <strong>{t("amountLabel")}:</strong>{" "}
+                      {formatPrice(grandTotal, selectedCurrency)}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(paypalEmail)}
+                      className="text-xs font-semibold text-primary-600 hover:text-primary-700"
+                    >
+                      {t("copyEmail")}
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
@@ -694,7 +862,10 @@ function PaymentPageContent() {
                       ? t.rich("agreeTerms", {
                           terms: renderTermsLink,
                           cancellation: renderCancellationLink,
-                          amount: formatPrice(grandTotal, selectedCurrency),
+                          amount: formatPrice(
+                            depositRequired ? depositAmount : grandTotal,
+                            selectedCurrency,
+                          ),
                         })
                       : t.rich("agreeTermsProperty", {
                           terms: renderTermsLink,
@@ -928,6 +1099,22 @@ function PaymentPageContent() {
                     <p className="text-xs text-gray-500">{tc("includesTaxes")}</p>
                   </div>
                 </div>
+                {depositRequired && (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Due now</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatPrice(depositAmount, selectedCurrency)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600">Due at arrival</span>
+                      <span className="font-semibold text-gray-900">
+                        {formatPrice(remainingBalance, selectedCurrency)}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

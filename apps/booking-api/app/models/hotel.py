@@ -31,6 +31,18 @@ class HotelBranding(BaseModel):
     favicon_url: str | None = None
 
 
+class PointOfInterest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    id: str
+    label: str
+    travel_time: str
+    color: str
+    latitude: float
+    longitude: float
+    position: int = 0
+
+
 class HotelResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -59,6 +71,9 @@ class HotelResponse(BaseModel):
     supported_languages: list[str] = ["en"]
     refer_a_guest_enabled: bool = False
     instant_book: bool = False
+    map_view_enabled: bool = False
+    show_room_detail_map: bool = False
+    points_of_interest: list[PointOfInterest] = []
 
 
 class BankDetails(BaseModel):
@@ -85,6 +100,9 @@ class PaymentSettingsResponse(BaseModel):
     pay_at_hotel_methods: list[str] = []
     online_card_payment: bool = False
     bank_transfer: bool = False
+    paypal_enabled: bool = False
+    paypal_email: str = ""
+    paypal_payment_window_hours: int = 24
     free_cancellation_days: int = 7
     special_requests_enabled: bool = True
     arrival_time_enabled: bool = False

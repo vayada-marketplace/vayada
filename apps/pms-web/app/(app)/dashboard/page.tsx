@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { roomsService, RoomType } from "@/services/rooms";
-import { bookingsService, Booking, BookingAdditionalGuest } from "@/services/bookings";
+import { bookingsService, Booking, BookingAdditionalGuest, BookingNote } from "@/services/bookings";
 import { pmsSettingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
 import {
@@ -13,7 +13,9 @@ import {
   getOccupiedTonight,
   getPropertyToday,
   getRemainingArrivals,
+  getRemainingDepartures,
   isCheckedInArrival,
+  isCheckedOutDeparture,
 } from "@/lib/dashboardBookings";
 import { useTranslation } from "@/lib/i18n";
 
@@ -59,6 +61,10 @@ function arrivalTime(b: Booking) {
   return b.estimatedArrivalTime || "3:00 PM";
 }
 
+function checkoutTime() {
+  return "12:00";
+}
+
 function isPaid(b: Booking) {
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
@@ -97,7 +103,9 @@ export default function DashboardPage() {
   const [quickView, setQuickView] = useState<{
     booking: Booking;
     guests: BookingAdditionalGuest[];
+    notes: BookingNote[];
     loading: boolean;
+    mode: "arrival" | "departure";
   } | null>(null);
 
   const today = getPropertyToday(hotelTimezone);
@@ -126,25 +134,33 @@ export default function DashboardPage() {
   const departuresToday = useMemo(() => getDeparturesToday(bookings, today), [bookings, today]);
 
   const remainingArrivals = useMemo(() => getRemainingArrivals(arrivalsToday), [arrivalsToday]);
+  const remainingDepartures = useMemo(
+    () => getRemainingDepartures(departuresToday),
+    [departuresToday],
+  );
 
   const occupiedTonight = useMemo(() => getOccupiedTonight(bookings, today), [bookings, today]);
 
   const occupancyPct = totalRooms > 0 ? Math.round((occupiedTonight / totalRooms) * 100) : 0;
 
-  const openQuickView = (booking: Booking) => {
-    setQuickView({ booking, guests: [], loading: true });
-    bookingsService
-      .listAdditionalGuests(booking.id)
-      .then((res) =>
+  const openQuickView = (booking: Booking, mode: "arrival" | "departure") => {
+    setQuickView({ booking, guests: [], notes: [], loading: true, mode });
+    Promise.all([
+      bookingsService.listAdditionalGuests(booking.id).catch(() => ({ guests: [] })),
+      bookingsService.listNotes(booking.id).catch(() => ({ notes: [] })),
+    ])
+      .then(([guestRes, noteRes]) =>
         setQuickView((current) =>
           current?.booking.id === booking.id
-            ? { booking, guests: res.guests, loading: false }
+            ? { booking, guests: guestRes.guests, notes: noteRes.notes, loading: false, mode }
             : current,
         ),
       )
       .catch(() =>
         setQuickView((current) =>
-          current?.booking.id === booking.id ? { booking, guests: [], loading: false } : current,
+          current?.booking.id === booking.id
+            ? { booking, guests: [], notes: [], loading: false, mode }
+            : current,
         ),
       );
   };
@@ -254,7 +270,9 @@ export default function DashboardPage() {
           label={t("dashboard.departuresToday")}
           value={String(departuresToday.length)}
           sub={
-            departuresToday.length > 0 ? t("dashboard.firstCheckout") : t("dashboard.noDepartures")
+            departuresToday.length > 0
+              ? `${departuresToday.length} departures · ${remainingDepartures} remaining`
+              : t("dashboard.noDepartures")
           }
           icon={<ArrowUpIcon />}
         />
@@ -302,7 +320,7 @@ export default function DashboardPage() {
                 <button
                   key={b.id}
                   type="button"
-                  onClick={() => openQuickView(b)}
+                  onClick={() => openQuickView(b, "arrival")}
                   className="w-full flex items-center gap-3 py-2.5 text-left rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <Avatar first={b.guestFirstName} last={b.guestLastName} />
@@ -354,28 +372,44 @@ export default function DashboardPage() {
           ) : (
             <div className="divide-y divide-gray-50">
               {departuresToday.map((b) => (
-                <div key={b.id} className="flex items-center gap-3 py-2.5">
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => openQuickView(b, "departure")}
+                  className="w-full flex items-center gap-3 py-2.5 text-left rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
                   <Avatar first={b.guestFirstName} last={b.guestLastName} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">
                       {b.guestFirstName} {b.guestLastName}
                     </p>
                     <p className="text-xs text-gray-400 truncate">
-                      <span className="text-gray-500">11:00 AM</span> ·{" "}
-                      {b.roomNumber ? (
-                        <span className="text-gray-500">#{b.roomNumber}</span>
-                      ) : (
-                        <span className="font-medium text-amber-700">
-                          {t("calendar.unassigned")}
-                        </span>
-                      )}
+                      <span className="text-gray-500">Check-out by {checkoutTime()}</span> ·{" "}
+                      <span className="text-gray-500">{roomLabel(b)}</span>
                     </p>
                   </div>
-                  <span className="shrink-0 text-[11px] font-medium text-green-600">
-                    {t("dashboard.settled")} ✓
-                  </span>
-                </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {!isPaid(b) && (
+                      <span className="hidden rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 sm:inline-flex">
+                        {formatCurrency(b.balanceAmount || b.totalAmount, b.currency)} pending
+                      </span>
+                    )}
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        isCheckedOutDeparture(b)
+                          ? "bg-slate-100 text-slate-700"
+                          : "bg-sky-100 text-sky-700"
+                      }`}
+                    >
+                      {isCheckedOutDeparture(b) ? "Checked out" : "Checked in"}
+                    </span>
+                    <span className="text-gray-300">›</span>
+                  </div>
+                </button>
               ))}
+              <p className="pt-3 text-xs font-medium text-gray-500">
+                Click a guest to start check-out.
+              </p>
             </div>
           )}
         </div>
@@ -446,7 +480,9 @@ export default function DashboardPage() {
         <ArrivalQuickView
           booking={quickView.booking}
           guests={quickView.guests}
+          notes={quickView.notes}
           loading={quickView.loading}
+          mode={quickView.mode}
           onClose={() => setQuickView(null)}
         />
       )}
@@ -459,16 +495,22 @@ export default function DashboardPage() {
 function ArrivalQuickView({
   booking,
   guests,
+  notes,
   loading,
+  mode,
   onClose,
 }: {
   booking: Booking;
   guests: BookingAdditionalGuest[];
+  notes: BookingNote[];
   loading: boolean;
+  mode: "arrival" | "departure";
   onClose: () => void;
 }) {
   const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
   const due = isPaid(booking) ? 0 : booking.totalAmount;
+  const internalNotes = notes.filter((note) => note.body.trim().length > 0);
+  const isDeparture = mode === "departure";
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-gray-950/30 md:items-center"
@@ -483,7 +525,7 @@ function ArrivalQuickView({
         <div className="sticky top-0 flex items-start justify-between gap-4 border-b border-gray-100 bg-white p-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-              Arrival quick view
+              {isDeparture ? "Departure quick view" : "Arrival quick view"}
             </p>
             <h2 className="mt-1 truncate text-lg font-semibold text-gray-950">
               {guestName(booking)}
@@ -503,7 +545,7 @@ function ArrivalQuickView({
         <div className="space-y-4 p-5">
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
-              Arriving today
+              {isDeparture ? "Checked in" : "Arriving today"}
             </span>
             {due > 0 && (
               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
@@ -523,9 +565,12 @@ function ArrivalQuickView({
               <dd className="mt-0.5 font-semibold text-gray-900">{roomLabel(booking)}</dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-gray-500">Arrival</dt>
+              <dt className="text-xs font-medium text-gray-500">
+                {isDeparture ? "Check-out" : "Arrival"}
+              </dt>
               <dd className="mt-0.5 font-semibold text-gray-900">
-                Today · {arrivalTime(booking)} · {booking.nights} night
+                Today · {isDeparture ? `by ${checkoutTime()}` : arrivalTime(booking)} ·{" "}
+                {booking.nights} night
                 {booking.nights === 1 ? "" : "s"} ·{" "}
                 {(booking.numberOfGuests ?? booking.adults + booking.children) || 1} guest
                 {(booking.numberOfGuests ?? booking.adults + booking.children) === 1 ? "" : "s"}
@@ -533,7 +578,16 @@ function ArrivalQuickView({
             </div>
           </dl>
 
-          {booking.specialRequests && (
+          {isDeparture && internalNotes.length > 0 && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Internal note
+              </p>
+              <p className="mt-1 text-sm text-gray-800">{internalNotes[0].body}</p>
+            </div>
+          )}
+
+          {!isDeparture && booking.specialRequests && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
                 Special request
@@ -544,10 +598,10 @@ function ArrivalQuickView({
 
           <div className="grid gap-2">
             <Link
-              href={`/check-in/${booking.id}`}
+              href={isDeparture ? `/check-out/${booking.id}` : `/check-in/${booking.id}`}
               className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"
             >
-              Start check-in
+              {isDeparture ? "Start check-out" : "Start check-in"}
             </Link>
             <Link
               href={`/bookings/${booking.id}`}

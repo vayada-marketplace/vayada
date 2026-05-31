@@ -1,14 +1,36 @@
 import createMiddleware from "next-intl/middleware";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 
 const intlMiddleware = createMiddleware(routing);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 
-function isKnownSubdomain(hostname: string): boolean {
-  // Matches *.booking.vayada.com or *.localhost (local dev)
-  return hostname.endsWith(".booking.vayada.com") || hostname.includes("localhost");
+function normalizeHost(hostname: string): string {
+  const normalized = hostname.trim().toLowerCase();
+  if (normalized.startsWith("[")) {
+    return normalized.replace(/^\[([^\]]+)\](?::\d+)?$/, "$1");
+  }
+  return normalized.replace(/:\d+$/, "");
+}
+
+function getKnownSubdomainSlug(hostname: string): string | null {
+  const host = normalizeHost(hostname);
+  const parts = host.split(".");
+
+  if (host.endsWith(".booking.vayada.com") || host.endsWith(".booking.localhost")) {
+    return parts.length >= 3 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0] : null;
+  }
+
+  if (host.endsWith(".localhost")) {
+    return parts.length === 2 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0] : null;
+  }
+
+  return null;
+}
+
+function isLocalHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname.startsWith("127.0.0.1") || hostname === "::1";
 }
 
 export default async function middleware(request: NextRequest) {
@@ -17,23 +39,20 @@ export default async function middleware(request: NextRequest) {
   // Hostnames are case-insensitive per RFC 1035 §2.3.3 but the backend
   // lookup keys are stored lowercased — normalize here so a stray
   // uppercase Host header still resolves.
-  const hostname = (request.headers.get("host") || "").toLowerCase();
-  const parts = hostname.split(".");
+  const hostname = normalizeHost(request.headers.get("host") || "");
 
-  let slug: string | null = null;
+  let slug = getKnownSubdomainSlug(hostname);
 
-  if (isKnownSubdomain(hostname)) {
-    // Existing behavior: extract slug from subdomain
-    if (parts.length >= 3 && parts[0] !== "www") {
-      slug = parts[0];
-    } else if (parts.length === 2 && !parts[0].includes("localhost")) {
-      slug = parts[0];
-    }
-  } else {
+  if (
+    !slug &&
+    !hostname.includes("localhost") &&
+    !isLocalHost(hostname) &&
+    !hostname.endsWith(".booking.vayada.com")
+  ) {
     // Custom domain: resolve slug via API
     try {
       const res = await fetch(
-        `${API_URL}/api/resolve-domain?domain=${encodeURIComponent(hostname.split(":")[0])}`,
+        `${API_URL}/api/resolve-domain?domain=${encodeURIComponent(hostname)}`,
       );
       if (res.ok) {
         const data = await res.json();

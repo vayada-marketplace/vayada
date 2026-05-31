@@ -8,7 +8,10 @@ import pytest
 from app.database import AuthDatabase, Database
 from httpx import AsyncClient
 
+from app.jwt_utils import create_access_token
+
 from tests.conftest import (
+    create_test_admin,
     create_test_creator,
     create_test_user,
     generate_test_email,
@@ -503,3 +506,81 @@ class TestVerifyEmail:
         response = await client.get("/auth/verify-email")
 
         assert response.status_code == 422  # Missing required query param
+
+
+class TestSuperadminLogin:
+    """Superadmin login flow — is_superadmin triggers the same 2FA gate as type=admin."""
+
+    async def test_superadmin_without_totp_gets_token(self, client: AsyncClient, cleanup_database):
+        """Superadmin with no TOTP enrolled receives a full access token."""
+        password = "TestPassword123!"
+        user = await create_test_user(password=password, user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+
+        response = await client.post(
+            "/auth/login", json={"email": user["email"], "password": password}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("access_token") is not None
+        assert not data.get("requires_totp")
+
+    async def test_superadmin_with_totp_enrolled_gets_challenge(
+        self, client: AsyncClient, cleanup_database
+    ):
+        """Superadmin with TOTP enrolled receives a TOTP session instead of a token."""
+        from app.repositories.totp_repo import TotpRepository
+        from app.totp_utils import encrypt_secret
+
+        password = "TestPassword123!"
+        user = await create_test_user(password=password, user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+        await TotpRepository.upsert_secret(str(user["id"]), encrypt_secret("JBSWY3DPEHPK3PXP"))
+        await TotpRepository.mark_enrolled(str(user["id"]))
+
+        response = await client.post(
+            "/auth/login", json={"email": user["email"], "password": password}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("requires_totp") is True
+        assert data.get("totp_session") is not None
+        assert data.get("access_token") is None
+
+
+class TestTotpSetup:
+    """Tests for POST /auth/totp/setup"""
+
+    async def test_admin_can_setup_totp(self, client: AsyncClient, cleanup_database):
+        """Admin user can reach /totp/setup."""
+        admin = await create_test_admin()
+        response = await client.post("/auth/totp/setup", headers=get_auth_headers(admin["token"]))
+        assert response.status_code == 200
+        data = response.json()
+        assert "otpauth_uri" in data
+        assert "secret" in data
+
+    async def test_superadmin_can_setup_totp(self, client: AsyncClient, cleanup_database):
+        """Non-admin user with is_superadmin=True can reach /totp/setup."""
+        user = await create_test_user(user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+        token = create_access_token(
+            {"sub": str(user["id"]), "email": user["email"], "type": user["type"]}
+        )
+
+        response = await client.post("/auth/totp/setup", headers=get_auth_headers(token))
+        assert response.status_code == 200
+        assert "otpauth_uri" in response.json()
+
+    async def test_creator_cannot_setup_totp(self, client: AsyncClient, test_creator):
+        """Regular creator (no superadmin flag) is rejected by /totp/setup."""
+        response = await client.post(
+            "/auth/totp/setup", headers=get_auth_headers(test_creator["token"])
+        )
+        assert response.status_code == 403

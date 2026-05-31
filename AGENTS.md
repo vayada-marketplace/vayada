@@ -8,18 +8,18 @@ This file is the **canonical, tool-neutral agent guide**. Claude Code, Codex, an
 
 ## App map
 
-| Path                       | Stack      | Port | Local URL                             |
-| -------------------------- | ---------- | ---- | ------------------------------------- |
-| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost`   |
-| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`       |
-| `apps/marketplace-admin`   | Next.js 14 | 3001 | `https://admin.marketplace.localhost` |
-| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`       |
-| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`           |
-| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`     |
-| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`           |
-| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`               |
-| `apps/affiliate-dashboard` | Next.js 14 | 3005 | `https://affiliate.localhost`         |
-| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`           |
+| Path                       | Stack      | Port | Local URL                           |
+| -------------------------- | ---------- | ---- | ----------------------------------- |
+| `apps/marketplace-api`     | FastAPI    | 8000 | `https://api.marketplace.localhost` |
+| `apps/marketplace-web`     | Next.js 14 | 3000 | `https://marketplace.localhost`     |
+| `apps/vayada-admin`        | Next.js 14 | 3001 | `https://admin.localhost`           |
+| `apps/booking-api`         | FastAPI    | 8001 | `https://api.booking.localhost`     |
+| `apps/booking-web`         | Next.js 14 | 3002 | `https://booking.localhost`         |
+| `apps/booking-admin`       | Next.js 14 | 3003 | `https://admin.booking.localhost`   |
+| `apps/pms-api`             | FastAPI    | 8002 | `https://api.pms.localhost`         |
+| `apps/pms-web`             | Next.js 14 | 3004 | `https://pms.localhost`             |
+| `apps/affiliate-dashboard` | Next.js 14 | 3005 | `https://affiliate.localhost`       |
+| `apps/landing`             | Next.js 14 | 3006 | `https://landing.localhost`         |
 
 Local URLs are the recommended way to reach each app — see [Local dev — portless](#local-dev--portless). Plain `localhost:PORT` still works for contributors not on portless.
 
@@ -118,7 +118,9 @@ Before claiming a change is complete:
 - **Backend (FastAPI)** — run `python -m pytest` in the affected app. `ruff check <changed-paths>` for new code.
 - **Frontend (Next.js)** — run `npm run build` (and `npm run lint` if the change is non-trivial). The dev server is not enough — Next builds catch type/import errors the dev server misses.
 - **Cross-app or workspace changes** — also run root `npm run build` / `npm run typecheck` to confirm no workspace consumer broke.
-- **UI changes** — start the dev server and exercise the feature in a browser before declaring it done. Type checks and tests verify code correctness, not feature correctness.
+- **UI changes** — start the dev server and exercise the feature in a browser before declaring it done. Type checks and tests verify code correctness, not feature correctness. When the changed surface is covered by the Playwright pilot, run the focused smoke command too, for example `npm run e2e:landing` or `npm run e2e:booking-web`; use `E2E_START_SERVERS=1` if you want Playwright to start plain-port dev servers for the pilot apps.
+
+Playwright is currently a **pilot smoke layer**, not a replacement for build, lint, typecheck, or pytest. Local Playwright defaults target portless URLs and tolerate local HTTPS certificates; plain-port overrides are documented in `tests/e2e/README.md`. Agents should say which browser flow they actually exercised — starting a server alone is not enough.
 
 Formatting (Prettier for JS/TS/MD/YAML/CSS, Ruff for Python) is wired up but **not enforced** across the existing codebase yet. Touched files should be clean; pre-existing drift is acceptable. Full operating model: [`engineering/code-quality-gates.md`](engineering/code-quality-gates.md).
 
@@ -136,9 +138,9 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 ## Linear workflow
 
 - Ticket → **In Progress** when implementation starts (via the `linear` MCP).
-- Ticket → **In Review** when the PR is opened and ready for CodeRabbit/human review.
-- Ticket → **Done** when implementation is merged and no required follow-up remains.
-- Shipping/merging does **not** auto-transition any status. Move to `Done` because implementation is merged and complete, not just because code landed in `main`.
+- Ticket stays **In Progress** when the agent finishes implementation, pushes the branch, and opens the PR.
+- Ticket → **Done** only after the human merges the PR, smoke tests the shipped change, and confirms no required follow-up remains.
+- Shipping/merging does **not** auto-transition any status. Move to `Done` because the merged work has been smoke tested and accepted, not just because code landed in `main`.
 - If QA later finds an issue, the human reopens the ticket (back to `In Progress`) or opens a follow-up.
 
 Task-specific scope and acceptance criteria live in the Linear issue itself — read it before starting.

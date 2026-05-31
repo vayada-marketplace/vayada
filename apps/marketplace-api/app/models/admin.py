@@ -262,3 +262,7 @@ class UserDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     profile: CreatorProfileDetail | HotelProfileDetail | None = None
+
+
+class SetSuperadminRequest(BaseModel):
+    is_superadmin: bool

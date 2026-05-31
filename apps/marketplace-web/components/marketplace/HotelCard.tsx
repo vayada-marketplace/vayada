@@ -3,7 +3,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { Hotel } from "@/lib/types";
 import { Button, SuccessModal, ErrorModal, PlatformIcon } from "@/components/ui";
-import { MapPinIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
+import {
+  MapPinIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CalendarDaysIcon,
+  HomeModernIcon,
+} from "@heroicons/react/24/outline";
 import { HotelDetailModal } from "./HotelDetailModal";
 import {
   CollaborationApplicationModal,
@@ -99,6 +105,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
 
   const images = hotel.images && hotel.images.length > 0 ? hotel.images : [];
   const hasMultipleImages = images.length > 1;
+  const visibleMonths = hotel.availability ? sortMonths(hotel.availability).slice(0, 3) : [];
 
   const goToPreviousImage = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -116,9 +123,9 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
 
   return (
     <>
-      <div className="relative bg-white rounded-xl shadow-sm hover:shadow-lg transition-shadow overflow-hidden border border-gray-200 flex flex-col h-full">
+      <div className="flex h-full flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-colors hover:border-gray-300">
         {/* Image Gallery */}
-        <div className="relative h-48 bg-gradient-to-br from-primary-100 to-primary-200 flex-shrink-0 overflow-hidden">
+        <div className="relative h-40 flex-shrink-0 overflow-hidden bg-gray-100">
           {images.length > 0 && !imageError ? (
             <>
               {/* Current Image */}
@@ -136,14 +143,14 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
                 <>
                   <button
                     onClick={goToPreviousImage}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors z-10"
+                    className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-md bg-black/45 p-1.5 text-white transition-colors hover:bg-black/65"
                     aria-label="Previous image"
                   >
                     <ChevronLeftIcon className="w-5 h-5" />
                   </button>
                   <button
                     onClick={goToNextImage}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-black/50 hover:bg-black/70 rounded-full text-white transition-colors z-10"
+                    className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-md bg-black/45 p-1.5 text-white transition-colors hover:bg-black/65"
                     aria-label="Next image"
                   >
                     <ChevronRightIcon className="w-5 h-5" />
@@ -153,7 +160,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
 
               {/* Image Indicators/Dots */}
               {hasMultipleImages && (
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+                <div className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 gap-1.5">
                   {images.map((_, index) => (
                     <button
                       key={index}
@@ -174,80 +181,90 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
             </>
           ) : (
             <div className="w-full h-full flex items-center justify-center">
-              <span className="text-primary-600 text-3xl font-bold">{hotel.name.charAt(0)}</span>
+              <span className="text-3xl font-bold text-primary-600">{hotel.name.charAt(0)}</span>
             </div>
           )}
+          <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
+            {hotel.accommodationType && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-white/95 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm">
+                <HomeModernIcon className="h-3.5 w-3.5 text-gray-500" />
+                {hotel.accommodationType}
+              </span>
+            )}
+            {hotel.collaborationType && (
+              <span className="inline-flex rounded-md bg-white/95 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm">
+                {hotel.collaborationType === "Kostenlos" ? "Free stay" : "Paid stay"}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Content */}
-        <div className="p-6 flex flex-col flex-1">
+        <div className="flex flex-1 flex-col p-4">
           {/* Name */}
-          <h3 className="text-xl font-bold text-gray-900 mb-2">{hotel.name}</h3>
+          <h3 className="line-clamp-1 text-base font-semibold text-gray-950" title={hotel.name}>
+            {hotel.name}
+          </h3>
 
           {/* Location */}
-          <div className="flex items-center text-gray-600 text-sm mb-4">
-            <MapPinIcon className="w-4 h-4 mr-1.5 flex-shrink-0" />
-            <span>{hotel.location}</span>
+          <div className="mt-1 flex items-center text-sm text-gray-500">
+            <MapPinIcon className="mr-1.5 h-4 w-4 flex-shrink-0 text-gray-400" />
+            <span className="truncate">{hotel.location}</span>
           </div>
 
-          {/* Platforms */}
-          {hotel.platforms && hotel.platforms.length > 0 && (
-            <div className="mb-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-700 font-medium">Platforms:</span>
-                <div className="flex items-center gap-2">
-                  {hotel.platforms.map((platform, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-center w-6 h-6 text-gray-700"
-                      title={platform === "YT" ? "YouTube" : platform}
-                    >
-                      <PlatformIcon platform={platform} />
-                    </div>
-                  ))}
-                </div>
-              </div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+              <p className="text-[11px] font-medium text-gray-500">Stay length</p>
+              <p className="mt-1 truncate text-sm font-semibold text-gray-950">
+                {hotel.minNumberOfNights || hotel.numberOfNights
+                  ? `${hotel.minNumberOfNights ?? 1}-${hotel.numberOfNights ?? hotel.minNumberOfNights} nights`
+                  : "Flexible"}
+              </p>
             </div>
-          )}
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+              <p className="text-[11px] font-medium text-gray-500">Board</p>
+              <p className="mt-1 truncate text-sm font-semibold text-gray-950">
+                {hotel.boardType ?? "Not set"}
+              </p>
+            </div>
+          </div>
 
           {/* Availability */}
           {hotel.availability && hotel.availability.length > 0 && (
-            <div className="mb-6">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-700 font-medium">Available:</span>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {hotel.availability.length === 12 ? (
-                    <span className="inline-block px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium">
-                      All Year
-                    </span>
-                  ) : hotel.availability.length > 4 ? (
-                    <>
-                      {sortMonths(hotel.availability)
-                        .slice(0, 4)
-                        .map((month, index) => (
-                          <span
-                            key={index}
-                            className="inline-block px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium"
-                          >
-                            {getMonthAbbr(month)}
-                          </span>
-                        ))}
-                      <span className="inline-block px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium">
-                        +{hotel.availability.length - 4}
-                      </span>
-                    </>
-                  ) : (
-                    sortMonths(hotel.availability).map((month, index) => (
-                      <span
-                        key={index}
-                        className="inline-block px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium"
-                      >
-                        {getMonthAbbr(month)}
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
+            <div className="mt-4 flex flex-wrap items-center gap-1.5">
+              <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600">
+                <CalendarDaysIcon className="h-3.5 w-3.5 text-gray-400" />
+                {hotel.availability.length === 12 ? "All year" : "Available"}
+              </span>
+              {hotel.availability.length !== 12 &&
+                visibleMonths.map((month) => (
+                  <span
+                    key={month}
+                    className="inline-flex rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600"
+                  >
+                    {getMonthAbbr(month)}
+                  </span>
+                ))}
+              {hotel.availability.length > 3 && hotel.availability.length !== 12 && (
+                <span className="inline-flex rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
+                  +{hotel.availability.length - 3}
+                </span>
+              )}
+            </div>
+          )}
+
+          {hotel.platforms && hotel.platforms.length > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {hotel.platforms.slice(0, 4).map((platform, index) => (
+                <span
+                  key={index}
+                  className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600"
+                  title={platform === "YT" ? "YouTube" : platform}
+                >
+                  <PlatformIcon platform={platform} className="h-3.5 w-3.5" />
+                  {platform === "YT" ? "YouTube" : platform}
+                </span>
+              ))}
             </div>
           )}
 
@@ -255,18 +272,18 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
           <div className="flex-1"></div>
 
           {/* Action Buttons */}
-          <div className="flex gap-3 mt-auto">
+          <div className="mt-4 flex gap-2 border-t border-gray-100 pt-3">
             <Button
               variant="outline"
               size="sm"
-              className="flex-1 border-gray-300 text-gray-700 hover:bg-gray-50"
+              className="flex-1 rounded-md border-gray-300 text-gray-700 hover:bg-gray-50"
               onClick={() => setIsModalOpen(true)}
             >
-              View Details
+              Details
             </Button>
             {isPublic ? (
               <Link href={`${ROUTES.LOGIN}?redirect=/marketplace`} className="flex-1">
-                <Button variant="primary" size="sm" className="w-full">
+                <Button variant="primary" size="sm" className="w-full rounded-md">
                   Sign in to Apply
                 </Button>
               </Link>
@@ -274,7 +291,7 @@ export function HotelCard({ hotel, creatorPlatforms = [], isPublic = false }: Ho
               <Button
                 variant="primary"
                 size="sm"
-                className="flex-1"
+                className="flex-1 rounded-md"
                 onClick={(e) => {
                   e.preventDefault();
                   setShowApplicationModal(true);

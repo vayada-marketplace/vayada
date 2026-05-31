@@ -50,23 +50,23 @@ Rule of thumb: if an issue touches several areas equally, pick the most affected
 
 ## Workflow statuses
 
-| Status        | When the ticket lives here                                                                                                             |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `Backlog`     | Identified work; not actively scheduled.                                                                                               |
-| `Todo`        | Scheduled / ready to be picked up next.                                                                                                |
-| `In Progress` | Implementation has started (agent or human).                                                                                           |
-| `In Review`   | Optional: implementation done but implementer wants explicit human review before closing. Skippable when the implementer is confident. |
-| `Done`        | Work is complete and shipped (or accepted, for non-code tickets). Reopened to `In Progress` if QA later finds an issue.                |
-| `Canceled`    | Won't do — leave a comment explaining why.                                                                                             |
-| `Duplicate`   | Dupe of another issue — link the canonical ticket in a comment.                                                                        |
+| Status        | When the ticket lives here                                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Backlog`     | Identified work; not actively scheduled.                                                                                             |
+| `Todo`        | Scheduled / ready to be picked up next.                                                                                              |
+| `In Progress` | Implementation has started, including agent-owned work with an open PR waiting for human merge and smoke test.                       |
+| `In Review`   | Optional: implementation needs explicit human design/product review before merge. Most agent PRs stay `In Progress` instead.         |
+| `Done`        | Work is merged, smoke tested, and accepted (or accepted for non-code tickets). Reopened to `In Progress` if QA later finds an issue. |
+| `Canceled`    | Won't do — leave a comment explaining why.                                                                                           |
+| `Duplicate`   | Dupe of another issue — link the canonical ticket in a comment.                                                                      |
 
 Transitions worth noting:
 
 - `Backlog` → `Todo`: when you commit to doing it in the near term.
 - `Todo` → `In Progress`: when implementation actually begins.
-- `In Progress` → `Done`: default close-out — when the implementer (agent or human) considers the work complete.
-- `In Progress` → `In Review`: optional intermediate handoff when the implementer wants explicit human review before the ticket is marked done.
-- `In Review` → `Done`: either the implementer (after addressing review feedback) or the reviewer moves it.
+- `In Progress` stays `In Progress`: when an agent finishes implementation, pushes the branch, and opens a PR for the human to merge and smoke test.
+- `In Progress` → `In Review`: optional intermediate handoff for explicit human design/product review before merge. This is not the default for agent PRs.
+- `In Progress` / `In Review` → `Done`: after the human merges the PR, smoke tests the shipped change, and confirms no required follow-up remains.
 - `Done` → `In Progress`: human reopens if QA finds an issue.
 - Any → `Canceled` / `Duplicate`: leave a comment.
 
@@ -146,14 +146,14 @@ When an agent (Codex, Claude Code, etc.) is working on a ticket:
 
 - **Status changes the agent makes:**
   - `Backlog` / `Todo` → `In Progress` when implementation begins.
-  - `In Progress` → `Done` when the agent considers the work complete (all acceptance criteria met, validation run, code shipped). This is the default close-out — the agent owns the full lifecycle.
-  - `In Progress` → `In Review` (optional) when the agent wants explicit human review _before_ closing — e.g., the change is risky, the acceptance criteria are subjective, or the agent is not confident the work is correct.
-  - `In Review` → `Done` if the agent later confirms the work is complete (e.g., after fixing review feedback).
+  - Keep the ticket `In Progress` when implementation is complete, validation has run, the branch is pushed, and the PR is opened.
+  - `In Progress` → `In Review` only when the agent needs explicit human design/product review before merge — e.g., the change is risky, the acceptance criteria are subjective, or the agent is not confident the work is correct.
 - **Status changes the agent does NOT make:**
-  - Shipping/merging never auto-transitions any status. Move to `Done` because implementation is finished, not because code landed in `main`.
+  - Do not move implementation tickets to `Done`. The human moves them to `Done` after merging and smoke testing.
+  - Shipping/merging never auto-transitions any status. Move to `Done` because the merged work has been smoke tested and accepted, not because code landed in `main`.
   - Don't move someone else's ticket through statuses unless you're picking up the work yourself.
 
-If QA later finds an issue with a `Done` ticket, the human reopens it (back to `In Progress`) or opens a follow-up ticket — closing `Done` is a default, not a guarantee.
+If QA later finds an issue with a `Done` ticket, the human reopens it (back to `In Progress`) or opens a follow-up ticket.
 
 - **Comments:**
   - Add a comment when the agent records a decision, investigation result, or non-obvious choice.

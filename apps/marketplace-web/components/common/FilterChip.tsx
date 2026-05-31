@@ -7,7 +7,7 @@ interface FilterChipProps {
 
 export function FilterChip({ label, onRemove }: FilterChipProps) {
   return (
-    <div className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded-lg">
+    <div className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-600">
       <span>{label}</span>
       <button
         onClick={onRemove}

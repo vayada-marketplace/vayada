@@ -4,9 +4,11 @@ const DASHBOARD_BOOKING_STATUSES = new Set<Booking["status"]>([
   "confirmed",
   "checked_in",
   "in_house",
+  "checked_out",
 ]);
 
 const CHECKED_IN_STATUSES = new Set<Booking["status"]>(["checked_in", "in_house"]);
+const CHECKED_OUT_STATUSES = new Set<Booking["status"]>(["checked_out"]);
 
 export function getPropertyToday(timezone?: string | null) {
   const date = new Date();
@@ -44,6 +46,10 @@ export function isCheckedInArrival(booking: Booking) {
   return CHECKED_IN_STATUSES.has(booking.status);
 }
 
+export function isCheckedOutDeparture(booking: Booking) {
+  return CHECKED_OUT_STATUSES.has(booking.status);
+}
+
 export function getDashboardBookings(bookings: Booking[]) {
   return bookings.filter(isDashboardBooking);
 }
@@ -60,11 +66,22 @@ export function getArrivalsToday(bookings: Booking[], today: string) {
 }
 
 export function getDeparturesToday(bookings: Booking[], today: string) {
-  return getDashboardBookings(bookings).filter((booking) => booking.checkOut === today);
+  return getDashboardBookings(bookings)
+    .filter((booking) => booking.checkOut === today)
+    .sort((a, b) => {
+      const aCheckedOut = isCheckedOutDeparture(a);
+      const bCheckedOut = isCheckedOutDeparture(b);
+      if (aCheckedOut === bCheckedOut) return 0;
+      return aCheckedOut ? 1 : -1;
+    });
 }
 
 export function getRemainingArrivals(arrivals: Booking[]) {
   return arrivals.filter((booking) => !isCheckedInArrival(booking)).length;
+}
+
+export function getRemainingDepartures(departures: Booking[]) {
+  return departures.filter((booking) => !isCheckedOutDeparture(booking)).length;
 }
 
 export function getOccupiedTonight(bookings: Booking[], today: string) {

@@ -85,7 +85,20 @@
     "freeWifi": "Kostenloses WLAN",
     "airportTransfer": "Flughafentransfer",
     "selectThisRate": "Diesen Tarif wählen",
-    "soldOut": "Ausgebucht"
+    "soldOut": "Ausgebucht",
+    "mobileView": {
+      "list": "Liste",
+      "map": "Karte"
+    },
+    "roomMap": {
+      "noLocations": "Keine Standorte verfügbar",
+      "noLocationsDesc": "Zimmertypen ohne gespeicherte Koordinaten werden weiterhin in der Liste angezeigt.",
+      "locations": "{count, plural, one {# Standort} other {# Standorte}}",
+      "perNight": "/ Nacht",
+      "view": "Ansehen →",
+      "zoomIn": "Vergrößern",
+      "zoomOut": "Verkleinern"
+    }
   },
   "rooms": {
     "title": "Unsere Zimmer",
@@ -196,8 +209,17 @@
     "bankTransferNote": "Überweisen Sie direkt auf das Bankkonto des Hotels",
     "nonRefundablePaymentHint": "Zahlung vor Ort und Banküberweisung sind bei nicht erstattbaren Tarifen nicht verfügbar.",
     "bankTransferExplanation": "Bitte überweisen Sie den Gesamtbetrag auf das unten angegebene Bankkonto. Ihre Buchung wird bestätigt, sobald das Hotel die Zahlung verifiziert hat.",
+    "paypalLabel": "Mit PayPal bezahlen",
+    "paypalHelper": "Senden Sie die Zahlung manuell; die Unterkunft bestätigt sie nach Erhalt.",
+    "paypalInstructions": "Senden Sie die Zahlung an die unten angegebene PayPal-E-Mail und geben Sie nach Erstellung der Buchung Ihre Buchungsreferenz in der PayPal-Notiz an. Ihre Buchung wird bestätigt, sobald die Unterkunft die Zahlung verifiziert hat, normalerweise innerhalb von {hours} Stunden.",
+    "paypalEmailLabel": "PayPal-E-Mail",
+    "amountLabel": "Betrag",
+    "copy": "Kopieren",
+    "copied": "Kopiert",
+    "copyEmail": "E-Mail kopieren",
     "bankName": "Bank",
     "accountHolder": "Kontoinhaber",
+    "accountNumber": "Kontonummer",
     "submitRequest": "Buchungsanfrage senden",
     "processing": "Wird verarbeitet...",
     "confirmPayment": "Zahlung bestätigen",

@@ -1,3 +1,5 @@
+import math
+
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 MAX_ROOM_SIZE = 15000
@@ -39,8 +41,8 @@ def _validate_partial_refund_tiers(tiers: list) -> list:
         try:
             days_int = int(days)
             percent_int = int(percent)
-        except (TypeError, ValueError):
-            raise ValueError("partial_refund_tiers entries must be integers")
+        except (TypeError, ValueError) as e:
+            raise ValueError("partial_refund_tiers entries must be integers") from e
         if days_int < 0 or days_int > 365:
             raise ValueError(
                 "partial_refund_tiers[].min_days_before_check_in must be between 0 and 365"
@@ -86,6 +88,50 @@ def _validate_meal_plans(plans: list) -> list:
         # the camelCase API surface and the snake_case DB consumers happy.
         p["charge_per"] = charge_per
     return plans
+
+
+def _validate_rate_deposit_settings(settings: dict | None) -> dict | None:
+    if settings is None:
+        return None
+    if not isinstance(settings, dict):
+        raise ValueError("rate_deposit_settings must be an object")
+
+    normalized: dict[str, dict] = {}
+    for rate_key, raw in settings.items():
+        if rate_key not in ("flexible", "nonrefundable"):
+            raise ValueError("rate_deposit_settings keys must be 'flexible' or 'nonrefundable'")
+        if raw is None:
+            continue
+        if not isinstance(raw, dict):
+            raise ValueError("rate_deposit_settings entries must be objects")
+        val = raw.get("enabled", False)
+        if not isinstance(val, bool):
+            raise ValueError("enabled must be a boolean")
+        enabled = val
+        percentage = raw.get("percentage", 50 if enabled else None)
+        if not enabled:
+            normalized[rate_key] = {"enabled": False, "percentage": None}
+            continue
+        try:
+            pct = int(percentage)
+        except (TypeError, ValueError) as e:
+            raise ValueError("deposit percentage must be an integer") from e
+        if pct < 1 or pct > 100:
+            raise ValueError("deposit percentage must be between 1 and 100")
+        normalized[rate_key] = {"enabled": True, "percentage": pct}
+    return normalized
+
+
+def _validate_latitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -90 or value > 90):
+        raise ValueError("latitude must be between -90 and 90")
+    return value
+
+
+def _validate_longitude(value: float | None) -> float | None:
+    if value is not None and (not math.isfinite(value) or value < -180 or value > 180):
+        raise ValueError("longitude must be between -180 and 180")
+    return value
 
 
 def _validate_operating_periods(periods: list) -> list:
@@ -246,6 +292,9 @@ class RoomTypeCreate(BaseModel):
     base_rate: float = 0
     non_refundable_rate: float | None = None
     currency: str = "EUR"
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str] = []
     images: list[str] = []
     bed_type: str = ""
@@ -271,6 +320,7 @@ class RoomTypeCreate(BaseModel):
     last_minute_discount: dict | None = None
     minimum_advance_days: int = 0
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] = []
 
     @field_validator("size")
@@ -294,10 +344,25 @@ class RoomTypeCreate(BaseModel):
             raise ValueError("max_children must be at least 0")
         return v
 
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v: float | None) -> float | None:
+        return _validate_latitude(v)
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v: float | None) -> float | None:
+        return _validate_longitude(v)
+
     @field_validator("meal_plans")
     @classmethod
     def validate_meal_plans(cls, v: list[dict]) -> list[dict]:
         return _validate_meal_plans(v)
+
+    @field_validator("rate_deposit_settings")
+    @classmethod
+    def validate_rate_deposit_settings(cls, v: dict[str, dict] | None) -> dict | None:
+        return _validate_rate_deposit_settings(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod
@@ -360,6 +425,9 @@ class RoomTypeUpdate(BaseModel):
     base_rate: float | None = None
     non_refundable_rate: float | None = None
     currency: str | None = None
+    location_address: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str] | None = None
     images: list[str] | None = None
     bed_type: str | None = None
@@ -385,7 +453,15 @@ class RoomTypeUpdate(BaseModel):
     last_minute_discount: dict | None = None
     minimum_advance_days: int | None = None
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] | None = None
+
+    @field_validator("location_address")
+    @classmethod
+    def validate_location_address(cls, v: str | None) -> str | None:
+        if v is None:
+            return ""
+        return v
 
     @field_validator("size")
     @classmethod
@@ -407,6 +483,16 @@ class RoomTypeUpdate(BaseModel):
         if v is not None and v < 0:
             raise ValueError("max_children must be at least 0")
         return v
+
+    @field_validator("latitude")
+    @classmethod
+    def validate_latitude(cls, v: float | None) -> float | None:
+        return _validate_latitude(v)
+
+    @field_validator("longitude")
+    @classmethod
+    def validate_longitude(cls, v: float | None) -> float | None:
+        return _validate_longitude(v)
 
     @field_validator("flexible_cancellation_type")
     @classmethod
@@ -468,6 +554,11 @@ class RoomTypeUpdate(BaseModel):
             _validate_meal_plans(v)
         return v
 
+    @field_validator("rate_deposit_settings")
+    @classmethod
+    def validate_rate_deposit_settings(cls, v: dict[str, dict] | None) -> dict | None:
+        return _validate_rate_deposit_settings(v)
+
 
 class RoomTypeResponse(BaseModel):
     """Guest-facing response — includes availability."""
@@ -490,6 +581,9 @@ class RoomTypeResponse(BaseModel):
     original_rate: float | None = None
     last_minute_discount_percent: int | None = None
     currency: str
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str]
     images: list[str]
     bed_type: str
@@ -504,6 +598,7 @@ class RoomTypeResponse(BaseModel):
     partial_refund_tiers: list[dict] = []
     non_refundable_cancellation_policy: str = "Non-refundable from booking"
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
 
 
 class RoomTypeAdminResponse(BaseModel):
@@ -524,6 +619,9 @@ class RoomTypeAdminResponse(BaseModel):
     base_rate: float
     non_refundable_rate: float | None = None
     currency: str
+    location_address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
     amenities: list[str]
     images: list[str]
     bed_type: str
@@ -549,6 +647,7 @@ class RoomTypeAdminResponse(BaseModel):
     last_minute_discount: dict | None = None
     minimum_advance_days: int = 0
     rate_payment_methods: dict[str, list[str]] | None = None
+    rate_deposit_settings: dict[str, dict] | None = None
     meal_plans: list[dict] = []
     created_at: str
     updated_at: str

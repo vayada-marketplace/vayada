@@ -20,6 +20,16 @@ export interface HotelBranding {
   faviconUrl?: string;
 }
 
+export interface PointOfInterest {
+  id: string;
+  label: string;
+  travelTime: string;
+  color: string;
+  latitude: number;
+  longitude: number;
+  position: number;
+}
+
 export interface Hotel {
   id: string;
   name: string;
@@ -46,6 +56,9 @@ export interface Hotel {
   supportedLanguages: string[];
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
+  mapViewEnabled?: boolean;
+  showRoomDetailMap?: boolean;
+  pointsOfInterest?: PointOfInterest[];
 }
 
 export interface RoomType {
@@ -61,6 +74,9 @@ export interface RoomType {
   baseRate: number;
   nonRefundableRate: number | null;
   currency: string;
+  locationAddress?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   amenities: string[];
   images: string[];
   bedType: string;
@@ -76,6 +92,13 @@ export interface RoomType {
   originalRate?: number | null;
   lastMinuteDiscountPercent?: number | null;
   ratePaymentMethods?: Record<string, string[]> | null;
+  rateDepositSettings?: Record<
+    string,
+    {
+      enabled: boolean;
+      percentage: number | null;
+    }
+  > | null;
 }
 
 export interface SearchParams {
@@ -104,6 +127,10 @@ export interface Booking {
   // compatibility with cached/legacy booking shapes; treat missing as 1.
   numberOfRooms?: number;
   totalAmount: number;
+  depositRequired?: boolean;
+  depositPercentage?: number | null;
+  depositAmount?: number;
+  balanceAmount?: number;
   addonTotal?: number;
   // Selected add-ons snapshot from booking creation. Names are cached at
   // booking time so historical bookings still show the correct name even

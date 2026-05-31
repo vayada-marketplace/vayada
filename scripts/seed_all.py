@@ -40,7 +40,7 @@ def main():
     print("    hotel5@mock.com (Seaside Retreat)      — no booking record (marketplace pre-fill)")
     print()
     print("  Credentials:")
-    print("    Admin:    admin@vayada.com / vayada123")
+    print("    Admin:    admin@vayada.com / Vayada123")
     print("    Hotels:   hotel[1-5]@mock.com / Test1234")
     print("    Creators: creator[1-4]@mock.com / Test1234")
 

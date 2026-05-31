@@ -325,43 +325,65 @@ export default function MarketplacePage() {
   }, [filteredCreators, sortOption]);
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: "#f9f8f6" }}>
+    <main className="min-h-screen bg-gray-50">
       <AuthenticatedNavigation />
-      <div className={`transition-all duration-300 ${isCollapsed ? "md:pl-20" : "md:pl-64"} pt-16`}>
+      <div className={`transition-all duration-200 ${isCollapsed ? "md:pl-14" : "md:pl-52"} pt-12`}>
         <div className="pt-4">
           <ProfileWarningBanner />
         </div>
 
-        <div
-          className="max-w-7xl mx-auto pt-4 pb-8"
-          style={{ paddingLeft: "clamp(0.5rem, 3%, 3rem)", paddingRight: "2rem" }}
-        >
+        <div className="mx-auto max-w-7xl px-4 py-4 md:px-6 md:py-6">
           {/* Header */}
-          <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="mb-4">
             <div>
-              <h1 className="text-5xl font-extrabold bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Creator hotel network
+              </p>
+              <h1 className="mt-1 text-2xl font-bold tracking-normal text-gray-950 md:text-3xl">
                 Marketplace
               </h1>
-              <p className="text-lg text-gray-600 font-medium">
-                Explore Collaborations opportunities
+              <p className="mt-1 text-sm text-gray-500">
+                Find the right collaboration match, compare fit signals, and start the next
+                conversation.
               </p>
             </div>
           </div>
 
           {/* Filters */}
-          <MarketplaceFilters
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            sortOption={sortOption}
-            onSortChange={setSortOption}
-            filters={filters}
-            onFiltersChange={setFilters}
-            viewType={userType === "creator" ? "hotels" : userType === "hotel" ? "creators" : "all"}
-          />
+          <section className="mb-5 rounded-lg border border-gray-200 bg-white/80 px-3 py-3 shadow-sm">
+            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-gray-500">
+                Showing {userType === "creator" ? "hotel stays" : "creator partners"} sorted by fit
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                <select
+                  value={sortOption}
+                  onChange={(e) => setSortOption(e.target.value)}
+                  className="h-8 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 focus:border-gray-300 focus:ring-2 focus:ring-gray-100"
+                  aria-label="Sort marketplace results"
+                >
+                  <option value="relevance">Relevance</option>
+                  <option value="name-asc">Name (A-Z)</option>
+                  <option value="name-desc">Name (Z-A)</option>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                </select>
+              </div>
+            </div>
+            <MarketplaceFilters
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              filters={filters}
+              onFiltersChange={setFilters}
+              viewType={
+                userType === "creator" ? "hotels" : userType === "hotel" ? "creators" : "all"
+              }
+            />
+          </section>
 
           {/* Error notification */}
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+            <div className="mb-4 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-3">
               <p className="text-red-700">{error}</p>
               <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
                 <span className="sr-only">Dismiss</span>✕
@@ -371,11 +393,24 @@ export default function MarketplacePage() {
 
           {/* Results */}
           {loading ? (
-            <div className="flex justify-center items-center py-20">
-              <div className="relative">
-                <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-100"></div>
-                <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-primary-600 absolute top-0 left-0"></div>
-              </div>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-64 animate-pulse rounded-lg border border-gray-200 bg-white shadow-sm"
+                >
+                  <div className="h-28 rounded-t-lg bg-gray-100" />
+                  <div className="space-y-3 p-4">
+                    <div className="h-4 w-2/3 rounded bg-gray-100" />
+                    <div className="h-3 w-1/2 rounded bg-gray-100" />
+                    <div className="grid grid-cols-3 gap-2 pt-3">
+                      <div className="h-12 rounded bg-gray-100" />
+                      <div className="h-12 rounded bg-gray-100" />
+                      <div className="h-12 rounded bg-gray-100" />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           ) : (
             <>
@@ -383,7 +418,7 @@ export default function MarketplacePage() {
               {userType === "creator" && (
                 <div className="mb-12">
                   {sortedHotels.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       {sortedHotels.map((hotel) => (
                         <HotelCard
                           key={hotel.id}
@@ -393,10 +428,9 @@ export default function MarketplacePage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="text-center py-16 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/50">
-                      <p className="text-gray-500 text-lg">
-                        No hotels found that match your criteria.
-                      </p>
+                    <div className="rounded-lg border border-gray-200 bg-white py-16 text-center shadow-sm">
+                      <p className="text-sm font-medium text-gray-900">No hotels found</p>
+                      <p className="mt-1 text-sm text-gray-500">Adjust filters or search terms.</p>
                     </div>
                   )}
                 </div>
@@ -406,16 +440,15 @@ export default function MarketplacePage() {
               {userType === "hotel" && (
                 <div>
                   {sortedCreators.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {sortedCreators.map((creator) => (
                         <CreatorCard key={creator.id} creator={creator} />
                       ))}
                     </div>
                   ) : (
-                    <div className="text-center py-16 bg-white/80 backdrop-blur-sm rounded-2xl shadow-sm border border-gray-200/50">
-                      <p className="text-gray-500 text-lg">
-                        No creators found that match your criteria.
-                      </p>
+                    <div className="rounded-lg border border-gray-200 bg-white py-16 text-center shadow-sm">
+                      <p className="text-sm font-medium text-gray-900">No creators found</p>
+                      <p className="mt-1 text-sm text-gray-500">Adjust filters or search terms.</p>
                     </div>
                   )}
                 </div>

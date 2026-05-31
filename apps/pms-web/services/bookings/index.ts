@@ -1,5 +1,6 @@
 import { pmsClient } from "../api/pmsClient";
 import { buildQueryString } from "@/lib/utils/queryString";
+import type { CheckinStepType } from "@/services/settings";
 
 export interface AssignedRoom {
   roomId: string | null;
@@ -12,6 +13,8 @@ export interface Booking {
   bookingReference: string;
   roomTypeId: string;
   roomName: string;
+  roomMaxOccupancy: number;
+  totalRoomCapacity: number;
   guestFirstName: string;
   guestLastName: string;
   guestEmail: string;
@@ -29,12 +32,17 @@ export interface Booking {
   nightlyRate: number;
   numberOfRooms: number;
   totalAmount: number;
+  depositRequired: boolean;
+  depositPercentage: number | null;
+  depositAmount: number;
+  balanceAmount: number;
   currency: string;
   status:
     | "pending"
     | "confirmed"
     | "checked_in"
     | "in_house"
+    | "checked_out"
     | "cancelled"
     | "declined"
     | "expired";
@@ -48,6 +56,7 @@ export interface Booking {
   paymentStatus: string | null;
   checkInPendingFlags: string[];
   checkedInAt: string | null;
+  checkedOutAt: string | null;
   hostResponseDeadline: string | null;
   platformFeeAmount: number | null;
   affiliateCommissionAmount: number | null;
@@ -122,6 +131,7 @@ export interface BookingNote {
   authorUserId: string;
   authorName: string;
   body: string;
+  source: "check-in" | "check-out" | "booking-detail" | null;
   createdAt: string;
 }
 
@@ -170,6 +180,52 @@ export interface BookingChangeRequest {
   declineReason: string | null;
   decidedAt: string | null;
   createdAt: string;
+}
+
+export interface CheckinStepResult {
+  stepId: string;
+  label: string;
+  type: CheckinStepType;
+  value: string | number | boolean | null;
+  completedAt: string | null;
+}
+
+export interface CheckinPendingFlag {
+  stepId: string;
+  label: string;
+}
+
+export type CheckoutInspectionStatus = "ok" | "issue" | "neutral";
+
+export interface CheckoutInspectionResult {
+  stepId: string;
+  label: string;
+  status: CheckoutInspectionStatus;
+  note: string | null;
+  completedAt: string | null;
+}
+
+export interface CheckoutCharge {
+  id: string;
+  bookingId: string;
+  label: string;
+  amount: number;
+  originalAmount: number;
+  status: "pending" | "paid" | "waived";
+  createdAt: string;
+  settledAt: string | null;
+  waivedAt: string | null;
+}
+
+export interface CheckoutRecord {
+  id: string;
+  bookingId: string;
+  completedAt: string;
+  completedBy: string | null;
+  inspectionResults: CheckoutInspectionResult[];
+  chargesSettled: CheckoutCharge[];
+  pendingFlags: CheckoutInspectionResult[];
+  checkoutNotes: string | null;
 }
 
 export const bookingsService = {
@@ -223,8 +279,44 @@ export const bookingsService = {
   updateStatus: (id: string, status: "confirmed" | "cancelled") =>
     pmsClient.patch<Booking>(`/admin/bookings/${id}/status`, { status }),
 
-  completeCheckIn: (id: string, pendingFlags: string[]) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/check-in`, { pendingFlags }),
+  completeCheckIn: (
+    id: string,
+    pendingFlags: string[],
+    stepResults: CheckinStepResult[] = [],
+    pendingFlagDetails: CheckinPendingFlag[] = [],
+  ) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/check-in`, {
+      pendingFlags,
+      stepResults,
+      pendingFlagDetails,
+    }),
+
+  listCheckoutCharges: (id: string) =>
+    pmsClient.get<{ charges: CheckoutCharge[] }>(`/admin/bookings/${id}/checkout-charges`),
+
+  addCheckoutCharge: (id: string, label: string, amount: number) =>
+    pmsClient.post<CheckoutCharge>(`/admin/bookings/${id}/checkout-charges`, { label, amount }),
+
+  markCheckoutChargePaid: (id: string, chargeId: string) =>
+    pmsClient.post<CheckoutCharge>(`/admin/bookings/${id}/checkout-charges/${chargeId}/paid`, {}),
+
+  waiveCheckoutCharge: (id: string, chargeId: string) =>
+    pmsClient.post<CheckoutCharge>(`/admin/bookings/${id}/checkout-charges/${chargeId}/waive`, {}),
+
+  getCheckoutRecord: (id: string) =>
+    pmsClient.get<CheckoutRecord | null>(`/admin/bookings/${id}/checkout-record`),
+
+  completeCheckOut: (
+    id: string,
+    inspectionResults: CheckoutInspectionResult[],
+    pendingFlags: CheckoutInspectionResult[],
+    checkoutNotes?: string,
+  ) =>
+    pmsClient.post<Booking>(`/admin/bookings/${id}/check-out`, {
+      inspectionResults,
+      pendingFlags,
+      checkoutNotes,
+    }),
 
   markPaid: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/mark-paid`, {}),
 
@@ -282,8 +374,8 @@ export const bookingsService = {
   // VAY-495 booking detail — internal notes, additional guests, cancel-with-reason.
   listNotes: (id: string) => pmsClient.get<{ notes: BookingNote[] }>(`/admin/bookings/${id}/notes`),
 
-  createNote: (id: string, body: string) =>
-    pmsClient.post<BookingNote>(`/admin/bookings/${id}/notes`, { body }),
+  createNote: (id: string, body: string, source?: BookingNote["source"]) =>
+    pmsClient.post<BookingNote>(`/admin/bookings/${id}/notes`, { body, source }),
 
   deleteNote: (id: string, noteId: string) =>
     pmsClient.delete<void>(`/admin/bookings/${id}/notes/${noteId}`),

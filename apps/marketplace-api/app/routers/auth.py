@@ -303,8 +303,11 @@ async def login(http_request: Request, request: LoginRequest):
         if not user:
             await RateLimitRepository.record_failure(request.email)
             await LoginAuditRepository.log(
-                email=request.email, success=False, failure_reason="user_not_found",
-                ip_address=ip, user_agent=ua,
+                email=request.email,
+                success=False,
+                failure_reason="user_not_found",
+                ip_address=ip,
+                user_agent=ua,
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
@@ -316,8 +319,12 @@ async def login(http_request: Request, request: LoginRequest):
         if not password_valid:
             await RateLimitRepository.record_failure(request.email)
             await LoginAuditRepository.log(
-                email=request.email, success=False, failure_reason="wrong_password",
-                user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+                email=request.email,
+                success=False,
+                failure_reason="wrong_password",
+                user_id=str(user["id"]),
+                ip_address=ip,
+                user_agent=ua,
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
@@ -325,8 +332,12 @@ async def login(http_request: Request, request: LoginRequest):
 
         if user["status"] == "suspended":
             await LoginAuditRepository.log(
-                email=request.email, success=False, failure_reason="suspended",
-                user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+                email=request.email,
+                success=False,
+                failure_reason="suspended",
+                user_id=str(user["id"]),
+                ip_address=ip,
+                user_agent=ua,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="Account is suspended"
@@ -334,13 +345,17 @@ async def login(http_request: Request, request: LoginRequest):
 
         await RateLimitRepository.clear(request.email)
 
-        if user["type"] == "admin" and await TotpRepository.is_enrolled(str(user["id"])):
-            totp_session = create_totp_session_token(
-                str(user["id"]), user["email"], user["type"]
-            )
+        is_superadmin = bool(user.get("is_superadmin"))
+        if is_superadmin and await TotpRepository.is_enrolled(str(user["id"])):
+            totp_session = create_totp_session_token(str(user["id"]), user["email"], user["type"])
             await LoginAuditRepository.log(
-                email=request.email, success=False, failure_reason="totp_required",
-                auth_method="password", user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+                email=request.email,
+                success=False,
+                failure_reason="totp_required",
+                auth_method="password",
+                user_id=str(user["id"]),
+                ip_address=ip,
+                user_agent=ua,
             )
             return LoginResponse(
                 message="Two-factor authentication required.",
@@ -352,8 +367,12 @@ async def login(http_request: Request, request: LoginRequest):
             data={"sub": str(user["id"]), "email": user["email"], "type": user["type"]}
         )
         await LoginAuditRepository.log(
-            email=request.email, success=True, auth_method="password",
-            user_id=str(user["id"]), ip_address=ip, user_agent=ua,
+            email=request.email,
+            success=True,
+            auth_method="password",
+            user_id=str(user["id"]),
+            ip_address=ip,
+            user_agent=ua,
         )
         return LoginResponse(
             id=str(user["id"]),
@@ -363,6 +382,7 @@ async def login(http_request: Request, request: LoginRequest):
             status=user["status"],
             access_token=access_token,
             expires_in=get_token_expiration_seconds(),
+            is_superadmin=is_superadmin,
             message="Login successful",
         )
 
@@ -382,7 +402,9 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
 
     payload = decode_totp_session_token(request.totp_session)
     if not payload:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session"
+        )
 
     user_id = payload["sub"]
     email = payload["email"]
@@ -398,7 +420,9 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
             },
         )
 
-    user = await UserRepository.get_by_id(user_id, columns="id, email, name, type, status")
+    user = await UserRepository.get_by_id(
+        user_id, columns="id, email, name, type, status, is_superadmin"
+    )
     if not user or user["status"] == "suspended":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
 
@@ -424,18 +448,25 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
     if not verified:
         await RateLimitRepository.record_failure(email)
         await LoginAuditRepository.log(
-            email=email, success=False, failure_reason="wrong_totp",
-            auth_method=auth_method, user_id=user_id, ip_address=ip, user_agent=ua,
+            email=email,
+            success=False,
+            failure_reason="wrong_totp",
+            auth_method=auth_method,
+            user_id=user_id,
+            ip_address=ip,
+            user_agent=ua,
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid code")
 
     await RateLimitRepository.clear(email)
-    access_token = create_access_token(
-        data={"sub": user_id, "email": email, "type": user_type}
-    )
+    access_token = create_access_token(data={"sub": user_id, "email": email, "type": user_type})
     await LoginAuditRepository.log(
-        email=email, success=True, auth_method=auth_method,
-        user_id=user_id, ip_address=ip, user_agent=ua,
+        email=email,
+        success=True,
+        auth_method=auth_method,
+        user_id=user_id,
+        ip_address=ip,
+        user_agent=ua,
     )
     return LoginResponse(
         id=user_id,
@@ -445,6 +476,7 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
         status=user["status"],
         access_token=access_token,
         expires_in=get_token_expiration_seconds(),
+        is_superadmin=bool(user.get("is_superadmin")),
         message="Login successful",
     )
 
@@ -452,9 +484,11 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
 @router.post("/totp/setup", response_model=TotpSetupResponse, status_code=status.HTTP_200_OK)
 async def totp_setup(user_id: str = Depends(get_current_user_id)):
     """Generate a new TOTP secret and return the otpauth URI for QR display. Does not enroll yet."""
-    user = await UserRepository.get_by_id(user_id, columns="id, email, type")
-    if not user or user["type"] != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    user = await UserRepository.get_by_id(user_id, columns="id, email, type, is_superadmin")
+    if not user or not user.get("is_superadmin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required"
+        )
 
     secret = generate_totp_secret()
     await TotpRepository.upsert_secret(user_id, encrypt_secret(secret))

@@ -189,6 +189,9 @@ async def get_rooms_for_guest(
                 original_rate=original_rate,
                 last_minute_discount_percent=lm_discount_pct,
                 currency=room["currency"],
+                location_address=room.get("location_address", "") or "",
+                latitude=float(room["latitude"]) if room.get("latitude") is not None else None,
+                longitude=float(room["longitude"]) if room.get("longitude") is not None else None,
                 amenities=parse_jsonb(room["amenities"]),
                 images=parse_jsonb(room["images"]),
                 bed_type=room["bed_type"],
@@ -205,6 +208,9 @@ async def get_rooms_for_guest(
                 or "Non-refundable from booking",
                 rate_payment_methods=(lambda v: v if isinstance(v, dict) else None)(
                     parse_jsonb(room.get("rate_payment_methods"))
+                ),
+                rate_deposit_settings=(lambda v: v if isinstance(v, dict) else None)(
+                    parse_jsonb(room.get("rate_deposit_settings"))
                 ),
             )
         )

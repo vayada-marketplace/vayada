@@ -1,7 +1,10 @@
 import json
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+
+from app.models.checkin import CheckinPendingFlag, CheckinStepResult
 
 
 def to_camel(string: str) -> str:
@@ -66,6 +69,10 @@ class BookingResponse(BaseModel):
     status: str
     payment_method: str | None = None
     payment_status: str | None = None
+    deposit_required: bool = False
+    deposit_percentage: int | None = None
+    deposit_amount: float = 0
+    balance_amount: float = 0
     host_response_deadline: str | None = None
     created_at: str
 
@@ -113,6 +120,8 @@ class AdminBookingCreate(BaseModel):
     children: int = 0
     nightly_rate: float | None = None
     channel: str = "direct"
+    addon_ids: list[str] = []
+    addon_quantities: dict[str, int] = {}
 
 
 class AssignedRoom(BaseModel):
@@ -134,6 +143,8 @@ class BookingAdminResponse(BaseModel):
     booking_reference: str
     room_type_id: str
     room_name: str
+    room_max_occupancy: int = 1
+    total_room_capacity: int = 1
     guest_first_name: str
     guest_last_name: str
     guest_email: str
@@ -164,8 +175,13 @@ class BookingAdminResponse(BaseModel):
     channel: str = "direct"
     payment_method: str | None = None
     payment_status: str | None = None
+    deposit_required: bool = False
+    deposit_percentage: int | None = None
+    deposit_amount: float = 0
+    balance_amount: float = 0
     check_in_pending_flags: list[str] = []
     checked_in_at: str | None = None
+    checked_out_at: str | None = None
     host_response_deadline: str | None = None
     platform_fee_amount: float | None = None
     affiliate_commission_amount: float | None = None
@@ -235,6 +251,8 @@ class BookingCheckInComplete(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     pending_flags: list[str] = []
+    step_results: list[CheckinStepResult] = []
+    pending_flag_details: list[CheckinPendingFlag] = []
 
 
 class BookingArrivalCharge(BaseModel):
@@ -377,6 +395,7 @@ class BookingNoteCreate(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     body: str
+    source: Literal["check-in", "check-out", "booking-detail"] | None = None
 
 
 class BookingNoteResponse(BaseModel):
@@ -387,6 +406,7 @@ class BookingNoteResponse(BaseModel):
     author_user_id: str
     author_name: str
     body: str
+    source: str | None = None
     created_at: str
 
 

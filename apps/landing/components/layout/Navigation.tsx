@@ -20,6 +20,12 @@ export default function Navigation() {
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleLogoClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
+    const isHomePage = window.location.pathname === ROUTES.HOME;
+
+    if (isHomePage) {
+      e.preventDefault();
+    }
+
     if (resetTimer.current) clearTimeout(resetTimer.current);
     clickCount.current += 1;
 

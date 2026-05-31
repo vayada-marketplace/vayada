@@ -667,7 +667,7 @@ class TestMarketplaceAdminNotifications:
     async def test_admin_notified_on_collaboration_create(
         self, client: AsyncClient, test_creator_verified, test_hotel_verified, mock_send_email
     ):
-        """An influencer creating a request notifies the marketplace admin."""
+        """An influencer creating a request notifies the Vayada admin."""
         listing_id = str(test_hotel_verified["listing"]["listing"]["id"])
 
         response = await client.post(

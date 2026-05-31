@@ -6,6 +6,7 @@ import {
   BoltIcon,
   CalendarDaysIcon,
   ClockIcon,
+  ClipboardDocumentCheckIcon,
   GlobeAltIcon,
 } from "@heroicons/react/24/outline";
 import { bookingsService } from "@/services/bookings";
@@ -29,6 +30,8 @@ type SectionId =
   | "booking-engine"
   | "calendar"
   | "check-in-out"
+  | "checkin-checklist"
+  | "checkout-inspection"
   | "localization";
 
 // Anchors used by SearchModal (apps/pms-web/components/layout/SearchModal.tsx)
@@ -38,6 +41,8 @@ const ANCHOR_TO_SECTION: Record<string, SectionId> = {
   "booking-engine": "booking-engine",
   calendar: "calendar",
   "check-in-out": "check-in-out",
+  "checkin-checklist": "checkin-checklist",
+  "checkout-inspection": "checkout-inspection",
   currency: "localization",
   language: "localization",
 };
@@ -357,6 +362,18 @@ export default function SettingsPage() {
       id: "check-in-out",
       label: t("settings.checkInCheckOut"),
       icon: ClockIcon,
+    },
+    {
+      id: "checkin-checklist",
+      label: "Check-in checklist",
+      icon: ClipboardDocumentCheckIcon,
+      href: "/settings/checkin-checklist",
+    },
+    {
+      id: "checkout-inspection",
+      label: "Check-out inspection",
+      icon: ClipboardDocumentCheckIcon,
+      href: "/settings/checkout-inspection",
     },
     { id: "localization", label: "Localization", icon: GlobeAltIcon },
   ];

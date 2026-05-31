@@ -684,6 +684,23 @@ async def main():
 
         for slug, rooms in ROOM_TYPES.items():
             for room in rooms:
+                existing = await pms_conn.fetchrow(
+                    """
+                    SELECT rt.id
+                    FROM room_types rt
+                    JOIN hotels h ON h.id = rt.hotel_id
+                    WHERE h.slug = $1 AND rt.name = $2
+                    ORDER BY rt.created_at, rt.id
+                    LIMIT 1
+                    """,
+                    slug,
+                    room["name"],
+                )
+                if existing:
+                    room_name_to_id[(slug, room["name"])] = str(existing["id"])
+                    print(f"  Room type already exists: {slug} / {room['name']}")
+                    continue
+
                 row = await pms_conn.fetchrow(
                     INSERT_ROOM_TYPE_SQL,
                     slug,
@@ -704,18 +721,6 @@ async def main():
                 if row:
                     room_name_to_id[(slug, room["name"])] = str(row["id"])
                     print(f"  Seeded room type: {slug} / {room['name']}")
-                else:
-                    # Already exists — look up ID
-                    existing = await pms_conn.fetchrow(
-                        "SELECT rt.id FROM room_types rt "
-                        "JOIN hotels h ON h.id = rt.hotel_id "
-                        "WHERE h.slug = $1 AND rt.name = $2",
-                        slug,
-                        room["name"],
-                    )
-                    if existing:
-                        room_name_to_id[(slug, room["name"])] = str(existing["id"])
-                    print(f"  Room type already exists: {slug} / {room['name']}")
 
         # ── Seed Sample Bookings (into PMS DB) ───────────────────────
 

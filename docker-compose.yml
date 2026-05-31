@@ -11,7 +11,7 @@
 #
 # Ports:
 #   3000  Marketplace frontend
-#   3001  Marketplace admin frontend
+#   3001  Vayada admin frontend
 #   3002  Booking engine frontend
 #   3003  Booking engine admin frontend
 #   3004  PMS frontend
@@ -262,6 +262,8 @@ services:
       AUTH_DATABASE_URL: postgresql://vayada_auth_user:vayada_auth_password@auth-postgres:5432/vayada_auth_db
       BOOKING_ENGINE_DATABASE_URL: postgresql://vayada_booking_user:vayada_booking_password@booking-postgres:5432/vayada_booking_db
       BOOKING_ENGINE_API_URL: http://booking-backend:8001
+      JWT_SECRET_KEY: your-secret-key-change-in-production
+      JWT_ALGORITHM: HS256
       CORS_ORIGINS: http://localhost:3002,http://localhost:3003,http://localhost:3004
       API_HOST: "0.0.0.0"
       API_PORT: "8002"
@@ -324,11 +326,11 @@ services:
     networks:
       - vayada-network
 
-  marketplace-admin-frontend:
+  vayada-admin-frontend:
     build:
-      context: ./apps/marketplace-admin
+      context: ./apps/vayada-admin
       dockerfile: Dockerfile.dev
-    container_name: vayada-marketplace-admin-frontend
+    container_name: vayada-admin-frontend
     ports:
       - "3001:3001"
     environment:
@@ -339,7 +341,7 @@ services:
       - NEXT_PUBLIC_PMS_URL=http://localhost:8002
       - NEXT_PUBLIC_BOOKING_URL_TEMPLATE=http://{slug}.localhost:3002
     volumes:
-      - ./apps/marketplace-admin:/app
+      - ./apps/vayada-admin:/app
       - /app/node_modules
       - /app/.next
     depends_on:

@@ -85,7 +85,7 @@ export function Modal({
       onClick={handleBackdropClick}
     >
       <div
-        className={`bg-white rounded-2xl shadow-2xl ${sizeClasses[size]} w-full max-h-[95vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-200 ${className}`}
+        className={`max-h-[95vh] w-full overflow-y-auto rounded-lg bg-white shadow-2xl ${sizeClasses[size]} animate-in fade-in zoom-in-95 duration-200 ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
         {children}
@@ -103,13 +103,13 @@ export interface ModalHeaderProps {
 export function ModalHeader({ children, onClose, className = "" }: ModalHeaderProps) {
   return (
     <div
-      className={`sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10 ${className}`}
+      className={`sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-3 ${className}`}
     >
-      <h3 className="text-xl font-bold text-gray-900">{children}</h3>
+      <h3 className="text-base font-semibold text-gray-950">{children}</h3>
       {onClose && (
-        <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
+        <button onClick={onClose} className="rounded-md p-2 transition-colors hover:bg-gray-100">
           <svg
-            className="w-6 h-6 text-gray-600"
+            className="h-5 w-5 text-gray-500"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -133,7 +133,7 @@ export interface ModalBodyProps {
 }
 
 export function ModalBody({ children, className = "" }: ModalBodyProps) {
-  return <div className={`p-6 ${className}`}>{children}</div>;
+  return <div className={`p-5 ${className}`}>{children}</div>;
 }
 
 export interface ModalFooterProps {
@@ -144,7 +144,7 @@ export interface ModalFooterProps {
 export function ModalFooter({ children, className = "" }: ModalFooterProps) {
   return (
     <div
-      className={`sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-3 ${className}`}
+      className={`sticky bottom-0 flex items-center justify-end gap-2 border-t border-gray-200 bg-white px-5 py-3 ${className}`}
     >
       {children}
     </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { PencilIcon, PlusIcon, XMarkIcon } from "@heroicons/react/24/solid";
+import { PencilIcon, XMarkIcon } from "@heroicons/react/24/solid";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -11,7 +11,6 @@ import {
 import { Button, Input, ErrorModal } from "@/components/ui";
 import { ROUTES } from "@/lib/constants/routes";
 import { PLATFORM_OPTIONS, AGE_GROUP_OPTIONS } from "@/lib/constants";
-import { formatNumber } from "@/lib/utils";
 import { ProfilePictureModal } from "../ProfilePictureModal";
 import { CreatorOverviewTab } from "./CreatorOverviewTab";
 import { PlatformCardView } from "./PlatformCardView";
@@ -51,7 +50,6 @@ export function CreatorProfile() {
     isSavingProfile,
     showPictureModal,
     setShowPictureModal,
-    profilePicturePreview,
     setProfilePicturePreview,
     editFormData,
     setEditFormData,
@@ -65,18 +63,20 @@ export function CreatorProfile() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center py-20">
-        <div className="relative">
-          <div className="animate-spin rounded-full h-16 w-16 border-4 border-primary-100"></div>
-          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-primary-600 absolute top-0 left-0"></div>
-        </div>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div
+            key={index}
+            className="h-40 animate-pulse rounded-lg border border-gray-200 bg-white shadow-sm"
+          />
+        ))}
       </div>
     );
   }
 
   if (isProfileIncomplete) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+      <div className="rounded-lg border border-gray-200 bg-white p-10 text-center shadow-sm">
         <div className="max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
             <svg
@@ -109,7 +109,7 @@ export function CreatorProfile() {
 
   if (!creatorProfile) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+      <div className="rounded-lg border border-gray-200 bg-white p-10 text-center shadow-sm">
         <div className="max-w-md mx-auto">
           <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
             <svg
@@ -142,38 +142,38 @@ export function CreatorProfile() {
   return (
     <>
       {/* Header with Tabs and Action Buttons */}
-      <div className="pt-6 pr-6 pb-6 pl-0 mb-6" style={{ backgroundColor: "#f9f8f6" }}>
+      <div className="mb-4 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
         <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1 rounded-lg bg-gray-100 p-1">
             <button
               onClick={() => setActiveCreatorTab("overview")}
-              className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+              className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 activeCreatorTab === "overview"
-                  ? "bg-primary-600 text-white"
-                  : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                  ? "bg-white text-gray-950 shadow-sm"
+                  : "text-gray-500 hover:text-gray-900"
               }`}
             >
               Overview
             </button>
             <button
               onClick={() => setActiveCreatorTab("platforms")}
-              className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+              className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 activeCreatorTab === "platforms"
-                  ? "bg-primary-600 text-white"
-                  : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                  ? "bg-white text-gray-950 shadow-sm"
+                  : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Social Media Platforms
+              Platforms
             </button>
             <button
               onClick={() => setActiveCreatorTab("reviews")}
-              className={`px-4 py-2.5 rounded-lg font-semibold transition-all duration-200 ${
+              className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
                 activeCreatorTab === "reviews"
-                  ? "bg-primary-600 text-white"
-                  : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
+                  ? "bg-white text-gray-950 shadow-sm"
+                  : "text-gray-500 hover:text-gray-900"
               }`}
             >
-              Reviews &amp; Ratings
+              Reviews
             </button>
           </div>
           {isEditingProfile ? (
@@ -181,7 +181,7 @@ export function CreatorProfile() {
               <button
                 onClick={handleCancelEdit}
                 disabled={isSavingProfile}
-                className="px-4 py-2.5 rounded-lg font-semibold bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -193,7 +193,7 @@ export function CreatorProfile() {
                   !editFormData.shortDescription ||
                   !editFormData.location
                 }
-                className="px-4 py-2.5 rounded-lg font-semibold bg-primary-600 text-white hover:bg-primary-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="rounded-md bg-primary-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSavingProfile ? "Saving..." : "Save Changes"}
               </button>
@@ -201,7 +201,7 @@ export function CreatorProfile() {
           ) : (
             <button
               onClick={() => setIsEditingProfile(true)}
-              className="p-2.5 rounded-lg bg-white text-primary-600 border border-primary-600 hover:bg-primary-50 transition-all duration-200 flex items-center justify-center"
+              className="flex items-center justify-center rounded-md border border-gray-300 bg-white p-2 text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
               title="Edit Profile"
             >
               <PencilIcon className="w-5 h-5" />
@@ -211,7 +211,7 @@ export function CreatorProfile() {
       </div>
 
       {/* Tab Content */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 space-y-5">
+      <div className="space-y-5 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:p-5">
         {activeCreatorTab === "overview" && (
           <CreatorOverviewTab
             profile={creatorProfile}
@@ -228,8 +228,7 @@ export function CreatorProfile() {
         {activeCreatorTab === "platforms" && (
           <div>
             <div className="flex items-center gap-3 mb-6">
-              <div className="w-1 h-8 bg-gradient-to-b from-primary-600 to-primary-400 rounded-full"></div>
-              <h2 className="text-2xl font-bold text-gray-900">Social Media Platforms</h2>
+              <h2 className="text-base font-semibold text-gray-950">Social Media Platforms</h2>
             </div>
 
             {!isEditingProfile ? (
@@ -248,7 +247,7 @@ export function CreatorProfile() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-center gap-3 mb-4">
                     <div className="w-11 h-11 bg-primary-50 rounded-xl flex items-center justify-center shadow-sm">
                       <LinkIcon className="w-5 h-5 text-primary-600" />

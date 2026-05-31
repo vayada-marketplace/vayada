@@ -29,6 +29,7 @@ function storeUserData(data: {
   name: string;
   type: string;
   status: string;
+  is_superadmin?: boolean;
 }): void {
   if (typeof window === "undefined") return;
 
@@ -38,6 +39,7 @@ function storeUserData(data: {
   localStorage.setItem(STORAGE_KEYS.USER_NAME, data.name);
   localStorage.setItem(STORAGE_KEYS.USER_TYPE, data.type);
   localStorage.setItem(STORAGE_KEYS.USER_STATUS, data.status);
+  localStorage.setItem(STORAGE_KEYS.IS_SUPERADMIN, data.is_superadmin ? "true" : "false");
 
   // Store full user object for easy access
   localStorage.setItem(
@@ -48,6 +50,7 @@ function storeUserData(data: {
       name: data.name,
       type: data.type,
       status: data.status,
+      is_superadmin: data.is_superadmin || false,
     }),
   );
 }
@@ -65,6 +68,7 @@ function clearAuthData(): void {
   localStorage.removeItem(STORAGE_KEYS.USER_NAME);
   localStorage.removeItem(STORAGE_KEYS.USER_TYPE);
   localStorage.removeItem(STORAGE_KEYS.USER_STATUS);
+  localStorage.removeItem(STORAGE_KEYS.IS_SUPERADMIN);
   localStorage.removeItem(STORAGE_KEYS.USER);
   localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "false");
   localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
@@ -106,6 +110,7 @@ export const authService = {
         name: response.name,
         type: response.type,
         status: response.status,
+        is_superadmin: response.is_superadmin,
       });
 
       return response;

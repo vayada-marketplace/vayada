@@ -9,6 +9,7 @@ import {
   MealPlan,
   MealPlanCode,
   PartialRefundTier,
+  RateDepositSetting,
 } from "@/services/rooms";
 import ImageUpload from "@/components/ImageUpload";
 import {
@@ -567,7 +568,7 @@ function RatePaymentMethodsSection({
     <div>
       <div className="flex items-start gap-3 mb-2">
         <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
-          7
+          8
         </span>
         <div className="flex-1">
           <h3 className="text-[13px] font-semibold text-gray-900">
@@ -635,6 +636,114 @@ function RatePaymentMethodsSection({
   );
 }
 
+function RateDepositSection({
+  value,
+  flexibleRateEnabled,
+  nonRefundableEnabled,
+  baseRate,
+  currency,
+  onChange,
+}: {
+  value: Record<string, RateDepositSetting> | null;
+  flexibleRateEnabled: boolean;
+  nonRefundableEnabled: boolean;
+  baseRate: number;
+  currency: string;
+  onChange: (next: Record<string, RateDepositSetting> | null) => void;
+}) {
+  const rates: { key: string; label: string; shown: boolean }[] = [
+    { key: "flexible", label: "Flexible rate", shown: flexibleRateEnabled },
+    { key: "nonrefundable", label: "Non-refundable rate", shown: nonRefundableEnabled },
+  ];
+
+  const updateRate = (rateKey: string, patch: Partial<RateDepositSetting>) => {
+    const current = value ?? {};
+    const previous = current[rateKey] ?? { enabled: false, percentage: null };
+    const nextRate = { ...previous, ...patch };
+    if (nextRate.enabled && !nextRate.percentage) nextRate.percentage = 50;
+    const next = { ...current, [rateKey]: nextRate };
+    onChange(next);
+  };
+
+  return (
+    <div>
+      <div className="flex items-start gap-3 mb-2">
+        <span className="w-6 h-6 rounded-full bg-primary-500 text-white text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+          7
+        </span>
+        <div className="flex-1">
+          <h3 className="text-[13px] font-semibold text-gray-900">Deposit at booking</h3>
+          <p className="text-[11px] text-gray-400">
+            Collect a percentage now; the remaining balance is due at the property on arrival.
+          </p>
+        </div>
+      </div>
+      <div className="ml-4 md:ml-9 space-y-3">
+        {rates
+          .filter((r) => r.shown)
+          .map((rate) => {
+            const setting = value?.[rate.key] ?? { enabled: false, percentage: null };
+            const percentage = setting.percentage ?? 50;
+            const deposit = Math.round((baseRate || 0) * percentage) / 100;
+            const balance = Math.max((baseRate || 0) - deposit, 0);
+            return (
+              <div
+                key={rate.key}
+                className={`rounded-xl border p-4 ${setting.enabled ? "border-primary-200 bg-primary-50/30" : "border-gray-200 bg-white"}`}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => updateRate(rate.key, { enabled: !setting.enabled })}
+                    className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${setting.enabled ? "bg-primary-500" : "bg-gray-300"}`}
+                    aria-label={`Toggle deposit for ${rate.label}`}
+                  >
+                    <span
+                      className={`absolute top-[2px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${setting.enabled ? "left-[20px]" : "left-[2px]"}`}
+                    />
+                  </button>
+                  <div className="min-w-[150px] flex-1">
+                    <div className="text-[12px] font-semibold text-gray-900">{rate.label}</div>
+                    <div className="text-[11px] text-gray-500">
+                      {setting.enabled && percentage === 100
+                        ? "Full payment at booking"
+                        : setting.enabled
+                          ? "Deposit required"
+                          : "No deposit"}
+                    </div>
+                  </div>
+                  {setting.enabled && (
+                    <div className="inline-flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={percentage}
+                        onChange={(e) =>
+                          updateRate(rate.key, {
+                            percentage: clampNumberInput(e.target.value, 1, 100),
+                          })
+                        }
+                        className="w-14 px-1 text-[12px] font-semibold text-gray-900 bg-transparent outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      />
+                      <span className="text-[12px] font-semibold text-gray-900">%</span>
+                    </div>
+                  )}
+                </div>
+                {setting.enabled && (
+                  <p className="mt-3 text-[11px] text-gray-500">
+                    Guest pays {percentage}% ({formatCurrency(deposit, currency)}) at booking,{" "}
+                    {formatCurrency(balance, currency)} due at arrival.
+                  </p>
+                )}
+              </div>
+            );
+          })}
+      </div>
+    </div>
+  );
+}
+
 export default function RoomTypeForm({
   form,
   onChange,
@@ -651,6 +760,12 @@ export default function RoomTypeForm({
   const previousCurrencyRef = useRef(form.currency || "EUR");
   const [activeTab, setActiveTab] = useState<RoomTab>("details");
   const [sortOrderInput, setSortOrderInput] = useState<string>(String(form.sortOrder ?? 0));
+  const [latitudeInput, setLatitudeInput] = useState<string>(
+    form.latitude != null ? String(form.latitude) : "",
+  );
+  const [longitudeInput, setLongitudeInput] = useState<string>(
+    form.longitude != null ? String(form.longitude) : "",
+  );
   const [amenityInput, setAmenityInput] = useState("");
   const [featureInput, setFeatureInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
@@ -756,6 +871,12 @@ export default function RoomTypeForm({
   // the committed numeric values so the user can fully clear a field before typing a new
   // number — onChange writes the raw string, onBlur clamps to [min, max] and rewrites it.
   const [maxOccupancyInput, setMaxOccupancyInput] = useState(String(form.maxOccupancy ?? 2));
+  const [maxAdultsInput, setMaxAdultsInput] = useState(
+    form.maxAdults == null ? "" : String(form.maxAdults),
+  );
+  const [maxChildrenInput, setMaxChildrenInput] = useState(
+    form.maxChildren == null ? "" : String(form.maxChildren),
+  );
   const [bedroomsInput, setBedroomsInput] = useState(String(form.bedrooms ?? 1));
   const [bathroomsInput, setBathroomsInput] = useState(String(form.bathrooms ?? 1));
   const [sizeInput, setSizeInput] = useState(String(form.size ?? 1));
@@ -1253,34 +1374,103 @@ export default function RoomTypeForm({
             </button>
           </div>
 
-          {/* Max Occupancy */}
+          {/* Occupancy */}
           <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <label className="text-[12px] font-semibold text-gray-900">
-                Max Occupancy <span className="text-red-500">*</span>
-              </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <label className="text-[12px] font-semibold text-gray-900">
+                    Total Max Occupancy <span className="text-red-500">*</span>
+                  </label>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  value={maxOccupancyInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMaxOccupancyInput(v);
+                    if (v !== "") {
+                      const n = Number(v);
+                      if (Number.isFinite(n) && n >= 1) updateForm({ maxOccupancy: n });
+                    }
+                  }}
+                  onBlur={() => {
+                    const n = clampNumberInput(maxOccupancyInput, 1);
+                    setMaxOccupancyInput(String(n));
+                    updateForm({ maxOccupancy: n });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <label className="text-[12px] font-semibold text-gray-900">Max Adults</label>
+                </div>
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Any"
+                  value={maxAdultsInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMaxAdultsInput(v);
+                    if (v === "") {
+                      updateForm({ maxAdults: null });
+                      return;
+                    }
+                    const n = Number(v);
+                    if (Number.isFinite(n) && n >= 1) updateForm({ maxAdults: n });
+                  }}
+                  onBlur={() => {
+                    if (maxAdultsInput === "") {
+                      updateForm({ maxAdults: null });
+                      return;
+                    }
+                    const n = clampNumberInput(maxAdultsInput, 1);
+                    setMaxAdultsInput(String(n));
+                    updateForm({ maxAdults: n });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <label className="text-[12px] font-semibold text-gray-900">Max Children</label>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Any"
+                  value={maxChildrenInput}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMaxChildrenInput(v);
+                    if (v === "") {
+                      updateForm({ maxChildren: null });
+                      return;
+                    }
+                    const n = Number(v);
+                    if (Number.isFinite(n) && n >= 0) updateForm({ maxChildren: n });
+                  }}
+                  onBlur={() => {
+                    if (maxChildrenInput === "") {
+                      updateForm({ maxChildren: null });
+                      return;
+                    }
+                    const n = clampNumberInput(maxChildrenInput, 0);
+                    setMaxChildrenInput(String(n));
+                    updateForm({ maxChildren: n });
+                  }}
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
+                />
+              </div>
             </div>
-            <input
-              type="number"
-              min={1}
-              value={maxOccupancyInput}
-              onChange={(e) => {
-                const v = e.target.value;
-                setMaxOccupancyInput(v);
-                if (v !== "") {
-                  const n = Number(v);
-                  if (Number.isFinite(n) && n >= 1) updateForm({ maxOccupancy: n });
-                }
-              }}
-              onBlur={() => {
-                const n = clampNumberInput(maxOccupancyInput, 1);
-                setMaxOccupancyInput(String(n));
-                updateForm({ maxOccupancy: n });
-              }}
-              className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent focus:bg-white text-gray-900"
-            />
             <p className="text-[10px] text-gray-400 mt-1">
-              Shows as &quot;Up to X guests&quot; on room card
+              Total occupancy still controls the room card. Adult and child limits refine booking
+              availability when set.
             </p>
           </div>
 
@@ -1434,6 +1624,121 @@ export default function RoomTypeForm({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Location */}
+          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/60 p-4">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-[12px] font-bold text-gray-900 uppercase tracking-widest">
+                  Location
+                </h3>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Saved per room type. Guests see this address and pin when map view is enabled.
+                </p>
+              </div>
+              {!(form.latitude != null && form.longitude != null) && (
+                <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+                  No location set - this room type won't appear on the map.
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+              <div className="lg:col-span-3 space-y-3">
+                <div>
+                  <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+                    Search address
+                  </label>
+                  <input
+                    type="text"
+                    value={form.locationAddress || ""}
+                    onChange={(e) => updateForm({ locationAddress: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                    placeholder="Street, area, city, country"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Provider autocomplete/geocoding plugs in here; coordinates are stored so the
+                    Booking Engine never geocodes on page load.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+                      Latitude
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min={-90}
+                      max={90}
+                      value={latitudeInput}
+                      onChange={(e) => setLatitudeInput(e.target.value)}
+                      onBlur={() => {
+                        if (latitudeInput === "") {
+                          updateForm({ latitude: null });
+                        } else {
+                          const v = Math.max(-90, Math.min(90, Number(latitudeInput)));
+                          setLatitudeInput(String(v));
+                          updateForm({ latitude: v });
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                      placeholder="-8.670458"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+                      Longitude
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min={-180}
+                      max={180}
+                      value={longitudeInput}
+                      onChange={(e) => setLongitudeInput(e.target.value)}
+                      onBlur={() => {
+                        if (longitudeInput === "") {
+                          updateForm({ longitude: null });
+                        } else {
+                          const v = Math.max(-180, Math.min(180, Number(longitudeInput)));
+                          setLongitudeInput(String(v));
+                          updateForm({ longitude: v });
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                      placeholder="115.212629"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="lg:col-span-2 min-h-[180px] rounded-xl border border-gray-200 bg-white relative overflow-hidden">
+                <div className="absolute inset-0 opacity-70 bg-[linear-gradient(90deg,#e5e7eb_1px,transparent_1px),linear-gradient(0deg,#e5e7eb_1px,transparent_1px)] bg-[size:28px_28px]" />
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-sky-50" />
+                {form.latitude != null && form.longitude != null ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="relative">
+                      <div className="absolute -inset-5 rounded-full bg-primary-500/10 animate-pulse" />
+                      <div className="relative rounded-full bg-primary-600 text-white text-[11px] font-bold px-3 py-1.5 shadow-lg">
+                        Pin preview
+                      </div>
+                    </div>
+                    <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 border border-gray-200 px-3 py-2 text-[11px] text-gray-600 shadow-sm">
+                      {Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                    <p className="text-[12px] font-medium text-gray-500">
+                      Enter coordinates to verify the guest-facing pin.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Sort Order & Active */}
@@ -2689,7 +2994,17 @@ export default function RoomTypeForm({
               </div>
             </div>
 
-            {/* Section 7: Allowed payment methods per rate */}
+            {/* Section 7: Deposit settings per rate */}
+            <RateDepositSection
+              value={form.rateDepositSettings ?? null}
+              flexibleRateEnabled={flexibleRateEnabled}
+              nonRefundableEnabled={nonRefundableEnabled}
+              baseRate={form.baseRate || 0}
+              currency={form.currency || "EUR"}
+              onChange={(next) => updateForm({ rateDepositSettings: next })}
+            />
+
+            {/* Section 8: Allowed payment methods per rate */}
             <RatePaymentMethodsSection
               value={form.ratePaymentMethods ?? null}
               flexibleRateEnabled={flexibleRateEnabled}

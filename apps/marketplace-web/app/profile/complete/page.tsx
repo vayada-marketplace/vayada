@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
+import Link from "next/link";
 import { HotelBadgeIcon } from "@/components/ui";
 import { ROUTES } from "@/lib/constants/routes";
 import { STORAGE_KEYS } from "@/lib/constants";
@@ -450,45 +452,47 @@ export default function ProfileCompletePage() {
       : hotelForm.calculateProgress();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 via-white to-primary-50 relative overflow-hidden">
-      {/* Decorative Background Elements */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-pink-200 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
-      </div>
-
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="relative bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-6 py-4 shadow-sm">
-        <div className="max-w-4xl mx-auto flex items-center justify-center relative">
-          <a
+      <div className="border-b border-gray-200 bg-white px-4 py-3">
+        <div className="relative mx-auto flex max-w-5xl items-center justify-center">
+          <Link
             href="/"
-            className="absolute left-0 p-2 -ml-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-all"
+            className="absolute left-0 -ml-2 rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
             title="Back to Home"
           >
             <ArrowLeftIcon className="w-5 h-5" />
-          </a>
+          </Link>
           <div className="flex items-center gap-2">
-            <img src="/vayada-logo.png" alt="vayada" className="h-12" />
+            <Image
+              src="/vayada-logo.png"
+              alt="vayada"
+              width={120}
+              height={48}
+              className="h-10 w-auto"
+            />
           </div>
         </div>
       </div>
 
-      <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6 lg:px-8">
         <ProfileCompletionProgress percentage={completionPercentage} />
 
         {/* Header Card with Steps */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-5 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="mb-4 flex flex-col items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm md:flex-row">
           <div className="flex items-center gap-3 text-center md:text-left">
             {userType === "creator" ? (
-              <div className="flex-shrink-0 w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center shadow-sm">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-md bg-primary-600 shadow-sm">
                 <UserIcon className="w-5 h-5 text-white" />
               </div>
             ) : (
               <HotelBadgeIcon active />
             )}
             <div>
-              <h1 className="text-lg font-bold text-gray-900 leading-tight">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Marketplace setup
+              </p>
+              <h1 className="text-lg font-semibold leading-tight text-gray-950">
                 Complete Your Profile
               </h1>
               <p className="text-xs text-gray-500 max-w-xs">

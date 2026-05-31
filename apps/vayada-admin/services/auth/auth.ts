@@ -1,0 +1,298 @@
+/**
+ * Authentication service for admin
+ */
+
+import { apiClient, ApiErrorResponse } from "../api/client";
+import type { LoginRequest, LoginResponse } from "@/lib/types";
+
+const TOKEN_KEY = "access_token";
+const EXPIRES_AT_KEY = "token_expires_at";
+
+/**
+ * Store JWT token and expiration time
+ */
+function storeToken(token: string, expiresIn: number): void {
+  if (typeof window === "undefined") return;
+
+  localStorage.setItem(TOKEN_KEY, token);
+  const expiresAt = Date.now() + expiresIn * 1000;
+  localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString());
+}
+
+/**
+ * Store user data in localStorage
+ */
+function storeUserData(data: {
+  id: string;
+  email: string;
+  name: string;
+  type: string;
+  status: string;
+  is_superadmin?: boolean;
+}): void {
+  if (typeof window === "undefined") return;
+
+  localStorage.setItem("isLoggedIn", "true");
+  localStorage.setItem("userId", data.id);
+  localStorage.setItem("userEmail", data.email);
+  localStorage.setItem("userName", data.name);
+  localStorage.setItem("userType", data.type);
+  localStorage.setItem("userStatus", data.status);
+  localStorage.setItem("isSuperAdmin", data.is_superadmin ? "true" : "false");
+
+  localStorage.setItem(
+    "user",
+    JSON.stringify({
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      type: data.type,
+      status: data.status,
+      is_superadmin: data.is_superadmin || false,
+    }),
+  );
+}
+
+/**
+ * Clear all auth data from localStorage
+ */
+function clearAuthData(): void {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(EXPIRES_AT_KEY);
+  localStorage.removeItem("userId");
+  localStorage.removeItem("userEmail");
+  localStorage.removeItem("userName");
+  localStorage.removeItem("userType");
+  localStorage.removeItem("userStatus");
+  localStorage.removeItem("isSuperAdmin");
+  localStorage.removeItem("user");
+  localStorage.setItem("isLoggedIn", "false");
+}
+
+/**
+ * Get token if not expired
+ */
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const token = localStorage.getItem(TOKEN_KEY);
+  const expiresAt = localStorage.getItem(EXPIRES_AT_KEY);
+
+  if (!token || !expiresAt) return null;
+
+  if (Date.now() >= parseInt(expiresAt)) {
+    clearAuthData();
+    return null;
+  }
+
+  return token;
+}
+
+export interface RegisterRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+export interface RegisterResponse {
+  message: string;
+  id: string;
+  email: string;
+  name: string;
+}
+
+export const authService = {
+  /**
+   * Superadmin access is granted by toggling users.is_superadmin in the auth DB.
+   */
+  register: async (data: RegisterRequest): Promise<RegisterResponse> => {
+    void data;
+    throw new Error(
+      "Admin self-registration is disabled. Grant is_superadmin on an existing user.",
+    );
+  },
+
+  /**
+   * Login user (admin). Returns early with requires_totp=true if TOTP is needed.
+   * Caller must call verifyTotp() to complete the flow.
+   */
+  login: async (data: LoginRequest): Promise<LoginResponse> => {
+    try {
+      const response = await apiClient.post<LoginResponse>("/auth/login", data);
+
+      if (response.requires_totp) {
+        return response;
+      }
+
+      // Verify user has platform staff access.
+      if (!response.is_superadmin) {
+        throw new Error("Access denied. Superadmin account required.");
+      }
+
+      storeToken(response.access_token!, response.expires_in!);
+      storeUserData({
+        id: response.id!,
+        email: response.email!,
+        name: response.name!,
+        type: response.type!,
+        status: response.status!,
+        is_superadmin: response.is_superadmin,
+      });
+
+      return response;
+    } catch (error) {
+      if (error instanceof ApiErrorResponse) {
+        throw error;
+      }
+      throw error;
+    }
+  },
+
+  /**
+   * Complete TOTP login step after a successful password auth.
+   */
+  verifyTotp: async (totpSession: string, code: string): Promise<LoginResponse> => {
+    const response = await apiClient.post<LoginResponse>("/auth/totp/verify", {
+      totp_session: totpSession,
+      code,
+    });
+
+    if (!response.is_superadmin) {
+      throw new Error("Access denied. Superadmin account required.");
+    }
+
+    storeToken(response.access_token!, response.expires_in!);
+    storeUserData({
+      id: response.id!,
+      email: response.email!,
+      name: response.name!,
+      type: response.type!,
+      status: response.status!,
+      is_superadmin: response.is_superadmin,
+    });
+
+    return response;
+  },
+
+  /**
+   * Logout user
+   */
+  logout: (): void => {
+    clearAuthData();
+
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+  },
+
+  /**
+   * Get current user
+   */
+  getCurrentUser: async () => {
+    try {
+      const response = await apiClient.get<LoginResponse>("/auth/me");
+      return response;
+    } catch (error) {
+      if (error instanceof ApiErrorResponse) {
+        throw error;
+      }
+      throw new Error("Failed to get current user");
+    }
+  },
+
+  /**
+   * Check if user is logged in (has valid token)
+   */
+  isLoggedIn: (): boolean => {
+    return getToken() !== null;
+  },
+
+  /**
+   * Check if current user is a superadmin
+   */
+  isAdmin: (): boolean => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("isSuperAdmin") === "true";
+  },
+
+  /**
+   * Get token if available and not expired
+   */
+  getToken: (): string | null => {
+    return getToken();
+  },
+
+  /**
+   * Request password reset
+   */
+  forgotPassword: async (email: string): Promise<{ message: string }> => {
+    try {
+      const response = await apiClient.post<{ message: string }>("/auth/forgot-password", {
+        email,
+      });
+      return { message: response.message };
+    } catch {
+      // Always return success for security (anti-enumeration)
+      return {
+        message: "If an account with that email exists, a password reset link has been sent.",
+      };
+    }
+  },
+
+  /**
+   * Reset password with token
+   */
+  resetPassword: async (token: string, newPassword: string): Promise<{ message: string }> => {
+    const response = await apiClient.post<{ message: string }>("/auth/reset-password", {
+      token,
+      new_password: newPassword,
+    });
+    return response;
+  },
+
+  totpStatus: async (): Promise<{ enrolled: boolean }> => {
+    return apiClient.get<{ enrolled: boolean }>("/auth/totp/status");
+  },
+
+  totpSetup: async (): Promise<{ otpauth_uri: string; secret: string; message: string }> => {
+    return apiClient.post<{ otpauth_uri: string; secret: string; message: string }>(
+      "/auth/totp/setup",
+      {},
+    );
+  },
+
+  totpConfirm: async (code: string): Promise<{ recovery_codes: string[]; message: string }> => {
+    return apiClient.post<{ recovery_codes: string[]; message: string }>("/auth/totp/confirm", {
+      code,
+    });
+  },
+
+  totpRegenerateCodes: async (
+    code: string,
+  ): Promise<{ recovery_codes: string[]; message: string }> => {
+    return apiClient.post<{ recovery_codes: string[]; message: string }>(
+      "/auth/totp/recovery-codes/regenerate",
+      { code },
+    );
+  },
+
+  totpCodeCount: async (): Promise<{ count: number }> => {
+    return apiClient.get<{ count: number }>("/auth/totp/recovery-codes/count");
+  },
+
+  loginHistory: async (): Promise<{
+    entries: Array<{
+      id: string;
+      success: boolean;
+      auth_method: string | null;
+      failure_reason: string | null;
+      ip_address: string | null;
+      user_agent: string | null;
+      created_at: string;
+    }>;
+  }> => {
+    return apiClient.get("/auth/login-history");
+  },
+};

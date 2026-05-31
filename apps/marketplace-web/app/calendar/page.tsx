@@ -107,13 +107,24 @@ function CalendarPageContent() {
   };
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: "#f9f8f6" }}>
+    <main className="min-h-screen bg-gray-50">
       <AuthenticatedNavigation />
-      <div className={`transition-all duration-300 ${isCollapsed ? "md:pl-16" : "md:pl-56"} pt-16`}>
-        <div className="w-full pt-8 pb-8 px-8">
+      <div className={`pt-12 transition-all duration-200 ${isCollapsed ? "md:pl-14" : "md:pl-52"}`}>
+        <div className="w-full px-4 py-4 md:px-6 md:py-6">
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Collaboration planning
+            </p>
+            <h1 className="mt-1 text-2xl font-bold tracking-normal text-gray-950 md:text-3xl">
+              Calendar
+            </h1>
+            <p className="mt-1 text-sm text-gray-500">
+              Track stays, campaign windows, trips, and external creator commitments.
+            </p>
+          </div>
           {isLoading ? (
-            <div className="flex items-center justify-center h-[600px] bg-white rounded-xl shadow-sm border border-gray-200">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            <div className="grid h-[600px] place-items-center rounded-lg border border-gray-200 bg-white shadow-sm">
+              <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
             </div>
           ) : (
             <YearlyCalendar

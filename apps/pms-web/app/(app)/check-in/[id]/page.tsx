@@ -7,8 +7,12 @@ import {
   Booking,
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
+  BookingNote,
+  CheckinPendingFlag,
+  CheckinStepResult,
   bookingsService,
 } from "@/services/bookings";
+import { CheckinChecklistStep, settingsService } from "@/services/settings";
 import { formatCurrency } from "@/lib/formatCurrency";
 
 type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: number };
@@ -16,13 +20,17 @@ type GuestDraft = BookingAdditionalGuestPayload & { id?: string; position: numbe
 const primaryActionClass =
   "rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60";
 
-type BookerDraft = {
-  guestFirstName: string;
-  guestLastName: string;
-  guestEmail: string;
-  guestPhone: string;
-  guestCountry: string;
-};
+type GuestRegistrationDraft = Pick<
+  BookingAdditionalGuestPayload,
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "phone"
+  | "gender"
+  | "nationality"
+  | "dateOfBirth"
+  | "passportNumber"
+>;
 
 function guestName(b: Booking) {
   return `${b.guestFirstName} ${b.guestLastName}`.trim();
@@ -34,6 +42,17 @@ function totalGuests(b: Booking) {
 
 function expectedAdditionalGuests(b: Booking) {
   return Math.max(0, totalGuests(b) - 1);
+}
+
+function totalRoomCapacity(b: Booking) {
+  return Math.max(
+    1,
+    b.totalRoomCapacity ?? (b.roomMaxOccupancy || 1) * Math.max(1, b.numberOfRooms || 1),
+  );
+}
+
+function additionalGuestCapacity(b: Booking) {
+  return Math.max(0, totalRoomCapacity(b) - 1);
 }
 
 function roomUnit(b: Booking): string | null {
@@ -62,20 +81,74 @@ function guestsLabel(b: Booking) {
 }
 
 function isPaid(b: Booking) {
+  if (b.depositRequired) return b.balanceAmount <= 0;
   return ["captured", "paid", "refunded", "partially_refunded"].includes(b.paymentStatus || "");
 }
 
 function normalizeGuests(booking: Booking, guests: BookingAdditionalGuest[]): GuestDraft[] {
   const rows: GuestDraft[] = guests.map((g) => ({ ...g }));
-  for (let idx = rows.length; idx < expectedAdditionalGuests(booking); idx += 1) {
+  const expectedRows = Math.min(
+    expectedAdditionalGuests(booking),
+    additionalGuestCapacity(booking),
+  );
+  for (let idx = rows.length; idx < expectedRows; idx += 1) {
     rows.push({ position: idx + 1, roomPosition: rows[0]?.roomPosition ?? 0 });
   }
   return rows;
 }
 
-function guestComplete(g: GuestDraft) {
+function bookerDraftFromBooking(booking: Booking): GuestRegistrationDraft {
+  return {
+    firstName: booking.guestFirstName || "",
+    lastName: booking.guestLastName || "",
+    email: booking.guestEmail || "",
+    phone: booking.guestPhone || "",
+    gender: booking.guestGender || "",
+    nationality: booking.guestCountry || "",
+    dateOfBirth: booking.guestDateOfBirth || null,
+    passportNumber: booking.guestPassportNumber || "",
+  };
+}
+
+function guestComplete(g: GuestRegistrationDraft) {
   return Boolean(
     g.firstName && g.lastName && g.gender && g.nationality && g.dateOfBirth && g.passportNumber,
+  );
+}
+
+function guestHasData(g: GuestRegistrationDraft) {
+  return Boolean(
+    g.firstName ||
+    g.lastName ||
+    g.email ||
+    g.phone ||
+    g.gender ||
+    g.nationality ||
+    g.dateOfBirth ||
+    g.passportNumber,
+  );
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function bookerDraftChanged(draft: GuestRegistrationDraft, b: Booking) {
+  return (
+    draft.firstName !== (b.guestFirstName || "") ||
+    draft.lastName !== (b.guestLastName || "") ||
+    draft.email !== (b.guestEmail || "") ||
+    draft.phone !== (b.guestPhone || "") ||
+    draft.gender !== (b.guestGender || "") ||
+    draft.nationality !== (b.guestCountry || "") ||
+    draft.dateOfBirth !== (b.guestDateOfBirth || null) ||
+    draft.passportNumber !== (b.guestPassportNumber || "")
   );
 }
 
@@ -83,102 +156,173 @@ function channelIsOta(channel: string | null | undefined) {
   return Boolean(channel && channel.toLowerCase() !== "direct");
 }
 
-function pendingFlags(booking: Booking, guests: GuestDraft[]) {
+function pendingFlags(booking: Booking, booker: GuestRegistrationDraft, guests: GuestDraft[]) {
   const flags: string[] = [];
+  if (!guestComplete(booker)) flags.push("Booker ID");
   guests.forEach((guest, idx) => {
     if (!guestComplete(guest)) flags.push(`Guest ${idx + 2} ID`);
   });
   if (!isPaid(booking))
-    flags.push(`Payment ${formatCurrency(booking.totalAmount, booking.currency)}`);
+    flags.push(
+      `Payment ${formatCurrency(
+        booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
+        booking.currency,
+      )}`,
+    );
   if (!booking.assignedRooms?.length && !booking.roomId) flags.push("Room assignment");
   return flags;
 }
 
-function bookerDraftFrom(b: Booking): BookerDraft {
-  return {
-    guestFirstName: b.guestFirstName,
-    guestLastName: b.guestLastName,
-    guestEmail: b.guestEmail,
-    guestPhone: b.guestPhone,
-    guestCountry: b.guestCountry,
-  };
+function customStepDone(step: CheckinChecklistStep, value: string | boolean | undefined) {
+  if (step.type === "checkbox") return value === true;
+  if (step.type === "amount") return Number(value || 0) > 0;
+  return typeof value === "string" && value.trim().length > 0;
 }
 
-function bookerDraftChanged(draft: BookerDraft, b: Booking) {
-  return (
-    draft.guestFirstName !== b.guestFirstName ||
-    draft.guestLastName !== b.guestLastName ||
-    draft.guestEmail !== b.guestEmail ||
-    draft.guestPhone !== b.guestPhone ||
-    draft.guestCountry !== b.guestCountry
-  );
+function customStepValueForRecord(step: CheckinChecklistStep, value: string | boolean | undefined) {
+  if (step.type === "checkbox") return value === true;
+  if (step.type === "amount") return value ? Number(value) : 0;
+  return typeof value === "string" ? value : "";
 }
 
 export default function CheckInPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const [booking, setBooking] = useState<Booking | null>(null);
+  const [booker, setBooker] = useState<GuestRegistrationDraft | null>(null);
   const [guests, setGuests] = useState<GuestDraft[]>([]);
+  const [notes, setNotes] = useState<BookingNote[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
   const [loading, setLoading] = useState(true);
-  const [savingGuest, setSavingGuest] = useState<number | null>(null);
+  const [savingGuest, setSavingGuest] = useState<string | null>(null);
+  const [removingGuest, setRemovingGuest] = useState<string | null>(null);
+  const [savingNote, setSavingNote] = useState(false);
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
   const [actionLoading, setActionLoading] = useState<null | "markPaid" | "completeCheckIn">(null);
-  const [bookerEditOpen, setBookerEditOpen] = useState(false);
-  const [bookerDraft, setBookerDraft] = useState<BookerDraft>({
-    guestFirstName: "",
-    guestLastName: "",
-    guestEmail: "",
-    guestPhone: "",
-    guestCountry: "",
-  });
+  const [customSteps, setCustomSteps] = useState<CheckinChecklistStep[]>([]);
+  const [customValues, setCustomValues] = useState<Record<string, string | boolean>>({});
+  const [requiredWarning, setRequiredWarning] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([bookingsService.get(id), bookingsService.listAdditionalGuests(id)])
-      .then(([bookingRes, guestRes]) => {
+    Promise.all([
+      bookingsService.get(id),
+      bookingsService.listAdditionalGuests(id),
+      settingsService.getCheckinChecklist().catch(() => ({ steps: [] })),
+      bookingsService.listNotes(id).catch(() => ({ notes: [] })),
+    ])
+      .then(([bookingRes, guestRes, checklistRes, noteRes]) => {
         setBooking(bookingRes);
+        setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
-        setBookerDraft(bookerDraftFrom(bookingRes));
+        setCustomSteps(checklistRes.steps || []);
+        setNotes(noteRes.notes || []);
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));
   }, [id]);
 
-  // Warn before leaving with unsaved booker edits open
-  useEffect(() => {
-    if (!bookerEditOpen) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [bookerEditOpen]);
-
-  const flags = useMemo(() => (booking ? pendingFlags(booking, guests) : []), [booking, guests]);
-  const completedGuests = guests.filter(guestComplete).length + 1;
+  const systemFlags = useMemo(
+    () => (booking && booker ? pendingFlags(booking, booker, guests) : []),
+    [booking, booker, guests],
+  );
+  const customPending = useMemo(
+    () =>
+      customSteps
+        .filter((step) => step.required && !customStepDone(step, customValues[step.id]))
+        .map((step) => ({ stepId: step.id, label: step.label })),
+    [customSteps, customValues],
+  );
+  const flags = useMemo(
+    () => [...systemFlags, ...customPending.map((flag) => flag.label)],
+    [systemFlags, customPending],
+  );
+  const completedGuests =
+    guests.filter(guestComplete).length + (booker && guestComplete(booker) ? 1 : 0);
   const ota = channelIsOta(booking?.channel);
+  const maxGuests = booking ? totalRoomCapacity(booking) : 1;
+  const remainingGuestSlots = booking ? Math.max(0, maxGuests - (guests.length + 1)) : 0;
+  const overCapacityBy = booking ? Math.max(0, guests.length + 1 - maxGuests) : 0;
+  const capacityReached = remainingGuestSlots === 0;
+
+  const updateBooker = (patch: Partial<GuestRegistrationDraft>) => {
+    setBooker((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
 
   const updateGuest = (index: number, patch: Partial<GuestDraft>) => {
     setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...g, ...patch } : g)));
   };
 
+  const updateCustomValue = (stepId: string, value: string | boolean) => {
+    setRequiredWarning(false);
+    setCustomValues((prev) => ({ ...prev, [stepId]: value }));
+  };
+
   const addGuest = () => {
+    if (capacityReached) return;
     setGuests((prev) => [
       ...prev,
       { position: prev.length + 1, roomPosition: prev[0]?.roomPosition ?? 0 },
     ]);
   };
 
+  const removeGuest = async (index: number) => {
+    if (!booking) return;
+    const draft = guests[index];
+    if (!draft) return;
+    if (guestHasData(draft)) {
+      const confirmed = window.confirm(
+        `Remove Guest ${index + 2}? Their registration data will be deleted.`,
+      );
+      if (!confirmed) return;
+    }
+    setRemovingGuest(`guest-${index}`);
+    setError("");
+    try {
+      if (draft.id) {
+        await bookingsService.deleteAdditionalGuest(booking.id, draft.id);
+      }
+      setGuests((prev) =>
+        prev
+          .filter((_, idx) => idx !== index)
+          .map((guest, idx) => ({ ...guest, position: guest.id ? guest.position : idx + 1 })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not remove guest");
+    } finally {
+      setRemovingGuest(null);
+    }
+  };
+
+  const saveNote = async () => {
+    if (!booking) return;
+    const body = noteDraft.trim();
+    if (!body) return;
+    setSavingNote(true);
+    setError("");
+    try {
+      const saved = await bookingsService.createNote(booking.id, body, "check-in");
+      setNotes((prev) => [saved, ...prev]);
+      setNoteDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save note");
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
   const saveGuest = async (index: number) => {
     if (!booking) return;
-    setSavingGuest(index);
+    setSavingGuest(`guest-${index}`);
     setError("");
     try {
       const draft = guests[index];
       const payload: BookingAdditionalGuestPayload = {
         firstName: draft.firstName || "",
         lastName: draft.lastName || "",
+        email: draft.email || "",
+        phone: draft.phone || "",
         gender: draft.gender || "",
         nationality: draft.nationality || "",
         dateOfBirth: draft.dateOfBirth || null,
@@ -191,6 +335,30 @@ export default function CheckInPage() {
       setGuests((prev) => prev.map((g, idx) => (idx === index ? { ...saved } : g)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save guest");
+    } finally {
+      setSavingGuest(null);
+    }
+  };
+
+  const saveBooker = async () => {
+    if (!booking || !booker) return;
+    setSavingGuest("booker");
+    setError("");
+    try {
+      const updated = await bookingsService.update(booking.id, {
+        guestFirstName: booker.firstName || "",
+        guestLastName: booker.lastName || "",
+        guestEmail: booker.email || "",
+        guestPhone: booker.phone || "",
+        guestCountry: booker.nationality || "",
+        guestGender: booker.gender || "",
+        guestDateOfBirth: booker.dateOfBirth || null,
+        guestPassportNumber: booker.passportNumber || "",
+      });
+      setBooking(updated);
+      setBooker(bookerDraftFromBooking(updated));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save booker");
     } finally {
       setSavingGuest(null);
     }
@@ -210,16 +378,83 @@ export default function CheckInPage() {
   };
 
   const completeCheckIn = async () => {
-    if (!booking || actionLoading) return;
+    if (!booking || !booker || actionLoading) return;
     const carriedFlags = [...flags];
+    if (customPending.length > 0 && !requiredWarning) {
+      setRequiredWarning(true);
+      return;
+    }
     setActionLoading("completeCheckIn");
     setError("");
     try {
-      if (bookerEditOpen && bookerDraftChanged(bookerDraft, booking)) {
-        const bookerUpdated = await bookingsService.update(booking.id, bookerDraft);
-        setBooking(bookerUpdated);
+      // Flush any unsaved guest drafts that have data
+      const flushResults = await Promise.allSettled(
+        guests.map(async (draft, index) => {
+          if (index >= additionalGuestCapacity(booking)) return draft;
+          if (!guestHasData(draft)) return draft;
+          const payload: BookingAdditionalGuestPayload = {
+            firstName: draft.firstName || "",
+            lastName: draft.lastName || "",
+            email: draft.email || "",
+            phone: draft.phone || "",
+            gender: draft.gender || "",
+            nationality: draft.nationality || "",
+            dateOfBirth: draft.dateOfBirth || null,
+            passportNumber: draft.passportNumber || "",
+            roomPosition: draft.roomPosition ?? 0,
+          };
+          const saved = draft.id
+            ? await bookingsService.updateAdditionalGuest(booking.id, draft.id, payload)
+            : await bookingsService.createAdditionalGuest(booking.id, payload);
+          return { ...draft, ...saved };
+        }),
+      );
+      const flushedGuests = guests.map((draft, index) => {
+        const result = flushResults[index];
+        return result.status === "fulfilled" ? result.value : draft;
+      });
+      setGuests(flushedGuests);
+
+      if (flushResults.some((result) => result.status === "rejected")) {
+        throw new Error("Some guest drafts could not be saved. Please retry.");
       }
-      const checkedIn = await bookingsService.completeCheckIn(booking.id, carriedFlags);
+
+      if (bookerDraftChanged(booker, booking)) {
+        const updated = await bookingsService.update(booking.id, {
+          guestFirstName: booker.firstName || "",
+          guestLastName: booker.lastName || "",
+          guestEmail: booker.email || "",
+          guestPhone: booker.phone || "",
+          guestCountry: booker.nationality || "",
+          guestGender: booker.gender || "",
+          guestDateOfBirth: booker.dateOfBirth || null,
+          guestPassportNumber: booker.passportNumber || "",
+        });
+        setBooking(updated);
+        setBooker(bookerDraftFromBooking(updated));
+      }
+      const completedAt = new Date().toISOString();
+      const systemFlagDetails: CheckinPendingFlag[] = systemFlags.map((label) => ({
+        stepId: `system-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+        label,
+      }));
+      const customResults: CheckinStepResult[] = customSteps.map((step) => {
+        const value = customValues[step.id];
+        const done = customStepDone(step, value);
+        return {
+          stepId: step.id,
+          label: step.label,
+          type: step.type,
+          value: customStepValueForRecord(step, value),
+          completedAt: done ? completedAt : null,
+        };
+      });
+      const checkedIn = await bookingsService.completeCheckIn(
+        booking.id,
+        carriedFlags,
+        customResults,
+        [...systemFlagDetails, ...customPending],
+      );
       setBooking(checkedIn);
       setConfirmationFlags(carriedFlags);
     } catch (err) {
@@ -233,7 +468,7 @@ export default function CheckInPage() {
     return <div className="p-4 md:p-6 text-sm text-gray-500">Loading check-in...</div>;
   }
 
-  if (!booking) {
+  if (!booking || !booker) {
     return (
       <div className="p-4 md:p-6">
         <p className="text-sm text-red-600">{error || "Booking not found."}</p>
@@ -316,10 +551,11 @@ export default function CheckInPage() {
           </p>
         )}
 
-        {guests.some((g) => !guestComplete(g)) && (
+        {completedGuests < totalGuests(booking) && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-            {guests.filter((g) => !guestComplete(g)).length} of {totalGuests(booking)} guests
-            missing passport / ID. Required for police registration. Check in now, complete later.
+            {totalGuests(booking) - completedGuests} of {totalGuests(booking)} guests missing
+            registration details / passport / ID. Required for police registration. Check in now,
+            complete later.
           </div>
         )}
 
@@ -346,160 +582,75 @@ export default function CheckInPage() {
               action={`${completedGuests} of ${guests.length + 1} complete`}
             >
               <div className="space-y-3">
-                <div className="rounded-xl border border-green-200 bg-green-50 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-gray-950">
-                        ✓{" "}
-                        {bookerEditOpen
-                          ? `${bookerDraft.guestFirstName} ${bookerDraft.guestLastName}`.trim() ||
-                            guestName(booking)
-                          : guestName(booking)}{" "}
-                        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-green-700">
-                          booker
-                        </span>
-                      </p>
-                      {!bookerEditOpen && (
-                        <p className="mt-1 text-sm text-gray-600">
-                          {booking.guestCountry || "Nationality on file"} · reservation profile
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!bookerEditOpen) {
-                          setBookerEditOpen(true);
-                        } else {
-                          setBookerDraft(bookerDraftFrom(booking));
-                          setBookerEditOpen(false);
-                        }
-                      }}
-                      className="text-sm font-semibold text-blue-600"
-                    >
-                      {bookerEditOpen ? "Cancel" : "Edit"}
-                    </button>
-                  </div>
-                  {bookerEditOpen && (
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <Field
-                        label="First name"
-                        value={bookerDraft.guestFirstName}
-                        disabled={ota && Boolean(booking.guestFirstName)}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestFirstName: v }))}
-                      />
-                      <Field
-                        label="Last name"
-                        value={bookerDraft.guestLastName}
-                        disabled={ota && Boolean(booking.guestLastName)}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestLastName: v }))}
-                      />
-                      <Field
-                        label="Email"
-                        type="email"
-                        value={bookerDraft.guestEmail}
-                        disabled={ota && Boolean(booking.guestEmail)}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestEmail: v }))}
-                      />
-                      <Field
-                        label="Phone"
-                        type="tel"
-                        value={bookerDraft.guestPhone}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestPhone: v }))}
-                      />
-                      <Field
-                        label="Nationality"
-                        value={bookerDraft.guestCountry}
-                        onChange={(v) => setBookerDraft((d) => ({ ...d, guestCountry: v }))}
-                      />
-                    </div>
-                  )}
+                <div
+                  className={`rounded-xl border p-3 text-sm ${
+                    overCapacityBy > 0
+                      ? "border-red-200 bg-red-50 text-red-800"
+                      : capacityReached
+                        ? "border-amber-200 bg-amber-50 text-amber-900"
+                        : "border-blue-200 bg-blue-50 text-blue-900"
+                  }`}
+                >
+                  {overCapacityBy > 0
+                    ? `Over capacity by ${overCapacityBy} guest${overCapacityBy === 1 ? "" : "s"}. Room capacity reached (${maxGuests} guests maximum).`
+                    : capacityReached
+                      ? `Room capacity reached (${maxGuests} guests maximum).`
+                      : `This booking allows ${remainingGuestSlots} additional guest${remainingGuestSlots === 1 ? "" : "s"}.`}
                 </div>
+                <GuestRegistrationCard
+                  title={guestName(booking) || "Booker"}
+                  badge="booker"
+                  guest={booker}
+                  complete={guestComplete(booker)}
+                  ota={ota}
+                  onChange={updateBooker}
+                  onSave={saveBooker}
+                  saving={savingGuest === "booker"}
+                  saveLabel="Save booker"
+                />
 
                 {guests.map((guest, index) => {
                   const complete = guestComplete(guest);
                   return (
-                    <div
+                    <GuestRegistrationCard
                       key={guest.id || `new-${index}`}
-                      className={`rounded-xl border p-4 ${complete ? "border-green-200 bg-green-50" : "border-amber-200 bg-white"}`}
-                    >
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-gray-950">
-                            {complete ? "✓" : "!"} Guest {index + 2}
-                          </p>
-                          <p
-                            className={`text-sm ${complete ? "text-green-700" : "text-amber-700"}`}
-                          >
-                            {complete ? "Registration complete" : "Missing passport / ID"}
-                          </p>
-                        </div>
-                        {ota && (
-                          <span className="text-xs font-medium text-gray-500">
-                            Imported fields locked where supplied
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <Field
-                          label="First name"
-                          value={guest.firstName || ""}
-                          disabled={ota && Boolean(guest.firstName)}
-                          onChange={(v) => updateGuest(index, { firstName: v })}
-                        />
-                        <Field
-                          label="Last name"
-                          value={guest.lastName || ""}
-                          disabled={ota && Boolean(guest.lastName)}
-                          onChange={(v) => updateGuest(index, { lastName: v })}
-                        />
-                        <SelectField
-                          label="Gender"
-                          value={guest.gender || ""}
-                          onChange={(v) => updateGuest(index, { gender: v })}
-                        />
-                        <Field
-                          label="Nationality"
-                          value={guest.nationality || ""}
-                          disabled={ota && Boolean(guest.nationality)}
-                          onChange={(v) => updateGuest(index, { nationality: v })}
-                        />
-                        <Field
-                          label="Date of birth"
-                          type="date"
-                          value={guest.dateOfBirth || ""}
-                          onChange={(v) => updateGuest(index, { dateOfBirth: v || null })}
-                        />
-                        <Field
-                          label="Passport / ID number"
-                          value={guest.passportNumber || ""}
-                          placeholder="needed for police report"
-                          onChange={(v) => updateGuest(index, { passportNumber: v })}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => saveGuest(index)}
-                        disabled={savingGuest === index}
-                        className={`${primaryActionClass} mt-3`}
-                      >
-                        {savingGuest === index ? "Saving..." : "Save guest"}
-                      </button>
-                    </div>
+                      title={`Guest ${index + 2}`}
+                      guest={guest}
+                      complete={complete}
+                      ota={ota}
+                      onChange={(patch) => updateGuest(index, patch)}
+                      onSave={() => saveGuest(index)}
+                      saving={savingGuest === `guest-${index}`}
+                      onRemove={() => removeGuest(index)}
+                      removing={removingGuest === `guest-${index}`}
+                    />
                   );
                 })}
 
                 <button
                   type="button"
                   onClick={addGuest}
-                  className="w-full rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700"
+                  disabled={capacityReached}
+                  className="w-full rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
                 >
-                  + Add guest
+                  {capacityReached
+                    ? `Room capacity reached (${maxGuests} guests maximum).`
+                    : "+ Add guest"}
                 </button>
               </div>
             </Card>
 
             <Card title="Payment on arrival">
+              {booking.depositRequired && (
+                <div className="mb-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm">
+                  <p className="font-semibold text-gray-900">
+                    Deposit: {formatCurrency(booking.depositAmount, booking.currency)}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {booking.paymentStatus === "captured" ? "Paid" : "Pending"} before arrival
+                  </p>
+                </div>
+              )}
               <div
                 className={`rounded-xl border p-4 ${isPaid(booking) ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}
               >
@@ -507,19 +658,70 @@ export default function CheckInPage() {
                   className={`font-semibold ${isPaid(booking) ? "text-green-800" : "text-amber-950"}`}
                 >
                   {isPaid(booking)
-                    ? "Paid at property"
-                    : `${formatCurrency(booking.totalAmount, booking.currency)} due at property. Pay at property.`}
+                    ? booking.paymentMethod === "paypal"
+                      ? "PayPal payment received"
+                      : "Paid at property"
+                    : booking.paymentMethod === "paypal"
+                      ? `${formatCurrency(booking.totalAmount, booking.currency)} awaiting PayPal payment.`
+                      : `${formatCurrency(
+                          booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
+                          booking.currency,
+                        )} due at property. Pay at property.`}
                 </p>
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={markPaid}
-                    disabled={actionLoading !== null}
-                    className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  >
-                    {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
-                  </button>
-                </div>
+                {(!booking.depositRequired || booking.balanceAmount > 0) && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={markPaid}
+                      disabled={actionLoading !== null}
+                      className="rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {actionLoading === "markPaid" ? "Marking..." : "Mark as paid"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Card title="Notes">
+              <div className="space-y-4">
+                {notes.length > 0 && (
+                  <div className="space-y-3">
+                    {notes.map((note) => (
+                      <div key={note.id} className="rounded-lg border border-gray-200 p-3">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                          <span className="font-medium text-gray-700">
+                            {note.authorName || "Unknown"}
+                          </span>
+                          <span>{formatDateTime(note.createdAt)}</span>
+                          {note.source === "check-in" && (
+                            <span className="rounded-full bg-blue-50 px-2 py-0.5 font-medium text-blue-700">
+                              Check-in
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1.5 whitespace-pre-wrap text-sm text-gray-900">
+                          {note.body}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <textarea
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                  placeholder="Add a note (visible on the reservation)."
+                  rows={3}
+                  className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-950 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                />
+                <button
+                  type="button"
+                  onClick={saveNote}
+                  disabled={savingNote || !noteDraft.trim()}
+                  className={primaryActionClass}
+                >
+                  {savingNote ? "Saving..." : "Save note"}
+                </button>
               </div>
             </Card>
           </div>
@@ -527,7 +729,7 @@ export default function CheckInPage() {
           <aside className="lg:sticky lg:top-6 lg:self-start">
             <Card title="Checklist">
               <div className="space-y-3">
-                <ChecklistItem done label="Booker registered" />
+                <ChecklistItem done={guestComplete(booker)} label="Booker ID" />
                 {guests.map((guest, idx) => (
                   <ChecklistItem
                     key={guest.id || idx}
@@ -537,13 +739,33 @@ export default function CheckInPage() {
                 ))}
                 <ChecklistItem
                   done={isPaid(booking)}
-                  label={`Payment ${formatCurrency(booking.totalAmount, booking.currency)}`}
+                  label={`Payment ${formatCurrency(
+                    booking.depositRequired && booking.balanceAmount > 0
+                      ? booking.balanceAmount
+                      : booking.totalAmount,
+                    booking.currency,
+                  )}`}
                 />
                 <ChecklistItem
                   done={Boolean(booking.assignedRooms?.length || booking.roomId)}
                   label={`Room · ${booking.roomName}`}
                 />
+                {customSteps.map((step) => (
+                  <CustomChecklistItem
+                    key={step.id}
+                    step={step}
+                    value={customValues[step.id]}
+                    currency={booking.currency}
+                    onChange={(value) => updateCustomValue(step.id, value)}
+                  />
+                ))}
               </div>
+              {requiredWarning && customPending.length > 0 && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  {customPending.length} required step{customPending.length === 1 ? "" : "s"}{" "}
+                  incomplete - you can still check in, but these will remain flagged on the booking.
+                </div>
+              )}
               <button
                 type="button"
                 onClick={completeCheckIn}
@@ -562,6 +784,134 @@ export default function CheckInPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function GuestRegistrationCard({
+  title,
+  badge,
+  guest,
+  complete,
+  ota,
+  onChange,
+  onSave,
+  saving,
+  onRemove,
+  removing,
+  saveLabel = "Save guest",
+}: {
+  title: string;
+  badge?: string;
+  guest: GuestRegistrationDraft;
+  complete: boolean;
+  ota: boolean;
+  onChange: (patch: Partial<GuestRegistrationDraft>) => void;
+  onSave: () => void;
+  saving: boolean;
+  onRemove?: () => void;
+  removing?: boolean;
+  saveLabel?: string;
+}) {
+  const contactLocked = (value: string | null | undefined) => ota && Boolean(value);
+
+  return (
+    <div
+      className={`rounded-xl border p-4 ${
+        complete ? "border-green-200 bg-green-50" : "border-amber-200 bg-white"
+      }`}
+    >
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-gray-950">
+            {complete ? "✓" : "!"} {title}{" "}
+            {badge && (
+              <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-green-700">
+                {badge}
+              </span>
+            )}
+          </p>
+          <p className={`text-sm ${complete ? "text-green-700" : "text-amber-700"}`}>
+            {complete ? "Registration complete" : "Missing passport / ID"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {ota && (
+            <span className="text-right text-xs font-medium text-gray-500">
+              Imported fields locked where supplied
+            </span>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              disabled={removing}
+              className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+            >
+              {removing ? "Removing..." : "Remove"}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field
+          label="First name"
+          value={guest.firstName || ""}
+          disabled={contactLocked(guest.firstName)}
+          onChange={(v) => onChange({ firstName: v })}
+        />
+        <Field
+          label="Last name"
+          value={guest.lastName || ""}
+          disabled={contactLocked(guest.lastName)}
+          onChange={(v) => onChange({ lastName: v })}
+        />
+        <Field
+          label="Email"
+          type="email"
+          value={guest.email || ""}
+          disabled={contactLocked(guest.email)}
+          onChange={(v) => onChange({ email: v })}
+        />
+        <Field
+          label="Phone"
+          type="tel"
+          value={guest.phone || ""}
+          disabled={contactLocked(guest.phone)}
+          onChange={(v) => onChange({ phone: v })}
+        />
+        <SelectField
+          label="Gender"
+          value={guest.gender || ""}
+          onChange={(v) => onChange({ gender: v })}
+        />
+        <Field
+          label="Nationality"
+          value={guest.nationality || ""}
+          disabled={contactLocked(guest.nationality)}
+          onChange={(v) => onChange({ nationality: v })}
+        />
+        <Field
+          label="Date of birth"
+          type="date"
+          value={guest.dateOfBirth || ""}
+          onChange={(v) => onChange({ dateOfBirth: v || null })}
+        />
+        <Field
+          label="Passport / ID number"
+          value={guest.passportNumber || ""}
+          placeholder="needed for police report"
+          onChange={(v) => onChange({ passportNumber: v })}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={saving}
+        className={`${primaryActionClass} mt-3`}
+      >
+        {saving ? "Saving..." : saveLabel}
+      </button>
+    </div>
   );
 }
 
@@ -665,6 +1015,95 @@ function ChecklistItem({ done, label }: { done: boolean; label: string }) {
         {done ? "✓" : "!"}
       </span>
       <span className="min-w-0 text-sm font-medium text-gray-800">{label}</span>
+    </div>
+  );
+}
+
+function CustomChecklistItem({
+  step,
+  value,
+  currency,
+  onChange,
+}: {
+  step: CheckinChecklistStep;
+  value: string | boolean | undefined;
+  currency: string;
+  onChange: (value: string | boolean) => void;
+}) {
+  const done = customStepDone(step, value);
+  const controlId = `checklist-${step.id}`;
+  const labelId = `checklist-label-${step.id}`;
+  const indicatorClass = done
+    ? "bg-green-100 text-green-700"
+    : step.required
+      ? "bg-red-100 text-red-700"
+      : "bg-gray-100 text-gray-500";
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <div className="flex items-start gap-3">
+        <span
+          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ${indicatorClass}`}
+        >
+          {done ? "✓" : step.required ? "!" : "•"}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span id={labelId} className="break-words text-sm font-medium text-gray-900">
+              {step.label}
+            </span>
+            {step.required && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+                required
+              </span>
+            )}
+          </div>
+
+          {step.type === "checkbox" && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+              <input
+                id={controlId}
+                type="checkbox"
+                checked={value === true}
+                onChange={(event) => onChange(event.target.checked)}
+                aria-labelledby={`${labelId} ${controlId}-suffix`}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              <span id={`${controlId}-suffix`}>Done</span>
+            </label>
+          )}
+
+          {step.type === "text" && (
+            <input
+              id={controlId}
+              value={typeof value === "string" ? value : ""}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder="Add note"
+              aria-labelledby={labelId}
+              className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm"
+            />
+          )}
+
+          {step.type === "amount" && (
+            <div className="mt-2 flex h-10 rounded-lg border border-gray-200 bg-white">
+              <span className="flex items-center border-r border-gray-200 px-3 text-xs font-semibold text-gray-500">
+                {currency}
+              </span>
+              <input
+                id={controlId}
+                type="number"
+                min="0"
+                step="0.01"
+                value={typeof value === "string" ? value : ""}
+                onChange={(event) => onChange(event.target.value)}
+                placeholder="0.00"
+                aria-labelledby={labelId}
+                className="min-w-0 flex-1 rounded-r-lg px-3 text-sm outline-none"
+              />
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -12,6 +12,7 @@ import GuestSelector from "@/components/booking/GuestSelector";
 import RoomDetailModal from "@/components/booking/RoomDetailModal";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomFiltersBar from "@/components/booking/RoomFiltersBar";
+import RoomMapPanel from "@/components/booking/RoomMapPanel";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -172,7 +173,11 @@ function HomePageContent() {
   const [selectedRates, setSelectedRates] = useState<Record<string, string | null>>({});
   const [detailModalIndex, setDetailModalIndex] = useState<number | null>(null);
   const [searching, setSearching] = useState(false);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
+  const [mobileResultView, setMobileResultView] = useState<"list" | "map">("list");
   const roomsSectionRef = useRef<HTMLDivElement>(null);
+  const roomRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Reset stale modal index if the underlying room list shrinks (e.g. after a refetch)
   useEffect(() => {
@@ -221,7 +226,7 @@ function HomePageContent() {
 
   // Filter rooms using filterRooms mapping (room ID based) with fallback to text matching
   const filteredRooms = (() => {
-    let result =
+    const result =
       activeFilters.length === 0
         ? [...rooms]
         : rooms.filter((room) =>
@@ -254,6 +259,16 @@ function HomePageContent() {
       prev.includes(filter) ? prev.filter((f) => f !== filter) : [...prev, filter],
     );
   };
+
+  const selectRoomFromMap = (roomId: string) => {
+    setActiveRoomId(roomId);
+    setMobileResultView("list");
+    requestAnimationFrame(() => {
+      roomRefs.current[roomId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  const mapViewEnabled = hotel.mapViewEnabled === true;
 
   return (
     <div className="min-h-screen bg-white overflow-x-hidden">
@@ -577,56 +592,114 @@ function HomePageContent() {
         />
 
         {/* Room Cards */}
-        <div className="space-y-6">
-          {roomsLoading
-            ? Array.from({ length: 3 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse"
-                >
-                  <div className="flex flex-col md:flex-row">
-                    <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
-                    <div className="flex-1 p-5 space-y-4">
-                      <div className="h-6 bg-gray-200 rounded w-48" />
-                      <div className="h-4 bg-gray-200 rounded w-32" />
-                      <div className="flex gap-2">
-                        <div className="h-8 bg-gray-200 rounded-full w-24" />
-                        <div className="h-8 bg-gray-200 rounded-full w-20" />
-                        <div className="h-8 bg-gray-200 rounded-full w-28" />
+        {mapViewEnabled && !roomsLoading && (
+          <div className="mb-5 flex rounded-full border border-gray-200 bg-gray-50 p-1 md:hidden">
+            {(["list", "map"] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => setMobileResultView(view)}
+                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold capitalize transition-colors ${
+                  mobileResultView === view
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-900"
+                }`}
+              >
+                {t(`mobileView.${view}`)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div
+          className={
+            mapViewEnabled && !roomsLoading
+              ? "grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_420px] gap-6"
+              : ""
+          }
+        >
+          <div
+            className={`space-y-6 ${
+              mapViewEnabled && mobileResultView === "map" ? "hidden md:block" : ""
+            } ${mapViewEnabled ? "md:max-h-[calc(100vh-120px)] md:overflow-y-auto md:pr-2" : ""}`}
+          >
+            {roomsLoading
+              ? Array.from({ length: 3 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="bg-white border border-gray-200 rounded-2xl overflow-hidden animate-pulse"
+                  >
+                    <div className="flex flex-col md:flex-row">
+                      <div className="w-full md:w-[420px] h-64 md:min-h-[320px] bg-gray-200" />
+                      <div className="flex-1 p-5 space-y-4">
+                        <div className="h-6 bg-gray-200 rounded w-48" />
+                        <div className="h-4 bg-gray-200 rounded w-32" />
+                        <div className="flex gap-2">
+                          <div className="h-8 bg-gray-200 rounded-full w-24" />
+                          <div className="h-8 bg-gray-200 rounded-full w-20" />
+                          <div className="h-8 bg-gray-200 rounded-full w-28" />
+                        </div>
+                        <div className="h-px bg-gray-100" />
+                        <div className="h-16 bg-gray-200 rounded-xl" />
+                        <div className="h-16 bg-gray-200 rounded-xl" />
                       </div>
-                      <div className="h-px bg-gray-100" />
-                      <div className="h-16 bg-gray-200 rounded-xl" />
-                      <div className="h-16 bg-gray-200 rounded-xl" />
                     </div>
                   </div>
-                </div>
-              ))
-            : filteredRooms.map((room, roomIndex) => (
-                <RoomCard
-                  key={room.id}
-                  room={room}
-                  nights={nights}
-                  totalGuests={committedAdults + committedChildren}
-                  imageIndex={imageIndices[room.id] ?? 0}
-                  checkIn={committedCheckIn}
-                  hotelTimezone={hotel.timezone}
-                  onChangeImageIndex={(i) => setImageIndices((prev) => ({ ...prev, [room.id]: i }))}
-                  selectedRate={
-                    (selectedRates[room.id] as "flexible" | "nonrefundable" | null) ?? null
-                  }
-                  onChangeSelectedRate={(next) =>
-                    setSelectedRates((prev) => ({ ...prev, [room.id]: next }))
-                  }
-                  onView={() => {
-                    trackEvent(slug, "viewed_room", { roomId: room.id });
-                    setDetailModalIndex(roomIndex);
-                  }}
-                  onSelectRate={(rateType, requiredRooms) => {
-                    const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
-                    router.push(hasAddons ? `/addons?${params}` : `/book?${params}`);
-                  }}
+                ))
+              : filteredRooms.map((room, roomIndex) => (
+                  <div
+                    key={room.id}
+                    ref={(node) => {
+                      roomRefs.current[room.id] = node;
+                    }}
+                  >
+                    <RoomCard
+                      room={room}
+                      nights={nights}
+                      totalGuests={committedAdults + committedChildren}
+                      imageIndex={imageIndices[room.id] ?? 0}
+                      checkIn={committedCheckIn}
+                      hotelTimezone={hotel.timezone}
+                      active={activeRoomId === room.id}
+                      highlighted={hoveredRoomId === room.id}
+                      onHover={(hovered) => setHoveredRoomId(hovered ? room.id : null)}
+                      onSelectCard={() => setActiveRoomId(room.id)}
+                      onChangeImageIndex={(i) =>
+                        setImageIndices((prev) => ({ ...prev, [room.id]: i }))
+                      }
+                      selectedRate={
+                        (selectedRates[room.id] as "flexible" | "nonrefundable" | null) ?? null
+                      }
+                      onChangeSelectedRate={(next) =>
+                        setSelectedRates((prev) => ({ ...prev, [room.id]: next }))
+                      }
+                      onView={() => {
+                        trackEvent(slug, "viewed_room", { roomId: room.id });
+                        setDetailModalIndex(roomIndex);
+                      }}
+                      onSelectRate={(rateType, requiredRooms) => {
+                        const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
+                        router.push(hasAddons ? `/addons?${params}` : `/book?${params}`);
+                      }}
+                    />
+                  </div>
+                ))}
+          </div>
+
+          {mapViewEnabled && !roomsLoading && (
+            <div className={mobileResultView === "list" ? "hidden md:block" : "block"}>
+              <div className="md:sticky md:top-28">
+                <RoomMapPanel
+                  rooms={filteredRooms}
+                  activeRoomId={activeRoomId}
+                  hoveredRoomId={hoveredRoomId}
+                  onHoverRoom={setHoveredRoomId}
+                  onSelectRoom={selectRoomFromMap}
+                  className="md:h-[calc(100vh-140px)]"
                 />
-              ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -662,6 +735,9 @@ function HomePageContent() {
               checkOutTime={hotel.checkOutTime}
               checkIn={committedCheckIn}
               hotelTimezone={hotel.timezone}
+              propertyName={hotel.name}
+              showLocationMap={hotel.showRoomDetailMap}
+              pointsOfInterest={hotel.pointsOfInterest || []}
               onSelectRate={(rateType) => {
                 if (modalSoldOut) return;
                 const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;

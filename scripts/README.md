@@ -2,6 +2,27 @@
 
 Helper scripts for the Vayada monorepo.
 
+## `dev-portless.sh`
+
+Start the local development stack with Docker databases/backends and portless
+frontends.
+
+```sh
+./scripts/dev-portless.sh
+# or
+npm run dev:portless
+```
+
+The script starts the Docker services needed by the FastAPI APIs in the
+background, registers the portless API aliases, then runs `portless` in the
+foreground for all Next.js apps.
+
+To stop the Docker backend services started by the script:
+
+```sh
+./scripts/dev-portless.sh --stop
+```
+
 ## `run_migration.sh`
 
 Run database migrations against the production AWS RDS instance for a given
@@ -28,7 +49,7 @@ default to `localhost` Postgres URLs; override via `DATABASE_URL`,
 | `seed_all.py`         | Runs the three above in order (`users → marketplace → booking`) and prints credentials at the end.                 |
 
 ```sh
-python scripts/seed_all.py
+npm run seed:test-data
 ```
 
 Default credentials after seeding:

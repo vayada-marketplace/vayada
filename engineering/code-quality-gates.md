@@ -12,6 +12,7 @@ How Vayada enforces formatting, linting, typecheck, and tests across the monorep
 | **Ruff**          | Lint + format for Python                        | `[tool.ruff]` in root `pyproject.toml`                   |
 | **pytest**        | Tests for Python apps                           | Per-app `pytest.ini`                                     |
 | **Next.js build** | Build-time type/import errors for frontend apps | Per-app `next.config`                                    |
+| **Playwright**    | Pilot browser smoke tests for selected apps     | `playwright.config.ts` + `tests/e2e/` at root            |
 
 There is no single "lint everything" command yet — see "Running checks" below for the per-tool commands.
 
@@ -37,9 +38,34 @@ npm run build           # all frontend workspaces
 
 # Tests (Python; per-app)
 cd apps/<app>-api && python -m pytest
+
+# Browser smoke tests (Playwright pilot; selected apps only)
+npm run e2e
+npm run e2e:landing
+npm run e2e:booking-web
 ```
 
 Ruff has to be installed once per machine: `pip install ruff`. Prettier and ESLint come from `npm install` at the repo root.
+Playwright browser binaries are installed on demand with `npx playwright install chromium`; CI installs Chromium for the pilot workflow.
+
+## Playwright pilot
+
+The Playwright suite is intentionally small while the workflow is being proven. It covers public landing smoke routes and a booking-web tenant-host smoke flow. It does **not** replace the required frontend build/lint/typecheck checks or backend pytest.
+
+Local defaults target portless:
+
+```bash
+npm run e2e:landing      # https://landing.localhost
+npm run e2e:booking-web  # https://hotel-alpenrose.booking.localhost
+```
+
+To let Playwright start plain-port dev servers:
+
+```bash
+E2E_START_SERVERS=1 npm run e2e
+```
+
+Use `npm run e2e:report` to inspect the HTML report after a run. See `tests/e2e/README.md` for URL overrides, booking tenant setup, trace behavior, and agent guidance.
 
 ## Strictness policy
 
@@ -73,6 +99,8 @@ When a deferred rule eventually graduates to enforced, it gets its own follow-up
 ## CI enforcement
 
 Currently the per-app GitHub Actions workflows run that app's own checks (typically `npm run build` for frontends and `pytest` for Python). There is **no** root-level "check everything" CI job — and that's intentional until VAY-458 lands pre-commit/pre-push hooks and ratchets baseline drift down.
+
+The separate `Playwright Pilot` workflow runs targeted Chromium smoke tests for the pilot surfaces and uploads reports/traces for PR debugging. Treat it as a focused pilot gate until the team decides to expand or require broader E2E coverage.
 
 When the baseline is clean enough to enforce globally, add a `.github/workflows/quality.yml` that runs:
 

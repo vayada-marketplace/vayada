@@ -85,7 +85,20 @@
     "freeWifi": "WiFi gratis",
     "airportTransfer": "Transfer bandara",
     "selectThisRate": "Pilih Tarif Ini",
-    "soldOut": "Habis Terjual"
+    "soldOut": "Habis Terjual",
+    "mobileView": {
+      "list": "Daftar",
+      "map": "Peta"
+    },
+    "roomMap": {
+      "noLocations": "Tidak ada lokasi tersedia",
+      "noLocationsDesc": "Tipe kamar tanpa koordinat yang disimpan masih muncul di daftar.",
+      "locations": "{count, plural, one {# lokasi} other {# lokasi}}",
+      "perNight": "/ malam",
+      "view": "Lihat →",
+      "zoomIn": "Perbesar",
+      "zoomOut": "Perkecil"
+    }
   },
   "rooms": {
     "title": "Kamar Kami",
@@ -196,8 +209,17 @@
     "bankTransferNote": "Transfer langsung ke rekening bank hotel",
     "nonRefundablePaymentHint": "Bayar di properti dan transfer bank tidak tersedia untuk tarif non-refundable.",
     "bankTransferExplanation": "Silakan transfer jumlah total ke rekening bank di bawah ini. Pemesanan Anda akan dikonfirmasi setelah hotel memverifikasi pembayaran.",
+    "paypalLabel": "Bayar dengan PayPal",
+    "paypalHelper": "Kirim pembayaran secara manual; properti akan mengonfirmasi setelah menerimanya.",
+    "paypalInstructions": "Kirim pembayaran ke email PayPal di bawah ini dan sertakan referensi pemesanan Anda di catatan PayPal setelah pemesanan dibuat. Pemesanan Anda akan dikonfirmasi setelah properti memverifikasi pembayaran, biasanya dalam {hours} jam.",
+    "paypalEmailLabel": "Email PayPal",
+    "amountLabel": "Jumlah",
+    "copy": "Salin",
+    "copied": "Disalin",
+    "copyEmail": "Salin email",
     "bankName": "Bank",
     "accountHolder": "Pemegang Rekening",
+    "accountNumber": "Nomor Rekening",
     "submitRequest": "Kirim Permintaan Pemesanan",
     "processing": "Memproses...",
     "confirmPayment": "Konfirmasi Pembayaran",

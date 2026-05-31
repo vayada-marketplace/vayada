@@ -430,24 +430,30 @@ function ChatPageContent() {
   };
 
   return (
-    <main className="min-h-screen bg-white flex flex-col">
+    <main className="flex min-h-screen flex-col bg-gray-50">
       <AuthenticatedNavigation />
 
       <div
-        className={`fixed top-16 bottom-0 left-0 right-0 flex transition-all duration-300 ${
-          isCollapsed ? "md:pl-16" : "md:pl-56"
-        } z-0`}
+        className={`fixed bottom-0 left-0 right-0 top-12 z-0 flex gap-3 p-3 transition-all duration-200 md:p-4 ${
+          isCollapsed ? "md:pl-[4.5rem]" : "md:pl-56"
+        }`}
       >
         {/* COLUMN 1: LEFT SIDEBAR */}
-        <div className="w-80 md:w-96 border-r border-gray-200 flex flex-col h-full bg-white flex-shrink-0">
+        <div className="flex h-full w-80 flex-shrink-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm md:w-96">
           {/* Search */}
-          <div className="p-4 border-b border-gray-100">
+          <div className="border-b border-gray-100 p-3">
+            <div className="mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Collaboration inbox
+              </p>
+              <h1 className="text-base font-semibold text-gray-950">Messages</h1>
+            </div>
             <div className="relative">
-              <MagnifyingGlassIcon className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+              <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
                 placeholder="Search..."
-                className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                className="h-10 w-full rounded-md border border-gray-200 bg-gray-50 pl-9 pr-3 text-sm focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
             </div>
           </div>
@@ -476,9 +482,9 @@ function ChatPageContent() {
         {selectedChatId && activeChat && activeCollaboration ? (
           <>
             {/* COLUMN 2: CHAT AREA */}
-            <div className="flex-1 flex flex-col h-full bg-white relative border-r border-gray-200">
+            <div className="relative flex h-full flex-1 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
               {/* Chat Header */}
-              <div className="h-[72px] border-b border-gray-100 flex items-center justify-between px-6 bg-white flex-shrink-0">
+              <div className="flex h-[64px] flex-shrink-0 items-center justify-between border-b border-gray-100 bg-white px-4">
                 <div className="flex items-center gap-3">
                   {activeChat.partner_avatar ? (
                     <img
@@ -493,21 +499,21 @@ function ChatPageContent() {
                   )}
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-gray-900 leading-none">
+                      <h3 className="text-base font-semibold leading-none text-gray-950">
                         {activeChat.partner_name}
                       </h3>
                       <span
-                        className={`text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded-full border border-current opacity-80 ${getStatusClasses(activeChat.collaboration_status)}`}
+                        className={`rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${getStatusClasses(activeChat.collaboration_status)}`}
                       >
                         {activeChat.collaboration_status}
                       </span>
                     </div>
                     {activeCollaboration.listingName && (
-                      <div className="flex items-center gap-1.5 py-0.5 px-2 bg-blue-50/50 border border-blue-100/50 rounded-lg w-fit">
+                      <div className="flex w-fit items-center gap-1.5 rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5">
                         <span className="text-[9px] font-black text-gray-400 uppercase tracking-tight">
                           {userType === "hotel" ? "Applied to:" : "Property:"}
                         </span>
-                        <span className="text-xs font-black text-blue-600 tracking-wide">
+                        <span className="text-xs font-semibold tracking-wide text-gray-700">
                           {activeCollaboration.listingName}
                         </span>
                       </div>
@@ -517,7 +523,7 @@ function ChatPageContent() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setDetailCollaboration(activeCollaboration)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                    className="flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
                   >
                     Details <ArrowTopRightOnSquareIcon className="w-3.5 h-3.5" />
                   </button>
@@ -592,7 +598,7 @@ function ChatPageContent() {
             />
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center bg-gray-50/50">
+          <div className="flex flex-1 items-center justify-center rounded-lg border border-gray-200 bg-white shadow-sm">
             <div className="text-center">
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <MagnifyingGlassIcon className="w-8 h-8 text-gray-300" />

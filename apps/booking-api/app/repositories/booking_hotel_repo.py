@@ -137,6 +137,9 @@ class BookingHotelRepository:
         pay_at_property_enabled: bool = _D["pay_at_property_enabled"],
         online_card_payment: bool = _D["online_card_payment"],
         bank_transfer: bool = _D["bank_transfer"],
+        paypal_enabled: bool = _D["paypal_enabled"],
+        paypal_email: str = "",
+        paypal_payment_window_hours: int = _D["paypal_payment_window_hours"],
         free_cancellation_days: int = _D["free_cancellation_days"],
         email_notifications: bool = _D["email_notifications"],
         new_booking_alerts: bool = _D["new_booking_alerts"],
@@ -147,6 +150,7 @@ class BookingHotelRepository:
         arrival_time_enabled: bool = _D["arrival_time_enabled"],
         guest_count_enabled: bool = _D["guest_count_enabled"],
         refer_a_guest_enabled: bool = _D["refer_a_guest_enabled"],
+        map_view_enabled: bool = _D["map_view_enabled"],
         social_instagram: str = "",
         social_facebook: str = "",
         social_tiktok: str = "",
@@ -157,6 +161,8 @@ class BookingHotelRepository:
         payout_account_number: str = "",
         payout_bank_name: str = "",
         payout_swift: str = "",
+        show_room_detail_map: bool = _D["show_room_detail_map"],
+        points_of_interest: list | None = None,
     ) -> dict:
         query = """
             INSERT INTO booking_hotels (
@@ -164,17 +170,22 @@ class BookingHotelRepository:
                 timezone, currency, default_language, supported_currencies, supported_languages, user_id,
                 check_in_time, check_out_time,
                 check_in_from, check_in_until, check_out_from, check_out_until,
-                pay_at_property_enabled, online_card_payment, bank_transfer, free_cancellation_days,
+                pay_at_property_enabled, online_card_payment, bank_transfer,
+                paypal_enabled, paypal_email, paypal_payment_window_hours,
+                free_cancellation_days,
                 email_notifications, new_booking_alerts, payment_alerts, ota_booking_alerts, weekly_reports,
                 special_requests_enabled, arrival_time_enabled, guest_count_enabled, refer_a_guest_enabled,
+                map_view_enabled,
                 social_instagram, social_facebook, social_tiktok, social_youtube,
                 payout_account_holder, payout_account_type, payout_iban, payout_account_number,
-                payout_bank_name, payout_swift
+                payout_bank_name, payout_swift, show_room_detail_map, points_of_interest
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12,
                 $13, $14, $15, $16, $17, $18,
-                $19, $20, $21, $22, $23, $24, $25, $26, $27,
-                $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41
+                $19, $20, $21, $22, $23, $24,
+                $25, $26, $27, $28, $29, $30,
+                $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44,
+                $45, $46, $47::jsonb
             ) RETURNING *
         """
         row = await Database.fetchrow(
@@ -200,6 +211,9 @@ class BookingHotelRepository:
             pay_at_property_enabled,
             online_card_payment,
             bank_transfer,
+            paypal_enabled,
+            paypal_email,
+            paypal_payment_window_hours,
             free_cancellation_days,
             email_notifications,
             new_booking_alerts,
@@ -210,6 +224,7 @@ class BookingHotelRepository:
             arrival_time_enabled,
             guest_count_enabled,
             refer_a_guest_enabled,
+            map_view_enabled,
             social_instagram,
             social_facebook,
             social_tiktok,
@@ -220,6 +235,8 @@ class BookingHotelRepository:
             payout_account_number,
             payout_bank_name,
             payout_swift,
+            show_room_detail_map,
+            json.dumps(points_of_interest or []),
         )
         return dict(row)
 
@@ -239,6 +256,7 @@ class BookingHotelRepository:
             "filter_rooms",
             "pay_at_hotel_methods",
             "benefits",
+            "points_of_interest",
         )
         for col, val in updates.items():
             if col in json_columns:

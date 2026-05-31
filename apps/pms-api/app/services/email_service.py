@@ -73,13 +73,24 @@ def _booking_details_html(booking: dict) -> str:
     # not a bare singular, so the guest/host see how many rooms are booked.
     rooms = int(booking.get("number_of_rooms") or 1)
     accommodation = f"{rooms}× {booking['room_name']}" if rooms > 1 else booking["room_name"]
+    deposit_html = ""
+    if booking.get("deposit_required"):
+        deposit_status = (
+            "Deposit paid"
+            if booking.get("payment_status") in ("captured", "refunded", "partially_refunded")
+            else "Deposit pending"
+        )
+        deposit_html = f"""
+    <p class="detail"><strong>{deposit_status}:</strong> {booking["currency"]} {float(booking.get("deposit_amount", 0)):.2f}</p>
+    <p class="detail"><strong>Remaining balance:</strong> {booking["currency"]} {float(booking.get("balance_amount", 0)):.2f} — due at the property upon check-in</p>
+    """
     return f"""
     <p class="detail"><strong>Reference:</strong> {booking["booking_reference"]}</p>
     <p class="detail"><strong>Accommodation:</strong> {accommodation}</p>
     <p class="detail"><strong>Check-in:</strong> {booking["check_in"]}</p>
     <p class="detail"><strong>Check-out:</strong> {booking["check_out"]}</p>
     <p class="detail"><strong>Guests:</strong> {booking["adults"]} adults, {booking["children"]} children</p>{addons_html}
-    <p class="detail"><strong>Total:</strong> {booking["currency"]} {booking["total_amount"]}</p>
+    <p class="detail"><strong>Total:</strong> {booking["currency"]} {booking["total_amount"]}</p>{deposit_html}
     """
 
 
@@ -161,6 +172,7 @@ _PAYMENT_LABELS = {
     "card": "Card (authorization hold)",
     "pay_at_property": "Pay at property",
     "bank_transfer": "Bank transfer",
+    "paypal": "PayPal",
     "xendit": "Online payment (Xendit)",
 }
 
@@ -292,6 +304,42 @@ def _booking_request_reply_to(booking: dict) -> str:
     return settings.VAYADA_OPS_EMAIL
 
 
+def _bank_transfer_details_html(booking: dict) -> str:
+    details = booking.get("bank_details") or {}
+    if booking.get("payment_method") != "bank_transfer" or not details:
+        return ""
+
+    from html import escape
+
+    account_type = details.get("payout_account_type") or details.get("account_type") or "iban"
+    account_label = "Account Number" if account_type == "account_number" else "IBAN"
+    if account_type == "account_number":
+        account_value = details.get("payout_account_number") or details.get("account_number")
+    else:
+        account_value = details.get("payout_iban") or details.get("iban")
+    rows = [
+        ("Bank", details.get("payout_bank_name") or details.get("bank_name")),
+        ("Account Holder", details.get("payout_account_holder") or details.get("account_holder")),
+        (account_label, account_value),
+        ("BIC/SWIFT", details.get("payout_swift") or details.get("swift")),
+    ]
+    rows_html = "\n".join(
+        f'<p class="detail"><strong>{label}:</strong> {escape(str(value).strip())}</p>'
+        for label, value in rows
+        if str(value or "").strip()
+    )
+    if not rows_html:
+        return ""
+    reference = escape(str(booking.get("booking_reference") or ""))
+    amount = escape(f"{booking.get('currency', '')} {float(booking.get('total_amount') or 0):.2f}")
+    return f"""
+    <h3>Bank Transfer Details</h3>
+    <p class="detail">Please include your booking reference <strong>{reference}</strong> with the transfer.</p>
+    <p class="detail"><strong>Amount:</strong> {amount}</p>
+    {rows_html}
+    """
+
+
 async def send_booking_request_notification(hotel_email: str, booking: dict):
     """Notify host of new booking request with Accept/Reject actions."""
     subject, html_body = _render_request_status_email(booking, "pending")
@@ -301,11 +349,36 @@ async def send_booking_request_notification(hotel_email: str, booking: dict):
 
 async def send_guest_booking_requested(guest_email: str, booking: dict):
     """Confirm to guest that their booking request has been submitted."""
+    if booking.get("payment_method") == "paypal":
+        deadline = booking.get("host_response_deadline")
+        paypal_email = booking.get("paypal_email") or ""
+        deadline_html = (
+            f'<p class="detail"><strong>Payment deadline:</strong> {deadline}</p>'
+            if deadline
+            else ""
+        )
+        subject = f"Action needed: complete your PayPal payment for booking {booking['booking_reference']}"
+        content = f"""
+        <h2>PayPal Payment Pending</h2>
+        <p class="detail">Your booking at <strong>{booking["hotel_name"]}</strong> is not confirmed yet.</p>
+        {f'<p class="detail"><strong>Send payment to:</strong> {paypal_email}</p>' if paypal_email else ""}
+        <p class="detail">Please send the total amount by PayPal and include your booking reference in the PayPal note so the property can match it.</p>
+        <hr class="divider">
+        {_booking_details_html(booking)}
+        {deadline_html}
+        <hr class="divider">
+        <p class="detail">The property will confirm your booking once they verify the payment. If payment is not received by the deadline, the booking will be cancelled automatically.</p>
+        {_my_booking_button_html(booking, guest_email)}
+        """
+        await _send_email(guest_email, subject, _wrap_html(content))
+        return
+
     subject = f"Booking Request Submitted — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Submitted</h2>
     <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
     <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
+    {_bank_transfer_details_html(booking)}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">

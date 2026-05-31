@@ -7,7 +7,7 @@ import { STORAGE_KEYS } from "@/lib/constants";
 
 /**
  * List of allowed emails for testing purposes (e.g., cofounder)
- * Add emails here to grant access even if user is not admin
+ * Add emails here to grant access even if user is not superadmin
  */
 const ALLOWED_TEST_EMAILS: string[] = [
   // Add cofounder or other test emails here
@@ -18,7 +18,7 @@ const ALLOWED_TEST_EMAILS: string[] = [
  * Check if the current user has access to restricted features (marketplace, collaborations)
  *
  * Access is granted if:
- * - User type is 'admin'
+ * - User has is_superadmin=true
  * - User email is in the ALLOWED_TEST_EMAILS list
  *
  * @returns true if user has access, false otherwise
@@ -26,11 +26,10 @@ const ALLOWED_TEST_EMAILS: string[] = [
 export function hasRestrictedFeatureAccess(): boolean {
   if (typeof window === "undefined") return false;
 
-  const userType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
+  const isSuperAdmin = localStorage.getItem(STORAGE_KEYS.IS_SUPERADMIN) === "true";
   const userEmail = localStorage.getItem(STORAGE_KEYS.USER_EMAIL);
 
-  // Admin users always have access
-  if (userType === "admin") {
+  if (isSuperAdmin) {
     return true;
   }
 

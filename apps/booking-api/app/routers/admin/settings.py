@@ -1,4 +1,5 @@
 import logging
+import re
 import secrets
 from datetime import date
 from typing import Any
@@ -10,6 +11,7 @@ from app.dependencies import get_current_hotel, require_hotel_admin
 from app.models.settings import (
     PropertySettingsResponse,
     PropertySettingsUpdate,
+    SettingsPointOfInterest,
     hotel_default,
 )
 from app.models.utils import parse_json, slugify
@@ -51,6 +53,9 @@ _PROPERTY_FIELD_MAP = {
     "pay_at_hotel_methods": "pay_at_hotel_methods",
     "online_card_payment": "online_card_payment",
     "bank_transfer": "bank_transfer",
+    "paypal_enabled": "paypal_enabled",
+    "paypal_email": "paypal_email",
+    "paypal_payment_window_hours": "paypal_payment_window_hours",
     "free_cancellation_days": "free_cancellation_days",
     "email_notifications": "email_notifications",
     "new_booking_alerts": "new_booking_alerts",
@@ -76,8 +81,11 @@ _PROPERTY_FIELD_MAP = {
     "payout_bank_name": "payout_bank_name",
     "payout_swift": "payout_swift",
     "refer_a_guest_enabled": "refer_a_guest_enabled",
+    "map_view_enabled": "map_view_enabled",
     "terms_text": "terms_text",
     "cancellation_policy_text": "cancellation_policy_text",
+    "show_room_detail_map": "show_room_detail_map",
+    "points_of_interest": "points_of_interest",
 }
 
 
@@ -132,6 +140,9 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         ),
         online_card_payment=_coalesce(hotel, "online_card_payment"),
         bank_transfer=_coalesce(hotel, "bank_transfer"),
+        paypal_enabled=_coalesce(hotel, "paypal_enabled"),
+        paypal_email=_coalesce(hotel, "paypal_email"),
+        paypal_payment_window_hours=_coalesce(hotel, "paypal_payment_window_hours"),
         free_cancellation_days=_coalesce(hotel, "free_cancellation_days"),
         email_notifications=_coalesce(hotel, "email_notifications"),
         new_booking_alerts=_coalesce(hotel, "new_booking_alerts"),
@@ -139,6 +150,7 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         ota_booking_alerts=_coalesce(hotel, "ota_booking_alerts"),
         weekly_reports=_coalesce(hotel, "weekly_reports"),
         refer_a_guest_enabled=_coalesce(hotel, "refer_a_guest_enabled"),
+        map_view_enabled=_coalesce(hotel, "map_view_enabled"),
         special_requests_enabled=_coalesce(hotel, "special_requests_enabled"),
         arrival_time_enabled=_coalesce(hotel, "arrival_time_enabled"),
         guest_count_enabled=_coalesce(hotel, "guest_count_enabled"),
@@ -169,6 +181,10 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         payout_swift=_coalesce(hotel, "payout_swift"),
         terms_text=_coalesce(hotel, "terms_text"),
         cancellation_policy_text=_coalesce(hotel, "cancellation_policy_text"),
+        show_room_detail_map=_coalesce(hotel, "show_room_detail_map"),
+        points_of_interest=parse_json(
+            hotel.get("points_of_interest"), default=hotel_default("points_of_interest")
+        ),
     )
 
 
@@ -198,6 +214,12 @@ def _api_to_db_value(api_value, db_column: str):
     if api_value is not None:
         return api_value
     return hotel_default(db_column)
+
+
+def _serialize_points_of_interest(
+    points: list[SettingsPointOfInterest] | None,
+) -> list[dict[str, Any]]:
+    return [point.model_dump() for point in (points or [])]
 
 
 async def _resolve_unique_slug(
@@ -240,6 +262,15 @@ async def _create_hotel_from_settings(
     (multi-hotel-safe) and the legacy auto-create branch in
     PATCH /admin/settings/property.
     """
+    _validate_paypal_settings(
+        enabled=data.paypal_enabled if data.paypal_enabled is not None else False,
+        email=data.paypal_email or "",
+        window_hours=(
+            data.paypal_payment_window_hours
+            if data.paypal_payment_window_hours is not None
+            else hotel_default("paypal_payment_window_hours")
+        ),
+    )
     name = data.property_name or ""
     create_kwargs = dict(
         name=name,
@@ -264,6 +295,11 @@ async def _create_hotel_from_settings(
         ),
         online_card_payment=_api_to_db_value(data.online_card_payment, "online_card_payment"),
         bank_transfer=_api_to_db_value(data.bank_transfer, "bank_transfer"),
+        paypal_enabled=_api_to_db_value(data.paypal_enabled, "paypal_enabled"),
+        paypal_email=data.paypal_email or "",
+        paypal_payment_window_hours=_api_to_db_value(
+            data.paypal_payment_window_hours, "paypal_payment_window_hours"
+        ),
         free_cancellation_days=_api_to_db_value(
             data.free_cancellation_days, "free_cancellation_days"
         ),
@@ -278,6 +314,7 @@ async def _create_hotel_from_settings(
         arrival_time_enabled=_api_to_db_value(data.arrival_time_enabled, "arrival_time_enabled"),
         guest_count_enabled=_api_to_db_value(data.guest_count_enabled, "guest_count_enabled"),
         refer_a_guest_enabled=_api_to_db_value(data.refer_a_guest_enabled, "refer_a_guest_enabled"),
+        map_view_enabled=_api_to_db_value(data.map_view_enabled, "map_view_enabled"),
         social_instagram=data.instagram or "",
         social_facebook=data.facebook or "",
         social_tiktok=data.tiktok or "",
@@ -288,6 +325,10 @@ async def _create_hotel_from_settings(
         payout_account_number=data.payout_account_number or "",
         payout_bank_name=data.payout_bank_name or "",
         payout_swift=data.payout_swift or "",
+        show_room_detail_map=_api_to_db_value(data.show_room_detail_map, "show_room_detail_map"),
+        points_of_interest=_serialize_points_of_interest(
+            _api_to_db_value(data.points_of_interest, "points_of_interest")
+        ),
     )
     slug = await _resolve_unique_slug(name, user_id)
     try:
@@ -331,7 +372,7 @@ async def get_hotel_deletion_impact(
         if e.status_code in (403, 404):
             return {"upcomingBookingsCount": 0, "connectedChannelsCount": 0}
         logger.error("Failed to fetch deletion impact for hotel %s: %s", hotel_id, e)
-        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact")
+        raise HTTPException(status_code=502, detail="Failed to fetch deletion impact") from e
 
 
 @router.delete("/hotels/{hotel_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -354,7 +395,7 @@ async def delete_hotel(
         raise HTTPException(
             status_code=502,
             detail="Failed to delete the property's PMS data. Please retry.",
-        )
+        ) from e
 
     deleted = await BookingHotelRepository.delete(hotel_id)
     if not deleted:
@@ -382,10 +423,6 @@ async def create_hotel(
     the caller can then pass that id to the PMS register-hotel
     endpoint and to X-Hotel-Id headers going forward.
 
-    The superadmin variant (POST /admin/superadmin/hotels) deliberately
-    differs in slug-collision handling — it appends a user-id suffix
-    rather than 409ing — because superadmin creates hotels on behalf of
-    users who can't pick a different name interactively.
     """
     result = await _create_hotel_from_settings(data, user_id)
     return await _hotel_to_property_settings(result)
@@ -402,7 +439,18 @@ async def update_property_settings(
         for api_field, db_col in _PROPERTY_FIELD_MAP.items():
             value = getattr(data, api_field)
             if value is not None:
+                if api_field == "points_of_interest":
+                    value = _serialize_points_of_interest(value)
                 updates[db_col] = value
+
+        _validate_paypal_settings(
+            enabled=updates.get("paypal_enabled", hotel.get("paypal_enabled", False)),
+            email=updates.get("paypal_email", hotel.get("paypal_email") or ""),
+            window_hours=updates.get(
+                "paypal_payment_window_hours",
+                hotel.get("paypal_payment_window_hours") or 24,
+            ),
+        )
 
         schedule_pending_plan_switch(updates, date.today())
 
@@ -421,7 +469,7 @@ async def update_property_settings(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="A property with this name or slug already exists. Please choose a different value.",
-                )
+                ) from None
         else:
             result = await BookingHotelRepository.get_by_id(str(hotel["id"]))
     else:
@@ -432,6 +480,24 @@ async def update_property_settings(
         result = await _create_hotel_from_settings(data, user_id)
 
     return await _hotel_to_property_settings(result)
+
+
+def _validate_paypal_settings(
+    *,
+    enabled: bool,
+    email: str,
+    window_hours: int,
+) -> None:
+    if window_hours < 1 or window_hours > 168:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="PayPal payment window must be between 1 and 168 hours",
+        )
+    if enabled and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A valid PayPal email is required when PayPal is enabled",
+        )
 
 
 async def _maybe_rotate_slug_on_rename(

@@ -42,6 +42,22 @@ class ResolveDomainResponse(BaseModel):
     slug: str
 
 
+def _bank_details_complete(hotel: dict) -> bool:
+    account_type = hotel.get("payout_account_type") or "iban"
+    account_identifier = (
+        hotel.get("payout_account_number")
+        if account_type == "account_number"
+        else hotel.get("payout_iban")
+    )
+    required = [
+        hotel.get("payout_bank_name"),
+        hotel.get("payout_account_holder"),
+        account_identifier,
+        hotel.get("payout_swift"),
+    ]
+    return all(bool(str(value or "").strip()) for value in required)
+
+
 @router.get("/{slug}", response_model=HotelResponse)
 async def get_hotel(slug: str, lang: str = "en"):
     hotel = await get_hotel_by_slug(slug, locale=lang)
@@ -69,7 +85,8 @@ async def get_payment_settings(slug: str):
     hotel = await BookingHotelRepository.get_by_slug(slug)
     if not hotel:
         raise HTTPException(status_code=404, detail=f"Hotel '{slug}' not found")
-    bank_transfer = bool(hotel.get("bank_transfer", False))
+    bank_transfer = bool(hotel.get("bank_transfer", False)) and _bank_details_complete(hotel)
+    paypal_enabled = bool(hotel.get("paypal_enabled", False))
     return PaymentSettingsResponse(
         pay_at_property_enabled=hotel.get("pay_at_property_enabled", False),
         pay_at_hotel_methods=parse_json(
@@ -77,6 +94,11 @@ async def get_payment_settings(slug: str):
         ),
         online_card_payment=hotel.get("online_card_payment", False),
         bank_transfer=bank_transfer,
+        paypal_enabled=paypal_enabled,
+        paypal_email=(hotel.get("paypal_email") or "") if paypal_enabled else "",
+        paypal_payment_window_hours=(
+            (hotel.get("paypal_payment_window_hours") or 24) if paypal_enabled else 24
+        ),
         free_cancellation_days=hotel.get("free_cancellation_days", 7),
         special_requests_enabled=hotel.get("special_requests_enabled", True),
         arrival_time_enabled=hotel.get("arrival_time_enabled", False),
