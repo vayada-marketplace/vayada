@@ -25,8 +25,8 @@ so the history is legible.
 ## Phase 0 — enumerate open PRs
 
 ```bash
-gh pr list --json number,title,headRefName,mergeable,isDraft,labels \
-  --jq '.[] | select(.isDraft == false and ([.labels[].name] | index("WIP") == null)) | {number, title, headRefName, mergeable}'
+gh pr list --json number,title,headRefName,mergeable,isDraft,labels,statusCheckRollup \
+  --jq '.[] | select((.isDraft | not) and ([.labels[].name] | index("WIP") | not)) | {number, title, headRefName, mergeable}'
 ```
 
 Skip PRs that are draft or have a `WIP` label — leave those untouched.
