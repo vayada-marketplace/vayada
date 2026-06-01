@@ -523,6 +523,8 @@
   "channels.syncAri": "Sync Availability & Rates",
   "channels.syncing": "Syncing...",
   "channels.ariSyncStarted": "Availability & rates sync started",
+  "channels.ariSyncWarningTitle": "Availability sync needs attention",
+  "channels.retryAriSync": "Retry sync",
   "channels.syncBookings": "Sync Bookings",
   "channels.bookingSyncComplete": "Booking sync complete",
   "channels.failedToSyncBookings": "Failed to sync bookings",

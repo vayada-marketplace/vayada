@@ -534,6 +534,8 @@
   "channels.syncAvailability": "Verfuegbarkeit synchronisieren",
   "channels.syncing": "Synchronisieren...",
   "channels.availabilitySyncStarted": "Verfuegbarkeitssynchronisierung gestartet",
+  "channels.ariSyncWarningTitle": "Verfuegbarkeitssync braucht Aufmerksamkeit",
+  "channels.retryAriSync": "Sync erneut versuchen",
   "channels.syncBookings": "Buchungen synchronisieren",
   "channels.bookingSyncComplete": "Buchungssynchronisierung abgeschlossen",
   "channels.failedToSyncBookings": "Buchungssynchronisierung fehlgeschlagen",

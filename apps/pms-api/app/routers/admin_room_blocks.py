@@ -10,7 +10,7 @@ from app.models.room_block import RoomBlockCreate, RoomBlockResponse, RoomBlockU
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.services.channex_sync_service import push_availability_for_room_type
+from app.services.channex_sync_service import push_ari_for_room_type
 from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
@@ -131,9 +131,9 @@ async def create_room_block(
         )
         created.append(block)
 
-    # Push updated availability to Channex (once for the whole range)
+    # Push updated availability + rate-plan restrictions to Channex (once for the whole range).
     asyncio.create_task(
-        push_availability_for_room_type(
+        push_ari_for_room_type(
             hotel_id,
             data.room_type_id,
             start_date=data.start_date,
@@ -213,11 +213,11 @@ async def update_room_block(
         room_row = await RoomRepository.get_by_id(str(updated["room_id"]))
         room_number = room_row["room_number"] if room_row else None
 
-    # Push updated availability to Channex — cover union of old and new date ranges
+    # Push updated availability + rate-plan restrictions to Channex — cover union of old and new date ranges.
     sync_start = min(block["start_date"], new_start)
     sync_end = max(block["end_date"], new_end)
     asyncio.create_task(
-        push_availability_for_room_type(
+        push_ari_for_room_type(
             hotel_id,
             str(block["room_type_id"]),
             start_date=sync_start,
@@ -249,9 +249,9 @@ async def delete_room_block(
         raise HTTPException(status_code=404, detail="Room block not found")
     await RoomBlockRepository.delete(block_id)
 
-    # Push updated availability to Channex
+    # Push updated availability + rate-plan restrictions to Channex.
     asyncio.create_task(
-        push_availability_for_room_type(
+        push_ari_for_room_type(
             hotel_id,
             str(block["room_type_id"]),
             start_date=block["start_date"],

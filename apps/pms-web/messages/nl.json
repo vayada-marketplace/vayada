@@ -534,6 +534,8 @@
   "channels.syncAvailability": "Beschikbaarheid synchroniseren",
   "channels.syncing": "Synchroniseren...",
   "channels.availabilitySyncStarted": "Beschikbaarheidssynchronisatie gestart",
+  "channels.ariSyncWarningTitle": "Beschikbaarheidssynchronisatie vraagt aandacht",
+  "channels.retryAriSync": "Synchronisatie opnieuw proberen",
   "channels.syncBookings": "Boekingen synchroniseren",
   "channels.bookingSyncComplete": "Boekingensynchronisatie voltooid",
   "channels.failedToSyncBookings": "Boekingensynchronisatie mislukt",

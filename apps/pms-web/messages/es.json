@@ -538,6 +538,8 @@
   "channels.syncAvailability": "Sincronizar disponibilidad",
   "channels.syncing": "Sincronizando...",
   "channels.availabilitySyncStarted": "Sincronizacion de disponibilidad iniciada",
+  "channels.ariSyncWarningTitle": "La sincronizacion de disponibilidad requiere atencion",
+  "channels.retryAriSync": "Reintentar sincronizacion",
   "channels.syncBookings": "Sincronizar reservas",
   "channels.bookingSyncComplete": "Sincronizacion de reservas completada",
   "channels.failedToSyncBookings": "Error al sincronizar reservas",

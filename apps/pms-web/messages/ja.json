@@ -534,6 +534,8 @@
   "channels.syncAvailability": "空室状況を同期",
   "channels.syncing": "同期中...",
   "channels.availabilitySyncStarted": "空室状況の同期が開始されました",
+  "channels.ariSyncWarningTitle": "空室状況の同期に対応が必要です",
+  "channels.retryAriSync": "同期を再試行",
   "channels.syncBookings": "予約を同期",
   "channels.bookingSyncComplete": "予約の同期が完了しました",
   "channels.failedToSyncBookings": "予約の同期に失敗しました",

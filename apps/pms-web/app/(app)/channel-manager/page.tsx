@@ -8,9 +8,18 @@ import {
   ChannexRatePlanMapping,
   ChannelMarkup,
 } from "@/services/channex";
-import { ArrowPathIcon, CheckCircleIcon, LinkIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowPathIcon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
+  LinkIcon,
+} from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
 import ConfirmDialog from "@/components/ConfirmDialog";
+
+function getErrorMessage(err: unknown, fallback: string) {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 export default function ChannelManagerPage() {
   const { t } = useTranslation();
@@ -99,8 +108,8 @@ export default function ChannelManagerPage() {
       await channexService.updateMarkups(payload);
       setSuccess(t("channels.pricingSaved"));
       await loadStatus();
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToSavePricing"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToSavePricing")));
     } finally {
       setSavingMarkups(false);
     }
@@ -117,8 +126,8 @@ export default function ChannelManagerPage() {
           : `${t("channels.enabled")} (${result.roomsCreated} rooms, ${result.ratesCreated} rates)`,
       );
       await loadStatus();
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToEnable"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToEnable")));
     } finally {
       setEnabling(false);
     }
@@ -135,8 +144,8 @@ export default function ChannelManagerPage() {
       setRateMappings([]);
       setIframeUrl(null);
       setSuccess(t("channels.disabled"));
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToDisable"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToDisable")));
     } finally {
       setDisabling(false);
     }
@@ -149,8 +158,8 @@ export default function ChannelManagerPage() {
       await channexService.syncAri();
       setSuccess(t("channels.ariSyncStarted"));
       await loadStatus();
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToStartSync"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToStartSync")));
     } finally {
       setSyncingAri(false);
     }
@@ -163,8 +172,8 @@ export default function ChannelManagerPage() {
       await channexService.syncBookings();
       setSuccess(t("channels.bookingSyncComplete"));
       await loadStatus();
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToSyncBookings"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToSyncBookings")));
     } finally {
       setSyncingBookings(false);
     }
@@ -177,8 +186,8 @@ export default function ChannelManagerPage() {
       await channexService.installMessagingApp();
       setSuccess(t("channels.messagingAppInstalledSuccess"));
       await loadStatus();
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToInstallMessagingApp"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToInstallMessagingApp")));
     } finally {
       setInstallingMessagingApp(false);
     }
@@ -190,8 +199,8 @@ export default function ChannelManagerPage() {
     try {
       const { iframe_url: url } = await channexService.getIframeUrl();
       setIframeUrl(url);
-    } catch (err: any) {
-      setError(err.message || t("channels.failedToLoadIframe"));
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, t("channels.failedToLoadIframe")));
     } finally {
       setLoadingIframe(false);
     }
@@ -302,6 +311,30 @@ export default function ChannelManagerPage() {
                   </p>
                 )}
               </div>
+              {status.lastAriSyncError && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                  <div className="flex gap-2 text-sm text-amber-800">
+                    <ExclamationTriangleIcon className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium">{t("channels.ariSyncWarningTitle")}</p>
+                      <p className="mt-0.5">
+                        {status.lastAriSyncError}
+                        {status.lastAriSyncFailedAt
+                          ? ` (${new Date(status.lastAriSyncFailedAt).toLocaleString()})`
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSyncAri}
+                    disabled={syncingAri}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors whitespace-nowrap"
+                  >
+                    <ArrowPathIcon className={`w-3.5 h-3.5 ${syncingAri ? "animate-spin" : ""}`} />
+                    {syncingAri ? t("channels.syncing") : t("channels.retryAriSync")}
+                  </button>
+                </div>
+              )}
               {status.messagingAppInstalled ? (
                 <p className="mt-3 text-sm text-gray-600 flex items-center gap-1.5">
                   <CheckCircleIcon className="w-4 h-4 text-green-600" />

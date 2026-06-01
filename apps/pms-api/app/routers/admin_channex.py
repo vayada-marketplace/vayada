@@ -92,13 +92,13 @@ async def channex_enable(
         raise HTTPException(
             status_code=502,
             detail=f"Channel manager couldn't be set up: {e.summary}",
-        )
+        ) from e
     except ValueError as e:
         # Pre-flight validation failed — actionable for the hotel admin.
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Failed to provision Channex for hotel %s", hotel_id)
-        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}") from e
 
     return {
         "status": "enabled",
@@ -136,6 +136,8 @@ async def channex_status(
 
     last_booking = conn.get("last_booking_sync_at")
     last_ari = conn.get("last_ari_sync_at")
+    last_ari_error = conn.get("last_ari_sync_error")
+    last_ari_failed = conn.get("last_ari_sync_failed_at")
     prop_id = conn.get("channex_property_id")
 
     return ChannexSyncStatusResponse(
@@ -145,6 +147,8 @@ async def channex_status(
         rate_plans_provisioned=len(rate_mappings),
         last_booking_sync_at=last_booking.isoformat() if last_booking else None,
         last_ari_sync_at=last_ari.isoformat() if last_ari else None,
+        last_ari_sync_error=last_ari_error,
+        last_ari_sync_failed_at=last_ari_failed.isoformat() if last_ari_failed else None,
         messaging_app_installed=bool(conn.get("messaging_app_installed")),
     )
 
@@ -170,12 +174,12 @@ async def channex_provision(
         raise HTTPException(
             status_code=502,
             detail=f"Channel manager couldn't be re-provisioned: {e.summary}",
-        )
+        ) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Failed to provision Channex for hotel %s", hotel_id)
-        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}") from e
 
     return result
 
@@ -363,12 +367,12 @@ async def channex_update_markups(
         raise HTTPException(
             status_code=502,
             detail=f"Channel manager couldn't be updated: {e.summary}",
-        )
+        ) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Failed to provision per-channel rate plans for hotel %s", hotel_id)
-        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Provisioning failed: {e}") from e
 
     asyncio.create_task(push_ari_for_hotel(hotel_id))
 
@@ -409,7 +413,7 @@ async def channex_iframe_url(
         url = channex_service.build_iframe_url(token, property_id)
     except Exception as e:
         logger.exception("Failed to generate Channex iframe URL")
-        raise HTTPException(status_code=502, detail=f"Failed to generate iframe URL: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to generate iframe URL: {e}") from e
 
     return {"iframe_url": url}
 
@@ -475,7 +479,7 @@ async def channex_messaging_install(
         await ChannexConnectionRepository.set_messaging_app_installed(hotel_id, True)
     except Exception as e:
         logger.warning("Failed to install messaging app for hotel %s: %s", hotel_id, e)
-        raise HTTPException(status_code=502, detail=f"Failed to install messaging app: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to install messaging app: {e}") from e
     return {"status": "installed"}
 
 
@@ -531,7 +535,7 @@ async def channex_webhook_setup(
     try:
         existing = await channex_service.list_webhooks(api_key)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to list webhooks: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to list webhooks: {e}") from e
 
     match = None
     for w in existing:
@@ -554,7 +558,7 @@ async def channex_webhook_setup(
                 },
             )
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Failed to update webhook: {e}")
+            raise HTTPException(status_code=502, detail=f"Failed to update webhook: {e}") from e
         return {"status": "updated", "webhook_id": updated.get("id", match["id"])}
 
     try:
@@ -566,5 +570,5 @@ async def channex_webhook_setup(
             headers=headers,
         )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to create webhook: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to create webhook: {e}") from e
     return {"status": "created", "webhook_id": created.get("id")}
