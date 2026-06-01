@@ -146,6 +146,24 @@ def _split_amount(
     return nightly_rate, total_amount
 
 
+def _max_stay_warning(room_type: dict, check_in: date, check_out: date) -> str | None:
+    nights = (check_out - check_in).days
+    seasons = RoomTypeRepository._parse_seasons(room_type)
+    max_stay = RoomTypeRepository._find_stay_max_stay(seasons, check_in, check_out)
+    if max_stay and nights > max_stay:
+        return (
+            f"Exceeds max stay restriction: {nights} nights selected, "
+            f"maximum is {max_stay} nights for the selected dates."
+        )
+    return None
+
+
+def _append_import_warning(notes: str, warning: str | None) -> str:
+    if not warning:
+        return notes
+    return f"{notes}\n\n{warning}" if notes else warning
+
+
 async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     """Import a Channex booking revision into vayada.
     Handles deduplication, new bookings, modifications, and cancellations.
@@ -248,6 +266,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
         adults = occupancy.get("adults", 1) or 1
         children = occupancy.get("children", 0) or 0
 
+        warning = _max_stay_warning(room_type, check_in, check_out)
         booking_data = {
             "hotel_id": hotel_id,
             "room_type_id": room_type_id,
@@ -255,7 +274,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
             "guest_last_name": last_name,
             "guest_email": guest_email,
             "guest_phone": guest_phone,
-            "special_requests": attrs.get("notes", "") or "",
+            "special_requests": _append_import_warning(attrs.get("notes", "") or "", warning),
             "check_in": check_in,
             "check_out": check_out,
             "adults": adults,

@@ -114,10 +114,14 @@ async def get_rooms_for_guest(
         total = room["total_rooms"]
         if check_in and check_out:
             stay_open = is_stay_sellable(check_in, check_out, room, calendar_settings)
+            seasons = RoomTypeRepository._parse_seasons(room)
+            max_stay = RoomTypeRepository._find_stay_max_stay(seasons, check_in, check_out)
+            nights = (check_out - check_in).days
             if (
                 same_day_closed
                 or not RoomTypeRepository.is_date_in_operating_periods(room, check_in)
                 or not stay_open
+                or (max_stay is not None and nights > max_stay)
             ):
                 remaining = 0
             else:

@@ -185,11 +185,14 @@ def _build_restriction_entry(
         or not is_date_auto_open(calendar_settings, check_date)
         or float(base_rate) <= 0
     )
+    seasons = RoomTypeRepository._parse_seasons(room_type)
+    season_min_stay = RoomTypeRepository._find_season_min_stay(seasons, check_date)
+    season_max_stay = RoomTypeRepository._find_season_max_stay(seasons, check_date)
 
     return {
         "rate": rate,
-        "min_stay_arrival": room_type.get("min_stay", 1) or 1,
-        "max_stay": room_type.get("max_stay", 0) or 0,
+        "min_stay_arrival": season_min_stay or room_type.get("min_stay", 1) or 1,
+        "max_stay": season_max_stay or room_type.get("max_stay", 0) or 0,
         "stop_sell": stop_sell,
         "closed_to_arrival": bool(room_type.get("closed_to_arrival", False)),
         "closed_to_departure": bool(room_type.get("closed_to_departure", False)),
@@ -223,9 +226,8 @@ def _restriction_to_value(
         "date_to": date_to.isoformat(),
         "rate": str(restr["rate"]),
         "min_stay_arrival": restr["min_stay_arrival"],
+        "max_stay": restr["max_stay"],
     }
-    if restr["max_stay"] > 0:
-        entry["max_stay"] = restr["max_stay"]
     if restr["stop_sell"]:
         entry["stop_sell"] = 1
     if restr["closed_to_arrival"]:

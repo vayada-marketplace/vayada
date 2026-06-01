@@ -273,12 +273,22 @@ async def create_admin_booking(
 
     # Get room type for pricing
     room_type = await RoomTypeRepository.get_by_id(str(room["room_type_id"]))
+    nights = (data.check_out - data.check_in).days
+    seasons = RoomTypeRepository._parse_seasons(room_type)
+    max_stay = RoomTypeRepository._find_stay_max_stay(seasons, data.check_in, data.check_out)
+    if max_stay and nights > max_stay:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This room has a maximum stay of {max_stay} nights for the selected dates. "
+                "Please shorten your stay."
+            ),
+        )
     if data.nightly_rate is not None:
         nightly_rate = data.nightly_rate
     else:
         resolved_base, _ = RoomTypeRepository.resolve_rate(room_type, data.check_in)
         nightly_rate = resolved_base
-    nights = (data.check_out - data.check_in).days
     hotel_slug = await Database.fetchval("SELECT slug FROM hotels WHERE id = $1", hotel_id)
     addon_ids, addon_quantities = await _normalize_addon_selection(
         slug=hotel_slug,
