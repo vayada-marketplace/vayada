@@ -515,8 +515,11 @@ async def _apply_booking_modification(
         if occupancy.get("children") is not None:
             updates["children"] = occupancy["children"]
 
-        if notes is not None:
-            updates["special_requests"] = _append_import_warning(notes, warning)
+        if notes is not None or warning:
+            base_notes = notes if notes is not None else (booking.get("special_requests") or "")
+            merged_notes = _append_import_warning(base_notes, warning)
+            if merged_notes:
+                updates["special_requests"] = merged_notes
 
         if updates:
             await _apply_updates(booking_id, updates)
