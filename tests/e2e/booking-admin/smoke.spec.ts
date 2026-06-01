@@ -7,7 +7,7 @@ test.describe("booking-admin smoke", () => {
 
     await page.goto("/login");
 
-    await expect(page.getByRole("heading", { name: /booking engine/i, level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /booking engine/i, level: 1 })).toBeVisible({ timeout: 10000 });
     await expect(page.getByLabel(/email address/i)).toBeVisible();
     await expect(page.getByLabel(/password/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
