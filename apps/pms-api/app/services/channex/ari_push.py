@@ -31,19 +31,19 @@ async def push_availability_for_room_type(
     room_type_id: str,
     start_date: date | None = None,
     end_date: date | None = None,
-) -> None:
+) -> bool:
     """Calculate and push availability for a room type to Channex."""
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"] or not conn.get("channex_property_id"):
-        return
+        return True
 
     room_mapping = await ChannexRoomTypeMappingRepository.get_by_room_type_id(room_type_id)
     if not room_mapping:
-        return
+        return True
 
     room_type = await RoomTypeRepository.get_by_id(room_type_id)
     if not room_type:
-        return
+        return True
 
     if start_date is None:
         start_date = date.today()
@@ -102,7 +102,7 @@ async def push_availability_for_room_type(
         )
 
     if not values:
-        return
+        return True
 
     try:
         await channex_service.push_availability(api_key, values)
@@ -111,12 +111,14 @@ async def push_availability_for_room_type(
             room_type_id,
             len(values),
         )
-    except Exception as e:
+        return True
+    except Exception:
         logger.error(
-            "Failed to push availability for room type %s: %s",
+            "Failed to push availability for room type %s",
             room_type_id,
-            e,
+            exc_info=True,
         )
+        return False
 
 
 # ── Restrictions (rates + rules) ─────────────────────────────────────
@@ -223,15 +225,11 @@ def _restriction_to_value(
         "date_to": date_to.isoformat(),
         "rate": str(restr["rate"]),
         "min_stay_arrival": restr["min_stay_arrival"],
+        "stop_sell": 1 if restr["stop_sell"] else 0,
+        "closed_to_arrival": 1 if restr["closed_to_arrival"] else 0,
+        "closed_to_departure": 1 if restr["closed_to_departure"] else 0,
     }
-    if restr["max_stay"] > 0:
-        entry["max_stay"] = restr["max_stay"]
-    if restr["stop_sell"]:
-        entry["stop_sell"] = 1
-    if restr["closed_to_arrival"]:
-        entry["closed_to_arrival"] = 1
-    if restr["closed_to_departure"]:
-        entry["closed_to_departure"] = 1
+    entry["max_stay"] = restr["max_stay"]
     return entry
 
 
@@ -245,15 +243,15 @@ async def push_restrictions_for_rate_plan(
     start_date: date | None = None,
     end_date: date | None = None,
     meal_plan_code: int = 0,
-) -> None:
+) -> bool:
     """Calculate and push rates + restrictions for a single rate plan to Channex."""
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"] or not conn.get("channex_property_id"):
-        return
+        return True
 
     room_type = await RoomTypeRepository.get_by_id(room_type_id)
     if not room_type:
-        return
+        return True
     calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
 
     if start_date is None:
@@ -311,7 +309,7 @@ async def push_restrictions_for_rate_plan(
         )
 
     if not values:
-        return
+        return True
 
     # VAY-349: structured payload log so we can verify exactly what leaves
     # our system per (date_from..date_to, channel, plan, meal, markup) →
@@ -341,12 +339,14 @@ async def push_restrictions_for_rate_plan(
             channex_rate_plan_id,
             len(values),
         )
-    except Exception as e:
+        return True
+    except Exception:
         logger.error(
-            "Failed to push restrictions for room type %s: %s",
+            "Failed to push restrictions for room type %s",
             room_type_id,
-            e,
+            exc_info=True,
         )
+        return False
 
 
 # ── Cancellation policy ──────────────────────────────────────────────
