@@ -1,6 +1,9 @@
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+MODULE_ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
 def to_camel(string: str) -> str:
@@ -35,8 +38,6 @@ class ModuleActivationUpdate(BaseModel):
     @field_validator("module_id")
     @classmethod
     def validate_module_id(cls, value: str) -> str:
-        if not value.replace("-", "").isalnum() or value.startswith("-") or value.endswith("-"):
-            raise ValueError("moduleId must be kebab-case")
-        if "--" in value or value.lower() != value:
+        if not MODULE_ID_PATTERN.fullmatch(value):
             raise ValueError("moduleId must be kebab-case")
         return value

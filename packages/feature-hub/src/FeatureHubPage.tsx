@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
   BoltIcon,
@@ -280,29 +280,37 @@ function ModuleCard({
 }) {
   return (
     <article
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") onOpen();
-      }}
       className={cx(
-        "group min-h-[190px] cursor-pointer rounded-md border bg-white p-4 shadow-sm outline-none transition",
+        "group relative min-h-[190px] rounded-md border bg-white p-4 shadow-sm transition",
         isActive
           ? "border-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]"
           : "border-stone-200 hover:border-stone-400",
       )}
     >
-      <div className="mb-4 flex items-start justify-between gap-3">
+      <button
+        type="button"
+        aria-label={`View ${module.name} details`}
+        onClick={onOpen}
+        onKeyDown={(event) => {
+          if (event.key === " ") {
+            event.preventDefault();
+            onOpen();
+          }
+        }}
+        className="absolute inset-0 z-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+      />
+      <div className="pointer-events-none relative z-10 mb-4 flex items-start justify-between gap-3">
         <ModuleIcon module={module} active={isActive} />
-        <ToggleSwitch
-          checked={isActive}
-          disabled={saving}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(checked) => onToggle(checked)}
-        />
+        <div className="pointer-events-auto">
+          <ToggleSwitch
+            checked={isActive}
+            disabled={saving}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(checked) => onToggle(checked)}
+          />
+        </div>
       </div>
-      <div className="min-w-0">
+      <div className="pointer-events-none relative z-10 min-w-0">
         <div className="flex min-h-6 items-center gap-2">
           <h2 className="truncate text-base font-semibold text-gray-950">{module.name}</h2>
           {module.isNew && (
@@ -313,7 +321,7 @@ function ModuleCard({
         </div>
         <p className="mt-1 line-clamp-2 text-sm leading-5 text-stone-600">{module.description}</p>
       </div>
-      <div className="mt-4 flex flex-wrap gap-1.5">
+      <div className="pointer-events-none relative z-10 mt-4 flex flex-wrap gap-1.5">
         <span className="rounded-md bg-stone-100 px-2 py-1 text-xs font-medium text-stone-700">
           {module.category}
         </span>
@@ -374,12 +382,16 @@ function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean
             : "border-stone-200 bg-stone-50 text-stone-700",
         )}
       >
-        <BrandMark id={module.id} />
+        <BrandMark id={module.icon} />
       </div>
     );
   }
-  const Icon =
-    module.id === "financials" ? ChartGlyph : module.id === "affiliates" ? UsersGlyph : ChatGlyph;
+  const icons = {
+    chart: ChartGlyph,
+    chat: ChatGlyph,
+    users: UsersGlyph,
+  };
+  const Icon = icons[module.icon as keyof typeof icons] || ChatGlyph;
   return (
     <div
       className={cx(
@@ -480,6 +492,25 @@ function DetailModal({
   onClose: () => void;
   onToggle: (isActive: boolean) => void;
 }) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const titleId = `feature-hub-detail-${module.id}`;
+
+  useEffect(() => {
+    const previousActiveElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previousActiveElement?.focus();
+    };
+  }, [onClose]);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/35 backdrop-blur-sm sm:items-center sm:p-4"
@@ -487,12 +518,19 @@ function DetailModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-md bg-white shadow-2xl sm:max-h-[92vh] sm:max-w-3xl sm:rounded-md">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-md bg-white shadow-2xl sm:max-h-[92vh] sm:max-w-3xl sm:rounded-md"
+      >
         <div className="flex items-start gap-3 border-b border-stone-200 px-4 py-4 sm:px-5">
           <ModuleIcon module={module} active={isActive} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-semibold text-gray-950">{module.name}</h2>
+              <h2 id={titleId} className="text-xl font-semibold text-gray-950">
+                {module.name}
+              </h2>
               {module.isNew && (
                 <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
                   NEW
@@ -511,6 +549,7 @@ function DetailModal({
             </div>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close"

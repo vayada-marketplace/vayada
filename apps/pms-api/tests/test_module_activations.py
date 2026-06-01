@@ -76,6 +76,13 @@ class TestModuleActivations:
         assert resp.json()["activeModules"] == []
         assert resp.json()["activations"][0]["moduleId"] == "inbox"
 
+    async def test_rejects_non_ascii_kebab_case_module_id(self, client, hotel_user):
+        await create_test_hotel(str(hotel_user["id"]))
+
+        resp = await _patch(client, hotel_user["token"], "Bad_Module", True)
+
+        assert resp.status_code == 422
+
     async def test_activation_state_is_scoped_by_selected_hotel_header(
         self,
         client,

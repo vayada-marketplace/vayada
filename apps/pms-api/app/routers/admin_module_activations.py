@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Path
 
 from app.dependencies import require_hotel_admin
 from app.models.module_activation import (
@@ -35,8 +35,13 @@ async def list_module_activations(user_id: str = Depends(require_hotel_admin)):
 
 @router.patch("/module-activations/{module_id}", response_model=ModuleActivation)
 async def update_module_activation(
-    module_id: str,
     data: ModuleActivationUpdate,
+    module_id: str = Path(
+        ...,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$",
+    ),
     user_id: str = Depends(require_hotel_admin),
 ):
     hotel_id = await get_hotel_id(user_id)

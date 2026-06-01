@@ -27,12 +27,10 @@ function readCached(hotelId?: string): string[] {
 
 function publish(activeModuleIds: string[], hotelId?: string) {
   if (typeof window === "undefined") return;
+  const detail = { activeModuleIds, hotelId: hotelId || selectedHotelId() || "default" };
   window.localStorage.setItem(storageKey(hotelId), JSON.stringify(activeModuleIds));
-  window.dispatchEvent(
-    new CustomEvent(EVENT_NAME, {
-      detail: { activeModuleIds, hotelId: hotelId || selectedHotelId() || "default" },
-    }),
-  );
+  window.localStorage.setItem(EVENT_NAME, JSON.stringify(detail));
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail }));
 }
 
 export function useFeatureModuleActivations(client: FeatureActivationClient) {
@@ -78,16 +76,35 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
   }, [refresh]);
 
   useEffect(() => {
-    const onChange = (event: Event) => {
-      const detail = (event as CustomEvent).detail as
-        | { activeModuleIds?: string[]; hotelId?: string }
-        | undefined;
-      if (!detail?.activeModuleIds) return;
-      if (detail.hotelId && hotelId && detail.hotelId !== hotelId) return;
-      setActiveModuleIds(detail.activeModuleIds);
+    const applyDetail = (
+      detail: { activeModuleIds?: unknown; hotelId?: string } | null | undefined,
+    ) => {
+      const activeModuleIds = detail?.activeModuleIds;
+      if (!Array.isArray(activeModuleIds)) return;
+      if (!activeModuleIds.every((id): id is string => typeof id === "string")) return;
+      const detailHotelId = detail?.hotelId;
+      if (detailHotelId && hotelId && detailHotelId !== hotelId) return;
+      setActiveModuleIds(activeModuleIds);
     };
+
+    const onChange = (event: Event) => {
+      applyDetail((event as CustomEvent).detail);
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== EVENT_NAME || !event.newValue) return;
+      try {
+        applyDetail(JSON.parse(event.newValue));
+      } catch {
+        // Ignore malformed cross-tab notifications.
+      }
+    };
+
     window.addEventListener(EVENT_NAME, onChange);
-    return () => window.removeEventListener(EVENT_NAME, onChange);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener(EVENT_NAME, onChange);
+      window.removeEventListener("storage", onStorage);
+    };
   }, [hotelId]);
 
   const setModuleActive = useCallback(

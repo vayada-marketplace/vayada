@@ -307,7 +307,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   )}
                 >
                   <BoltIcon className="h-3.5 w-3.5 shrink-0" />
-                  <span>Feature Hub</span>
+                  <span>{t("layout.sidebar.featureHub")}</span>
                 </Link>
               )}
             </Fragment>
