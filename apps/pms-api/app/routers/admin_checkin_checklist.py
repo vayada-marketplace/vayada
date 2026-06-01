@@ -1,9 +1,15 @@
 import json
+from copy import deepcopy
 
 from fastapi import APIRouter, Depends
 
 from app.dependencies import require_hotel_admin
-from app.models.checkin import ChecklistStep, ChecklistTemplateResponse, ChecklistTemplateUpdate
+from app.models.checkin import (
+    DEFAULT_CHECKIN_CHECKLIST_STEPS,
+    ChecklistStep,
+    ChecklistTemplateResponse,
+    ChecklistTemplateUpdate,
+)
 from app.repositories.checkin_checklist_repo import CheckinChecklistRepository
 from app.utils import get_hotel_id
 
@@ -19,6 +25,12 @@ def _parse_steps(value) -> list[dict]:
 
 
 def _template_response(row: dict | None) -> ChecklistTemplateResponse:
+    if row is None:
+        steps = [
+            ChecklistStep.model_validate({**step, "position": idx})
+            for idx, step in enumerate(deepcopy(DEFAULT_CHECKIN_CHECKLIST_STEPS))
+        ]
+        return ChecklistTemplateResponse(steps=steps)
     if not row:
         return ChecklistTemplateResponse(steps=[])
     steps = [
