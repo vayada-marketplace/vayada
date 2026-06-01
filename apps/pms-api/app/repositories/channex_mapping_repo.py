@@ -91,11 +91,29 @@ class ChannexConnectionRepository:
         await Database.execute(
             """
             UPDATE channex_connections
-            SET last_ari_sync_at = $2, updated_at = now()
+            SET last_ari_sync_at = $2,
+                last_ari_sync_error = NULL,
+                last_ari_sync_failed_at = NULL,
+                updated_at = now()
             WHERE hotel_id = $1
             """,
             hotel_id,
             synced_at,
+        )
+
+    @staticmethod
+    async def record_ari_sync_error(hotel_id: str, error: str, failed_at: datetime) -> None:
+        await Database.execute(
+            """
+            UPDATE channex_connections
+            SET last_ari_sync_error = $2,
+                last_ari_sync_failed_at = $3,
+                updated_at = now()
+            WHERE hotel_id = $1
+            """,
+            hotel_id,
+            error[:1000],
+            failed_at,
         )
 
     @staticmethod

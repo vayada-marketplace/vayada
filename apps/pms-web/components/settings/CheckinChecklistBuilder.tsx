@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeftIcon,
+  ArrowPathIcon,
   Bars3Icon,
   CheckCircleIcon,
+  EyeIcon,
   PlusIcon,
   TrashIcon,
 } from "@heroicons/react/24/outline";
@@ -17,24 +19,39 @@ import {
 
 const DRAFT_STORAGE_KEY = "vayada:pms:checkin-checklist-preview";
 
-export const SYSTEM_CHECKLIST_STEPS: CheckinChecklistStep[] = [
+export const DEFAULT_CHECKIN_CHECKLIST_STEPS: CheckinChecklistStep[] = [
   {
-    id: "system-booker-id",
-    label: "Booker ID / passport",
+    id: "default-verify-guest-ids",
+    label: "Verify guest IDs / passports",
+    prompt: "Confirm passport or ID details are captured for every guest.",
     type: "checkbox",
     required: true,
-    system: true,
+    system: false,
     position: 0,
   },
   {
-    id: "system-payment",
-    label: "Payment collected",
-    type: "amount",
+    id: "default-confirm-payment-status",
+    label: "Confirm payment / deposit status",
+    prompt: "Confirm the deposit, balance, or pay-at-property status before handover.",
+    type: "checkbox",
     required: true,
-    system: true,
+    system: false,
     position: 1,
   },
+  {
+    id: "default-room-access",
+    label: "Assign room & hand over keys/access",
+    prompt: "Make sure the guest has their room assignment and access instructions.",
+    type: "checkbox",
+    required: true,
+    system: false,
+    position: 2,
+  },
 ];
+
+function defaultSteps(): CheckinChecklistStep[] {
+  return DEFAULT_CHECKIN_CHECKLIST_STEPS.map((step, position) => ({ ...step, position }));
+}
 
 function newStep(position: number): CheckinChecklistStep {
   const id =
@@ -50,33 +67,7 @@ function typeLabel(type: CheckinChecklistStepType) {
   return "☑ Checkbox";
 }
 
-export function checklistPreviewSteps(customSteps: CheckinChecklistStep[]) {
-  return [
-    SYSTEM_CHECKLIST_STEPS[0],
-    {
-      id: "system-additional-guests",
-      label: "Guest 2+ ID / passport (generated per booking)",
-      type: "checkbox" as const,
-      required: true,
-      system: true,
-      position: 1,
-    },
-    { ...SYSTEM_CHECKLIST_STEPS[1], position: 2 },
-    {
-      id: "system-room",
-      label: "Room assignment",
-      type: "checkbox" as const,
-      required: true,
-      system: true,
-      position: 3,
-    },
-    ...customSteps.map((step, idx) => ({ ...step, position: idx + 4 })),
-  ];
-}
-
 export function CheckinChecklistPreview({ steps }: { steps: CheckinChecklistStep[] }) {
-  const previewSteps = checklistPreviewSteps(steps);
-
   return (
     <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
       <div className="border-b border-gray-100 px-4 py-3">
@@ -85,16 +76,19 @@ export function CheckinChecklistPreview({ steps }: { steps: CheckinChecklistStep
         </p>
       </div>
       <div className="max-h-[520px] space-y-2 overflow-y-auto p-4">
-        {previewSteps.map((step) => (
+        {steps.length === 0 && (
+          <div className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500">
+            No check-in steps configured.
+          </div>
+        )}
+        {steps.map((step) => (
           <div key={step.id} className="rounded-lg border border-gray-200 bg-white p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="break-words text-sm font-semibold text-gray-950">
                   {step.label.trim() || "(unnamed step)"}
                 </p>
-                {step.prompt && (
-                  <p className="mt-0.5 text-xs text-gray-500">{step.prompt}</p>
-                )}
+                {step.prompt && <p className="mt-0.5 text-xs text-gray-500">{step.prompt}</p>}
               </div>
               <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">
                 {step.required ? "Required" : "Optional"}
@@ -104,11 +98,6 @@ export function CheckinChecklistPreview({ steps }: { steps: CheckinChecklistStep
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
                 {typeLabel(step.type)}
               </span>
-              {step.system && (
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                  system
-                </span>
-              )}
             </div>
           </div>
         ))}
@@ -162,6 +151,15 @@ export function CheckinChecklistBuilder() {
     setSteps((prev) => [...prev, step]);
   };
 
+  const restoreDefaultSteps = () => {
+    setSuccess("");
+    setError("");
+    setErrors({});
+    const restored = defaultSteps();
+    nextFocusId.current = restored[0]?.id ?? null;
+    setSteps(restored);
+  };
+
   const removeStep = (id: string) => {
     setSuccess("");
     setSteps((prev) => prev.filter((step) => step.id !== id));
@@ -199,6 +197,10 @@ export function CheckinChecklistBuilder() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openPreview = () => {
+    sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(normalizedSteps));
   };
 
   if (loading) {
@@ -240,7 +242,7 @@ export function CheckinChecklistBuilder() {
           <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-100 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Custom check-in steps
+                Check-in steps
               </p>
               <p className="mt-1 text-xs text-gray-500">
                 Required steps warn staff if skipped. No steps block check-in.
@@ -256,7 +258,6 @@ export function CheckinChecklistBuilder() {
               {normalizedSteps.map((step, index) => {
                 const previousStep = normalizedSteps[index - 1];
                 const nextStep = normalizedSteps[index + 1];
-                const hasPrompt = step.type === "text" || step.type === "amount";
 
                 return (
                   <div
@@ -270,13 +271,7 @@ export function CheckinChecklistBuilder() {
                     }}
                     className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
                   >
-                    <div
-                      className={`grid gap-3 md:items-start ${
-                        hasPrompt
-                          ? "md:grid-cols-[88px_minmax(0,1fr)_160px_140px_40px]"
-                          : "md:grid-cols-[88px_minmax(0,1fr)_140px_40px]"
-                      }`}
-                    >
+                    <div className="grid gap-3 md:grid-cols-[88px_minmax(0,1fr)_140px_40px] md:items-start">
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
@@ -306,30 +301,27 @@ export function CheckinChecklistBuilder() {
                           </button>
                         </div>
                       </div>
-                      <Field
-                        value={step.label}
-                        placeholder="Label"
-                        maxLength={120}
-                        error={errors[step.id]}
-                        dataStepLabel={step.id}
-                        onChange={(value) => updateStep(step.id, { label: value })}
-                      />
-                      {hasPrompt && (
+                      <div className="space-y-2">
                         <Field
+                          value={step.label}
+                          placeholder="Label"
+                          maxLength={120}
+                          error={errors[step.id]}
+                          dataStepLabel={step.id}
+                          onChange={(value) => updateStep(step.id, { label: value })}
+                        />
+                        <TextAreaField
                           value={step.prompt ?? ""}
-                          placeholder="Prompt / placeholder"
+                          placeholder="Help text"
                           maxLength={200}
                           onChange={(value) => updateStep(step.id, { prompt: value })}
                         />
-                      )}
+                      </div>
                       <select
                         value={step.type}
                         onChange={(event) => {
                           const newType = event.target.value as CheckinChecklistStepType;
-                          updateStep(step.id, {
-                            type: newType,
-                            prompt: newType === "checkbox" ? "" : (step.prompt ?? ""),
-                          });
+                          updateStep(step.id, { type: newType });
                         }}
                         className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
                       >
@@ -370,7 +362,25 @@ export function CheckinChecklistBuilder() {
                 Add step
               </button>
             </div>
-            <div className="flex justify-end border-t border-gray-100 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/settings/checkin-checklist/preview"
+                  onClick={openPreview}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  <EyeIcon className="h-4 w-4" />
+                  Preview
+                </Link>
+                <button
+                  type="button"
+                  onClick={restoreDefaultSteps}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  <ArrowPathIcon className="h-4 w-4" />
+                  Restore defaults
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={save}
@@ -419,6 +429,29 @@ function Field({
       />
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
+  );
+}
+
+function TextAreaField({
+  value,
+  placeholder,
+  maxLength = 200,
+  onChange,
+}: {
+  value: string;
+  placeholder: string;
+  maxLength?: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <textarea
+      value={value}
+      maxLength={maxLength}
+      rows={2}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-gray-400"
+    />
   );
 }
 

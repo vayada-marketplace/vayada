@@ -156,6 +156,8 @@ class TestRecordPayment:
         booking = await create_test_booking_with_payment(
             str(hotel["id"]),
             str(room["id"]),
+            check_in="2026-08-01",
+            check_out="2026-08-05",
             nightly_rate=250.0,
             status="confirmed",
             payment_method="pay_at_property",
