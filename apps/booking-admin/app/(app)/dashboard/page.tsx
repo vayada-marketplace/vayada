@@ -15,9 +15,9 @@ import {
 } from "@/services/dashboard";
 
 const SOURCE_COLORS: Record<string, string> = {
-  direct: "#1e3a5f",
-  "booking.com": "#3b82f6",
-  airbnb: "#93c5fd",
+  direct: "#2F52F5",
+  "booking.com": "#003580",
+  airbnb: "#FF5A5F",
   expedia: "#f59e0b",
   google: "#10b981",
 };

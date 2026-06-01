@@ -131,9 +131,11 @@ export function LocationMapPreview({
           style={markerPosition(poi)}
         />
       ))}
-      <div className="absolute bottom-2 right-2 rounded bg-white/90 px-2 py-1 text-[10px] text-gray-500 shadow-sm">
-        Click map to place selected POI
-      </div>
+      {selectedPoiId && (
+        <div className="absolute bottom-2 right-2 rounded bg-white/90 px-2 py-1 text-[10px] text-gray-500 shadow-sm">
+          Click map to place selected POI
+        </div>
+      )}
     </div>
   );
 }
