@@ -535,6 +535,7 @@
   "channels.syncing": "Sincronizzazione...",
   "channels.availabilitySyncStarted": "Sincronizzazione disponibilita' avviata",
   "channels.ariSyncWarningTitle": "La sincronizzazione disponibilita' richiede attenzione",
+  "channels.ariSyncWarningMessage": "L'ultima sincronizzazione di disponibilita' e tariffe non e' riuscita.",
   "channels.retryAriSync": "Riprova sincronizzazione",
   "channels.syncBookings": "Sincronizza prenotazioni",
   "channels.bookingSyncComplete": "Sincronizzazione prenotazioni completata",

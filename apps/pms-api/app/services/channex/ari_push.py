@@ -112,11 +112,11 @@ async def push_availability_for_room_type(
             len(values),
         )
         return True
-    except Exception as e:
+    except Exception:
         logger.error(
-            "Failed to push availability for room type %s: %s",
+            "Failed to push availability for room type %s",
             room_type_id,
-            e,
+            exc_info=True,
         )
         return False
 
@@ -229,8 +229,7 @@ def _restriction_to_value(
         "closed_to_arrival": 1 if restr["closed_to_arrival"] else 0,
         "closed_to_departure": 1 if restr["closed_to_departure"] else 0,
     }
-    if restr["max_stay"] > 0:
-        entry["max_stay"] = restr["max_stay"]
+    entry["max_stay"] = restr["max_stay"]
     return entry
 
 
@@ -341,11 +340,11 @@ async def push_restrictions_for_rate_plan(
             len(values),
         )
         return True
-    except Exception as e:
+    except Exception:
         logger.error(
-            "Failed to push restrictions for room type %s: %s",
+            "Failed to push restrictions for room type %s",
             room_type_id,
-            e,
+            exc_info=True,
         )
         return False
 

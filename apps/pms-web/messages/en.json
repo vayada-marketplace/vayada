@@ -524,6 +524,7 @@
   "channels.syncing": "Syncing...",
   "channels.ariSyncStarted": "Availability & rates sync started",
   "channels.ariSyncWarningTitle": "Availability sync needs attention",
+  "channels.ariSyncWarningMessage": "The last availability and rates sync failed.",
   "channels.retryAriSync": "Retry sync",
   "channels.syncBookings": "Sync Bookings",
   "channels.bookingSyncComplete": "Booking sync complete",

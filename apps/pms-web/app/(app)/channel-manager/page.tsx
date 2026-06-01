@@ -312,13 +312,17 @@ export default function ChannelManagerPage() {
                 )}
               </div>
               {status.lastAriSyncError && (
-                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div
+                  role="alert"
+                  aria-atomic="true"
+                  className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex flex-col md:flex-row md:items-start md:justify-between gap-3"
+                >
                   <div className="flex gap-2 text-sm text-amber-800">
                     <ExclamationTriangleIcon className="w-4 h-4 mt-0.5 shrink-0" />
                     <div>
                       <p className="font-medium">{t("channels.ariSyncWarningTitle")}</p>
                       <p className="mt-0.5">
-                        {status.lastAriSyncError}
+                        {t("channels.ariSyncWarningMessage")}
                         {status.lastAriSyncFailedAt
                           ? ` (${new Date(status.lastAriSyncFailedAt).toLocaleString()})`
                           : ""}

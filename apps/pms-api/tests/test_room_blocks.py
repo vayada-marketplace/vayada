@@ -252,17 +252,23 @@ class TestDeleteRoomBlock:
             end_date="2026-12-31",
         )
 
+        sync_invoked = asyncio.Event()
+
+        async def mark_sync_invoked(*args, **kwargs):
+            sync_invoked.set()
+            return True
+
         with patch(
             "app.routers.admin_room_blocks.push_ari_for_room_type",
-            new=AsyncMock(return_value=True),
+            new=AsyncMock(side_effect=mark_sync_invoked),
         ) as sync_ari:
             resp = await client.delete(
                 f"/admin/room-blocks/{block['id']}",
                 headers=get_auth_headers(user["token"]),
             )
-            await asyncio.sleep(0)
+            assert resp.status_code == 204
+            await asyncio.wait_for(sync_invoked.wait(), timeout=1)
 
-        assert resp.status_code == 204
         sync_ari.assert_awaited_once_with(
             str(hotel["id"]),
             str(room["id"]),
