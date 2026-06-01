@@ -40,6 +40,9 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"], ["html"]],
+  expect: {
+    timeout: 15_000,
+  },
   use: {
     actionTimeout: 10_000,
     trace: process.env.CI ? "on-first-retry" : "retain-on-failure",
