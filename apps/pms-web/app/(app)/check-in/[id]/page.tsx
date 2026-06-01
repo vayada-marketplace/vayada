@@ -8,7 +8,6 @@ import {
   BookingAdditionalGuest,
   BookingAdditionalGuestPayload,
   BookingNote,
-  CheckinPendingFlag,
   CheckinStepResult,
   bookingsService,
 } from "@/services/bookings";
@@ -156,23 +155,6 @@ function channelIsOta(channel: string | null | undefined) {
   return Boolean(channel && channel.toLowerCase() !== "direct");
 }
 
-function pendingFlags(booking: Booking, booker: GuestRegistrationDraft, guests: GuestDraft[]) {
-  const flags: string[] = [];
-  if (!guestComplete(booker)) flags.push("Booker ID");
-  guests.forEach((guest, idx) => {
-    if (!guestComplete(guest)) flags.push(`Guest ${idx + 2} ID`);
-  });
-  if (!isPaid(booking))
-    flags.push(
-      `Payment ${formatCurrency(
-        booking.depositRequired ? booking.balanceAmount : booking.totalAmount,
-        booking.currency,
-      )}`,
-    );
-  if (!booking.assignedRooms?.length && !booking.roomId) flags.push("Room assignment");
-  return flags;
-}
-
 function customStepDone(step: CheckinChecklistStep, value: string | boolean | undefined) {
   if (step.type === "checkbox") return value === true;
   if (step.type === "amount") return Number(value || 0) > 0;
@@ -202,8 +184,8 @@ export default function CheckInPage() {
   const [error, setError] = useState("");
   const [confirmationFlags, setConfirmationFlags] = useState<string[] | null>(null);
   const [actionLoading, setActionLoading] = useState<null | "markPaid" | "completeCheckIn">(null);
-  const [customSteps, setCustomSteps] = useState<CheckinChecklistStep[]>([]);
-  const [customValues, setCustomValues] = useState<Record<string, string | boolean>>({});
+  const [checklistSteps, setChecklistSteps] = useState<CheckinChecklistStep[]>([]);
+  const [checklistValues, setChecklistValues] = useState<Record<string, string | boolean>>({});
   const [requiredWarning, setRequiredWarning] = useState(false);
 
   useEffect(() => {
@@ -218,27 +200,23 @@ export default function CheckInPage() {
         setBooking(bookingRes);
         setBooker(bookerDraftFromBooking(bookingRes));
         setGuests(normalizeGuests(bookingRes, guestRes.guests));
-        setCustomSteps(checklistRes.steps || []);
+        setChecklistSteps(checklistRes.steps || []);
         setNotes(noteRes.notes || []);
       })
       .catch((err) => setError(err.message || "Could not load check-in"))
       .finally(() => setLoading(false));
   }, [id]);
 
-  const systemFlags = useMemo(
-    () => (booking && booker ? pendingFlags(booking, booker, guests) : []),
-    [booking, booker, guests],
-  );
-  const customPending = useMemo(
+  const pendingChecklistSteps = useMemo(
     () =>
-      customSteps
-        .filter((step) => step.required && !customStepDone(step, customValues[step.id]))
+      checklistSteps
+        .filter((step) => step.required && !customStepDone(step, checklistValues[step.id]))
         .map((step) => ({ stepId: step.id, label: step.label })),
-    [customSteps, customValues],
+    [checklistSteps, checklistValues],
   );
   const flags = useMemo(
-    () => [...systemFlags, ...customPending.map((flag) => flag.label)],
-    [systemFlags, customPending],
+    () => pendingChecklistSteps.map((flag) => flag.label),
+    [pendingChecklistSteps],
   );
   const completedGuests =
     guests.filter(guestComplete).length + (booker && guestComplete(booker) ? 1 : 0);
@@ -258,7 +236,7 @@ export default function CheckInPage() {
 
   const updateCustomValue = (stepId: string, value: string | boolean) => {
     setRequiredWarning(false);
-    setCustomValues((prev) => ({ ...prev, [stepId]: value }));
+    setChecklistValues((prev) => ({ ...prev, [stepId]: value }));
   };
 
   const addGuest = () => {
@@ -382,7 +360,7 @@ export default function CheckInPage() {
   const completeCheckIn = async () => {
     if (!booking || !booker || actionLoading) return;
     const carriedFlags = [...flags];
-    if (customPending.length > 0 && !requiredWarning) {
+    if (pendingChecklistSteps.length > 0 && !requiredWarning) {
       setRequiredWarning(true);
       return;
     }
@@ -436,12 +414,8 @@ export default function CheckInPage() {
         setBooker(bookerDraftFromBooking(updated));
       }
       const completedAt = new Date().toISOString();
-      const systemFlagDetails: CheckinPendingFlag[] = systemFlags.map((label) => ({
-        stepId: `system-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-        label,
-      }));
-      const customResults: CheckinStepResult[] = customSteps.map((step) => {
-        const value = customValues[step.id];
+      const checklistResults: CheckinStepResult[] = checklistSteps.map((step) => {
+        const value = checklistValues[step.id];
         const done = customStepDone(step, value);
         return {
           stepId: step.id,
@@ -454,8 +428,8 @@ export default function CheckInPage() {
       const checkedIn = await bookingsService.completeCheckIn(
         booking.id,
         carriedFlags,
-        customResults,
-        [...systemFlagDetails, ...customPending],
+        checklistResults,
+        pendingChecklistSteps,
       );
       setBooking(checkedIn);
       setConfirmationFlags(carriedFlags);
@@ -737,41 +711,26 @@ export default function CheckInPage() {
           <aside className="lg:sticky lg:top-6 lg:self-start">
             <Card title="Checklist">
               <div className="space-y-3">
-                <ChecklistItem done={guestComplete(booker)} label="Booker ID" />
-                {guests.map((guest, idx) => (
-                  <ChecklistItem
-                    key={guest.id || idx}
-                    done={guestComplete(guest)}
-                    label={`Guest ${idx + 2} ID`}
-                  />
-                ))}
-                <ChecklistItem
-                  done={isPaid(booking)}
-                  label={`Payment ${formatCurrency(
-                    booking.depositRequired && booking.balanceAmount > 0
-                      ? booking.balanceAmount
-                      : booking.totalAmount,
-                    booking.currency,
-                  )}`}
-                />
-                <ChecklistItem
-                  done={Boolean(booking.assignedRooms?.length || booking.roomId)}
-                  label={`Room · ${booking.roomName}`}
-                />
-                {customSteps.map((step) => (
+                {checklistSteps.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-gray-300 p-3 text-sm text-gray-500">
+                    No check-in steps configured.
+                  </div>
+                )}
+                {checklistSteps.map((step) => (
                   <CustomChecklistItem
                     key={step.id}
                     step={step}
-                    value={customValues[step.id]}
+                    value={checklistValues[step.id]}
                     currency={booking.currency}
                     onChange={(value) => updateCustomValue(step.id, value)}
                   />
                 ))}
               </div>
-              {requiredWarning && customPending.length > 0 && (
+              {requiredWarning && pendingChecklistSteps.length > 0 && (
                 <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                  {customPending.length} required step{customPending.length === 1 ? "" : "s"}{" "}
-                  incomplete - you can still check in, but these will remain flagged on the booking.
+                  {pendingChecklistSteps.length} required step
+                  {pendingChecklistSteps.length === 1 ? "" : "s"} incomplete - you can still check
+                  in, but these will remain flagged on the booking.
                 </div>
               )}
               <button
@@ -1014,19 +973,6 @@ function SelectField({
   );
 }
 
-function ChecklistItem({ done, label }: { done: boolean; label: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <span
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ${done ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}
-      >
-        {done ? "✓" : "!"}
-      </span>
-      <span className="min-w-0 text-sm font-medium text-gray-800">{label}</span>
-    </div>
-  );
-}
-
 function CustomChecklistItem({
   step,
   value,
@@ -1066,6 +1012,7 @@ function CustomChecklistItem({
               </span>
             )}
           </div>
+          {step.prompt && <p className="mt-1 text-xs text-gray-500">{step.prompt}</p>}
 
           {step.type === "checkbox" && (
             <label className="mt-2 flex items-center gap-2 text-sm text-gray-600">
@@ -1086,7 +1033,7 @@ function CustomChecklistItem({
               id={controlId}
               value={typeof value === "string" ? value : ""}
               onChange={(event) => onChange(event.target.value)}
-              placeholder="Add note"
+              placeholder={step.prompt || "Add note"}
               aria-labelledby={labelId}
               className="mt-2 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm"
             />
