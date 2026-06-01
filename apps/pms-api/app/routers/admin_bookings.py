@@ -437,6 +437,22 @@ async def update_booking_details(
         next_check_out = _as_date(updates.get("check_out", booking["check_out"]))
         if next_check_out <= next_check_in:
             raise HTTPException(status_code=400, detail="check_out must be after check_in")
+        nights = max(1, (next_check_out - next_check_in).days)
+        room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
+        seasons = RoomTypeRepository._parse_seasons(room_type)
+        max_stay = RoomTypeRepository._find_stay_max_stay(
+            seasons,
+            next_check_in,
+            next_check_out,
+        )
+        if max_stay and nights > max_stay:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This room has a maximum stay of {max_stay} nights for the selected dates. "
+                    "Please shorten your stay."
+                ),
+            )
     if should_reprice_addons and next_addon_ids:
         check_in = _as_date(updates.get("check_in", booking["check_in"]))
         check_out = _as_date(updates.get("check_out", booking["check_out"]))

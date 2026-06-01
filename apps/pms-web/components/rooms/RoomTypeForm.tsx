@@ -809,10 +809,15 @@ export default function RoomTypeForm({
     sortSeasonsChronologically(
       (form.seasons || []).map((s) => {
         const rawMaxStay = s.maxStay ?? (s as { max_stay?: number | string | null }).max_stay;
+        const numericMaxStay = Number(rawMaxStay);
         const maxStay =
-          rawMaxStay === undefined || rawMaxStay === null || rawMaxStay === ""
+          rawMaxStay === undefined ||
+          rawMaxStay === null ||
+          rawMaxStay === "" ||
+          !Number.isFinite(numericMaxStay) ||
+          numericMaxStay <= 0
             ? null
-            : Math.max(0, Number(rawMaxStay) || 0);
+            : Math.floor(numericMaxStay);
         return {
           ...s,
           from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
@@ -2454,12 +2459,15 @@ export default function RoomTypeForm({
                                         onChange={(e) => {
                                           const u = [...seasons];
                                           const raw = e.target.value;
+                                          const parsedMaxStay = parseInt(raw, 10);
                                           u[idx] = {
                                             ...u[idx],
                                             maxStay:
-                                              raw === ""
+                                              raw === "" ||
+                                              Number.isNaN(parsedMaxStay) ||
+                                              parsedMaxStay <= 0
                                                 ? null
-                                                : Math.max(0, parseInt(raw, 10) || 0),
+                                                : parsedMaxStay,
                                           };
                                           setSeasons(u);
                                         }}

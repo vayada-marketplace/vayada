@@ -195,7 +195,7 @@ def _validate_season_stay_restrictions(seasons: list) -> list:
     for s in seasons:
         raw_min = s.get("minStay", s.get("min_stay", 1))
         try:
-            min_stay = int(raw_min or 1)
+            min_stay = 1 if raw_min is None or raw_min == "" else int(raw_min)
         except (TypeError, ValueError) as e:
             raise ValueError("Min stay must be a positive integer") from e
         if min_stay < 1:

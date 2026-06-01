@@ -1139,6 +1139,45 @@ class TestAdminBookings:
         assert resp.status_code == 400
         assert "maximum stay of 3 nights" in resp.json()["detail"].lower()
 
+    async def test_update_admin_booking_above_max_stay_is_blocked(self, client, cleanup_database):
+        import json
+
+        from app.database import Database
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room_type = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking(
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-08-10",
+            check_out="2026-08-12",
+        )
+        seasons = [
+            {
+                "name": "All year",
+                "tier": "Mid",
+                "from": "01-01",
+                "to": "12-31",
+                "rate": "150",
+                "minStay": 1,
+                "maxStay": 3,
+            }
+        ]
+        await Database.execute(
+            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
+            json.dumps(seasons),
+            room_type["id"],
+        )
+
+        resp = await client.patch(
+            f"/admin/bookings/{booking['id']}",
+            headers=get_auth_headers(user["token"]),
+            json={"checkOut": "2026-08-15"},
+        )
+        assert resp.status_code == 400
+        assert "maximum stay of 3 nights" in resp.json()["detail"].lower()
+
     async def test_list_bookings(self, client, hotel_with_booking):
         user = hotel_with_booking["user"]
 

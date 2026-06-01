@@ -148,8 +148,16 @@ def _split_amount(
 
 def _max_stay_warning(room_type: dict, check_in: date, check_out: date) -> str | None:
     nights = (check_out - check_in).days
-    seasons = RoomTypeRepository._parse_seasons(room_type)
-    max_stay = RoomTypeRepository._find_stay_max_stay(seasons, check_in, check_out)
+    try:
+        seasons = RoomTypeRepository._parse_seasons(room_type)
+        max_stay = RoomTypeRepository._find_stay_max_stay(seasons, check_in, check_out)
+    except Exception as exc:
+        logger.warning(
+            "Failed to evaluate max-stay warning for room type %s: %s",
+            room_type.get("id"),
+            exc,
+        )
+        return None
     if max_stay and nights > max_stay:
         return (
             f"Exceeds max stay restriction: {nights} nights selected, "
@@ -160,6 +168,8 @@ def _max_stay_warning(room_type: dict, check_in: date, check_out: date) -> str |
 
 def _append_import_warning(notes: str, warning: str | None) -> str:
     if not warning:
+        return notes
+    if warning in notes:
         return notes
     return f"{notes}\n\n{warning}" if notes else warning
 
@@ -457,6 +467,7 @@ async def _apply_booking_modification(
         booking = await BookingRepository.get_by_id(booking_id)
         if not booking:
             continue
+        room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
 
         updates: dict = {}
         if new_check_in:
@@ -468,6 +479,7 @@ async def _apply_booking_modification(
         check_in_eff = updates.get("check_in", booking["check_in"])
         check_out_eff = updates.get("check_out", booking["check_out"])
         nights = (check_out_eff - check_in_eff).days
+        warning = _max_stay_warning(room_type, check_in_eff, check_out_eff) if room_type else None
         nightly_rate, total_amount = _split_amount(room, attrs, nights, room_count)
         if total_amount is not None:
             updates["total_amount"] = total_amount
@@ -489,7 +501,7 @@ async def _apply_booking_modification(
             updates["children"] = occupancy["children"]
 
         if notes is not None:
-            updates["special_requests"] = notes
+            updates["special_requests"] = _append_import_warning(notes, warning)
 
         if updates:
             await _apply_updates(booking_id, updates)
