@@ -160,7 +160,7 @@ class TestBlockedRoomExclusion:
         assert moves == []
 
     async def test_partial_overlap_still_excluded(self, client, hotel_with_rooms):
-        """Block Jul 11–19, booking Jul 18–25: single-night overlap still excludes."""
+        """Block Jul 11-19, booking Jul 18-25: single-night overlap still excludes."""
         from datetime import date
 
         hotel = hotel_with_rooms["hotel"]
@@ -175,7 +175,7 @@ class TestBlockedRoomExclusion:
             room_id=str(rooms[0]["id"]),
         )
 
-        target, moves = await resolve_assignment(
+        target, _moves = await resolve_assignment(
             str(hotel["id"]),
             str(rt["id"]),
             date(2026, 7, 18),
@@ -202,7 +202,7 @@ class TestBlockedRoomExclusion:
                 room_id=str(room["id"]),
             )
 
-        target, moves = await resolve_assignment(
+        target, _moves = await resolve_assignment(
             str(hotel["id"]),
             str(rt["id"]),
             date(2026, 7, 13),
@@ -254,16 +254,14 @@ class TestBlockedRoomExclusion:
 
         # No valid packing exists — the solver must not move the booking into
         # a blocked room and must return None instead.
-        target, moves = await resolve_assignment(
+        target, _moves = await resolve_assignment(
             str(hotel["id"]),
             str(rt["id"]),
             date(2026, 7, 13),
             date(2026, 7, 19),
         )
 
-        assert target is None or target == str(rooms[1]["id"]), (
-            "solver must not place the booking into a blocked room"
-        )
+        assert target is None, "solver must not place the booking into a blocked room"
 
     async def test_multi_room_path_skips_blocked_room(self, client, hotel_with_rooms):
         """resolve_room_assignments (count>1) must also honour blocks."""
