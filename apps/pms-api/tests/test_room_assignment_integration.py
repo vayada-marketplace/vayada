@@ -160,7 +160,7 @@ class TestBlockedRoomExclusion:
         assert moves == []
 
     async def test_partial_overlap_still_excluded(self, client, hotel_with_rooms):
-        """Block Jul 11–19, booking Jul 18–25: single-night overlap still excludes."""
+        """Block Jul 11-19, booking Jul 18-25: single-night overlap still excludes."""
         from datetime import date
 
         hotel = hotel_with_rooms["hotel"]
@@ -280,7 +280,7 @@ class TestBlockedRoomExclusion:
             room_id=str(rooms[0]["id"]),
         )
 
-        primary, extras, moves = await resolve_room_assignments(
+        primary, extras, _moves = await resolve_room_assignments(
             str(hotel["id"]),
             str(rt["id"]),
             date(2026, 7, 13),

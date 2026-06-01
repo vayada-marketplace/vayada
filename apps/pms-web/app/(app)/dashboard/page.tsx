@@ -100,6 +100,7 @@ export default function DashboardPage() {
   const [hotelCurrency, setHotelCurrency] = useState("EUR");
   const [hotelTimezone, setHotelTimezone] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [noShowError, setNoShowError] = useState<string | null>(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [quickView, setQuickView] = useState<{
     booking: Booking;
@@ -167,9 +168,14 @@ export default function DashboardPage() {
   };
 
   const handleNoShow = async (bookingId: string) => {
-    await bookingsService.markNoShow(bookingId);
-    setBookings((prev) => prev.filter((b) => b.id !== bookingId));
-    setQuickView(null);
+    setNoShowError(null);
+    try {
+      await bookingsService.markNoShow(bookingId);
+      setBookings((prev) => prev.filter((b) => b.id !== bookingId));
+      setQuickView(null);
+    } catch {
+      setNoShowError("Failed to mark as no-show. Please try again.");
+    }
   };
 
   const monthStartStr = useMemo(() => {
@@ -241,6 +247,11 @@ export default function DashboardPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-5 overflow-x-hidden">
+      {noShowError && (
+        <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {noShowError}
+        </p>
+      )}
       {/* Title */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
