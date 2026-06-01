@@ -350,6 +350,47 @@ class TestCreateBooking:
         assert resp.status_code == 400
         assert "minimum stay" in resp.json()["detail"].lower()
 
+    async def test_create_booking_above_max_stay(self, client, cleanup_database):
+        import json as _json
+
+        from app.database import Database
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]))
+
+        seasons = [
+            {
+                "name": "All year",
+                "tier": "Mid",
+                "from": "01-01",
+                "to": "12-31",
+                "rate": "150",
+                "minStay": 1,
+                "maxStay": 3,
+            }
+        ]
+        await Database.execute(
+            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
+            _json.dumps(seasons),
+            room["id"],
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Test",
+                "guestLastName": "User",
+                "guestEmail": "test@example.com",
+                "guestPhone": "+1234",
+                "checkIn": "2026-08-10",
+                "checkOut": "2026-08-15",
+            },
+        )
+        assert resp.status_code == 400
+        assert "maximum stay of 3 nights" in resp.json()["detail"].lower()
+
 
 class TestBookingLookup:
     async def test_lookup_booking(self, client, hotel_with_booking):
