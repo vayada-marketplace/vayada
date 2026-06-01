@@ -36,6 +36,10 @@ function isBeforeDate(a: string, b: string): boolean {
   return new Date(a) < new Date(b);
 }
 
+function isAfterDate(a: string, b: string): boolean {
+  return new Date(a) > new Date(b);
+}
+
 function isBetween(date: string, start: string, end: string): boolean {
   const d = new Date(date);
   return d > new Date(start) && d < new Date(end);
@@ -71,6 +75,8 @@ function MonthGrid({
   unavailableDates,
   minCheckOut,
   minStayNights,
+  maxCheckOut,
+  maxStayNights,
 }: {
   year: number;
   month: number;
@@ -82,6 +88,8 @@ function MonthGrid({
   unavailableDates: Set<string>;
   minCheckOut: string | null;
   minStayNights: number;
+  maxCheckOut: string | null;
+  maxStayNights: number | null;
 }) {
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
@@ -154,7 +162,13 @@ function MonthGrid({
             isBeforeDate(checkIn, cell.dateStr) &&
             isBeforeDate(cell.dateStr, minCheckOut)
           );
-          const isDisabled = isPast || isUnavailable || isBelowMinStay;
+          const isAboveMaxStay = !!(
+            maxCheckOut &&
+            checkIn &&
+            isBeforeDate(checkIn, cell.dateStr) &&
+            isAfterDate(cell.dateStr, maxCheckOut)
+          );
+          const isDisabled = isPast || isUnavailable || isBelowMinStay || isAboveMaxStay;
 
           return (
             <div
@@ -178,7 +192,9 @@ function MonthGrid({
                     ? "Fully booked"
                     : isBelowMinStay
                       ? `Minimum stay is ${minStayNights} nights`
-                      : undefined
+                      : isAboveMaxStay && maxStayNights
+                        ? `Maximum stay is ${maxStayNights} nights`
+                        : undefined
                 }
                 className={`w-9 h-9 flex items-center justify-center text-sm rounded-full transition-colors relative z-10 ${
                   isDisabled
@@ -219,6 +235,7 @@ export default function DatePickerCalendar({
   const [tempCheckOut, setTempCheckOut] = useState<string | null>(checkOut);
   const [unavailableDates, setUnavailableDates] = useState<Set<string>>(new Set());
   const [minStayByArrival, setMinStayByArrival] = useState<Record<string, number>>({});
+  const [maxStayByArrival, setMaxStayByArrival] = useState<Record<string, number>>({});
 
   // Calendar months
   const now = new Date();
@@ -259,9 +276,10 @@ export default function DatePickerCalendar({
     const end = toDateString(endYear, endMonth, lastDay);
     hotelService
       .getUnavailableDates(slug, start, end)
-      .then(({ dates, minStayByArrival }) => {
+      .then(({ dates, minStayByArrival, maxStayByArrival }) => {
         setUnavailableDates(new Set(dates));
         setMinStayByArrival((prev) => ({ ...prev, ...minStayByArrival }));
+        setMaxStayByArrival((prev) => ({ ...prev, ...maxStayByArrival }));
       })
       .catch(() => {});
   }, [open, slug, baseMonth, baseYear]);
@@ -339,6 +357,14 @@ export default function DatePickerCalendar({
   const minCheckOut =
     selectionState === "selectCheckOut" && tempCheckIn && requiredMinStay > 1
       ? addDays(tempCheckIn, requiredMinStay)
+      : null;
+  const requiredMaxStay =
+    selectionState === "selectCheckOut" && tempCheckIn
+      ? maxStayByArrival[tempCheckIn] || null
+      : null;
+  const maxCheckOut =
+    selectionState === "selectCheckOut" && tempCheckIn && requiredMaxStay
+      ? addDays(tempCheckIn, requiredMaxStay)
       : null;
 
   const formatSummaryDate = (dateStr: string) => {
@@ -427,6 +453,8 @@ export default function DatePickerCalendar({
             unavailableDates={unavailableDates}
             minCheckOut={minCheckOut}
             minStayNights={requiredMinStay}
+            maxCheckOut={maxCheckOut}
+            maxStayNights={requiredMaxStay}
           />
           <MonthGrid
             year={secondYear}
@@ -439,6 +467,8 @@ export default function DatePickerCalendar({
             unavailableDates={unavailableDates}
             minCheckOut={minCheckOut}
             minStayNights={requiredMinStay}
+            maxCheckOut={maxCheckOut}
+            maxStayNights={requiredMaxStay}
           />
         </div>
 
