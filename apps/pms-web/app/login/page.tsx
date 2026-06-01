@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { authService } from "@/services/auth";
 import { ApiErrorResponse } from "@/services/api/client";
@@ -9,7 +9,7 @@ import { pmsSettingsService } from "@/services/settings";
 import LoginForm from "@/components/auth/LoginForm";
 import { useTranslation } from "@/lib/i18n";
 
-export default function LoginPage() {
+function LoginContent() {
   const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -124,5 +124,13 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <LoginContent />
+    </Suspense>
   );
 }
