@@ -183,6 +183,7 @@
   "bookings.statusCancelled": "Geannuleerd",
   "bookings.statusDeclined": "Afgewezen",
   "bookings.statusExpired": "Verlopen",
+  "bookings.statusNoShow": "No-show",
   "bookings.tableGuest": "Gast",
   "bookings.tableStatus": "Status",
   "bookings.tableRoom": "Kamer",

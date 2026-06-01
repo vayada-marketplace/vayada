@@ -17,6 +17,7 @@ const STATUS_STYLES: Record<string, string> = {
   // VAY-404 — host-rejected request, distinct from guest cancel.
   declined: "border-rose-300 text-rose-700 bg-rose-50",
   expired: "border-gray-200 text-gray-500 bg-gray-50",
+  no_show: "border-orange-200 text-orange-700 bg-orange-50",
 };
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
@@ -27,6 +28,7 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   cancelled: "bookings.statusCancelled",
   declined: "bookings.statusDeclined",
   expired: "bookings.statusExpired",
+  no_show: "bookings.statusNoShow",
 };
 
 const BALANCE_STYLES: Record<string, string> = {
@@ -148,6 +150,7 @@ export default function ReservationsPage() {
     },
     { label: t("bookings.statusPending"), value: "pending", count: statusCounts["pending"] || 0 },
     { label: t("bookings.statusExpired"), value: "expired", count: statusCounts["expired"] || 0 },
+    { label: t("bookings.statusNoShow"), value: "no_show", count: statusCounts["no_show"] || 0 },
   ];
 
   return (

@@ -7,6 +7,8 @@ const DASHBOARD_BOOKING_STATUSES = new Set<Booking["status"]>([
   "checked_out",
 ]);
 
+const NOT_CHECKED_IN_DEPARTURE_STATUSES = new Set<Booking["status"]>(["confirmed"]);
+
 const CHECKED_IN_STATUSES = new Set<Booking["status"]>(["checked_in", "in_house"]);
 const CHECKED_OUT_STATUSES = new Set<Booking["status"]>(["checked_out"]);
 
@@ -50,6 +52,10 @@ export function isCheckedOutDeparture(booking: Booking) {
   return CHECKED_OUT_STATUSES.has(booking.status);
 }
 
+export function isNotCheckedInDeparture(booking: Booking) {
+  return NOT_CHECKED_IN_DEPARTURE_STATUSES.has(booking.status);
+}
+
 export function getDashboardBookings(bookings: Booking[]) {
   return bookings.filter(isDashboardBooking);
 }
@@ -69,6 +75,10 @@ export function getDeparturesToday(bookings: Booking[], today: string) {
   return getDashboardBookings(bookings)
     .filter((booking) => booking.checkOut === today)
     .sort((a, b) => {
+      // Not-checked-in (most urgent) first, then checked-in, then checked-out last.
+      const aNotIn = isNotCheckedInDeparture(a);
+      const bNotIn = isNotCheckedInDeparture(b);
+      if (aNotIn !== bNotIn) return aNotIn ? -1 : 1;
       const aCheckedOut = isCheckedOutDeparture(a);
       const bCheckedOut = isCheckedOutDeparture(b);
       if (aCheckedOut === bCheckedOut) return 0;
@@ -82,6 +92,10 @@ export function getRemainingArrivals(arrivals: Booking[]) {
 
 export function getRemainingDepartures(departures: Booking[]) {
   return departures.filter((booking) => !isCheckedOutDeparture(booking)).length;
+}
+
+export function isResolvedDeparture(booking: Booking) {
+  return isCheckedOutDeparture(booking);
 }
 
 export function getOccupiedTonight(bookings: Booking[], today: string) {

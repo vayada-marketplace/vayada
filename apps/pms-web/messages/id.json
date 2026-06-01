@@ -187,6 +187,7 @@
   "bookings.statusCancelled": "Dibatalkan",
   "bookings.statusDeclined": "Ditolak",
   "bookings.statusExpired": "Kedaluwarsa",
+  "bookings.statusNoShow": "Tidak hadir",
   "bookings.tableGuest": "Tamu",
   "bookings.tableStatus": "Status",
   "bookings.tableRoom": "Kamar",

@@ -187,6 +187,7 @@
   "bookings.statusCancelled": "Cancelled",
   "bookings.statusDeclined": "Declined",
   "bookings.statusExpired": "Expired",
+  "bookings.statusNoShow": "No-show",
   "bookings.tableGuest": "Guest",
   "bookings.tableStatus": "Status",
   "bookings.tableRoom": "Room",

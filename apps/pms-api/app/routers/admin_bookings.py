@@ -1422,6 +1422,62 @@ async def cancel_booking_with_reason(
     return await _admin_response(updated)
 
 
+@router.post("/bookings/{booking_id}/no-show", response_model=BookingAdminResponse)
+async def mark_booking_no_show(
+    booking_id: str,
+    user_id: str = Depends(require_hotel_admin),
+):
+    """VAY-560: Mark a confirmed booking as no-show when the guest never arrived."""
+    booking, hotel_id = await _booking_owned_by_hotel(booking_id, user_id)
+
+    if booking["status"] != "confirmed":
+        raise HTTPException(
+            status_code=400,
+            detail="Only confirmed bookings (never checked in) can be marked as no-show",
+        )
+
+    check_out = booking["check_out"]
+    if isinstance(check_out, str):
+        check_out = date.fromisoformat(check_out)
+    if check_out > date.today():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot mark future departure as no-show",
+        )
+
+    await BookingRepository.update_status(booking_id, "no_show")
+    updated = await BookingRepository.get_by_id(booking_id)
+
+    asyncio.create_task(
+        push_availability_for_room_type(
+            hotel_id,
+            str(booking["room_type_id"]),
+            start_date=booking["check_in"],
+            end_date=booking["check_out"],
+        )
+    )
+    if booking.get("room_id"):
+        asyncio.create_task(
+            try_place_unassigned_after_cancellation(
+                hotel_id,
+                str(booking["room_type_id"]),
+                booking["check_in"],
+                booking["check_out"],
+            )
+        )
+    # Guest notification intentionally omitted: marking no-show is an
+    # operational staff action, not a status change the guest needs to know about.
+    await BookingEventRepository.record(
+        booking_id=booking_id,
+        hotel_id=hotel_id,
+        event_type="guest_no_show",
+        payload={},
+        actor_user_id=user_id,
+    )
+
+    return await _admin_response(updated)
+
+
 # ── Payouts ───────────────────────────────────────────────────────
 
 
