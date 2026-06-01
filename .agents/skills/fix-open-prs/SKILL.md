@@ -25,8 +25,8 @@ so the history is legible.
 ## Phase 0 — enumerate open PRs
 
 ```bash
-gh pr list --json number,title,headRefName,mergeable,statusCheckRollup \
-  --jq '.[] | {number, title, headRefName, mergeable}'
+gh pr list --json number,title,headRefName,mergeable,isDraft,labels \
+  --jq '.[] | select(.isDraft == false and ([.labels[].name] | index("WIP") == null)) | {number, title, headRefName, mergeable}'
 ```
 
 Skip PRs that are draft or have a `WIP` label — leave those untouched.
@@ -43,15 +43,15 @@ comments with AI agents`):
 
 ```bash
 # List reviews, filter to the latest coderabbitai COMMENTED review
-gh api repos/{owner}/{repo}/pulls/{PR}/reviews \
-  --jq '[.[] | select(.user.login == "coderabbitai" and .state == "COMMENTED")] | last'
+gh api repos/{owner}/{repo}/pulls/{PR}/reviews --paginate \
+  --jq '[.[] | select(.user.login == "coderabbitai" and .state == "COMMENTED")] | max_by(.submitted_at)'
 ```
 
 The review body contains a fenced code block under the heading
 `🤖 Prompt for all review comments with AI agents`. That code block is a
 structured agent prompt listing every unresolved inline comment like:
 
-```
+```text
 Verify each finding against current code. Fix only still-valid issues, skip
 the rest with a brief reason, keep changes minimal, and validate.
 
@@ -74,7 +74,7 @@ findings** — trust what CodeRabbit extracted.
   - TypeScript files → `cd apps/<app> && npm run typecheck`
   - Python files → `cd apps/<api> && ruff check . && ruff format --check .`
 - Commit:
-  ```
+  ```text
   fix: address CodeRabbit suggestions on <PR title>
   ```
 
@@ -152,7 +152,7 @@ and skip the fix.
 
 After fixes, commit:
 
-```
+```text
 fix: resolve CI failures on <PR title>
 
 <one-line summary of what was failing and why>
@@ -169,7 +169,7 @@ After all three passes are complete for a PR:
 1. Push the branch (if not already pushed during conflict resolution):
    `git push origin {branch}`.
 2. Summarise what was done in a PR comment:
-   ```
+   ```text
    @coderabbitai Applied N CodeRabbit suggestions, resolved merge conflicts
    with main, and fixed <failing check name>. Re-triggering CI.
    ```
