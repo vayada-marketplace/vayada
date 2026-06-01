@@ -9,6 +9,7 @@ import pytest
 from tests.conftest import (
     create_test_booking,
     create_test_hotel,
+    create_test_room,
     create_test_room_type,
     create_test_user,
     generate_test_slug,
@@ -1094,6 +1095,88 @@ class TestAdminBookings:
         body = resp.json()
         assert body["bookings"] == []
         assert body["total"] == 0
+
+    async def test_create_admin_booking_above_max_stay_is_blocked(self, client, cleanup_database):
+        import json
+
+        from app.database import Database
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room_type = await create_test_room_type(str(hotel["id"]))
+        room = await create_test_room(str(hotel["id"]), str(room_type["id"]))
+        seasons = [
+            {
+                "name": "All year",
+                "tier": "Mid",
+                "from": "01-01",
+                "to": "12-31",
+                "rate": "150",
+                "minStay": 1,
+                "maxStay": 3,
+            }
+        ]
+        await Database.execute(
+            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
+            json.dumps(seasons),
+            room_type["id"],
+        )
+
+        resp = await client.post(
+            "/admin/bookings",
+            headers=get_auth_headers(user["token"]),
+            json={
+                "roomId": str(room["id"]),
+                "guestFirstName": "Test",
+                "guestLastName": "User",
+                "guestEmail": "test@example.com",
+                "checkIn": "2026-08-10",
+                "checkOut": "2026-08-15",
+                "adults": 1,
+                "children": 0,
+            },
+        )
+        assert resp.status_code == 400
+        assert "maximum stay of 3 nights" in resp.json()["detail"].lower()
+
+    async def test_update_admin_booking_above_max_stay_is_blocked(self, client, cleanup_database):
+        import json
+
+        from app.database import Database
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room_type = await create_test_room_type(str(hotel["id"]))
+        booking = await create_test_booking(
+            str(hotel["id"]),
+            str(room_type["id"]),
+            check_in="2026-08-10",
+            check_out="2026-08-12",
+        )
+        seasons = [
+            {
+                "name": "All year",
+                "tier": "Mid",
+                "from": "01-01",
+                "to": "12-31",
+                "rate": "150",
+                "minStay": 1,
+                "maxStay": 3,
+            }
+        ]
+        await Database.execute(
+            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
+            json.dumps(seasons),
+            room_type["id"],
+        )
+
+        resp = await client.patch(
+            f"/admin/bookings/{booking['id']}",
+            headers=get_auth_headers(user["token"]),
+            json={"checkOut": "2026-08-15"},
+        )
+        assert resp.status_code == 400
+        assert "maximum stay of 3 nights" in resp.json()["detail"].lower()
 
     async def test_list_bookings(self, client, hotel_with_booking):
         user = hotel_with_booking["user"]
