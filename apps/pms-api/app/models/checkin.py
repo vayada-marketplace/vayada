@@ -18,6 +18,7 @@ class ChecklistStep(BaseModel):
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str = Field(max_length=120)
+    prompt: str = Field(default="", max_length=200)
     type: ChecklistStepType = "checkbox"
     required: bool = False
     system: bool = False

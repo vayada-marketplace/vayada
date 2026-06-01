@@ -33,6 +33,7 @@ export type CheckinChecklistStepType = CheckinStepType;
 export interface CheckinChecklistStep {
   id: string;
   label: string;
+  prompt?: string;
   type: CheckinChecklistStepType;
   required: boolean;
   system?: boolean;
