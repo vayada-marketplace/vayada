@@ -44,6 +44,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored && stored !== DEFAULT_LOCALE) {
       setLocaleState(stored);
+      document.documentElement.lang = stored;
       loadMessages(stored).then(setMessages);
     }
   }, []);
