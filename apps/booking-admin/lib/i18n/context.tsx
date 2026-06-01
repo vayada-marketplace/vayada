@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { DEFAULT_LOCALE } from "./languages";
+import defaultEnMessages from "../../messages/en.json";
 
 type Messages = Record<string, string>;
 
@@ -16,7 +17,9 @@ const I18nContext = createContext<I18nContextValue | null>(null);
 const STORAGE_KEY = "admin_language";
 
 // Cache loaded messages to avoid re-fetching
-const messageCache: Record<string, Messages> = {};
+const messageCache: Record<string, Messages> = {
+  en: defaultEnMessages as Messages,
+};
 
 async function loadMessages(locale: string): Promise<Messages> {
   if (messageCache[locale]) return messageCache[locale];
@@ -29,23 +32,21 @@ async function loadMessages(locale: string): Promise<Messages> {
     if (locale !== DEFAULT_LOCALE) {
       return loadMessages(DEFAULT_LOCALE);
     }
-    return {};
+    return messageCache[DEFAULT_LOCALE] ?? {};
   }
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState(DEFAULT_LOCALE);
-  const [messages, setMessages] = useState<Messages>({});
-  const [ready, setReady] = useState(false);
+  const [messages, setMessages] = useState<Messages>(defaultEnMessages as Messages);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    const initialLocale = stored || DEFAULT_LOCALE;
-    setLocaleState(initialLocale);
-    loadMessages(initialLocale).then((msgs) => {
-      setMessages(msgs);
-      setReady(true);
-    });
+    if (stored && stored !== DEFAULT_LOCALE) {
+      setLocaleState(stored);
+      document.documentElement.lang = stored;
+      loadMessages(stored).then(setMessages);
+    }
   }, []);
 
   const setLocale = useCallback((newLocale: string) => {
@@ -67,15 +68,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     },
     [messages],
   );
-
-  // Don't render children until messages are loaded to avoid flicker
-  if (!ready) {
-    return (
-      <div className="h-screen flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
 
   return <I18nContext.Provider value={{ locale, setLocale, t }}>{children}</I18nContext.Provider>;
 }

@@ -7,20 +7,30 @@ This directory contains the Vayada Playwright pilot from VAY-545. It is a focuse
 Run from the repo root:
 
 ```bash
-npm run e2e
+npm run e2e                       # all specs
 npm run e2e:landing
 npm run e2e:booking-web
+npm run e2e:affiliate-dashboard
+npm run e2e:booking-admin
+npm run e2e:marketplace-web
+npm run e2e:pms-web
+npm run e2e:vayada-admin
 npm run e2e:headed
 npm run e2e:ui
 npm run e2e:report
 ```
 
-By default local tests expect the app to already be running through portless:
+By default local tests expect the apps to already be running through portless:
 
 - `https://landing.localhost`
 - `https://hotel-alpenrose.booking.localhost`
+- `https://affiliate.localhost`
+- `https://admin.booking.localhost`
+- `https://marketplace.localhost`
+- `https://pms.localhost`
+- `https://admin.localhost`
 
-To have Playwright start plain-port Next.js dev servers for the pilot apps:
+To have Playwright start plain-port Next.js dev servers for all apps:
 
 ```bash
 E2E_START_SERVERS=1 npm run e2e
@@ -30,12 +40,22 @@ Plain-port server mode uses:
 
 - `http://127.0.0.1:3006` for landing
 - `http://hotel-alpenrose.booking.localhost:3002` for booking-web
+- `http://127.0.0.1:3005` for affiliate-dashboard
+- `http://127.0.0.1:3003` for booking-admin
+- `http://127.0.0.1:3000` for marketplace-web
+- `http://127.0.0.1:3004` for pms-web
+- `http://127.0.0.1:3001` for vayada-admin
 
 Override URLs when needed:
 
 ```bash
 E2E_LANDING_BASE_URL=http://localhost:3006 npm run e2e:landing
 E2E_BOOKING_BASE_URL=http://hotel-alpenrose.localhost:3002 npm run e2e:booking-web
+E2E_AFFILIATE_BASE_URL=http://localhost:3005 npm run e2e:affiliate-dashboard
+E2E_BOOKING_ADMIN_BASE_URL=http://localhost:3003 npm run e2e:booking-admin
+E2E_MARKETPLACE_BASE_URL=http://localhost:3000 npm run e2e:marketplace-web
+E2E_PMS_BASE_URL=http://localhost:3004 npm run e2e:pms-web
+E2E_VAYADA_ADMIN_BASE_URL=http://localhost:3001 npm run e2e:vayada-admin
 ```
 
 ## Booking Tenant Smoke
@@ -51,6 +71,10 @@ cd apps/booking-web && portless
 ```
 
 Then visit `https://hotel-alpenrose.booking.localhost`.
+
+## Auth App Smokes
+
+The smoke tests for `affiliate-dashboard`, `booking-admin`, `marketplace-web`, `pms-web`, and `vayada-admin` navigate to `/login` and verify the login shell renders without errors. No API mocking is required — the login pages are fully static until the form is submitted.
 
 ## Debugging
 
