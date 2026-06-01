@@ -109,6 +109,7 @@
   "layout.sidebar.roomsAndRates": "Chambres & Tarifs",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Parametres",
+  "layout.sidebar.featureHub": "Feature Hub",
   "layout.sidebar.collapse": "Reduire",
   "search.placeholder": "Rechercher reservations, voyageurs, chambres, parametres, pages...",
   "search.noResults": "Aucun resultat pour '{query}'",
