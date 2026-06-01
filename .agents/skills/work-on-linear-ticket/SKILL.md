@@ -24,7 +24,7 @@ Fetch the ticket before writing a single line of code.
 
 Move the ticket to **In Progress** before touching any code.
 
-```
+```text
 save_issue(id: "VAY-NNN", state: "In Progress")
 ```
 
@@ -34,7 +34,7 @@ Do not defer this step. The status signals to teammates that work has started.
 
 Create a branch from `main` following the repo convention:
 
-```
+```text
 <initials>/vay-<id>-<slug>
 ```
 
