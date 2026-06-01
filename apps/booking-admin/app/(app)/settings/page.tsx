@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
   BuildingOffice2Icon,
@@ -164,6 +164,7 @@ export default function SettingsPage() {
     longitude: number;
   } | null>(null);
   const [propertyCoordinateLoaded, setPropertyCoordinateLoaded] = useState(false);
+  const propertyCoordinateLoadingRef = useRef(false);
 
   const handleChangeEmail = async () => {
     try {
@@ -491,7 +492,8 @@ export default function SettingsPage() {
   };
 
   const loadPropertyCoordinate = useCallback(async () => {
-    if (propertyCoordinateLoaded) return;
+    if (propertyCoordinateLoaded || propertyCoordinateLoadingRef.current) return;
+    propertyCoordinateLoadingRef.current = true;
     try {
       const roomTypes = await pmsClient.get<
         { latitude: number | null; longitude: number | null }[]
@@ -515,6 +517,8 @@ export default function SettingsPage() {
       setPropertyCoordinateLoaded(true);
     } catch {
       // transient failure — leave propertyCoordinateLoaded false so next navigation retries
+    } finally {
+      propertyCoordinateLoadingRef.current = false;
     }
   }, [propertyCoordinateLoaded]);
 
