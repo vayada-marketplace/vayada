@@ -174,6 +174,21 @@ def _append_import_warning(notes: str, warning: str | None) -> str:
     return f"{notes}\n\n{warning}" if notes else warning
 
 
+async def _room_type_for_booking(booking: dict) -> dict | None:
+    room_type_id = booking.get("room_type_id")
+    if not room_type_id:
+        return None
+    try:
+        return await RoomTypeRepository.get_by_id(str(room_type_id))
+    except Exception as exc:
+        logger.warning(
+            "Failed to load room type %s for Channex max-stay warning: %s",
+            room_type_id,
+            exc,
+        )
+        return None
+
+
 async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     """Import a Channex booking revision into vayada.
     Handles deduplication, new bookings, modifications, and cancellations.
@@ -467,7 +482,7 @@ async def _apply_booking_modification(
         booking = await BookingRepository.get_by_id(booking_id)
         if not booking:
             continue
-        room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
+        room_type = await _room_type_for_booking(booking)
 
         updates: dict = {}
         if new_check_in:
