@@ -1436,6 +1436,15 @@ async def mark_booking_no_show(
             detail="Only confirmed bookings (never checked in) can be marked as no-show",
         )
 
+    check_out = booking["check_out"]
+    if isinstance(check_out, str):
+        check_out = date.fromisoformat(check_out)
+    if check_out > date.today():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot mark future departure as no-show",
+        )
+
     await BookingRepository.update_status(booking_id, "no_show")
     updated = await BookingRepository.get_by_id(booking_id)
 
@@ -1456,6 +1465,8 @@ async def mark_booking_no_show(
                 booking["check_out"],
             )
         )
+    # Guest notification intentionally omitted: marking no-show is an
+    # operational staff action, not a status change the guest needs to know about.
     await BookingEventRepository.record(
         booking_id=booking_id,
         hotel_id=hotel_id,

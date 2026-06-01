@@ -524,17 +524,22 @@ function ArrivalQuickView({
   onNoShow?: (bookingId: string) => Promise<void>;
 }) {
   const [noShowLoading, setNoShowLoading] = useState(false);
+  const [noShowError, setNoShowError] = useState<string | null>(null);
   const missingIds = loading ? 0 : incompleteGuestCount(booking, guests);
   const due = isPaid(booking) ? 0 : booking.totalAmount;
   const internalNotes = notes.filter((note) => note.body.trim().length > 0);
   const isDeparture = mode === "departure";
   const isNotCheckedIn = isDeparture && isNotCheckedInDeparture(booking);
+  const isCheckedOut = booking.status === "checked_out";
 
   async function handleNoShow() {
     if (!onNoShow) return;
     setNoShowLoading(true);
+    setNoShowError(null);
     try {
       await onNoShow(booking.id);
+    } catch {
+      setNoShowError("Failed to mark as no-show. Please try again.");
     } finally {
       setNoShowLoading(false);
     }
@@ -583,12 +588,20 @@ function ArrivalQuickView({
               className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                 isNotCheckedIn
                   ? "bg-amber-100 text-amber-800"
-                  : isDeparture
-                    ? "bg-green-100 text-green-700"
-                    : "bg-blue-100 text-blue-700"
+                  : isCheckedOut
+                    ? "bg-gray-100 text-gray-600"
+                    : isDeparture
+                      ? "bg-green-100 text-green-700"
+                      : "bg-blue-100 text-blue-700"
               }`}
             >
-              {isNotCheckedIn ? "Not checked in" : isDeparture ? "Checked in" : "Arriving today"}
+              {isNotCheckedIn
+                ? "Not checked in"
+                : isCheckedOut
+                  ? "Checked out"
+                  : isDeparture
+                    ? "Checked in"
+                    : "Arriving today"}
             </span>
             {due > 0 && (
               <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
@@ -642,6 +655,11 @@ function ArrivalQuickView({
           <div className="grid gap-2">
             {isNotCheckedIn ? (
               <>
+                {noShowError && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                    {noShowError}
+                  </p>
+                )}
                 <Link
                   href={`/check-in/${booking.id}?next=checkout`}
                   className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-4 text-sm font-semibold text-white hover:bg-primary-700"

@@ -23,8 +23,10 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isConfirmed = booking.status === "confirmed";
 
   async function handleNoShow() {
+    if (!isConfirmed) return;
     setLoading(true);
     setError(null);
     try {
@@ -49,20 +51,24 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
           </p>
         )}
         <div className="flex flex-col gap-3 sm:flex-row">
-          <Link
-            href={`/check-in/${booking.id}?next=checkout`}
-            className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
-          >
-            Check in now
-          </Link>
-          <button
-            type="button"
-            onClick={handleNoShow}
-            disabled={loading}
-            className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
-          >
-            {loading ? "Marking…" : "Mark as no-show"}
-          </button>
+          {isConfirmed && (
+            <Link
+              href={`/check-in/${booking.id}?next=checkout`}
+              className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
+            >
+              Check in now
+            </Link>
+          )}
+          {isConfirmed && (
+            <button
+              type="button"
+              onClick={handleNoShow}
+              disabled={loading}
+              className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+            >
+              {loading ? "Marking…" : "Mark as no-show"}
+            </button>
+          )}
           <Link
             href="/dashboard"
             className="flex h-11 items-center justify-center rounded-lg border border-gray-200 px-5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
