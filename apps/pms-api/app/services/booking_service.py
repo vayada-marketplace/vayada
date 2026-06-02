@@ -1068,12 +1068,6 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         raise ValueError(
             f"This room requires a minimum stay of {min_stay} nights for the selected dates"
         )
-    max_stay = RoomTypeRepository._find_stay_max_stay(seasons, data.check_in, data.check_out)
-    if max_stay and nights > max_stay:
-        raise ValueError(
-            f"This room has a maximum stay of {max_stay} nights for the selected dates. "
-            "Please shorten your stay."
-        )
 
     min_advance = room.get("minimum_advance_days") or 0
     if min_advance > 0:

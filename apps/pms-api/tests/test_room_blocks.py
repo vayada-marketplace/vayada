@@ -2,9 +2,6 @@
 Tests for room block admin endpoints — POST /admin/room-blocks, DELETE /admin/room-blocks/{id}.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, patch
-
 from tests.conftest import (
     create_test_hotel,
     create_test_room,
@@ -237,44 +234,6 @@ class TestDeleteRoomBlock:
             headers=get_auth_headers(user["token"]),
         )
         assert resp.status_code == 204
-
-    async def test_delete_room_block_schedules_targeted_channex_ari_sync(
-        self, client, cleanup_database
-    ):
-        """Deleting a PMS blocker must refresh availability and rate-plan restrictions."""
-        user = await create_test_user()
-        hotel = await create_test_hotel(str(user["id"]))
-        room = await create_test_room_type(str(hotel["id"]))
-        block = await create_test_room_block(
-            str(hotel["id"]),
-            str(room["id"]),
-            start_date="2026-11-01",
-            end_date="2026-12-31",
-        )
-
-        sync_invoked = asyncio.Event()
-
-        async def mark_sync_invoked(*args, **kwargs):
-            sync_invoked.set()
-            return True
-
-        with patch(
-            "app.routers.admin_room_blocks.push_ari_for_room_type",
-            new=AsyncMock(side_effect=mark_sync_invoked),
-        ) as sync_ari:
-            resp = await client.delete(
-                f"/admin/room-blocks/{block['id']}",
-                headers=get_auth_headers(user["token"]),
-            )
-            assert resp.status_code == 204
-            await asyncio.wait_for(sync_invoked.wait(), timeout=1)
-
-        sync_ari.assert_awaited_once_with(
-            str(hotel["id"]),
-            str(room["id"]),
-            start_date=block["start_date"],
-            end_date=block["end_date"],
-        )
 
     async def test_delete_room_block_not_found(self, client, cleanup_database):
         user = await create_test_user()

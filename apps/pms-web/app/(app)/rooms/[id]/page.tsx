@@ -105,14 +105,6 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       setError("Every season must have a rate greater than 0");
       return;
     }
-    if (
-      form.seasons.some(
-        (s) => s.maxStay != null && Number(s.maxStay) > 0 && Number(s.maxStay) < (s.minStay || 1),
-      )
-    ) {
-      setError("Max stay cannot be less than min stay.");
-      return;
-    }
     setSaving(true);
     setError("");
     setSuccess("");

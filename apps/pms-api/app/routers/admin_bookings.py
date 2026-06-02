@@ -87,31 +87,6 @@ def _is_direct_channel(channel: str | None) -> bool:
     return (channel or "direct").strip().lower() in {"direct", "website", "booking_engine"}
 
 
-def _validate_max_stay(room_type: dict, check_in: date, check_out: date) -> None:
-    nights = max(1, (check_out - check_in).days)
-    try:
-        seasons = RoomTypeRepository._parse_seasons(room_type)
-        max_stay = RoomTypeRepository._find_stay_max_stay(seasons, check_in, check_out)
-    except Exception as exc:
-        logger.warning(
-            "Failed to evaluate max-stay for room type %s: %s",
-            room_type.get("id") if room_type else None,
-            exc,
-        )
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to validate max-stay for selected dates",
-        ) from exc
-    if max_stay and nights > max_stay:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"This room has a maximum stay of {max_stay} nights for the selected dates. "
-                "Please shorten your stay."
-            ),
-        )
-
-
 async def _has_captured_payment(booking: dict) -> bool:
     if (booking.get("payment_status") or "").lower() in ADDON_LOCK_PAYMENT_STATUSES:
         return True
@@ -298,13 +273,12 @@ async def create_admin_booking(
 
     # Get room type for pricing
     room_type = await RoomTypeRepository.get_by_id(str(room["room_type_id"]))
-    nights = (data.check_out - data.check_in).days
-    _validate_max_stay(room_type, data.check_in, data.check_out)
     if data.nightly_rate is not None:
         nightly_rate = data.nightly_rate
     else:
         resolved_base, _ = RoomTypeRepository.resolve_rate(room_type, data.check_in)
         nightly_rate = resolved_base
+    nights = (data.check_out - data.check_in).days
     hotel_slug = await Database.fetchval("SELECT slug FROM hotels WHERE id = $1", hotel_id)
     addon_ids, addon_quantities = await _normalize_addon_selection(
         slug=hotel_slug,
@@ -453,8 +427,6 @@ async def update_booking_details(
         next_check_out = _as_date(updates.get("check_out", booking["check_out"]))
         if next_check_out <= next_check_in:
             raise HTTPException(status_code=400, detail="check_out must be after check_in")
-        room_type = await RoomTypeRepository.get_by_id(str(booking["room_type_id"]))
-        _validate_max_stay(room_type, next_check_in, next_check_out)
     if should_reprice_addons and next_addon_ids:
         check_in = _as_date(updates.get("check_in", booking["check_in"]))
         check_out = _as_date(updates.get("check_out", booking["check_out"]))

@@ -7,8 +7,6 @@ export interface ChannexSyncStatus {
   ratePlansProvisioned: number;
   lastBookingSyncAt: string | null;
   lastAriSyncAt: string | null;
-  lastAriSyncError: string | null;
-  lastAriSyncFailedAt: string | null;
   messagingAppInstalled: boolean;
 }
 

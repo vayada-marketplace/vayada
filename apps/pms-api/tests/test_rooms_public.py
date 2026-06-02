@@ -114,64 +114,6 @@ class TestPublicRooms:
         assert len(rooms) == 1
         assert rooms[0]["remainingRooms"] == 1  # 3 total - 2 booked
 
-    async def test_rooms_over_max_stay_show_zero_remaining(self, client, cleanup_database):
-        user = await create_test_user()
-        hotel = await create_test_hotel(str(user["id"]))
-        room = await create_test_room_type(str(hotel["id"]), total_rooms=3)
-        seasons = [
-            {
-                "name": "All year",
-                "tier": "Mid",
-                "from": "01-01",
-                "to": "12-31",
-                "rate": "150",
-                "minStay": 1,
-                "maxStay": 3,
-            }
-        ]
-        await Database.execute(
-            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
-            json.dumps(seasons),
-            room["id"],
-        )
-
-        resp = await client.get(
-            f"/api/hotels/{hotel['slug']}/rooms",
-            params={"check_in": "2026-06-01", "check_out": "2026-06-06"},
-        )
-        assert resp.status_code == 200
-        rooms = resp.json()
-        assert rooms[0]["remainingRooms"] == 0
-
-    async def test_unavailable_dates_includes_max_stay_by_arrival(self, client, cleanup_database):
-        user = await create_test_user()
-        hotel = await create_test_hotel(str(user["id"]))
-        room = await create_test_room_type(str(hotel["id"]), total_rooms=3)
-        seasons = [
-            {
-                "name": "All year",
-                "tier": "Mid",
-                "from": "01-01",
-                "to": "12-31",
-                "rate": "150",
-                "minStay": 1,
-                "maxStay": 3,
-            }
-        ]
-        await Database.execute(
-            "UPDATE room_types SET seasons = $1::jsonb WHERE id = $2",
-            json.dumps(seasons),
-            room["id"],
-        )
-
-        resp = await client.get(
-            f"/api/hotels/{hotel['slug']}/unavailable-dates",
-            params={"start": "2026-06-01", "end": "2026-06-03"},
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["max_stay_by_arrival"]["2026-06-01"] == 3
-
     async def test_rooms_no_dates_shows_total(self, client, hotel_with_rooms):
         """Without check_in/check_out, remainingRooms equals totalRooms."""
         hotel = hotel_with_rooms["hotel"]

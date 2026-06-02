@@ -46,7 +46,6 @@ from app.services.channex.inbound import (  # noqa: F401
 from app.services.channex.orchestrator import (  # noqa: F401
     push_ari_for_booking,
     push_ari_for_hotel,
-    push_ari_for_room_type,
 )
 from app.services.channex.outbound import handle_vayada_cancellation  # noqa: F401
 from app.services.channex.provisioning import provision_property  # noqa: F401

@@ -85,25 +85,6 @@ def test_channex_push_uses_daily_override():
     assert entry["rate"] == 1_210_000
 
 
-def test_channex_push_uses_season_stay_restrictions():
-    room = _make_room(
-        seasons=[
-            {
-                "name": "May",
-                "tier": "Mid",
-                "from": "05-01",
-                "to": "05-31",
-                "rate": "1600000",
-                "minStay": 2,
-                "maxStay": 14,
-            }
-        ]
-    )
-    entry = _build_restriction_entry(room, date(2026, 5, 7))
-    assert entry["min_stay_arrival"] == 2
-    assert entry["max_stay"] == 14
-
-
 def _run_update_room_type_capture_pushes(
     payload_kwargs: dict,
     *,

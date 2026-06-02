@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date
 
 from app.database import Database
 
@@ -233,28 +233,6 @@ class RoomTypeRepository:
         return seasons
 
     @staticmethod
-    def _season_covers_date(season: dict, check_date: date) -> bool:
-        """Return true when a recurring season contains check_date."""
-        season_from = season.get("from")
-        season_to = season.get("to")
-        if not season_from or not season_to:
-            return False
-        try:
-            if len(season_from) <= 5:
-                s_from = date(check_date.year, int(season_from[:2]), int(season_from[3:]))
-            else:
-                s_from = date.fromisoformat(season_from).replace(year=check_date.year)
-            if len(season_to) <= 5:
-                s_to = date(check_date.year, int(season_to[:2]), int(season_to[3:]))
-            else:
-                s_to = date.fromisoformat(season_to).replace(year=check_date.year)
-        except (ValueError, TypeError):
-            return False
-        if s_from > s_to:
-            return check_date >= s_from or check_date <= s_to
-        return s_from <= check_date <= s_to
-
-    @staticmethod
     def _find_season_rate(seasons: list, check_in: date, adults: int | None = None) -> float | None:
         """Find the season rate that covers the check-in date. Seasons repeat yearly.
         If adults is provided and the season has occupancyRates, use the per-occupancy rate."""
@@ -262,15 +240,35 @@ class RoomTypeRepository:
             rate = season.get("rate")
             if not rate:
                 continue
-            if not RoomTypeRepository._season_covers_date(season, check_in):
+            season_from = season.get("from")
+            season_to = season.get("to")
+            if not season_from or not season_to:
                 continue
             try:
-                if adults is not None:
-                    occupancy_rates = season.get("occupancyRates") or {}
-                    occ_rate = occupancy_rates.get(str(adults))
-                    if occ_rate is not None:
-                        return float(occ_rate)
-                return float(rate)
+                # Seasons may be stored as MM-DD or YYYY-MM-DD
+                if len(season_from) <= 5:
+                    s_from = date(check_in.year, int(season_from[:2]), int(season_from[3:]))
+                else:
+                    s_from = date.fromisoformat(season_from)
+                    s_from = s_from.replace(year=check_in.year)
+                if len(season_to) <= 5:
+                    s_to = date(check_in.year, int(season_to[:2]), int(season_to[3:]))
+                else:
+                    s_to = date.fromisoformat(season_to)
+                    s_to = s_to.replace(year=check_in.year)
+                # Handle seasons crossing year boundary (e.g., Nov-Feb)
+                matched = False
+                if s_from > s_to:
+                    matched = check_in >= s_from or check_in <= s_to
+                else:
+                    matched = s_from <= check_in <= s_to
+                if matched:
+                    if adults is not None:
+                        occupancy_rates = season.get("occupancyRates") or {}
+                        occ_rate = occupancy_rates.get(str(adults))
+                        if occ_rate is not None:
+                            return float(occ_rate)
+                    return float(rate)
             except (ValueError, TypeError):
                 continue
         return None
@@ -279,65 +277,34 @@ class RoomTypeRepository:
     def _find_season_min_stay(seasons: list, check_in: date) -> int | None:
         """Return the minStay configured on the season covering check_in, if any."""
         for season in seasons:
-            if not RoomTypeRepository._season_covers_date(season, check_in):
+            season_from = season.get("from")
+            season_to = season.get("to")
+            if not season_from or not season_to:
                 continue
-            raw = season.get("minStay", season.get("min_stay"))
-            if raw is None:
-                return None
             try:
-                return int(raw)
+                if len(season_from) <= 5:
+                    s_from = date(check_in.year, int(season_from[:2]), int(season_from[3:]))
+                else:
+                    s_from = date.fromisoformat(season_from).replace(year=check_in.year)
+                if len(season_to) <= 5:
+                    s_to = date(check_in.year, int(season_to[:2]), int(season_to[3:]))
+                else:
+                    s_to = date.fromisoformat(season_to).replace(year=check_in.year)
+                if s_from > s_to:
+                    matched = check_in >= s_from or check_in <= s_to
+                else:
+                    matched = s_from <= check_in <= s_to
+                if matched:
+                    raw = season.get("minStay")
+                    if raw is None:
+                        return None
+                    try:
+                        return int(raw)
+                    except (ValueError, TypeError):
+                        return None
             except (ValueError, TypeError):
-                return None
-        return None
-
-    @staticmethod
-    def _find_season_max_stay(seasons: list, check_in: date) -> int | None:
-        """Return the positive maxStay configured on the season covering check_in, if any."""
-        for season in seasons:
-            if not RoomTypeRepository._season_covers_date(season, check_in):
                 continue
-            raw = season.get("maxStay", season.get("max_stay"))
-            if raw in (None, "", 0, "0"):
-                return None
-            try:
-                value = int(raw)
-            except (ValueError, TypeError):
-                return None
-            return value if value > 0 else None
         return None
-
-    @staticmethod
-    def _find_stay_max_stay(seasons: list, check_in: date, check_out: date) -> int | None:
-        """Return the most restrictive positive maxStay across the selected stay."""
-        max_stays: list[int] = []
-        current = check_in
-        while current < check_out:
-            max_stay = RoomTypeRepository._find_season_max_stay(seasons, current)
-            if max_stay:
-                max_stays.append(max_stay)
-            current = current + timedelta(days=1)
-        return min(max_stays) if max_stays else None
-
-    @staticmethod
-    def _find_arrival_max_stay(
-        seasons: list, check_in: date, horizon_days: int = 366
-    ) -> int | None:
-        """Return the latest allowed stay length from an arrival date.
-
-        The limit can become stricter after crossing into another season, so
-        this walks forward and stops at the first night count that violates
-        the most restrictive maxStay encountered so far.
-        """
-        encountered: list[int] = []
-        for nights in range(1, horizon_days + 1):
-            stay_date = check_in + timedelta(days=nights - 1)
-            max_stay = RoomTypeRepository._find_season_max_stay(seasons, stay_date)
-            if max_stay:
-                encountered.append(max_stay)
-            effective_max = min(encountered) if encountered else None
-            if effective_max and nights > effective_max:
-                return nights - 1
-        return min(encountered) if encountered else None
 
     @staticmethod
     def _get_lowest_season_rate(seasons: list) -> float | None:

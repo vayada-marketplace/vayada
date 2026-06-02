@@ -66,7 +66,6 @@ export interface RoomType {
     to: string;
     rate: string;
     minStay: number;
-    maxStay?: number | string | null;
     occupancyRates?: Record<string, string>;
   }[];
   weekendSurcharge: string;
@@ -122,7 +121,6 @@ export interface RoomTypeCreate {
     to: string;
     rate: string;
     minStay: number;
-    maxStay?: number | string | null;
     occupancyRates?: Record<string, string>;
   }[];
   weekendSurcharge?: string;

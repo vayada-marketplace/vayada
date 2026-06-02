@@ -133,27 +133,6 @@ def test_update_without_seasons_skips_gap_validation():
     RoomTypeUpdate(operating_periods=[{"from": "01-01", "to": "06-30"}])
 
 
-def test_season_max_stay_must_not_be_less_than_min_stay():
-    with pytest.raises(ValidationError) as exc:
-        _build_create(
-            [{"from": "01-01", "to": "12-31"}],
-            [_season("All year", "01-01", "12-31") | {"minStay": 5, "maxStay": 3}],
-        )
-    assert "Max stay cannot be less than min stay" in str(exc.value)
-
-
-def test_season_blank_or_zero_max_stay_means_no_limit():
-    room = _build_create(
-        [{"from": "01-01", "to": "12-31"}],
-        [
-            _season("H1", "01-01", "06-30") | {"maxStay": ""},
-            _season("H2", "07-01", "12-31") | {"maxStay": 0},
-        ],
-    )
-    assert room.seasons[0]["maxStay"] is None
-    assert room.seasons[1]["maxStay"] is None
-
-
 # Cross-year operating-period support exists in the gap helper for parity
 # with the frontend, even though the existing operating-period field validator
 # rejects to < from at the model boundary. Test the helper directly.
