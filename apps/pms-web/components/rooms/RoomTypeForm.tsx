@@ -802,30 +802,16 @@ export default function RoomTypeForm({
       to: string;
       rate: string;
       minStay: number;
-      maxStay?: number | null;
       occupancyRates?: Record<string, string>;
     }[]
   >(
     sortSeasonsChronologically(
-      (form.seasons || []).map((s) => {
-        const rawMaxStay = s.maxStay ?? (s as { max_stay?: number | string | null }).max_stay;
-        const numericMaxStay = Number(rawMaxStay);
-        const maxStay =
-          rawMaxStay === undefined ||
-          rawMaxStay === null ||
-          rawMaxStay === "" ||
-          !Number.isFinite(numericMaxStay) ||
-          numericMaxStay <= 0
-            ? null
-            : Math.floor(numericMaxStay);
-        return {
-          ...s,
-          from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
-          to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
-          maxStay,
-          occupancyRates: s.occupancyRates || {},
-        };
-      }),
+      (form.seasons || []).map((s) => ({
+        ...s,
+        from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
+        to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
+        occupancyRates: s.occupancyRates || {},
+      })),
     ),
   );
   const [previewMonth, setPreviewMonth] = useState(() => new Date());
@@ -2274,7 +2260,6 @@ export default function RoomTypeForm({
                         to: "",
                         rate: "",
                         minStay: 1,
-                        maxStay: null,
                         occupancyRates: {},
                       },
                     ])
@@ -2318,15 +2303,6 @@ export default function RoomTypeForm({
                           <th className="text-left px-4 py-2 text-gray-500 font-medium">
                             Min Stay
                           </th>
-                          <th
-                            className="text-left px-4 py-2 text-gray-500 font-medium"
-                            title="Maximum number of nights per booking. Leave empty for no limit."
-                          >
-                            Max Stay
-                          </th>
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium">
-                            Per guest
-                          </th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2337,11 +2313,6 @@ export default function RoomTypeForm({
                           );
                           const isOccExpanded = expandedOccupancy[idx] || false;
                           const seasonPriceWarning = visiblePriceWarningById.get(`season:${idx}`);
-                          const maxStayValue = season.maxStay ?? null;
-                          const maxStayInvalid =
-                            maxStayValue !== null &&
-                            maxStayValue > 0 &&
-                            maxStayValue < (season.minStay || 1);
                           return (
                             <React.Fragment key={idx}>
                               <tr className="border-b border-gray-50">
@@ -2397,54 +2368,15 @@ export default function RoomTypeForm({
                                   </div>
                                 </td>
                                 <td className="px-4 py-2.5">
-                                  <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const u = [...seasons];
-                                        u[idx] = {
-                                          ...u[idx],
-                                          minStay: Math.max(1, (u[idx].minStay || 1) - 1),
-                                        };
-                                        setSeasons(u);
-                                      }}
-                                      className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
-                                    >
-                                      &minus;
-                                    </button>
-                                    <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
-                                      {season.minStay || 1}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const u = [...seasons];
-                                        u[idx] = {
-                                          ...u[idx],
-                                          minStay: (u[idx].minStay || 1) + 1,
-                                        };
-                                        setSeasons(u);
-                                      }}
-                                      className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <div className="space-y-1">
-                                    <div
-                                      className={`inline-flex items-center gap-0 border rounded-lg overflow-hidden ${maxStayInvalid ? "border-red-300" : "border-gray-200"}`}
-                                    >
+                                  <div className="flex items-center gap-3">
+                                    <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
                                       <button
                                         type="button"
                                         onClick={() => {
                                           const u = [...seasons];
-                                          const current = Number(u[idx].maxStay || 0);
-                                          const minStay = u[idx].minStay || 1;
                                           u[idx] = {
                                             ...u[idx],
-                                            maxStay: current <= minStay ? null : current - 1,
+                                            minStay: Math.max(1, (u[idx].minStay || 1) - 1),
                                           };
                                           setSeasons(u);
                                         }}
@@ -2452,38 +2384,16 @@ export default function RoomTypeForm({
                                       >
                                         &minus;
                                       </button>
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        value={season.maxStay ?? ""}
-                                        onChange={(e) => {
-                                          const u = [...seasons];
-                                          const raw = e.target.value;
-                                          const parsedMaxStay = parseInt(raw, 10);
-                                          u[idx] = {
-                                            ...u[idx],
-                                            maxStay:
-                                              raw === "" ||
-                                              Number.isNaN(parsedMaxStay) ||
-                                              parsedMaxStay <= 0
-                                                ? null
-                                                : parsedMaxStay,
-                                          };
-                                          setSeasons(u);
-                                        }}
-                                        placeholder="—"
-                                        title="Maximum number of nights per booking. Leave empty for no limit."
-                                        className="w-[42px] px-1 py-1 text-[11px] font-semibold text-gray-900 bg-white text-center outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      />
+                                      <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
+                                        {season.minStay || 1}
+                                      </span>
                                       <button
                                         type="button"
                                         onClick={() => {
                                           const u = [...seasons];
-                                          const current = Number(u[idx].maxStay || 0);
-                                          const minStay = u[idx].minStay || 1;
                                           u[idx] = {
                                             ...u[idx],
-                                            maxStay: current > 0 ? current + 1 : minStay,
+                                            minStay: (u[idx].minStay || 1) + 1,
                                           };
                                           setSeasons(u);
                                         }}
@@ -2492,38 +2402,29 @@ export default function RoomTypeForm({
                                         +
                                       </button>
                                     </div>
-                                    {maxStayInvalid && (
-                                      <p className="text-[10px] font-medium text-red-600">
-                                        Max stay cannot be less than min stay.
-                                      </p>
+                                    {maxOcc > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedOccupancy((prev) => ({
+                                            ...prev,
+                                            [idx]: !prev[idx],
+                                          }))
+                                        }
+                                        className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors ${hasOccRates ? "text-primary-600 bg-primary-50 hover:bg-primary-100" : "text-gray-500 hover:bg-gray-100"}`}
+                                      >
+                                        <ChevronDownIcon
+                                          className={`w-3 h-3 transition-transform ${isOccExpanded ? "" : "-rotate-90"}`}
+                                        />
+                                        Per guest
+                                      </button>
                                     )}
                                   </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  {maxOcc > 1 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setExpandedOccupancy((prev) => ({
-                                          ...prev,
-                                          [idx]: !prev[idx],
-                                        }))
-                                      }
-                                      className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors ${hasOccRates ? "text-primary-600 bg-primary-50 hover:bg-primary-100" : "text-gray-500 hover:bg-gray-100"}`}
-                                    >
-                                      <ChevronDownIcon
-                                        className={`w-3 h-3 transition-transform ${isOccExpanded ? "" : "-rotate-90"}`}
-                                      />
-                                      Per guest
-                                    </button>
-                                  ) : (
-                                    <span className="text-gray-300">&mdash;</span>
-                                  )}
                                 </td>
                               </tr>
                               {isOccExpanded && maxOcc > 1 && (
                                 <tr className="border-b border-gray-50 bg-gray-50/50">
-                                  <td colSpan={5} className="px-4 py-2.5 pl-10">
+                                  <td colSpan={3} className="px-4 py-2.5 pl-10">
                                     <div className="space-y-1.5">
                                       <span className="text-[10px] text-gray-400 font-medium">
                                         Rate per number of guests
@@ -3195,10 +3096,8 @@ export default function RoomTypeForm({
                         </span>
                       )}
                       {s.rate && (
-                        <span className="text-gray-500 ml-auto text-right">
+                        <span className="text-gray-500 ml-auto">
                           {formatCurrency(parseFloat(s.rate) || 0, form.currency || "EUR")}/night
-                          {" · "}Min {s.minStay || 1}
-                          {s.maxStay && s.maxStay > 0 ? ` · Max ${s.maxStay}` : ""}
                         </span>
                       )}
                     </div>

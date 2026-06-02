@@ -45,21 +45,18 @@ export const hotelService = {
   ): Promise<{
     dates: string[];
     minStayByArrival: Record<string, number>;
-    maxStayByArrival: Record<string, number>;
   }> {
     try {
       const data = await pms.get<{
         dates?: string[];
         min_stay_by_arrival?: Record<string, number>;
-        max_stay_by_arrival?: Record<string, number>;
       }>(`/api/hotels/${slug}/unavailable-dates?start=${start}&end=${end}`);
       return {
         dates: data.dates || [],
         minStayByArrival: data.min_stay_by_arrival || {},
-        maxStayByArrival: data.max_stay_by_arrival || {},
       };
     } catch {
-      return { dates: [], minStayByArrival: {}, maxStayByArrival: {} };
+      return { dates: [], minStayByArrival: {} };
     }
   },
 

@@ -9,15 +9,6 @@ export interface CalendarRoomType {
   baseRate: number;
   maxOccupancy: number;
   currency: string;
-  seasons: {
-    name?: string;
-    tier?: string;
-    from: string;
-    to: string;
-    rate?: string | number;
-    minStay?: number;
-    maxStay?: number | string | null;
-  }[];
 }
 
 export interface CalendarRoom {

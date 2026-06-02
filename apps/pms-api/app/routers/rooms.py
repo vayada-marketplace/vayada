@@ -39,14 +39,11 @@ async def get_unavailable_dates(
     end: date = Query(...),
 ):
     """Return dates where ALL room types are fully booked, plus per-arrival
-    stay-length constraints across the active rooms in the requested range.
+    min-stay constraints across the active rooms in the requested range.
 
     `min_stay_by_arrival` only includes arrival dates where the smallest
     available room min-stay is greater than 1 — clients can default to 1
     for any date not present in the map.
-
-    `max_stay_by_arrival` only includes arrival dates where every available
-    room type has a maximum stay. Clients can treat missing dates as unlimited.
     """
     hotel_id = await get_hotel_id_by_slug(slug)
     if not hotel_id:
@@ -69,7 +66,6 @@ async def get_unavailable_dates(
     today = property_today(hotel_timezone)
     unavailable = []
     min_stay_by_arrival: dict[str, int] = {}
-    max_stay_by_arrival: dict[str, int] = {}
     current = start
     while current < end:
         next_day = current + timedelta(days=1)
@@ -85,7 +81,6 @@ async def get_unavailable_dates(
         all_full = True
         days_until = (current - today).days
         eligible_min_stays: list[int] = []
-        eligible_max_stays: list[int | None] = []
         for room in rooms:
             total = room["total_rooms"]
             if not is_date_auto_open(calendar_settings, current):
@@ -108,24 +103,15 @@ async def get_unavailable_dates(
                     or 1
                 )
                 eligible_min_stays.append(room_min)
-                room_max = RoomTypeRepository._find_arrival_max_stay(
-                    seasons_by_room[str(room["id"])], current
-                )
-                eligible_max_stays.append(room_max)
         if all_full:
             unavailable.append(current.isoformat())
         elif eligible_min_stays:
             lowest = min(eligible_min_stays)
             if lowest > 1:
                 min_stay_by_arrival[current.isoformat()] = lowest
-            if eligible_max_stays and all(max_stay is not None for max_stay in eligible_max_stays):
-                max_stay_by_arrival[current.isoformat()] = max(
-                    max_stay for max_stay in eligible_max_stays if max_stay is not None
-                )
         current = next_day
 
     return UnavailableDatesResponse(
         dates=unavailable,
         min_stay_by_arrival=min_stay_by_arrival,
-        max_stay_by_arrival=max_stay_by_arrival,
     )

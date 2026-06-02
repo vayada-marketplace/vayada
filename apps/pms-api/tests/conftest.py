@@ -119,10 +119,6 @@ async def cleanup_database(init_database):
             test_hotel_ids,
         )
         await Database.execute(
-            "DELETE FROM property_module_activations WHERE hotel_id = ANY($1::uuid[])",
-            test_hotel_ids,
-        )
-        await Database.execute(
             "DELETE FROM affiliate_clicks WHERE hotel_id = ANY($1::uuid[])",
             test_hotel_ids,
         )
@@ -190,10 +186,6 @@ async def cleanup_database(init_database):
             )
             await Database.execute(
                 "DELETE FROM hotel_payment_settings WHERE hotel_id = ANY($1::uuid[])",
-                user_hotel_ids,
-            )
-            await Database.execute(
-                "DELETE FROM property_module_activations WHERE hotel_id = ANY($1::uuid[])",
                 user_hotel_ids,
             )
             await Database.execute(

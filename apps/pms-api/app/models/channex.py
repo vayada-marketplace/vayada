@@ -67,8 +67,6 @@ class ChannexSyncStatusResponse(BaseModel):
     rate_plans_provisioned: int = 0
     last_booking_sync_at: str | None = None
     last_ari_sync_at: str | None = None
-    last_ari_sync_error: str | None = None
-    last_ari_sync_failed_at: str | None = None
     messaging_app_installed: bool = False
 
 
