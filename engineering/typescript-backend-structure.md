@@ -2,7 +2,8 @@
 
 _VAY-602 decision record. Inputs: VAY-600 WorkOS identity architecture,
 VAY-601 Ask Intelligence architecture, and VAY-604 AI-agent bookability
-recommendation._
+recommendation. Updated after VAY-605 selected a planned big-bang database
+rewrite._
 
 ## Recommendation
 
@@ -11,10 +12,13 @@ current FastAPI files and not a premature microservice split.
 
 The target should be one cohesive backend codebase with explicit domain modules,
 shared infrastructure packages, product API adapters, and compatibility facades
-for old frontend/public routes during migration. The first TypeScript backend
-surface should be small and additive. Python services should keep serving
-production traffic until individual domains are migrated behind tested,
-observable contracts.
+for old frontend/public routes during migration.
+
+The code migration can still be incremental, but the database rewrite should be
+planned as a coordinated target-schema cutover per VAY-605. Python services
+should keep serving production traffic against the current databases until the
+target schema, legacy-to-target migration pipeline, application cutover branch,
+staging rehearsals, validation gates, and rollback window are ready.
 
 The backend structure should be organized around these principles:
 
@@ -29,6 +33,10 @@ The backend structure should be organized around these principles:
   third-party side effects, and response shaping in one file.
 - Cross-domain access happens through typed domain interfaces or read models,
   not by one product directly opening another product's database pool.
+- The TypeScript backend should be built against the target domain model and
+  target schema contracts, with compatibility adapters for old HTTP/frontend
+  shapes. It should not encode current product database boundaries as
+  permanent architecture.
 - Background work uses explicit job/event infrastructure with idempotency,
   retries, failure visibility, and audit links. Avoid untracked
   `asyncio.create_task`-style side effects.
@@ -51,6 +59,10 @@ and AI decisions harder to implement safely:
 - Product services directly open other product databases. Examples include PMS
   reading booking-engine hotel identity/payment data, booking-api reading PMS
   billing data, and marketplace-api reading PMS affiliate data.
+- Database ownership is currently split by historical product app rather than
+  by the target domains needed for WorkOS, bookability, intelligence, finance,
+  jobs, and audit. VAY-605 therefore makes database restructure a coordinated
+  cutover program, not an endpoint-by-endpoint table patch.
 - Large routers and services mix responsibilities. Current examples include
   `apps/pms-api/app/services/booking_service.py`,
   `apps/pms-api/app/routers/admin_bookings.py`,
@@ -96,6 +108,11 @@ app during or after migration. The API boundary should be logical first. Split
 into separate deployable services only when there is operational pressure such
 as scaling, ownership, compliance, or release isolation.
 
+This app should be able to run against target-schema fixtures and staging target
+databases before production cutover. Legacy Python APIs may continue serving
+production until the cutover, but new TypeScript domain code should express the
+target model rather than mirror the old database layout.
+
 If the team later wants separate deployables, keep them thin:
 
 ```text
@@ -122,6 +139,7 @@ packages/backend-audit
 packages/backend-events
 packages/backend-observability
 packages/backend-test
+packages/backend-migration
 packages/domain-identity
 packages/domain-hotels
 packages/domain-booking
@@ -153,6 +171,9 @@ Package responsibilities:
   correlation IDs.
 - `backend-test`: builders, fake WorkOS/session contexts, test DB utilities,
   contract fixtures, and HTTP test helpers.
+- `backend-migration`: target-schema DDL entry points, legacy-to-target
+  migration helpers, parity checks, fixture loaders, and cutover validation
+  harnesses.
 
 Domain packages should own business language and application services. They
 should not import HTTP routers. HTTP adapters import domains, never the reverse.
@@ -216,6 +237,10 @@ Owns:
 - WorkOS webhook reconciliation
 - selected organization/resource resolution
 
+In the target schema, `users.type`, `is_superadmin`, and product `user_id`
+ownership columns are migration inputs only. They should not survive as
+authorization primitives in TypeScript domain services.
+
 Retire:
 
 - product-specific auth dependency copies
@@ -226,7 +251,8 @@ Preserve:
 
 - stable internal user IDs
 - existing product resource IDs
-- compatibility for current JWT/cookie sessions until WorkOS migration is ready
+- compatibility for current JWT/cookie sessions until the WorkOS/session cutover
+  is ready
 
 ### Hotels and property content
 
@@ -240,6 +266,11 @@ Owns shared hotel/property facts used by marketplace, booking, PMS, and AI:
 
 This domain should provide canonical read models rather than letting PMS,
 booking-api, and marketplace-api keep duplicating hotel identity reads.
+
+VAY-605 should define whether this is one physical target database with schemas
+per domain or multiple physical databases cut over together. Either way,
+TypeScript should model canonical property identity explicitly instead of
+choosing one current product table as permanent source of truth.
 
 ### Booking and direct checkout
 
@@ -285,7 +316,8 @@ Retire:
 
 Preserve:
 
-- current PMS DB data model until migrations are scoped and tested
+- existing PMS data semantics through the target migration, not the current PMS
+  table layout as permanent architecture
 - Channex integration behavior and channel mapping semantics
 - existing admin route compatibility while frontends migrate
 
@@ -353,34 +385,39 @@ This is not the same as public AI bookability. Intelligence uses authenticated
 organization context and owner permissions. Distribution serves public,
 read-only hotel bookability to external agents and search systems.
 
-## Data access model
+## Data access and cutover model
 
-Keep database ownership explicit during migration:
+Keep database ownership explicit while preparing the big-bang cutover:
 
 - A domain owns writes to its authoritative tables.
 - Other domains consume either typed application services, read models, or
   events.
-- Cross-database reads are allowed only as migration adapters with an expiry
-  note and tests.
-- New TypeScript code should not introduce new raw cross-product DB pools as the
-  default integration pattern.
+- Legacy cross-database reads are treated as source extraction or temporary
+  compatibility only, not as the target integration pattern.
+- New TypeScript code should target the VAY-605 schema contracts and should not
+  introduce raw cross-product DB pools as normal domain integration.
 
-Recommended migration bridge:
+Recommended cutover bridge:
 
 ```text
 Python FastAPI services
-  -> existing DBs and routes
+  -> existing DBs and routes until cutover
 
 TypeScript backend
-  -> new domain services
-  -> typed adapters to existing DB tables where needed
-  -> compatibility HTTP routes for migrated frontend/public contracts
+  -> target domain services
+  -> target-schema fixtures/staging DB before production
+  -> compatibility HTTP routes for existing frontend/public contracts
+
+Migration pipeline
+  -> extract from auth/marketplace/booking/PMS
+  -> transform into target schema
+  -> validate parity before production cutover
 ```
 
-The first TypeScript domains can read existing tables. The goal is not an
-immediate schema rewrite. The goal is to move authorization, orchestration,
-contracts, and side effects into clear domain boundaries before deeper data
-model changes.
+The goal is not to port each FastAPI table access pattern into TypeScript. The
+goal is to design the target domain model and target database contracts, build
+the migration pipeline, rehearse the cutover, then switch application traffic in
+one coordinated release.
 
 ## Old shapes to retire, preserve, redesign
 
@@ -399,7 +436,8 @@ Preserve:
 - internal Vayada user IDs and product resource IDs
 - current guest checkout and booking lifecycle semantics
 - existing public booking URLs through redirects or compatibility adapters
-- product DB tables until each data migration is explicitly scoped
+- existing production databases as source of truth until the VAY-605 cutover
+  window
 - Channex, Stripe, Xendit, email, affiliate, and marketplace integration
   behavior while moving orchestration behind typed services
 - local portless hostnames and app paths during migration
@@ -424,22 +462,24 @@ These are the smallest useful follow-ups after this decision:
      `backend-test`.
    - Validation: build, typecheck, one HTTP test, and local portless route.
 
-2. **Define RequestContext and authorization contract**
+2. **Define target-schema boundaries and migration harness**
+   - Convert the VAY-605 ownership map into target-schema contracts for
+     identity, hotel catalog, booking, PMS, marketplace, finance,
+     distribution, intelligence, and jobs/audit.
+   - Add migration/parity harness interfaces to `backend-migration`.
+   - Validation: target-schema contract fixtures and source-to-target mapping
+     tests for representative records.
+
+3. **Define RequestContext and authorization contract**
    - Add TypeScript types and tests for actor, organization, membership,
      permissions, and linked resources.
-   - Include compatibility inputs for current JWT/cookie and `X-Hotel-Id`.
+   - Include compatibility inputs for current JWT/cookie and `X-Hotel-Id`, but
+     resolve them into the target organization/resource model.
    - Validation: unit tests for allowed/denied hotel resource resolution.
 
-3. **Backfill organization/resource-link schema plan**
-   - Draft auth-db migrations for organizations, memberships, external
-     identities, and resource links.
-   - Include rollback/backfill strategy and mapping from existing hotel,
-     creator, affiliate, and platform users.
-   - Validation: migration dry-run locally and fixture-based mapping tests.
-
 4. **Implement public AI bookability profile contract**
-   - Add a read-only profile endpoint or contract test using existing booking
-     hotel data.
+   - Add a read-only profile endpoint or contract test using target bookability
+     fixtures.
    - Return hotel identity, canonical URLs, capabilities, completeness, and
      freshness.
    - Validation: contract tests and no guest/private fields.
@@ -447,7 +487,8 @@ These are the smallest useful follow-ups after this decision:
 5. **Implement quote service contract**
    - Extract a deterministic quote shape for dates, guests, room count, rates,
      policies, payment capabilities, and booking URL.
-   - Can initially read existing PMS/booking tables through adapters.
+   - Validate parity with existing PMS/booking behavior through migration
+     fixtures and staging rehearsals.
    - Validation: tests for sold out, min/max stay, same-day cutoff, and payment
      not configured.
 
@@ -462,6 +503,12 @@ These are the smallest useful follow-ups after this decision:
    - Add idempotency, retry, dead-letter visibility, and audit correlation.
    - Validation: unit test retry/idempotency behavior and one integration test.
 
+8. **Write application cutover runbook for the TS backend**
+   - Define which Python routes remain until cutover, which TypeScript routes
+     replace them, deploy order, config flags, target DB readiness checks, and
+     rollback behavior.
+   - Validation: tabletop runbook review and staging smoke against target schema.
+
 ## Open decisions before implementation planning
 
 VAY-603 should resolve these before committing to a full roadmap:
@@ -471,13 +518,16 @@ VAY-603 should resolve these before committing to a full roadmap:
 - Database tooling: pick migration and query tooling for TypeScript
   (`node-postgres` plus typed query generation, Prisma, Drizzle, Kysely, or
   another option).
+- Big-bang database topology: decide whether the target is one physical database
+  with schemas per domain or multiple physical databases cut over together.
 - Job/event infrastructure: choose the first durable job mechanism compatible
   with ECS/local dev.
-- WorkOS rollout sequencing: decide whether WorkOS lands before the first TS
-  product route or whether the first TS app supports legacy JWT compatibility
-  first.
-- Source of truth for hotel identity: decide the exact shared hotel/property
-  read model and which current table remains authoritative during migration.
+- WorkOS rollout sequencing: decide whether WorkOS is part of the same cutover
+  or whether the TS app supports a short-lived legacy session compatibility
+  layer against the target identity model.
+- Source of truth for hotel identity: decide the target shared hotel/property
+  model and source-to-target transforms from current booking/PMS/marketplace
+  tables.
 - AI provider/runtime: choose the agent runtime and storage shape after the
   evidence tools are defined.
 - Public AI terms/rate limits: define external client limits, cache policy, and
@@ -494,6 +544,7 @@ This target structure gives VAY-603 a concrete implementation-planning base:
 - AI-agent bookability can expose one public quote/bookability contract instead
   of leaking internal booking-api/PMS boundaries.
 - Python and TypeScript services can coexist behind compatibility routes while
-  migration proceeds domain by domain.
+  the target schema, ETL pipeline, and cutover branch are prepared.
 - Backend implementation tickets can be small, testable, and reversible instead
-  of broad "rewrite the backend" epics.
+  of one broad "rewrite the backend" epic, while production migration still
+  happens as a coordinated VAY-605 cutover.
