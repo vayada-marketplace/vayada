@@ -73,12 +73,14 @@ There is no separate `vayada-agent-skills` repo. Vayada is one repo; skills live
 
 All shared skills that currently exist in `.agents/skills/`:
 
-| Skill | File | When to use |
-|---|---|---|
-| `vayada-skills-storage` | `.agents/skills/vayada-skills-storage/SKILL.md` | Deciding where a new skill or guidance belongs (this file). |
-| `write-linear-issue` | `.agents/skills/write-linear-issue/SKILL.md` | Creating or restructuring a Vayada Linear ticket. |
-| `work-on-linear-ticket` | `.agents/skills/work-on-linear-ticket/SKILL.md` | Picking up a Linear ticket and implementing it end-to-end. |
-| `run-local-portless` | `.agents/skills/run-local-portless/SKILL.md` | Running the full Vayada stack locally via portless. |
+| Skill                         | File                                                  | When to use                                                                                                                   |
+| ----------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `fix-open-prs`                | `.agents/skills/fix-open-prs/SKILL.md`                | Cleaning up open PRs by addressing CodeRabbit comments, merge conflicts, and failing CI.                                      |
+| `run-local-portless`          | `.agents/skills/run-local-portless/SKILL.md`          | Running the full Vayada stack locally via portless.                                                                           |
+| `typescript-rewrite-workflow` | `.agents/skills/typescript-rewrite-workflow/SKILL.md` | Planning or implementing the TypeScript backend rewrite, WorkOS, Ask Intelligence, target schema, migration, or cutover work. |
+| `vayada-skills-storage`       | `.agents/skills/vayada-skills-storage/SKILL.md`       | Deciding where a new skill or guidance belongs (this file).                                                                   |
+| `write-linear-issue`          | `.agents/skills/write-linear-issue/SKILL.md`          | Creating or restructuring a Vayada Linear ticket.                                                                             |
+| `work-on-linear-ticket`       | `.agents/skills/work-on-linear-ticket/SKILL.md`       | Picking up a Linear ticket and implementing it end-to-end.                                                                    |
 
 Update this table when adding or removing a skill.
 
