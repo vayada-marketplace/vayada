@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowPathIcon,
-  BoltIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   MagnifyingGlassIcon,
@@ -17,7 +16,6 @@ import {
   activeNavModules,
   CORE_NAV_ITEMS,
   FEATURE_CATEGORIES,
-  FEATURE_MODULES,
   modulesForProduct,
 } from "./registry";
 import type {
@@ -31,6 +29,7 @@ import { useFeatureModuleActivations } from "./useFeatureModuleActivations";
 interface FeatureHubPageProps {
   activationClient: FeatureActivationClient;
   initialProduct?: FeatureProduct;
+  products?: FeatureProduct[];
 }
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -47,7 +46,13 @@ const PRODUCT_PREVIEW_LABELS: Record<FeatureProduct, string> = {
   booking_engine: "Booking Engine navigation",
 };
 
-export function FeatureHubPage({ activationClient, initialProduct = "pms" }: FeatureHubPageProps) {
+const ALL_PRODUCTS = Object.keys(PRODUCT_LABELS) as FeatureProduct[];
+
+export function FeatureHubPage({
+  activationClient,
+  initialProduct = "pms",
+  products,
+}: FeatureHubPageProps) {
   const [product, setProduct] = useState<FeatureProduct>(initialProduct);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<"All" | FeatureCategory>("All");
@@ -57,15 +62,26 @@ export function FeatureHubPage({ activationClient, initialProduct = "pms" }: Fea
   const { activeModuleIds, activeModuleSet, loading, error, setModuleActive } =
     useFeatureModuleActivations(activationClient);
 
+  const availableProducts = useMemo(() => {
+    const requested = products?.length ? products : ALL_PRODUCTS;
+    return requested.includes(initialProduct) ? requested : [initialProduct, ...requested];
+  }, [initialProduct, products]);
+
+  useEffect(() => {
+    if (!availableProducts.includes(product)) {
+      setProduct(availableProducts[0]);
+    }
+  }, [availableProducts, product]);
+
   useEffect(() => {
     if (!notice) return;
     const id = window.setTimeout(() => setNotice(""), 3800);
     return () => window.clearTimeout(id);
   }, [notice]);
 
-  const combinedActiveCount = useMemo(
-    () => FEATURE_MODULES.filter((module) => activeModuleSet.has(module.id)).length,
-    [activeModuleSet],
+  const productActiveCount = useMemo(
+    () => activeModuleCount(product, activeModuleIds),
+    [activeModuleIds, product],
   );
 
   const filteredModules = useMemo(() => {
@@ -111,144 +127,149 @@ export function FeatureHubPage({ activationClient, initialProduct = "pms" }: Fea
   const clearSearch = () => setQuery("");
 
   return (
-    <div className="min-h-full bg-[#f7f7f4] text-gray-950">
-      <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-5 flex flex-col gap-3 border-b border-stone-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm">
-                <BoltIcon className="h-4 w-4" />
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-                <CheckCircleIcon className="h-3.5 w-3.5" />
-                {combinedActiveCount} active
+    <div className="min-h-full bg-gray-50 p-4 text-gray-950 md:p-6">
+      <div className="pb-4">
+        <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-xl font-semibold text-gray-900 md:text-2xl">Feature Hub</h1>
+            <p className="mt-1 max-w-2xl text-[13px] text-gray-500">
+              Activate property modules and keep navigation focused on the tools your team uses.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700">
+                <CheckCircleIcon className="h-3.5 w-3.5 text-primary-600" />
+                {productActiveCount} active
               </span>
               {loading && (
-                <span className="inline-flex items-center gap-1 rounded-md border border-stone-200 bg-white px-2 py-1 text-xs font-medium text-stone-500">
+                <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-500">
                   <ArrowPathIcon className="h-3.5 w-3.5 animate-spin" />
                   Syncing
                 </span>
               )}
             </div>
-            <h1 className="text-2xl font-semibold tracking-normal text-gray-950 sm:text-3xl">
-              Feature Hub
-            </h1>
-            <p className="mt-1 max-w-2xl text-sm text-stone-600">
-              Activate modules to add them to your property. Your navigation adapts automatically.
-            </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            {(Object.keys(PRODUCT_LABELS) as FeatureProduct[]).map((key) => {
-              const count = activeModuleCount(key, activeModuleIds);
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setProduct(key)}
-                  className={cx(
-                    "inline-flex min-h-10 items-center justify-center rounded-md border px-3 text-sm font-semibold transition-colors",
-                    product === key
-                      ? "border-gray-950 bg-gray-950 text-white"
-                      : "border-stone-300 bg-white text-stone-700 hover:border-stone-500",
-                  )}
-                >
-                  {PRODUCT_LABELS[key]}{" "}
-                  <span className="ml-1 text-xs opacity-75">· {count} active</span>
-                </button>
-              );
-            })}
-          </div>
-        </header>
-
-        {error && (
-          <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
-            {notice}
-          </div>
-        )}
-
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_360px]">
-          <main className="min-w-0">
-            <div className="mb-4 flex flex-col gap-3">
-              <label className="relative block">
-                <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search modules..."
-                  className="h-11 w-full rounded-md border border-stone-300 bg-white pl-9 pr-9 text-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                />
-                {query && (
+          {availableProducts.length > 1 && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {availableProducts.map((key) => {
+                const count = activeModuleCount(key, activeModuleIds);
+                return (
                   <button
+                    key={key}
                     type="button"
-                    onClick={clearSearch}
-                    aria-label="Clear search"
-                    title="Clear search"
-                    className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-900"
-                  >
-                    <XMarkIcon className="h-4 w-4" />
-                  </button>
-                )}
-              </label>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {FEATURE_CATEGORIES.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => setCategory(item)}
+                    onClick={() => setProduct(key)}
                     className={cx(
-                      "h-9 shrink-0 rounded-md border px-3 text-sm font-medium transition-colors",
-                      category === item
-                        ? "border-emerald-600 bg-emerald-600 text-white"
-                        : "border-stone-300 bg-white text-stone-700 hover:border-stone-500",
+                      "inline-flex min-h-9 items-center justify-center rounded-md border px-3 text-[13px] font-medium transition-colors",
+                      product === key
+                        ? "border-primary-600 bg-primary-600 text-white"
+                        : "border-gray-200 bg-white text-gray-700 hover:border-gray-400",
                     )}
                   >
-                    {item}
+                    {PRODUCT_LABELS[key]}{" "}
+                    <span className="ml-1 text-xs opacity-75">· {count} active</span>
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
+          )}
+        </header>
+      </div>
 
-            {filteredModules.length === 0 ? (
-              <div className="rounded-md border border-dashed border-stone-300 bg-white px-5 py-12 text-center">
-                <SparklesIcon className="mx-auto h-8 w-8 text-stone-400" />
-                <p className="mt-3 text-sm font-semibold text-stone-900">
-                  {query ? `No modules match "${query}"` : "No modules in this category."}
-                </p>
-                {query && (
-                  <button
-                    type="button"
-                    onClick={clearSearch}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-700 hover:border-stone-500"
-                  >
-                    <XMarkIcon className="h-4 w-4" />
-                    Clear search
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3">
-                {filteredModules.map((module) => (
-                  <ModuleCard
-                    key={module.id}
-                    module={module}
-                    isActive={activeModuleSet.has(module.id)}
-                    saving={savingModuleId === module.id}
-                    onOpen={() => setSelectedModule(module)}
-                    onToggle={(isActive) => toggleModule(module, isActive)}
-                  />
-                ))}
-              </div>
-            )}
-          </main>
+      <div>
+        <div className="max-w-5xl">
+          {error && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {error}
+            </div>
+          )}
+          {notice && (
+            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-700">
+              {notice}
+            </div>
+          )}
 
-          <aside className="lg:sticky lg:top-4 lg:self-start">
-            <NavigationPreview product={product} activeModuleIds={activeModuleIds} />
-          </aside>
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px] xl:grid-cols-[minmax(0,1fr)_300px]">
+            <main className="min-w-0">
+              <div className="mb-4 rounded-lg border border-gray-200 bg-white">
+                <div className="space-y-3 px-4 py-4 md:px-5">
+                  <label className="relative block">
+                    <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                    <input
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
+                      placeholder="Search modules..."
+                      className="h-10 w-full rounded-md border border-gray-200 bg-white pl-9 pr-9 text-sm outline-none transition focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+                    />
+                    {query && (
+                      <button
+                        type="button"
+                        onClick={clearSearch}
+                        aria-label="Clear search"
+                        title="Clear search"
+                        className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                      </button>
+                    )}
+                  </label>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {FEATURE_CATEGORIES.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => setCategory(item)}
+                        className={cx(
+                          "h-8 shrink-0 rounded-full px-3 text-[12px] font-medium transition-colors",
+                          category === item
+                            ? "bg-primary-600 text-white"
+                            : "bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-900",
+                        )}
+                      >
+                        {item}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {filteredModules.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-300 bg-white px-5 py-12 text-center">
+                  <SparklesIcon className="mx-auto h-8 w-8 text-gray-400" />
+                  <p className="mt-3 text-sm font-semibold text-gray-900">
+                    {query ? `No modules match "${query}"` : "No modules in this category."}
+                  </p>
+                  {query && (
+                    <button
+                      type="button"
+                      onClick={clearSearch}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
+                    >
+                      <XMarkIcon className="h-4 w-4" />
+                      Clear search
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+                  <div className="divide-y divide-gray-100">
+                    {filteredModules.map((module) => (
+                      <ModuleCard
+                        key={module.id}
+                        module={module}
+                        isActive={activeModuleSet.has(module.id)}
+                        saving={savingModuleId === module.id}
+                        onOpen={() => setSelectedModule(module)}
+                        onToggle={(isActive) => toggleModule(module, isActive)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </main>
+
+            <aside className="lg:sticky lg:top-4 lg:self-start">
+              <NavigationPreview product={product} activeModuleIds={activeModuleIds} />
+            </aside>
+          </div>
         </div>
       </div>
 
@@ -281,56 +302,56 @@ function ModuleCard({
   return (
     <article
       className={cx(
-        "group relative min-h-[190px] rounded-md border bg-white p-4 shadow-sm transition",
-        isActive
-          ? "border-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.14)]"
-          : "border-stone-200 hover:border-stone-400",
+        "flex flex-col gap-4 px-4 py-4 transition sm:flex-row sm:items-center sm:justify-between md:px-5",
+        isActive ? "bg-primary-50/40" : "bg-white hover:bg-gray-50/70",
       )}
     >
-      <button
-        type="button"
-        aria-label={`View ${module.name} details`}
-        onClick={onOpen}
-        onKeyDown={(event) => {
-          if (event.key === " ") {
-            event.preventDefault();
-            onOpen();
-          }
-        }}
-        className="absolute inset-0 z-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-      />
-      <div className="pointer-events-none relative z-10 mb-4 flex items-start justify-between gap-3">
+      <div className="flex min-w-0 items-start gap-3">
         <ModuleIcon module={module} active={isActive} />
-        <div className="pointer-events-auto">
-          <ToggleSwitch
-            checked={isActive}
-            disabled={saving}
-            ariaLabel={`${isActive ? "Deactivate" : "Activate"} ${module.name}`}
-            onClick={(event) => event.stopPropagation()}
-            onChange={(checked) => onToggle(checked)}
-          />
-        </div>
-      </div>
-      <div className="pointer-events-none relative z-10 min-w-0">
-        <div className="flex min-h-6 items-center gap-2">
-          <h2 className="truncate text-base font-semibold text-gray-950">{module.name}</h2>
-          {module.isNew && (
-            <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
-              NEW
+        <div className="min-w-0">
+          <div className="flex min-h-6 flex-wrap items-center gap-2">
+            <h2 className="text-[14px] font-semibold text-gray-900">{module.name}</h2>
+            {module.isNew && (
+              <span className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
+                NEW
+              </span>
+            )}
+            <span
+              className={cx(
+                "rounded-md px-2 py-0.5 text-[11px] font-medium",
+                isActive ? "bg-primary-100 text-primary-700" : "bg-gray-100 text-gray-600",
+              )}
+            >
+              {isActive ? "Active" : "Inactive"}
             </span>
-          )}
+          </div>
+          <p className="mt-1 text-[13px] leading-5 text-gray-500">{module.description}</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <span className="rounded-md bg-gray-100 px-2 py-1 text-[11px] font-medium text-gray-600">
+              {module.category}
+            </span>
+            {module.type === "external" && (
+              <span className="rounded-md bg-primary-50 px-2 py-1 text-[11px] font-medium text-primary-700">
+                External
+              </span>
+            )}
+          </div>
         </div>
-        <p className="mt-1 line-clamp-2 text-sm leading-5 text-stone-600">{module.description}</p>
       </div>
-      <div className="pointer-events-none relative z-10 mt-4 flex flex-wrap gap-1.5">
-        <span className="rounded-md bg-stone-100 px-2 py-1 text-xs font-medium text-stone-700">
-          {module.category}
-        </span>
-        {module.type === "external" && (
-          <span className="rounded-md bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
-            External
-          </span>
-        )}
+      <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="inline-flex h-9 items-center justify-center rounded-md border border-gray-200 bg-white px-3 text-[13px] font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900"
+        >
+          Details
+        </button>
+        <ToggleSwitch
+          checked={isActive}
+          disabled={saving}
+          ariaLabel={`${isActive ? "Deactivate" : "Activate"} ${module.name}`}
+          onChange={(checked) => onToggle(checked)}
+        />
       </div>
     </article>
   );
@@ -340,13 +361,11 @@ function ToggleSwitch({
   checked,
   disabled,
   ariaLabel,
-  onClick,
   onChange,
 }: {
   checked: boolean;
   disabled?: boolean;
   ariaLabel: string;
-  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onChange: (checked: boolean) => void;
 }) {
   return (
@@ -356,19 +375,16 @@ function ToggleSwitch({
       aria-checked={checked}
       aria-label={ariaLabel}
       disabled={disabled}
-      onClick={(event) => {
-        onClick?.(event);
-        onChange(!checked);
-      }}
+      onClick={() => onChange(!checked)}
       className={cx(
-        "relative h-7 w-12 shrink-0 rounded-full border transition-colors disabled:cursor-wait disabled:opacity-60",
-        checked ? "border-emerald-600 bg-emerald-600" : "border-stone-300 bg-stone-100",
+        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors disabled:cursor-wait disabled:opacity-50",
+        checked ? "bg-primary-600" : "bg-gray-300",
       )}
     >
       <span
         className={cx(
-          "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform",
-          checked ? "translate-x-6" : "translate-x-0.5",
+          "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-5" : "translate-x-0.5",
         )}
       />
     </button>
@@ -382,8 +398,8 @@ function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean
         className={cx(
           "flex h-11 w-11 items-center justify-center rounded-md border text-sm font-black",
           active
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-            : "border-stone-200 bg-stone-50 text-stone-700",
+            ? "border-primary-200 bg-primary-50 text-primary-700"
+            : "border-gray-200 bg-gray-50 text-gray-700",
         )}
       >
         <BrandMark id={module.icon} />
@@ -401,8 +417,8 @@ function ModuleIcon({ module, active }: { module: FeatureModule; active: boolean
       className={cx(
         "flex h-11 w-11 items-center justify-center rounded-md border",
         active
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : "border-stone-200 bg-stone-50 text-stone-600",
+          ? "border-primary-200 bg-primary-50 text-primary-700"
+          : "border-gray-200 bg-gray-50 text-gray-600",
       )}
     >
       <Icon className="h-5 w-5" />
@@ -433,48 +449,53 @@ function NavigationPreview({
   const totalItems = CORE_NAV_ITEMS[product].length + navModules.length;
 
   return (
-    <section className="rounded-md border border-stone-200 bg-white shadow-sm">
+    <section className="rounded-lg border border-gray-200 bg-white">
       <button
         type="button"
-        className="flex w-full items-center justify-between border-b border-stone-200 px-4 py-3 text-left lg:pointer-events-none"
+        className="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3 text-left lg:pointer-events-none"
       >
         <div>
-          <h2 className="text-sm font-semibold text-gray-950">{PRODUCT_PREVIEW_LABELS[product]}</h2>
-          <p className="mt-0.5 text-xs text-stone-500">Live preview</p>
+          <h2 className="text-[14px] font-semibold text-gray-900">
+            {PRODUCT_PREVIEW_LABELS[product]}
+          </h2>
+          <p className="mt-0.5 text-xs text-gray-500">Live preview</p>
         </div>
-        <ChevronDownIcon className="h-4 w-4 text-stone-400 lg:hidden" />
+        <ChevronDownIcon className="h-4 w-4 text-gray-400 lg:hidden" />
       </button>
       <div className="p-3">
         <div className="space-y-1.5">
           {CORE_NAV_ITEMS[product].map((item) => (
             <div
               key={item.href}
-              className="flex h-9 items-center gap-2 rounded-md px-2 text-sm text-stone-500"
+              className="flex h-9 items-center gap-2 rounded-md px-2 text-[13px] text-gray-500"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-stone-300" />
+              <span className="h-1.5 w-1.5 rounded-full bg-gray-300" />
               <span className="truncate">{item.label}</span>
             </div>
           ))}
           {navModules.map((module) => (
             <div
               key={module.id}
-              className="flex h-9 items-center gap-2 rounded-md bg-emerald-50 px-2 text-sm font-semibold text-emerald-700"
+              className="flex h-9 items-center gap-2 rounded-md bg-primary-50 px-2 text-[13px] font-semibold text-primary-700"
             >
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="h-2 w-2 rounded-full bg-primary-500" />
               <span className="truncate">{module.navItem?.label}</span>
             </div>
           ))}
         </div>
         {nonNavActive.length > 0 && (
-          <div className="mt-4 space-y-2 border-t border-stone-200 pt-3">
+          <div className="mt-4 space-y-2 border-t border-gray-100 pt-3">
             {nonNavActive.map((module) => (
-              <div key={module.id} className="rounded-md bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              <div
+                key={module.id}
+                className="rounded-md bg-primary-50 px-3 py-2 text-xs text-primary-700"
+              >
                 <span className="font-semibold">{module.name}</span>: {module.settingsNote}
               </div>
             ))}
           </div>
         )}
-        <div className="mt-4 flex items-center justify-between border-t border-stone-200 pt-3 text-xs font-semibold text-stone-500">
+        <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs font-medium text-gray-500">
           <span>{totalItems} items</span>
           <span>{navModules.length} module items</span>
         </div>
@@ -526,9 +547,9 @@ function DetailModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-md bg-white shadow-2xl sm:max-h-[92vh] sm:max-w-3xl sm:rounded-md"
+        className="flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-lg bg-white shadow-2xl sm:max-h-[92vh] sm:max-w-3xl sm:rounded-lg"
       >
-        <div className="flex items-start gap-3 border-b border-stone-200 px-4 py-4 sm:px-5">
+        <div className="flex items-start gap-3 border-b border-gray-100 px-4 py-4 sm:px-5">
           <ModuleIcon module={module} active={isActive} />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -542,11 +563,11 @@ function DetailModal({
               )}
             </div>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              <span className="rounded-md bg-stone-100 px-2 py-1 text-xs font-medium text-stone-700">
+              <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
                 {module.category}
               </span>
               {module.type === "external" && (
-                <span className="rounded-md bg-sky-50 px-2 py-1 text-xs font-medium text-sky-700">
+                <span className="rounded-md bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">
                   External integration
                 </span>
               )}
@@ -558,7 +579,7 @@ function DetailModal({
             onClick={onClose}
             aria-label="Close"
             title="Close"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-900"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900"
           >
             <XMarkIcon className="h-5 w-5" />
           </button>
@@ -566,17 +587,17 @@ function DetailModal({
 
         <div className="overflow-y-auto px-4 py-4 sm:px-5">
           <p className="text-base font-medium leading-7 text-gray-900">{module.detail.headline}</p>
-          <div className="mt-4 overflow-hidden rounded-md border border-stone-200 bg-stone-50">
+          <div className="mt-4 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
             <ModuleVisual type={module.detail.visualType} />
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {module.detail.features.map((feature) => (
               <div
                 key={feature.text}
-                className="flex min-h-14 items-start gap-2 rounded-md border border-stone-200 bg-white p-3"
+                className="flex min-h-14 items-start gap-2 rounded-md border border-gray-200 bg-white p-3"
               >
-                <feature.icon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                <p className="text-sm leading-5 text-stone-700">{feature.text}</p>
+                <feature.icon className="mt-0.5 h-4 w-4 shrink-0 text-primary-600" />
+                <p className="text-sm leading-5 text-gray-700">{feature.text}</p>
               </div>
             ))}
           </div>
@@ -588,7 +609,7 @@ function DetailModal({
           )}
         </div>
 
-        <div className="flex flex-col gap-3 border-t border-stone-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex items-center gap-3">
             <ToggleSwitch
               checked={isActive}
@@ -596,7 +617,7 @@ function DetailModal({
               ariaLabel={`${isActive ? "Deactivate" : "Activate"} ${module.name}`}
               onChange={onToggle}
             />
-            <span className="text-sm font-semibold text-stone-700">
+            <span className="text-sm font-semibold text-gray-700">
               {isActive ? "Active" : "Inactive"}
             </span>
           </div>
@@ -607,8 +628,8 @@ function DetailModal({
             className={cx(
               "inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition disabled:cursor-wait disabled:opacity-60",
               isActive
-                ? "border border-stone-300 bg-white text-stone-700 hover:border-stone-500"
-                : "bg-emerald-600 text-white hover:bg-emerald-700",
+                ? "border border-gray-200 bg-white text-gray-700 hover:border-gray-400"
+                : "bg-primary-600 text-white hover:bg-primary-700",
             )}
           >
             <PowerIcon className="h-4 w-4" />
