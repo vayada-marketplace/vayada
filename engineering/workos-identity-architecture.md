@@ -98,6 +98,16 @@ Recommended schema shape:
   state.
 - `external_identities.last_login_at`, `raw_profile`, timestamps.
 
+Required integrity:
+
+- `external_identities.user_id` is `NOT NULL` and references `users.id`.
+- `(external_identities.provider, external_identities.provider_user_id)` is
+  unique where `provider_user_id` is present.
+- `(external_identities.provider, external_identities.provider_email)` can be a
+  partial unique bootstrap constraint only where the provider/email pair is
+  known to be canonical for account creation. Do not use provider email
+  uniqueness as the long-term authorization key.
+
 Set WorkOS user `external_id` to `users.id` whenever Vayada creates or
 backfills the WorkOS user. If a user arrives through SSO/JIT before a Vayada user
 exists, create the Vayada user during callback, then update the WorkOS user
@@ -122,6 +132,15 @@ Recommended schema shape:
 - `organizations.workos_org_id`: WorkOS `org_*` ID, nullable during backfill.
 - `organizations.workos_external_id`: normally the same value as
   `organizations.id`.
+
+Required integrity:
+
+- `organizations.workos_org_id` is unique where present. During migration it can
+  stay nullable for organizations not yet backfilled, but once a tenant is
+  WorkOS-managed it must be populated before accepting WorkOS sessions for that
+  tenant.
+- `organizations.workos_external_id` is unique where present and should match the
+  internal organization UUID used as WorkOS `external_id`.
 
 Set WorkOS organization `external_id` to `organizations.id`. Store the WorkOS
 organization ID locally for fast session validation and webhook reconciliation.
@@ -156,6 +175,15 @@ Recommended schema shape:
 - `organization_memberships.workos_role_slugs`: coarse mirrored role slugs from
   WorkOS.
 - invite/source/audit timestamps.
+
+Required integrity:
+
+- `organization_memberships.organization_id` is `NOT NULL` and references
+  `organizations.id`.
+- `organization_memberships.user_id` is `NOT NULL` and references `users.id`.
+- `organization_memberships.workos_membership_id` is unique where present.
+- The internal membership identity is unique on `(organization_id, user_id)` so
+  webhook retries, backfills, and manual fixes resolve to one Vayada membership.
 
 WorkOS membership status gates whether the user can present that organization in
 an authenticated session. Vayada membership status and permissions gate what the
