@@ -146,6 +146,49 @@ def _split_amount(
     return nightly_rate, total_amount
 
 
+def _max_stay_warning(room_type: dict, check_in: date, check_out: date) -> str | None:
+    nights = (check_out - check_in).days
+    try:
+        seasons = RoomTypeRepository._parse_seasons(room_type)
+        max_stay = RoomTypeRepository._find_stay_max_stay(seasons, check_in, check_out)
+    except Exception as exc:
+        logger.warning(
+            "Failed to evaluate max-stay warning for room type %s: %s",
+            room_type.get("id"),
+            exc,
+        )
+        return None
+    if max_stay and nights > max_stay:
+        return (
+            f"Exceeds max stay restriction: {nights} nights selected, "
+            f"maximum is {max_stay} nights for the selected dates."
+        )
+    return None
+
+
+def _append_import_warning(notes: str, warning: str | None) -> str:
+    if not warning:
+        return notes
+    if warning in notes:
+        return notes
+    return f"{notes}\n\n{warning}" if notes else warning
+
+
+async def _room_type_for_booking(booking: dict) -> dict | None:
+    room_type_id = booking.get("room_type_id")
+    if not room_type_id:
+        return None
+    try:
+        return await RoomTypeRepository.get_by_id(str(room_type_id))
+    except Exception as exc:
+        logger.warning(
+            "Failed to load room type %s for Channex max-stay warning: %s",
+            room_type_id,
+            exc,
+        )
+        return None
+
+
 async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
     """Import a Channex booking revision into vayada.
     Handles deduplication, new bookings, modifications, and cancellations.
@@ -248,6 +291,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
         adults = occupancy.get("adults", 1) or 1
         children = occupancy.get("children", 0) or 0
 
+        warning = _max_stay_warning(room_type, check_in, check_out)
         booking_data = {
             "hotel_id": hotel_id,
             "room_type_id": room_type_id,
@@ -255,7 +299,7 @@ async def process_inbound_booking(revision: dict, hotel_id: str) -> None:
             "guest_last_name": last_name,
             "guest_email": guest_email,
             "guest_phone": guest_phone,
-            "special_requests": attrs.get("notes", "") or "",
+            "special_requests": _append_import_warning(attrs.get("notes", "") or "", warning),
             "check_in": check_in,
             "check_out": check_out,
             "adults": adults,
@@ -438,6 +482,7 @@ async def _apply_booking_modification(
         booking = await BookingRepository.get_by_id(booking_id)
         if not booking:
             continue
+        room_type = await _room_type_for_booking(booking)
 
         updates: dict = {}
         if new_check_in:
@@ -449,6 +494,7 @@ async def _apply_booking_modification(
         check_in_eff = updates.get("check_in", booking["check_in"])
         check_out_eff = updates.get("check_out", booking["check_out"])
         nights = (check_out_eff - check_in_eff).days
+        warning = _max_stay_warning(room_type, check_in_eff, check_out_eff) if room_type else None
         nightly_rate, total_amount = _split_amount(room, attrs, nights, room_count)
         if total_amount is not None:
             updates["total_amount"] = total_amount
@@ -469,8 +515,11 @@ async def _apply_booking_modification(
         if occupancy.get("children") is not None:
             updates["children"] = occupancy["children"]
 
-        if notes is not None:
-            updates["special_requests"] = notes
+        if notes is not None or warning:
+            base_notes = notes if notes is not None else (booking.get("special_requests") or "")
+            merged_notes = _append_import_warning(base_notes, warning)
+            if merged_notes:
+                updates["special_requests"] = merged_notes
 
         if updates:
             await _apply_updates(booking_id, updates)

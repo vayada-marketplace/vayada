@@ -17,7 +17,7 @@ from app.repositories.booking_room_repo import BookingRoomRepository
 from app.repositories.room_block_repo import RoomBlockRepository
 from app.repositories.room_repo import RoomRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.utils import get_hotel_id
+from app.utils import get_hotel_id, parse_jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +75,11 @@ async def create_room(
                 "sort_order": data.sort_order,
             }
         )
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=409,
             detail="A room with this number already exists",
-        )
+        ) from e
     return _room_to_response(room)
 
 
@@ -153,11 +153,11 @@ async def delete_room(
 
     try:
         await RoomRepository.delete(room_id)
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=409,
             detail="Cannot delete room with existing bookings",
-        )
+        ) from e
 
 
 @router.get("/calendar", response_model=CalendarResponse)
@@ -235,6 +235,7 @@ async def get_calendar(
                 base_rate=float(rt["base_rate"]),
                 max_occupancy=rt.get("max_occupancy", 2),
                 currency=rt["currency"],
+                seasons=parse_jsonb(rt.get("seasons", [])),
             )
             for rt in room_types
         ],
