@@ -17,7 +17,8 @@ The full operating model — projects, label semantics, status transitions, prio
 4. **Pick labels.** One Type + at least one Area (see operating-model doc § Labels).
 5. **Pick project or standalone.** See "Project vs standalone" below.
 6. **Set priority.** Default `Medium`. `High` if the user is actively pulling it in. `Urgent` only for production-impacting or date-blocking work.
-7. **Confirm with the user before creating.** Show them the draft; ask whether to create as-is.
+7. **Set assignee.** Every ticket must have an assignee. Use the assignee the user named, the current owner implied by the conversation, or ask one short question before creating.
+8. **Confirm with the user before creating.** Show them the draft; ask whether to create as-is.
 
 ## Decision tree — what kind of issue is this?
 
@@ -101,7 +102,7 @@ For `Bug` issues, prepend a `Steps to reproduce` section before `Scope`, and fra
 - **Area label** — at least one (DX / AI-Agents / CI-CD / Repo-Strategy / Docs / Platform / Frontend / Backend).
 - **Project** if it belongs to one.
 - **Priority** — `Medium` by default; raise/lower deliberately.
-- **Assignee** when picked up (don't pre-assign untouched backlog).
+- **Assignee** — always required. Do not create unassigned tickets; if the assignee is not specified or inferable, ask before creating.
 
 ## Preserving rough user intent
 
@@ -114,7 +115,7 @@ Users often describe work in fragmented or aspirational terms. The skill is to m
 
 ## Confirm before creating
 
-Show the user the draft (title, description, labels, project, priority). Wait for their go-ahead. Linear issue creation is auto-mode-classifier-sensitive; explicit user approval avoids friction and keeps you from creating tickets the user didn't actually want.
+Show the user the draft (title, description, labels, project, priority, assignee). Wait for their go-ahead. Linear issue creation is auto-mode-classifier-sensitive; explicit user approval avoids friction and keeps you from creating tickets the user didn't actually want.
 
 Exception: if the user explicitly said "create a ticket for X", you may proceed without re-confirming the draft, but still show what you created.
 
@@ -125,5 +126,5 @@ Exception: if the user explicitly said "create a ticket for X", you may proceed 
 - **Mixing types** — one issue = one Type label. Split if it's truly Feature + Bug.
 - **Multi-area kitchen sinks** — if an issue legitimately touches Frontend + Backend + Platform, that's a signal it should be a project, not a single ticket.
 - **Setting priority by importance instead of activity.** Priority means "how soon", not "how big". A massive but unscheduled refactor is `Medium`, not `High`.
-- **Pre-assigning untouched backlog** to encourage someone to pick it up — leave unassigned until work actually starts.
+- **Creating unassigned tickets** — every ticket should have a clear owner even if it remains in backlog.
 - **Silently rewriting the original ticket description.** Append a clarification section instead.
