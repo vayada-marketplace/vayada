@@ -69,6 +69,19 @@ There is no separate `vayada-agent-skills` repo. Vayada is one repo; skills live
 - Per-tool skill variants (a "Codex version" and a "Claude version" of the same workflow) — skills are tool-neutral; all tools read from the same directory.
 - Copying skill files into a second directory or into other repos — there is one shared skills directory.
 
+## Skills index
+
+All shared skills that currently exist in `.agents/skills/`:
+
+| Skill | File | When to use |
+|---|---|---|
+| `vayada-skills-storage` | `.agents/skills/vayada-skills-storage/SKILL.md` | Deciding where a new skill or guidance belongs (this file). |
+| `write-linear-issue` | `.agents/skills/write-linear-issue/SKILL.md` | Creating or restructuring a Vayada Linear ticket. |
+| `work-on-linear-ticket` | `.agents/skills/work-on-linear-ticket/SKILL.md` | Picking up a Linear ticket and implementing it end-to-end. |
+| `run-local-portless` | `.agents/skills/run-local-portless/SKILL.md` | Running the full Vayada stack locally via portless. |
+
+Update this table when adding or removing a skill.
+
 ## References
 
 - VAY-442 — Repository strategy decision (monorepo).

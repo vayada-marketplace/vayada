@@ -118,7 +118,21 @@ Before claiming a change is complete:
 - **Backend (FastAPI)** — run `python -m pytest` in the affected app. `ruff check <changed-paths>` for new code.
 - **Frontend (Next.js)** — run `npm run build` (and `npm run lint` if the change is non-trivial). The dev server is not enough — Next builds catch type/import errors the dev server misses.
 - **Cross-app or workspace changes** — also run root `npm run build` / `npm run typecheck` to confirm no workspace consumer broke.
-- **UI changes** — start the dev server and exercise the feature in a browser before declaring it done. Type checks and tests verify code correctness, not feature correctness. When the changed surface is covered by the Playwright pilot, run the focused smoke command too, for example `npm run e2e:landing` or `npm run e2e:booking-web`; use `E2E_START_SERVERS=1` if you want Playwright to start plain-port dev servers for the pilot apps.
+- **UI changes** — start the dev server and exercise the feature in a browser before declaring it done. Type checks and tests verify code correctness, not feature correctness. When the changed surface is covered by the Playwright pilot, run the focused smoke command too (see table below); use `E2E_START_SERVERS=1` if you want Playwright to start plain-port dev servers for the pilot apps.
+
+**Playwright surface-to-command mapping:**
+
+| Surface                | Command                          | portless URL                          |
+| ---------------------- | -------------------------------- | ------------------------------------- |
+| `apps/landing`         | `npm run e2e:landing`            | `https://landing.localhost`           |
+| `apps/booking-web`     | `npm run e2e:booking-web`        | `https://hotel-alpenrose.booking.localhost` |
+| `apps/affiliate-dashboard` | `npm run e2e:affiliate-dashboard` | `https://affiliate.localhost`      |
+| `apps/booking-admin`   | `npm run e2e:booking-admin`      | `https://admin.booking.localhost`     |
+| `apps/marketplace-web` | `npm run e2e:marketplace-web`    | `https://marketplace.localhost`       |
+| `apps/pms-web`         | `npm run e2e:pms-web`            | `https://pms.localhost`               |
+| `apps/vayada-admin`    | `npm run e2e:vayada-admin`       | `https://admin.localhost`             |
+
+`npm run e2e` runs all of the above. URL overrides and debugging are documented in `tests/e2e/README.md`.
 
 Playwright is currently a **pilot smoke layer**, not a replacement for build, lint, typecheck, or pytest. Local Playwright defaults target portless URLs and tolerate local HTTPS certificates; plain-port overrides are documented in `tests/e2e/README.md`. Agents should say which browser flow they actually exercised — starting a server alone is not enough.
 

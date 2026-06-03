@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
   BuildingOffice2Icon,
@@ -36,6 +36,7 @@ import {
   type SettingsNavSection,
 } from "@/components/settings/layout";
 import { LocationMapPreview } from "@/components/settings/LocationMapPreview";
+import { PoiSearchInput } from "@/components/settings/PoiSearchInput";
 import { useTranslation } from "@/lib/i18n";
 
 // Audit-driven section IDs (VAY-400):
@@ -158,6 +159,12 @@ export default function SettingsPage() {
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
+  const [propertyCoordinate, setPropertyCoordinate] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [propertyCoordinateLoaded, setPropertyCoordinateLoaded] = useState(false);
+  const propertyCoordinateLoadingRef = useRef(false);
 
   const handleChangeEmail = async () => {
     try {
@@ -398,17 +405,19 @@ export default function SettingsPage() {
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `poi-${Date.now()}`;
+    const defaultCoord = propertyCoordinate ?? { latitude: NaN, longitude: NaN };
     const newPoi = {
       id,
       label: "",
       travelTime: "",
       color,
-      latitude: -8.65,
-      longitude: 115.22,
+      latitude: defaultCoord.latitude,
+      longitude: defaultCoord.longitude,
       position: pois.length,
     };
     updatePois([...pois, newPoi]);
     setSelectedPoiId(id);
+    loadPropertyCoordinate();
   };
 
   const patchPoi = (
@@ -482,6 +491,37 @@ export default function SettingsPage() {
     } catch {}
   };
 
+  const loadPropertyCoordinate = useCallback(async () => {
+    if (propertyCoordinateLoaded || propertyCoordinateLoadingRef.current) return;
+    propertyCoordinateLoadingRef.current = true;
+    try {
+      const roomTypes = await pmsClient.get<
+        { latitude: number | null; longitude: number | null }[]
+      >("/admin/room-types");
+      const withCoords = roomTypes.filter(
+        (rt) =>
+          rt.latitude != null &&
+          rt.longitude != null &&
+          Number.isFinite(rt.latitude) &&
+          Number.isFinite(rt.longitude),
+      );
+      if (withCoords.length === 0) {
+        setPropertyCoordinateLoaded(true);
+        return;
+      }
+      const centroid = {
+        latitude: withCoords.reduce((s, rt) => s + rt.latitude!, 0) / withCoords.length,
+        longitude: withCoords.reduce((s, rt) => s + rt.longitude!, 0) / withCoords.length,
+      };
+      setPropertyCoordinate(centroid);
+      setPropertyCoordinateLoaded(true);
+    } catch {
+      // transient failure — leave propertyCoordinateLoaded false so next navigation retries
+    } finally {
+      propertyCoordinateLoadingRef.current = false;
+    }
+  }, [propertyCoordinateLoaded]);
+
   const sections: SettingsNavSection[] = [
     { id: "property", label: t("settings.tabs.property"), icon: BuildingOffice2Icon },
     { id: "booking", label: t("settings.tabs.booking"), icon: CalendarDaysIcon },
@@ -504,7 +544,10 @@ export default function SettingsPage() {
       description={t("settings.subtitle")}
       sections={sections}
       activeId={activeSection}
-      onSelect={(id) => setActiveSection(id as Section)}
+      onSelect={(id) => {
+        setActiveSection(id as Section);
+        if (id === "location") loadPropertyCoordinate();
+      }}
     >
       {/* Feedback banner */}
       {feedback && (
@@ -983,36 +1026,48 @@ export default function SettingsPage() {
                           placeholder="3 min walk"
                         />
                       </label>
-                      <label className="block text-[13px] font-medium text-gray-700">
-                        Latitude
-                        <input
-                          type="number"
-                          value={Number.isFinite(poi.latitude) ? poi.latitude : ""}
-                          step="0.0000001"
-                          onChange={(event) =>
-                            patchPoi(poi.id, {
-                              latitude:
-                                event.target.value === "" ? Number.NaN : event.target.valueAsNumber,
-                            })
-                          }
-                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
+                    </div>
+
+                    <div className="mt-3">
+                      <label className="block text-[13px] font-medium text-gray-700 mb-1">
+                        Search location
                       </label>
-                      <label className="block text-[13px] font-medium text-gray-700">
-                        Longitude
-                        <input
-                          type="number"
-                          value={Number.isFinite(poi.longitude) ? poi.longitude : ""}
-                          step="0.0000001"
-                          onChange={(event) =>
-                            patchPoi(poi.id, {
-                              longitude:
-                                event.target.value === "" ? Number.NaN : event.target.valueAsNumber,
-                            })
-                          }
-                          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                      </label>
+                      <PoiSearchInput
+                        onSelect={(latitude, longitude, name) => {
+                          patchPoi(poi.id, {
+                            latitude,
+                            longitude,
+                            ...(!poi.label.trim() ? { label: name } : {}),
+                          });
+                          setSelectedPoiId(poi.id);
+                        }}
+                      />
+                      {Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude) && (
+                        <p className="mt-1 text-[11px] text-gray-400">
+                          Placed at {poi.latitude.toFixed(5)}, {poi.longitude.toFixed(5)}
+                          {" · "}
+                          <button
+                            type="button"
+                            className="text-primary-600 hover:underline"
+                            onClick={() => setSelectedPoiId(poi.id)}
+                          >
+                            click map to reposition
+                          </button>
+                        </p>
+                      )}
+                      {(!Number.isFinite(poi.latitude) || !Number.isFinite(poi.longitude)) && (
+                        <p className="mt-1 text-[11px] text-amber-600">
+                          Not placed yet — search above or{" "}
+                          <button
+                            type="button"
+                            className="underline"
+                            onClick={() => setSelectedPoiId(poi.id)}
+                          >
+                            click the map
+                          </button>
+                          .
+                        </p>
+                      )}
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -1033,16 +1088,27 @@ export default function SettingsPage() {
                 ))}
               </div>
 
-              <div className="lg:sticky lg:top-5 lg:self-start">
+              <div className="lg:sticky lg:top-5 lg:self-start space-y-2">
+                {propertyCoordinateLoaded && !propertyCoordinate && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                    Set a location on your room types in{" "}
+                    <strong>Rooms &amp; Rates</strong> so the map knows where to center.
+                  </div>
+                )}
                 <LocationMapPreview
                   propertyName={settings.property_name}
-                  pois={settings.points_of_interest || []}
+                  property={propertyCoordinate}
+                  pois={(settings.points_of_interest || []).filter(
+                    (poi) =>
+                      Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude),
+                  )}
                   selectedPoiId={selectedPoiId}
                   onPlacePoi={
                     selectedPoiId
                       ? (latitude, longitude) => patchPoi(selectedPoiId, { latitude, longitude })
                       : undefined
                   }
+                  onMovePoi={(id, latitude, longitude) => patchPoi(id, { latitude, longitude })}
                 />
               </div>
             </div>

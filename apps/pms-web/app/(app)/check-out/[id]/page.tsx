@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   Booking,
   BookingNote,
@@ -18,6 +18,68 @@ type InspectionDraft = {
   status: CheckoutInspectionStatus;
   note: string;
 };
+
+function NotCheckedInPage({ booking }: { booking: Booking }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const isConfirmed = booking.status === "confirmed";
+
+  async function handleNoShow() {
+    if (!isConfirmed) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await bookingsService.markNoShow(booking.id);
+      router.push("/dashboard");
+    } catch {
+      setError("Failed to mark as no-show. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="p-4 md:p-6">
+      <div className="mx-auto max-w-lg space-y-4">
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          This guest hasn&apos;t been checked in yet. Check them in to proceed with check-out, or
+          mark as a no-show if the guest didn&apos;t arrive.
+        </div>
+        {error && (
+          <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </p>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          {isConfirmed && (
+            <Link
+              href={`/check-in/${booking.id}?next=checkout`}
+              className="flex h-11 items-center justify-center rounded-lg bg-primary-600 px-5 text-sm font-semibold text-white hover:bg-primary-700"
+            >
+              Check in now
+            </Link>
+          )}
+          {isConfirmed && (
+            <button
+              type="button"
+              onClick={handleNoShow}
+              disabled={loading}
+              className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+            >
+              {loading ? "Marking…" : "Mark as no-show"}
+            </button>
+          )}
+          <Link
+            href="/dashboard"
+            className="flex h-11 items-center justify-center rounded-lg border border-gray-200 px-5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+          >
+            Back to dashboard
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}
 
 const primaryActionClass =
   "rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 disabled:opacity-60";
@@ -248,13 +310,7 @@ export default function CheckOutPage() {
   }
 
   if (!["checked_in", "in_house", "checked_out"].includes(booking.status)) {
-    return (
-      <main className="p-4 md:p-6">
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          This booking is not checked in yet, so check-out is not available.
-        </div>
-      </main>
-    );
+    return <NotCheckedInPage booking={booking} />;
   }
 
   if (booking.status === "checked_out" && !confirmationFlags) {

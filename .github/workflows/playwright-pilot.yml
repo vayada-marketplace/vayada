@@ -10,6 +10,11 @@ on:
       - "tests/e2e/**"
       - "apps/landing/**"
       - "apps/booking-web/**"
+      - "apps/affiliate-dashboard/**"
+      - "apps/booking-admin/**"
+      - "apps/marketplace-web/**"
+      - "apps/pms-web/**"
+      - "apps/vayada-admin/**"
       - "packages/marketplace-shared/**"
       - "package.json"
       - "package-lock.json"
@@ -21,7 +26,7 @@ concurrency:
 
 jobs:
   smoke:
-    name: Landing + Booking Web Smoke
+    name: Frontend App Smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

@@ -1530,10 +1530,14 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
 
   const isPending = booking.status === "pending";
   const canCancelBooking = booking.status === "confirmed";
+  const canCheckIn = booking.status === "confirmed";
   // VAY-404: treat 'declined' (host rejected) the same as cancelled/expired
   // for read-only/disabled UI affordances — the booking is terminal.
   const isCancelled =
-    booking.status === "cancelled" || booking.status === "declined" || booking.status === "expired";
+    booking.status === "cancelled" ||
+    booking.status === "declined" ||
+    booking.status === "expired" ||
+    booking.status === "no_show";
   const isDirectBooking = normalizeChannelKey(booking.channel) === "direct";
   const addOnsLocked = addOnsLockedAfterPayment(booking);
   const canEditAddOns = !isCancelled && isDirectBooking && !addOnsLocked;
@@ -2402,6 +2406,18 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* VAY-560: Check in from booking detail — visible for any confirmed booking regardless of date. */}
+        {canCheckIn && (
+          <div className="flex gap-3 flex-wrap">
+            <Link
+              href={`/check-in/${booking.id}`}
+              className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700"
+            >
+              Check in guest
+            </Link>
           </div>
         )}
 

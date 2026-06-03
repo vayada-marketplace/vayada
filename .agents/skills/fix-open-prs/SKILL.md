@@ -25,8 +25,8 @@ so the history is legible.
 ## Phase 0 — enumerate open PRs
 
 ```bash
-gh pr list --json number,title,headRefName,mergeable,isDraft,labels \
-  --jq '.[] | select(.isDraft == false and ([.labels[].name] | index("WIP") == null)) | {number, title, headRefName, mergeable}'
+gh pr list --json number,title,headRefName,mergeable,isDraft,labels,statusCheckRollup \
+  --jq '.[] | select((.isDraft | not) and ([.labels[].name] | index("WIP") | not)) | {number, title, headRefName, mergeable}'
 ```
 
 Skip PRs that are draft or have a `WIP` label — leave those untouched.
@@ -98,21 +98,43 @@ If `CONFLICTING`:
 
 1. `git fetch origin`
 2. On the PR branch, attempt a rebase: `git rebase origin/main`.
-3. If the rebase produces conflicts, resolve them file by file:
+3. If git reports `skipped previously applied commit` warnings, those commits
+   are already on main — this is normal. Use `git rebase --skip` to advance
+   past them. If the rebase immediately errors because the first conflicting
+   commit is one of these already-merged commits, abort and fall back to merge
+   (see below).
+4. If the rebase produces content conflicts, resolve them file by file:
    - Read both sides of each conflict.
    - Prefer the intent of the PR branch; bring in main's changes where they
      don't conflict semantically.
    - For migration files: keep both sides (both migrations are valid and must
      both apply in sequence); rename the PR's migration if the sequence number
      collides with one in main.
-4. `git rebase --continue` after each conflict is resolved.
-5. Push: `git push --force-with-lease origin {branch}`.
-6. Commit message is already part of the rebase — no separate commit needed.
+5. `git rebase --continue` after each conflict is resolved.
+6. Push: `git push --force-with-lease origin {branch}`.
+7. Commit message is already part of the rebase — no separate commit needed.
 
-Prefer rebase over merge to keep the branch history linear. Only fall back to
-`git merge origin/main` if the rebase produces more than three conflict sites
-and the conflicts are not mechanical (e.g. they require understanding of both
-sides' intent).
+Prefer rebase over merge to keep the branch history linear. Fall back to
+`git merge origin/main` if the rebase produces more than three conflict sites,
+the conflicts are not mechanical, or the rebase fails because many intermediate
+commits were already cherry-picked into main.
+
+### Merge fallback
+
+When using `git merge origin/main`, `--ours` and `--theirs` refer to:
+- `--ours` → the current PR branch (the branch being fixed)
+- `--theirs` → main (the incoming branch)
+
+Resolution strategy per file type:
+
+| File type | Strategy |
+|---|---|
+| Source files the PR intentionally changed (e.g. tests with CodeRabbit fixes) | `git checkout --ours <file>` — keep the PR branch's improvements |
+| Generated lock files (`package-lock.json`, `poetry.lock`) | Delete and regenerate: `npm install` / `poetry lock` |
+| Files changed on both sides with unrelated edits | Merge manually, keeping both sets of changes |
+
+After resolving all conflicts, `git add` the files and `git commit` (the merge
+commit message is sufficient — no need to reword it).
 
 ---
 

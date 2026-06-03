@@ -280,7 +280,7 @@ class TestBlockedRoomExclusion:
             room_id=str(rooms[0]["id"]),
         )
 
-        primary, extras, moves = await resolve_room_assignments(
+        primary, extras, _moves = await resolve_room_assignments(
             str(hotel["id"]),
             str(rt["id"]),
             date(2026, 7, 13),

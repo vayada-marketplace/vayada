@@ -13,11 +13,43 @@ def to_camel(string: str) -> str:
 ChecklistStepType = Literal["checkbox", "text", "amount"]
 
 
+DEFAULT_CHECKIN_CHECKLIST_STEPS: list[dict] = [
+    {
+        "id": "default-verify-guest-ids",
+        "label": "Verify guest IDs / passports",
+        "prompt": "Confirm passport or ID details are captured for every guest.",
+        "type": "checkbox",
+        "required": True,
+        "system": False,
+        "position": 0,
+    },
+    {
+        "id": "default-confirm-payment-status",
+        "label": "Confirm payment / deposit status",
+        "prompt": "Confirm the deposit, balance, or pay-at-property status before handover.",
+        "type": "checkbox",
+        "required": True,
+        "system": False,
+        "position": 1,
+    },
+    {
+        "id": "default-room-access",
+        "label": "Assign room & hand over keys/access",
+        "prompt": "Make sure the guest has their room assignment and access instructions.",
+        "type": "checkbox",
+        "required": True,
+        "system": False,
+        "position": 2,
+    },
+]
+
+
 class ChecklistStep(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str = Field(default_factory=lambda: str(uuid4()))
     label: str = Field(max_length=120)
+    prompt: str = Field(default="", max_length=200)
     type: ChecklistStepType = "checkbox"
     required: bool = False
     system: bool = False

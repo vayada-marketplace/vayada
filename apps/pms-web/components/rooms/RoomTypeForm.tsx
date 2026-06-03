@@ -802,16 +802,30 @@ export default function RoomTypeForm({
       to: string;
       rate: string;
       minStay: number;
+      maxStay?: number | null;
       occupancyRates?: Record<string, string>;
     }[]
   >(
     sortSeasonsChronologically(
-      (form.seasons || []).map((s) => ({
-        ...s,
-        from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
-        to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
-        occupancyRates: s.occupancyRates || {},
-      })),
+      (form.seasons || []).map((s) => {
+        const rawMaxStay = s.maxStay ?? (s as { max_stay?: number | string | null }).max_stay;
+        const numericMaxStay = Number(rawMaxStay);
+        const maxStay =
+          rawMaxStay === undefined ||
+          rawMaxStay === null ||
+          rawMaxStay === "" ||
+          !Number.isFinite(numericMaxStay) ||
+          numericMaxStay <= 0
+            ? null
+            : Math.floor(numericMaxStay);
+        return {
+          ...s,
+          from: s.from && s.from.length > 5 ? s.from.slice(5) : s.from,
+          to: s.to && s.to.length > 5 ? s.to.slice(5) : s.to,
+          maxStay,
+          occupancyRates: s.occupancyRates || {},
+        };
+      }),
     ),
   );
   const [previewMonth, setPreviewMonth] = useState(() => new Date());
@@ -2260,6 +2274,7 @@ export default function RoomTypeForm({
                         to: "",
                         rate: "",
                         minStay: 1,
+                        maxStay: null,
                         occupancyRates: {},
                       },
                     ])
@@ -3198,8 +3213,10 @@ export default function RoomTypeForm({
                         </span>
                       )}
                       {s.rate && (
-                        <span className="text-gray-500 ml-auto">
+                        <span className="text-gray-500 ml-auto text-right">
                           {formatCurrency(parseFloat(s.rate) || 0, form.currency || "EUR")}/night
+                          {" · "}Min {s.minStay || 1}
+                          {s.maxStay && s.maxStay > 0 ? ` · Max ${s.maxStay}` : ""}
                         </span>
                       )}
                     </div>

@@ -73,6 +73,7 @@ export default function NewRoomPage() {
                       to: "12-31",
                       rate: String(rate),
                       minStay: 1,
+                      maxStay: null,
                     },
                   ]
                 : [],
@@ -118,6 +119,14 @@ export default function NewRoomPage() {
     }
     if (form.seasons.some((s) => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
       setError("Every season must have a rate greater than 0");
+      return;
+    }
+    if (
+      form.seasons.some(
+        (s) => s.maxStay != null && Number(s.maxStay) > 0 && Number(s.maxStay) < (s.minStay || 1),
+      )
+    ) {
+      setError("Max stay cannot be less than min stay.");
       return;
     }
     setSaving(true);

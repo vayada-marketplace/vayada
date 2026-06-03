@@ -21,6 +21,7 @@ class CalendarRoomType(_CamelModel):
     base_rate: float
     max_occupancy: int = 2
     currency: str
+    seasons: list[dict] = []
 
 
 class CalendarRoom(_CamelModel):
