@@ -2308,281 +2308,299 @@ export default function RoomTypeForm({
                         </select>
                       </div>
                     </div>
-                    <table className="w-full text-[11px]">
-                      <thead>
-                        <tr className="border-b border-gray-100">
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium">Season</th>
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium">
-                            Flex Rate
-                          </th>
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium">
-                            Min Stay
-                          </th>
-                          <th
-                            className="text-left px-4 py-2 text-gray-500 font-medium"
-                            title="Maximum number of nights per booking. Leave empty for no limit."
-                          >
-                            Max Stay
-                          </th>
-                          <th className="text-left px-4 py-2 text-gray-500 font-medium">
-                            Per guest
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {seasons.map((season, idx) => {
-                          const maxOcc = form.maxOccupancy ?? 2;
-                          const hasOccRates = Object.values(season.occupancyRates || {}).some(
-                            (v) => v !== "" && v !== undefined,
-                          );
-                          const isOccExpanded = expandedOccupancy[idx] || false;
-                          const seasonPriceWarning = visiblePriceWarningById.get(`season:${idx}`);
-                          const maxStayValue = season.maxStay ?? null;
-                          const maxStayInvalid =
-                            maxStayValue !== null &&
-                            maxStayValue > 0 &&
-                            maxStayValue < (season.minStay || 1);
-                          return (
-                            <React.Fragment key={idx}>
-                              <tr className="border-b border-gray-50">
-                                <td className="px-4 py-2.5">
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className={`text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || "text-gray-600 bg-gray-100"}`}
-                                    >
-                                      {season.tier || "—"}
-                                    </span>
-                                    {season.name ? (
-                                      <span className="text-[12px] text-gray-700">
-                                        {season.name}
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[620px] table-fixed text-[11px]">
+                        <colgroup>
+                          <col className="w-[27%]" />
+                          <col className="w-[22%]" />
+                          <col className="w-[13%]" />
+                          <col className="w-[17%]" />
+                          <col className="w-[21%]" />
+                        </colgroup>
+                        <thead>
+                          <tr className="border-b border-gray-100">
+                            <th className="text-left px-3 py-2 text-gray-500 font-medium">
+                              Season
+                            </th>
+                            <th className="text-left px-3 py-2 text-gray-500 font-medium">
+                              Flex Rate
+                            </th>
+                            <th
+                              className="text-left px-2 py-2 text-gray-500 font-medium"
+                              title="Minimum number of nights per booking."
+                            >
+                              Min
+                            </th>
+                            <th
+                              className="text-left px-2 py-2 text-gray-500 font-medium"
+                              title="Maximum number of nights per booking. Leave empty for no limit."
+                            >
+                              Max
+                            </th>
+                            <th className="text-left px-2 py-2 text-gray-500 font-medium whitespace-nowrap">
+                              Per guest
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {seasons.map((season, idx) => {
+                            const maxOcc = form.maxOccupancy ?? 2;
+                            const hasOccRates = Object.values(season.occupancyRates || {}).some(
+                              (v) => v !== "" && v !== undefined,
+                            );
+                            const isOccExpanded = expandedOccupancy[idx] || false;
+                            const seasonPriceWarning = visiblePriceWarningById.get(`season:${idx}`);
+                            const maxStayValue = season.maxStay ?? null;
+                            const maxStayInvalid =
+                              maxStayValue !== null &&
+                              maxStayValue > 0 &&
+                              maxStayValue < (season.minStay || 1);
+                            return (
+                              <React.Fragment key={idx}>
+                                <tr className="border-b border-gray-50">
+                                  <td className="px-3 py-2.5">
+                                    <div className="flex min-w-0 items-center gap-2">
+                                      <span
+                                        className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded ${tierColors[season.tier] || "text-gray-600 bg-gray-100"}`}
+                                      >
+                                        {season.tier || "—"}
                                       </span>
-                                    ) : (
-                                      <span className="text-gray-300">&mdash;</span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <div className="space-y-1">
-                                    <div className="flex items-center gap-1">
-                                      <span className="text-gray-400">
-                                        {getCurrencySymbol(currency)}
-                                      </span>
-                                      <input
-                                        type="number"
-                                        value={season.rate}
-                                        onChange={(e) => {
-                                          const u = [...seasons];
-                                          u[idx] = { ...u[idx], rate: e.target.value };
-                                          setSeasons(u);
-                                        }}
-                                        onBlur={() => markPriceWarningTouched(`season:${idx}`)}
-                                        className={`w-16 px-2 py-1 bg-gray-50 border rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${!season.rate || Number(season.rate) <= 0 ? "border-red-400" : seasonPriceWarning ? "border-amber-400 bg-amber-50/50" : "border-gray-200"}`}
-                                        placeholder="0"
-                                        min="1"
-                                        required
-                                      />
-                                      {(!season.rate || Number(season.rate) <= 0) && (
-                                        <span className="text-[10px] text-red-500">Required</span>
+                                      {season.name ? (
+                                        <span className="truncate text-[12px] text-gray-700">
+                                          {season.name}
+                                        </span>
+                                      ) : (
+                                        <span className="text-gray-300">&mdash;</span>
                                       )}
                                     </div>
-                                    {seasonPriceWarning && (
-                                      <div className="max-w-[320px]">
-                                        <PriceWarningMessage
-                                          warning={seasonPriceWarning}
-                                          currency={currency}
-                                          onDismiss={() => dismissPriceWarning(seasonPriceWarning)}
+                                  </td>
+                                  <td className="px-3 py-2.5">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-gray-400">
+                                          {getCurrencySymbol(currency)}
+                                        </span>
+                                        <input
+                                          type="number"
+                                          value={season.rate}
+                                          onChange={(e) => {
+                                            const u = [...seasons];
+                                            u[idx] = { ...u[idx], rate: e.target.value };
+                                            setSeasons(u);
+                                          }}
+                                          onBlur={() => markPriceWarningTouched(`season:${idx}`)}
+                                          className={`w-[72px] px-2 py-1 bg-gray-50 border rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${!season.rate || Number(season.rate) <= 0 ? "border-red-400" : seasonPriceWarning ? "border-amber-400 bg-amber-50/50" : "border-gray-200"}`}
+                                          placeholder="0"
+                                          min="1"
+                                          required
                                         />
+                                        {(!season.rate || Number(season.rate) <= 0) && (
+                                          <span className="text-[10px] text-red-500">Required</span>
+                                        )}
                                       </div>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const u = [...seasons];
-                                        u[idx] = {
-                                          ...u[idx],
-                                          minStay: Math.max(1, (u[idx].minStay || 1) - 1),
-                                        };
-                                        setSeasons(u);
-                                      }}
-                                      className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
-                                    >
-                                      &minus;
-                                    </button>
-                                    <span className="px-2 py-1 text-[11px] font-semibold text-gray-900 bg-white min-w-[28px] text-center">
-                                      {season.minStay || 1}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const u = [...seasons];
-                                        u[idx] = {
-                                          ...u[idx],
-                                          minStay: (u[idx].minStay || 1) + 1,
-                                        };
-                                        setSeasons(u);
-                                      }}
-                                      className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  <div className="space-y-1">
-                                    <div
-                                      className={`inline-flex items-center gap-0 border rounded-lg overflow-hidden ${maxStayInvalid ? "border-red-300" : "border-gray-200"}`}
-                                    >
+                                      {seasonPriceWarning && (
+                                        <div className="max-w-[150px]">
+                                          <PriceWarningMessage
+                                            warning={seasonPriceWarning}
+                                            currency={currency}
+                                            onDismiss={() =>
+                                              dismissPriceWarning(seasonPriceWarning)
+                                            }
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="px-2 py-2.5">
+                                    <div className="inline-flex items-center gap-0 border border-gray-200 rounded-lg overflow-hidden">
                                       <button
                                         type="button"
                                         onClick={() => {
                                           const u = [...seasons];
-                                          const current = Number(u[idx].maxStay || 0);
-                                          const minStay = u[idx].minStay || 1;
                                           u[idx] = {
                                             ...u[idx],
-                                            maxStay: current <= minStay ? null : current - 1,
+                                            minStay: Math.max(1, (u[idx].minStay || 1) - 1),
                                           };
                                           setSeasons(u);
                                         }}
-                                        className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
+                                        className="h-7 w-6 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
                                       >
                                         &minus;
                                       </button>
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        value={season.maxStay ?? ""}
-                                        onChange={(e) => {
-                                          const u = [...seasons];
-                                          const raw = e.target.value;
-                                          const parsedMaxStay = parseInt(raw, 10);
-                                          u[idx] = {
-                                            ...u[idx],
-                                            maxStay:
-                                              raw === "" ||
-                                              Number.isNaN(parsedMaxStay) ||
-                                              parsedMaxStay <= 0
-                                                ? null
-                                                : parsedMaxStay,
-                                          };
-                                          setSeasons(u);
-                                        }}
-                                        placeholder="—"
-                                        title="Maximum number of nights per booking. Leave empty for no limit."
-                                        className="w-[42px] px-1 py-1 text-[11px] font-semibold text-gray-900 bg-white text-center outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                      />
+                                      <span className="inline-flex h-7 min-w-7 items-center justify-center px-1 text-[11px] font-semibold text-gray-900 bg-white">
+                                        {season.minStay || 1}
+                                      </span>
                                       <button
                                         type="button"
                                         onClick={() => {
                                           const u = [...seasons];
-                                          const current = Number(u[idx].maxStay || 0);
-                                          const minStay = u[idx].minStay || 1;
                                           u[idx] = {
                                             ...u[idx],
-                                            maxStay: current > 0 ? current + 1 : minStay,
+                                            minStay: (u[idx].minStay || 1) + 1,
                                           };
                                           setSeasons(u);
                                         }}
-                                        className="px-1.5 py-1 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
+                                        className="h-7 w-6 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
                                       >
                                         +
                                       </button>
                                     </div>
-                                    {maxStayInvalid && (
-                                      <p className="text-[10px] font-medium text-red-600">
-                                        Max stay cannot be less than min stay.
-                                      </p>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-2.5">
-                                  {maxOcc > 1 ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setExpandedOccupancy((prev) => ({
-                                          ...prev,
-                                          [idx]: !prev[idx],
-                                        }))
-                                      }
-                                      className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors ${hasOccRates ? "text-primary-600 bg-primary-50 hover:bg-primary-100" : "text-gray-500 hover:bg-gray-100"}`}
-                                    >
-                                      <ChevronDownIcon
-                                        className={`w-3 h-3 transition-transform ${isOccExpanded ? "" : "-rotate-90"}`}
-                                      />
-                                      Per guest
-                                    </button>
-                                  ) : (
-                                    <span className="text-gray-300">&mdash;</span>
-                                  )}
-                                </td>
-                              </tr>
-                              {isOccExpanded && maxOcc > 1 && (
-                                <tr className="border-b border-gray-50 bg-gray-50/50">
-                                  <td colSpan={5} className="px-4 py-2.5 pl-10">
-                                    <div className="space-y-1.5">
-                                      <span className="text-[10px] text-gray-400 font-medium">
-                                        Rate per number of guests
-                                      </span>
-                                      {Array.from({ length: maxOcc }, (_, i) => i + 1).map(
-                                        (guestCount) => {
-                                          const isAnchor = guestCount === 1;
-                                          const occRate =
-                                            (season.occupancyRates || {})[String(guestCount)] || "";
-                                          return (
-                                            <div
-                                              key={guestCount}
-                                              className="flex items-center gap-2"
-                                            >
-                                              <span className="text-[11px] text-gray-500 w-16">
-                                                {guestCount} {guestCount === 1 ? "guest" : "guests"}
-                                              </span>
-                                              <span className="text-gray-400 text-[11px]">
-                                                {getCurrencySymbol(form.currency || "EUR")}
-                                              </span>
-                                              {isAnchor ? (
-                                                <span className="text-[11px] text-gray-400 px-2 py-1">
-                                                  {season.rate || "—"} (season rate)
-                                                </span>
-                                              ) : (
-                                                <input
-                                                  type="number"
-                                                  value={occRate}
-                                                  onChange={(e) => {
-                                                    const u = [...seasons];
-                                                    const occ = {
-                                                      ...(u[idx].occupancyRates || {}),
-                                                    };
-                                                    if (e.target.value === "") {
-                                                      delete occ[String(guestCount)];
-                                                    } else {
-                                                      occ[String(guestCount)] = e.target.value;
-                                                    }
-                                                    u[idx] = { ...u[idx], occupancyRates: occ };
-                                                    setSeasons(u);
-                                                  }}
-                                                  className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                                                  placeholder={season.rate || "same as rate"}
-                                                  min="0"
-                                                />
-                                              )}
-                                            </div>
-                                          );
-                                        },
+                                  </td>
+                                  <td className="px-2 py-2.5">
+                                    <div className="space-y-1">
+                                      <div
+                                        className={`inline-flex items-center gap-0 border rounded-lg overflow-hidden ${maxStayInvalid ? "border-red-300" : "border-gray-200"}`}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const u = [...seasons];
+                                            const current = Number(u[idx].maxStay || 0);
+                                            const minStay = u[idx].minStay || 1;
+                                            u[idx] = {
+                                              ...u[idx],
+                                              maxStay: current <= minStay ? null : current - 1,
+                                            };
+                                            setSeasons(u);
+                                          }}
+                                          className="h-7 w-6 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
+                                        >
+                                          &minus;
+                                        </button>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          value={season.maxStay ?? ""}
+                                          onChange={(e) => {
+                                            const u = [...seasons];
+                                            const raw = e.target.value;
+                                            const parsedMaxStay = parseInt(raw, 10);
+                                            u[idx] = {
+                                              ...u[idx],
+                                              maxStay:
+                                                raw === "" ||
+                                                Number.isNaN(parsedMaxStay) ||
+                                                parsedMaxStay <= 0
+                                                  ? null
+                                                  : parsedMaxStay,
+                                            };
+                                            setSeasons(u);
+                                          }}
+                                          placeholder="—"
+                                          title="Maximum number of nights per booking. Leave empty for no limit."
+                                          className="h-7 w-8 px-1 text-[11px] font-semibold text-gray-900 bg-white text-center outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const u = [...seasons];
+                                            const current = Number(u[idx].maxStay || 0);
+                                            const minStay = u[idx].minStay || 1;
+                                            u[idx] = {
+                                              ...u[idx],
+                                              maxStay: current > 0 ? current + 1 : minStay,
+                                            };
+                                            setSeasons(u);
+                                          }}
+                                          className="h-7 w-6 text-gray-500 hover:bg-gray-100 transition-colors text-[11px] font-medium"
+                                        >
+                                          +
+                                        </button>
+                                      </div>
+                                      {maxStayInvalid && (
+                                        <p className="text-[10px] font-medium text-red-600">
+                                          Max stay cannot be less than min stay.
+                                        </p>
                                       )}
                                     </div>
                                   </td>
+                                  <td className="px-2 py-2.5">
+                                    {maxOcc > 1 ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedOccupancy((prev) => ({
+                                            ...prev,
+                                            [idx]: !prev[idx],
+                                          }))
+                                        }
+                                        className={`inline-flex max-w-full items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-[10px] font-medium transition-colors ${hasOccRates ? "text-primary-600 bg-primary-50 hover:bg-primary-100" : "text-gray-500 hover:bg-gray-100"}`}
+                                      >
+                                        <ChevronDownIcon
+                                          className={`h-3 w-3 shrink-0 transition-transform ${isOccExpanded ? "" : "-rotate-90"}`}
+                                        />
+                                        Per guest
+                                      </button>
+                                    ) : (
+                                      <span className="text-gray-300">&mdash;</span>
+                                    )}
+                                  </td>
                                 </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                {isOccExpanded && maxOcc > 1 && (
+                                  <tr className="border-b border-gray-50 bg-gray-50/50">
+                                    <td colSpan={5} className="px-4 py-2.5 pl-10">
+                                      <div className="space-y-1.5">
+                                        <span className="text-[10px] text-gray-400 font-medium">
+                                          Rate per number of guests
+                                        </span>
+                                        {Array.from({ length: maxOcc }, (_, i) => i + 1).map(
+                                          (guestCount) => {
+                                            const isAnchor = guestCount === 1;
+                                            const occRate =
+                                              (season.occupancyRates || {})[String(guestCount)] ||
+                                              "";
+                                            return (
+                                              <div
+                                                key={guestCount}
+                                                className="flex items-center gap-2"
+                                              >
+                                                <span className="text-[11px] text-gray-500 w-16">
+                                                  {guestCount}{" "}
+                                                  {guestCount === 1 ? "guest" : "guests"}
+                                                </span>
+                                                <span className="text-gray-400 text-[11px]">
+                                                  {getCurrencySymbol(form.currency || "EUR")}
+                                                </span>
+                                                {isAnchor ? (
+                                                  <span className="text-[11px] text-gray-400 px-2 py-1">
+                                                    {season.rate || "—"} (season rate)
+                                                  </span>
+                                                ) : (
+                                                  <input
+                                                    type="number"
+                                                    value={occRate}
+                                                    onChange={(e) => {
+                                                      const u = [...seasons];
+                                                      const occ = {
+                                                        ...(u[idx].occupancyRates || {}),
+                                                      };
+                                                      if (e.target.value === "") {
+                                                        delete occ[String(guestCount)];
+                                                      } else {
+                                                        occ[String(guestCount)] = e.target.value;
+                                                      }
+                                                      u[idx] = { ...u[idx], occupancyRates: occ };
+                                                      setSeasons(u);
+                                                    }}
+                                                    className="w-20 px-2 py-1 bg-white border border-gray-200 rounded text-[11px] text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                                                    placeholder={season.rate || "same as rate"}
+                                                    min="0"
+                                                  />
+                                                )}
+                                              </div>
+                                            );
+                                          },
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
