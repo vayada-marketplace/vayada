@@ -137,6 +137,10 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 ## Linear workflow
 
+For this repository, Linear work defaults to the Vayada workspace. Agents should use
+the `linear_vayada` MCP server for all `VAY-*` issue lookups, comments, updates, and
+issue creation unless the user explicitly names another workspace.
+
 - Ticket → **In Progress** when implementation starts (via the `linear` MCP).
 - Ticket stays **In Progress** when the agent finishes implementation, pushes the branch, and opens the PR.
 - Ticket → **Done** only after the human merges the PR, smoke tests the shipped change, and confirms no required follow-up remains.
