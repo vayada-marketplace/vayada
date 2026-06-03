@@ -305,6 +305,7 @@ function ModuleCard({
           <ToggleSwitch
             checked={isActive}
             disabled={saving}
+            ariaLabel={`${isActive ? "Deactivate" : "Activate"} ${module.name}`}
             onClick={(event) => event.stopPropagation()}
             onChange={(checked) => onToggle(checked)}
           />
@@ -338,11 +339,13 @@ function ModuleCard({
 function ToggleSwitch({
   checked,
   disabled,
+  ariaLabel,
   onClick,
   onChange,
 }: {
   checked: boolean;
   disabled?: boolean;
+  ariaLabel: string;
   onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onChange: (checked: boolean) => void;
 }) {
@@ -351,6 +354,7 @@ function ToggleSwitch({
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={(event) => {
         onClick?.(event);
@@ -586,7 +590,12 @@ function DetailModal({
 
         <div className="flex flex-col gap-3 border-t border-stone-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="flex items-center gap-3">
-            <ToggleSwitch checked={isActive} disabled={saving} onChange={onToggle} />
+            <ToggleSwitch
+              checked={isActive}
+              disabled={saving}
+              ariaLabel={`${isActive ? "Deactivate" : "Activate"} ${module.name}`}
+              onChange={onToggle}
+            />
             <span className="text-sm font-semibold text-stone-700">
               {isActive ? "Active" : "Inactive"}
             </span>

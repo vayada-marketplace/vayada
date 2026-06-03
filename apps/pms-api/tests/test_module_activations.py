@@ -76,6 +76,57 @@ class TestModuleActivations:
         assert resp.json()["activeModules"] == []
         assert resp.json()["activations"][0]["moduleId"] == "inbox"
 
+    async def test_repeated_state_patch_preserves_timestamps(self, client, hotel_user):
+        hotel = await create_test_hotel(str(hotel_user["id"]))
+        token = hotel_user["token"]
+
+        await _patch(client, token, "inbox", False)
+        first_inactive = await Database.fetchrow(
+            """
+            SELECT deactivated_at, updated_at
+            FROM property_module_activations
+            WHERE hotel_id = $1 AND module_id = 'inbox'
+            """,
+            hotel["id"],
+        )
+
+        await _patch(client, token, "inbox", False)
+        second_inactive = await Database.fetchrow(
+            """
+            SELECT deactivated_at, updated_at
+            FROM property_module_activations
+            WHERE hotel_id = $1 AND module_id = 'inbox'
+            """,
+            hotel["id"],
+        )
+
+        assert second_inactive["deactivated_at"] == first_inactive["deactivated_at"]
+        assert second_inactive["updated_at"] == first_inactive["updated_at"]
+
+        await _patch(client, token, "inbox", True)
+        first_active = await Database.fetchrow(
+            """
+            SELECT activated_at, deactivated_at, updated_at
+            FROM property_module_activations
+            WHERE hotel_id = $1 AND module_id = 'inbox'
+            """,
+            hotel["id"],
+        )
+
+        await _patch(client, token, "inbox", True)
+        second_active = await Database.fetchrow(
+            """
+            SELECT activated_at, deactivated_at, updated_at
+            FROM property_module_activations
+            WHERE hotel_id = $1 AND module_id = 'inbox'
+            """,
+            hotel["id"],
+        )
+
+        assert second_active["activated_at"] == first_active["activated_at"]
+        assert second_active["deactivated_at"] is None
+        assert second_active["updated_at"] == first_active["updated_at"]
+
     async def test_rejects_non_ascii_kebab_case_module_id(self, client, hotel_user):
         await create_test_hotel(str(hotel_user["id"]))
 
