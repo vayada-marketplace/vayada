@@ -4,17 +4,22 @@ _VAY-601 decision record. AI API documentation checked on 2026-06-03._
 
 ## Recommendation
 
-Build Ask Intelligence as a governed domain layer in the backend, not as a
-generic chat endpoint attached to the database.
+Build Ask Intelligence MVP as a **read-only hotel owner agent** in the backend,
+not as a generic chat endpoint attached to the database.
 
-The layer should translate a user's question into a scoped, authorized data
-request, gather deterministic evidence from Vayada systems, optionally enrich it
-with external sources, and return a structured answer with explicit evidence,
-caveats, confidence, unavailable-data states, and suggested next actions.
+Use an agent framework for orchestration, tool loops, conversation state,
+tracing, and future workflow growth. Keep the MVP's tools predefined,
+read-only, and scoped to approved Vayada data. The agent should translate a
+hotel owner's question or goal into an authorized tool plan, gather
+deterministic evidence from Vayada systems, optionally explain missing
+enrichment, and return a structured answer with explicit evidence, caveats,
+confidence, unavailable-data states, and suggested next actions.
 
 The model should synthesize and explain. It should not be the authority for
 authorization, metric definitions, tenant scoping, billing entitlement, data
-freshness, or whether an action is allowed.
+freshness, or whether an action is allowed. Write actions should come later
+behind explicit preview, confirmation, permission checks, idempotency, and
+audit.
 
 ## Responsibilities
 
@@ -23,6 +28,8 @@ Ask Intelligence should own:
 - Intent classification: identify whether the question is about performance,
   revenue, booking funnel, pricing, availability, operations, guest behavior,
   creator/affiliate performance, setup quality, or platform support.
+- Goal framing: turn broad hotel-owner requests into a bounded read-only task
+  plan and ask clarifying questions when the goal or scope is ambiguous.
 - Scope resolution: resolve the active user, organization, product, hotel,
   property, date range, locale, currency, and resource boundaries.
 - Data plan creation: choose which approved data tools or metric views are
@@ -51,24 +58,46 @@ Ask Intelligence should not own:
 - Provider-specific prompt details as product behavior.
 - External data claims without source, timestamp, and caveat.
 - UI layout. It should return structured blocks the UI can render.
+- Direct write execution in the MVP.
 
 ## Architecture shape
 
-Use four layers:
+Use five layers:
 
-1. **Ask API**: accepts a question and explicit scope, authenticates the
+1. **Ask API**: accepts a question or goal and explicit scope, authenticates the
    requester, checks entitlement, and returns an answer envelope.
-2. **Planner and policy layer**: classifies intent, applies tenant/resource
-   policy, selects allowed tools, and builds a data plan.
-3. **Evidence tools**: typed functions that read curated metrics, product
+2. **Agent runtime**: manages the read-only agent loop, conversation state,
+   tool-call budget, traces, retries, stop conditions, and structured output
+   validation.
+3. **Planner and policy layer**: classifies intent, applies tenant/resource
+   policy, selects allowed predefined tools, and builds a data plan.
+4. **Evidence tools**: typed functions that read curated metrics, product
    repositories, setup data, and later external/enriched sources. Tools enforce
    authorization server-side.
-4. **Answer composer**: passes the evidence pack to the model and validates the
+5. **Answer composer**: passes the evidence pack to the model and validates the
    response against a strict schema before returning it.
 
 This keeps the model behind an application contract. The model may request
 evidence through approved tools, but it cannot choose arbitrary SQL, bypass
 resource boundaries, or invent unsupported fields.
+
+The MVP agent's tools should be predefined and read-only, for example:
+
+- `get_booking_performance`
+- `get_booking_source_mix`
+- `get_conversion_funnel`
+- `get_setup_gaps`
+- `get_room_type_performance`
+- `get_upcoming_arrivals`
+- `get_creator_collaboration_status`
+- `get_hotel_settings_summary`
+
+The initial agent should be able to plan and use those tools over multiple
+steps, but it should only return answers and suggested actions. Write-capable
+tools such as `draft_rate_change`, `create_task`, `draft_guest_reply`, and
+`prepare_booking_page_update` belong in a later assisted-action phase. Actual
+execution tools such as `apply_rate_change`, `send_guest_message`, or
+`publish_booking_page_update` require an explicit approval workflow.
 
 ## Data access model
 
@@ -143,7 +172,9 @@ of pretending to know the market.
 
 ## MVP boundary
 
-The MVP should answer internal-data questions only.
+The MVP should be a read-only hotel owner agent that answers internal-data
+questions and helps the owner decide what to do next. It should use an agent
+framework, but its available tools should be predefined read-only actions.
 
 Good MVP question types:
 
@@ -157,6 +188,8 @@ Good MVP question types:
 - "Which creator collaborations are overdue or underperforming?"
 - "What should I do next to improve direct bookings using only current Vayada
   data?"
+- "Look at my hotel performance and tell me the top three things to fix."
+- "Help me understand what happened this week before I make pricing changes."
 
 Non-MVP or enrichment-required question types:
 
@@ -168,6 +201,16 @@ Non-MVP or enrichment-required question types:
 
 The MVP may acknowledge those questions but should return `external_data_needed`
 with a suggested enrichment requirement.
+
+Non-MVP action-execution requests:
+
+- "Change my weekend rates."
+- "Send this message to every arriving guest."
+- "Publish these new booking page settings."
+- "Cancel risky bookings automatically."
+
+For those, the MVP should return a suggested action or draft plan only. It
+should not execute the action.
 
 ## Authorization and tenant boundaries
 
@@ -298,7 +341,7 @@ The answer must explain why confidence is not high.
 
 ### Suggested actions
 
-Suggested actions should be typed and non-destructive by default:
+Suggested actions should be typed and non-destructive in the MVP:
 
 - `view_report`
 - `open_settings`
@@ -309,10 +352,11 @@ Suggested actions should be typed and non-destructive by default:
 - `enable_feature`
 - `request_enrichment`
 
-Execution should require a separate explicit action flow with authorization,
-preview, confirmation, idempotency, and audit. Ask Intelligence should not
-silently change rates, cancel bookings, message guests, alter payout settings,
-or publish marketplace changes.
+Later assisted-action tools can draft or stage changes, but execution should
+require a separate explicit action flow with authorization, preview,
+confirmation, idempotency, and audit. Ask Intelligence should not silently
+change rates, cancel bookings, message guests, alter payout settings, or publish
+marketplace changes.
 
 ## Principles
 
@@ -366,6 +410,8 @@ or publish marketplace changes.
 - Hiding missing data behind confident prose.
 - Returning recommendations without evidence or freshness.
 - Executing actions in the same flow as answering a question.
+- Starting with write-capable autonomous tools before the read-only agent is
+  proven.
 - Sending full guest records or sensitive payout data to a model by default.
 - Building one-off AI code per app instead of a shared Ask Intelligence domain.
 - Treating the existing listing extraction helper as the architecture for Ask
@@ -379,14 +425,18 @@ Do not create Ask Intelligence implementation tickets until these are true:
   tenant boundaries.
 - The MVP question set is selected and explicitly limited to internal Vayada
   data.
+- The first version is explicitly scoped as a read-only hotel owner agent with
+  predefined tools.
 - A metric catalog exists for the first answer domains.
 - The first resource scope is selected. Recommended first scope: booking/PMS
   hotel performance for one selected hotel organization.
 - The answer envelope schema is reviewed and stable enough for frontend and
   backend contracts.
 - The evidence/audit tables or event model are designed.
-- The model provider abstraction is defined, including structured output
-  validation, retries, refusal handling, and cost/latency logging.
+- The agent runtime/provider abstraction is defined, including tool-loop limits,
+  structured output validation, retries, refusal handling, trace capture, and
+  cost/latency logging.
+- The predefined read-only tool catalog is reviewed and authorized.
 - PII handling rules are defined for guest, payout, and staff data.
 - External enrichment sources are explicitly deferred or separately approved.
 
@@ -394,6 +444,8 @@ Do not create Ask Intelligence implementation tickets until these are true:
 
 - Should Ask Intelligence live as a module inside the new TypeScript backend or
   as a separate service with its own audit and model-provider adapter?
+- Which agent framework/runtime should own orchestration, memory, tracing,
+  retries, and tool-loop limits?
 - Which canonical metrics should be implemented first: direct share, booking
   source mix, conversion funnel, ADR/revenue, occupancy, or setup completeness?
 - Should metric snapshots be stored at answer time for reproducibility, or
@@ -401,6 +453,7 @@ Do not create Ask Intelligence implementation tickets until these are true:
 - What is the first UI surface: dashboard question box, insight cards, setup
   assistant, or admin/support console?
 - How should the product distinguish recommendations from executable actions?
+- What approval contract is required before draft tools become execution tools?
 - Which data should never be sent to an LLM, even with redaction?
 - Which external enrichment connector, if any, is valuable enough to plan
   immediately after the internal-data MVP?
