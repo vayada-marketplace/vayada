@@ -26,6 +26,22 @@ Vayada can, however, make hotels more likely to be understood, compared, cited,
 and booked by giving agents fresh, complete, machine-readable direct-booking
 data with clear policies and a reliable booking path.
 
+The practical product distinction is:
+
+- **Without a quote API**: an AI assistant can discover a Vayada hotel from the
+  web, summarize why it may fit the request, and link to the hotel page. The
+  guest still has to click through, enter dates, check rooms, compare prices,
+  and complete the booking manually.
+- **With a quote API and checkout deep links**: an AI assistant can discover the
+  hotel, verify live availability/price/policy for the requested dates and
+  guests, then route the guest into a Vayada checkout URL with the same dates,
+  guests, room/rate, currency, promo, and referral context already filled in.
+
+In other words, structured pages help Vayada win recommendations. Quote APIs and
+deep links help Vayada turn those recommendations into direct booking traffic.
+MCP/tool integrations should reuse the same quote and deep-link contract rather
+than become the first place that bookability exists.
+
 ## Current Vayada surface
 
 Useful public pieces already exist:
