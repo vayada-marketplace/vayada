@@ -122,15 +122,15 @@ Before claiming a change is complete:
 
 **Playwright surface-to-command mapping:**
 
-| Surface                | Command                          | portless URL                          |
-| ---------------------- | -------------------------------- | ------------------------------------- |
-| `apps/landing`         | `npm run e2e:landing`            | `https://landing.localhost`           |
-| `apps/booking-web`     | `npm run e2e:booking-web`        | `https://hotel-alpenrose.booking.localhost` |
-| `apps/affiliate-dashboard` | `npm run e2e:affiliate-dashboard` | `https://affiliate.localhost`      |
-| `apps/booking-admin`   | `npm run e2e:booking-admin`      | `https://admin.booking.localhost`     |
-| `apps/marketplace-web` | `npm run e2e:marketplace-web`    | `https://marketplace.localhost`       |
-| `apps/pms-web`         | `npm run e2e:pms-web`            | `https://pms.localhost`               |
-| `apps/vayada-admin`    | `npm run e2e:vayada-admin`       | `https://admin.localhost`             |
+| Surface                    | Command                           | portless URL                                |
+| -------------------------- | --------------------------------- | ------------------------------------------- |
+| `apps/landing`             | `npm run e2e:landing`             | `https://landing.localhost`                 |
+| `apps/booking-web`         | `npm run e2e:booking-web`         | `https://hotel-alpenrose.booking.localhost` |
+| `apps/affiliate-dashboard` | `npm run e2e:affiliate-dashboard` | `https://affiliate.localhost`               |
+| `apps/booking-admin`       | `npm run e2e:booking-admin`       | `https://admin.booking.localhost`           |
+| `apps/marketplace-web`     | `npm run e2e:marketplace-web`     | `https://marketplace.localhost`             |
+| `apps/pms-web`             | `npm run e2e:pms-web`             | `https://pms.localhost`                     |
+| `apps/vayada-admin`        | `npm run e2e:vayada-admin`        | `https://admin.localhost`                   |
 
 `npm run e2e` runs all of the above. URL overrides and debugging are documented in `tests/e2e/README.md`.
 
@@ -144,6 +144,8 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 - **Protected `main`, PR-based workflow.** Do not commit directly to `main` for implementation work.
 - For each Linear implementation issue, create a branch linked to the issue, commit with a descriptive message, push the branch, and open a GitHub PR.
+- For large architecture or rewrite work, use stacked PRs. Keep each PR focused and around 400 changed non-generated lines or fewer unless the ticket explicitly justifies a larger slice.
+- For TypeScript backend rewrite, WorkOS, Ask Intelligence, target-schema, migration, or cutover work, load `.agents/skills/typescript-rewrite-workflow/SKILL.md` before coding. Architecture/design contracts must be written or linked before implementation PRs.
 - PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
 - CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
 - Merge with squash merge after required checks pass.
@@ -178,6 +180,8 @@ Production runs on AWS ECS Fargate, fronted by an ALB. Each app has a GitHub Act
 Shared agent skills live under `.agents/skills/<name>/SKILL.md`. The directory is intentionally tool-neutral; Codex, Claude Code, and any other agent should read the same shared skill content instead of maintaining per-tool copies.
 
 Start with `.agents/skills/vayada-skills-storage/SKILL.md` to understand the three-layer model (shared skill / repo-local instructions / Linear issue) and where new skills should go.
+
+Use `.agents/skills/typescript-rewrite-workflow/SKILL.md` for the TypeScript backend rewrite and adjacent WorkOS, Ask Intelligence, target-schema, migration, and cutover work.
 
 ## Gotchas
 
