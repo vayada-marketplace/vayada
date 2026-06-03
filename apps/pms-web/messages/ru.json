@@ -109,6 +109,7 @@
   "layout.sidebar.roomsAndRates": "Номера и цены",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Настройки",
+  "layout.sidebar.featureHub": "Feature Hub",
   "layout.sidebar.collapse": "Свернуть",
   "search.placeholder": "Поиск бронирований, гостей, номеров, настроек, страниц...",
   "search.noResults": "Нет результатов для '{query}'",

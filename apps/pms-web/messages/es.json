@@ -110,6 +110,7 @@
   "layout.sidebar.roomsAndRates": "Habitaciones y Tarifas",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Configuracion",
+  "layout.sidebar.featureHub": "Feature Hub",
   "layout.sidebar.collapse": "Contraer",
   "search.placeholder": "Buscar reservas, huespedes, habitaciones, configuracion, paginas...",
   "search.noResults": "Sin resultados para '{query}'",

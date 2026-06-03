@@ -109,6 +109,7 @@
   "layout.sidebar.roomsAndRates": "客房与价格",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "设置",
+  "layout.sidebar.featureHub": "Feature Hub",
   "layout.sidebar.collapse": "收起",
   "search.placeholder": "搜索预订、客人、房间、设置、页面...",
   "search.noResults": "'{query}' 无搜索结果",

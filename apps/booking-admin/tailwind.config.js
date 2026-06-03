@@ -4,6 +4,7 @@ module.exports = {
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "../../packages/feature-hub/src/**/*.{js,ts,jsx,tsx}",
     "../../packages/hotel-setup-wizard/src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {

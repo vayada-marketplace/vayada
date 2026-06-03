@@ -109,6 +109,7 @@
   "layout.sidebar.roomsAndRates": "Kamers & Tarieven",
   "layout.sidebar.channelManager": "Channel Manager",
   "layout.sidebar.settings": "Instellingen",
+  "layout.sidebar.featureHub": "Feature Hub",
   "layout.sidebar.collapse": "Inklappen",
   "search.placeholder": "Zoek reserveringen, gasten, kamers, instellingen, paginas...",
   "search.noResults": "Geen resultaten voor '{query}'",
