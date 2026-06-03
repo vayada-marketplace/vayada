@@ -6,12 +6,16 @@ structure, VAY-604 AI-agent bookability, and the VAY-605 schema audit._
 
 ## Recommendation
 
-Do not start the backend rewrite with a big-bang database rewrite.
+Proceed with a **planned big-bang database rewrite**, but do not confuse that
+with editing production tables in place.
 
-Start with an explicit ownership model, additive identity/resource-link tables,
-and read models for the new AI and distribution contracts. Keep the current
-auth, marketplace, booking, and PMS databases serving production traffic until a
-specific domain has a tested migration path.
+The target should be a new schema designed from the VAY-600, VAY-601, VAY-602,
+and VAY-604 decisions, built and validated in parallel, then cut over in one
+coordinated production migration. The current auth, marketplace, booking, and
+PMS databases remain the source of truth until the cutover window. Before that
+window, all rewrite work should happen through target-schema DDL, migration
+scripts, application compatibility work, staging rehearsals, and cutover
+runbooks.
 
 The target should be:
 
@@ -21,11 +25,15 @@ The target should be:
 - typed read models for cross-domain consumers instead of product services
   directly opening each other's database pools;
 - public bookability data separated from authenticated hotel-owner intelligence;
-- migration adapters with explicit expiry notes, validation, and rollback.
+- deterministic migration scripts from legacy databases into the new schema;
+- a rehearsed cutover plan with write freeze, parity checks, rollback, and
+  post-cutover monitoring.
 
 VAY-603 should use this plan as the database input to the integrated roadmap.
 The roadmap should not assume that the TypeScript backend can safely inherit
-the current table boundaries as permanent boundaries.
+the current table boundaries as permanent boundaries, and it should treat the
+database rewrite as a program-level cutover rather than a series of independent
+production table edits.
 
 ## Current schema audit
 
@@ -72,22 +80,23 @@ The main database problems are structural:
 Each target domain should own writes to its authoritative tables. Other domains
 should consume typed services, read models, or events.
 
-| Domain                          | Owns                                                                                                                                                        | Initial database posture                                                                                                                                                           |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Identity and authorization      | Internal users, WorkOS identity mappings, organizations, memberships, permissions, resource links, product entitlements, product audit events.              | Add tables to `auth-db` first. Keep `users.id` stable. Keep legacy auth columns as compatibility data until WorkOS and RequestContext are live.                                    |
-| Hotel/property catalog          | Canonical internal property identity, organization links to booking/PMS/marketplace resources, normalized public/private profile attributes.                | Start as a registry/read model over existing `booking_hotels`, PMS `hotels`, and marketplace `hotel_profiles`/`hotel_listings`. Do not move all hotel profile columns immediately. |
-| Booking and direct checkout     | Quote sessions, checkout context, booking lifecycle contract, guest booking records, booking status, cancellation/change flows.                             | PMS `bookings` stays operational source during transition. Add quote/deep-link state separately before changing booking creation tables.                                           |
-| PMS operations                  | Rooms, room types, inventory, room blocks, operational booking assignment, check-in/out, notes, housekeeping-style facts, channel manager sync state.       | Preserve PMS operational tables. Split only after adapters and validation exist.                                                                                                   |
-| Marketplace                     | Creators, creator platforms, hotel listings for collaborations, collaboration offers, deliverables, ratings, negotiation/chat.                              | Preserve marketplace tables. Add organization/resource links instead of using `users.type` as the workflow gate.                                                                   |
-| Finance                         | Payment settings, payments, payouts, commissions, affiliate payout settings, billing/pricing configuration, audit of rate/commission changes.               | Keep current payment/payout tables where they are until finance ownership is explicitly designed. Add entitlements and billing links in auth/platform first.                       |
-| Distribution and AI bookability | Public hotel bookability profile, quote read model, freshness metadata, typed unavailable reasons, deep-link context, external API clients and rate limits. | Add public read-model tables or materialized views after profile/quote contract is defined. This is public and read-only for external agents.                                      |
-| Ask Intelligence                | Metric catalog, setup-completeness snapshots, evidence catalog, answer records, conversations, agent runs, tool-call traces, unavailable-data states.       | Add intelligence tables after RequestContext and curated metric definitions exist. Keep tools read-only in MVP.                                                                    |
-| Jobs/events/audit               | Durable side-effect jobs, idempotency keys, retries, dead-letter visibility, product audit correlation.                                                     | Introduce as backend platform tables/shared infrastructure. Do not continue fire-and-forget side effects as the migration norm.                                                    |
+| Domain                          | Owns                                                                                                                                                        | Big-bang target posture                                                                                                                                      |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity and authorization      | Internal users, WorkOS identity mappings, organizations, memberships, permissions, resource links, product entitlements, product audit events.              | Model in the new target schema first. Keep `users.id` stable as migrated internal principal IDs; map WorkOS IDs through `external_identities`.               |
+| Hotel/property catalog          | Canonical internal property identity, organization links to booking/PMS/marketplace resources, normalized public/private profile attributes.                | Create canonical property tables and migrated links from legacy `booking_hotels`, PMS `hotels`, and marketplace `hotel_profiles`/`hotel_listings`.           |
+| Booking and direct checkout     | Quote sessions, checkout context, booking lifecycle contract, guest booking records, booking status, cancellation/change flows.                             | Move guest booking records and quote/checkout state into the target booking domain at cutover. Preserve public booking references and lifecycle semantics.   |
+| PMS operations                  | Rooms, room types, inventory, room blocks, operational booking assignment, check-in/out, notes, housekeeping-style facts, channel manager sync state.       | Migrate operational PMS tables into the target PMS domain with cleaner ownership and explicit external-channel mappings.                                     |
+| Marketplace                     | Creators, creator platforms, hotel listings for collaborations, collaboration offers, deliverables, ratings, negotiation/chat.                              | Migrate creator, listing, collaboration, deliverable, and chat records into marketplace-owned target tables linked through organizations/resources.          |
+| Finance                         | Payment settings, payments, payouts, commissions, affiliate payout settings, billing/pricing configuration, audit of rate/commission changes.               | Define finance-owned target tables before cutover; migrate payments/payouts/commissions without changing external provider identifiers.                      |
+| Distribution and AI bookability | Public hotel bookability profile, quote read model, freshness metadata, typed unavailable reasons, deep-link context, external API clients and rate limits. | Build as first-class target tables/read models, not as later patches on old booking/PMS shapes. Public and read-only for external agents.                    |
+| Ask Intelligence                | Metric catalog, setup-completeness snapshots, evidence catalog, answer records, conversations, agent runs, tool-call traces, unavailable-data states.       | Include intelligence tables in the target schema so the MVP has audit/evidence infrastructure from launch. Keep tools read-only in MVP.                      |
+| Jobs/events/audit               | Durable side-effect jobs, idempotency keys, retries, dead-letter visibility, product audit correlation.                                                     | Include job/event/audit tables in the target schema so cutover does not carry forward untracked fire-and-forget side effects as the default operating model. |
 
 ## Identity and authorization tables
 
-These are the first additive schema changes because every later domain depends
-on a stable request and resource model.
+These are the first target-schema tables because every later domain depends on a
+stable request and resource model. They should be created in the new database
+schema and loaded by migration scripts during rehearsals and final cutover.
 
 Recommended tables:
 
@@ -108,8 +117,8 @@ Rules:
 - Preserve `users.id` as the internal principal ID.
 - Add `external_identities` instead of replacing product table foreign keys with
   WorkOS IDs.
-- Treat `users.type`, `users.is_superadmin`, and product `user_id` owner fields
-  as compatibility columns after the new model is introduced.
+- Do not carry `users.type`, `users.is_superadmin`, or product `user_id` owner
+  fields forward as authorization primitives. They are migration inputs only.
 - Resolve every authenticated request to:
 
 ```text
@@ -180,9 +189,9 @@ Rules:
 - Suggested actions stay non-destructive in the MVP. Executable actions need a
   separate approval/idempotency/audit workflow.
 
-## Preserve, redesign, retire, backfill
+## Carry forward, redesign, retire, transform
 
-### Preserve
+### Carry forward
 
 - `users.id` as the stable internal principal.
 - Existing product resource IDs for `booking_hotels`, PMS `hotels`,
@@ -194,7 +203,7 @@ Rules:
   marketplace integration behavior until each integration is explicitly moved.
 - Consent history and GDPR request linkage.
 
-### Redesign
+### Redesign in the target schema
 
 - `users.type` as product authorization.
 - `users.is_superadmin` as platform authorization.
@@ -210,7 +219,7 @@ Rules:
 - Side effects as durable jobs/events with audit, retries, idempotency, and
   dead-letter visibility.
 
-### Retire after migration
+### Do not carry forward as active systems
 
 - Local password login and bcrypt session issuance for migrated users.
 - `password_reset_tokens` as a Vayada-owned auth flow after WorkOS is the
@@ -224,7 +233,7 @@ Rules:
 - `lodgify_connections` once the dropped Lodgify integration is confirmed to
   have no production dependency.
 
-### Backfill
+### Transform during migration
 
 - `external_identities` from existing `users` once WorkOS users are created or
   linked.
@@ -253,117 +262,149 @@ Rules:
 ### Phase 0: Inventory and contracts
 
 - Produce a full table/column inventory with owners, current writers, current
-  readers, PII classification, and migration risk.
-- Confirm the target domain ownership map.
-- Define RequestContext, resource-link, bookability quote, and Ask Intelligence
-  evidence contracts before writing migrations that depend on them.
+  readers, PII classification, retention sensitivity, external provider IDs,
+  and migration risk.
+- Confirm the target domain ownership map and the new schema boundaries.
+- Define RequestContext, resource-link, bookability quote, Ask Intelligence
+  evidence, jobs/events, audit, and finance contracts before writing migration
+  scripts that depend on them.
 
-### Phase 1: Add identity/resource-link schema
+### Phase 1: Target schema design
 
-- Add `external_identities`, `organizations`, `organization_memberships`,
-  `permission_catalog`, `role_permission_grants`,
-  `organization_resource_links`, `product_entitlements`, and
-  `product_audit_events`.
-- Keep all current code paths working.
-- Add migration tests and fixtures for common user/resource shapes.
+- Design the full target schema as DDL in a new database/schema namespace.
+- Include identity/resource links, canonical property tables, booking/PMS
+  operational tables, marketplace tables, finance tables, bookability tables,
+  Ask Intelligence tables, and jobs/audit tables.
+- Define stable IDs, foreign keys, uniqueness, status enums, nullable
+  migration fields, PII classifications, indexes, retention rules, and audit
+  requirements.
+- Review the schema as one design before implementation tickets start building
+  cutover code.
 
-### Phase 2: Backfill and validate
+### Phase 2: Migration pipeline
 
-- Backfill organizations, memberships, and resource links from current product
-  data.
-- Run dual-read validation: legacy ownership checks and new resource-link checks
-  should agree for seeded and production-like data.
-- Record mismatches as data cleanup issues before enforcement.
+- Build deterministic extract/transform/load scripts from auth-db,
+  marketplace, booking, and PMS into the target schema.
+- Keep current production databases as source of truth while the target schema
+  is repeatedly rebuilt in local and staging.
+- Make the migration idempotent in rehearsal environments: drop/recreate target
+  schema, load source snapshots, validate, and report mismatches.
+- Do not dual-write by default. If the final cutover requires a short bridge for
+  unavoidable writes, scope it as a separate explicit risk item.
 
-### Phase 3: RequestContext enforcement
+### Phase 3: Application cutover branch
 
-- Introduce TypeScript RequestContext or Python compatibility middleware that
-  resolves user, organization, permission, resource links, and entitlement.
-- Keep `X-Hotel-Id` as an input but not as hidden domain state.
-- Gate selected endpoints with the new resource-link checks while preserving
-  fallback behavior behind a feature flag.
+- Update the TypeScript backend roadmap and any required Python compatibility
+  code to read/write the target schema.
+- Replace legacy authorization paths with RequestContext over organizations,
+  memberships, permissions, resource links, and entitlements.
+- Keep public URLs and frontend contracts compatible through route adapters and
+  redirects, not by preserving old table ownership.
+- Replace normal cross-product database pools with target domain services and
+  read models.
 
-### Phase 4: Public bookability read models
+### Phase 4: Rehearsals and parity checks
 
-- Add the public profile and quote/deep-link schemas or materialized read
-  models.
-- Implement freshness metadata and typed unavailable reasons.
-- Validate quote parity against existing booking/PMS frontend flows.
+- Run full migration rehearsals on production-like snapshots in staging.
+- Compare source and target row counts, totals, status distributions, public
+  booking quote outputs, authorization decisions, payment/payout totals,
+  marketplace collaboration states, and Ask Intelligence metric fixtures.
+- Run application smoke tests against the target schema only.
+- Record every mismatch with an owner and block cutover until critical
+  mismatches are resolved or explicitly accepted.
 
-### Phase 5: Ask Intelligence data layer
+### Phase 5: Production cutover
 
-- Add metric definitions, setup-completeness snapshots, evidence catalog,
-  conversations, runs, tool calls, and answer audits.
-- Wire only predefined read-only tools.
-- Validate that evidence tools use RequestContext and cannot cross tenant
-  boundaries.
+- Announce a maintenance window if a write freeze is required.
+- Freeze or queue writes in current apps.
+- Take final backups/snapshots of all source databases.
+- Run the final migration from source databases into the target schema.
+- Run cutover validation gates.
+- Deploy app versions configured for the target schema.
+- Re-enable writes and monitor error rates, booking creation, payments,
+  external integrations, auth/session resolution, and public booking pages.
 
-### Phase 6: Domain table splits and renames
+### Phase 6: Stabilization
 
-- Only after adapters and read models are stable, decide which existing tables
-  should move, split, or be renamed.
-- Prioritize confusing ownership boundaries, not cosmetic renames.
-- Keep compatibility views or adapters for old Python routes until frontend and
-  public clients have moved.
+- Keep source databases read-only and retained for rollback/audit during the
+  agreed retention window.
+- Monitor parity-sensitive flows: login/session resolution, hotel selection,
+  booking creation, payment capture/refund, Channex sync, affiliate attribution,
+  marketplace collaboration changes, AI quote output, and Ask Intelligence
+  evidence calls.
+- Fix target-schema data issues with forward migrations or targeted data repair
+  scripts, not by reviving legacy writes.
 
-### Phase 7: Retire legacy auth and cross-pool reads
+### Phase 7: Legacy decommission
 
-- Stop creating local password sessions.
-- Remove TOTP/password/email-verification dependency for migrated users.
-- Remove `users.type`, `is_superadmin`, and direct product `user_id` checks from
-  authorization decisions after replacement coverage is complete.
-- Remove normal cross-product database pools from services. Keep only approved
-  migration adapters until their expiry date.
+- Remove local password/TOTP/email-verification dependency for migrated users.
+- Remove `users.type`, `is_superadmin`, direct product `user_id` ownership
+  checks, hidden `X-Hotel-Id` authorization state, and normal cross-product DB
+  pools from active code.
+- Archive old migration histories and source snapshots according to retention
+  and audit requirements.
 
-## Coexistence and rollback
+## Coexistence, cutover, and rollback
 
-During migration:
+Before cutover:
 
-- Python services remain the production writers for existing product tables
-  until each domain is migrated.
-- TypeScript services can read existing tables through typed adapters or read
-  models. New TypeScript code should not add raw product DB pools as the default
-  integration style.
-- New tables should be additive and nullable where needed until backfill and
-  validation pass.
-- Dual-read before dual-write. Prefer backfilled read models and validation
-  reports before any write ownership change.
-- Feature-flag enforcement changes so rollback can return to legacy checks
-  without dropping schema.
-- Use compatibility views/adapters for public URLs and old frontend contracts.
-- Keep migration scripts idempotent and safe to re-run locally/staging.
+- Existing Python services and current databases remain production source of
+  truth.
+- Target schema exists in local/staging and can be rebuilt from source
+  snapshots.
+- New application code can be developed against target-schema fixtures or
+  staging target databases, but it should not partially own production writes
+  before the cutover.
+- Compatibility adapters preserve HTTP/public behavior; they should not
+  preserve old database ownership as a permanent design constraint.
+
+During cutover:
+
+- Prefer a write freeze or queueing window over long-lived dual-write. Dual
+  write should be used only if the downtime requirement makes a freeze
+  impossible, and it must have reconciliation checks.
+- Final migration scripts must log source rows, target rows, counts, transform
+  warnings, skipped rows, and checksum/parity results.
+- App deployment and database cutover must be one coordinated release with a
+  named owner for each validation gate.
 
 Rollback posture:
 
-- Additive migrations roll back operationally by disabling feature flags and
-  ignoring new tables.
-- Backfills must log source rows, target rows, counts, and mismatches so they
-  can be rerun or corrected.
-- Any future destructive migration needs an archived backup/export, a verified
-  restore path, and a separate approval ticket.
-- Do not drop legacy auth or ownership columns until migrated traffic has run
-  through the new model and data parity checks have passed.
+- Rollback before writes resume: restore old app versions and keep using the
+  original databases.
+- Rollback after writes resume is harder because target-only writes may have
+  occurred. The runbook must define the maximum rollback window, whether target
+  writes can be replayed into old databases, and which external side effects
+  prevent rollback.
+- Source database snapshots must be retained read-only until the rollback
+  window is closed.
+- No destructive cleanup of old production databases happens in the same
+  release as cutover.
 
 ## Validation requirements
 
-For every schema implementation ticket:
+For every big-bang rewrite implementation ticket:
 
-- Run migrations locally against the relevant database.
-- Add migration tests or fixture checks for expected rows and constraints.
-- Compare row counts and uniqueness for backfilled entities.
-- Validate PII classification and public/private exposure for new read models.
-- Add contract tests for RequestContext resource resolution, quote output, or
-  evidence output depending on the domain.
-- Include staging dry-run instructions and rollback notes.
+- Run target-schema DDL locally and in staging.
+- Add migration tests or fixture checks for expected rows, constraints, and
+  transformed values.
+- Compare source and target row counts, uniqueness, checksums where practical,
+  and domain-specific totals.
+- Validate PII classification and public/private exposure for every target
+  table and public read model.
+- Add contract tests for RequestContext resource resolution, quote output,
+  payment/payout reconciliation, marketplace state, or evidence output
+  depending on the domain.
+- Include staging rehearsal instructions, cutover gates, and rollback notes.
 - For production auth DB changes, remember that auth migrations do not
-  auto-run in production. They require an explicit reviewed operation against
-  RDS using the auth migration script.
+  auto-run in production today. The big-bang cutover needs an explicit reviewed
+  production operation rather than relying on app startup migrations.
 
 Suggested validation checks by domain:
 
 | Domain           | Required validation                                                                                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Identity/auth    | WorkOS ID uniqueness, internal user mapping, active membership, permission resolution, legacy/new ownership parity.                                                      |
+| Identity/auth    | WorkOS ID uniqueness, internal user mapping, active membership, permission resolution, source/target ownership parity.                                                   |
 | Resource links   | One organization can link to many resources, one resource can reject ambiguous ownership unless explicitly allowed, deleted/suspended resources do not authorize access. |
 | Bookability      | Quote parity with existing booking flow, no private fields, correct cache/freshness metadata, typed unavailable reasons, deep-link round trip.                           |
 | Ask Intelligence | Evidence tools cannot cross tenant scope, unavailable states are explicit, answer audits reference evidence, PII is minimized.                                           |
@@ -373,7 +414,8 @@ Suggested validation checks by domain:
 ## First schema implementation tickets
 
 These are the first small, testable tickets VAY-603 should schedule after this
-plan is accepted.
+plan is accepted. They prepare a big-bang cutover without making partial
+production table ownership changes.
 
 1. **Inventory current database ownership and PII**
    - Scope: generate a table/column inventory for auth, marketplace, booking,
@@ -382,29 +424,30 @@ plan is accepted.
    - Validation: inventory includes every table from the migration histories,
      marks unknown ownership explicitly, and links to source migration files.
 
-2. **Add internal organization and resource-link schema**
-   - Scope: add `organizations`, `organization_memberships`,
-     `permission_catalog`, `role_permission_grants`,
-     `organization_resource_links`, `product_entitlements`, and
-     `product_audit_events` as additive auth-db migrations.
-   - Validation: local auth migration run, constraint tests, fixture inserts
-     for platform, hotel group, creator workspace, and affiliate partner.
+2. **Design the target database schema**
+   - Scope: create the full target schema ERD/DDL for identity, hotel catalog,
+     booking, PMS operations, marketplace, finance, distribution/bookability,
+     Ask Intelligence, and jobs/audit.
+   - Validation: schema review covers ownership, FKs, indexes, status enums,
+     PII classification, retention, and source-table mappings.
 
-3. **Add WorkOS external identity mapping schema**
-   - Scope: add `external_identities` and WorkOS mapping columns/constraints
-     needed by VAY-600.
-   - Validation: uniqueness tests for provider user IDs, nullable bootstrap
-     behavior, and compatibility with existing `users.id`.
+3. **Build the legacy-to-target migration pipeline**
+   - Scope: create idempotent local/staging ETL scripts from auth-db,
+     marketplace, booking, and PMS into the target schema.
+   - Validation: dry-run rebuild of the target schema from seed data with
+     source/target counts, mismatch report, and rerunnable output.
 
-4. **Backfill organizations, memberships, and resource links**
-   - Scope: create a dry-run-capable backfill from current `users.type`,
-     `is_superadmin`, `booking_hotels.user_id`, PMS `hotels.user_id`,
-     marketplace `hotel_profiles.user_id`, marketplace `creators.user_id`, and
-     PMS `affiliates.user_id`.
-   - Validation: source/target counts, mismatch report, rerunnable dry run, and
-     fixture tests for users with multiple hotels.
+4. **Define WorkOS identity and organization transforms**
+   - Scope: map existing `users`, `users.type`, `is_superadmin`,
+     `booking_hotels.user_id`, PMS `hotels.user_id`, marketplace
+     `hotel_profiles.user_id`, marketplace `creators.user_id`, and PMS
+     `affiliates.user_id` into target `external_identities`, `organizations`,
+     memberships, permissions, resource links, and entitlements.
+   - Validation: fixture tests for platform staff, one hotel owner with
+     multiple hotels, creator workspace, affiliate partner, and ambiguous
+     ownership.
 
-5. **Define RequestContext database contract**
+5. **Define RequestContext target contract**
    - Scope: define the query contract that resolves provider identity,
      internal user, selected organization, permissions, linked resource, and
      entitlement. Include compatibility inputs for current JWT and
@@ -413,55 +456,58 @@ plan is accepted.
      platform scopes.
 
 6. **Define public bookability profile and quote schema**
-   - Scope: specify tables/read models for public profile, quote sessions,
-     freshness, unavailable reasons, and booking deep-link context.
+   - Scope: specify target tables/read models for public profile, quote
+     sessions, freshness, unavailable reasons, and booking deep-link context.
    - Validation: contract fixtures for bookable, sold-out, payment-disabled,
      min-stay, max-stay, same-day cutoff, promo/referral, and stale data cases.
 
-7. **Add Ask Intelligence metric and evidence schema**
-   - Scope: add metric catalog, setup-completeness snapshots, evidence catalog,
-     conversations, runs, tool calls, and answer audit tables for the read-only
-     MVP.
+7. **Define Ask Intelligence metric and evidence schema**
+   - Scope: define target metric catalog, setup-completeness snapshots,
+     evidence catalog, conversations, runs, tool calls, and answer audit tables
+     for the read-only MVP.
    - Validation: evidence fixture tests, tenant-scope authorization tests, no
      raw guest PII in answer audit fixtures by default.
 
-8. **Create migration validation harness**
-   - Scope: add shared scripts/tests for migration dry runs, row-count checks,
-     uniqueness checks, ownership parity checks, and rollback notes.
-   - Validation: harness runs locally for at least auth-db and one product DB,
-     prints actionable mismatch reports, and fails on ambiguous ownership.
+8. **Create big-bang cutover validation harness**
+   - Scope: add shared scripts/tests for staging rehearsals, row-count checks,
+     uniqueness checks, ownership parity, quote parity, payment/payout totals,
+     public URL checks, and rollback readiness.
+   - Validation: harness rebuilds the target schema from local data, prints
+     actionable mismatch reports, and fails on ambiguous ownership or critical
+     parity gaps.
 
-9. **Deprecate legacy local auth and ownership fields**
-   - Scope: create a deprecation plan for local password/TOTP/email verification
-     tables, `users.type`, `users.is_superadmin`, direct product `user_id`
-     ownership checks, and `X-Hotel-Id` hidden domain state.
-   - Validation: every deprecated field/table has a replacement owner, rollout
-     flag, parity check, and earliest safe removal condition.
+9. **Write production cutover and rollback runbook**
+   - Scope: define maintenance window, write freeze or queueing, backup
+     snapshots, migration command sequence, validation gates, deploy order,
+     owner assignments, rollback window, and legacy DB retention.
+   - Validation: tabletop rehearsal with explicit go/no-go gates and rollback
+     decision points.
 
 ## Open decisions for VAY-603
 
 VAY-603 should decide these in the integrated roadmap:
 
-- Whether the identity/resource-link migrations land before the first
-  TypeScript backend app or in the first TS backend PR.
-- Whether `auth-db` remains the home for all identity/resource-link tables or
-  whether a new platform database is introduced later.
-- Which product surface becomes the first RequestContext enforcement pilot:
-  booking admin hotel selection, PMS hotel admin, marketplace hotel profile, or
-  platform admin.
+- Whether the big-bang target is one physical database with schemas per domain
+  or several physical databases cut over in the same release.
+- Whether all current Python services are replaced at cutover or whether a
+  small compatibility layer remains temporarily against the target schema.
+- Whether the production cutover can use a write freeze or needs a short
+  queue/dual-write bridge.
 - Whether bookability profile/quote read models are implemented as tables,
-  materialized views, or generated responses with cache metadata in the first
-  phase.
+  materialized views, or generated responses with cache metadata in the target
+  schema.
 - Which metric definitions are necessary for the Ask Intelligence MVP and which
   should wait for later enrichment.
-- The first side-effect path to move into jobs/events.
+- Which side effects must be converted to jobs/events before cutover and which
+  can remain synchronous temporarily.
 
 ## Acceptance signal
 
 This plan is ready to feed VAY-603 when:
 
-- the team agrees that database ownership should be domain-based and additive
-  first, not a big-bang rewrite;
+- the team agrees that the database rewrite is a planned big-bang cutover, with
+  discovery, target-schema design, migration scripts, and rehearsals performed
+  incrementally before production;
 - `users.id` remains the internal principal while WorkOS IDs live in mapping
   tables;
 - organization/resource links become the replacement for `users.type`,
