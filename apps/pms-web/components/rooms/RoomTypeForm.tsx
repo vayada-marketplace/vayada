@@ -2399,7 +2399,7 @@ export default function RoomTypeForm({
                                         )}
                                       </div>
                                       {seasonPriceWarning && (
-                                        <div className="max-w-[150px]">
+                                        <div className="max-w-xs">
                                           <PriceWarningMessage
                                             warning={seasonPriceWarning}
                                             currency={currency}
@@ -2488,7 +2488,7 @@ export default function RoomTypeForm({
                                           }}
                                           placeholder="—"
                                           title="Maximum number of nights per booking. Leave empty for no limit."
-                                          className="h-7 w-8 px-1 text-[11px] font-semibold text-gray-900 bg-white text-center outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                          className="h-7 w-8 px-1 text-[11px] font-semibold text-gray-900 bg-white text-center outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
                                         <button
                                           type="button"
