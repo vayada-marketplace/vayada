@@ -1,0 +1,28 @@
+{
+  "name": "vayada-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "portless": {
+    "name": "api"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastify": "^5.7.0",
+    "kysely": "^0.28.8",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}

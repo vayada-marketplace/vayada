@@ -12,6 +12,7 @@
     "packages/*"
   ],
   "scripts": {
+    "dev:api": "npm --workspace vayada-api run dev",
     "dev:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run dev",
     "dev:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run dev",
     "dev:booking-web": "npm --workspace vayada-booking-engine-frontend run dev",
@@ -39,6 +40,7 @@
     "e2e:pms-web": "playwright test --project=pms-web-chromium",
     "e2e:vayada-admin": "playwright test --project=vayada-admin-chromium",
     "e2e:report": "playwright show-report",
+    "build:api": "npm --workspace vayada-api run build",
     "build:affiliate-dashboard": "npm --workspace vayada-affiliate-dashboard run build",
     "build:booking-admin": "npm --workspace vayada-booking-engine-frontend-admin run build",
     "build:booking-web": "npm --workspace vayada-booking-engine-frontend run build",
@@ -53,6 +55,8 @@
     "lint:vayada-admin": "npm --workspace vayada-admin run lint",
     "lint:marketplace-web": "npm --workspace vayada-creator-marketplace run lint",
     "lint:pms-web": "npm --workspace vayada-pms-frontend run lint",
+    "test:api": "npm --workspace vayada-api run test",
+    "typecheck:api": "npm --workspace vayada-api run typecheck",
     "prepare": "husky"
   },
   "overrides": {

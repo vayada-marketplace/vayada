@@ -5,6 +5,7 @@ tfplan
 .codex/
 .claude/
 node_modules/
+dist/
 .npm/
 playwright/.auth/
 playwright-report/
