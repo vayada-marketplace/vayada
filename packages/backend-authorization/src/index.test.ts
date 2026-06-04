@@ -32,6 +32,18 @@ function assertSafeTestDatabase(url: string): void {
   }
 }
 
+async function resetRolePermissionGrantsTable(client: pg.Client): Promise<void> {
+  await client.query(`CREATE SCHEMA IF NOT EXISTS identity`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS identity.role_permission_grants (
+      organization_kind TEXT NOT NULL,
+      role_key TEXT NOT NULL,
+      permission_key TEXT NOT NULL
+    )
+  `);
+  await client.query(`TRUNCATE TABLE identity.role_permission_grants RESTART IDENTITY CASCADE`);
+}
+
 function linkedResource(
   product: Product,
   resourceType: ResourceType,
@@ -151,15 +163,7 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
     await client.connect();
 
     try {
-      await client.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
-      await client.query(`CREATE SCHEMA identity`);
-      await client.query(`
-        CREATE TABLE identity.role_permission_grants (
-          organization_kind TEXT NOT NULL,
-          role_key TEXT NOT NULL,
-          permission_key TEXT NOT NULL
-        )
-      `);
+      await resetRolePermissionGrantsTable(client);
       await client.query(
         `INSERT INTO identity.role_permission_grants
            (organization_kind, role_key, permission_key)
@@ -177,19 +181,21 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
       max: 1,
     });
 
-    await expect(repository.findPermissionsForRole("hotel_group", "hotel_owner")).resolves.toEqual([
-      "booking.settings.manage",
-      "pms.booking.update",
-    ]);
-    await expect(repository.findPermissionsForRole("platform", "platform_admin")).resolves.toEqual(
-      [],
-    );
-    await repository.close?.();
+    try {
+      await expect(
+        repository.findPermissionsForRole("hotel_group", "hotel_owner"),
+      ).resolves.toEqual(["booking.settings.manage", "pms.booking.update"]);
+      await expect(
+        repository.findPermissionsForRole("platform", "platform_admin"),
+      ).resolves.toEqual([]);
+    } finally {
+      await repository.close?.();
+    }
 
     const cleanup = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await cleanup.connect();
     try {
-      await cleanup.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
+      await resetRolePermissionGrantsTable(cleanup);
     } finally {
       await cleanup.end();
     }
