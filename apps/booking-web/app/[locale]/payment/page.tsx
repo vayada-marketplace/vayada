@@ -99,19 +99,34 @@ function PaymentPageContent() {
   const addonDates = guestDetails?.addonDates || {};
   const promoCodeParam = searchParams.get("promoCode") || "";
 
-  const { room, nights, roomTotal, addonTotal, promoDiscount, discountAmount, grandTotal } =
-    usePricing({
-      roomId,
-      checkIn,
-      checkOut,
-      rateType,
-      roomsParam,
-      adults: adultsParam,
-      selectedAddonIds,
-      addonQuantities,
-      addonDates,
-      promoCode: promoCodeParam,
-    });
+  const {
+    room,
+    nights,
+    quoteReady,
+    nightlyRate,
+    rateLineItems,
+    variableNightlyRates,
+    roomTotal,
+    promoDiscount,
+    discountAmount,
+    grandTotal,
+  } = usePricing({
+    roomId,
+    checkIn,
+    checkOut,
+    rateType,
+    roomsParam,
+    adults: adultsParam,
+    selectedAddonIds,
+    addonQuantities,
+    addonDates,
+    promoCode: promoCodeParam,
+  });
+  const roomRateBreakdown = rateLineItems
+    .map(
+      (item) => `${formatPrice(item.nightlyRate * roomsParam, selectedCurrency)} × ${item.nights}`,
+    )
+    .join(" + ");
   const [paymentMethod, setPaymentMethod] = useState<
     "card" | "pay_at_property" | "xendit" | "bank_transfer" | "paypal"
   >("pay_at_property");
@@ -213,6 +228,10 @@ function PaymentPageContent() {
 
   const handleSubmit = async () => {
     if (!agreedToTerms || !guestDetails || !room) return;
+    if (!quoteReady) {
+      setError(tc("pricingUpdating"));
+      return;
+    }
 
     setSubmitting(true);
     setError("");
@@ -309,11 +328,15 @@ function PaymentPageContent() {
           nights={nights}
           adults={adultsParam}
           roomTotal={roomTotal}
+          roomRateBreakdown={
+            variableNightlyRates
+              ? roomRateBreakdown
+              : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`
+          }
           addons={addons}
           selectedAddonIds={selectedAddonIds}
           addonQuantities={addonQuantities}
           addonDates={addonDates}
-          addonTotal={addonTotal}
           grandTotal={grandTotal}
           booking={pendingBooking}
           draftId={draftId}
@@ -930,9 +953,9 @@ function PaymentPageContent() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!agreedToTerms || submitting}
+                disabled={!agreedToTerms || submitting || !quoteReady}
                 className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm flex items-center gap-2 ${
-                  agreedToTerms && !submitting
+                  agreedToTerms && !submitting && quoteReady
                     ? "bg-primary-600 text-white hover:bg-primary-700"
                     : "bg-gray-200 text-gray-400 cursor-not-allowed"
                 }`}
@@ -1040,6 +1063,11 @@ function PaymentPageContent() {
                     {formatPrice(roomTotal, selectedCurrency)}
                   </span>
                 </div>
+                <p className="text-xs text-gray-500 text-right">
+                  {variableNightlyRates
+                    ? roomRateBreakdown
+                    : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
+                </p>
                 {addons
                   .filter((a) => selectedAddonIds.includes(a.id))
                   .map((addon) => {

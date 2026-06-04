@@ -314,6 +314,58 @@ class TestPublicRooms:
         rooms = resp.json()
         assert rooms[0]["remainingRooms"] == 0
 
+    async def test_rooms_quote_uses_per_night_rates_across_season_boundary(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(
+            str(hotel["id"]),
+            base_rate=0,
+            total_rooms=3,
+            non_refundable_enabled=True,
+        )
+        seasons = [
+            {
+                "name": "July",
+                "tier": "High",
+                "from": "07-01",
+                "to": "07-31",
+                "rate": "4800000",
+            },
+            {
+                "name": "Peak",
+                "tier": "Peak",
+                "from": "08-01",
+                "to": "08-31",
+                "rate": "6100000",
+            },
+        ]
+        await Database.execute(
+            "UPDATE room_types SET seasons = $1::jsonb, currency = 'IDR', "
+            "non_refundable_discount = 5 WHERE id = $2",
+            json.dumps(seasons),
+            room["id"],
+        )
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={"check_in": "2026-07-29", "check_out": "2026-08-03", "adults": 2},
+        )
+
+        assert resp.status_code == 200
+        quoted = resp.json()[0]
+        assert quoted["nightlyRates"] == [4800000, 4800000, 4800000, 6100000, 6100000]
+        assert quoted["baseRate"] == 5320000
+        assert quoted["nonRefundableNightlyRates"] == [
+            4560000,
+            4560000,
+            4560000,
+            5795000,
+            5795000,
+        ]
+        assert quoted["nonRefundableRate"] == 5054000
+
     async def test_unavailable_dates_includes_max_stay_by_arrival(self, client, cleanup_database):
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))

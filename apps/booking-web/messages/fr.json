@@ -3,6 +3,7 @@
     "checkAvailability": "Vérifier la disponibilité",
     "bookNow": "Réserver maintenant",
     "from": "À partir de",
+    "fromPrice": "à partir de {price}",
     "perNight": "/ nuit",
     "perDay": "/ jour",
     "total": "Total",
@@ -31,7 +32,8 @@
     "qty": "Qté",
     "perPerson": "par personne",
     "checkInFrom": "Arrivée à partir de {time}",
-    "checkOutBy": "Départ avant {time}"
+    "checkOutBy": "Départ avant {time}",
+    "pricingUpdating": "Les tarifs pour ces dates sont encore en cours de mise à jour. Veuillez patienter un instant puis réessayer."
   },
   "nav": {
     "contact": "Contact",

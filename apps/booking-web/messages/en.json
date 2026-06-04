@@ -3,6 +3,7 @@
     "checkAvailability": "Check Availability",
     "bookNow": "Book Now",
     "from": "From",
+    "fromPrice": "from {price}",
     "perNight": "/ night",
     "perDay": "/ day",
     "total": "Total",
@@ -31,7 +32,8 @@
     "qty": "Qty",
     "perPerson": "per person",
     "checkInFrom": "Check-in from {time}",
-    "checkOutBy": "Check-out by {time}"
+    "checkOutBy": "Check-out by {time}",
+    "pricingUpdating": "Pricing is still updating for these dates. Please wait a moment and try again."
   },
   "nav": {
     "contact": "Contact",

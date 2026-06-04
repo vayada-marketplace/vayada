@@ -4,8 +4,12 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { getNonRefundableRate } from "@/lib/constants/booking";
 import { getFreeCancellationDays, isFlexibleCancellationExpired } from "@/lib/constants/booking";
+import {
+  getFlexibleNightlyRates,
+  getNonRefundableNightlyRates,
+  hasVariableNightlyRates,
+} from "@/lib/constants/booking";
 import RateOption from "./RateOption";
 
 interface RoomCardProps {
@@ -48,22 +52,37 @@ export default function RoomCard({
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
 
   const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy);
-  // Per-night rates rounded in the displayed currency so nightly × nights matches
-  // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-  const flexibleNightly = convertAndRound(room.baseRate, room.currency);
-  const flexibleTotal = flexibleNightly * nights * requiredRooms;
-  const nonRefundableNightlyBase = getNonRefundableRate(room.baseRate, room.nonRefundableRate);
-  const nonRefundableNightly = convertAndRound(nonRefundableNightlyBase, room.currency);
-  const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms;
-  const discount = Math.round((1 - nonRefundableNightlyBase / room.baseRate) * 100);
+  const flexibleNightlies = getFlexibleNightlyRates(room, nights).map((rate) =>
+    convertAndRound(rate, room.currency),
+  );
+  const flexibleTotal = flexibleNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms;
+  const flexibleFromNightly =
+    (flexibleNightlies.length > 0 ? Math.min(...flexibleNightlies) : 0) * requiredRooms;
+  const flexibleVaries = hasVariableNightlyRates(flexibleNightlies);
+  const nonRefundableNightlies = getNonRefundableNightlyRates(room, nights).map((rate) =>
+    convertAndRound(rate, room.currency),
+  );
+  const nonRefundableTotal =
+    nonRefundableNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms;
+  const nonRefundableFromNightly =
+    (nonRefundableNightlies.length > 0 ? Math.min(...nonRefundableNightlies) : 0) * requiredRooms;
+  const nonRefundableVaries = hasVariableNightlyRates(nonRefundableNightlies);
+  const discount =
+    flexibleTotal > 0 ? Math.round((1 - nonRefundableTotal / flexibleTotal) * 100) : 0;
   const soldOut = room.remainingRooms < requiredRooms;
   const hasLastMinuteDeal = !!(
     room.lastMinuteDiscountPercent && room.lastMinuteDiscountPercent > 0
   );
-  const originalFlexibleTotal =
-    hasLastMinuteDeal && room.originalRate
-      ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
+  const originalFlexibleNightlies =
+    room.originalNightlyRates && room.originalNightlyRates.length === nights
+      ? room.originalNightlyRates.map((rate) => convertAndRound(rate, room.currency))
       : null;
+  const originalFlexibleTotal =
+    hasLastMinuteDeal && originalFlexibleNightlies
+      ? originalFlexibleNightlies.reduce((sum, rate) => sum + rate, 0) * requiredRooms
+      : hasLastMinuteDeal && room.originalRate
+        ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
+        : null;
 
   const partialRefundTiers =
     room.partialRefundTiers && room.partialRefundTiers.length > 0
@@ -88,6 +107,12 @@ export default function RoomCard({
   const showFlexibleRate =
     room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null);
   const hasNonRefundable = room.nonRefundableRate != null;
+  const flexibleNightlyLabel = flexibleVaries
+    ? tc("fromPrice", { price: formatPrice(flexibleFromNightly, selectedCurrency) })
+    : formatPrice(flexibleFromNightly, selectedCurrency);
+  const nonRefundableNightlyLabel = nonRefundableVaries
+    ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
+    : formatPrice(nonRefundableFromNightly, selectedCurrency);
 
   const effectiveSelectedRate: "flexible" | "nonrefundable" | null =
     selectedRate === "flexible" && showFlexibleRate
@@ -318,7 +343,7 @@ export default function RoomCard({
                   title={t("nonRefundableRate")}
                   description={t("nonRefundableDesc")}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(nonRefundableNightly * requiredRooms, selectedCurrency)}
+                  nightlyLabel={nonRefundableNightlyLabel}
                   discountPercent={discount}
                   soldOut={soldOut}
                 />
@@ -332,7 +357,7 @@ export default function RoomCard({
                   title={t("flexibleRate")}
                   description={flexibleDescription}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(flexibleNightly * requiredRooms, selectedCurrency)}
+                  nightlyLabel={flexibleNightlyLabel}
                   soldOut={soldOut}
                 />
               )}

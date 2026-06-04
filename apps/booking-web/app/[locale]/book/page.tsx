@@ -25,8 +25,17 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function FieldError({ id, message }: { id: string; message: string }) {
   return (
     <p id={id} role="alert" className="mt-1.5 flex items-center gap-1 text-xs text-red-600">
-      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+      <svg
+        className="w-3.5 h-3.5 flex-shrink-0"
+        fill="currentColor"
+        viewBox="0 0 20 20"
+        aria-hidden="true"
+      >
+        <path
+          fillRule="evenodd"
+          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
+          clipRule="evenodd"
+        />
       </svg>
       {message}
     </p>
@@ -93,9 +102,11 @@ function BookPageContent() {
   const {
     room,
     nights,
+    quoteReady,
     nightlyRate,
+    rateLineItems,
+    variableNightlyRates,
     roomTotal,
-    addonTotal,
     promoDiscount,
     discountAmount,
     grandTotal,
@@ -111,6 +122,11 @@ function BookPageContent() {
     addonDates,
     promoCode: promoCodeParam,
   });
+  const roomRateBreakdown = rateLineItems
+    .map(
+      (item) => `${formatPrice(item.nightlyRate * roomsParam, selectedCurrency)} × ${item.nights}`,
+    )
+    .join(" + ");
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -172,14 +188,27 @@ function BookPageContent() {
     const errors = validateFields();
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      if (errors.firstName) firstNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.lastName) lastNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.email) emailRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.phone) phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (errors.firstName && firstNameRef.current) {
+        firstNameRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstNameRef.current.focus();
+      } else if (errors.lastName && lastNameRef.current) {
+        lastNameRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        lastNameRef.current.focus();
+      } else if (errors.email && emailRef.current) {
+        emailRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        emailRef.current.focus();
+      } else if (errors.phone && phoneRef.current) {
+        phoneRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        phoneRef.current.querySelector("input")?.focus();
+      }
       return;
     }
     if (!room) {
       setSubmitError("No room selected");
+      return;
+    }
+    if (!quoteReady) {
+      setSubmitError(tc("pricingUpdating"));
       return;
     }
 
@@ -294,7 +323,9 @@ function BookPageContent() {
                     {formatPrice(roomTotal, selectedCurrency)}
                   </p>
                   <p className="text-xs text-gray-500">
-                    {formatPrice(nightlyRate * roomsParam, selectedCurrency)} &times; {nights}
+                    {variableNightlyRates
+                      ? roomRateBreakdown
+                      : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
                   </p>
                 </div>
               </div>
@@ -377,7 +408,10 @@ function BookPageContent() {
                 {/* First + Last Name */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="firstName" className="block text-sm font-semibold text-gray-900 mb-1.5">
+                    <label
+                      htmlFor="firstName"
+                      className="block text-sm font-semibold text-gray-900 mb-1.5"
+                    >
                       {t("firstName")} <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -401,7 +435,10 @@ function BookPageContent() {
                     )}
                   </div>
                   <div>
-                    <label htmlFor="lastName" className="block text-sm font-semibold text-gray-900 mb-1.5">
+                    <label
+                      htmlFor="lastName"
+                      className="block text-sm font-semibold text-gray-900 mb-1.5"
+                    >
                       {t("lastName")} <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -428,7 +465,10 @@ function BookPageContent() {
 
                 {/* Email */}
                 <div>
-                  <label htmlFor="email" className="block text-sm font-semibold text-gray-900 mb-1.5">
+                  <label
+                    htmlFor="email"
+                    className="block text-sm font-semibold text-gray-900 mb-1.5"
+                  >
                     {t("emailAddress")} <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -438,7 +478,11 @@ function BookPageContent() {
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
-                      if (fieldErrors.email && e.target.value.trim() && EMAIL_RE.test(e.target.value))
+                      if (
+                        fieldErrors.email &&
+                        e.target.value.trim() &&
+                        EMAIL_RE.test(e.target.value)
+                      )
                         setFieldErrors((prev) => ({ ...prev, email: undefined }));
                     }}
                     onBlur={() => handleBlur("email")}
@@ -447,15 +491,16 @@ function BookPageContent() {
                     aria-describedby={fieldErrors.email ? "email-error" : undefined}
                     className={`w-full px-4 py-3 rounded-lg border ${fieldErrors.email ? "border-red-400 focus:ring-red-500 focus:border-red-500" : "border-gray-300 focus:ring-primary-500 focus:border-primary-500"} text-gray-900 focus:outline-none focus:ring-2 placeholder:text-gray-400`}
                   />
-                  {fieldErrors.email && (
-                    <FieldError id="email-error" message={fieldErrors.email} />
-                  )}
+                  {fieldErrors.email && <FieldError id="email-error" message={fieldErrors.email} />}
                 </div>
 
                 {/* Phone + Country */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="phone" className="block text-sm font-semibold text-gray-900 mb-1.5">
+                    <label
+                      htmlFor="phone"
+                      className="block text-sm font-semibold text-gray-900 mb-1.5"
+                    >
                       {t("phoneNumber")} <span className="text-red-500">*</span>
                     </label>
                     <div
@@ -589,7 +634,7 @@ function BookPageContent() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={submitting}
+                disabled={submitting || !quoteReady}
                 className="px-8 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors text-sm disabled:opacity-50"
               >
                 {submitting
@@ -650,6 +695,11 @@ function BookPageContent() {
                     {formatPrice(roomTotal, selectedCurrency)}
                   </span>
                 </div>
+                <p className="text-xs text-gray-500 text-right">
+                  {variableNightlyRates
+                    ? roomRateBreakdown
+                    : `${formatPrice(nightlyRate * roomsParam, selectedCurrency)} × ${nights}`}
+                </p>
                 {addons
                   .filter((a) => selectedAddonIds.includes(a.id))
                   .map((addon) => {

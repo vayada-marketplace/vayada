@@ -22,6 +22,23 @@ class StayPricing:
     average_nightly_rate: float
 
 
+def compute_non_refundable_rate(
+    room_type: dict, base_rate: float, explicit_rate: float | None
+) -> float:
+    """Resolve the non-refundable rate for one night from the room config."""
+    if not room_type.get("flexible_rate_enabled", True):
+        return round(float(base_rate), 2)
+
+    discount = room_type.get("non_refundable_discount")
+    if discount is not None and discount > 0:
+        return round(float(base_rate) * (1 - float(discount) / 100), 2)
+
+    if explicit_rate is not None and explicit_rate > 0:
+        return round(float(explicit_rate), 2)
+
+    return round(float(base_rate), 2)
+
+
 async def _direct_physical_units_for_stay(
     room_type_id: str,
     check_in: date,
@@ -139,7 +156,7 @@ def compute_stay_pricing(
         night_date = check_in + timedelta(days=i)
         resolved_base, resolved_nr = RoomTypeRepository.resolve_rate(room_type, night_date, adults)
         if rate_type == "nonrefundable":
-            night_rate = resolved_nr if resolved_nr else round(resolved_base * 0.85, 2)
+            night_rate = compute_non_refundable_rate(room_type, resolved_base, resolved_nr)
         else:
             night_rate = resolved_base
         nightly_rates.append(night_rate)

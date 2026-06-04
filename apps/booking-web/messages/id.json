@@ -3,6 +3,7 @@
     "checkAvailability": "Cek Ketersediaan",
     "bookNow": "Pesan Sekarang",
     "from": "Mulai dari",
+    "fromPrice": "mulai dari {price}",
     "perNight": "/ malam",
     "perDay": "/ hari",
     "total": "Total",
@@ -31,7 +32,8 @@
     "qty": "Jml",
     "perPerson": "per orang",
     "checkInFrom": "Check-in mulai {time}",
-    "checkOutBy": "Check-out sampai {time}"
+    "checkOutBy": "Check-out sampai {time}",
+    "pricingUpdating": "Harga untuk tanggal ini masih diperbarui. Mohon tunggu sebentar dan coba lagi."
   },
   "nav": {
     "contact": "Kontak",

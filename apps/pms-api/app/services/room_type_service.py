@@ -6,7 +6,7 @@ from app.database import Database
 from app.models.room_type import RoomTypeResponse
 from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
-from app.services.availability_service import remaining_for_stay
+from app.services.availability_service import compute_stay_pricing, remaining_for_stay
 from app.services.calendar_auto_open_service import is_stay_sellable
 from app.services.occupancy import room_allows_guest_mix
 from app.services.same_day_booking import is_same_day_booking_closed, property_today
@@ -137,7 +137,27 @@ async def get_rooms_for_guest(
         else:
             remaining = total
 
-        if check_in:
+        nights = (check_out - check_in).days if check_in and check_out else 0
+        nightly_rates: list[float] = []
+        non_refundable_nightly_rates: list[float] = []
+        original_nightly_rates: list[float] = []
+
+        if check_in and check_out and nights > 0:
+            flexible_pricing = compute_stay_pricing(room, check_in, check_out, adults, "flexible")
+            nightly_rates = flexible_pricing.nightly_rates
+            base_rate = flexible_pricing.average_nightly_rate
+            nr_rate = None
+            if room.get("non_refundable_enabled", False):
+                nr_pricing = compute_stay_pricing(
+                    room,
+                    check_in,
+                    check_out,
+                    adults,
+                    "nonrefundable",
+                )
+                non_refundable_nightly_rates = nr_pricing.nightly_rates
+                nr_rate = nr_pricing.average_nightly_rate
+        elif check_in:
             base_rate, nr_rate = RoomTypeRepository.resolve_rate(room, check_in, adults)
         else:
             base_rate = float(room["base_rate"])
@@ -153,16 +173,29 @@ async def get_rooms_for_guest(
         # Only provide NR rate when non-refundable is enabled
         if not room.get("non_refundable_enabled", False):
             nr_rate = None
+            non_refundable_nightly_rates = []
         elif room.get("flexible_rate_enabled", True):
             # Flexible + NR: calculate NR rate from discount percentage
             discount_pct = room.get("non_refundable_discount")
-            if discount_pct is not None and discount_pct > 0:
+            if non_refundable_nightly_rates:
+                nr_rate = round(
+                    sum(non_refundable_nightly_rates) / len(non_refundable_nightly_rates),
+                    2,
+                )
+            elif discount_pct is not None and discount_pct > 0:
                 nr_rate = round(base_rate * (1 - discount_pct / 100), 2)
+                non_refundable_nightly_rates = [
+                    round(rate * (1 - discount_pct / 100), 2) for rate in nightly_rates
+                ]
             elif nr_rate is None or nr_rate == 0:
                 nr_rate = base_rate
+                if not non_refundable_nightly_rates:
+                    non_refundable_nightly_rates = nightly_rates.copy()
         else:
             # NR only (no flexible): non-refundable rate is the base rate
             nr_rate = base_rate
+            if not non_refundable_nightly_rates:
+                non_refundable_nightly_rates = nightly_rates.copy()
 
         # Apply last-minute discount (booking-time concern, not rate-definition)
         original_rate = None
@@ -179,9 +212,14 @@ async def get_rooms_for_guest(
             if pct and pct > 0:
                 lm_discount_pct = pct
                 original_rate = base_rate
+                original_nightly_rates = nightly_rates.copy()
                 base_rate = round(base_rate * (1 - pct / 100), 2)
+                nightly_rates = [round(rate * (1 - pct / 100), 2) for rate in nightly_rates]
                 if nr_rate is not None:
                     nr_rate = round(nr_rate * (1 - pct / 100), 2)
+                    non_refundable_nightly_rates = [
+                        round(rate * (1 - pct / 100), 2) for rate in non_refundable_nightly_rates
+                    ]
 
         result.append(
             RoomTypeResponse(
@@ -198,6 +236,9 @@ async def get_rooms_for_guest(
                 size=room["size"],
                 base_rate=base_rate,
                 non_refundable_rate=nr_rate,
+                nightly_rates=nightly_rates,
+                non_refundable_nightly_rates=non_refundable_nightly_rates,
+                original_nightly_rates=original_nightly_rates,
                 original_rate=original_rate,
                 last_minute_discount_percent=lm_discount_pct,
                 currency=room["currency"],

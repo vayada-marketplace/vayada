@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
+import { getFlexibleNightlyRates } from "@/lib/constants/booking";
 
 interface RoomMapPanelProps {
   rooms: RoomType[];
@@ -104,8 +105,10 @@ export default function RoomMapPanel({
       {mappedRooms.map((room) => {
         const active = activeRoomId === room.id;
         const hovered = hoveredRoomId === room.id;
+        const nightlyRates = getFlexibleNightlyRates(room, room.nightlyRates?.length || 1);
+        const fromRate = nightlyRates.length > 0 ? Math.min(...nightlyRates) : room.baseRate;
         const displayPrice = compactCurrency(
-          convertAndRound(room.baseRate, room.currency),
+          convertAndRound(fromRate, room.currency),
           selectedCurrency,
         );
         const position = positionFor(room);

@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useAddons, useHotel, useRooms, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { calculateNights } from "@/lib/utils";
-import { calculatePromoDiscount, getNonRefundableRate } from "@/lib/constants/booking";
+import {
+  calculatePromoDiscount,
+  getFlexibleNightlyRates,
+  getNonRefundableNightlyRates,
+  groupNightlyRates,
+  hasVariableNightlyRates,
+} from "@/lib/constants/booking";
 import { hotelService } from "@/services/api/hotel";
 
 export interface PromoDiscount {
@@ -71,15 +77,28 @@ export function usePricing({
   const room = rooms.find((r) => r.id === roomId) || rooms[0];
   const nights = calculateNights(checkIn, checkOut);
   const roomCurrency = room?.currency || hotel?.currency || "EUR";
+  const hasMismatchedNightlyRates =
+    Array.isArray(room?.nightlyRates) && room.nightlyRates.length !== nights;
+  const quoteReady = Boolean(
+    room && checkIn && checkOut && nights > 0 && !hasMismatchedNightlyRates,
+  );
 
-  // Per-night rate rounded in the displayed currency so nightly × nights equals
-  // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-  const nightlyRateBase =
+  const nightlyRatesBase =
     rateType === "nonrefundable"
-      ? getNonRefundableRate(room?.baseRate ?? 0, room?.nonRefundableRate)
-      : (room?.baseRate ?? 0);
-  const nightlyRate = room ? convertAndRound(nightlyRateBase, roomCurrency) : 0;
-  const roomTotal = nightlyRate * nights * roomsParam;
+      ? getNonRefundableNightlyRates(room, nights)
+      : getFlexibleNightlyRates(room, nights);
+  // Each nightly line is rounded in the displayed currency before summing so
+  // the itemized rows and totals stay arithmetically consistent.
+  const nightlyRates = nightlyRatesBase.map((rate) => convertAndRound(rate, roomCurrency));
+  const nightlyRate =
+    nightlyRates.length > 0
+      ? Math.round(
+          (nightlyRates.reduce((sum, rate) => sum + rate, 0) / nightlyRates.length) * 100,
+        ) / 100
+      : 0;
+  const roomTotal = nightlyRates.reduce((sum, rate) => sum + rate, 0) * roomsParam;
+  const rateLineItems = groupNightlyRates(nightlyRates);
+  const variableNightlyRates = hasVariableNightlyRates(nightlyRates);
 
   // Sum addon line totals in the displayed currency. Each line is rounded
   // first so its shown price matches its contribution.
@@ -143,7 +162,11 @@ export function usePricing({
     room,
     nights,
     roomCurrency,
+    quoteReady,
+    nightlyRates,
     nightlyRate,
+    rateLineItems,
+    variableNightlyRates,
     roomTotal,
     addonTotal,
     promoDiscount,
