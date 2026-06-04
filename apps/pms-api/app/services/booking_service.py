@@ -1052,8 +1052,14 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     if not is_stay_sellable(data.check_in, data.check_out, room, calendar_settings):
         raise ValueError("Room type is not available for the selected dates")
 
+    auto_rearrange_enabled = await HotelRepository.get_auto_rearrange_enabled(hotel_id)
     available = await remaining_for_stay(
-        data.room_type_id, room["total_rooms"], data.check_in, data.check_out
+        data.room_type_id,
+        room["total_rooms"],
+        data.check_in,
+        data.check_out,
+        hotel_id=hotel_id,
+        allow_rearrange=data.number_of_rooms <= 1 and auto_rearrange_enabled,
     )
     if available < data.number_of_rooms:
         raise ValueError("Not enough rooms available for the selected dates")

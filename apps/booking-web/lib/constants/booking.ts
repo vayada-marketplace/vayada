@@ -35,17 +35,16 @@ export function hasVariableNightlyRates(rates: number[]): boolean {
 }
 
 export function groupNightlyRates(rates: number[]): { nights: number; nightlyRate: number }[] {
-  const grouped = new Map<string, { nights: number; nightlyRate: number }>();
+  const grouped: { nights: number; nightlyRate: number }[] = [];
   for (const rate of rates) {
-    const key = rate.toFixed(2);
-    const existing = grouped.get(key);
-    if (existing) {
-      existing.nights += 1;
+    const current = grouped[grouped.length - 1];
+    if (current && current.nightlyRate.toFixed(2) === rate.toFixed(2)) {
+      current.nights += 1;
     } else {
-      grouped.set(key, { nights: 1, nightlyRate: rate });
+      grouped.push({ nights: 1, nightlyRate: rate });
     }
   }
-  return Array.from(grouped.values());
+  return grouped;
 }
 
 /** Parse the admin-selected cancellation policy string (e.g. "Free until 14 days before")

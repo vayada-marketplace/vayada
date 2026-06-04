@@ -135,6 +135,9 @@ async def test_guest_rooms_do_not_discount_when_hotel_toggle_is_off(monkeypatch)
     async def get_calendar_settings(*args, **kwargs):
         return {}
 
+    async def get_auto_rearrange_enabled(*args, **kwargs):
+        return False
+
     async def remaining_for_stay(*args, **kwargs):
         return 3
 
@@ -142,6 +145,11 @@ async def test_guest_rooms_do_not_discount_when_hotel_toggle_is_off(monkeypatch)
     monkeypatch.setattr(room_type_service.RoomTypeRepository, "list_by_hotel_id", list_by_hotel_id)
     monkeypatch.setattr(
         room_type_service.HotelRepository, "get_calendar_settings", get_calendar_settings
+    )
+    monkeypatch.setattr(
+        room_type_service.HotelRepository,
+        "get_auto_rearrange_enabled",
+        get_auto_rearrange_enabled,
     )
     monkeypatch.setattr(room_type_service, "remaining_for_stay", remaining_for_stay)
     monkeypatch.setattr(room_type_service, "property_today", lambda timezone: date(2026, 5, 27))

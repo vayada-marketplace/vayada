@@ -107,6 +107,12 @@ export default function RoomCard({
   const showFlexibleRate =
     room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null);
   const hasNonRefundable = room.nonRefundableRate != null;
+  const flexibleNightlyLabel = flexibleVaries
+    ? tc("fromPrice", { price: formatPrice(flexibleFromNightly, selectedCurrency) })
+    : formatPrice(flexibleFromNightly, selectedCurrency);
+  const nonRefundableNightlyLabel = nonRefundableVaries
+    ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
+    : formatPrice(nonRefundableFromNightly, selectedCurrency);
 
   const effectiveSelectedRate: "flexible" | "nonrefundable" | null =
     selectedRate === "flexible" && showFlexibleRate
@@ -337,7 +343,7 @@ export default function RoomCard({
                   title={t("nonRefundableRate")}
                   description={t("nonRefundableDesc")}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
-                  nightlyLabel={`${nonRefundableVaries ? "from " : ""}${formatPrice(nonRefundableFromNightly, selectedCurrency)}`}
+                  nightlyLabel={nonRefundableNightlyLabel}
                   discountPercent={discount}
                   soldOut={soldOut}
                 />
@@ -351,7 +357,7 @@ export default function RoomCard({
                   title={t("flexibleRate")}
                   description={flexibleDescription}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
-                  nightlyLabel={`${flexibleVaries ? "from " : ""}${formatPrice(flexibleFromNightly, selectedCurrency)}`}
+                  nightlyLabel={flexibleNightlyLabel}
                   soldOut={soldOut}
                 />
               )}

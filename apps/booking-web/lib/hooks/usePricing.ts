@@ -77,12 +77,11 @@ export function usePricing({
   const room = rooms.find((r) => r.id === roomId) || rooms[0];
   const nights = calculateNights(checkIn, checkOut);
   const roomCurrency = room?.currency || hotel?.currency || "EUR";
-  const quoteReady =
-    !room ||
-    !checkIn ||
-    !checkOut ||
-    nights <= 0 ||
-    (Array.isArray(room.nightlyRates) && room.nightlyRates.length === nights);
+  const hasMismatchedNightlyRates =
+    Array.isArray(room?.nightlyRates) && room.nightlyRates.length !== nights;
+  const quoteReady = Boolean(
+    room && checkIn && checkOut && nights > 0 && !hasMismatchedNightlyRates,
+  );
 
   const nightlyRatesBase =
     rateType === "nonrefundable"

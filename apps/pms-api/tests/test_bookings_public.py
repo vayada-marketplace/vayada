@@ -10,6 +10,7 @@ from tests.conftest import (
     create_test_booking,
     create_test_hotel,
     create_test_payment_settings,
+    create_test_room,
     create_test_room_type,
     create_test_user,
 )
@@ -178,6 +179,110 @@ class TestCreateBooking:
             },
         )
         assert resp.status_code == 400
+
+    @patch("app.services.booking_service.push_availability_for_room_type", new_callable=AsyncMock)
+    @patch("app.services.booking_service.send_booking_request_notification", new_callable=AsyncMock)
+    async def test_create_booking_allows_checkout_on_sold_out_day(
+        self, mock_host_email, mock_push, client, cleanup_database
+    ):
+        from app.database import Database
+
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
+        unit = await create_test_room(str(hotel["id"]), str(room["id"]), room_number="101")
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        sold_out_night = await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-07",
+            check_out="2026-06-08",
+        )
+        await Database.execute(
+            "UPDATE bookings SET room_id = $1 WHERE id = $2",
+            str(unit["id"]),
+            str(sold_out_night["id"]),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Checkout",
+                "guestLastName": "Guest",
+                "guestEmail": "checkout@example.com",
+                "guestPhone": "+1111",
+                "checkIn": "2026-06-06",
+                "checkOut": "2026-06-07",
+                "paymentMethod": "pay_at_property",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        booking = resp.json()["booking"]
+        assert booking["checkIn"] == "2026-06-06"
+        assert booking["checkOut"] == "2026-06-07"
+        assert booking["nights"] == 1
+
+    @patch("app.services.booking_service.push_availability_for_room_type", new_callable=AsyncMock)
+    @patch("app.services.booking_service.send_booking_request_notification", new_callable=AsyncMock)
+    async def test_create_booking_allows_auto_rearrange_packable_stay(
+        self, mock_host_email, mock_push, client, hotel_with_rooms
+    ):
+        from app.database import Database
+
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+        rooms = hotel_with_rooms["rooms"]
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await Database.execute(
+            "UPDATE hotels SET auto_rearrange_enabled = TRUE WHERE id = $1",
+            hotel["id"],
+        )
+        for idx, (check_in, check_out) in enumerate(
+            [
+                ("2026-08-23", "2026-08-26"),
+                ("2026-08-25", "2026-08-28"),
+                ("2026-08-22", "2026-08-24"),
+                ("2026-08-21", "2026-08-23"),
+                ("2026-08-26", "2026-08-29"),
+            ]
+        ):
+            existing = await create_test_booking(
+                str(hotel["id"]),
+                str(room["id"]),
+                check_in=check_in,
+                check_out=check_out,
+                status="confirmed",
+                guest_email=f"packable-{idx}@example.com",
+            )
+            await Database.execute(
+                "UPDATE bookings SET room_id = $1 WHERE id = $2",
+                str(rooms[idx]["id"]),
+                str(existing["id"]),
+            )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Packable",
+                "guestLastName": "Guest",
+                "guestEmail": "packable@example.com",
+                "guestPhone": "+1111",
+                "checkIn": "2026-08-22",
+                "checkOut": "2026-08-27",
+                "paymentMethod": "pay_at_property",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        booking_id = resp.json()["booking"]["id"]
+        assigned_room = await Database.fetchval(
+            "SELECT room_id FROM bookings WHERE id = $1",
+            booking_id,
+        )
+        assert assigned_room is not None
 
     async def test_create_booking_unknown_hotel(self, client, init_database):
         resp = await client.post(

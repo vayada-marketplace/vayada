@@ -263,12 +263,12 @@ export default function BookingConfirmationPage({
               </h1>
               <p className="text-gray-600 mb-4">
                 {t("pendingSubtitle") ||
-                  "Your booking request has been submitted. The host will respond within 24 hours."}
+                  "Your booking request has been submitted. We'll respond within 24 hours."}
               </p>
               {booking?.hostResponseDeadline && (
                 <div className="mb-6">
                   <p className="text-sm text-gray-500 mb-1">
-                    {t("hostResponseIn") || "Host will respond latest:"}
+                    {t("hostResponseIn") || "We'll respond latest:"}
                   </p>
                   <CountdownTimer deadline={booking.hostResponseDeadline} />
                 </div>
@@ -302,9 +302,9 @@ export default function BookingConfirmationPage({
               <p className="text-gray-600 mb-6">
                 {booking?.paymentMethod === "card"
                   ? t("declinedCardSubtitle") ||
-                    "The host declined your booking request. Any authorization hold on your card has been released."
+                    "We declined your booking request. Any authorization hold on your card has been released."
                   : t("declinedSubtitle") ||
-                    "The host declined your booking request. We encourage you to explore alternative dates or properties."}
+                    "We declined your booking request. We encourage you to explore alternative dates or properties."}
               </p>
             </>
           )}
@@ -315,7 +315,7 @@ export default function BookingConfirmationPage({
               </h1>
               <p className="text-gray-600 mb-6">
                 {t("expiredSubtitle") ||
-                  "Your booking request expired because the host did not respond within 24 hours. Any card hold has been released."}
+                  "Your booking request expired because we did not respond within 24 hours. Any card hold has been released."}
               </p>
             </>
           )}
@@ -458,8 +458,8 @@ export default function BookingConfirmationPage({
               <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
               <p className="text-xs text-blue-700 mt-1">
                 Send {booking.currency} {booking.totalAmount} to {paypalInfo.email} and include{" "}
-                {booking.bookingReference} in the PayPal note so the property can match it. Payment
-                must be confirmed within {paypalInfo.windowHours} hours.
+                {booking.bookingReference} in the PayPal note so we can match it. Payment must be
+                confirmed within {paypalInfo.windowHours} hours.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -488,7 +488,7 @@ export default function BookingConfirmationPage({
               </p>
               <p className="text-xs text-blue-700 mt-1">
                 {t("changePendingDesc") ||
-                  "The hotel will review your requested change and email you once they respond."}
+                  "We'll review your requested change and email you once we respond."}
               </p>
               <p className="text-xs text-blue-700 mt-2">
                 {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}

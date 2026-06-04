@@ -39,22 +39,38 @@ def compute_non_refundable_rate(
     return round(float(base_rate), 2)
 
 
-async def remaining_for_stay(
+async def _direct_physical_units_for_stay(
+    room_type_id: str,
+    check_in: date,
+    check_out: date,
+) -> int | None:
+    from app.repositories.booking_room_repo import BookingRoomRepository
+    from app.repositories.room_block_repo import RoomBlockRepository
+    from app.repositories.room_repo import RoomRepository
+
+    rooms = await RoomRepository.list_for_room_type(room_type_id)
+    if not rooms:
+        return None
+
+    room_ids = {str(room["id"]) for room in rooms}
+    occupied = await BookingRoomRepository.occupied_room_ids_for_room_type(
+        room_type_id, check_in, check_out
+    )
+    room_blocks = await RoomBlockRepository.list_blocked_rooms_for_room_type(
+        room_type_id, check_in, check_out
+    )
+    blocked_room_ids = {str(block["room_id"]) for block in room_blocks}
+    free_units = room_ids - occupied - blocked_room_ids
+
+    return len(free_units)
+
+
+async def _aggregate_remaining_for_stay(
     room_type_id: str,
     total_rooms: int,
     check_in: date,
     check_out: date,
 ) -> int:
-    """Rooms of this type still bookable across the given stay.
-
-    Returns the minimum free inventory across each occupied night, where
-    active card-payment drafts (VAY-388) count as soft holds. A room type
-    with staggered bookings/blocks across different nights should remain
-    bookable as long as every night still has a free unit.
-    """
-    if check_in >= check_out:
-        return 0
-
     remaining = total_rooms
     current = check_in
     while current < check_out:
@@ -68,6 +84,54 @@ async def remaining_for_stay(
         current = next_day
 
     return max(0, remaining)
+
+
+async def remaining_for_stay(
+    room_type_id: str,
+    total_rooms: int,
+    check_in: date,
+    check_out: date,
+    *,
+    hotel_id: str | None = None,
+    allow_rearrange: bool = False,
+) -> int:
+    """Rooms of this type still bookable across the given stay.
+
+    Returns the minimum free inventory across each occupied night, where
+    active card-payment drafts (VAY-388) count as soft holds. A room type
+    with staggered bookings/blocks across different nights should remain
+    bookable as long as every night still has a free unit.
+    """
+    if check_in >= check_out:
+        return 0
+
+    aggregate_remaining = await _aggregate_remaining_for_stay(
+        room_type_id, total_rooms, check_in, check_out
+    )
+    if aggregate_remaining <= 0:
+        return 0
+
+    direct_physical_remaining = await _direct_physical_units_for_stay(
+        room_type_id, check_in, check_out
+    )
+    if direct_physical_remaining is None:
+        return aggregate_remaining
+    if direct_physical_remaining > 0:
+        return min(direct_physical_remaining, aggregate_remaining)
+
+    if not allow_rearrange or not hotel_id:
+        return 0
+
+    from app.services.room_assignment import find_assignment_for_window
+
+    result = await find_assignment_for_window(
+        hotel_id,
+        room_type_id,
+        check_in,
+        check_out,
+        auto_rearrange_enabled=True,
+    )
+    return min(1, aggregate_remaining) if result else 0
 
 
 def compute_stay_pricing(

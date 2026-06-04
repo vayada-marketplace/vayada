@@ -188,14 +188,19 @@ function BookPageContent() {
     const errors = validateFields();
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      if (errors.firstName)
-        firstNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.lastName)
-        lastNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.email)
-        emailRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.phone)
-        phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (errors.firstName && firstNameRef.current) {
+        firstNameRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        firstNameRef.current.focus();
+      } else if (errors.lastName && lastNameRef.current) {
+        lastNameRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        lastNameRef.current.focus();
+      } else if (errors.email && emailRef.current) {
+        emailRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        emailRef.current.focus();
+      } else if (errors.phone && phoneRef.current) {
+        phoneRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+        phoneRef.current.querySelector("input")?.focus();
+      }
       return;
     }
     if (!room) {
@@ -203,9 +208,7 @@ function BookPageContent() {
       return;
     }
     if (!quoteReady) {
-      setSubmitError(
-        "Pricing is still updating for these dates. Please wait a moment and try again.",
-      );
+      setSubmitError(tc("pricingUpdating"));
       return;
     }
 

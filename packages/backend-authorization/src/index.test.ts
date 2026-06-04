@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import pg from "pg";
 
 import type {
+  ProductEntitlement,
   LinkedResource,
   OrganizationKind,
   PermissionKey,
@@ -15,10 +16,15 @@ import {
   AuthorizationError,
   canAccessResource,
   createAuthorizationResolver,
+  createPgEntitlementRepository,
   hasPermission,
+  hasActiveEntitlement,
   requirePermission,
+  requireActiveEntitlement,
   requireResourceAccess,
   createPgRolePermissionRepository,
+  type EntitlementRepository,
+  type EntitlementRequirement,
   type ResourceAccessRequirement,
   type RolePermissionRepository,
 } from "./index.js";
@@ -44,6 +50,24 @@ async function resetRolePermissionGrantsTable(client: pg.Client): Promise<void> 
   await client.query(`TRUNCATE TABLE identity.role_permission_grants RESTART IDENTITY CASCADE`);
 }
 
+async function resetProductEntitlementsTable(client: pg.Client): Promise<void> {
+  await client.query(`CREATE SCHEMA IF NOT EXISTS identity`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS identity.product_entitlements (
+      organization_id UUID NOT NULL,
+      product TEXT NOT NULL,
+      entitlement_key TEXT NOT NULL,
+      status TEXT NOT NULL,
+      resource_product TEXT,
+      resource_type TEXT,
+      resource_id TEXT,
+      starts_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ
+    )
+  `);
+  await client.query(`TRUNCATE TABLE identity.product_entitlements RESTART IDENTITY CASCADE`);
+}
+
 function linkedResource(
   product: Product,
   resourceType: ResourceType,
@@ -58,12 +82,18 @@ function linkedResource(
   };
 }
 
-function contextFor(options: {
-  kind: OrganizationKind;
-  roleKey: string;
-  permissions: PermissionKey[];
-  linkedResources: LinkedResource[];
-}): RequestContext {
+function contextFor(
+  options: {
+    kind?: OrganizationKind;
+    roleKey?: string;
+    permissions?: PermissionKey[];
+    linkedResources?: LinkedResource[];
+    entitlements?: ProductEntitlement[];
+  } = {},
+): RequestContext {
+  const kind = options.kind ?? "hotel_group";
+  const roleKey = options.roleKey ?? "hotel_owner";
+
   return {
     actor: {
       internalUserId: "user_test",
@@ -74,19 +104,19 @@ function contextFor(options: {
     selectedOrganization: {
       organizationId: "org_test",
       workosOrgId: "org_workos_test",
-      kind: options.kind,
+      kind,
       status: "active",
     },
     membership: {
       membershipId: "membership_test",
       status: "active",
-      roleKey: options.roleKey,
+      roleKey,
       workosMembershipId: "om_test",
-      workosRoleSlugs: [options.roleKey],
-      permissions: options.permissions,
+      workosRoleSlugs: [roleKey],
+      permissions: options.permissions ?? [],
     },
-    linkedResources: options.linkedResources,
-    entitlements: [],
+    linkedResources: options.linkedResources ?? [],
+    entitlements: options.entitlements ?? [],
     locale: "en-US",
     currency: "EUR",
     audit: {
@@ -94,6 +124,18 @@ function contextFor(options: {
       source: "api",
       receivedAt: "2026-06-04T12:00:00.000Z",
     },
+  };
+}
+
+function entitlement(
+  status: ProductEntitlement["status"],
+  resource?: ProductEntitlement["resource"],
+): ProductEntitlement {
+  return {
+    product: "booking",
+    key: "booking-engine",
+    status,
+    resource,
   };
 }
 
@@ -153,6 +195,28 @@ describe("createAuthorizationResolver", () => {
     expect(calls).toEqual([{ kind: "hotel_group", roleKey: "hotel_owner" }]);
     expect(resolution.permissions).toEqual(["booking.settings.manage", "pms.booking.update"]);
   });
+
+  it("loads entitlements separately from permissions when a repository is provided", async () => {
+    const roleRepository: RolePermissionRepository = {
+      async findPermissionsForRole() {
+        return ["booking.settings.manage"];
+      },
+    };
+    const entitlementRepository: EntitlementRepository = {
+      async findEntitlementsForContext(context) {
+        expect(context.membership.permissions).toEqual([]);
+        return [entitlement("active")];
+      },
+    };
+
+    const resolution = await createAuthorizationResolver(
+      roleRepository,
+      entitlementRepository,
+    )(contextFor());
+
+    expect(resolution.permissions).toEqual(["booking.settings.manage"]);
+    expect(resolution.entitlements).toEqual([entitlement("active")]);
+  });
 });
 
 describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
@@ -198,6 +262,74 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
       await resetRolePermissionGrantsTable(cleanup);
     } finally {
       await cleanup.end();
+    }
+  });
+});
+
+describe.skipIf(!TEST_DATABASE_URL)("createPgEntitlementRepository", () => {
+  it("reads org and active linked-resource entitlements from identity.product_entitlements", async () => {
+    assertSafeTestDatabase(TEST_DATABASE_URL!);
+
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+
+    try {
+      await resetProductEntitlementsTable(client);
+      await client.query(
+        `INSERT INTO identity.product_entitlements
+           (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
+         VALUES
+           ('00000000-0000-0000-0000-000000000001', 'booking', 'booking-engine', 'active', NULL, NULL, NULL),
+           ('00000000-0000-0000-0000-000000000001', 'pms', 'pms-core', 'active', 'pms', 'pms_hotel', 'pms_hotel_alpenrose'),
+           ('00000000-0000-0000-0000-000000000001', 'pms', 'pms-core', 'active', 'pms', 'pms_hotel', 'pms_hotel_other'),
+           ('00000000-0000-0000-0000-000000000002', 'booking', 'booking-engine', 'active', NULL, NULL, NULL)`,
+      );
+    } finally {
+      await client.end();
+    }
+
+    const repository = createPgEntitlementRepository({
+      connectionString: TEST_DATABASE_URL!,
+      max: 1,
+    });
+
+    try {
+      await expect(
+        repository.findEntitlementsForContext({
+          ...hotelContext,
+          selectedOrganization: {
+            ...hotelContext.selectedOrganization,
+            organizationId: "00000000-0000-0000-0000-000000000001",
+          },
+          linkedResources: [linkedResource("pms", "pms_hotel", "pms_hotel_alpenrose")],
+        }),
+      ).resolves.toEqual([
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "active",
+        },
+        {
+          product: "pms",
+          key: "pms-core",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_hotel",
+            resourceId: "pms_hotel_alpenrose",
+          },
+        },
+      ]);
+    } finally {
+      await repository.close?.();
+
+      const cleanup = new pg.Client({ connectionString: TEST_DATABASE_URL });
+      await cleanup.connect();
+      try {
+        await resetProductEntitlementsTable(cleanup);
+      } finally {
+        await cleanup.end();
+      }
     }
   });
 });
@@ -295,5 +427,131 @@ describe("authorization helpers", () => {
         requirement("booking.settings.manage", "booking", "booking_hotel", "booking_hotel_other"),
       ),
     ).toThrow(AuthorizationError);
+  });
+});
+
+describe("entitlement helpers", () => {
+  const bookingRequirement: EntitlementRequirement = {
+    product: "booking",
+    key: "booking-engine",
+  };
+
+  it.each([
+    [
+      "allows an active entitlement",
+      contextFor({ entitlements: [entitlement("active")] }),
+      bookingRequirement,
+      true,
+    ],
+    [
+      "denies a suspended entitlement",
+      contextFor({ entitlements: [entitlement("suspended")] }),
+      bookingRequirement,
+      false,
+    ],
+    [
+      "denies an expired entitlement",
+      contextFor({ entitlements: [entitlement("expired")] }),
+      bookingRequirement,
+      false,
+    ],
+    ["denies a missing entitlement", contextFor(), bookingRequirement, false],
+    [
+      "denies resource-scoped entitlement for org-wide requirement",
+      contextFor({
+        entitlements: [
+          entitlement("active", {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: "booking_hotel_alpenrose",
+          }),
+        ],
+      }),
+      bookingRequirement,
+      false,
+    ],
+    [
+      "allows org-level entitlement for a resource requirement",
+      contextFor({ entitlements: [entitlement("active")] }),
+      {
+        product: "booking",
+        key: "booking-engine",
+        resource: {
+          product: "booking",
+          resourceType: "booking_hotel",
+          resourceId: "booking_hotel_alpenrose",
+        },
+      },
+      true,
+    ],
+    [
+      "allows matching resource-scoped entitlement",
+      contextFor({
+        entitlements: [
+          entitlement("active", {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: "booking_hotel_alpenrose",
+          }),
+        ],
+      }),
+      {
+        product: "booking",
+        key: "booking-engine",
+        resource: {
+          product: "booking",
+          resourceType: "booking_hotel",
+          resourceId: "booking_hotel_alpenrose",
+        },
+      },
+      true,
+    ],
+    [
+      "denies non-matching resource-scoped entitlement",
+      contextFor({
+        entitlements: [
+          entitlement("active", {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: "booking_hotel_other",
+          }),
+        ],
+      }),
+      {
+        product: "booking",
+        key: "booking-engine",
+        resource: {
+          product: "booking",
+          resourceType: "booking_hotel",
+          resourceId: "booking_hotel_alpenrose",
+        },
+      },
+      false,
+    ],
+  ] as const)("%s", (_name, context, entitlementRequirement, expected) => {
+    expect(hasActiveEntitlement(context, entitlementRequirement)).toBe(expected);
+  });
+
+  it("throws authorization errors for missing active entitlement", () => {
+    expect(() => requireActiveEntitlement(hotelContext, bookingRequirement)).toThrow(
+      AuthorizationError,
+    );
+  });
+
+  it("keeps permissions and entitlements independent", () => {
+    const permittedButNotEntitled = contextFor({
+      permissions: ["booking.settings.manage"],
+      linkedResources: [linkedResource("booking", "booking_hotel", "booking_hotel_alpenrose")],
+      entitlements: [entitlement("suspended")],
+    });
+
+    expect(hasPermission(permittedButNotEntitled, "booking.settings.manage")).toBe(true);
+    expect(hasActiveEntitlement(permittedButNotEntitled, bookingRequirement)).toBe(false);
+    expect(() =>
+      requirePermission(permittedButNotEntitled, "booking.settings.manage"),
+    ).not.toThrow();
+    expect(() => requireActiveEntitlement(permittedButNotEntitled, bookingRequirement)).toThrow(
+      AuthorizationError,
+    );
   });
 });

@@ -54,7 +54,7 @@ export default function PolicyModal({
         </div>
         <div className="px-6 py-5 overflow-y-auto text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
           {kind === "terms"
-            ? termsText || "Please contact the property for the full Terms and Conditions."
+            ? termsText || "Please contact us for the full Terms and Conditions."
             : cancellationPolicyText || cancellationFallback}
         </div>
       </div>

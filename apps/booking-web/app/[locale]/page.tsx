@@ -244,7 +244,7 @@ function HomePageContent() {
             }),
           );
     const stayTotal = (room: (typeof rooms)[number]) => {
-      const rates = getFlexibleNightlyRates(room, room.nightlyRates?.length || 1);
+      const rates = getFlexibleNightlyRates(room, nights);
       return rates.reduce((sum, rate) => sum + rate, 0);
     };
     if (sortOption === "priceLow") result.sort((a, b) => stayTotal(a) - stayTotal(b));
