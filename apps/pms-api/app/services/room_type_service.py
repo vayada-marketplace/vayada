@@ -91,6 +91,7 @@ async def get_rooms_for_guest(
 
     rooms = await RoomTypeRepository.list_by_hotel_id(hotel_id, active_only=True)
     calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
+    auto_rearrange_enabled = await HotelRepository.get_auto_rearrange_enabled(hotel_id)
     result = []
 
     for room in rooms:
@@ -125,7 +126,14 @@ async def get_rooms_for_guest(
             ):
                 remaining = 0
             else:
-                remaining = await remaining_for_stay(str(room["id"]), total, check_in, check_out)
+                remaining = await remaining_for_stay(
+                    str(room["id"]),
+                    total,
+                    check_in,
+                    check_out,
+                    hotel_id=hotel_id,
+                    allow_rearrange=auto_rearrange_enabled,
+                )
         else:
             remaining = total
 
