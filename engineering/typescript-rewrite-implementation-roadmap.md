@@ -207,7 +207,15 @@ criteria:
    - Output: `engineering/ask-intelligence-evidence-contract.md` and
      `engineering/fixtures/ask-intelligence-evidence/answers.json`.
 
-8. **Write cutover and rollback runbook**
+8. **Define jobs/events contract**
+   - Specify idempotency keys, retry behavior, failure visibility, dead-letter
+     handling, audit correlation, and sync/async route boundaries.
+   - Validation: fixtures cover side-effect enqueue, duplicate idempotency, and
+     dead-letter behavior.
+   - Output: `engineering/jobs-events-contract.md` and
+     `engineering/fixtures/jobs-events/cases.json`.
+
+9. **Write cutover and rollback runbook**
    - Define coexistence, staging rehearsal gates, maintenance window,
      deployment order, rollback window, and post-cutover monitoring.
    - Validation: tabletop review with explicit go/no-go gates.
@@ -222,4 +230,6 @@ criteria:
 - `engineering/target-schema-ownership-map.md`
 - `engineering/migration-parity-harness.md`
 - `engineering/public-bookability-contract.md`
+- `engineering/ask-intelligence-evidence-contract.md`
+- `engineering/jobs-events-contract.md`
 - `.agents/skills/typescript-rewrite-workflow/SKILL.md`
