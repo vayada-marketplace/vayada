@@ -1,0 +1,265 @@
+{
+  "contractVersion": "public-bookability.v1",
+  "cases": [
+    {
+      "caseId": "bookable",
+      "description": "A fresh public quote with one checkout-ready offer.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-12",
+        "checkOut": "2026-09-15",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en",
+        "promoCode": null,
+        "referralCode": "creator-anna"
+      },
+      "expected": {
+        "status": "bookable",
+        "unavailableReasons": [],
+        "offerCount": 1,
+        "mustInclude": [
+          "quote.quoteId",
+          "quote.expiresAt",
+          "quote.offers[0].totals.grandTotal",
+          "deepLink.url"
+        ],
+        "mustExclude": [
+          "guestEmail",
+          "guestPhone",
+          "payoutAccountId",
+          "ownerNotes",
+          "roomAssignment"
+        ]
+      }
+    },
+    {
+      "caseId": "sold-out",
+      "description": "No public inventory remains for the requested date range.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-10-01",
+        "checkOut": "2026-10-03",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "unavailable",
+        "unavailableReasons": [
+          {
+            "code": "sold_out",
+            "publicDetail": {
+              "dateRange": {
+                "checkIn": "2026-10-01",
+                "checkOut": "2026-10-03"
+              }
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
+      "caseId": "payment-disabled",
+      "description": "Hotel has public rooms, but no supported public checkout method.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-12",
+        "checkOut": "2026-09-15",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "unavailable",
+        "unavailableReasons": [
+          {
+            "code": "payment_disabled",
+            "publicDetail": {
+              "supportedPaymentMethods": []
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
+      "caseId": "min-stay-not-met",
+      "description": "Requested stay is shorter than public minimum stay.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-12-24",
+        "checkOut": "2026-12-25",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "unavailable",
+        "unavailableReasons": [
+          {
+            "code": "min_stay_not_met",
+            "publicDetail": {
+              "requestedNights": 1,
+              "minimumNights": 3
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
+      "caseId": "max-stay-exceeded",
+      "description": "Requested stay is longer than public maximum stay.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-01",
+        "checkOut": "2026-10-20",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "unavailable",
+        "unavailableReasons": [
+          {
+            "code": "max_stay_exceeded",
+            "publicDetail": {
+              "requestedNights": 49,
+              "maximumNights": 30
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
+      "caseId": "same-day-cutoff-passed",
+      "description": "Same-day booking request arrives after the hotel cutoff.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-06-04",
+        "checkOut": "2026-06-05",
+        "adults": 1,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "unavailable",
+        "unavailableReasons": [
+          {
+            "code": "same_day_cutoff_passed",
+            "publicDetail": {
+              "cutoffTime": "16:00",
+              "timezone": "Europe/Vienna"
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
+      "caseId": "promo-referral-applied",
+      "description": "A public promo and referral context are preserved in the quote and deep link.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-12",
+        "checkOut": "2026-09-15",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en",
+        "promoCode": "DIRECT10",
+        "referralCode": "creator-anna"
+      },
+      "expected": {
+        "status": "bookable",
+        "unavailableReasons": [],
+        "offerCount": 1,
+        "discounts": [
+          {
+            "code": "DIRECT10",
+            "publicLabel": "Direct booking discount",
+            "amount": 54
+          }
+        ],
+        "deepLinkPreserves": ["promo_code", "referral_code", "quote_id"]
+      }
+    },
+    {
+      "caseId": "stale-data",
+      "description": "Quote source data is too stale to produce a reliable public offer.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-12",
+        "checkOut": "2026-09-15",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "stale",
+        "freshness": {
+          "status": "stale",
+          "staleSources": ["pms"]
+        },
+        "unavailableReasons": [
+          {
+            "code": "stale_data",
+            "publicDetail": {
+              "sourceOwner": "pms",
+              "maximumAgeSeconds": 300
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
+      "caseId": "unavailable-data",
+      "description": "A required source is unavailable and the API must not guess.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-12",
+        "checkOut": "2026-09-15",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "error",
+        "freshness": {
+          "status": "unavailable",
+          "unavailableSources": ["finance"]
+        },
+        "unavailableReasons": [
+          {
+            "code": "unavailable_data",
+            "publicDetail": {
+              "sourceOwner": "finance"
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    }
+  ]
+}

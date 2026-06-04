@@ -68,7 +68,8 @@ Contract slices:
 - migration and parity harness design for target rebuilds, source-to-target
   checks, mismatch reports, and explicit SQL migration application:
   `engineering/migration-parity-harness.md`
-- public bookability profile and quote contract
+- public bookability profile and quote contract:
+  `engineering/public-bookability-contract.md`
 - Ask Intelligence evidence and answer envelope contract
 - jobs/events idempotency, retry, failure visibility, and audit contract
 
@@ -195,6 +196,8 @@ criteria:
      unavailable reasons, and booking deep-link context.
    - Validation: fixtures for bookable, sold out, payment disabled, min/max
      stay, same-day cutoff, promo/referral, and stale data cases.
+   - Output: `engineering/public-bookability-contract.md` and
+     `engineering/fixtures/public-bookability/cases.json`.
 
 7. **Define Ask Intelligence evidence contract**
    - Specify read-only evidence tools, answer envelope, unavailable-data states,
@@ -216,4 +219,5 @@ criteria:
 - `engineering/backend-database-restructure.md`
 - `engineering/target-schema-ownership-map.md`
 - `engineering/migration-parity-harness.md`
+- `engineering/public-bookability-contract.md`
 - `.agents/skills/typescript-rewrite-workflow/SKILL.md`
