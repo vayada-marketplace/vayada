@@ -10,6 +10,7 @@ from app.database import Database
 from tests.conftest import (
     create_test_booking,
     create_test_hotel,
+    create_test_room,
     create_test_room_block,
     create_test_room_type,
     create_test_user,
@@ -144,6 +145,106 @@ class TestPublicRooms:
         rooms = resp.json()
         assert len(rooms) == 1
         assert rooms[0]["remainingRooms"] == 1
+
+    async def test_checkout_date_does_not_require_availability(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
+        unit = await create_test_room(str(hotel["id"]), str(room["id"]), room_number="101")
+        sold_out_night = await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-07",
+            check_out="2026-06-08",
+        )
+        await Database.execute(
+            "UPDATE bookings SET room_id = $1 WHERE id = $2",
+            str(unit["id"]),
+            str(sold_out_night["id"]),
+        )
+
+        unavailable = await client.get(
+            f"/api/hotels/{hotel['slug']}/unavailable-dates",
+            params={"start": "2026-06-06", "end": "2026-06-09"},
+        )
+        assert unavailable.status_code == 200
+        assert unavailable.json()["dates"] == ["2026-06-07"]
+
+        one_night = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={"check_in": "2026-06-06", "check_out": "2026-06-07"},
+        )
+        assert one_night.status_code == 200
+        assert one_night.json()[0]["remainingRooms"] == 1
+
+        crosses_sold_out_night = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={"check_in": "2026-06-06", "check_out": "2026-06-08"},
+        )
+        assert crosses_sold_out_night.status_code == 200
+        assert crosses_sold_out_night.json()[0]["remainingRooms"] == 0
+
+    async def test_remaining_rooms_requires_same_physical_unit_for_whole_stay(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=2)
+        first_unit = await create_test_room(str(hotel["id"]), str(room["id"]), room_number="101")
+        second_unit = await create_test_room(str(hotel["id"]), str(room["id"]), room_number="102")
+        first_night = await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-06",
+            check_out="2026-06-07",
+        )
+        second_night = await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-07",
+            check_out="2026-06-08",
+            guest_email="second@example.com",
+        )
+        await Database.execute(
+            "UPDATE bookings SET room_id = $1 WHERE id = $2",
+            str(first_unit["id"]),
+            str(first_night["id"]),
+        )
+        await Database.execute(
+            "UPDATE bookings SET room_id = $1 WHERE id = $2",
+            str(second_unit["id"]),
+            str(second_night["id"]),
+        )
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={"check_in": "2026-06-06", "check_out": "2026-06-08"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["remainingRooms"] == 0
+
+    async def test_unassigned_bookings_still_consume_physical_inventory(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
+        await create_test_room(str(hotel["id"]), str(room["id"]), room_number="101")
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-06",
+            check_out="2026-06-07",
+        )
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={"check_in": "2026-06-06", "check_out": "2026-06-07"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["remainingRooms"] == 0
 
     async def test_rooms_over_max_stay_show_zero_remaining(self, client, cleanup_database):
         user = await create_test_user()

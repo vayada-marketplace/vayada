@@ -62,6 +62,19 @@ function addDays(dateStr: string, days: number): string {
   return toDateString(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+function hasUnavailableStayNight(
+  checkIn: string,
+  checkOut: string,
+  unavailableDates: Set<string>,
+): boolean {
+  let current = checkIn;
+  while (isBeforeDate(current, checkOut)) {
+    if (unavailableDates.has(current)) return true;
+    current = addDays(current, 1);
+  }
+  return false;
+}
+
 const DAY_LABELS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
 
 function MonthGrid({
@@ -77,6 +90,7 @@ function MonthGrid({
   minStayNights,
   maxCheckOut,
   maxStayNights,
+  selectionState,
 }: {
   year: number;
   month: number;
@@ -90,6 +104,7 @@ function MonthGrid({
   minStayNights: number;
   maxCheckOut: string | null;
   maxStayNights: number | null;
+  selectionState: "selectCheckIn" | "selectCheckOut";
 }) {
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
@@ -155,7 +170,14 @@ function MonthGrid({
             checkIn && rangeEnd && !isBeforeDate(rangeEnd, checkIn)
               ? isBetween(cell.dateStr, checkIn, rangeEnd)
               : false;
-          const isUnavailable = unavailableDates.has(cell.dateStr);
+          const isSelectingCheckout =
+            selectionState === "selectCheckOut" &&
+            !!checkIn &&
+            !checkOut &&
+            isBeforeDate(checkIn, cell.dateStr);
+          const isUnavailable = isSelectingCheckout
+            ? hasUnavailableStayNight(checkIn, cell.dateStr, unavailableDates)
+            : unavailableDates.has(cell.dateStr);
           const isBelowMinStay = !!(
             minCheckOut &&
             checkIn &&
@@ -189,7 +211,9 @@ function MonthGrid({
                 onMouseLeave={() => onDayHover(null)}
                 title={
                   isUnavailable
-                    ? "Fully booked"
+                    ? isSelectingCheckout
+                      ? "Stay crosses a fully booked night"
+                      : "Fully booked"
                     : isBelowMinStay
                       ? `Minimum stay is ${minStayNights} nights`
                       : isAboveMaxStay && maxStayNights
@@ -273,7 +297,7 @@ export default function DatePickerCalendar({
     const endMonth = baseMonth === 11 ? 0 : baseMonth + 1;
     const endYear = baseMonth === 11 ? baseYear + 1 : baseYear;
     const lastDay = getDaysInMonth(endYear, endMonth);
-    const end = toDateString(endYear, endMonth, lastDay);
+    const end = addDays(toDateString(endYear, endMonth, lastDay), 1);
     hotelService
       .getUnavailableDates(slug, start, end)
       .then(({ dates, minStayByArrival, maxStayByArrival }) => {
@@ -455,6 +479,7 @@ export default function DatePickerCalendar({
             minStayNights={requiredMinStay}
             maxCheckOut={maxCheckOut}
             maxStayNights={requiredMaxStay}
+            selectionState={selectionState}
           />
           <MonthGrid
             year={secondYear}
@@ -469,6 +494,7 @@ export default function DatePickerCalendar({
             minStayNights={requiredMinStay}
             maxCheckOut={maxCheckOut}
             maxStayNights={requiredMaxStay}
+            selectionState={selectionState}
           />
         </div>
 
