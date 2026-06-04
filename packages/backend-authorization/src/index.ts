@@ -3,6 +3,7 @@ import pg from "pg";
 import type {
   OrganizationKind,
   PermissionKey,
+  ResourceRelationship,
   ProductEntitlement,
   RequestContext,
   ResourceType,
@@ -14,6 +15,7 @@ export type RolePermissionRepository = {
     organizationKind: OrganizationKind,
     roleKey: string,
   ): Promise<PermissionKey[]>;
+  close?(): Promise<void>;
 };
 
 export type AuthorizationResolution = {
@@ -32,6 +34,7 @@ export type ResourceRequirement = {
   product: Product;
   resourceType: ResourceType;
   resourceId: string;
+  allowedRelationships: readonly ResourceRelationship[];
 };
 
 export type ResourceAccessRequirement = {
@@ -71,6 +74,9 @@ export function createPgRolePermissionRepository(
       );
       return result.rows.map((row) => row.permission_key);
     },
+    async close() {
+      await pool.end();
+    },
   };
 }
 
@@ -98,7 +104,8 @@ export function hasActiveLinkedResource(
       resource.status === "active" &&
       resource.product === requirement.product &&
       resource.resourceType === requirement.resourceType &&
-      resource.resourceId === requirement.resourceId,
+      resource.resourceId === requirement.resourceId &&
+      requirement.allowedRelationships.includes(resource.relationship),
   );
 }
 

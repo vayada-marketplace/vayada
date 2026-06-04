@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import pg from "pg";
 
 import type {
   LinkedResource,
   OrganizationKind,
   PermissionKey,
   Product,
+  ResourceRelationship,
   RequestContext,
   ResourceType,
 } from "@vayada/backend-auth";
@@ -16,9 +18,19 @@ import {
   hasPermission,
   requirePermission,
   requireResourceAccess,
+  createPgRolePermissionRepository,
   type ResourceAccessRequirement,
   type RolePermissionRepository,
 } from "./index.js";
+
+const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
+
+function assertSafeTestDatabase(url: string): void {
+  const dbName = new URL(url).pathname.replace(/^\//, "");
+  if (!/(^|[_-])test([_-]|$)/i.test(dbName)) {
+    throw new Error(`Refusing to use non-test database "${dbName}"`);
+  }
+}
 
 function linkedResource(
   product: Product,
@@ -106,10 +118,11 @@ function requirement(
   product: Product,
   resourceType: ResourceType,
   resourceId: string,
+  allowedRelationships: readonly ResourceRelationship[] = ["owner"],
 ): ResourceAccessRequirement {
   return {
     permission,
-    resource: { product, resourceType, resourceId },
+    resource: { product, resourceType, resourceId, allowedRelationships },
   };
 }
 
@@ -130,6 +143,59 @@ describe("createAuthorizationResolver", () => {
   });
 });
 
+describe.skipIf(!TEST_DATABASE_URL)("createPgRolePermissionRepository", () => {
+  it("reads role grants from identity.role_permission_grants", async () => {
+    assertSafeTestDatabase(TEST_DATABASE_URL!);
+
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+
+    try {
+      await client.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
+      await client.query(`CREATE SCHEMA identity`);
+      await client.query(`
+        CREATE TABLE identity.role_permission_grants (
+          organization_kind TEXT NOT NULL,
+          role_key TEXT NOT NULL,
+          permission_key TEXT NOT NULL
+        )
+      `);
+      await client.query(
+        `INSERT INTO identity.role_permission_grants
+           (organization_kind, role_key, permission_key)
+         VALUES
+           ('hotel_group', 'hotel_owner', 'booking.settings.manage'),
+           ('hotel_group', 'hotel_owner', 'pms.booking.update'),
+           ('creator_workspace', 'creator_owner', 'marketplace.profile.manage')`,
+      );
+    } finally {
+      await client.end();
+    }
+
+    const repository = createPgRolePermissionRepository({
+      connectionString: TEST_DATABASE_URL!,
+      max: 1,
+    });
+
+    await expect(repository.findPermissionsForRole("hotel_group", "hotel_owner")).resolves.toEqual([
+      "booking.settings.manage",
+      "pms.booking.update",
+    ]);
+    await expect(repository.findPermissionsForRole("platform", "platform_admin")).resolves.toEqual(
+      [],
+    );
+    await repository.close?.();
+
+    const cleanup = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await cleanup.connect();
+    try {
+      await cleanup.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
+    } finally {
+      await cleanup.end();
+    }
+  });
+});
+
 describe("authorization helpers", () => {
   it.each([
     [
@@ -137,6 +203,22 @@ describe("authorization helpers", () => {
       hotelContext,
       requirement("booking.settings.manage", "booking", "booking_hotel", "booking_hotel_alpenrose"),
       true,
+    ],
+    [
+      "denies hotel owner when the resource relationship is not allowed",
+      contextFor({
+        kind: "hotel_group",
+        roleKey: "hotel_owner",
+        permissions: ["booking.settings.manage"],
+        linkedResources: [
+          {
+            ...linkedResource("booking", "booking_hotel", "booking_hotel_alpenrose"),
+            relationship: "promotes",
+          },
+        ],
+      }),
+      requirement("booking.settings.manage", "booking", "booking_hotel", "booking_hotel_alpenrose"),
+      false,
     ],
     [
       "denies hotel owner when the booking hotel is not linked",
@@ -181,7 +263,7 @@ describe("authorization helpers", () => {
     [
       "allows platform admin with platform permission and platform link",
       platformContext,
-      requirement("platform.user.suspend", "platform", "platform", "vayada"),
+      requirement("platform.user.suspend", "platform", "platform", "vayada", ["operator"]),
       true,
     ],
     [

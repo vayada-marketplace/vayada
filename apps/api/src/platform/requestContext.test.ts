@@ -30,7 +30,8 @@ describe("RequestContext contract fixtures", () => {
           resource.status === "active" &&
           resource.product === fixture.requirement.resource.product &&
           resource.resourceType === fixture.requirement.resource.resourceType &&
-          resource.resourceId === fixture.requirement.resource.resourceId,
+          resource.resourceId === fixture.requirement.resource.resourceId &&
+          fixture.requirement.resource.allowedRelationships.includes(resource.relationship),
       );
 
       expect(hasPermission && hasResourceLink).toBe(fixture.expected === "allowed");

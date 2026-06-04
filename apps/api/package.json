@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@vayada/backend-auth": "0.0.0",
+    "@vayada/backend-authorization": "0.0.0",
     "@vayada/backend-config": "0.0.0",
     "@vayada/backend-db": "0.0.0",
     "@vayada/backend-http": "0.0.0",

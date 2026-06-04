@@ -27,7 +27,9 @@ import type { LinkedResource, PermissionKey, RequestContext } from "@vayada/back
 // Fixture types remain local — they reference RequestContext and are test-only.
 export type ResourceAccessRequirement = {
   permission: PermissionKey;
-  resource: Pick<LinkedResource, "product" | "resourceType" | "resourceId">;
+  resource: Pick<LinkedResource, "product" | "resourceType" | "resourceId"> & {
+    allowedRelationships: readonly LinkedResource["relationship"][];
+  };
 };
 
 export type RequestContextFixtureCase = {

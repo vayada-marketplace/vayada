@@ -151,17 +151,3 @@ INSERT INTO identity.permission_catalog (key, product, description) VALUES
   ('marketplace.profile.manage',       'marketplace', 'Manage a marketplace hotel or creator profile'),
   ('affiliate.payout.manage',          'affiliate',   'Manage affiliate payout settings and runs')
 ON CONFLICT (key) DO NOTHING;
-
--- Seed the first role grants used by RequestContext authorization tests.
--- Fine-grained role design will expand in follow-up tickets; this baseline
--- keeps the auth boundary executable for the initial hotel/creator/affiliate/platform scopes.
-INSERT INTO identity.role_permission_grants (organization_kind, role_key, permission_key) VALUES
-  ('platform',          'platform_admin', 'platform.user.suspend'),
-  ('hotel_group',       'hotel_owner',    'booking.settings.manage'),
-  ('hotel_group',       'hotel_owner',    'booking.reservation.read'),
-  ('hotel_group',       'hotel_owner',    'pms.booking.update'),
-  ('hotel_group',       'hotel_owner',    'pms.finance.read'),
-  ('hotel_group',       'hotel_owner',    'marketplace.collaboration.review'),
-  ('creator_workspace', 'creator_owner',  'marketplace.profile.manage'),
-  ('affiliate_partner', 'affiliate_owner', 'affiliate.payout.manage')
-ON CONFLICT (organization_kind, role_key, permission_key) DO NOTHING;
