@@ -1,0 +1,33 @@
+{
+  "name": "@vayada/backend-authorization",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Permission resolution and resource access helpers for the TypeScript backend.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "npm --workspace @vayada/backend-auth run build",
+    "build": "tsc -p tsconfig.build.json",
+    "pretest": "npm --workspace @vayada/backend-auth run build",
+    "test": "vitest run",
+    "pretypecheck": "npm --workspace @vayada/backend-auth run build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vayada/backend-auth": "0.0.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}

@@ -2,13 +2,22 @@ import { AuthError } from "./errors.js";
 import { type IdentityRepository } from "./repository.js";
 import {
   type LinkedResource,
+  type PermissionKey,
   type Product,
+  type ProductEntitlement,
   type RequestContext,
   type RequestSource,
   type ResourceRelationship,
   type ResourceType,
 } from "./types.js";
 import { type VerifiedSession } from "./verify.js";
+
+export type AuthorizationResolution = {
+  permissions: PermissionKey[];
+  entitlements?: ProductEntitlement[];
+};
+
+export type AuthorizationResolver = (context: RequestContext) => Promise<AuthorizationResolution>;
 
 export type ResolveOptions = {
   requestId: string;
@@ -17,6 +26,7 @@ export type ResolveOptions = {
   source?: RequestSource;
   sourceIp?: string;
   userAgent?: string;
+  authorizationResolver?: AuthorizationResolver;
 };
 
 /**
@@ -79,7 +89,7 @@ export async function resolveRequestContext(
 
   const resourceLinks = await repo.findLinkedResources(org.organizationId);
 
-  return {
+  const context: RequestContext = {
     actor: {
       internalUserId: user.userId,
       providerIdentity: {
@@ -124,5 +134,20 @@ export async function resolveRequestContext(
       userAgent: options.userAgent,
       receivedAt: new Date().toISOString(),
     },
+  };
+
+  if (!options.authorizationResolver) {
+    return context;
+  }
+
+  const authorization = await options.authorizationResolver(context);
+
+  return {
+    ...context,
+    membership: {
+      ...context.membership,
+      permissions: authorization.permissions,
+    },
+    entitlements: authorization.entitlements ?? context.entitlements,
   };
 }
