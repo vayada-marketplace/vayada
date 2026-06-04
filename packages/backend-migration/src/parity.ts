@@ -41,17 +41,23 @@ export type ParityConfig = {
 type ExpectedTarget = {
   counts: Record<string, number>;
   idStability: Record<string, string[]>;
-  // uniquenessChecks is intentionally not declared here: the checks are hardcoded
-  // in checkUniqueness() below for the identity domain. A future ticket should
-  // make this configurable when additional domains are added.
+  uniquenessChecks?: string[];
 };
+
+const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function parseTableRef(
   tableRef: string,
   findings: ParityFinding[],
 ): { schema: string; table: string } | null {
   const parts = tableRef.split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+  if (
+    parts.length !== 2 ||
+    !parts[0] ||
+    !parts[1] ||
+    !SAFE_IDENTIFIER.test(parts[0]) ||
+    !SAFE_IDENTIFIER.test(parts[1])
+  ) {
     findings.push({
       severity: "fail",
       code: "INVALID_FIXTURE_CONFIG",
@@ -129,48 +135,60 @@ async function checkIdStability(
 // in external_identities and (organization_id, user_id) uniqueness in memberships.
 // These mirror the constraints in 0001_identity.sql and catch data that bypassed
 // constraints during a legacy migration or pg_restore with deferred constraints.
-async function checkUniqueness(client: pg.Client, findings: ParityFinding[]): Promise<void> {
-  const extIdDupes = await client.query<{ count: string }>(`
-    SELECT count(*)::text FROM (
-      SELECT provider, provider_user_id
-      FROM identity.external_identities
-      WHERE provider_user_id IS NOT NULL
-      GROUP BY provider, provider_user_id
-      HAVING count(*) > 1
-    ) AS dupes
-  `);
-  if (parseInt(extIdDupes.rows[0].count, 10) > 0) {
-    findings.push({
-      severity: "fail",
-      code: "UNIQUENESS_VIOLATION",
-      owner: "Identity/auth",
-      targetObject: "identity.external_identities",
-      message: "Duplicate (provider, provider_user_id) pairs found",
-      expected: "0 duplicate pairs",
-      actual: `${extIdDupes.rows[0].count} duplicate pair(s)`,
-      suggestedAction: "Deduplicate source external identity rows before migration.",
-    });
+// Only runs the checks listed in expected.uniquenessChecks; runs all if the field is absent.
+async function checkUniqueness(
+  client: pg.Client,
+  expected: ExpectedTarget,
+  findings: ParityFinding[],
+): Promise<void> {
+  const checks = expected.uniquenessChecks;
+  const runAll = !checks;
+
+  if (runAll || checks.includes("external_identities")) {
+    const extIdDupes = await client.query<{ count: string }>(`
+      SELECT count(*)::text FROM (
+        SELECT provider, provider_user_id
+        FROM identity.external_identities
+        WHERE provider_user_id IS NOT NULL
+        GROUP BY provider, provider_user_id
+        HAVING count(*) > 1
+      ) AS dupes
+    `);
+    if (parseInt(extIdDupes.rows[0].count, 10) > 0) {
+      findings.push({
+        severity: "fail",
+        code: "UNIQUENESS_VIOLATION",
+        owner: "Identity/auth",
+        targetObject: "identity.external_identities",
+        message: "Duplicate (provider, provider_user_id) pairs found",
+        expected: "0 duplicate pairs",
+        actual: `${extIdDupes.rows[0].count} duplicate pair(s)`,
+        suggestedAction: "Deduplicate source external identity rows before migration.",
+      });
+    }
   }
 
-  const membershipDupes = await client.query<{ count: string }>(`
-    SELECT count(*)::text FROM (
-      SELECT organization_id, user_id
-      FROM identity.organization_memberships
-      GROUP BY organization_id, user_id
-      HAVING count(*) > 1
-    ) AS dupes
-  `);
-  if (parseInt(membershipDupes.rows[0].count, 10) > 0) {
-    findings.push({
-      severity: "fail",
-      code: "UNIQUENESS_VIOLATION",
-      owner: "Identity/auth",
-      targetObject: "identity.organization_memberships",
-      message: "Duplicate (organization_id, user_id) pairs found in memberships",
-      expected: "0 duplicate pairs",
-      actual: `${membershipDupes.rows[0].count} duplicate pair(s)`,
-      suggestedAction: "Deduplicate membership rows before migration.",
-    });
+  if (runAll || checks.includes("organization_memberships")) {
+    const membershipDupes = await client.query<{ count: string }>(`
+      SELECT count(*)::text FROM (
+        SELECT organization_id, user_id
+        FROM identity.organization_memberships
+        GROUP BY organization_id, user_id
+        HAVING count(*) > 1
+      ) AS dupes
+    `);
+    if (parseInt(membershipDupes.rows[0].count, 10) > 0) {
+      findings.push({
+        severity: "fail",
+        code: "UNIQUENESS_VIOLATION",
+        owner: "Identity/auth",
+        targetObject: "identity.organization_memberships",
+        message: "Duplicate (organization_id, user_id) pairs found in memberships",
+        expected: "0 duplicate pairs",
+        actual: `${membershipDupes.rows[0].count} duplicate pair(s)`,
+        suggestedAction: "Deduplicate membership rows before migration.",
+      });
+    }
   }
 }
 
@@ -193,7 +211,7 @@ export async function runParityChecks(config: ParityConfig): Promise<ParityRepor
   try {
     await checkRowCounts(client, expected, findings);
     await checkIdStability(client, expected, findings);
-    await checkUniqueness(client, findings);
+    await checkUniqueness(client, expected, findings);
   } finally {
     await client.end();
   }

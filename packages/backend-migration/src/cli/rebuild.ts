@@ -81,10 +81,10 @@ if (result.applied.length > 0) {
 if (result.applied.length === 0 && !result.failed) {
   console.log("No migrations to apply.");
 }
-if (fixtures) {
-  console.log(`Fixtures: loaded "${fixtures}"`);
-}
 if (result.failed) {
   console.error(`Failed at version ${result.failed}. See platform.schema_migrations for details.`);
   process.exit(1);
+}
+if (fixtures) {
+  console.log(`Fixtures: loaded "${fixtures}"`);
 }

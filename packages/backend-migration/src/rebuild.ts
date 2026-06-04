@@ -29,6 +29,12 @@ export async function rebuild(config: RebuildConfig): Promise<RunResult> {
     );
   }
 
+  const hasFixtureCase = config.fixtureCase !== undefined;
+  const hasFixturesDir = config.fixturesDir !== undefined;
+  if (hasFixtureCase !== hasFixturesDir) {
+    throw new Error("fixtureCase and fixturesDir must both be provided or both omitted.");
+  }
+
   const client = new pg.Client({ connectionString: config.connectionString });
   await client.connect();
 
@@ -44,7 +50,7 @@ export async function rebuild(config: RebuildConfig): Promise<RunResult> {
 
     const result = await applyMigrations(config, client);
 
-    if (config.fixtureCase && config.fixturesDir) {
+    if (config.fixtureCase && config.fixturesDir && !result.failed) {
       await loadFixtureCase(
         { fixtureCase: config.fixtureCase, fixturesDir: config.fixturesDir },
         client,
