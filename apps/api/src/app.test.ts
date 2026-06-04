@@ -105,6 +105,18 @@ describe("vayada-api", () => {
             return ["booking.settings.manage"];
           },
         },
+        entitlementRepository: {
+          async findEntitlementsForContext(context) {
+            expect(context.selectedOrganization.organizationId).toBe("org_hotel_group");
+            return [
+              {
+                product: "booking",
+                key: "booking-engine",
+                status: "active",
+              },
+            ];
+          },
+        },
       },
     });
 
@@ -113,12 +125,14 @@ describe("vayada-api", () => {
       return {
         userId: context.actor.internalUserId,
         permissions: context.membership.permissions,
+        entitlements: context.entitlements,
       };
     });
 
     const response = await injectJson<{
       userId: string;
       permissions: string[];
+      entitlements: Array<{ product: string; key: string; status: string }>;
     }>(app, {
       method: "GET",
       url: "/protected-context",
@@ -131,6 +145,13 @@ describe("vayada-api", () => {
     expect(response.body).toEqual({
       userId: "user_hotel_owner",
       permissions: ["booking.settings.manage"],
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "active",
+        },
+      ],
     });
   });
 });

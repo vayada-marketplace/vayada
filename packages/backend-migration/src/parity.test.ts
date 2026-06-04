@@ -126,7 +126,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
     }
   });
 
-  it("applies 0001_identity.sql and loads the fixture without error", async () => {
+  it("applies identity migrations and loads the fixture without error", async () => {
     const result = await rebuild({
       connectionString: TEST_DATABASE_URL!,
       migrationsDir: MIGRATIONS_DIR,
@@ -136,7 +136,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
       fixturesDir: FIXTURES_DIR,
     });
 
-    expect(result.applied).toEqual(["0001"]);
+    expect(result.applied).toEqual(["0001", "0002", "0003"]);
     expect(result.failed).toBeNull();
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -149,6 +149,11 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
         `SELECT count(*)::int AS count FROM identity.permission_catalog`,
       );
       expect(perms.rows[0].count).toBe(8);
+
+      const entitlements = await client.query(
+        `SELECT count(*)::int AS count FROM identity.product_entitlements`,
+      );
+      expect(entitlements.rows[0].count).toBe(2);
     } finally {
       await client.end();
     }

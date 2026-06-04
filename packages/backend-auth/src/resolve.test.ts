@@ -131,7 +131,7 @@ describe("resolveRequestContext", () => {
     expect(ctx.entitlements).toEqual([]);
   });
 
-  it("populates permissions through an authorization resolver when provided", async () => {
+  it("populates authorization data through a resolver when provided", async () => {
     const repo = fakeRepo({ user: USER, org: ORG, membership: MEMBERSHIP, resources: RESOURCES });
     const ctx = await resolveRequestContext(SESSION, repo, {
       ...OPTIONS,
@@ -142,12 +142,45 @@ describe("resolveRequestContext", () => {
 
         return {
           permissions: ["booking.settings.manage", "pms.booking.update"],
+          entitlements: [
+            {
+              product: "booking",
+              key: "booking-engine",
+              status: "active",
+            },
+            {
+              product: "pms",
+              key: "pms-core",
+              status: "active",
+              resource: {
+                product: "pms",
+                resourceType: "pms_hotel",
+                resourceId: "pms_hotel_alpenrose",
+              },
+            },
+          ],
         };
       },
     });
 
     expect(ctx.membership.permissions).toEqual(["booking.settings.manage", "pms.booking.update"]);
-    expect(ctx.entitlements).toEqual([]);
+    expect(ctx.entitlements).toEqual([
+      {
+        product: "booking",
+        key: "booking-engine",
+        status: "active",
+      },
+      {
+        product: "pms",
+        key: "pms-core",
+        status: "active",
+        resource: {
+          product: "pms",
+          resourceType: "pms_hotel",
+          resourceId: "pms_hotel_alpenrose",
+        },
+      },
+    ]);
   });
 
   it("uses default locale and currency when not provided", async () => {

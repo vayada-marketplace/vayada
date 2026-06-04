@@ -1,6 +1,7 @@
 import { backendAuthPlugin, type BackendAuthPluginOptions } from "@vayada/backend-auth";
 import {
   createAuthorizationResolver,
+  type EntitlementRepository,
   type RolePermissionRepository,
 } from "@vayada/backend-authorization";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
@@ -10,6 +11,7 @@ import { registerHealthRoutes } from "./routes/health.js";
 
 type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
+  entitlementRepository?: EntitlementRepository;
 };
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
@@ -24,10 +26,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   });
 
   if (options.auth) {
-    const { rolePermissionRepository, ...authOptions } = options.auth;
+    const { rolePermissionRepository, entitlementRepository, ...authOptions } = options.auth;
     app.register(backendAuthPlugin, {
       ...authOptions,
-      authorizationResolver: createAuthorizationResolver(rolePermissionRepository),
+      authorizationResolver: createAuthorizationResolver(
+        rolePermissionRepository,
+        entitlementRepository,
+      ),
     });
   }
 

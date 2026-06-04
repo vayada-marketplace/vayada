@@ -5,6 +5,7 @@
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
     "identity.organization_resource_links": 2,
+    "identity.product_entitlements": 2,
     "identity.permission_catalog": 8,
     "identity.role_permission_grants": 8
   },
