@@ -65,6 +65,9 @@ Contract slices:
 - target schema ownership map for identity, hotel catalog, booking, PMS,
   marketplace, finance, distribution/bookability, Ask Intelligence, jobs, and
   audit: `engineering/target-schema-ownership-map.md`
+- migration and parity harness design for target rebuilds, source-to-target
+  checks, mismatch reports, and explicit SQL migration application:
+  `engineering/migration-parity-harness.md`
 - public bookability profile and quote contract
 - Ask Intelligence evidence and answer envelope contract
 - jobs/events idempotency, retry, failure visibility, and audit contract
@@ -180,6 +183,7 @@ criteria:
      reports, and go/no-go failures.
    - Validation: harness design explains how ambiguous ownership and public PII
      leaks fail.
+   - Output: `engineering/migration-parity-harness.md`.
 
 5. **Scaffold `apps/api`**
    - Add health/readiness, route groups, minimal shared packages, build,
@@ -211,4 +215,5 @@ criteria:
 - `engineering/typescript-backend-structure.md`
 - `engineering/backend-database-restructure.md`
 - `engineering/target-schema-ownership-map.md`
+- `engineering/migration-parity-harness.md`
 - `.agents/skills/typescript-rewrite-workflow/SKILL.md`
