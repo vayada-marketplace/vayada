@@ -129,7 +129,7 @@ async def send_guest_confirmation(guest_email: str, booking: dict):
     subject = f"Booking Confirmed — {booking['booking_reference']}"
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
-    <p class="detail">Great news — your booking at <strong>{booking["hotel_name"]}</strong> has been confirmed by the hotel.</p>
+    <p class="detail">Great news — we have confirmed your booking at <strong>{booking["hotel_name"]}</strong>.</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -147,7 +147,7 @@ async def send_guest_cancellation(guest_email: str, booking: dict):
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
-    <p class="detail">If you have any questions, please contact the hotel directly.</p>
+    <p class="detail">If you have any questions, please contact us directly.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -362,12 +362,12 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
         <h2>PayPal Payment Pending</h2>
         <p class="detail">Your booking at <strong>{booking["hotel_name"]}</strong> is not confirmed yet.</p>
         {f'<p class="detail"><strong>Send payment to:</strong> {paypal_email}</p>' if paypal_email else ""}
-        <p class="detail">Please send the total amount by PayPal and include your booking reference in the PayPal note so the property can match it.</p>
+        <p class="detail">Please send the total amount by PayPal and include your booking reference in the PayPal note so we can match it.</p>
         <hr class="divider">
         {_booking_details_html(booking)}
         {deadline_html}
         <hr class="divider">
-        <p class="detail">The property will confirm your booking once they verify the payment. If payment is not received by the deadline, the booking will be cancelled automatically.</p>
+        <p class="detail">We'll confirm your booking once we verify the payment. If payment is not received by the deadline, the booking will be cancelled automatically.</p>
         {_my_booking_button_html(booking, guest_email)}
         """
         await _send_email(guest_email, subject, _wrap_html(content))
@@ -377,12 +377,12 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
     content = f"""
     <h2>Booking Request Submitted</h2>
     <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
-    <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
+    <p class="detail">We'll review your request and respond within <strong>24 hours</strong>.</p>
     {_bank_transfer_details_html(booking)}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
-    <p class="detail">You will receive an email once the host responds. You can also check your booking status using your reference number.</p>
+    <p class="detail">You will receive an email once we respond. You can also check your booking status using your reference number.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -400,13 +400,13 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
 
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
-    <p class="detail">Great news — your booking at <strong>{booking["hotel_name"]}</strong> has been accepted by the host.</p>
+    <p class="detail">Great news — we have accepted your booking at <strong>{booking["hotel_name"]}</strong>.</p>
     <p class="detail">{payment_note}</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
-    <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
+    <p class="detail">We'll contact you shortly with your confirmation documents and all the details for your stay.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -427,7 +427,7 @@ async def send_guest_booking_rejected(guest_email: str, booking: dict, reason: s
     subject = f"Booking Request Declined — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Declined</h2>
-    <p class="detail">Unfortunately, your booking request at <strong>{booking["hotel_name"]}</strong> was declined by the host.</p>
+    <p class="detail">Unfortunately, we declined your booking request at <strong>{booking["hotel_name"]}</strong>.</p>
     {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
     {reason_html}
     <hr class="divider">
@@ -449,7 +449,7 @@ async def send_guest_booking_expired(guest_email: str, booking: dict):
     subject = f"Booking Request Expired — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Expired</h2>
-    <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has expired because the host did not respond within 24 hours.</p>
+    <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has expired because we did not respond within 24 hours.</p>
     {"<p class='detail'>" + refund_note + "</p>" if refund_note else ""}
     <hr class="divider">
     {_booking_details_html(booking)}
@@ -499,7 +499,7 @@ async def send_guest_cancellation_refund(
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">{refund_text}</p>
-    <p class="detail">If you have any questions, please contact the hotel directly.</p>
+    <p class="detail">If you have any questions, please contact us directly.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -545,7 +545,7 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
-    <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
+    <p class="detail">We'll contact you shortly with your confirmation documents and all the details for your stay.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -687,7 +687,7 @@ async def send_guest_payment_confirmed(
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
-    <p class="detail">Thank you for your payment. You will receive a separate confirmation once the host reviews your booking.</p>
+    <p class="detail">Thank you for your payment. You will receive a separate confirmation once we review your booking.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -847,11 +847,11 @@ async def send_guest_change_request_received(guest_email: str, booking: dict, ch
     content = f"""
     <h2>Change Request Received</h2>
     <p class="detail">We've received your change request for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
-    <p class="detail">The host will review it shortly. We'll email you as soon as they respond.</p>
+    <p class="detail">We'll review it shortly and email you as soon as we respond.</p>
     <hr class="divider">
     {_change_diff_html(booking, change_request)}
     <hr class="divider">
-    <p class="detail">Until the host approves, your booking remains as it currently is.</p>
+    <p class="detail">Until we approve it, your booking remains as it currently is.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -867,14 +867,14 @@ async def send_guest_change_request_approved(guest_email: str, booking: dict, ch
             f"payment using the same payment method as the original booking."
         )
     elif diff < 0:
-        payment_note = "Your booking total decreased. Any refund will be processed by the property."
+        payment_note = "Your booking total decreased. We'll process any refund."
     else:
         payment_note = ""
 
     subject = f"Change Request Approved — {booking['booking_reference']}"
     content = f"""
     <h2>Change Request Approved</h2>
-    <p class="detail">Good news — the host approved your change for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
+    <p class="detail">Good news — we approved your change for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
     <hr class="divider">
     {_change_diff_html(booking, change_request)}
     <hr class="divider">
@@ -895,7 +895,7 @@ async def send_guest_change_request_declined(guest_email: str, booking: dict, ch
     subject = f"Change Request Declined — {booking['booking_reference']}"
     content = f"""
     <h2>Change Request Declined</h2>
-    <p class="detail">The host declined your change request for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
+    <p class="detail">We declined your change request for booking <strong>{booking["booking_reference"]}</strong> at <strong>{booking["hotel_name"]}</strong>.</p>
     {reason_html}
     <p class="detail">Your original booking remains unchanged.</p>
     <hr class="divider">

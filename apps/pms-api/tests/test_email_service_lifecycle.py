@@ -7,7 +7,11 @@ from app.services import email_service
 from app.services.email_service import (
     _render_request_status_email,
     send_booking_request_notification,
+    send_guest_booking_accepted,
+    send_guest_booking_expired,
+    send_guest_booking_rejected,
     send_guest_booking_requested,
+    send_guest_payment_confirmed,
     send_host_booking_accepted,
     send_host_booking_expired,
     send_host_booking_rejected,
@@ -168,6 +172,70 @@ async def test_guest_bank_transfer_request_email_includes_full_bank_details():
     assert "DE89370400440532013000" in html
     assert "VAYADEF0" in html
     assert "VAY-ABC123" in html
+
+
+@pytest.mark.asyncio
+async def test_guest_booking_request_email_uses_property_voice():
+    sent = []
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, subject, html_body))
+
+    with patch.object(email_service, "_send_email", side_effect=fake_send):
+        await send_guest_booking_requested("alice@example.com", BOOKING)
+
+    html = sent[0][2]
+    assert "We'll review your request and respond" in html
+    assert "once we respond" in html
+    assert "The host will review" not in html
+    assert "once the host responds" not in html
+
+
+@pytest.mark.asyncio
+async def test_guest_paypal_request_email_uses_property_voice():
+    sent = []
+    booking = {
+        **BOOKING,
+        "payment_method": "paypal",
+        "paypal_email": "pay@hotel.example",
+        "host_response_deadline": "2026-06-02T12:00:00Z",
+    }
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, subject, html_body))
+
+    with patch.object(email_service, "_send_email", side_effect=fake_send):
+        await send_guest_booking_requested("alice@example.com", booking)
+
+    html = sent[0][2]
+    assert "so we can match it" in html
+    assert "We'll confirm your booking once we verify the payment" in html
+    assert "so the property can match it" not in html
+    assert "The property will confirm" not in html
+
+
+@pytest.mark.asyncio
+async def test_guest_lifecycle_emails_use_property_voice():
+    sent = []
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((subject, html_body))
+
+    with patch.object(email_service, "_send_email", side_effect=fake_send):
+        await send_guest_booking_accepted("alice@example.com", BOOKING)
+        await send_guest_booking_rejected("alice@example.com", BOOKING)
+        await send_guest_booking_expired("alice@example.com", BOOKING)
+        await send_guest_payment_confirmed("alice@example.com", BOOKING, 450.0, "card")
+
+    html = "\n".join(body for (_subject, body) in sent)
+    assert "we have accepted your booking" in html
+    assert "we declined your booking request" in html
+    assert "because we did not respond" in html
+    assert "once we review your booking" in html
+    assert "accepted by the host" not in html
+    assert "declined by the host" not in html
+    assert "because the host did not respond" not in html
+    assert "once the host reviews" not in html
 
 
 @pytest.mark.asyncio

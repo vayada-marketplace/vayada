@@ -130,7 +130,7 @@ export default function StripeConfirmStep({
               ? t("confirmPaymentDescInstant") ||
                 "Complete your payment to confirm the booking. Your card will be charged now."
               : t("confirmPaymentDesc") ||
-                "Complete your payment to submit the booking request. Your card will be authorized but not charged until the host accepts."}
+                "Complete your payment to submit the booking request. Your card will be authorized but not charged until we accept."}
           </p>
 
           <div className="mb-6 p-4 bg-accent rounded-xl space-y-2">
@@ -238,7 +238,7 @@ export default function StripeConfirmStep({
             {depositRequired
               ? `Your card is charged ${formatPrice(depositAmount, selectedCurrency)} now. The remaining balance is paid at the property.`
               : t("authorizationNote") ||
-                "Your card will only be charged if the host accepts your booking within 24 hours."}
+                "Your card will only be charged if we accept your booking within 24 hours."}
           </p>
         </div>
       </div>
