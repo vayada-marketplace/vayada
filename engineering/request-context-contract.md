@@ -93,14 +93,44 @@ resource, and a resource link alone does not authorize an action.
 Authenticated route slices should:
 
 1. Resolve `RequestContext` before calling domain services.
-2. Pass `RequestContext` or a narrowed domain-specific context into application
+2. Enforce route policy at the route boundary with
+   `apps/api/src/routes/policy.ts` `enforceRoutePolicy`.
+3. Pass `RequestContext` or a narrowed domain-specific context into application
    services.
-3. Reject requests that cannot resolve selected organization, membership,
+4. Reject requests that cannot resolve selected organization, membership,
    permission, and linked resource context.
-4. Add contract fixtures before adding a new scope, permission family, or
+5. Add contract fixtures before adding a new scope, permission family, or
    resource type.
-5. Record audit metadata from the context for mutating or sensitive reads.
+6. Record audit metadata from the context for mutating or sensitive reads.
+
+Protected product route handlers in `apps/api/src/routes/**` should start by
+calling `enforceRoutePolicy(request, { ... })` with the route's permission,
+entitlement, and resource requirement. Direct `requireAuthContext` usage inside
+product route handlers is allowed only for public routes or a documented
+exception in the PR. Reviewers should treat an unprotected product route as a
+blocker unless the route is explicitly public.
+
+Every protected route adapter must cover the route-policy denial matrix:
+
+- missing or invalid authentication returns `401`;
+- missing permission returns `403`;
+- missing entitlement returns `403`;
+- inactive entitlement returns `403`;
+- missing linked-resource access returns `403`;
+- valid authentication, permission, entitlement, and resource access succeeds.
 
 Do not add product route behavior that depends directly on `users.type`,
 `is_superadmin`, direct product `user_id` ownership, or hidden `X-Hotel-Id`
 state.
+
+## Contract and Parity
+
+Route adapters should be contract-led, not route-port-led. Before migrating a
+legacy FastAPI behavior into `apps/api`, define the request shape, response
+shape, error cases, and route policy that the TypeScript adapter must satisfy.
+
+If legacy behavior is correct and expected, preserve it with parity or
+compatibility tests. If legacy behavior is unsafe or incorrect, improve it
+explicitly: document the intentional divergence in the Linear issue or PR and
+cover the new behavior with tests. Do not silently change legacy behavior during
+a broad route migration.
