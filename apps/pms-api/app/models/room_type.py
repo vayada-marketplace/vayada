@@ -190,6 +190,37 @@ def _validate_season_rates(seasons: list) -> list:
     return seasons
 
 
+def _validate_season_stay_restrictions(seasons: list) -> list:
+    """Normalize and validate per-season min/max stay restrictions."""
+    for s in seasons:
+        raw_min = s.get("minStay", s.get("min_stay", 1))
+        try:
+            min_stay = 1 if raw_min is None or raw_min == "" else int(raw_min)
+        except (TypeError, ValueError) as e:
+            raise ValueError("Min stay must be a positive integer") from e
+        if min_stay < 1:
+            raise ValueError("Min stay must be a positive integer")
+        s["minStay"] = min_stay
+
+        raw_max = s.get("maxStay", s.get("max_stay"))
+        if raw_max in (None, ""):
+            s["maxStay"] = None
+            continue
+        try:
+            max_stay = int(raw_max)
+        except (TypeError, ValueError) as e:
+            raise ValueError("Max stay must be 0 or a positive integer") from e
+        if max_stay < 0:
+            raise ValueError("Max stay must be 0 or a positive integer")
+        if max_stay == 0:
+            s["maxStay"] = None
+            continue
+        if max_stay < min_stay:
+            raise ValueError("Max stay cannot be less than min stay.")
+        s["maxStay"] = max_stay
+    return seasons
+
+
 _DAYS_IN_MONTH = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)  # leap-year so Feb 29 is valid
 _TOTAL_DAYS = sum(_DAYS_IN_MONTH)
 
@@ -400,6 +431,7 @@ class RoomTypeCreate(BaseModel):
     def validate_seasons(cls, v: list[dict]) -> list[dict]:
         _normalize_season_dates(v)
         _validate_season_rates(v)
+        _validate_season_stay_restrictions(v)
         _validate_no_season_overlap(v)
         return v
 
@@ -535,6 +567,7 @@ class RoomTypeUpdate(BaseModel):
         if v is not None:
             _normalize_season_dates(v)
             _validate_season_rates(v)
+            _validate_season_stay_restrictions(v)
             _validate_no_season_overlap(v)
         return v
 
@@ -655,7 +688,8 @@ class RoomTypeAdminResponse(BaseModel):
 
 class UnavailableDatesResponse(BaseModel):
     """Public /api/hotels/{slug}/unavailable-dates: dates where every room
-    type is fully booked, plus per-arrival min-stay constraints."""
+    type is fully booked, plus per-arrival stay-length constraints."""
 
     dates: list[str] = []
     min_stay_by_arrival: dict[str, int] = {}
+    max_stay_by_arrival: dict[str, int] = {}

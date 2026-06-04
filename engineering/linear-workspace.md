@@ -132,7 +132,7 @@ Why this exists. What triggered it. What problem it solves.
 - **Area label** (at least one — DX/AI-Agents/CI-CD/Repo-Strategy/Docs/Platform/Frontend/Backend).
 - **Project**, if part of an initiative.
 - **Priority** — `No priority` is acceptable for untriaged backlog; everything else should have one.
-- **Assignee** — once picked up.
+- **Assignee** — always required. Do not create unassigned tickets; ask for the owner if it is not obvious.
 
 ### Tone
 

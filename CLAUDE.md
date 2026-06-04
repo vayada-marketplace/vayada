@@ -8,3 +8,9 @@ Claude Code wrapper for the vayada monorepo.
 
 - **Skills.** Project skills live at `.agents/skills/<name>/SKILL.md`. They are shared with Codex and any other agent rather than duplicated per tool. The bootstrap skill at `.agents/skills/vayada-skills-storage/SKILL.md` documents where new skills go.
 - **Deferred tools.** Many MCP/built-in tools are deferred and not present in the initial tool list. Before claiming a tool is missing, check the deferred-tools system-reminder and load it via `ToolSearch`.
+
+## Linear
+
+This project uses the **Vayada** Linear workspace (team key: VAY).
+
+- Use `mcp__linear__*` tools for all Linear operations in this repo

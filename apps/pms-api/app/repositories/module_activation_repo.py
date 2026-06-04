@@ -44,9 +44,13 @@ class ModuleActivationRepository:
                 END,
                 deactivated_at = CASE
                     WHEN EXCLUDED.is_active THEN NULL
-                    ELSE NOW()
+                    WHEN property_module_activations.is_active THEN NOW()
+                    ELSE property_module_activations.deactivated_at
                 END,
-                updated_at = NOW()
+                updated_at = CASE
+                    WHEN property_module_activations.is_active IS DISTINCT FROM EXCLUDED.is_active THEN NOW()
+                    ELSE property_module_activations.updated_at
+                END
             RETURNING module_id, is_active, activated_at, deactivated_at, updated_at
             """,
             hotel_id,

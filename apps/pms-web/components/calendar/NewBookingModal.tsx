@@ -39,16 +39,20 @@ const CHANNELS = [
 // Direct and Other are always offered regardless of channel-manager state.
 const ALWAYS_SHOWN_CHANNELS = new Set(["direct", "other"]);
 
-// Returns the YYYY-MM-DD string one day after the given YYYY-MM-DD string.
+// Returns a YYYY-MM-DD string offset by the given day count.
 // Parsed as local date so DST / timezone doesn't shift the result.
-function addOneDay(date: string): string {
+function addDays(date: string, days: number): string {
   const [y, m, d] = date.split("-").map(Number);
   if (!y || !m || !d) return "";
-  const next = new Date(y, m - 1, d + 1);
+  const next = new Date(y, m - 1, d + days);
   const yyyy = next.getFullYear();
   const mm = String(next.getMonth() + 1).padStart(2, "0");
   const dd = String(next.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function addOneDay(date: string): string {
+  return addDays(date, 1);
 }
 
 function nightsBetween(start: string, end: string): number {
@@ -59,6 +63,57 @@ function nightsBetween(start: string, end: string): number {
   const a = new Date(ys, ms - 1, ds).getTime();
   const b = new Date(ye, me - 1, de).getTime();
   return Math.round((b - a) / 86_400_000);
+}
+
+function seasonContainsDate(
+  season: CalendarRoomType["seasons"][number],
+  dateString: string,
+): boolean {
+  const from = season.from?.length > 5 ? season.from.slice(5) : season.from;
+  const to = season.to?.length > 5 ? season.to.slice(5) : season.to;
+  if (!from || !to) return false;
+  const mmdd = dateString.slice(5);
+  return from > to ? mmdd >= from || mmdd <= to : mmdd >= from && mmdd <= to;
+}
+
+function parseMaxStay(value: number | string | null | undefined): number | null {
+  const parsed = Number(value || 0);
+  return parsed > 0 ? parsed : null;
+}
+
+function maxStayForRange(
+  seasons: CalendarRoomType["seasons"],
+  checkIn: string,
+  checkOut: string,
+): number | null {
+  const limits: number[] = [];
+  let current = checkIn;
+  while (current < checkOut) {
+    const season = seasons.find((s) => seasonContainsDate(s, current));
+    const limit = parseMaxStay(season?.maxStay);
+    if (limit) limits.push(limit);
+    current = addOneDay(current);
+  }
+  return limits.length > 0 ? Math.min(...limits) : null;
+}
+
+function latestCheckoutForArrival(
+  seasons: CalendarRoomType["seasons"],
+  checkIn: string,
+  horizonDays = 366,
+): string | null {
+  const limits: number[] = [];
+  for (let nights = 1; nights <= horizonDays; nights += 1) {
+    const stayDate = addDays(checkIn, nights - 1);
+    const season = seasons.find((s) => seasonContainsDate(s, stayDate));
+    const limit = parseMaxStay(season?.maxStay);
+    if (limit) limits.push(limit);
+    const effectiveMax = limits.length > 0 ? Math.min(...limits) : null;
+    if (effectiveMax && nights > effectiveMax) {
+      return addDays(checkIn, nights - 1);
+    }
+  }
+  return limits.length > 0 ? addDays(checkIn, Math.min(...limits)) : null;
 }
 
 export default function NewBookingModal({
@@ -196,6 +251,15 @@ export default function NewBookingModal({
   }
 
   const nights = nightsBetween(checkIn, checkOut);
+  const maxStayLimit =
+    selectedRoomType && checkIn && checkOut
+      ? maxStayForRange(selectedRoomType.seasons || [], checkIn, checkOut)
+      : null;
+  const exceedsMaxStay = maxStayLimit !== null && nights > maxStayLimit;
+  const checkoutMaxDate =
+    selectedRoomType && checkIn
+      ? latestCheckoutForArrival(selectedRoomType.seasons || [], checkIn)
+      : null;
   const totalGuests = adults + children;
   const overOccupancy = selectedRoomType != null && totalGuests > selectedRoomType.maxOccupancy;
   const rateNum = nightlyRate ? parseFloat(nightlyRate) : null;
@@ -219,6 +283,12 @@ export default function NewBookingModal({
     }
     if (checkOut <= checkIn) {
       setError("Check-out must be after check-in");
+      return;
+    }
+    if (exceedsMaxStay && maxStayLimit) {
+      setError(
+        `This room has a maximum stay of ${maxStayLimit} nights for the selected dates. Please shorten your stay.`,
+      );
       return;
     }
     if (!guestFirstName.trim() || !guestLastName.trim()) {
@@ -395,15 +465,24 @@ export default function NewBookingModal({
                   type="date"
                   value={checkOut}
                   onChange={(e) => setCheckOut(e.target.value)}
+                  min={checkIn ? addOneDay(checkIn) : undefined}
+                  max={checkoutMaxDate ?? undefined}
                   className={inputCls}
                   required
                 />
               </div>
             </div>
             {nights > 0 && (
-              <p className="text-xs text-gray-500">
-                {nights} night{nights !== 1 ? "s" : ""}
-              </p>
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500">
+                  {nights} night{nights !== 1 ? "s" : ""}
+                </p>
+                {exceedsMaxStay && maxStayLimit && (
+                  <p className="text-xs font-medium text-amber-700">
+                    This room has a maximum stay of {maxStayLimit} nights for the selected dates.
+                  </p>
+                )}
+              </div>
             )}
           </div>
         </section>

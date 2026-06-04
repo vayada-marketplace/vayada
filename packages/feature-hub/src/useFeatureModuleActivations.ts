@@ -19,7 +19,10 @@ function storageKey(hotelId?: string): string {
 function readCached(hotelId?: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(window.localStorage.getItem(storageKey(hotelId)) || "[]");
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey(hotelId)) || "[]");
+    return Array.isArray(parsed) && parsed.every((id): id is string => typeof id === "string")
+      ? parsed
+      : [];
   } catch {
     return [];
   }
@@ -38,7 +41,13 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
   const [hotelId, setHotelId] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const clientRef = useRef(client);
   const mounted = useRef(true);
+
+  // Keep refresh stable while still using the latest client implementation.
+  useEffect(() => {
+    clientRef.current = client;
+  }, [client]);
 
   useEffect(() => {
     mounted.current = true;
@@ -58,7 +67,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
     setLoading(true);
     setError("");
     try {
-      const response = await client.list();
+      const response = await clientRef.current.list();
       if (!mounted.current) return;
       applyResponse(response);
     } catch (err) {
@@ -69,7 +78,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
     } finally {
       if (mounted.current) setLoading(false);
     }
-  }, [applyResponse, client]);
+  }, [applyResponse]);
 
   useEffect(() => {
     refresh();
@@ -116,14 +125,14 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
       setActiveModuleIds(next);
       publish(next, hotelId);
       try {
-        await client.update(moduleId, isActive);
+        await clientRef.current.update(moduleId, isActive);
       } catch (err) {
         setActiveModuleIds(previous);
         publish(previous, hotelId);
         throw err;
       }
     },
-    [activeModuleIds, client, hotelId],
+    [activeModuleIds, hotelId],
   );
 
   const activeModuleSet = useMemo(() => new Set(activeModuleIds), [activeModuleIds]);

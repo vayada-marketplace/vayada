@@ -1,22 +1,16 @@
 "use client";
 
-import {
-  FeatureHubPage,
-  type FeatureActivationClient,
-  type ModuleActivation,
-  type ModuleActivationsResponse,
-} from "@vayada/feature-hub";
-import { pmsClient } from "@/services/api/pmsClient";
+import { FeatureHubPage, type FeatureProduct } from "@vayada/feature-hub";
+import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
-const activationClient: FeatureActivationClient = {
-  list: () => pmsClient.get<ModuleActivationsResponse>("/admin/module-activations"),
-  update: (moduleId: string, isActive: boolean) =>
-    pmsClient.patch<ModuleActivation>(`/admin/module-activations/${moduleId}`, {
-      moduleId,
-      isActive,
-    }),
-};
+const PRODUCTS: FeatureProduct[] = ["pms"];
 
 export default function PmsFeatureHubRoute() {
-  return <FeatureHubPage activationClient={activationClient} initialProduct="pms" />;
+  return (
+    <FeatureHubPage
+      activationClient={moduleActivationClient}
+      initialProduct="pms"
+      products={PRODUCTS}
+    />
+  );
 }
