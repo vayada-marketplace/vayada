@@ -2,10 +2,20 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runMigrations, type MigrationEnvironment } from "../runner.js";
+import { MIGRATION_ENVIRONMENTS, runMigrations, type MigrationEnvironment } from "../runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
+
+function assertValidEnvironment(value: string): MigrationEnvironment {
+  if ((MIGRATION_ENVIRONMENTS as readonly string[]).includes(value)) {
+    return value as MigrationEnvironment;
+  }
+  console.error(
+    `Error: invalid --env "${value}". Must be one of: ${MIGRATION_ENVIRONMENTS.join(", ")}.`,
+  );
+  process.exit(1);
+}
 
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;
@@ -19,7 +29,7 @@ function parseArgs(argv: string[]): {
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]) {
-      env = args[++i] as MigrationEnvironment;
+      env = assertValidEnvironment(args[++i]);
     } else if (args[i] === "--connection-string" && args[i + 1]) {
       connectionString = args[++i];
     } else if (args[i] === "--migrations-dir" && args[i + 1]) {

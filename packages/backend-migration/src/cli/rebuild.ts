@@ -3,12 +3,22 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { rebuild } from "../rebuild.js";
-import { type MigrationEnvironment } from "../runner.js";
+import { MIGRATION_ENVIRONMENTS, type MigrationEnvironment } from "../runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
 
-const ALL_SCHEMAS = ["platform"] as const;
+const DEFAULT_SCHEMAS = ["platform"] as const;
+
+function assertValidEnvironment(value: string): MigrationEnvironment {
+  if ((MIGRATION_ENVIRONMENTS as readonly string[]).includes(value)) {
+    return value as MigrationEnvironment;
+  }
+  console.error(
+    `Error: invalid --env "${value}". Must be one of: ${MIGRATION_ENVIRONMENTS.join(", ")}.`,
+  );
+  process.exit(1);
+}
 
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;
@@ -22,11 +32,11 @@ function parseArgs(argv: string[]): {
   let connectionString = process.env["TARGET_DATABASE_URL"] ?? "";
   let migrationsDir = DEFAULT_MIGRATIONS_DIR;
   let fixtures: string | null = null;
-  let schemas: string[] = [...ALL_SCHEMAS];
+  let schemas: string[] = [...DEFAULT_SCHEMAS];
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]) {
-      env = args[++i] as MigrationEnvironment;
+      env = assertValidEnvironment(args[++i]);
     } else if (args[i] === "--connection-string" && args[i + 1]) {
       connectionString = args[++i];
     } else if (args[i] === "--migrations-dir" && args[i + 1]) {
@@ -34,8 +44,16 @@ function parseArgs(argv: string[]): {
     } else if (args[i] === "--fixtures" && args[i + 1]) {
       fixtures = args[++i];
     } else if (args[i] === "--schemas" && args[i + 1]) {
-      schemas = args[++i].split(",").map((s) => s.trim());
+      schemas = args[++i]
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
     }
+  }
+
+  if (schemas.length === 0) {
+    console.error("Error: --schemas must specify at least one schema name.");
+    process.exit(1);
   }
 
   return { env, connectionString, migrationsDir, fixtures, schemas };

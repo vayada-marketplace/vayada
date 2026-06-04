@@ -1,6 +1,11 @@
 export {
+  ADVISORY_LOCK_ID,
+  MIGRATION_ENVIRONMENTS,
+  acquireAdvisoryLock,
+  applyMigrations,
   computeChecksum,
   discoverMigrations,
+  ensureLedgerTable,
   runMigrations,
   type LedgerRow,
   type MigrationEnvironment,

@@ -80,6 +80,16 @@ describe("discoverMigrations", () => {
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
+function assertSafeTestDatabase(url: string): void {
+  const dbName = new URL(url).pathname.replace(/^\//, "");
+  if (!/test/i.test(dbName)) {
+    throw new Error(
+      `Refusing to run destructive test cleanup against non-test database "${dbName}". ` +
+        `TEST_DATABASE_URL must point to a database with "test" in its name.`,
+    );
+  }
+}
+
 describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
   let tmpDir: string;
 
@@ -90,6 +100,8 @@ describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
 
   afterEach(async () => {
     await rm(tmpDir, { recursive: true, force: true });
+
+    assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
