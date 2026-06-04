@@ -204,6 +204,8 @@ criteria:
      audit records, and tenant scope rules.
    - Validation: fixture answers reference evidence and cannot cross tenant
      scope.
+   - Output: `engineering/ask-intelligence-evidence-contract.md` and
+     `engineering/fixtures/ask-intelligence-evidence/answers.json`.
 
 8. **Write cutover and rollback runbook**
    - Define coexistence, staging rehearsal gates, maintenance window,
