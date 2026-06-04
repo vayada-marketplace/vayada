@@ -2,20 +2,11 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { MIGRATION_ENVIRONMENTS, runMigrations, type MigrationEnvironment } from "../runner.js";
+import { runMigrations, type MigrationEnvironment } from "../runner.js";
+import { assertValidEnvironment } from "./utils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
-
-function assertValidEnvironment(value: string): MigrationEnvironment {
-  if ((MIGRATION_ENVIRONMENTS as readonly string[]).includes(value)) {
-    return value as MigrationEnvironment;
-  }
-  console.error(
-    `Error: invalid --env "${value}". Must be one of: ${MIGRATION_ENVIRONMENTS.join(", ")}.`,
-  );
-  process.exit(1);
-}
 
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;

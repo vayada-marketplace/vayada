@@ -3,27 +3,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { rebuild } from "../rebuild.js";
-import { MIGRATION_ENVIRONMENTS, type MigrationEnvironment } from "../runner.js";
+import { type MigrationEnvironment } from "../runner.js";
+import { assertValidEnvironment } from "./utils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
+const DEFAULT_FIXTURES_DIR = join(__dirname, "../../fixtures");
 
-const DEFAULT_SCHEMAS = ["platform"] as const;
-
-function assertValidEnvironment(value: string): MigrationEnvironment {
-  if ((MIGRATION_ENVIRONMENTS as readonly string[]).includes(value)) {
-    return value as MigrationEnvironment;
-  }
-  console.error(
-    `Error: invalid --env "${value}". Must be one of: ${MIGRATION_ENVIRONMENTS.join(", ")}.`,
-  );
-  process.exit(1);
-}
+const DEFAULT_SCHEMAS = ["platform", "identity"] as const;
 
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;
   connectionString: string;
   migrationsDir: string;
+  fixturesDir: string;
   fixtures: string | null;
   schemas: string[];
 } {
@@ -31,6 +24,7 @@ function parseArgs(argv: string[]): {
   let env: MigrationEnvironment = "local";
   let connectionString = process.env["TARGET_DATABASE_URL"] ?? "";
   let migrationsDir = DEFAULT_MIGRATIONS_DIR;
+  let fixturesDir = DEFAULT_FIXTURES_DIR;
   let fixtures: string | null = null;
   let schemas: string[] = [...DEFAULT_SCHEMAS];
 
@@ -41,6 +35,8 @@ function parseArgs(argv: string[]): {
       connectionString = args[++i];
     } else if (args[i] === "--migrations-dir" && args[i + 1]) {
       migrationsDir = args[++i];
+    } else if (args[i] === "--fixtures-dir" && args[i + 1]) {
+      fixturesDir = args[++i];
     } else if (args[i] === "--fixtures" && args[i + 1]) {
       fixtures = args[++i];
     } else if (args[i] === "--schemas" && args[i + 1]) {
@@ -56,10 +52,12 @@ function parseArgs(argv: string[]): {
     process.exit(1);
   }
 
-  return { env, connectionString, migrationsDir, fixtures, schemas };
+  return { env, connectionString, migrationsDir, fixturesDir, fixtures, schemas };
 }
 
-const { env, connectionString, migrationsDir, fixtures, schemas } = parseArgs(process.argv);
+const { env, connectionString, migrationsDir, fixturesDir, fixtures, schemas } = parseArgs(
+  process.argv,
+);
 
 if (!connectionString) {
   console.error("Error: TARGET_DATABASE_URL or --connection-string is required.");
@@ -67,7 +65,15 @@ if (!connectionString) {
 }
 
 console.log(`Dropping schemas: ${schemas.join(", ")}`);
-const result = await rebuild({ connectionString, migrationsDir, environment: env, schemas });
+
+const result = await rebuild({
+  connectionString,
+  migrationsDir,
+  environment: env,
+  schemas,
+  fixtureCase: fixtures ?? undefined,
+  fixturesDir: fixtures ? fixturesDir : undefined,
+});
 
 if (result.applied.length > 0) {
   console.log(`Applied:  ${result.applied.join(", ")}`);
@@ -75,10 +81,10 @@ if (result.applied.length > 0) {
 if (result.applied.length === 0 && !result.failed) {
   console.log("No migrations to apply.");
 }
-if (fixtures) {
-  console.log(`Fixtures: "${fixtures}" — fixture loader not yet implemented (VAY-616).`);
-}
 if (result.failed) {
   console.error(`Failed at version ${result.failed}. See platform.schema_migrations for details.`);
   process.exit(1);
+}
+if (fixtures) {
+  console.log(`Fixtures: loaded "${fixtures}"`);
 }

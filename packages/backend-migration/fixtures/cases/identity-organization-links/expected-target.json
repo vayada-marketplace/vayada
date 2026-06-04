@@ -1,0 +1,15 @@
+{
+  "counts": {
+    "identity.users": 1,
+    "identity.external_identities": 1,
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 2,
+    "identity.permission_catalog": 8
+  },
+  "idStability": {
+    "identity.users": ["a1b2c3d4-0000-0000-0000-000000000001"],
+    "identity.organizations": ["b2c3d4e5-0000-0000-0000-000000000001"]
+  },
+  "uniquenessChecks": ["external_identities", "organization_memberships"]
+}

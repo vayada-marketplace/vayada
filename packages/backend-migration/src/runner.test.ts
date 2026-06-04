@@ -6,6 +6,7 @@ import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { computeChecksum, discoverMigrations, runMigrations } from "./runner.js";
+import { assertSafeTestDatabase } from "./testUtils.js";
 
 // ---------------------------------------------------------------------------
 // Pure unit tests — no database required
@@ -79,16 +80,6 @@ describe("discoverMigrations", () => {
 // ---------------------------------------------------------------------------
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
-
-function assertSafeTestDatabase(url: string): void {
-  const dbName = new URL(url).pathname.replace(/^\//, "");
-  if (!/test/i.test(dbName)) {
-    throw new Error(
-      `Refusing to run destructive test cleanup against non-test database "${dbName}". ` +
-        `TEST_DATABASE_URL must point to a database with "test" in its name.`,
-    );
-  }
-}
 
 describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
   let tmpDir: string;
