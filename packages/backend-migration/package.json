@@ -1,0 +1,32 @@
+{
+  "name": "@vayada/backend-migration",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Target schema SQL migration runner and local parity harness for the TypeScript backend.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "target:migrate": "tsx src/cli/migrate.ts",
+    "target:rebuild": "tsx src/cli/rebuild.ts"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/pg": "^8.15.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}
