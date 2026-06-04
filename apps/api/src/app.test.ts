@@ -1,7 +1,9 @@
 import {
   createFakeVerifier,
   requireAuthContext,
+  type ProductEntitlement,
   type IdentityRepository,
+  type PermissionKey,
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
@@ -55,6 +57,57 @@ const identityRepository: IdentityRepository = {
     ];
   },
 };
+
+function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): IdentityRepository {
+  return {
+    ...identityRepository,
+    async findLinkedResources() {
+      return [
+        {
+          product: "booking",
+          resourceType: "booking_hotel",
+          resourceId: hotelId,
+          relationship: "owner",
+          status: "active",
+        },
+      ];
+    },
+  };
+}
+
+function buildAuthenticatedApp(
+  options: {
+    permissions?: PermissionKey[];
+    entitlements?: ProductEntitlement[];
+    linkedHotelId?: string;
+  } = {},
+): ReturnType<typeof buildApp> {
+  return buildApp({
+    logger: false,
+    auth: {
+      verifier: createFakeVerifier(new Map([["valid-token", session]])),
+      repository: identityRepositoryWithHotel(options.linkedHotelId),
+      rolePermissionRepository: {
+        async findPermissionsForRole() {
+          return options.permissions ?? ["booking.settings.manage"];
+        },
+      },
+      entitlementRepository: {
+        async findEntitlementsForContext() {
+          return (
+            options.entitlements ?? [
+              {
+                product: "booking",
+                key: "booking-engine",
+                status: "active",
+              },
+            ]
+          );
+        },
+      },
+    },
+  });
+}
 
 describe("vayada-api", () => {
   let app: ReturnType<typeof buildApp> | null = null;
@@ -153,5 +206,119 @@ describe("vayada-api", () => {
         },
       ],
     });
+  });
+
+  it("allows the booking policy route with auth, permission, entitlement, and linked resource", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson<{
+      group: string;
+      authorized: boolean;
+      hotelId: string;
+      userId: string;
+    }>(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/policy-check",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      group: "booking",
+      authorized: true,
+      hotelId: "booking_hotel_alpenrose",
+      userId: "user_hotel_owner",
+    });
+  });
+
+  it("rejects the booking policy route without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/policy-check",
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects the booking policy route with an invalid token", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/policy-check",
+      headers: {
+        authorization: "Bearer invalid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects the booking policy route when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/policy-check",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects the booking policy route when entitlement is missing", async () => {
+    app = buildAuthenticatedApp({ entitlements: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/policy-check",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects the booking policy route when entitlement is suspended", async () => {
+    app = buildAuthenticatedApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/policy-check",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects the booking policy route when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_other/policy-check",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
   });
 });

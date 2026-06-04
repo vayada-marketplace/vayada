@@ -6,6 +6,7 @@ import {
 } from "@vayada/backend-authorization";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 
+import { registerBookingRoutes } from "./routes/booking.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 
@@ -38,6 +39,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.register(registerHealthRoutes);
   app.register(registerRouteGroups, { prefix: "/api" });
+  app.register(registerBookingRoutes, { prefix: "/api/booking" });
 
   return app;
 }
