@@ -1,6 +1,8 @@
 import pg from "pg";
 
 import type {
+  EntitlementStatus,
+  LinkedResource,
   OrganizationKind,
   PermissionKey,
   ResourceRelationship,
@@ -15,6 +17,11 @@ export type RolePermissionRepository = {
     organizationKind: OrganizationKind,
     roleKey: string,
   ): Promise<PermissionKey[]>;
+  close?(): Promise<void>;
+};
+
+export type EntitlementRepository = {
+  findEntitlementsForContext(context: RequestContext): Promise<ProductEntitlement[]>;
   close?(): Promise<void>;
 };
 
@@ -41,6 +48,29 @@ export type ResourceAccessRequirement = {
   permission: PermissionKey;
   resource: ResourceRequirement;
 };
+
+export type EntitlementRequirement = {
+  product: Product;
+  key: string;
+  resource?: Pick<LinkedResource, "product" | "resourceType" | "resourceId">;
+};
+
+type ProductEntitlementRow = {
+  product: Product;
+  entitlement_key: string;
+  status: EntitlementStatus;
+  resource_product: Product | null;
+  resource_type: ResourceType | null;
+  resource_id: string | null;
+};
+
+function resourceScopeKey(
+  product: Product,
+  resourceType: ResourceType,
+  resourceId: string,
+): string {
+  return `${product}:${resourceType}:${resourceId}`;
+}
 
 export class AuthorizationError extends Error {
   readonly statusCode = 403;
@@ -80,15 +110,102 @@ export function createPgRolePermissionRepository(
   };
 }
 
-export function createAuthorizationResolver(
-  repository: RolePermissionRepository,
-): AuthorizationResolver {
-  return async (context) => ({
-    permissions: await repository.findPermissionsForRole(
-      context.selectedOrganization.kind,
-      context.membership.roleKey,
-    ),
+export function createPgEntitlementRepository(
+  config: AuthorizationRepositoryConfig,
+): EntitlementRepository {
+  if (!config.connectionString.trim()) {
+    throw new Error("AuthorizationRepositoryConfig.connectionString must not be empty");
+  }
+
+  const pool = new pg.Pool({
+    connectionString: config.connectionString,
+    max: config.max,
   });
+
+  return {
+    async findEntitlementsForContext(context) {
+      const result = await pool.query<ProductEntitlementRow>(
+        `SELECT
+           product,
+           entitlement_key,
+           CASE
+             WHEN status = 'active' AND expires_at IS NOT NULL AND expires_at <= now()
+               THEN 'expired'
+             ELSE status
+           END AS status,
+           resource_product,
+           resource_type,
+           resource_id
+         FROM identity.product_entitlements
+         WHERE organization_id = $1
+           AND (starts_at IS NULL OR starts_at <= now())
+         ORDER BY product, entitlement_key, resource_product NULLS FIRST, resource_type NULLS FIRST, resource_id NULLS FIRST`,
+        [context.selectedOrganization.organizationId],
+      );
+
+      const activeLinkedResourceKeys = new Set(
+        context.linkedResources
+          .filter((resource) => resource.status === "active")
+          .map((resource) =>
+            resourceScopeKey(resource.product, resource.resourceType, resource.resourceId),
+          ),
+      );
+
+      return result.rows
+        .filter(
+          (row) =>
+            row.resource_product === null ||
+            (row.resource_type !== null &&
+              row.resource_id !== null &&
+              activeLinkedResourceKeys.has(
+                resourceScopeKey(row.resource_product, row.resource_type, row.resource_id),
+              )),
+        )
+        .map((row): ProductEntitlement => {
+          if (row.resource_product === null) {
+            return {
+              product: row.product,
+              key: row.entitlement_key,
+              status: row.status,
+            };
+          }
+
+          return {
+            product: row.product,
+            key: row.entitlement_key,
+            status: row.status,
+            resource: {
+              product: row.resource_product,
+              resourceType: row.resource_type!,
+              resourceId: row.resource_id!,
+            },
+          };
+        });
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
+export function createAuthorizationResolver(
+  rolePermissionRepository: RolePermissionRepository,
+  entitlementRepository?: EntitlementRepository,
+): AuthorizationResolver {
+  return async (context) => {
+    const [permissions, entitlements] = await Promise.all([
+      rolePermissionRepository.findPermissionsForRole(
+        context.selectedOrganization.kind,
+        context.membership.roleKey,
+      ),
+      entitlementRepository?.findEntitlementsForContext(context),
+    ]);
+
+    return {
+      permissions,
+      entitlements,
+    };
+  };
 }
 
 export function hasPermission(context: RequestContext, permission: PermissionKey): boolean {
@@ -119,12 +236,53 @@ export function canAccessResource(
   );
 }
 
+export function hasActiveEntitlement(
+  context: RequestContext,
+  requirement: EntitlementRequirement,
+): boolean {
+  return context.entitlements.some((entitlement) => {
+    if (
+      entitlement.status !== "active" ||
+      entitlement.product !== requirement.product ||
+      entitlement.key !== requirement.key
+    ) {
+      return false;
+    }
+
+    if (!requirement.resource) {
+      return entitlement.resource === undefined;
+    }
+
+    return (
+      entitlement.resource === undefined ||
+      (entitlement.resource.product === requirement.resource.product &&
+        entitlement.resource.resourceType === requirement.resource.resourceType &&
+        entitlement.resource.resourceId === requirement.resource.resourceId)
+    );
+  });
+}
+
 export function requirePermission(
   context: RequestContext,
   permission: PermissionKey,
 ): RequestContext {
   if (!hasPermission(context, permission)) {
     throw new AuthorizationError(`Missing required permission: ${permission}`);
+  }
+  return context;
+}
+
+export function requireActiveEntitlement(
+  context: RequestContext,
+  requirement: EntitlementRequirement,
+): RequestContext {
+  if (!hasActiveEntitlement(context, requirement)) {
+    const resource = requirement.resource
+      ? ` for ${requirement.resource.product}:${requirement.resource.resourceType}:${requirement.resource.resourceId}`
+      : "";
+    throw new AuthorizationError(
+      `Missing active entitlement: ${requirement.product}:${requirement.key}${resource}`,
+    );
   }
   return context;
 }

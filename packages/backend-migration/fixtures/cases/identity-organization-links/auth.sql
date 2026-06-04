@@ -36,3 +36,10 @@ INSERT INTO identity.organization_resource_links
 VALUES
   ('b2c3d4e5-0000-0000-0000-000000000001', 'booking', 'booking_hotel', 'booking_hotel_alpenrose', 'owner',    'active'),
   ('b2c3d4e5-0000-0000-0000-000000000001', 'pms',     'pms_hotel',     'pms_hotel_alpenrose',     'operator', 'active');
+
+-- Product/module entitlements for the selected organization and linked resources.
+INSERT INTO identity.product_entitlements
+  (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
+VALUES
+  ('b2c3d4e5-0000-0000-0000-000000000001', 'booking', 'booking-engine', 'active', NULL,      NULL,            NULL),
+  ('b2c3d4e5-0000-0000-0000-000000000001', 'pms',     'pms-core',        'active', 'pms',     'pms_hotel',     'pms_hotel_alpenrose');
