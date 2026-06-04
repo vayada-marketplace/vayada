@@ -1,0 +1,81 @@
+{
+  "contractVersion": "jobs-events.v1",
+  "cases": [
+    {
+      "caseId": "booking-confirmed-enqueues-side-effects",
+      "description": "A committed booking status change records an event and enqueues durable side-effect jobs.",
+      "input": {
+        "eventType": "booking.status_changed",
+        "aggregate": {
+          "type": "booking",
+          "id": "book_123"
+        },
+        "organizationId": "org_hotel_alpenrose",
+        "requestId": "req_001",
+        "correlationId": "corr_booking_001",
+        "payload": {
+          "fromStatus": "pending",
+          "toStatus": "confirmed",
+          "roomTypeId": "rt_deluxe",
+          "checkIn": "2026-09-12",
+          "checkOut": "2026-09-15"
+        }
+      },
+      "expected": {
+        "domainEventStatus": "recorded",
+        "jobs": [
+          {
+            "jobType": "email.booking-status-changed",
+            "idempotencyKey": "email.booking-status-changed:booking:book_123:guest-confirmed:v1"
+          },
+          {
+            "jobType": "channex.push-availability",
+            "idempotencyKey": "channex.push-availability:room_type:rt_deluxe:2026-09-12_2026-09-15:v1"
+          }
+        ],
+        "auditCorrelation": {
+          "requestId": "req_001",
+          "correlationId": "corr_booking_001",
+          "organizationId": "org_hotel_alpenrose"
+        }
+      }
+    },
+    {
+      "caseId": "duplicate-enqueue-reuses-idempotency",
+      "description": "A repeated enqueue with the same semantic key does not create duplicate customer-facing work.",
+      "existingJob": {
+        "jobType": "email.booking-status-changed",
+        "idempotencyKey": "email.booking-status-changed:booking:book_123:guest-confirmed:v1",
+        "status": "succeeded"
+      },
+      "enqueue": {
+        "jobType": "email.booking-status-changed",
+        "idempotencyKey": "email.booking-status-changed:booking:book_123:guest-confirmed:v1"
+      },
+      "expected": {
+        "createdNewJob": false,
+        "returnedStatus": "succeeded",
+        "attemptsAdded": 0
+      }
+    },
+    {
+      "caseId": "retry-exhaustion-dead-letters",
+      "description": "A retryable provider failure records attempts and becomes visible after max attempts.",
+      "job": {
+        "jobType": "channex.push-availability",
+        "idempotencyKey": "channex.push-availability:room_type:rt_deluxe:2026-09-12_2026-09-15:v1",
+        "maxAttempts": 5,
+        "failureCategory": "provider_5xx"
+      },
+      "expected": {
+        "finalStatus": "dead_lettered",
+        "attemptCount": 5,
+        "deadLetter": {
+          "replayEligible": true,
+          "ownerPackage": "backend-events",
+          "auditEventType": "job.dead_lettered"
+        }
+      }
+    }
+  ]
+}
