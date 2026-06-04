@@ -9,9 +9,5 @@
   "idStability": {
     "identity.users": ["a1b2c3d4-0000-0000-0000-000000000001"],
     "identity.organizations": ["b2c3d4e5-0000-0000-0000-000000000001"]
-  },
-  "uniquenessChecks": [
-    "identity.external_identities.(provider,provider_user_id)",
-    "identity.organization_memberships.(organization_id,user_id)"
-  ]
+  }
 }

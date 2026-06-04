@@ -41,8 +41,31 @@ export type ParityConfig = {
 type ExpectedTarget = {
   counts: Record<string, number>;
   idStability: Record<string, string[]>;
-  uniquenessChecks: string[];
+  // uniquenessChecks is intentionally not declared here: the checks are hardcoded
+  // in checkUniqueness() below for the identity domain. A future ticket should
+  // make this configurable when additional domains are added.
 };
+
+function parseTableRef(
+  tableRef: string,
+  findings: ParityFinding[],
+): { schema: string; table: string } | null {
+  const parts = tableRef.split(".");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    findings.push({
+      severity: "fail",
+      code: "INVALID_FIXTURE_CONFIG",
+      owner: "Parity harness",
+      targetObject: tableRef,
+      message: `Malformed table reference "${tableRef}" in expected-target.json — expected "schema.table"`,
+      expected: "schema.table",
+      actual: tableRef,
+      suggestedAction: `Fix the table reference in expected-target.json.`,
+    });
+    return null;
+  }
+  return { schema: parts[0], table: parts[1] };
+}
 
 async function checkRowCounts(
   client: pg.Client,
@@ -50,9 +73,11 @@ async function checkRowCounts(
   findings: ParityFinding[],
 ): Promise<void> {
   for (const [tableRef, expectedCount] of Object.entries(expected.counts)) {
-    const [schema, table] = tableRef.split(".");
+    const ref = parseTableRef(tableRef, findings);
+    if (!ref) continue;
+
     const result = await client.query<{ count: string }>(
-      `SELECT count(*)::text FROM "${schema}"."${table}"`,
+      `SELECT count(*)::text FROM "${ref.schema}"."${ref.table}"`,
     );
     const actual = parseInt(result.rows[0].count, 10);
     if (actual !== expectedCount) {
@@ -76,10 +101,12 @@ async function checkIdStability(
   findings: ParityFinding[],
 ): Promise<void> {
   for (const [tableRef, ids] of Object.entries(expected.idStability)) {
-    const [schema, table] = tableRef.split(".");
+    const ref = parseTableRef(tableRef, findings);
+    if (!ref) continue;
+
     for (const id of ids) {
       const result = await client.query<{ exists: boolean }>(
-        `SELECT EXISTS(SELECT 1 FROM "${schema}"."${table}" WHERE id = $1) AS exists`,
+        `SELECT EXISTS(SELECT 1 FROM "${ref.schema}"."${ref.table}" WHERE id = $1) AS exists`,
         [id],
       );
       if (!result.rows[0].exists) {
@@ -98,8 +125,11 @@ async function checkIdStability(
   }
 }
 
+// Identity-domain uniqueness checks. Checks (provider, provider_user_id) uniqueness
+// in external_identities and (organization_id, user_id) uniqueness in memberships.
+// These mirror the constraints in 0001_identity.sql and catch data that bypassed
+// constraints during a legacy migration or pg_restore with deferred constraints.
 async function checkUniqueness(client: pg.Client, findings: ParityFinding[]): Promise<void> {
-  // (provider, provider_user_id) uniqueness — partial (only where provider_user_id IS NOT NULL)
   const extIdDupes = await client.query<{ count: string }>(`
     SELECT count(*)::text FROM (
       SELECT provider, provider_user_id
@@ -122,7 +152,6 @@ async function checkUniqueness(client: pg.Client, findings: ParityFinding[]): Pr
     });
   }
 
-  // (organization_id, user_id) uniqueness in memberships
   const membershipDupes = await client.query<{ count: string }>(`
     SELECT count(*)::text FROM (
       SELECT organization_id, user_id

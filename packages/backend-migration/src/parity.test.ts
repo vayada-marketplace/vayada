@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
@@ -6,21 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runParityChecks } from "./parity.js";
 import { rebuild } from "./rebuild.js";
+import { assertSafeTestDatabase } from "./testUtils.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 const MIGRATIONS_DIR = join(import.meta.dirname, "../migrations");
-
-function assertSafeTestDatabase(url: string): void {
-  const dbName = new URL(url).pathname.replace(/^\//, "");
-  if (!/test/i.test(dbName)) {
-    throw new Error(
-      `Refusing to run destructive test cleanup against non-test database "${dbName}". ` +
-        `TEST_DATABASE_URL must point to a database with "test" in its name.`,
-    );
-  }
-}
 
 describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
   beforeEach(async () => {
@@ -62,16 +53,18 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
     expect(report.findings.filter((f) => f.severity === "fail")).toHaveLength(0);
   });
 
-  it("reports UNIQUENESS_VIOLATION when a duplicate provider_user_id is inserted", async () => {
-    // Inject a duplicate external identity row directly
+  it("reports UNIQUENESS_VIOLATION when duplicate provider_user_id rows exist", async () => {
+    // Drop the partial unique index first so we can insert a duplicate row.
+    // The parity checker's SQL detects duplicates independently of the index;
+    // this test validates that detection path. The afterEach drops the schema.
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
+      await client.query(`DROP INDEX IF EXISTS identity.uq_external_identities_provider_user_id`);
       await client.query(`
         INSERT INTO identity.users (id, email, status)
         VALUES ('ffffffff-0000-0000-0000-000000000099', 'dup@example.com', 'active')
       `);
-      // Same (provider, provider_user_id) as the fixture row — a duplicate
       await client.query(`
         INSERT INTO identity.external_identities
           (user_id, provider, provider_user_id, provider_email, provider_email_verified)
@@ -96,7 +89,6 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
   });
 
   it("reports ID_STABILITY_VIOLATION when a source user ID is not preserved", async () => {
-    // Remove the expected user and replace with a different ID
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
@@ -121,16 +113,7 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
 });
 
 describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)", () => {
-  let tmpMigrationsDir: string;
-
-  beforeEach(async () => {
-    tmpMigrationsDir = join(tmpdir(), `backend-migration-parity-${Date.now()}`);
-    await mkdir(tmpMigrationsDir, { recursive: true });
-    assertSafeTestDatabase(TEST_DATABASE_URL!);
-  });
-
   afterEach(async () => {
-    await rm(tmpMigrationsDir, { recursive: true, force: true });
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -156,7 +139,6 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
     expect(result.applied).toEqual(["0001"]);
     expect(result.failed).toBeNull();
 
-    // Verify identity tables were created and seeded
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
