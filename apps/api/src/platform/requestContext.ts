@@ -1,4 +1,4 @@
-export type AuthProvider = "workos" | "legacy-compat";
+export type AuthProvider = "workos";
 
 export type InternalUserStatus = "active" | "pending" | "suspended" | "deleted";
 
@@ -85,17 +85,6 @@ export type ProductEntitlement = {
   resource?: Pick<LinkedResource, "product" | "resourceType" | "resourceId">;
 };
 
-export type CompatibilityInput =
-  | {
-      kind: "legacy-jwt";
-      userId: string;
-    }
-  | {
-      kind: "x-hotel-id";
-      hotelId: string;
-      resolvedAs: Pick<LinkedResource, "product" | "resourceType" | "resourceId">;
-    };
-
 export type RequestAuditMetadata = {
   requestId: string;
   correlationId?: string;
@@ -103,7 +92,6 @@ export type RequestAuditMetadata = {
   sourceIp?: string;
   userAgent?: string;
   receivedAt: string;
-  compatibilityInputs?: CompatibilityInput[];
 };
 
 export type RequestContext = {

@@ -7,8 +7,7 @@ VAY-607._
 
 Every authenticated TypeScript backend route should receive a resolved
 `RequestContext` before domain code runs. The context is the boundary between
-provider authentication, Vayada authorization, compatibility HTTP inputs, and
-domain services.
+provider authentication, Vayada authorization, and domain services.
 
 The contract lives in `apps/api/src/platform/requestContext.ts` until the backend
 package split in VAY-611 moves it into a shared backend authorization or test
@@ -48,27 +47,31 @@ resource links, entitlements, and product audit.
   profiles, affiliates, and payout accounts.
 - `entitlements`: active or suspended product/module access.
 - `locale` and `currency`: request presentation defaults for domain logic.
-- `audit`: request ID, source, timestamp, optional correlation metadata, and
-  explicit compatibility inputs.
+- `audit`: request ID, source, timestamp, and optional correlation metadata.
 
 Domain code should consume this context rather than reading provider tokens,
 cookies, legacy JWT claims, `X-Hotel-Id`, `users.type`, or `is_superadmin`.
 
-## Compatibility Boundary
+## No Legacy Authorization Boundary
 
-Legacy inputs can remain at HTTP adapter edges while Vayada migrates existing
-frontends and Python services. They are not authorization primitives.
+The TypeScript backend rewrite should not preserve legacy authorization inputs
+as part of its route or domain contract. New `apps/api` authenticated routes
+should require a resolved WorkOS-backed provider identity, internal user,
+selected organization, active membership, permissions, linked resources,
+entitlements, and audit metadata.
 
-- Legacy JWTs may identify an internal user during transition, but the resolved
-  context still needs organization, membership, permissions, and linked
-  resources.
-- `X-Hotel-Id` may be accepted by compatibility routes, but it must resolve into
-  a linked booking/PMS hotel resource before domain code sees it.
-- `users.type` can route old profile/onboarding behavior only during migration;
-  it is not the target product authorization model.
-- `users.is_superadmin` can support old admin dependencies only during migration;
-  platform authorization should come from platform organization membership plus
-  platform permission keys.
+These inputs are deliberately not represented in `RequestContext`:
+
+- `X-Hotel-Id`
+- `users.type`
+- `users.is_superadmin`
+- direct product `user_id` ownership
+- legacy local JWT claims as authorization state
+
+If an old frontend or Python/FastAPI surface still depends on one of those
+inputs, that behavior should remain outside the new TypeScript backend contract
+until the surface is migrated to explicit organization/resource selection. Do
+not add temporary `apps/api` routes whose authorization depends on those inputs.
 
 ## Fixture Coverage
 
@@ -92,11 +95,12 @@ Authenticated route slices should:
 1. Resolve `RequestContext` before calling domain services.
 2. Pass `RequestContext` or a narrowed domain-specific context into application
    services.
-3. Keep compatibility input handling in HTTP adapters.
+3. Reject requests that cannot resolve selected organization, membership,
+   permission, and linked resource context.
 4. Add contract fixtures before adding a new scope, permission family, or
    resource type.
 5. Record audit metadata from the context for mutating or sensitive reads.
 
 Do not add product route behavior that depends directly on `users.type`,
 `is_superadmin`, direct product `user_id` ownership, or hidden `X-Hotel-Id`
-state. Those belong only in temporary compatibility adapters.
+state.

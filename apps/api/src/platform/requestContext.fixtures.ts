@@ -64,17 +64,6 @@ const hotelOwnerContext: RequestContext = {
   audit: {
     ...baseAudit,
     requestId: "req_hotel_owner",
-    compatibilityInputs: [
-      {
-        kind: "x-hotel-id",
-        hotelId: "booking_hotel_alpenrose",
-        resolvedAs: {
-          product: "booking",
-          resourceType: "booking_hotel",
-          resourceId: "booking_hotel_alpenrose",
-        },
-      },
-    ],
   },
 };
 

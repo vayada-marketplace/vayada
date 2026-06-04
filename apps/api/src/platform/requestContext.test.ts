@@ -37,14 +37,13 @@ describe("RequestContext contract fixtures", () => {
     }
   });
 
-  it("keeps legacy inputs as resolved compatibility metadata", () => {
+  it("does not model legacy authorization shortcuts", () => {
     for (const fixture of requestContextFixtureCases) {
       expect(fixture.context).not.toHaveProperty("userType");
       expect(fixture.context).not.toHaveProperty("isSuperadmin");
       expect(fixture.context).not.toHaveProperty("hotelId");
-      expect(fixture.context.audit.compatibilityInputs ?? []).not.toContainEqual(
-        expect.objectContaining({ kind: "x-hotel-id", resolvedAs: undefined }),
-      );
+      expect(fixture.context.audit).not.toHaveProperty("compatibilityInputs");
+      expect(fixture.context.actor.providerIdentity.provider).toBe("workos");
     }
   });
 });
