@@ -75,6 +75,7 @@ All shared skills that currently exist in `.agents/skills/`:
 
 | Skill                         | File                                                  | When to use                                                                                                                   |
 | ----------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `adversarial-review`          | `.agents/skills/adversarial-review/SKILL.md`          | Reviewing an implemented Vayada ticket adversarially before opening a PR.                                                     |
 | `fix-open-prs`                | `.agents/skills/fix-open-prs/SKILL.md`                | Cleaning up open PRs by addressing CodeRabbit comments, merge conflicts, and failing CI.                                      |
 | `run-local-portless`          | `.agents/skills/run-local-portless/SKILL.md`          | Running the full Vayada stack locally via portless.                                                                           |
 | `typescript-rewrite-workflow` | `.agents/skills/typescript-rewrite-workflow/SKILL.md` | Planning or implementing the TypeScript backend rewrite, WorkOS, Ask Intelligence, target schema, migration, or cutover work. |
