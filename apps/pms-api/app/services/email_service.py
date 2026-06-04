@@ -373,16 +373,29 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
         await _send_email(guest_email, subject, _wrap_html(content))
         return
 
+    is_bank_transfer = booking.get("payment_method") == "bank_transfer"
+    next_step_html = (
+        '<p class="detail">Please transfer the required amount using the bank details below. '
+        "Your booking will be confirmed once we verify the payment.</p>"
+        if is_bank_transfer
+        else '<p class="detail">We\'ll review your request and respond within <strong>24 hours</strong>.</p>'
+    )
+    status_followup = (
+        "You can also check your booking status using your reference number."
+        if is_bank_transfer
+        else "You will receive an email once we respond. You can also check your booking status using your reference number."
+    )
+
     subject = f"Booking Request Submitted — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Submitted</h2>
     <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
-    <p class="detail">We'll review your request and respond within <strong>24 hours</strong>.</p>
+    {next_step_html}
     {_bank_transfer_details_html(booking)}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
-    <p class="detail">You will receive an email once we respond. You can also check your booking status using your reference number.</p>
+    <p class="detail">{status_followup}</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))

@@ -209,6 +209,7 @@
     "bankTransferNote": "Überweisen Sie direkt auf unser Bankkonto",
     "nonRefundablePaymentHint": "Zahlung vor Ort und Banküberweisung sind bei nicht erstattbaren Tarifen nicht verfügbar.",
     "bankTransferExplanation": "Bitte überweisen Sie den Gesamtbetrag auf das unten angegebene Bankkonto. Ihre Buchung wird bestätigt, sobald wir die Zahlung verifiziert haben.",
+    "bankTransferDepositExplanation": "Bitte überweisen Sie {deposit}. Der Restbetrag von {remaining} ist in der Unterkunft fällig. Ihre Buchung wird bestätigt, sobald wir die Zahlung verifiziert haben.",
     "paypalLabel": "Mit PayPal bezahlen",
     "paypalHelper": "Senden Sie die Zahlung manuell; wir bestätigen sie nach Erhalt.",
     "paypalInstructions": "Senden Sie die Zahlung an die unten angegebene PayPal-E-Mail und geben Sie nach Erstellung der Buchung Ihre Buchungsreferenz in der PayPal-Notiz an. Ihre Buchung wird bestätigt, sobald wir die Zahlung verifiziert haben, normalerweise innerhalb von {hours} Stunden.",

@@ -209,6 +209,7 @@
     "bankTransferNote": "Transférez directement sur notre compte bancaire",
     "nonRefundablePaymentHint": "Le paiement sur place et le virement bancaire ne sont pas disponibles pour les tarifs non remboursables.",
     "bankTransferExplanation": "Veuillez transférer le montant total sur le compte bancaire ci-dessous. Votre réservation sera confirmée une fois que nous aurons vérifié le paiement.",
+    "bankTransferDepositExplanation": "Veuillez transférer {deposit}. Le solde de {remaining} sera dû à l'établissement. Votre réservation sera confirmée une fois que nous aurons vérifié le paiement.",
     "paypalLabel": "Payer par PayPal",
     "paypalHelper": "Envoyez le paiement manuellement ; nous le confirmerons après réception.",
     "paypalInstructions": "Envoyez le paiement à l'adresse PayPal ci-dessous et indiquez votre référence de réservation dans la note PayPal une fois la réservation créée. Votre réservation sera confirmée lorsque nous aurons vérifié le paiement, généralement sous {hours} heures.",

@@ -187,6 +187,7 @@
     "bankTransferNote": "Transfer directly to our bank account",
     "nonRefundablePaymentHint": "Pay at Property and Bank Transfer are not available for non-refundable rates.",
     "bankTransferExplanation": "Please transfer the total amount to the bank account below. Your booking will be confirmed once we verify the payment.",
+    "bankTransferDepositExplanation": "Please transfer {deposit}. The remaining {remaining} is due at the property. Your booking will be confirmed once we verify the payment.",
     "paypalLabel": "Pay by PayPal",
     "paypalHelper": "Send payment manually; we'll confirm it once received.",
     "paypalInstructions": "Send payment to the PayPal email below and include your booking reference in the PayPal note after your booking is created. Your booking will be confirmed once we verify the payment, typically within {hours} hours.",

@@ -209,6 +209,7 @@
     "bankTransferNote": "Transfer langsung ke rekening bank kami",
     "nonRefundablePaymentHint": "Bayar di properti dan transfer bank tidak tersedia untuk tarif non-refundable.",
     "bankTransferExplanation": "Silakan transfer jumlah total ke rekening bank di bawah ini. Pemesanan Anda akan dikonfirmasi setelah kami memverifikasi pembayaran.",
+    "bankTransferDepositExplanation": "Silakan transfer {deposit}. Sisa {remaining} dibayar di properti. Pemesanan Anda akan dikonfirmasi setelah kami memverifikasi pembayaran.",
     "paypalLabel": "Bayar dengan PayPal",
     "paypalHelper": "Kirim pembayaran secara manual; kami akan mengonfirmasi setelah menerimanya.",
     "paypalInstructions": "Kirim pembayaran ke email PayPal di bawah ini dan sertakan referensi pemesanan Anda di catatan PayPal setelah pemesanan dibuat. Pemesanan Anda akan dikonfirmasi setelah kami memverifikasi pembayaran, biasanya dalam {hours} jam.",

@@ -172,6 +172,8 @@ async def test_guest_bank_transfer_request_email_includes_full_bank_details():
     assert "DE89370400440532013000" in html
     assert "VAYADEF0" in html
     assert "VAY-ABC123" in html
+    assert "Your booking will be confirmed once we verify the payment." in html
+    assert "once the hotel verifies the payment" not in html
 
 
 @pytest.mark.asyncio

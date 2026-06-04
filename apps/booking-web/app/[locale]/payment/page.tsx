@@ -724,7 +724,11 @@ function PaymentPageContent() {
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
                     {depositRequired
-                      ? `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                      ? t("bankTransferDepositExplanation", {
+                          deposit: formatPrice(depositAmount, selectedCurrency),
+                          remaining: formatPrice(remainingBalance, selectedCurrency),
+                        }) ||
+                        `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property. Your booking will be confirmed once we verify the payment.`
                       : t("bankTransferExplanation") ||
                         "Please transfer the total amount to the bank account below. Your booking will be confirmed once we verify the payment."}
                   </div>
