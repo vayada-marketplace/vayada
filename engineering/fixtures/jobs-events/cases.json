@@ -36,7 +36,14 @@
         "auditCorrelation": {
           "requestId": "req_001",
           "correlationId": "corr_booking_001",
-          "organizationId": "org_hotel_alpenrose"
+          "causationId": "booking.status_changed:book_123",
+          "organizationId": "org_hotel_alpenrose",
+          "actor": {
+            "type": "internal_user",
+            "id": "user_hotel_admin_001"
+          },
+          "resourceIds": ["booking:book_123", "room_type:rt_deluxe"],
+          "source": "apps/api.booking-status"
         }
       }
     },
@@ -71,6 +78,15 @@
         "finalStatus": "dead_lettered",
         "attemptCount": 5,
         "deadLetter": {
+          "jobId": "job_channex_push_availability_001",
+          "idempotencyKey": "channex.push-availability:room_type:rt_deluxe:2026-09-12_2026-09-15:v1",
+          "errorCategory": "provider_5xx",
+          "affectedOrganizationId": "org_hotel_alpenrose",
+          "affectedResource": {
+            "type": "room_type",
+            "id": "rt_deluxe"
+          },
+          "lastAttemptAt": "2026-06-04T09:45:00Z",
           "replayEligible": true,
           "ownerPackage": "backend-events",
           "auditEventType": "job.dead_lettered"
