@@ -466,7 +466,7 @@ function PaymentPageContent() {
                         </div>
                         <p className="text-xs text-gray-500 ml-7">
                           {t("cardAuthNote") ||
-                            "Secure payment via Stripe. Your card will be authorized when the host confirms."}
+                            "Secure payment via Stripe. Your card will be authorized when we confirm."}
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -608,7 +608,7 @@ function PaymentPageContent() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 ml-7">
-                          {t("bankTransferNote") || "Transfer directly to the hotel's bank account"}
+                          {t("bankTransferNote") || "Transfer directly to our bank account"}
                         </p>
                       </div>
                     </div>
@@ -695,7 +695,7 @@ function PaymentPageContent() {
                     {depositRequired
                       ? `You will be charged ${formatPrice(depositAmount, selectedCurrency)} now. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
                       : t("cardAuthExplanation") ||
-                        "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires."}
+                        "Your card will be authorized but not charged until we accept your booking. The hold will be released if the booking is declined or expires."}
                   </div>
                   <div className="flex items-center gap-2 p-3 bg-accent rounded-xl text-sm text-gray-600">
                     <svg
@@ -724,9 +724,13 @@ function PaymentPageContent() {
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
                     {depositRequired
-                      ? `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                      ? t("bankTransferDepositExplanation", {
+                          deposit: formatPrice(depositAmount, selectedCurrency),
+                          remaining: formatPrice(remainingBalance, selectedCurrency),
+                        }) ||
+                        `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property. Your booking will be confirmed once we verify the payment.`
                       : t("bankTransferExplanation") ||
-                        "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
+                        "Please transfer the total amount to the bank account below. Your booking will be confirmed once we verify the payment."}
                   </div>
                   {bankDetails && isBankDetailsComplete(bankDetails) && (
                     <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
@@ -802,7 +806,7 @@ function PaymentPageContent() {
                     ? t("payAtPropertyExplanationInstant") ||
                       "No payment is required now. You will pay directly at the property upon check-in. Your booking will be confirmed instantly."
                     : t("payAtPropertyExplanation") ||
-                      "No payment is required now. You will pay directly at the property upon check-in. The host will review your booking request."}
+                      "No payment is required now. You will pay directly at the property upon check-in. We'll review your booking request."}
                 </div>
               )}
             </div>

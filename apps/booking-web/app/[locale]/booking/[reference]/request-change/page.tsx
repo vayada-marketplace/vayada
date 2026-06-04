@@ -201,7 +201,7 @@ export default function RequestChangePage({
         </h1>
         <p className="text-sm text-gray-600 mb-6">
           {t("subtitle") ||
-            "Pick the new dates or add-ons you'd like. The hotel will review and approve before anything is applied."}
+            "Pick the new dates or add-ons you'd like. We'll review and approve before anything is applied."}
         </p>
 
         {loadError && (
@@ -213,7 +213,7 @@ export default function RequestChangePage({
         {hasPending && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
             {t("pendingExists") ||
-              "A change request is already pending approval for this booking. Please wait for the hotel to respond."}
+              "A change request is already pending approval for this booking. Please wait for us to respond."}
           </div>
         )}
 
@@ -256,7 +256,7 @@ export default function RequestChangePage({
                 </h2>
                 <p className="text-xs text-gray-500 mb-3">
                   {t("addonsHint") ||
-                    "Picking nothing here keeps the booking without add-ons; selecting an add-on adds it to the booking once the hotel approves."}
+                    "Picking nothing here keeps the booking without add-ons; selecting an add-on adds it to the booking once we approve it."}
                 </p>
                 <div className="space-y-2">
                   {addons.map((addon) => {

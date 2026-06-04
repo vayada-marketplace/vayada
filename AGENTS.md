@@ -186,6 +186,7 @@ Use `.agents/skills/typescript-rewrite-workflow/SKILL.md` for the TypeScript bac
 ## Gotchas
 
 - **SMTP** — port 587 SES uses `start_tls=True`, **not** `use_tls=True`. Recurring regression — check on any email/SMTP change.
+- **Booking Engine guest copy** — guest-facing direct-booking pages and emails speak as the property in first person (`we` / `our` / `us`). Do not refer to the property as `the host`, `the hotel`, or `the property` when it is reviewing, accepting, declining, confirming, or verifying a guest booking/payment/change.
 - **PMS migrations auto-run** on ECS container start. After a push to `main`, do **not** suggest manually running `scripts/run_migration.sh`.
 - **auth-db** does **not** auto-migrate **in production** (unlike PMS). Locally, `docker compose up` runs auth migrations via the `auth-db-migrate` one-shot service. For prod schema changes, run `scripts/run_migration.sh auth` against RDS.
 - **`vw` worktree helper is gone.** Ticket work uses normal git branches and direct-to-main commits — no worktree scripts, no shipping helpers.
