@@ -1,0 +1,25 @@
+{
+  "name": "@vayada/backend-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared backend configuration helpers for the TypeScript API.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}
