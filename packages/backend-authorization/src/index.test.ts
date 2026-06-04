@@ -293,40 +293,43 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgEntitlementRepository", () => {
       max: 1,
     });
 
-    await expect(
-      repository.findEntitlementsForContext({
-        ...hotelContext,
-        selectedOrganization: {
-          ...hotelContext.selectedOrganization,
-          organizationId: "00000000-0000-0000-0000-000000000001",
-        },
-        linkedResources: [linkedResource("pms", "pms_hotel", "pms_hotel_alpenrose")],
-      }),
-    ).resolves.toEqual([
-      {
-        product: "booking",
-        key: "booking-engine",
-        status: "active",
-      },
-      {
-        product: "pms",
-        key: "pms-core",
-        status: "active",
-        resource: {
-          product: "pms",
-          resourceType: "pms_hotel",
-          resourceId: "pms_hotel_alpenrose",
-        },
-      },
-    ]);
-    await repository.close?.();
-
-    const cleanup = new pg.Client({ connectionString: TEST_DATABASE_URL });
-    await cleanup.connect();
     try {
-      await resetProductEntitlementsTable(cleanup);
+      await expect(
+        repository.findEntitlementsForContext({
+          ...hotelContext,
+          selectedOrganization: {
+            ...hotelContext.selectedOrganization,
+            organizationId: "00000000-0000-0000-0000-000000000001",
+          },
+          linkedResources: [linkedResource("pms", "pms_hotel", "pms_hotel_alpenrose")],
+        }),
+      ).resolves.toEqual([
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "active",
+        },
+        {
+          product: "pms",
+          key: "pms-core",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_hotel",
+            resourceId: "pms_hotel_alpenrose",
+          },
+        },
+      ]);
     } finally {
-      await cleanup.end();
+      await repository.close?.();
+
+      const cleanup = new pg.Client({ connectionString: TEST_DATABASE_URL });
+      await cleanup.connect();
+      try {
+        await resetProductEntitlementsTable(cleanup);
+      } finally {
+        await cleanup.end();
+      }
     }
   });
 });

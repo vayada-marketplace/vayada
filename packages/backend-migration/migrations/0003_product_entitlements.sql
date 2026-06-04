@@ -5,6 +5,11 @@
 -- Adds the entitlement read model consumed by RequestContext. This is not the
 -- billing source of truth: finance/product domains own upstream entitlement
 -- writes, and authenticated backend requests read the normalized state here.
+--
+-- Keep CHECK values aligned with backend-auth types:
+-- Product: product, resource_product
+-- EntitlementStatus: status
+-- ResourceType: resource_type
 
 CREATE TABLE identity.product_entitlements (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -32,6 +37,12 @@ CREATE TABLE identity.product_entitlements (
       (resource_product IS NULL AND resource_type IS NULL AND resource_id IS NULL)
       OR
       (resource_product IS NOT NULL AND resource_type IS NOT NULL AND resource_id IS NOT NULL)
+    ),
+  CONSTRAINT chk_product_entitlements_date_order
+    CHECK (
+      starts_at IS NULL
+      OR expires_at IS NULL
+      OR starts_at <= expires_at
     )
 );
 
