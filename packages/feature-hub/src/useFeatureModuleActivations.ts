@@ -19,7 +19,10 @@ function storageKey(hotelId?: string): string {
 function readCached(hotelId?: string): string[] {
   if (typeof window === "undefined") return [];
   try {
-    return JSON.parse(window.localStorage.getItem(storageKey(hotelId)) || "[]");
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey(hotelId)) || "[]");
+    return Array.isArray(parsed) && parsed.every((id): id is string => typeof id === "string")
+      ? parsed
+      : [];
   } catch {
     return [];
   }
@@ -41,6 +44,7 @@ export function useFeatureModuleActivations(client: FeatureActivationClient) {
   const clientRef = useRef(client);
   const mounted = useRef(true);
 
+  // Keep refresh stable while still using the latest client implementation.
   useEffect(() => {
     clientRef.current = client;
   }, [client]);

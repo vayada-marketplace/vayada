@@ -3,6 +3,7 @@ const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  transpilePackages: ["@vayada/feature-hub"],
   turbopack: {
     root: path.join(__dirname, "../.."),
   },

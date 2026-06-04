@@ -4,16 +4,11 @@ import { Fragment, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BoltIcon, ChevronLeftIcon, ChevronDownIcon, CheckIcon } from "@heroicons/react/24/outline";
-import {
-  useFeatureModuleActivations,
-  type FeatureActivationClient,
-  type ModuleActivation,
-  type ModuleActivationsResponse,
-} from "@vayada/feature-hub";
+import { useFeatureModuleActivations } from "@vayada/feature-hub";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
 import { messagingService } from "@/services/messaging";
-import { pmsClient } from "@/services/api/pmsClient";
+import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 const UNREAD_POLL_MS = 60_000;
 
@@ -44,15 +39,6 @@ interface NavItem {
   badge?: number;
 }
 
-const MODULE_ACTIVATION_CLIENT: FeatureActivationClient = {
-  list: () => pmsClient.get<ModuleActivationsResponse>("/admin/module-activations"),
-  update: (moduleId: string, isActive: boolean) =>
-    pmsClient.patch<ModuleActivation>(`/admin/module-activations/${moduleId}`, {
-      moduleId,
-      isActive,
-    }),
-};
-
 const CORE_NAV_ITEMS: Omit<NavItem, "badge">[] = [
   { labelKey: "layout.sidebar.dashboard", href: "/dashboard", icon: DashboardIcon },
   { labelKey: "layout.sidebar.calendar", href: "/calendar", icon: CalendarIcon },
@@ -74,7 +60,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [inboxUnread, setInboxUnread] = useState(0);
   const { t } = useTranslation();
   const switcherRef = useRef<HTMLDivElement>(null);
-  const { activeModuleSet } = useFeatureModuleActivations(MODULE_ACTIVATION_CLIENT);
+  const { activeModuleSet } = useFeatureModuleActivations(moduleActivationClient);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

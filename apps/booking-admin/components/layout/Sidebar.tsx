@@ -10,15 +10,10 @@ import {
   CheckIcon,
   Cog6ToothIcon,
 } from "@heroicons/react/24/outline";
-import {
-  useFeatureModuleActivations,
-  type FeatureActivationClient,
-  type ModuleActivation,
-  type ModuleActivationsResponse,
-} from "@vayada/feature-hub";
+import { useFeatureModuleActivations } from "@vayada/feature-hub";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/lib/i18n";
-import { pmsClient } from "@/services/api/pmsClient";
+import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
@@ -45,15 +40,6 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const MODULE_ACTIVATION_CLIENT: FeatureActivationClient = {
-  list: () => pmsClient.get<ModuleActivationsResponse>("/admin/module-activations"),
-  update: (moduleId: string, isActive: boolean) =>
-    pmsClient.patch<ModuleActivation>(`/admin/module-activations/${moduleId}`, {
-      moduleId,
-      isActive,
-    }),
-};
-
 const coreNavItems: NavItem[] = [
   { labelKey: "layout.sidebar.dashboard", href: "/", icon: DashboardIcon },
   { labelKey: "layout.sidebar.designStudio", href: "/design-studio", icon: DesignStudioIcon },
@@ -71,7 +57,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [showSwitcher, setShowSwitcher] = useState(false);
   const switcherRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
-  const { activeModuleSet } = useFeatureModuleActivations(MODULE_ACTIVATION_CLIENT);
+  const { activeModuleSet } = useFeatureModuleActivations(moduleActivationClient);
   const navItems: NavItem[] = [
     coreNavItems[0],
     ...(activeModuleSet.has("affiliates") ? [activatableNavItems.affiliates] : []),

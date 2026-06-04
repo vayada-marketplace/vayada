@@ -27,6 +27,10 @@ import type {
 import { useFeatureModuleActivations } from "./useFeatureModuleActivations";
 
 interface FeatureHubPageProps {
+  /**
+   * Prefer a module-scoped or memoized client. The hook stores the latest value
+   * in a ref so refresh callbacks stay stable across renders.
+   */
   activationClient: FeatureActivationClient;
   initialProduct?: FeatureProduct;
   products?: FeatureProduct[];
@@ -517,18 +521,45 @@ function DetailModal({
   onClose: () => void;
   onToggle: (isActive: boolean) => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const titleId = `feature-hub-detail-${module.id}`;
 
   useEffect(() => {
     const previousActiveElement =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeButtonRef.current?.focus();
-
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      ).filter(
+        (element) => !element.hasAttribute("disabled") && !element.getAttribute("aria-hidden"),
+      );
+
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
+    closeButtonRef.current?.focus();
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
@@ -544,6 +575,7 @@ function DetailModal({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
