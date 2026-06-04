@@ -13,7 +13,6 @@
         "rooms": 1,
         "currency": "EUR",
         "locale": "en",
-        "promoCode": null,
         "referralCode": "creator-anna"
       },
       "expected": {
@@ -26,6 +25,7 @@
           "quote.offers[0].totals.grandTotal",
           "deepLink.url"
         ],
+        "deepLinkPreserves": ["referral_code", "quote_id"],
         "mustExclude": [
           "guestEmail",
           "guestPhone",
@@ -197,7 +197,14 @@
             "amount": 54
           }
         ],
-        "deepLinkPreserves": ["promo_code", "referral_code", "quote_id"]
+        "deepLinkPreserves": ["promo_code", "referral_code", "quote_id"],
+        "mustExclude": [
+          "guestEmail",
+          "guestPhone",
+          "payoutAccountId",
+          "ownerNotes",
+          "roomAssignment"
+        ]
       }
     },
     {

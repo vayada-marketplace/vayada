@@ -222,12 +222,12 @@ Response shape:
           "cancellation": "Free cancellation until 7 days before arrival.",
           "deposit": "No deposit required."
         },
-        "bookingUrl": "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&room_type=room_deluxe&rate_plan=rate_flexible_breakfast&referral_code=creator-anna&quote=quote_01JZALPENROSE"
+        "bookingUrl": "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&room_type=room_deluxe&rate_plan=rate_flexible_breakfast&referral_code=creator-anna&quote_id=quote_01JZALPENROSE"
       }
     ]
   },
   "deepLink": {
-    "url": "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&referral_code=creator-anna&quote=quote_01JZALPENROSE",
+    "url": "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&referral_code=creator-anna&quote_id=quote_01JZALPENROSE",
     "expiresAt": "2026-06-04T09:16:00Z",
     "preserves": [
       "dates",
@@ -260,7 +260,8 @@ Response shape:
         "status": "fresh"
       }
     ]
-  }
+  },
+  "dataSources": ["booking", "pms", "finance", "distribution"]
 }
 ```
 
@@ -295,7 +296,8 @@ Unavailable reason codes:
 
 When status is not `bookable`, the response must still include
 `contractVersion`, `generatedAt`, `request`, `status`, `unavailableReasons`,
-`freshness`, and `deepLink` when a safe hotel search link can be produced.
+`freshness`, `publicVisibility`, `dataSources`, and `deepLink` when a safe hotel
+search link can be produced.
 
 ## Public-Safe Field Rules
 
