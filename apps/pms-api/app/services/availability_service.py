@@ -30,17 +30,27 @@ async def remaining_for_stay(
 ) -> int:
     """Rooms of this type still bookable across the given stay.
 
-    Returns ``max(0, total - booked - blocked - soft_held)`` where
-    soft_held counts active card-payment drafts (VAY-388) so a guest in
-    the Stripe entry window can't be undercut by another guest checking
-    out concurrently.
+    Returns the minimum free inventory across each occupied night, where
+    active card-payment drafts (VAY-388) count as soft holds. A room type
+    with staggered bookings/blocks across different nights should remain
+    bookable as long as every night still has a free unit.
     """
-    booked = await RoomTypeRepository.count_booked(room_type_id, check_in, check_out)
-    blocked = await RoomTypeRepository.count_blocked(room_type_id, check_in, check_out)
-    soft_held = await BookingDraftRepository.count_active_for_stay(
-        room_type_id, check_in, check_out
-    )
-    return max(0, total_rooms - booked - blocked - soft_held)
+    if check_in >= check_out:
+        return 0
+
+    remaining = total_rooms
+    current = check_in
+    while current < check_out:
+        next_day = current + timedelta(days=1)
+        booked = await RoomTypeRepository.count_booked(room_type_id, current, next_day)
+        blocked = await RoomTypeRepository.count_blocked(room_type_id, current, next_day)
+        soft_held = await BookingDraftRepository.count_active_for_stay(
+            room_type_id, current, next_day
+        )
+        remaining = min(remaining, total_rooms - booked - blocked - soft_held)
+        current = next_day
+
+    return max(0, remaining)
 
 
 def compute_stay_pricing(

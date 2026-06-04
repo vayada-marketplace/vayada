@@ -4,6 +4,7 @@ These are the outbound writes that publish vayada inventory + rates +
 rules to Channex (which fans them out to OTAs)."""
 
 import logging
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -23,6 +24,20 @@ from app.utils import parse_jsonb
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class AriPushResult:
+    ok: bool
+    error: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.ok
+
+
+def _push_error_summary(prefix: str, exc: Exception) -> str:
+    detail = getattr(exc, "summary", None) or str(exc)
+    return f"{prefix}: {detail}" if detail else prefix
+
+
 # ── Availability ─────────────────────────────────────────────────────
 
 
@@ -31,19 +46,19 @@ async def push_availability_for_room_type(
     room_type_id: str,
     start_date: date | None = None,
     end_date: date | None = None,
-) -> bool:
+) -> AriPushResult:
     """Calculate and push availability for a room type to Channex."""
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"] or not conn.get("channex_property_id"):
-        return True
+        return AriPushResult(True)
 
     room_mapping = await ChannexRoomTypeMappingRepository.get_by_room_type_id(room_type_id)
     if not room_mapping:
-        return True
+        return AriPushResult(True)
 
     room_type = await RoomTypeRepository.get_by_id(room_type_id)
     if not room_type:
-        return True
+        return AriPushResult(True)
 
     if start_date is None:
         start_date = date.today()
@@ -102,7 +117,7 @@ async def push_availability_for_room_type(
         )
 
     if not values:
-        return True
+        return AriPushResult(True)
 
     try:
         await channex_service.push_availability(api_key, values)
@@ -111,14 +126,17 @@ async def push_availability_for_room_type(
             room_type_id,
             len(values),
         )
-        return True
-    except Exception:
+        return AriPushResult(True)
+    except Exception as e:
+        error = _push_error_summary(
+            f"availability push failed for room type {room_type_id}",
+            e,
+        )
         logger.error(
-            "Failed to push availability for room type %s",
-            room_type_id,
+            error,
             exc_info=True,
         )
-        return False
+        return AriPushResult(False, error)
 
 
 # ── Restrictions (rates + rules) ─────────────────────────────────────
@@ -246,15 +264,15 @@ async def push_restrictions_for_rate_plan(
     start_date: date | None = None,
     end_date: date | None = None,
     meal_plan_code: int = 0,
-) -> bool:
+) -> AriPushResult:
     """Calculate and push rates + restrictions for a single rate plan to Channex."""
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"] or not conn.get("channex_property_id"):
-        return True
+        return AriPushResult(True)
 
     room_type = await RoomTypeRepository.get_by_id(room_type_id)
     if not room_type:
-        return True
+        return AriPushResult(True)
     calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
 
     if start_date is None:
@@ -312,7 +330,7 @@ async def push_restrictions_for_rate_plan(
         )
 
     if not values:
-        return True
+        return AriPushResult(True)
 
     # VAY-349: structured payload log so we can verify exactly what leaves
     # our system per (date_from..date_to, channel, plan, meal, markup) →
@@ -342,14 +360,18 @@ async def push_restrictions_for_rate_plan(
             channex_rate_plan_id,
             len(values),
         )
-        return True
-    except Exception:
+        return AriPushResult(True)
+    except Exception as e:
+        error = _push_error_summary(
+            f"restrictions push failed for room type {room_type_id} "
+            f"rate plan {channex_rate_plan_id}",
+            e,
+        )
         logger.error(
-            "Failed to push restrictions for room type %s",
-            room_type_id,
+            error,
             exc_info=True,
         )
-        return False
+        return AriPushResult(False, error)
 
 
 # ── Cancellation policy ──────────────────────────────────────────────

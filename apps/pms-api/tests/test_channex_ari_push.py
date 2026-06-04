@@ -5,7 +5,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from app.services.channex.ari_push import _restriction_to_value
+from app.services.channex.ari_push import AriPushResult, _restriction_to_value
 from app.services.channex.orchestrator import push_ari_for_room_type
 
 
@@ -145,3 +145,43 @@ async def test_targeted_room_type_ari_sync_pushes_all_rate_plans_for_range():
     )
     mark_success.assert_awaited_once_with("hotel-1", datetime(2026, 1, 1, tzinfo=UTC))
     mark_failure.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_targeted_ari_sync_records_specific_channex_failure_reason():
+    error = "availability push failed for room type room-type-1: Channex rejected availability: availability exceeds room count"
+
+    with (
+        patch(
+            "app.services.channex.orchestrator.ChannexChannelMarkupRepository.get_markup_map",
+            new=AsyncMock(return_value={}),
+        ),
+        patch(
+            "app.services.channex.orchestrator.push_availability_for_room_type",
+            new=AsyncMock(return_value=AriPushResult(False, error)),
+        ),
+        patch(
+            "app.services.channex.orchestrator.ChannexRatePlanMappingRepository.list_by_room_type_id",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "app.services.channex.orchestrator.ChannexConnectionRepository.update_last_ari_sync",
+            new=AsyncMock(),
+        ) as mark_success,
+        patch(
+            "app.services.channex.orchestrator.ChannexConnectionRepository.record_ari_sync_error",
+            new=AsyncMock(),
+        ) as mark_failure,
+        patch(
+            "app.services.channex.orchestrator.datetime",
+            autospec=True,
+        ) as mock_datetime,
+    ):
+        failed_at = datetime(2026, 6, 2, 10, 15, 30, tzinfo=UTC)
+        mock_datetime.now.return_value = failed_at
+
+        ok = await push_ari_for_room_type("hotel-1", "room-type-1")
+
+    assert ok is False
+    mark_success.assert_not_awaited()
+    mark_failure.assert_awaited_once_with("hotel-1", error, failed_at)
