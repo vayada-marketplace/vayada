@@ -7,7 +7,7 @@
     "name": "api"
   },
   "scripts": {
-    "build:backend-packages": "npm --workspace @vayada/backend-config run build && npm --workspace @vayada/backend-http run build && npm --workspace @vayada/backend-db run build && npm --workspace @vayada/backend-auth run build && npm --workspace @vayada/backend-test run build",
+    "build:backend-packages": "npm --workspace @vayada/backend-config run build && npm --workspace @vayada/backend-http run build && npm --workspace @vayada/backend-db run build && npm --workspace @vayada/backend-auth run build && npm --workspace @vayada/backend-authorization run build && npm --workspace @vayada/backend-test run build",
     "prebuild": "npm run build:backend-packages",
     "predev": "npm run build:backend-packages",
     "dev": "tsx watch src/server.ts",
@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@vayada/backend-auth": "0.0.0",
+    "@vayada/backend-authorization": "0.0.0",
     "@vayada/backend-config": "0.0.0",
     "@vayada/backend-db": "0.0.0",
     "@vayada/backend-http": "0.0.0",

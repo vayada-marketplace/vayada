@@ -131,6 +131,25 @@ describe("resolveRequestContext", () => {
     expect(ctx.entitlements).toEqual([]);
   });
 
+  it("populates permissions through an authorization resolver when provided", async () => {
+    const repo = fakeRepo({ user: USER, org: ORG, membership: MEMBERSHIP, resources: RESOURCES });
+    const ctx = await resolveRequestContext(SESSION, repo, {
+      ...OPTIONS,
+      authorizationResolver: async (baseContext) => {
+        expect(baseContext.membership.permissions).toEqual([]);
+        expect(baseContext.selectedOrganization.kind).toBe("hotel_group");
+        expect(baseContext.membership.roleKey).toBe("hotel_owner");
+
+        return {
+          permissions: ["booking.settings.manage", "pms.booking.update"],
+        };
+      },
+    });
+
+    expect(ctx.membership.permissions).toEqual(["booking.settings.manage", "pms.booking.update"]);
+    expect(ctx.entitlements).toEqual([]);
+  });
+
   it("uses default locale and currency when not provided", async () => {
     const repo = fakeRepo({ user: USER, org: ORG, membership: MEMBERSHIP });
     const ctx = await resolveRequestContext(SESSION, repo, { requestId: "req_defaults" });

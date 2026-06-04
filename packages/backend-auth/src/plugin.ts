@@ -4,7 +4,7 @@ import fp from "fastify-plugin";
 
 import { AuthError, UnauthorizedError } from "./errors.js";
 import { type IdentityRepository } from "./repository.js";
-import { resolveRequestContext } from "./resolve.js";
+import { type AuthorizationResolver, resolveRequestContext } from "./resolve.js";
 import { type RequestContext } from "./types.js";
 import { type TokenVerifier, extractBearerToken } from "./verify.js";
 
@@ -13,6 +13,7 @@ const CONTEXT_DECORATION = "authContext";
 export type BackendAuthPluginOptions = {
   verifier: TokenVerifier;
   repository: IdentityRepository;
+  authorizationResolver?: AuthorizationResolver;
   /** Default locale when not specified by Accept-Language. Defaults to "en". */
   defaultLocale?: string;
   /** Default currency. Defaults to "USD". */
@@ -53,6 +54,7 @@ const backendAuthPluginFn: FastifyPluginAsync<BackendAuthPluginOptions> = async 
         source: "api",
         sourceIp: request.ip,
         userAgent: request.headers["user-agent"],
+        authorizationResolver: options.authorizationResolver,
       });
       request.authContext = context;
     } catch (error) {

@@ -46,7 +46,12 @@ export {
 } from "./repository.js";
 
 // RequestContext resolution
-export { resolveRequestContext, type ResolveOptions } from "./resolve.js";
+export {
+  resolveRequestContext,
+  type AuthorizationResolution,
+  type AuthorizationResolver,
+  type ResolveOptions,
+} from "./resolve.js";
 
 // Fastify plugin
 export {
