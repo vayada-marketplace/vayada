@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
 
-import { AuthError } from "./errors.js";
+import { AuthError, UnauthorizedError } from "./errors.js";
 import { type IdentityRepository } from "./repository.js";
 import { resolveRequestContext } from "./resolve.js";
 import { type RequestContext } from "./types.js";
@@ -30,10 +30,9 @@ declare module "fastify" {
  * Fastify plugin that resolves a WorkOS access token into a RequestContext
  * and attaches it to every request as `request.authContext`.
  *
- * Unauthenticated requests (missing or invalid token) set `request.authContext`
- * to null — routes must call `requireAuthContext(request)` to enforce auth.
- * This allows public routes (health, bookability) to coexist with authenticated
- * routes without separate plugin registration.
+ * Only AuthErrors are swallowed — infrastructure failures (DB, network) are
+ * re-thrown so Fastify's error handler can return a 500, not a misleading 401.
+ * Routes call requireAuthContext(request) to enforce authentication.
  */
 const backendAuthPluginFn: FastifyPluginAsync<BackendAuthPluginOptions> = async (
   app: FastifyInstance,
@@ -56,9 +55,10 @@ const backendAuthPluginFn: FastifyPluginAsync<BackendAuthPluginOptions> = async 
         userAgent: request.headers["user-agent"],
       });
       request.authContext = context;
-    } catch {
-      // Auth errors are surfaced when requireAuthContext is called.
-      // Non-auth requests simply proceed with authContext = null.
+    } catch (error) {
+      if (!(error instanceof AuthError)) throw error;
+      // AuthError means the token or identity is invalid/missing.
+      // authContext stays null and requireAuthContext surfaces the 401.
     }
   });
 };
@@ -70,26 +70,17 @@ export const backendAuthPlugin = fp(backendAuthPluginFn, {
 
 /**
  * Returns the resolved RequestContext for an authenticated request.
- * Throws 401 if the token was missing or invalid, 403 if the token was valid
- * but identity resolution failed.
+ * Throws UnauthorizedError (statusCode 401) when the request has no context —
+ * Fastify's default error handler maps statusCode to the HTTP response status.
  *
  * Call this at the start of any route handler that requires authentication.
  */
-export function requireAuthContext(request: FastifyRequest, reply: FastifyReply): RequestContext {
+export function requireAuthContext(request: FastifyRequest): RequestContext {
   const ctx = request.authContext;
   if (!ctx) {
-    throw reply
-      .code(401)
-      .send({ error: "Unauthorized", message: "A valid access token is required." });
+    throw new UnauthorizedError();
   }
   return ctx;
 }
 
-/**
- * Route-level helper that asserts an auth context is present and returns it.
- * Intended for use inside authenticated route handlers:
- *
- *   const ctx = getAuthContext(request, reply);
- *   // ctx is now typed as RequestContext
- */
 export { requireAuthContext as getAuthContext };

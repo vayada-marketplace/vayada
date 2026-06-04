@@ -41,11 +41,18 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
 
       const claims = payload as Record<string, unknown>;
 
+      if (!payload.sub) {
+        throw new AuthError("TOKEN_INVALID", "JWT is missing required sub claim");
+      }
+      if (payload.exp === undefined) {
+        throw new AuthError("TOKEN_INVALID", "JWT is missing required exp claim");
+      }
+
       return {
-        workosUserId: payload.sub!,
+        workosUserId: payload.sub,
         workosOrgId: typeof claims["org_id"] === "string" ? claims["org_id"] : null,
         sessionId: typeof claims["sid"] === "string" ? claims["sid"] : null,
-        expiresAt: payload.exp!,
+        expiresAt: payload.exp,
       };
     } catch (error) {
       if (error instanceof AuthError) throw error;

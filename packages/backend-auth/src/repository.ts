@@ -1,21 +1,28 @@
 import pg from "pg";
 
+import type {
+  InternalUserStatus,
+  MembershipStatus,
+  OrganizationKind,
+  OrganizationStatus,
+} from "./types.js";
+
 export type IdentityUser = {
   userId: string;
   email: string;
-  status: string;
+  status: InternalUserStatus;
 };
 
 export type IdentityOrganization = {
   organizationId: string;
   workosOrgId: string | null;
-  kind: string;
-  status: string;
+  kind: OrganizationKind;
+  status: OrganizationStatus;
 };
 
 export type IdentityMembership = {
   membershipId: string;
-  status: string;
+  status: MembershipStatus;
   roleKey: string;
   workosMembershipId: string | null;
   workosRoleSlugs: string[];
@@ -40,11 +47,35 @@ export interface IdentityRepository {
   findLinkedResources(organizationId: string): Promise<IdentityResourceLink[]>;
 }
 
-/** Postgres-backed implementation querying the identity schema. */
-export function createPgIdentityRepository(pool: pg.Pool): IdentityRepository {
+export type RepositoryConfig = {
+  connectionString: string;
+  /** Maximum number of connections in the pool. Defaults to pg's default (10). */
+  max?: number;
+};
+
+/**
+ * Creates a Postgres-backed IdentityRepository that manages its own connection
+ * pool internally. Accepts a connection string rather than a pre-built pool so
+ * callers do not need to create and manage a separate pool alongside any other
+ * database clients used by apps/api.
+ */
+export function createPgIdentityRepository(config: RepositoryConfig): IdentityRepository {
+  if (!config.connectionString.trim()) {
+    throw new Error("RepositoryConfig.connectionString must not be empty");
+  }
+
+  const pool = new pg.Pool({
+    connectionString: config.connectionString,
+    max: config.max,
+  });
+
   return {
     async findUserByProviderUserId(provider, providerUserId) {
-      const result = await pool.query<{ user_id: string; email: string; status: string }>(
+      const result = await pool.query<{
+        user_id: string;
+        email: string;
+        status: InternalUserStatus;
+      }>(
         `SELECT u.id AS user_id, u.email, u.status
          FROM identity.external_identities ei
          JOIN identity.users u ON u.id = ei.user_id
@@ -61,8 +92,8 @@ export function createPgIdentityRepository(pool: pg.Pool): IdentityRepository {
       const result = await pool.query<{
         id: string;
         workos_org_id: string | null;
-        kind: string;
-        status: string;
+        kind: OrganizationKind;
+        status: OrganizationStatus;
       }>(
         `SELECT id, workos_org_id, kind, status
          FROM identity.organizations
@@ -83,7 +114,7 @@ export function createPgIdentityRepository(pool: pg.Pool): IdentityRepository {
     async findActiveMembership(userId, organizationId) {
       const result = await pool.query<{
         id: string;
-        status: string;
+        status: MembershipStatus;
         role_key: string;
         workos_membership_id: string | null;
         workos_role_slugs: string[];

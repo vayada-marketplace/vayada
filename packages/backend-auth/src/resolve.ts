@@ -2,15 +2,11 @@ import { AuthError } from "./errors.js";
 import { type IdentityRepository } from "./repository.js";
 import {
   type LinkedResource,
-  type OrganizationKind,
-  type OrganizationStatus,
-  type MembershipStatus,
-  type InternalUserStatus,
   type Product,
-  type ResourceRelationship,
-  type ResourceType,
   type RequestContext,
   type RequestSource,
+  type ResourceRelationship,
+  type ResourceType,
 } from "./types.js";
 import { type VerifiedSession } from "./verify.js";
 
@@ -93,17 +89,17 @@ export async function resolveRequestContext(
         providerOrganizationId: session.workosOrgId,
       },
       email: user.email,
-      status: user.status as InternalUserStatus,
+      status: user.status,
     },
     selectedOrganization: {
       organizationId: org.organizationId,
       workosOrgId: org.workosOrgId ?? undefined,
-      kind: org.kind as OrganizationKind,
-      status: org.status as OrganizationStatus,
+      kind: org.kind,
+      status: org.status,
     },
     membership: {
       membershipId: membership.membershipId,
-      status: membership.status as MembershipStatus,
+      status: membership.status,
       roleKey: membership.roleKey,
       workosMembershipId: membership.workosMembershipId ?? undefined,
       workosRoleSlugs: membership.workosRoleSlugs,

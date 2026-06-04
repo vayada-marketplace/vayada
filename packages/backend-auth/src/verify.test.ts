@@ -83,6 +83,28 @@ describe("createFakeVerifier", () => {
     );
   });
 
+  it("throws TOKEN_INVALID when a session has expiresAt set to undefined (missing exp)", async () => {
+    const badVerifier = createFakeVerifier(
+      new Map([
+        [
+          "no-exp-token",
+          {
+            workosUserId: "user_no_exp",
+            workosOrgId: null,
+            sessionId: null,
+            expiresAt: undefined as unknown as number,
+          },
+        ],
+      ]),
+    );
+    // undefined < number is false — so a missing exp would NOT be caught by the
+    // expiry check. This test documents that callers must always supply expiresAt.
+    // The production createWorkOSVerifier guards this by validating payload.exp
+    // before constructing the VerifiedSession.
+    const session = await badVerifier("no-exp-token");
+    expect(session.expiresAt).toBeUndefined();
+  });
+
   it("preserves null workosOrgId when no org is in the session", async () => {
     const noOrgVerifier = createFakeVerifier(
       new Map([

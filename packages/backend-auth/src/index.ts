@@ -22,7 +22,7 @@ export type {
 } from "./types.js";
 
 // Errors
-export { AuthError, type AuthErrorCode } from "./errors.js";
+export { AuthError, UnauthorizedError, type AuthErrorCode } from "./errors.js";
 
 // Token verification
 export {
@@ -42,6 +42,7 @@ export {
   type IdentityRepository,
   type IdentityResourceLink,
   type IdentityUser,
+  type RepositoryConfig,
 } from "./repository.js";
 
 // RequestContext resolution

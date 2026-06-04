@@ -17,3 +17,17 @@ export class AuthError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * Thrown by requireAuthContext when the request has no resolved context.
+ * Fastify's default error handler maps statusCode to the HTTP response status,
+ * so throwing this produces a 401 response without needing access to FastifyReply.
+ */
+export class UnauthorizedError extends Error {
+  readonly statusCode = 401;
+
+  constructor(message = "A valid access token is required.") {
+    super(message);
+    this.name = "UnauthorizedError";
+  }
+}
