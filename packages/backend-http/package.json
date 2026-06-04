@@ -14,6 +14,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "pretest": "npm --workspace @vayada/backend-test run build",
+    "pretypecheck": "npm --workspace @vayada/backend-test run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@vayada/backend-test": "0.0.0",
     "typescript": "^5",
     "vitest": "^4.0.15"
   }

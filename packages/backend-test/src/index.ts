@@ -5,6 +5,7 @@ export type InjectJsonResponse<TBody> = {
   body: TBody;
 };
 
+/** Injects a Fastify request and parses the JSON response body. */
 export async function injectJson<TBody>(
   app: FastifyInstance,
   options: InjectOptions,

@@ -11,6 +11,7 @@
     "noEmitOnError": true,
     "outDir": "dist",
     "rootDir": "src",
+    "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "types": ["node"]

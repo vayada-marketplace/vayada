@@ -1,3 +1,4 @@
+import { injectJson } from "@vayada/backend-test";
 import Fastify from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -20,13 +21,13 @@ describe("backend-http", () => {
       prefix: "/api",
     });
 
-    const response = await app.inject({
+    const response = await injectJson(app, {
       method: "GET",
       url: "/api/booking/health",
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    expect(response.body).toEqual({
       group: "booking",
       status: "ok",
     });

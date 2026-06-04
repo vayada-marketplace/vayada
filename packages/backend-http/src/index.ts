@@ -13,6 +13,7 @@ export type RouteGroupHealth = {
   status: "ok";
 };
 
+/** Registers placeholder health routes for the selected product route groups. */
 export async function registerRouteGroupHealthRoutes(
   app: FastifyInstance,
   options: RouteGroupPluginOptions = {},

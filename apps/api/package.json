@@ -9,6 +9,7 @@
   "scripts": {
     "build:backend-packages": "npm --workspace @vayada/backend-config run build && npm --workspace @vayada/backend-http run build && npm --workspace @vayada/backend-db run build && npm --workspace @vayada/backend-test run build",
     "prebuild": "npm run build:backend-packages",
+    "predev": "npm run build:backend-packages",
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.build.json",
     "pretest": "npm run build:backend-packages",
