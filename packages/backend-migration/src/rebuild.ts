@@ -1,5 +1,6 @@
 import pg from "pg";
 
+import { loadFixtureCase } from "./fixtures.js";
 import {
   ADVISORY_LOCK_ID,
   acquireAdvisoryLock,
@@ -10,6 +11,8 @@ import {
 
 export type RebuildConfig = RunnerConfig & {
   schemas: string[];
+  fixtureCase?: string;
+  fixturesDir?: string;
 };
 
 function assertSafeIdentifier(name: string): void {
@@ -30,7 +33,7 @@ export async function rebuild(config: RebuildConfig): Promise<RunResult> {
   await client.connect();
 
   try {
-    // Hold the advisory lock across both the DROP SCHEMA and migration phases so
+    // Hold the advisory lock across drops, migrations, and fixture loading so
     // concurrent rebuild/migrate calls cannot interleave.
     await acquireAdvisoryLock(client);
 
@@ -39,7 +42,16 @@ export async function rebuild(config: RebuildConfig): Promise<RunResult> {
       await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     }
 
-    return await applyMigrations(config, client);
+    const result = await applyMigrations(config, client);
+
+    if (config.fixtureCase && config.fixturesDir) {
+      await loadFixtureCase(
+        { fixtureCase: config.fixtureCase, fixturesDir: config.fixturesDir },
+        client,
+      );
+    }
+
+    return result;
   } finally {
     try {
       await client.query(`SELECT pg_advisory_unlock($1)`, [ADVISORY_LOCK_ID]);

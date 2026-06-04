@@ -59,6 +59,7 @@
     "typecheck:api": "npm --workspace vayada-api run typecheck",
     "target:migrate": "npm --workspace @vayada/backend-migration run target:migrate --",
     "target:rebuild": "npm --workspace @vayada/backend-migration run target:rebuild --",
+    "target:parity": "npm --workspace @vayada/backend-migration run target:parity --",
     "prepare": "husky"
   },
   "overrides": {

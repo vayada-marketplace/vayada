@@ -2,14 +2,11 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { rebuild } from "../rebuild.js";
+import { runParityChecks } from "../parity.js";
 import { MIGRATION_ENVIRONMENTS, type MigrationEnvironment } from "../runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
 const DEFAULT_FIXTURES_DIR = join(__dirname, "../../fixtures");
-
-const DEFAULT_SCHEMAS = ["platform", "identity"] as const;
 
 function assertValidEnvironment(value: string): MigrationEnvironment {
   if ((MIGRATION_ENVIRONMENTS as readonly string[]).includes(value)) {
@@ -24,76 +21,77 @@ function assertValidEnvironment(value: string): MigrationEnvironment {
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;
   connectionString: string;
-  migrationsDir: string;
   fixturesDir: string;
   fixtures: string | null;
-  schemas: string[];
+  report: "json" | "text";
 } {
   const args = argv.slice(2);
   let env: MigrationEnvironment = "local";
   let connectionString = process.env["TARGET_DATABASE_URL"] ?? "";
-  let migrationsDir = DEFAULT_MIGRATIONS_DIR;
   let fixturesDir = DEFAULT_FIXTURES_DIR;
   let fixtures: string | null = null;
-  let schemas: string[] = [...DEFAULT_SCHEMAS];
+  let report: "json" | "text" = "text";
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]) {
       env = assertValidEnvironment(args[++i]);
     } else if (args[i] === "--connection-string" && args[i + 1]) {
       connectionString = args[++i];
-    } else if (args[i] === "--migrations-dir" && args[i + 1]) {
-      migrationsDir = args[++i];
     } else if (args[i] === "--fixtures-dir" && args[i + 1]) {
       fixturesDir = args[++i];
     } else if (args[i] === "--fixtures" && args[i + 1]) {
       fixtures = args[++i];
-    } else if (args[i] === "--schemas" && args[i + 1]) {
-      schemas = args[++i]
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+    } else if (args[i] === "--report" && args[i + 1]) {
+      const value = args[++i];
+      if (value !== "json" && value !== "text") {
+        console.error(`Error: --report must be "json" or "text", got "${value}".`);
+        process.exit(1);
+      }
+      report = value;
     }
   }
 
-  if (schemas.length === 0) {
-    console.error("Error: --schemas must specify at least one schema name.");
-    process.exit(1);
-  }
-
-  return { env, connectionString, migrationsDir, fixturesDir, fixtures, schemas };
+  return { env, connectionString, fixturesDir, fixtures, report };
 }
 
-const { env, connectionString, migrationsDir, fixturesDir, fixtures, schemas } = parseArgs(
-  process.argv,
-);
+const { env, connectionString, fixturesDir, fixtures, report } = parseArgs(process.argv);
 
 if (!connectionString) {
   console.error("Error: TARGET_DATABASE_URL or --connection-string is required.");
   process.exit(1);
 }
 
-console.log(`Dropping schemas: ${schemas.join(", ")}`);
+if (!fixtures) {
+  console.error("Error: --fixtures <case> is required.");
+  process.exit(1);
+}
 
-const result = await rebuild({
+const result = await runParityChecks({
   connectionString,
-  migrationsDir,
+  fixtureCase: fixtures,
+  fixturesDir,
   environment: env,
-  schemas,
-  fixtureCase: fixtures ?? undefined,
-  fixturesDir: fixtures ? fixturesDir : undefined,
 });
 
-if (result.applied.length > 0) {
-  console.log(`Applied:  ${result.applied.join(", ")}`);
+if (report === "json") {
+  console.log(JSON.stringify(result, null, 2));
+} else {
+  console.log(`\nParity report: ${result.fixtureCase} (${result.environment})`);
+  console.log(`Status:   ${result.status.toUpperCase()}`);
+  console.log(`Failures: ${result.summary.failures}`);
+  console.log(`Warnings: ${result.summary.warnings}`);
+  if (result.findings.length > 0) {
+    console.log("\nFindings:");
+    for (const f of result.findings) {
+      console.log(`  [${f.severity.toUpperCase()}] ${f.code} — ${f.targetObject}`);
+      console.log(`    ${f.message}`);
+      console.log(`    Expected: ${f.expected}`);
+      console.log(`    Actual:   ${f.actual}`);
+      if (f.suggestedAction) console.log(`    Fix: ${f.suggestedAction}`);
+    }
+  }
 }
-if (result.applied.length === 0 && !result.failed) {
-  console.log("No migrations to apply.");
-}
-if (fixtures) {
-  console.log(`Fixtures: loaded "${fixtures}"`);
-}
-if (result.failed) {
-  console.error(`Failed at version ${result.failed}. See platform.schema_migrations for details.`);
+
+if (result.status === "failed") {
   process.exit(1);
 }

@@ -16,3 +16,13 @@ export {
 } from "./runner.js";
 
 export { rebuild, type RebuildConfig } from "./rebuild.js";
+
+export { loadFixtureCase, type FixtureLoaderConfig } from "./fixtures.js";
+
+export {
+  runParityChecks,
+  type ParityCheckSeverity,
+  type ParityConfig,
+  type ParityFinding,
+  type ParityReport,
+} from "./parity.js";

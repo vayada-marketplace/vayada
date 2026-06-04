@@ -17,7 +17,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "target:migrate": "tsx src/cli/migrate.ts",
-    "target:rebuild": "tsx src/cli/rebuild.ts"
+    "target:rebuild": "tsx src/cli/rebuild.ts",
+    "target:parity": "tsx src/cli/parity.ts"
   },
   "dependencies": {
     "pg": "^8.16.3"
