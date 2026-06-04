@@ -57,6 +57,8 @@
     "lint:pms-web": "npm --workspace vayada-pms-frontend run lint",
     "test:api": "npm --workspace vayada-api run test",
     "typecheck:api": "npm --workspace vayada-api run typecheck",
+    "target:migrate": "npm --workspace @vayada/backend-migration run target:migrate --",
+    "target:rebuild": "npm --workspace @vayada/backend-migration run target:rebuild --",
     "prepare": "husky"
   },
   "overrides": {
