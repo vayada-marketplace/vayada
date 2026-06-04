@@ -17,6 +17,7 @@ from app.repositories.channex_mapping_repo import (
 from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services import channex_service
+from app.services.availability_service import compute_non_refundable_rate
 from app.services.calendar_auto_open_service import has_sellable_rate_on_date, is_date_auto_open
 from app.services.channex._common import SYNC_HORIZON_DAYS, _count_local_blocks
 from app.utils import parse_jsonb
@@ -179,11 +180,7 @@ def _build_restriction_entry(
 
     # Use non-refundable rate/discount for non_refundable plans
     if plan_name == "non_refundable":
-        if non_refundable_rate:
-            rate = non_refundable_rate
-        else:
-            discount = room_type.get("non_refundable_discount", 5) or 5
-            rate = round(base_rate * (1 - discount / 100), 2)
+        rate = compute_non_refundable_rate(room_type, base_rate, non_refundable_rate)
     else:
         rate = base_rate
 

@@ -8,8 +8,10 @@ import type { PointOfInterest } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import LocationMap from "@/components/booking/LocationMap";
 import {
-  getNonRefundableRate,
+  getFlexibleNightlyRates,
   getFreeCancellationDays,
+  getNonRefundableNightlyRates,
+  hasVariableNightlyRates,
   isFlexibleCancellationExpired,
 } from "@/lib/constants/booking";
 
@@ -128,10 +130,17 @@ export default function RoomDetailModal({
 
   if (!open) return null;
 
-  const flexibleTotal = room.baseRate * nights;
-  const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate);
-  const nonRefundableTotal = nonRefundableNightly * nights;
-  const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100);
+  const flexibleNightlies = getFlexibleNightlyRates(room, nights);
+  const flexibleFromNightly = flexibleNightlies.length > 0 ? Math.min(...flexibleNightlies) : 0;
+  const flexibleTotal = flexibleNightlies.reduce((sum, rate) => sum + rate, 0);
+  const flexibleVaries = hasVariableNightlyRates(flexibleNightlies);
+  const nonRefundableNightlies = getNonRefundableNightlyRates(room, nights);
+  const nonRefundableFromNightly =
+    nonRefundableNightlies.length > 0 ? Math.min(...nonRefundableNightlies) : 0;
+  const nonRefundableTotal = nonRefundableNightlies.reduce((sum, rate) => sum + rate, 0);
+  const nonRefundableVaries = hasVariableNightlyRates(nonRefundableNightlies);
+  const discount =
+    flexibleTotal > 0 ? Math.round((1 - nonRefundableTotal / flexibleTotal) * 100) : 0;
 
   // Rate option buttons — shared between mobile scroll body and desktop sticky footer
   const rateOptionsJsx = (
@@ -200,7 +209,8 @@ export default function RoomDetailModal({
             </div>
             <div className="text-right flex-shrink-0">
               <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
-                {formatPrice(room.baseRate, room.currency)}
+                {flexibleVaries ? "from " : ""}
+                {formatPrice(flexibleFromNightly, room.currency)}
               </p>
               <p className="text-xs text-gray-500">/night</p>
             </div>
@@ -243,7 +253,8 @@ export default function RoomDetailModal({
             </div>
             <div className="text-right flex-shrink-0">
               <p className="text-base md:text-lg font-bold text-gray-900 whitespace-nowrap">
-                {formatPrice(nonRefundableNightly, room.currency)}
+                {nonRefundableVaries ? "from " : ""}
+                {formatPrice(nonRefundableFromNightly, room.currency)}
               </p>
               <p className="text-xs text-gray-500">/night</p>
             </div>

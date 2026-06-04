@@ -19,6 +19,7 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { trackEvent } from "@/services/api/tracking";
 import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
+import { getFlexibleNightlyRates } from "@/lib/constants/booking";
 
 interface AppliedPromo {
   code: string;
@@ -242,8 +243,12 @@ function HomePageContent() {
               );
             }),
           );
-    if (sortOption === "priceLow") result.sort((a, b) => a.baseRate - b.baseRate);
-    else if (sortOption === "priceHigh") result.sort((a, b) => b.baseRate - a.baseRate);
+    const stayTotal = (room: (typeof rooms)[number]) => {
+      const rates = getFlexibleNightlyRates(room, room.nightlyRates?.length || 1);
+      return rates.reduce((sum, rate) => sum + rate, 0);
+    };
+    if (sortOption === "priceLow") result.sort((a, b) => stayTotal(a) - stayTotal(b));
+    else if (sortOption === "priceHigh") result.sort((a, b) => stayTotal(b) - stayTotal(a));
     else if (sortOption === "roomSize") result.sort((a, b) => (b.size || 0) - (a.size || 0));
     const totalGuests = committedAdults + committedChildren;
     const isSoldOut = (room: (typeof rooms)[number]) =>

@@ -18,11 +18,11 @@ interface StripeConfirmStepProps {
   nights: number;
   adults: number;
   roomTotal: number;
+  roomRateBreakdown: string;
   addons: Addon[];
   selectedAddonIds: string[];
   addonQuantities: Record<string, number>;
   addonDates?: Record<string, string[]>;
-  addonTotal: number;
   grandTotal: number;
   // For the VAY-388 card flow this is the draft preview (status='draft',
   // empty id). After Stripe authorizes, we replace it with the real
@@ -52,11 +52,11 @@ export default function StripeConfirmStep({
   nights,
   adults,
   roomTotal,
+  roomRateBreakdown,
   addons,
   selectedAddonIds,
   addonQuantities,
   addonDates,
-  addonTotal,
   grandTotal,
   booking,
   draftId,
@@ -143,6 +143,7 @@ export default function StripeConfirmStep({
                 {formatPrice(roomTotal, selectedCurrency)}
               </span>
             </div>
+            <p className="text-xs text-gray-500 text-right">{roomRateBreakdown}</p>
             {addons
               .filter((a) => selectedAddonIds.includes(a.id))
               .map((addon) => {

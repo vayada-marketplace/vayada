@@ -73,6 +73,9 @@ export interface RoomType {
   size: number;
   baseRate: number;
   nonRefundableRate: number | null;
+  nightlyRates?: number[];
+  nonRefundableNightlyRates?: number[];
+  originalNightlyRates?: number[];
   currency: string;
   locationAddress?: string;
   latitude?: number | null;

@@ -13,6 +13,7 @@ from datetime import date
 from decimal import Decimal
 
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.services.availability_service import compute_stay_pricing
 from app.services.channex.ari_push import _build_restriction_entry
 
 
@@ -85,6 +86,31 @@ def test_channex_push_uses_daily_override():
     assert entry["rate"] == 1_210_000
 
 
+def test_channex_non_refundable_push_uses_per_date_discount_over_legacy_flat_rate():
+    room = _make_room(
+        non_refundable_rate=900_000,
+        non_refundable_discount=5,
+        seasons=[
+            {"name": "July", "tier": "High", "from": "07-01", "to": "07-31", "rate": "4800000"},
+            {"name": "Peak", "tier": "Peak", "from": "08-01", "to": "08-31", "rate": "6100000"},
+        ],
+    )
+
+    july_entry = _build_restriction_entry(
+        room,
+        date(2026, 7, 31),
+        plan_name="non_refundable",
+    )
+    august_entry = _build_restriction_entry(
+        room,
+        date(2026, 8, 1),
+        plan_name="non_refundable",
+    )
+
+    assert july_entry["rate"] == 4_560_000
+    assert august_entry["rate"] == 5_795_000
+
+
 def test_channex_push_uses_season_stay_restrictions():
     room = _make_room(
         seasons=[
@@ -102,6 +128,72 @@ def test_channex_push_uses_season_stay_restrictions():
     entry = _build_restriction_entry(room, date(2026, 5, 7))
     assert entry["min_stay_arrival"] == 2
     assert entry["max_stay"] == 14
+
+
+def test_stay_pricing_sums_each_night_across_season_boundary():
+    room = _make_room(
+        base_rate=0,
+        seasons=[
+            {"name": "July", "tier": "High", "from": "07-01", "to": "07-31", "rate": "4800000"},
+            {"name": "Peak", "tier": "Peak", "from": "08-01", "to": "08-31", "rate": "6100000"},
+        ],
+    )
+
+    pricing = compute_stay_pricing(room, date(2026, 7, 29), date(2026, 8, 3))
+
+    assert pricing.nightly_rates == [4_800_000, 4_800_000, 4_800_000, 6_100_000, 6_100_000]
+    assert pricing.room_total == 26_600_000
+    assert pricing.average_nightly_rate == 5_320_000
+
+
+def test_stay_pricing_keeps_daily_override_date_specific():
+    room = _make_room(
+        seasons=[
+            {"name": "May", "tier": "Mid", "from": "05-01", "to": "05-31", "rate": "1600000"},
+        ],
+        daily_rates={"2026-05-07": 1_100_000},
+    )
+
+    pricing = compute_stay_pricing(room, date(2026, 5, 7), date(2026, 5, 9))
+
+    assert pricing.nightly_rates == [1_100_000, 1_600_000]
+    assert pricing.room_total == 2_700_000
+
+
+def test_stay_pricing_applies_weekend_surcharge_per_night():
+    room = _make_room(
+        seasons=[
+            {"name": "May", "tier": "Mid", "from": "05-01", "to": "05-31", "rate": "1000000"},
+        ],
+        weekend_surcharge="+20%",
+    )
+
+    pricing = compute_stay_pricing(room, date(2026, 5, 7), date(2026, 5, 10))
+
+    assert pricing.nightly_rates == [1_000_000, 1_200_000, 1_200_000]
+    assert pricing.room_total == 3_400_000
+
+
+def test_non_refundable_stay_pricing_uses_configured_discount():
+    room = _make_room(
+        base_rate=0,
+        non_refundable_enabled=True,
+        non_refundable_discount=5,
+        seasons=[
+            {"name": "July", "tier": "High", "from": "07-01", "to": "07-31", "rate": "4800000"},
+            {"name": "Peak", "tier": "Peak", "from": "08-01", "to": "08-31", "rate": "6100000"},
+        ],
+    )
+
+    pricing = compute_stay_pricing(
+        room,
+        date(2026, 7, 29),
+        date(2026, 8, 3),
+        rate_type="nonrefundable",
+    )
+
+    assert pricing.nightly_rates == [4_560_000, 4_560_000, 4_560_000, 5_795_000, 5_795_000]
+    assert pricing.room_total == 25_270_000
 
 
 def _run_update_room_type_capture_pushes(
