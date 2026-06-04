@@ -10,6 +10,7 @@ from app.database import Database
 from tests.conftest import (
     create_test_booking,
     create_test_hotel,
+    create_test_room_block,
     create_test_room_type,
     create_test_user,
     generate_test_slug,
@@ -113,6 +114,36 @@ class TestPublicRooms:
         rooms = resp.json()
         assert len(rooms) == 1
         assert rooms[0]["remainingRooms"] == 1  # 3 total - 2 booked
+
+    async def test_rooms_with_staggered_booking_and_block_keep_inventory(
+        self, client, cleanup_database
+    ):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        room = await create_test_room_type(str(hotel["id"]), total_rooms=2)
+
+        await create_test_booking(
+            str(hotel["id"]),
+            str(room["id"]),
+            check_in="2026-06-01",
+            check_out="2026-06-02",
+        )
+        await create_test_room_block(
+            str(hotel["id"]),
+            str(room["id"]),
+            start_date="2026-06-02",
+            end_date="2026-06-03",
+        )
+
+        resp = await client.get(
+            f"/api/hotels/{hotel['slug']}/rooms",
+            params={"check_in": "2026-06-01", "check_out": "2026-06-03"},
+        )
+
+        assert resp.status_code == 200
+        rooms = resp.json()
+        assert len(rooms) == 1
+        assert rooms[0]["remainingRooms"] == 1
 
     async def test_rooms_over_max_stay_show_zero_remaining(self, client, cleanup_database):
         user = await create_test_user()

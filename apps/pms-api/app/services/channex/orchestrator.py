@@ -33,7 +33,13 @@ async def _push_ari_for_room_type_payload(
         end_date=end_date,
     )
     if not availability_ok:
-        raise RuntimeError(f"availability push failed for room type {room_type_id}")
+        raise RuntimeError(
+            getattr(
+                availability_ok,
+                "error",
+                f"availability push failed for room type {room_type_id}",
+            )
+        )
 
     rate_plans = await ChannexRatePlanMappingRepository.list_by_room_type_id(room_type_id)
     for rp in rate_plans:
@@ -51,8 +57,12 @@ async def _push_ari_for_room_type_payload(
         )
         if not restrictions_ok:
             raise RuntimeError(
-                "restrictions push failed for room type "
-                f"{room_type_id} rate plan {rp['channex_rate_plan_id']}"
+                getattr(
+                    restrictions_ok,
+                    "error",
+                    "restrictions push failed for room type "
+                    f"{room_type_id} rate plan {rp['channex_rate_plan_id']}",
+                )
             )
 
 
