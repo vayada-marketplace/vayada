@@ -64,7 +64,7 @@ Contract slices:
   and audit metadata
 - target schema ownership map for identity, hotel catalog, booking, PMS,
   marketplace, finance, distribution/bookability, Ask Intelligence, jobs, and
-  audit
+  audit: `engineering/target-schema-ownership-map.md`
 - public bookability profile and quote contract
 - Ask Intelligence evidence and answer envelope contract
 - jobs/events idempotency, retry, failure visibility, and audit contract
@@ -173,6 +173,7 @@ criteria:
      source mapping.
    - Validation: every current migration history is represented or explicitly
      deferred.
+   - Output: `engineering/target-schema-ownership-map.md`.
 
 4. **Design migration/parity harness**
    - Specify local/staging commands, fixture shape, count checks, mismatch
@@ -209,4 +210,5 @@ criteria:
 - `engineering/ai-agent-bookability.md`
 - `engineering/typescript-backend-structure.md`
 - `engineering/backend-database-restructure.md`
+- `engineering/target-schema-ownership-map.md`
 - `.agents/skills/typescript-rewrite-workflow/SKILL.md`
