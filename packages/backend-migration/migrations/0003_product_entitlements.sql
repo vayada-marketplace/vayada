@@ -1,10 +1,10 @@
 -- Migration: 0003_product_entitlements
--- Owner: domain-identity (backend-authorization)
+-- Owner: domain-identity read model (backend-authorization)
 -- See: engineering/request-context-contract.md, engineering/target-schema-ownership-map.md
 --
--- Adds the entitlement read model consumed by RequestContext. Billing/finance
--- systems may own upstream product state, but authenticated backend requests
--- read the normalized entitlement state from identity.product_entitlements.
+-- Adds the entitlement read model consumed by RequestContext. This is not the
+-- billing source of truth: finance/product domains own upstream entitlement
+-- writes, and authenticated backend requests read the normalized state here.
 
 CREATE TABLE identity.product_entitlements (
   id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

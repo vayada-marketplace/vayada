@@ -50,6 +50,24 @@ async function resetRolePermissionGrantsTable(client: pg.Client): Promise<void> 
   await client.query(`TRUNCATE TABLE identity.role_permission_grants RESTART IDENTITY CASCADE`);
 }
 
+async function resetProductEntitlementsTable(client: pg.Client): Promise<void> {
+  await client.query(`CREATE SCHEMA IF NOT EXISTS identity`);
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS identity.product_entitlements (
+      organization_id UUID NOT NULL,
+      product TEXT NOT NULL,
+      entitlement_key TEXT NOT NULL,
+      status TEXT NOT NULL,
+      resource_product TEXT,
+      resource_type TEXT,
+      resource_id TEXT,
+      starts_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ
+    )
+  `);
+  await client.query(`TRUNCATE TABLE identity.product_entitlements RESTART IDENTITY CASCADE`);
+}
+
 function linkedResource(
   product: Product,
   resourceType: ResourceType,
@@ -256,21 +274,7 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgEntitlementRepository", () => {
     await client.connect();
 
     try {
-      await client.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
-      await client.query(`CREATE SCHEMA identity`);
-      await client.query(`
-        CREATE TABLE identity.product_entitlements (
-          organization_id UUID NOT NULL,
-          product TEXT NOT NULL,
-          entitlement_key TEXT NOT NULL,
-          status TEXT NOT NULL,
-          resource_product TEXT,
-          resource_type TEXT,
-          resource_id TEXT,
-          starts_at TIMESTAMPTZ,
-          expires_at TIMESTAMPTZ
-        )
-      `);
+      await resetProductEntitlementsTable(client);
       await client.query(
         `INSERT INTO identity.product_entitlements
            (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
@@ -320,7 +324,7 @@ describe.skipIf(!TEST_DATABASE_URL)("createPgEntitlementRepository", () => {
     const cleanup = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await cleanup.connect();
     try {
-      await cleanup.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
+      await resetProductEntitlementsTable(cleanup);
     } finally {
       await cleanup.end();
     }

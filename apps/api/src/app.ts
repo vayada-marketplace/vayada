@@ -9,7 +9,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastif
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 
-type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
+export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
   entitlementRepository?: EntitlementRepository;
 };
