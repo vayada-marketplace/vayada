@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Architecture boundaries
+        run: npm run check:architecture-boundaries
+
       - name: Typecheck
         run: npm run typecheck
 

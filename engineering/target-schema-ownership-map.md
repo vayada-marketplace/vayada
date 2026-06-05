@@ -29,6 +29,11 @@ source of truth until the reviewed cutover window.
   they do not replace Vayada internal IDs.
 - Tables that expose public or AI-readable data must state their public/private
   posture before DDL is written.
+- Booking Engine and PMS ownership follows
+  `engineering/booking-pms-domain-boundaries.md`: Booking Engine owns
+  guest-facing direct-booking contracts; PMS owns operational inventory,
+  reservations, room assignment, and channel connectivity. Vayada PMS is one PMS
+  implementation, not the Booking Engine backend.
 
 ## Topology Posture
 
@@ -129,6 +134,11 @@ Owner package: `domain-booking`.
 | `booking_notes_public`              | Booking/checkout            | Public-safe subset of PMS notes/events only when guest-visible.                                             | Private PMS notes remain PMS-owned.                                              |
 | `direct_booking_summary_read_model` | Booking/checkout read model | `guest_bookings`, PMS operational assignments, payments, property catalog.                                  | Consumed by PMS, finance, and Ask Intelligence through permissioned views.       |
 
+Booking/checkout must not depend on PMS operational tables, Channex mappings,
+or a Vayada PMS database connection as its normal source. It may publish booking
+events or call PMS integration interfaces so Vayada PMS or an external PMS can
+create/update the operational reservation.
+
 ### PMS Operations
 
 Owner package: `domain-pms`.
@@ -154,6 +164,11 @@ Owner package: `domain-pms`.
 | `channel_booking_mappings`          | PMS operations            | PMS `channex_booking_mappings`, webhook mapping state.                                                            | Channel booking identity mapping.                                             |
 | `channel_sync_status`               | PMS operations            | PMS Channex sync errors/status fields, ARI sync state.                                                            | Consumed by jobs/events for retries and observability.                        |
 | `pms_operations_summary_read_model` | PMS operations read model | Rooms, rates, assignments, channel status, booking summaries.                                                     | Consumed by Ask Intelligence and admin dashboards through permissioned views. |
+
+PMS operations owns Channex connectivity because Channex distributes inventory,
+rates, restrictions, and OTA reservations for a PMS-style system. PMS operations
+must not own direct checkout, public quote sessions, promo/referral application,
+or guest-facing Booking Engine confirmation contracts.
 
 ### Marketplace
 
@@ -281,16 +296,17 @@ from the repo at the time of this decision.
 
 ## Cross-Domain Access Contracts
 
-| Consumer need                                      | Producer owner           | Access boundary                                                                                       |
-| -------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| RequestContext resource resolution                 | Identity/auth            | `request_context_resource_scope` read model; no product DB pools.                                     |
-| Public hotel profile for marketplace/landing       | Hotel catalog            | `property_public_profile_read_model`; marketplace may add marketplace-owned listing fields.           |
-| Public AI bookability and quotes                   | Distribution/bookability | `public_hotel_bookability_profiles`, `public_room_offer_snapshots`, `public_quote_read_models`.       |
-| PMS calendar/operations view of guest bookings     | Booking/checkout         | `direct_booking_summary_read_model` plus PMS-owned operational assignments.                           |
-| Finance dashboards and payout visibility           | Finance                  | `finance_visibility_read_model` gated by finance permission keys.                                     |
-| Ask Intelligence hotel performance answers         | Ask Intelligence         | Evidence tools over curated booking/PMS/finance/read-model inputs; no arbitrary SQL.                  |
-| Channex side-effect retries and webhook processing | PMS + jobs/events/audit  | PMS owns normalized channel state; jobs/audit owns raw receipts, job attempts, and dead-letter state. |
-| Product audit timelines                            | Jobs/events/audit        | `product_audit_events` with actor, organization, target resource, action, and correlation metadata.   |
+| Consumer need                                      | Producer owner           | Access boundary                                                                                                  |
+| -------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| RequestContext resource resolution                 | Identity/auth            | `request_context_resource_scope` read model; no product DB pools.                                                |
+| Public hotel profile for marketplace/landing       | Hotel catalog            | `property_public_profile_read_model`; marketplace may add marketplace-owned listing fields.                      |
+| Public AI bookability and quotes                   | Distribution/bookability | `public_hotel_bookability_profiles`, `public_room_offer_snapshots`, `public_quote_read_models`.                  |
+| PMS calendar/operations view of guest bookings     | Booking/checkout         | `direct_booking_summary_read_model` plus PMS-owned operational assignments.                                      |
+| Booking Engine handoff to a PMS                    | PMS operations           | PMS reservation sink interface or domain event; Vayada PMS and external PMS systems implement the same boundary. |
+| Finance dashboards and payout visibility           | Finance                  | `finance_visibility_read_model` gated by finance permission keys.                                                |
+| Ask Intelligence hotel performance answers         | Ask Intelligence         | Evidence tools over curated booking/PMS/finance/read-model inputs; no arbitrary SQL.                             |
+| Channex side-effect retries and webhook processing | PMS + jobs/events/audit  | PMS owns normalized channel state; jobs/audit owns raw receipts, job attempts, and dead-letter state.            |
+| Product audit timelines                            | Jobs/events/audit        | `product_audit_events` with actor, organization, target resource, action, and correlation metadata.              |
 
 ## DDL Readiness Checklist
 

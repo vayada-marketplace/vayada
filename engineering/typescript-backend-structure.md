@@ -44,6 +44,11 @@ The backend structure should be organized around these principles:
   hotel-owner Ask Intelligence agent.
 - Preserve existing public URLs and frontend contracts through compatibility
   adapters until the frontend has moved to the new contracts.
+- Preserve the Booking Engine / PMS split defined in
+  `engineering/booking-pms-domain-boundaries.md`: Booking Engine owns
+  guest-facing checkout and direct-booking contracts; PMS owns operational
+  inventory, reservations, room assignment, and channel connectivity. Vayada PMS
+  is one PMS implementation, not the Booking Engine backend.
 
 ## Current backend pain points
 
@@ -296,6 +301,14 @@ Redesign:
 - separate payment orchestration from booking persistence
 - publish booking events for email, Channex, metrics, and affiliate handling
 
+Boundaries:
+
+- do not read or write PMS operational tables directly;
+- do not import Channex integration code;
+- interact with PMS through a reservation sink, read model, or domain event;
+- treat Vayada PMS and external PMS systems as interchangeable implementations
+  behind the PMS boundary.
+
 ### PMS operations
 
 Owns hotel operations:
@@ -320,6 +333,15 @@ Preserve:
   table layout as permanent architecture
 - Channex integration behavior and channel mapping semantics
 - existing admin route compatibility while frontends migrate
+
+Boundaries:
+
+- do not own public checkout conversion or quote/session contracts;
+- do not make direct-booking payment, promo, or guest-facing status rules
+  operational PMS state unless consumed through Booking/Finance read models or
+  events;
+- keep Channex code behind PMS connectivity contracts so Booking Engine does
+  not couple to a specific channel manager.
 
 ### Marketplace and collaborations
 
