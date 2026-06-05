@@ -91,6 +91,15 @@ Before opening a rewrite PR, verify:
   integration.
 - Authorization flows through a typed request context or an explicit temporary
   compatibility boundary.
+- Protected `apps/api` product routes use `enforceRoutePolicy` at the route
+  boundary. Direct `requireAuthContext` in a product route is a blocker unless
+  the route is explicitly public or the PR documents the exception.
+- Protected route adapter tests cover the denial matrix: missing/invalid auth,
+  missing permission, missing entitlement, inactive entitlement, missing linked
+  resource, and allowed access.
+- Route adapters have a request/response/error contract or parity fixture. If
+  the TypeScript adapter intentionally improves bad legacy behavior, the PR
+  documents that divergence and tests the new behavior.
 - Side effects have idempotency, retry, and audit visibility when they are in
   scope.
 - Validation is appropriate for the layer changed: build/typecheck, unit tests,
