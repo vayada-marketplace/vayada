@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthError } from "./errors.js";
-import { createFakeVerifier, extractBearerToken, type VerifiedSession } from "./verify.js";
+import {
+  createFakeVerifier,
+  createWorkOSVerifier,
+  extractBearerToken,
+  type VerifiedSession,
+} from "./verify.js";
 
 // ---------------------------------------------------------------------------
 // extractBearerToken
@@ -32,6 +38,133 @@ describe("extractBearerToken", () => {
 
   it("returns null for a bare token with no scheme", () => {
     expect(extractBearerToken("abc.def.ghi")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createWorkOSVerifier
+// ---------------------------------------------------------------------------
+
+const WORKOS_ISSUER = "https://api.workos.com/user_management/client_expected";
+const WORKOS_CLIENT_ID = "client_expected";
+const WORKOS_JWKS_URL = "https://api.workos.com/sso/jwks/client_expected";
+
+async function signWorkOSTestToken(claims: JWTPayload & Record<string, unknown>) {
+  const { privateKey, publicKey } = await generateKeyPair("RS256");
+  const publicJwk = await exportJWK(publicKey);
+  const kid = "test-key";
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          keys: [
+            {
+              ...publicJwk,
+              kid,
+              alg: "RS256",
+              use: "sig",
+            },
+          ],
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+        },
+      );
+    }),
+  );
+
+  return new SignJWT(claims)
+    .setProtectedHeader({ alg: "RS256", kid })
+    .setIssuer(WORKOS_ISSUER)
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .sign(privateKey);
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("createWorkOSVerifier", () => {
+  it("verifies a WorkOS access token that carries client_id instead of aud", async () => {
+    const token = await signWorkOSTestToken({
+      sub: "user_workos_hotel_owner",
+      org_id: "org_workos_hotel_group",
+      sid: "session_hotel_owner",
+      client_id: WORKOS_CLIENT_ID,
+    });
+
+    const verifier = createWorkOSVerifier({
+      jwksUrl: WORKOS_JWKS_URL,
+      issuer: WORKOS_ISSUER,
+      audience: WORKOS_CLIENT_ID,
+    });
+
+    await expect(verifier(token)).resolves.toMatchObject({
+      workosUserId: "user_workos_hotel_owner",
+      workosOrgId: "org_workos_hotel_group",
+      sessionId: "session_hotel_owner",
+    });
+  });
+
+  it("rejects a token for another WorkOS client_id", async () => {
+    const token = await signWorkOSTestToken({
+      sub: "user_workos_hotel_owner",
+      org_id: "org_workos_hotel_group",
+      client_id: "client_other",
+    });
+
+    const verifier = createWorkOSVerifier({
+      jwksUrl: WORKOS_JWKS_URL,
+      issuer: WORKOS_ISSUER,
+      audience: WORKOS_CLIENT_ID,
+    });
+
+    await expect(verifier(token)).rejects.toSatisfy(
+      (e: unknown) => e instanceof AuthError && e.code === "TOKEN_INVALID",
+    );
+  });
+
+  it("does not allow aud fallback to override a mismatched WorkOS client_id", async () => {
+    const token = await signWorkOSTestToken({
+      sub: "user_workos_hotel_owner",
+      org_id: "org_workos_hotel_group",
+      client_id: "client_other",
+      aud: WORKOS_CLIENT_ID,
+    });
+
+    const verifier = createWorkOSVerifier({
+      jwksUrl: WORKOS_JWKS_URL,
+      issuer: WORKOS_ISSUER,
+      audience: WORKOS_CLIENT_ID,
+    });
+
+    await expect(verifier(token)).rejects.toSatisfy(
+      (e: unknown) => e instanceof AuthError && e.code === "TOKEN_INVALID",
+    );
+  });
+
+  it("keeps aud array support for non-WorkOS-compatible test tokens", async () => {
+    const token = await signWorkOSTestToken({
+      sub: "user_workos_hotel_owner",
+      org_id: "org_workos_hotel_group",
+      aud: ["client_other", WORKOS_CLIENT_ID],
+    });
+
+    const verifier = createWorkOSVerifier({
+      jwksUrl: WORKOS_JWKS_URL,
+      issuer: WORKOS_ISSUER,
+      audience: WORKOS_CLIENT_ID,
+    });
+
+    await expect(verifier(token)).resolves.toMatchObject({
+      workosUserId: "user_workos_hotel_owner",
+      workosOrgId: "org_workos_hotel_group",
+    });
   });
 });
 
