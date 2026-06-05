@@ -347,7 +347,7 @@ describe("vayada-api", () => {
     });
   });
 
-  it("returns booking reservations with auth, policy, and the documented legacy list shape", async () => {
+  it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
     const response = await injectJson(app, {
