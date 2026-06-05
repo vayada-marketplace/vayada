@@ -6,6 +6,7 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createPgBookingSettingsReadRepository } from "./routes/bookingSettings.js";
 
 const config = loadConfig();
 
@@ -34,6 +35,11 @@ function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
+  bookingSettingsRepository: config.bookingDatabaseUrl
+    ? createPgBookingSettingsReadRepository({
+        connectionString: config.bookingDatabaseUrl,
+      })
+    : undefined,
 });
 
 try {

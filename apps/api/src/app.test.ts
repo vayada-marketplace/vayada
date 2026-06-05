@@ -10,6 +10,10 @@ import { injectJson } from "@vayada/backend-test";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
+import {
+  createPgBookingSettingsReadRepository,
+  type BookingSettingsReadRepository,
+} from "./routes/bookingSettings.js";
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 
@@ -58,6 +62,19 @@ const identityRepository: IdentityRepository = {
   },
 };
 
+const bookingSettingsRepository: BookingSettingsReadRepository = {
+  async findAddonSettingsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      showAddonsStep: false,
+      groupAddonsByCategory: true,
+    };
+  },
+};
+
 function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): IdentityRepository {
   return {
     ...identityRepository,
@@ -80,10 +97,12 @@ function buildAuthenticatedApp(
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
     linkedHotelId?: string;
+    settingsRepository?: BookingSettingsReadRepository;
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
+    bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepositoryWithHotel(options.linkedHotelId),
@@ -143,6 +162,17 @@ describe("vayada-api", () => {
       group: "booking",
       status: "ok",
     });
+  });
+
+  it("does not expose booking addon settings until a read model is configured", async () => {
+    app = buildApp({ logger: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 
   it("wires authorization into authenticated API context resolution", async () => {
@@ -206,6 +236,157 @@ describe("vayada-api", () => {
         },
       ],
     });
+  });
+
+  it("returns booking addon settings with auth, policy, and the documented legacy-compatible shape", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      showAddonsStep: false,
+      groupAddonsByCategory: true,
+    });
+  });
+
+  it("rejects empty booking settings repository connection strings", async () => {
+    expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
+      "Booking settings repository connectionString must not be empty",
+    );
+  });
+
+  it("defaults missing booking addon settings fields to the legacy response defaults", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return {};
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      showAddonsStep: true,
+      groupAddonsByCategory: true,
+    });
+  });
+
+  it("rejects booking addon settings without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects booking addon settings with an invalid token", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer invalid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it("rejects booking addon settings when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects booking addon settings when entitlement is missing", async () => {
+    app = buildAuthenticatedApp({ entitlements: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects booking addon settings when entitlement is suspended", async () => {
+    app = buildAuthenticatedApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("rejects booking addon settings when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_other/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("returns 404 when the authorized booking hotel has no settings record", async () => {
+    app = buildAuthenticatedApp({ linkedHotelId: "booking_hotel_missing" });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_missing/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
   });
 
   it("allows the booking policy route with auth, permission, entitlement, and linked resource", async () => {
