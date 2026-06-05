@@ -12,6 +12,7 @@ export type ApiConfig = {
   port: number;
   auth?: ApiAuthConfig;
   bookingDatabaseUrl?: string;
+  pmsDatabaseUrl?: string;
 };
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -56,5 +57,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ...server,
     auth: loadAuthConfig(env),
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
+    pmsDatabaseUrl: readOptionalEnv(env, "PMS_DATABASE_URL"),
   };
 }

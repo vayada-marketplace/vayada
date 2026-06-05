@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  registerBookingReservationRoutes,
+  type BookingReservationsReadRepository,
+} from "./bookingReservations.js";
+import {
   registerBookingSettingsRoutes,
   type BookingSettingsReadRepository,
 } from "./bookingSettings.js";
@@ -11,6 +15,7 @@ type BookingHotelParams = {
 };
 
 export type BookingRoutesOptions = {
+  reservationsRepository?: BookingReservationsReadRepository;
   settingsRepository?: BookingSettingsReadRepository;
 };
 
@@ -20,6 +25,10 @@ export async function registerBookingRoutes(
 ): Promise<void> {
   if (options.settingsRepository) {
     await registerBookingSettingsRoutes(app, options.settingsRepository);
+  }
+
+  if (options.reservationsRepository) {
+    await registerBookingReservationRoutes(app, options.reservationsRepository);
   }
 
   app.get<{ Params: BookingHotelParams }>("/hotels/:hotelId/policy-check", async (request) => {

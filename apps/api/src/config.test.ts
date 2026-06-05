@@ -38,4 +38,12 @@ describe("api config", () => {
       }).bookingDatabaseUrl,
     ).toBe("postgresql://booking-db");
   });
+
+  it("loads optional PMS database config for reservation read models", () => {
+    expect(
+      loadConfig({
+        PMS_DATABASE_URL: "postgresql://pms-db",
+      }).pmsDatabaseUrl,
+    ).toBe("postgresql://pms-db");
+  });
 });

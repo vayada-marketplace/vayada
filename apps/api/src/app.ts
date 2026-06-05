@@ -6,6 +6,7 @@ import {
 } from "@vayada/backend-authorization";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 
+import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import type { BookingSettingsReadRepository } from "./routes/bookingSettings.js";
 import { registerBookingRoutes } from "./routes/booking.js";
 import { registerRouteGroups } from "./routes/groups.js";
@@ -18,6 +19,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
+  bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingSettingsRepository?: BookingSettingsReadRepository;
 };
 
@@ -43,6 +45,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(registerRouteGroups, { prefix: "/api" });
   app.register(registerBookingRoutes, {
     prefix: "/api/booking",
+    reservationsRepository: options.bookingReservationsRepository,
     settingsRepository: options.bookingSettingsRepository,
   });
 
