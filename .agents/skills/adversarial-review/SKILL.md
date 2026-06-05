@@ -13,17 +13,24 @@ The goal is to find real defects, regressions, missed acceptance criteria, risky
 
 Run for every Linear ticket implementation before PR creation.
 
-Use an independent subagent when the runtime supports it for:
+For shared packages, cross-domain architecture, auth, tenant boundaries, booking,
+payment, availability, or PMS workflows: explicitly use an independent subagent
+adversarial review before opening or finalizing the PR. Do not count a local
+self-review as satisfying this requirement.
+
+This requirement applies to:
 
 - backend logic
 - auth, tenant boundaries, permissions, or user data
 - migrations or schema changes
 - booking, payment, availability, or PMS workflows
 - shared package changes
+- cross-domain architecture changes
 - cross-app changes
 - non-trivial frontend state or API integration
 
-For tiny copy or visual-only changes, a local second-pass review is acceptable.
+For changes outside those categories, such as tiny copy or visual-only changes,
+a local second-pass review is acceptable.
 
 ## Inputs
 

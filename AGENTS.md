@@ -146,6 +146,7 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 - For each Linear implementation issue, create a branch linked to the issue, commit with a descriptive message, push the branch, and open a GitHub PR.
 - For large architecture or rewrite work, use stacked PRs. Keep each PR focused and around 400 changed non-generated lines or fewer unless the ticket explicitly justifies a larger slice.
 - For TypeScript backend rewrite, WorkOS, Ask Intelligence, target-schema, migration, or cutover work, load `.agents/skills/typescript-rewrite-workflow/SKILL.md` before coding. Architecture/design contracts must be written or linked before implementation PRs.
+- For shared packages, cross-domain architecture, auth, tenant boundaries, booking, payment, availability, or PMS workflows: explicitly use an independent subagent adversarial review before opening or finalizing the PR. Do not count a local self-review as satisfying this requirement.
 - PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
 - CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
 - Merge with squash merge after required checks pass.
