@@ -25,6 +25,10 @@ The target should be:
 - typed read models for cross-domain consumers instead of product services
   directly opening each other's database pools;
 - public bookability data separated from authenticated hotel-owner intelligence;
+- Booking Engine and PMS operations separated per
+  `engineering/booking-pms-domain-boundaries.md`, so direct booking/checkout
+  does not become dependent on Vayada PMS tables and Vayada PMS remains one
+  interchangeable PMS implementation;
 - deterministic migration scripts from legacy databases into the new schema;
 - a rehearsed cutover plan with write freeze, parity checks, rollback, and
   post-cutover monitoring.
@@ -212,6 +216,10 @@ Rules:
   input, but domain logic should receive an explicit resolved resource context.
 - Cross-product reads through `AuthDatabase`, `PmsDatabase`,
   `MarketplaceDatabase`, and `BookingEngineDatabase` as normal integration.
+- Booking Engine routes or services that treat PMS tables, Channex tables, or
+  `PMS_DATABASE_URL` as their normal reservation source.
+- PMS routes or services that own direct-booking checkout, quote/session, promo,
+  or guest-facing confirmation contracts.
 - Booking quote, checkout context, payment eligibility, and deep-link state as
   one explicit domain contract.
 - Hotel setup completeness and agent-readiness as reusable read models.

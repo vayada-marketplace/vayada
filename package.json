@@ -27,6 +27,7 @@
     "typecheck": "npm --workspaces --if-present run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:architecture-boundaries": "node scripts/check-architecture-boundaries.mjs",
     "lint:python": "ruff check .",
     "format:python": "ruff format .",
     "e2e": "playwright test",

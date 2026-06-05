@@ -123,6 +123,13 @@ Do not add product route behavior that depends directly on `users.type`,
 `is_superadmin`, direct product `user_id` ownership, or hidden `X-Hotel-Id`
 state.
 
+Product route adapters must also preserve domain ownership boundaries. For
+booking/PMS surfaces, follow `engineering/booking-pms-domain-boundaries.md`:
+Booking Engine routes may depend on Booking interfaces/read models, but not PMS
+tables, Channex tables, `PMS_DATABASE_URL`, or Vayada PMS implementation
+details. PMS routes may depend on operational PMS interfaces, but not own
+direct-booking checkout or quote/session contracts.
+
 ## Contract and Parity
 
 Route adapters should be contract-led, not route-port-led. Before migrating a
