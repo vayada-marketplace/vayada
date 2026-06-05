@@ -14,9 +14,10 @@ import {
   createPgBookingSettingsReadRepository,
   type BookingSettingsReadRepository,
 } from "./routes/bookingSettings.js";
-import type {
-  BookingReservationReadModel,
-  BookingReservationsReadRepository,
+import {
+  toReservationResponse,
+  type BookingReservationReadModel,
+  type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
@@ -435,6 +436,30 @@ describe("vayada-api", () => {
       limit: 50,
       offset: 0,
     });
+  });
+
+  it("sanitizes invalid reservation numeric and date values from read models", () => {
+    const response = toReservationResponse({
+      ...reservation,
+      roomMaxOccupancy: Number.NaN,
+      nightlyRate: "N/A",
+      totalAmount: "",
+      depositAmount: "not-a-number",
+      balanceAmount: Number.POSITIVE_INFINITY,
+      checkedInAt: "not-a-date",
+      createdAt: "not-a-date",
+      updatedAt: new Date("not-a-date"),
+    });
+
+    expect(response.roomMaxOccupancy).toBe(1);
+    expect(response.totalRoomCapacity).toBe(2);
+    expect(response.nightlyRate).toBe(0);
+    expect(response.totalAmount).toBe(0);
+    expect(response.depositAmount).toBe(0);
+    expect(response.balanceAmount).toBe(0);
+    expect(response.checkedInAt).toBeNull();
+    expect(response.createdAt).toBe("");
+    expect(response.updatedAt).toBe("");
   });
 
   it("returns an empty booking reservation list for an authorized hotel with no rows", async () => {

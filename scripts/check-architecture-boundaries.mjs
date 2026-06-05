@@ -52,18 +52,16 @@ for (const check of checks) {
       }
 
       const source = stripComments(readFileSync(filePath, "utf8"));
-      const lines = source.split(/\r?\n/);
       for (const rule of check.forbidden) {
-        lines.forEach((line, index) => {
-          if (rule.pattern.test(line)) {
-            violations.push({
-              check: check.name,
-              file: relativePath,
-              line: index + 1,
-              message: rule.message,
-            });
-          }
-        });
+        const pattern = toGlobalRegExp(rule.pattern);
+        for (const match of source.matchAll(pattern)) {
+          violations.push({
+            check: check.name,
+            file: relativePath,
+            line: lineNumberAt(source, match.index ?? 0),
+            message: rule.message,
+          });
+        }
       }
     }
   }
@@ -98,4 +96,13 @@ function stripComments(source) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, (match) => "\n".repeat(match.split(/\r?\n/).length - 1))
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+function toGlobalRegExp(pattern) {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
+}
+
+function lineNumberAt(source, index) {
+  return source.slice(0, index).split(/\r?\n/).length;
 }

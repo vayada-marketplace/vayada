@@ -220,7 +220,7 @@ export function toReservationResponse(
   const checkIn = toDateOnly(reservation.checkIn);
   const checkOut = toDateOnly(reservation.checkOut);
   const numberOfRooms = Math.max(1, reservation.numberOfRooms ?? 1);
-  const roomMaxOccupancy = Math.max(1, Number(reservation.roomMaxOccupancy || 1));
+  const roomMaxOccupancy = Math.max(1, toNumber(reservation.roomMaxOccupancy));
   const primaryRoom = reservation.roomId
     ? [
         {
@@ -329,7 +329,12 @@ function parseJson<T>(value: T | string | null | undefined, defaultValue: T): T 
 }
 
 function toNumber(value: number | string): number {
-  return typeof value === "number" ? value : Number(value);
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function toNullableNumber(value: number | string | null | undefined): number | null {
@@ -338,28 +343,44 @@ function toNullableNumber(value: number | string | null | undefined): number | n
 }
 
 function toDateOnly(value: Date | string): string {
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
+  const date = toValidDate(value);
+  if (date) {
+    return date.toISOString().slice(0, 10);
   }
 
-  return value.slice(0, 10);
+  return typeof value === "string" ? value.slice(0, 10) : "";
 }
 
 function toIsoDateTime(value: Date | string): string {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  return new Date(value).toISOString();
+  return toIsoDateTimeOrNull(value) ?? "";
 }
 
 function toIsoDateTimeOrNull(value: Date | string | null | undefined): string | null {
   if (!value) return null;
-  return toIsoDateTime(value);
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
+}
+
+function toValidDate(value: Date | string): Date | null {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : null;
+  }
+
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
 function daysBetween(start: string, end: string): number {
   const startTime = Date.parse(`${start}T00:00:00.000Z`);
   const endTime = Date.parse(`${end}T00:00:00.000Z`);
+  if (!Number.isFinite(startTime) || !Number.isFinite(endTime)) {
+    return 0;
+  }
+
   return Math.max(0, Math.round((endTime - startTime) / 86_400_000));
 }
