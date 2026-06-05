@@ -94,9 +94,14 @@ type PmsReservationStatus =
   | "no_show"
   | "failed";
 
+type PmsCurrencyCode = string;
+type PmsDecimalAmount = string;
+type PmsDate = string;
+type PmsUtcDateTime = string;
+
 type PmsMoney = {
-  amount: number;
-  currency: string;
+  amountDecimal: PmsDecimalAmount;
+  currency: PmsCurrencyCode;
 };
 
 type PmsAuditContext = {
@@ -108,7 +113,7 @@ type PmsAuditContext = {
   actorType: "guest" | "hotel_user" | "system" | "platform_admin";
   actorId?: string;
   source: "booking_engine" | "pms_admin" | "job_retry" | "migration" | "test";
-  occurredAt: string;
+  occurredAt: PmsUtcDateTime;
 };
 
 type PmsExternalReference = {
@@ -121,6 +126,27 @@ type PmsExternalReference = {
   opaqueProviderData?: Record<string, string | number | boolean | null>;
 };
 ```
+
+Scalar format rules:
+
+- `PmsCurrencyCode` must be an ISO-4217 uppercase three-letter code, for example
+  `"EUR"` or `"USD"`.
+- `PmsDecimalAmount` is a base-10 decimal string in major units, for example
+  `"120.50"`. It must not use floating point JSON numbers, exponential
+  notation, thousands separators, or currency symbols.
+- Monetary values must be rounded before serialization using the currency minor
+  unit for the target `PmsCurrencyCode` unless a field explicitly documents a
+  different precision. For standard currencies this means `"120.50"` for EUR and
+  `"120"` for JPY.
+- Negative money is forbidden unless the field explicitly allows it. Discounts,
+  refunds, and penalties are represented as positive amounts in their own typed
+  fields.
+- `PmsDate` must be an ISO calendar date in `YYYY-MM-DD` format.
+- `PmsUtcDateTime` must be an ISO-8601 UTC timestamp with a trailing `Z`, for
+  example `"2026-06-05T14:16:42.000Z"`.
+- Adapters must validate these scalar formats before persisting commands or
+  comparing idempotency payloads. Invalid scalars return `VALIDATION_FAILED`
+  before any provider call.
 
 `opaqueProviderData` is adapter-owned metadata for diagnostics and retries. It
 must not be required by Booking Engine business logic.
@@ -163,13 +189,13 @@ type CreatePmsReservationCommand = {
     guestBookingId: string;
     bookingReference: string;
     status: "confirmed";
-    createdAt: string;
+    createdAt: PmsUtcDateTime;
     source: "direct_booking";
     locale: string;
   };
   stay: {
-    checkInDate: string;
-    checkOutDate: string;
+    checkInDate: PmsDate;
+    checkOutDate: PmsDate;
     adults: number;
     children: number;
     numberOfRooms: number;
@@ -204,7 +230,7 @@ type CreatePmsReservationCommand = {
   policy: {
     cancellationPolicyId?: string;
     cancellationSummary?: string;
-    refundableUntil?: string | null;
+    refundableUntil?: PmsUtcDateTime | null;
   };
 };
 
@@ -214,7 +240,7 @@ type PmsGuest = {
   email?: string | null;
   phone?: string | null;
   country?: string | null;
-  dateOfBirth?: string | null;
+  dateOfBirth?: PmsDate | null;
 };
 ```
 
@@ -285,7 +311,7 @@ type CancelPmsReservationCommand = {
       | "no_show"
       | "platform_action"
       | "other";
-    cancelledAt: string;
+    cancelledAt: PmsUtcDateTime;
     penaltyAmount?: PmsMoney;
     refundAmount?: PmsMoney;
     note?: string;
@@ -399,6 +425,44 @@ Rules:
 - Provider-native idempotency keys may be derived from the Vayada key, but the
   Vayada key remains the audit source of truth.
 
+All adapters must use the same canonicalization algorithm before comparing
+payloads for replay versus `IDEMPOTENCY_CONFLICT`:
+
+```ts
+type CanonicalJsonValue =
+  | null
+  | boolean
+  | string
+  | number
+  | CanonicalJsonValue[]
+  | { [key: string]: CanonicalJsonValue };
+
+function canonicalizePayloadForIdempotency(command: unknown): string;
+```
+
+`canonicalizePayloadForIdempotency` rules:
+
+- Drop object properties whose value is `undefined`; an absent optional field and
+  an explicitly `undefined` field are the same.
+- Preserve explicit `null` values.
+- Deep-sort object keys lexicographically at every object level.
+- Preserve array order exactly. Array order is semantic for guests, rooms,
+  add-ons, and provider references.
+- Serialize money only through `PmsMoney.amountDecimal` after enforcing the
+  scalar rules above; do not serialize floating point money.
+- Canonicalize decimal strings by removing a leading `+`, removing unnecessary
+  leading zeros, and keeping the currency minor-unit scale required for that
+  field. For example EUR `"00120.5"` serializes as `"120.50"`.
+- Canonicalize all timestamps to `PmsUtcDateTime` with millisecond precision and
+  trailing `Z`.
+- Canonicalize all dates to `PmsDate`.
+- Serialize the resulting value with a stable JSON encoder equivalent to
+  `stableStringify`, without whitespace.
+
+Adapters must store the canonical payload string or its cryptographic digest
+next to the idempotency key. Replay comparison is based on that canonical value,
+not on provider-native payload bytes.
+
 ## Audit and Correlation
 
 Every command must create or link:
@@ -428,18 +492,22 @@ interface PmsOperationalReservationReadPort {
   ): Promise<PmsOperationalReservationListResult>;
 }
 
-type GetPmsOperationalReservationQuery = {
-  propertyId: string;
+type RequireAtLeastOne<T, Keys extends keyof T = keyof T> = Pick<T, Exclude<keyof T, Keys>> &
+  {
+    [K in Keys]-?: Required<Pick<T, K>> & Partial<Pick<T, Exclude<Keys, K>>>;
+  }[Keys];
+
+type GetPmsOperationalReservationQuery = { propertyId: string } & RequireAtLeastOne<{
   pmsReservationRef?: string;
   operationalReservationId?: string;
   guestBookingId?: string;
-};
+}>;
 
 type ListPmsOperationalReservationsQuery = {
   propertyId: string;
   dateRange: {
-    from: string;
-    to: string;
+    from: PmsDate;
+    to: PmsDate;
   };
   statuses?: PmsReservationStatus[];
   roomTypeId?: string;
@@ -459,8 +527,8 @@ type PmsOperationalReservationReadModel = {
   source: "direct_booking" | "channel" | "manual" | "imported";
   status: PmsReservationStatus;
   stay: {
-    checkInDate: string;
-    checkOutDate: string;
+    checkInDate: PmsDate;
+    checkOutDate: PmsDate;
     adults: number;
     children: number;
   };
@@ -483,7 +551,7 @@ type PmsOperationalReservationReadModel = {
   };
   externalReference?: PmsExternalReference;
   channelReservationRef?: string;
-  lastSyncedAt?: string;
+  lastSyncedAt?: PmsUtcDateTime;
   version?: string;
 };
 
