@@ -17,7 +17,7 @@ export type WorkOSVerifierConfig = {
   jwksUrl: string;
   /** Expected `iss` claim in the JWT. */
   issuer: string;
-  /** Expected `aud` claim — typically the WorkOS client ID. */
+  /** Expected WorkOS application client ID. */
   audience: string;
 };
 
@@ -36,7 +36,6 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
     try {
       const { payload } = await jwtVerify(token, jwks, {
         issuer: config.issuer,
-        audience: config.audience,
       });
 
       const claims = payload as Record<string, unknown>;
@@ -46,6 +45,12 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
       }
       if (payload.exp === undefined) {
         throw new AuthError("TOKEN_INVALID", "JWT is missing required exp claim");
+      }
+      if (!hasExpectedClientId(claims, config.audience)) {
+        throw new AuthError(
+          "TOKEN_INVALID",
+          "JWT client_id claim does not match expected client ID",
+        );
       }
 
       return {
@@ -63,6 +68,22 @@ export function createWorkOSVerifier(config: WorkOSVerifierConfig): TokenVerifie
       throw new AuthError("TOKEN_INVALID", `Token verification failed: ${message}`);
     }
   };
+}
+
+function hasExpectedClientId(claims: Record<string, unknown>, expectedClientId: string): boolean {
+  if (typeof claims["client_id"] === "string") {
+    return claims["client_id"] === expectedClientId;
+  }
+
+  const audience = claims["aud"];
+  if (typeof audience === "string") {
+    return audience === expectedClientId;
+  }
+  if (Array.isArray(audience)) {
+    return audience.includes(expectedClientId);
+  }
+
+  return false;
 }
 
 /**
