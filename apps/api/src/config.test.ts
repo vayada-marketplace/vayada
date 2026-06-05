@@ -30,4 +30,12 @@ describe("api config", () => {
       }),
     ).toThrow("Incomplete auth config");
   });
+
+  it("loads optional booking database config", () => {
+    expect(
+      loadConfig({
+        BOOKING_DATABASE_URL: "postgresql://booking-db",
+      }).bookingDatabaseUrl,
+    ).toBe("postgresql://booking-db");
+  });
 });

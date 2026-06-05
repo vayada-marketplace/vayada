@@ -1,12 +1,27 @@
 import type { FastifyInstance } from "fastify";
 
+import {
+  registerBookingSettingsRoutes,
+  type BookingSettingsReadRepository,
+} from "./bookingSettings.js";
 import { enforceRoutePolicy } from "./policy.js";
 
 type BookingHotelParams = {
   hotelId: string;
 };
 
-export async function registerBookingRoutes(app: FastifyInstance): Promise<void> {
+export type BookingRoutesOptions = {
+  settingsRepository?: BookingSettingsReadRepository;
+};
+
+export async function registerBookingRoutes(
+  app: FastifyInstance,
+  options: BookingRoutesOptions = {},
+): Promise<void> {
+  if (options.settingsRepository) {
+    await registerBookingSettingsRoutes(app, options.settingsRepository);
+  }
+
   app.get<{ Params: BookingHotelParams }>("/hotels/:hotelId/policy-check", async (request) => {
     const { hotelId } = request.params;
 
