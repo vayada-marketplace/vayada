@@ -116,8 +116,9 @@ Planned enforcement:
 
 - VAY-640 extends this into package-level import boundaries once
   `domain-booking`, `domain-pms`, and integration packages exist.
-- VAY-641 defines the PMS reservation integration contracts that Vayada PMS and
-  external PMS adapters must implement.
+- `engineering/pms-reservation-integration-contract.md` defines the PMS
+  reservation integration contracts that Vayada PMS and external PMS adapters
+  must implement.
 - VAY-642 audits existing legacy coupling and tracks removal order.
 
 The preferred interaction shape is:
@@ -163,6 +164,7 @@ answer:
 - `engineering/typescript-backend-structure.md`
 - `engineering/backend-database-restructure.md`
 - `engineering/target-schema-ownership-map.md`
+- `engineering/pms-reservation-integration-contract.md`
 - `engineering/public-bookability-contract.md`
 - Channex PMS API: https://channex.io/
 - Channex PMS integration guide: https://docs.channex.io/guides/pms-integration-guide

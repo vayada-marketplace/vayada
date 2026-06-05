@@ -305,7 +305,9 @@ Boundaries:
 
 - do not read or write PMS operational tables directly;
 - do not import Channex integration code;
-- interact with PMS through a reservation sink, read model, or domain event;
+- interact with PMS through the reservation sink and operational read contracts
+  in `engineering/pms-reservation-integration-contract.md`, or through a typed
+  domain event;
 - treat Vayada PMS and external PMS systems as interchangeable implementations
   behind the PMS boundary.
 
@@ -342,6 +344,8 @@ Boundaries:
   events;
 - keep Channex code behind PMS connectivity contracts so Booking Engine does
   not couple to a specific channel manager.
+- expose PMS reservation sink and operational reservation read ports that Vayada
+  PMS, external PMS adapters, and test fakes can all implement.
 
 ### Marketplace and collaborations
 
