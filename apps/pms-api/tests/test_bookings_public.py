@@ -2,6 +2,7 @@
 Tests for public /api/hotels/{slug}/bookings endpoints (create + lookup).
 """
 
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -187,6 +188,10 @@ class TestCreateBooking:
     ):
         from app.database import Database
 
+        base_date = date.today()
+        check_in = (base_date + timedelta(days=30)).isoformat()
+        sold_out_date = (base_date + timedelta(days=31)).isoformat()
+        check_out = (base_date + timedelta(days=32)).isoformat()
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
@@ -195,8 +200,8 @@ class TestCreateBooking:
         sold_out_night = await create_test_booking(
             str(hotel["id"]),
             str(room["id"]),
-            check_in="2026-06-07",
-            check_out="2026-06-08",
+            check_in=sold_out_date,
+            check_out=check_out,
         )
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
@@ -212,16 +217,16 @@ class TestCreateBooking:
                 "guestLastName": "Guest",
                 "guestEmail": "checkout@example.com",
                 "guestPhone": "+1111",
-                "checkIn": "2026-06-06",
-                "checkOut": "2026-06-07",
+                "checkIn": check_in,
+                "checkOut": sold_out_date,
                 "paymentMethod": "pay_at_property",
             },
         )
 
         assert resp.status_code == 200, resp.text
         booking = resp.json()["booking"]
-        assert booking["checkIn"] == "2026-06-06"
-        assert booking["checkOut"] == "2026-06-07"
+        assert booking["checkIn"] == check_in
+        assert booking["checkOut"] == sold_out_date
         assert booking["nights"] == 1
 
     @patch("app.services.booking_service.push_availability_for_room_type", new_callable=AsyncMock)

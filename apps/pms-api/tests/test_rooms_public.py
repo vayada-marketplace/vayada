@@ -3,6 +3,7 @@ Tests for public /api/hotels/{slug}/rooms endpoint.
 """
 
 import json
+from datetime import date, timedelta
 
 import pytest
 from app.database import Database
@@ -147,6 +148,11 @@ class TestPublicRooms:
         assert rooms[0]["remainingRooms"] == 1
 
     async def test_checkout_date_does_not_require_availability(self, client, cleanup_database):
+        base_date = date.today()
+        check_in = (base_date + timedelta(days=30)).isoformat()
+        sold_out_date = (base_date + timedelta(days=31)).isoformat()
+        check_out = (base_date + timedelta(days=32)).isoformat()
+        search_end = (base_date + timedelta(days=33)).isoformat()
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]), total_rooms=1)
@@ -154,8 +160,8 @@ class TestPublicRooms:
         sold_out_night = await create_test_booking(
             str(hotel["id"]),
             str(room["id"]),
-            check_in="2026-06-07",
-            check_out="2026-06-08",
+            check_in=sold_out_date,
+            check_out=check_out,
         )
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
@@ -165,21 +171,21 @@ class TestPublicRooms:
 
         unavailable = await client.get(
             f"/api/hotels/{hotel['slug']}/unavailable-dates",
-            params={"start": "2026-06-06", "end": "2026-06-09"},
+            params={"start": check_in, "end": search_end},
         )
         assert unavailable.status_code == 200
-        assert unavailable.json()["dates"] == ["2026-06-07"]
+        assert unavailable.json()["dates"] == [sold_out_date]
 
         one_night = await client.get(
             f"/api/hotels/{hotel['slug']}/rooms",
-            params={"check_in": "2026-06-06", "check_out": "2026-06-07"},
+            params={"check_in": check_in, "check_out": sold_out_date},
         )
         assert one_night.status_code == 200
         assert one_night.json()[0]["remainingRooms"] == 1
 
         crosses_sold_out_night = await client.get(
             f"/api/hotels/{hotel['slug']}/rooms",
-            params={"check_in": "2026-06-06", "check_out": "2026-06-08"},
+            params={"check_in": check_in, "check_out": check_out},
         )
         assert crosses_sold_out_night.status_code == 200
         assert crosses_sold_out_night.json()[0]["remainingRooms"] == 0
@@ -253,6 +259,10 @@ class TestPublicRooms:
     async def test_abstract_inventory_caps_but_does_not_consume_direct_fit(
         self, client, cleanup_database
     ):
+        base_date = date.today()
+        check_in = (base_date + timedelta(days=30)).isoformat()
+        blocked_date = (base_date + timedelta(days=31)).isoformat()
+        check_out = (base_date + timedelta(days=32)).isoformat()
         user = await create_test_user()
         hotel = await create_test_hotel(str(user["id"]))
         room = await create_test_room_type(str(hotel["id"]), total_rooms=2)
@@ -261,8 +271,8 @@ class TestPublicRooms:
         first_night = await create_test_booking(
             str(hotel["id"]),
             str(room["id"]),
-            check_in="2026-06-06",
-            check_out="2026-06-07",
+            check_in=check_in,
+            check_out=blocked_date,
         )
         await Database.execute(
             "UPDATE bookings SET room_id = $1 WHERE id = $2",
@@ -272,14 +282,14 @@ class TestPublicRooms:
         await create_test_room_block(
             str(hotel["id"]),
             str(room["id"]),
-            start_date="2026-06-07",
-            end_date="2026-06-08",
+            start_date=blocked_date,
+            end_date=check_out,
             blocked_count=1,
         )
 
         resp = await client.get(
             f"/api/hotels/{hotel['slug']}/rooms",
-            params={"check_in": "2026-06-06", "check_out": "2026-06-08"},
+            params={"check_in": check_in, "check_out": check_out},
         )
 
         assert resp.status_code == 200
