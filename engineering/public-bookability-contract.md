@@ -186,6 +186,34 @@ Recommended route:
 GET /api/ai/hotels/{slug}/quote?check_in&check_out&adults&children&rooms&currency&locale&promo_code&referral_code
 ```
 
+Implementation owner: TypeScript `apps/api` route backed by a
+`domain-distribution` public quote projection. Phase 1 is read-only quote plus
+canonical checkout deep link only. It does not create reservations, hold
+inventory, authorize payment, or let an external agent complete a booking.
+
+Until VAY-666 adds the canonical distribution quote table/backfill, `apps/api`
+wires a temporary compatibility quote repository from the public profile
+projection plus the PMS public room-search API configured by
+`PMS_PUBLIC_API_URL`. That compatibility path validates public request shape,
+hotel quote limits, locale/currency support, and same-property-day requests
+using the hotel timezone, then maps the existing public PMS room search response
+into the distribution quote projection. If `PMS_PUBLIC_API_URL` is not
+configured or the PMS public API is unavailable, it returns `unavailable_data`.
+It must not expose Booking, PMS, Finance, Channex, or promo/provider internals
+in the HTTP response.
+
+Response posture:
+
+- public, unauthenticated, read-only;
+- `Cache-Control: public, max-age=15, stale-while-revalidate=60`;
+- `X-Vayada-RateLimit-Policy: public-ai-quote-read`;
+- `X-Robots-Tag: noindex`;
+- bounded request parameters for dates, rooms, guests, locale, currency, promo,
+  and referral codes to limit price enumeration and abuse;
+- no private promo-only discounts, payout/provider details, payment processor
+  account data, Channex mappings, housekeeping, maintenance, admin-only fields,
+  or guest PII.
+
 Request shape:
 
 | Field           | Required | Notes                                                        |
@@ -315,6 +343,7 @@ Unavailable reason codes:
 | `min_stay_not_met`       | Requested nights are below public rate restriction.           | Required minimum nights.   |
 | `max_stay_exceeded`      | Requested nights exceed public rate restriction.              | Maximum nights.            |
 | `same_day_cutoff_passed` | Same-day booking cutoff has passed in hotel timezone.         | Cutoff time and timezone.  |
+| `unsupported_occupancy`  | Guest or room counts exceed public quote limits.              | Supported counts.          |
 | `unpublished`            | Hotel or all relevant rooms/rates are not publicly sellable.  | Generic statement only.    |
 | `policy_missing`         | Required public policy text is missing.                       | Missing public policy key. |
 | `stale_data`             | Source freshness is outside allowed quote window.             | Source owner and age.      |

@@ -6,6 +6,7 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { createPgBookingSettingsReadRepository } from "./routes/bookingSettings.js";
 
@@ -34,6 +35,12 @@ function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   };
 }
 
+const publicHotelProfileRepository = config.bookingDatabaseUrl
+  ? createPgPublicHotelProfileRepository({
+      connectionString: config.bookingDatabaseUrl,
+    })
+  : undefined;
+
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
   bookingSettingsRepository: config.bookingDatabaseUrl
@@ -41,9 +48,11 @@ const app = buildApp({
         connectionString: config.bookingDatabaseUrl,
       })
     : undefined,
-  publicHotelProfileRepository: config.bookingDatabaseUrl
-    ? createPgPublicHotelProfileRepository({
-        connectionString: config.bookingDatabaseUrl,
+  publicHotelProfileRepository,
+  publicHotelQuoteRepository: publicHotelProfileRepository
+    ? createCompatibilityPublicHotelQuoteRepository({
+        profileRepository: publicHotelProfileRepository,
+        pmsPublicApiUrl: config.pmsPublicApiUrl,
       })
     : undefined,
 });

@@ -11,6 +11,12 @@ import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution"
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  createCompatibilityPublicHotelQuoteRepository,
+  serializePublicHotelQuoteProjection,
+  toUnavailablePublicHotelQuoteProjection,
+  type PublicHotelQuoteRepository,
+} from "./routes/aiHotelQuotes.js";
 import { buildApp } from "./app.js";
 import {
   serializePublicHotelProfileProjection,
@@ -164,10 +170,26 @@ const bookingReservationsRepository: BookingReservationsReadRepository = {
 const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "bookable",
 )!.profile;
+const seededPublicQuote = PUBLIC_BOOKABILITY_FIXTURES.find(
+  (fixture) => fixture.caseId === "bookable",
+)!.quote!;
+const seededUnavailableQuote = PUBLIC_BOOKABILITY_FIXTURES.find(
+  (fixture) => fixture.caseId === "unavailable",
+)!.quote!;
 
 const publicHotelProfileRepository: PublicHotelProfileRepository = {
   async findProfileBySlug(slug) {
     return slug === seededPublicProfile.hotel.slug ? seededPublicProfile : null;
+  },
+};
+
+const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
+  async findQuoteBySlug(slug, query) {
+    if (slug !== seededPublicQuote.request.hotelSlug) return null;
+    if (query.check_in === "2026-09-12" && query.check_out === "2026-09-15") {
+      return seededPublicQuote;
+    }
+    return seededUnavailableQuote;
   },
 };
 
@@ -295,6 +317,17 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it("does not expose public AI hotel quotes until a distribution read model is configured", async () => {
+    app = buildApp({ logger: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
   it("returns the public AI hotel profile contract from the distribution read model", async () => {
     app = buildApp({
       logger: false,
@@ -328,6 +361,298 @@ describe("vayada-api", () => {
       },
       dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
     });
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("returns the public AI hotel quote contract from the distribution read model", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelQuoteRepository,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("public, max-age=15, stale-while-revalidate=60");
+    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-ai-quote-read");
+    expect(response.headers["x-robots-tag"]).toBe("noindex");
+    expect(body).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      publicVisibility: "public_safe",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        nights: 3,
+        adults: 2,
+        currency: "EUR",
+        locale: "en",
+      },
+      status: "bookable",
+      quote: {
+        priceGuarantee: "expires_at",
+        offers: [
+          {
+            roomTypeId: "room_deluxe",
+            totals: {
+              roomTotal: 540,
+              taxesAndFees: 54,
+              grandTotal: 594,
+            },
+            paymentOptions: ["card", "pay_at_property"],
+          },
+        ],
+      },
+      deepLink: {
+        url: "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&referral_code=creator-anna&quote_id=quote_alpenrose_001",
+      },
+      dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    });
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("returns stable unavailable reason codes for public AI hotel quotes", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelQuoteRepository,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-10-01&check_out=2026-10-02&adults=2",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [
+        { code: "sold_out", detail: "No public inventory for requested dates." },
+      ],
+    });
+    expect(body).not.toHaveProperty("quote");
+  });
+
+  it("builds bookable public AI quotes from the PMS public room-search adapter", async () => {
+    const repository = createCompatibilityPublicHotelQuoteRepository({
+      profileRepository: publicHotelProfileRepository,
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      now: () => new Date("2026-06-06T11:00:00.000Z"),
+      async fetch(input) {
+        expect(input.toString()).toBe(
+          "https://api.pms.localhost/api/hotels/hotel-alpenrose/rooms?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0",
+        );
+
+        return new Response(
+          JSON.stringify([
+            {
+              id: "room_deluxe",
+              name: "Deluxe Double Room",
+              maxOccupancy: 3,
+              maxAdults: 2,
+              maxChildren: 1,
+              nightlyRates: [180, 180, 180],
+              nonRefundableNightlyRates: [162, 162, 162],
+              currency: "EUR",
+              remainingRooms: 3,
+              flexibleRateEnabled: true,
+              cancellationPolicy: "Free cancellation until 7 days before arrival.",
+              nonRefundableCancellationPolicy: "Non-refundable from booking",
+              ratePaymentMethods: {
+                flexible: ["card", "pay_at_property"],
+                nonrefundable: ["xendit", "pay_at_property", "bank_transfer"],
+              },
+              rateDepositSettings: {
+                flexible: { enabled: false, percentage: null },
+                nonrefundable: { enabled: true, percentage: 50 },
+              },
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+      referral_code: "creator-anna",
+    });
+    const serialized = serializePublicHotelQuoteProjection(quote!);
+
+    expect(serialized).toMatchObject({
+      status: "bookable",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        nights: 3,
+        adults: 2,
+        rooms: 1,
+        currency: "EUR",
+        locale: "en",
+      },
+      quote: {
+        expiresAt: "2026-06-06T11:15:00.000Z",
+        priceGuarantee: "expires_at",
+        offers: [
+          {
+            roomTypeId: "room_deluxe",
+            ratePlanId: "flexible",
+            totals: {
+              roomTotal: 540,
+              taxesAndFees: 0,
+              discounts: 0,
+              grandTotal: 540,
+            },
+            policies: {
+              cancellation: "Free cancellation until 7 days before arrival.",
+              deposit: "No deposit required.",
+            },
+            paymentOptions: ["card", "pay_at_property"],
+          },
+          {
+            roomTypeId: "room_deluxe",
+            ratePlanId: "nonrefundable",
+            totals: {
+              roomTotal: 486,
+              grandTotal: 486,
+            },
+            policies: {
+              cancellation: "Non-refundable from booking",
+              deposit: "50% deposit required.",
+            },
+            paymentOptions: ["card", "bank_transfer"],
+          },
+        ],
+      },
+      deepLink: {
+        expiresAt: "2026-06-06T11:15:00.000Z",
+        preserves: ["dates", "guests", "rooms", "currency", "locale", "referral_code", "quote_id"],
+      },
+    });
+    expect(serialized.deepLink!.url).toContain(
+      "https://hotel-alpenrose.booking.localhost/en/book?",
+    );
+    expect(serialized.quote!.offers[0]!.bookingUrl).toContain("room_type=room_deluxe");
+    expect(serialized.quote!.offers[0]!.bookingUrl).toContain("rate_plan=flexible");
+    expect(findForbiddenPublicBookabilityKeys(serialized)).toEqual([]);
+  });
+
+  it("does not mark PMS multi-unit rooms bookable when requested room count cannot hold guests", async () => {
+    const repository = createCompatibilityPublicHotelQuoteRepository({
+      profileRepository: publicHotelProfileRepository,
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      now: () => new Date("2026-06-06T11:00:00.000Z"),
+      async fetch() {
+        return new Response(
+          JSON.stringify([
+            {
+              id: "room_family",
+              name: "Family Room",
+              maxOccupancy: 4,
+              maxAdults: 4,
+              maxChildren: 2,
+              baseRate: 240,
+              currency: "EUR",
+              remainingRooms: 2,
+              flexibleRateEnabled: true,
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "6",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [{ code: "unsupported_occupancy" }],
+    });
+    expect(quote!.quote).toBeUndefined();
+  });
+
+  it("does not return bookable public AI quote totals for promo codes before promo pricing is wired", async () => {
+    let pmsCalled = false;
+    const repository = createCompatibilityPublicHotelQuoteRepository({
+      profileRepository: publicHotelProfileRepository,
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      now: () => new Date("2026-06-06T11:00:00.000Z"),
+      async fetch() {
+        pmsCalled = true;
+        return new Response(JSON.stringify([]), { status: 200 });
+      },
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      currency: "EUR",
+      locale: "en",
+      promo_code: "SUMMER10",
+    });
+
+    expect(pmsCalled).toBe(false);
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      request: { promoCode: "SUMMER10" },
+      unavailableReasons: [{ code: "promo_not_applicable" }],
+    });
+  });
+
+  it("strips non-contract fields before returning public AI hotel quotes", async () => {
+    const pollutedQuote = {
+      ...seededPublicQuote,
+      quote: {
+        ...seededPublicQuote.quote!,
+        providerAccountId: "acct_private",
+        offers: [
+          {
+            ...seededPublicQuote.quote!.offers[0],
+            internalRatePlanPayload: "private",
+          },
+        ],
+      },
+      debugPayload: { webhookPayload: "private" },
+    } as unknown as typeof seededPublicQuote;
+    app = buildApp({
+      logger: false,
+      publicHotelQuoteRepository: {
+        async findQuoteBySlug() {
+          return pollutedQuote;
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).not.toHaveProperty("debugPayload");
+    expect(body.quote).not.toHaveProperty("providerAccountId");
+    expect(body.quote.offers[0]).not.toHaveProperty("internalRatePlanPayload");
     expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
   });
 
@@ -426,6 +751,106 @@ describe("vayada-api", () => {
       },
     });
     expect(serializePublicHotelProfileProjection(projection)).toEqual(projection);
+  });
+
+  it("normalizes invalid public AI quote requests through the compatibility adapter", () => {
+    const projection = toUnavailablePublicHotelQuoteProjection(
+      seededPublicProfile.hotel,
+      {
+        check_in: "2026-09-15",
+        check_out: "2026-09-12",
+        adults: "2",
+        currency: "EUR",
+        locale: "en",
+      },
+      new Date("2026-06-06T11:00:00.000Z"),
+    );
+
+    expect(projection).toMatchObject({
+      status: "unavailable",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        checkIn: "2026-09-15",
+        checkOut: "2026-09-12",
+        nights: 0,
+        adults: 2,
+        currency: "EUR",
+        locale: "en",
+      },
+      unavailableReasons: [{ code: "invalid_request" }],
+    });
+    expect(serializePublicHotelQuoteProjection(projection)).toEqual(projection);
+  });
+
+  it("uses hotel quote limits for public AI quote unavailable reasons", () => {
+    const projection = toUnavailablePublicHotelQuoteProjection(
+      seededPublicProfile.hotel,
+      {
+        check_in: "2026-06-07",
+        check_out: "2026-06-09",
+        adults: "20",
+        children: "1",
+        rooms: "6",
+        currency: "USD",
+        locale: "it",
+      },
+      new Date("2026-06-06T11:00:00.000Z"),
+    );
+
+    expect(projection.unavailableReasons.map((reason) => reason.code)).toEqual([
+      "unsupported_occupancy",
+      "currency_not_supported",
+      "locale_not_supported",
+    ]);
+    expect(findForbiddenPublicBookabilityKeys(projection)).toEqual([]);
+  });
+
+  it("normalizes same-property-day PMS sellout as same-day cutoff", async () => {
+    const repository = createCompatibilityPublicHotelQuoteRepository({
+      profileRepository: publicHotelProfileRepository,
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      now: () => new Date("2026-06-06T11:00:00.000Z"),
+      async fetch() {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-06-06",
+      check_out: "2026-06-07",
+      adults: "2",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [{ code: "same_day_cutoff_passed" }],
+    });
+  });
+
+  it("does not silently default malformed public AI quote counts", () => {
+    const projection = toUnavailablePublicHotelQuoteProjection(
+      seededPublicProfile.hotel,
+      {
+        check_in: "2026-09-12",
+        check_out: "2026-09-15",
+        adults: "two",
+        children: "-1",
+        rooms: "1.5",
+      },
+      new Date("2026-06-06T11:00:00.000Z"),
+    );
+
+    expect(projection.unavailableReasons).toEqual([
+      {
+        code: "invalid_request",
+        detail: "adults, children, and rooms must be non-negative integers.",
+      },
+    ]);
   });
 
   it("wires authorization into authenticated API context resolution", async () => {
