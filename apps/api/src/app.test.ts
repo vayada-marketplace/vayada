@@ -548,6 +548,35 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(serialized)).toEqual([]);
   });
 
+  it("falls back to unavailable public AI quotes when PMS public API config is malformed", async () => {
+    const repository = createCompatibilityPublicHotelQuoteRepository({
+      profileRepository: publicHotelProfileRepository,
+      pmsPublicApiUrl: "not a url",
+      now: () => new Date("2026-06-06T11:00:00.000Z"),
+      async fetch() {
+        throw new Error("Malformed PMS URL should not reach fetch");
+      },
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [
+        { code: "unavailable_data", detail: "Public availability source is unavailable." },
+      ],
+    });
+    expect(quote!.quote).toBeUndefined();
+  });
+
   it("does not mark PMS multi-unit rooms bookable when requested room count cannot hold guests", async () => {
     const repository = createCompatibilityPublicHotelQuoteRepository({
       profileRepository: publicHotelProfileRepository,

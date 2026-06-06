@@ -228,18 +228,19 @@ async function fetchPublicHotelQuoteFromPms(config: {
   now: Date;
 }): Promise<PublicBookabilityQuoteProjection> {
   const generatedAt = config.now.toISOString();
-  const url = new URL(
-    `/api/hotels/${encodeURIComponent(config.hotel.slug)}/rooms`,
-    config.pmsPublicApiUrl,
-  );
-  url.searchParams.set("check_in", config.request.checkIn);
-  url.searchParams.set("check_out", config.request.checkOut);
-  url.searchParams.set("adults", String(config.request.adults));
-  url.searchParams.set("children", String(config.request.children));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3_000);
 
   try {
+    const url = new URL(
+      `/api/hotels/${encodeURIComponent(config.hotel.slug)}/rooms`,
+      config.pmsPublicApiUrl,
+    );
+    url.searchParams.set("check_in", config.request.checkIn);
+    url.searchParams.set("check_out", config.request.checkOut);
+    url.searchParams.set("adults", String(config.request.adults));
+    url.searchParams.set("children", String(config.request.children));
+
     const response = await config.fetch(url, { signal: controller.signal });
     if (!response.ok) {
       return buildPmsUnavailableQuote(config.hotel, config.request, generatedAt);
