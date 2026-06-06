@@ -7,9 +7,16 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
+import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
+import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
+import {
+  serializePublicHotelProfileProjection,
+  toPublicHotelProfileProjection,
+  type PublicHotelProfileRepository,
+} from "./routes/aiHotels.js";
 import {
   createPgBookingSettingsReadRepository,
   type BookingSettingsReadRepository,
@@ -154,6 +161,16 @@ const bookingReservationsRepository: BookingReservationsReadRepository = {
   },
 };
 
+const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
+  (fixture) => fixture.caseId === "bookable",
+)!.profile;
+
+const publicHotelProfileRepository: PublicHotelProfileRepository = {
+  async findProfileBySlug(slug) {
+    return slug === seededPublicProfile.hotel.slug ? seededPublicProfile : null;
+  },
+};
+
 function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): IdentityRepository {
   return {
     ...identityRepository,
@@ -265,6 +282,152 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(404);
+  });
+
+  it("does not expose public AI hotel profiles until a distribution read model is configured", async () => {
+    app = buildApp({ logger: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("returns the public AI hotel profile contract from the distribution read model", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe(
+      "public, max-age=60, stale-while-revalidate=300",
+    );
+    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-ai-profile-read");
+    expect(body).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      publicVisibility: "public_safe",
+      hotel: {
+        slug: "hotel-alpenrose",
+        canonicalUrl: "https://hotel-alpenrose.booking.localhost/en",
+        timezone: "Europe/Vienna",
+        defaultCurrency: "EUR",
+        trust: {
+          profileComplete: true,
+          profileVerified: true,
+          bookabilityStatus: "bookable",
+        },
+      },
+      dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    });
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("strips non-contract fields before returning public AI hotel profiles", async () => {
+    const pollutedProfile = {
+      ...seededPublicProfile,
+      hotel: {
+        ...seededPublicProfile.hotel,
+        searchScore: 0.99,
+        images: [
+          {
+            ...seededPublicProfile.hotel.images[0],
+            internalCdnKey: "private",
+          },
+        ],
+      },
+      debugPayload: { providerAccountId: "acct_private" },
+    } as unknown as typeof seededPublicProfile;
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: {
+        async findProfileBySlug() {
+          return pollutedProfile;
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(body).not.toHaveProperty("debugPayload");
+    expect(body.hotel).not.toHaveProperty("searchScore");
+    expect(body.hotel.images[0]).not.toHaveProperty("internalCdnKey");
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("builds a public profile projection from the legacy Booking compatibility adapter", () => {
+    const projection = toPublicHotelProfileProjection(
+      {
+        id: "booking_hotel_alpenrose",
+        name: "Hotel Alpenrose",
+        slug: "hotel-alpenrose",
+        description: "A public alpine profile.",
+        location: "Innsbruck",
+        country: "AT",
+        currency: "EUR",
+        supported_currencies: ["USD"],
+        hero_image: "https://cdn.vayada.example/hotel.jpg",
+        images: ["https://cdn.vayada.example/room.jpg"],
+        amenities: ["wifi", "breakfast"],
+        check_in_time: "15:00",
+        check_out_time: "11:00",
+        timezone: "Europe/Vienna",
+        default_language: "en",
+        supported_languages: ["de"],
+        custom_domain: "book.alpenrose.example",
+        instant_book: true,
+        online_card_payment: true,
+        pay_at_property_enabled: true,
+        free_cancellation_days: 7,
+        terms_text: "Public terms",
+        cancellation_policy_text: "",
+        updated_at: "2026-06-06T10:00:00.000Z",
+      },
+      "2026-06-06T11:00:00.000Z",
+    );
+
+    expect(projection).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      hotel: {
+        propertyId: "booking_hotel_alpenrose",
+        slug: "hotel-alpenrose",
+        canonicalUrl: "https://book.alpenrose.example/en",
+        bookingBaseUrl: "https://book.alpenrose.example",
+        customDomainUrl: "https://book.alpenrose.example",
+        timezone: "Europe/Vienna",
+        defaultLocale: "en",
+        supportedLocales: ["en", "de"],
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR", "USD"],
+        location: { country: "AT", city: "Innsbruck" },
+        capabilities: {
+          instantBook: true,
+          onlinePayment: true,
+          payAtProperty: true,
+        },
+        trust: {
+          profileComplete: true,
+          profileVerified: true,
+          domainVerified: true,
+          bookabilityStatus: "unavailable",
+          reasonCodes: ["unavailable_data"],
+        },
+      },
+    });
+    expect(serializePublicHotelProfileProjection(projection)).toEqual(projection);
   });
 
   it("wires authorization into authenticated API context resolution", async () => {

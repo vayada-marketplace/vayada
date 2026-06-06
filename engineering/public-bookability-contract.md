@@ -76,6 +76,37 @@ Recommended route:
 GET /api/ai/hotels/{slug}
 ```
 
+Implementation owner: TypeScript `apps/api` route backed by a
+`domain-distribution` public profile read model. The route must not assemble
+Booking, PMS, Marketplace, Finance, or Channex-shaped payloads directly. Legacy
+product systems may feed the read model through compatibility adapters during
+the rewrite, but the HTTP response is the distribution projection.
+Until VAY-666 adds the canonical distribution table/backfill, `apps/api` uses a
+Booking DB compatibility adapter that maps legacy public hotel fields into the
+distribution projection and treats PMS availability freshness as unknown.
+The compatibility route is registered only when `BOOKING_DATABASE_URL` is
+configured. Without that repository config, `/api/ai/hotels/{slug}` is not
+mounted and consumers should treat the response as route-not-found/404 rather
+than an empty distribution projection.
+
+Intended consumers:
+
+- AI agents and search/partner crawlers that need a stable public hotel profile;
+- Vayada public pages and structured data generators that need the same
+  canonical URL/profile answer;
+- future MCP/tools and partner feeds.
+
+Response posture:
+
+- public, read-only; unauthenticated only when the API starts without auth
+  config. If `AUTH_DATABASE_URL`, `WORKOS_JWKS_URL`, `WORKOS_ISSUER`, and
+  `WORKOS_AUDIENCE` are configured, `apps/api` registers the backend auth plugin
+  and this endpoint follows the authenticated API posture;
+- `Cache-Control: public, max-age=60, stale-while-revalidate=300`;
+- `X-Vayada-RateLimit-Policy: public-ai-profile-read`;
+- no guest PII, payout/provider details, Channex mappings, housekeeping,
+  maintenance, or admin-only fields.
+
 Response shape:
 
 ```json

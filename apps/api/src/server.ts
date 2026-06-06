@@ -6,6 +6,7 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { createPgBookingSettingsReadRepository } from "./routes/bookingSettings.js";
 
 const config = loadConfig();
@@ -38,6 +39,12 @@ const app = buildApp({
   bookingSettingsRepository: config.bookingDatabaseUrl
     ? createPgBookingSettingsReadRepository({
         connectionString: config.bookingDatabaseUrl,
+      })
+    : undefined,
+  publicHotelProfileRepository: config.bookingDatabaseUrl
+    ? createPgPublicHotelProfileRepository({
+        connectionString: config.bookingDatabaseUrl,
+        bookingHostBase: config.bookingHostBase,
       })
     : undefined,
 });
