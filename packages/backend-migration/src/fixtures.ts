@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import pg from "pg";
 
@@ -22,11 +22,19 @@ export async function loadFixtureCase(
   client: pg.Client,
 ): Promise<void> {
   assertSafeFixtureCase(config.fixtureCase);
-  const sqlPath = join(config.fixturesDir, "cases", config.fixtureCase, "auth.sql");
-  const sql = await readFile(sqlPath, "utf8");
+  const caseDir = join(config.fixturesDir, "cases", config.fixtureCase);
+  const sqlFiles = (await readdir(caseDir)).filter((filename) => filename.endsWith(".sql")).sort();
+
+  if (sqlFiles.length === 0) {
+    throw new Error(`Fixture case "${config.fixtureCase}" does not contain any .sql files.`);
+  }
+
   await client.query("BEGIN");
   try {
-    await client.query(sql);
+    for (const filename of sqlFiles) {
+      const sql = await readFile(join(caseDir, filename), "utf8");
+      await client.query(sql);
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");

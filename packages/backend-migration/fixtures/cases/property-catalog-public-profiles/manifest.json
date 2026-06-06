@@ -1,0 +1,38 @@
+{
+  "caseId": "property-catalog-public-profiles",
+  "description": "Three canonical property catalog records covering a complete public property, a missing-location property, and a verified custom-domain property. Documents Booking, PMS, and Marketplace source-link backfill behavior.",
+  "sourceDatabases": ["booking", "pms", "marketplace"],
+  "expectedOwners": {
+    "hotel_catalog.properties": 3,
+    "hotel_catalog.property_source_links": 8,
+    "hotel_catalog.property_locations": 3,
+    "hotel_catalog.property_public_profile_read_model": 3
+  },
+  "expectedFailures": [
+    {
+      "case": "missing-location",
+      "reason": "Profile remains incomplete until structured city/country/timezone/geo are confirmed."
+    }
+  ],
+  "sourceConflictExpectations": [
+    {
+      "fieldGroup": "description",
+      "rule": "Marketplace copy may seed public profile text, but owner/admin or Booking public copy wins when verified."
+    },
+    {
+      "fieldGroup": "location",
+      "rule": "Marketplace free-form location is preserved as evidence and not promoted to structured location without confidence or confirmation."
+    },
+    {
+      "fieldGroup": "custom_domain",
+      "rule": "Only verified Booking/domain-verification state can enter the public read model."
+    }
+  ],
+  "publicExposureAllowlist": [
+    "hotel_catalog.properties.public_id",
+    "hotel_catalog.properties.display_name",
+    "hotel_catalog.property_slugs.slug",
+    "hotel_catalog.property_domains.hostname",
+    "hotel_catalog.property_public_profile_read_model"
+  ]
+}

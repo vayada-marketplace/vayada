@@ -1,0 +1,44 @@
+{
+  "counts": {
+    "hotel_catalog.properties": 3,
+    "hotel_catalog.property_source_links": 8,
+    "hotel_catalog.property_slugs": 4,
+    "hotel_catalog.property_domains": 1,
+    "hotel_catalog.property_locations": 3,
+    "hotel_catalog.property_profiles": 3,
+    "hotel_catalog.property_media": 3,
+    "hotel_catalog.property_amenities": 4,
+    "hotel_catalog.property_contact_channels": 2,
+    "hotel_catalog.property_policy_summaries": 3,
+    "hotel_catalog.property_public_profile_read_model": 3
+  },
+  "idStability": {
+    "hotel_catalog.properties": [
+      "c1000000-0000-0000-0000-000000000001",
+      "c1000000-0000-0000-0000-000000000002",
+      "c1000000-0000-0000-0000-000000000003"
+    ]
+  },
+  "uniquenessChecks": [],
+  "catalogPublicProfileChecks": {
+    "completePropertyIds": [
+      "c1000000-0000-0000-0000-000000000001",
+      "c1000000-0000-0000-0000-000000000003"
+    ],
+    "missingLocationPropertyIds": ["c1000000-0000-0000-0000-000000000002"],
+    "customDomainProperties": [
+      {
+        "propertyId": "c1000000-0000-0000-0000-000000000003",
+        "hostname": "stay.casadaliya.example"
+      }
+    ],
+    "forbiddenPublicProfileKeys": [
+      "channexPropertyId",
+      "channelManagerId",
+      "providerAccountId",
+      "providerPayload",
+      "credential",
+      "webhookPayload"
+    ]
+  }
+}
