@@ -2,6 +2,8 @@
 Tests for /api/hotels public endpoints — hotel details, addons, exchange rates.
 """
 
+from unittest.mock import AsyncMock, patch
+
 
 class TestGetHotel:
     async def test_get_hotel_found(self, client, hotel_with_property):
@@ -76,6 +78,79 @@ class TestGetHotel:
         resp = await client.get(f"/api/hotels/{hotel['slug']}")
         assert resp.status_code == 200
         assert resp.json()["instantBook"] is True
+
+    async def test_get_hotel_exposes_public_canonical_urls(self, client, hotel_with_property):
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        resp = await client.get(f"/api/hotels/{hotel['slug']}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["canonicalUrl"] == f"https://{hotel['slug']}.booking.vayada.com/en"
+        assert body["bookingBaseUrl"] == f"https://{hotel['slug']}.booking.vayada.com"
+        assert body["customDomainUrl"] is None
+
+        await Database.execute(
+            "UPDATE booking_hotels SET custom_domain = 'book.example.com' WHERE id = $1",
+            hotel["id"],
+        )
+        with patch(
+            "app.services.hotel_service.cloudflare_service.get_hostname_status",
+            new=AsyncMock(return_value={"status": "active", "ssl_status": "active"}),
+        ):
+            custom_resp = await client.get(f"/api/hotels/{hotel['slug']}")
+        assert custom_resp.status_code == 200
+        custom_body = custom_resp.json()
+        assert custom_body["canonicalUrl"] == "https://book.example.com/en"
+        assert custom_body["bookingBaseUrl"] == "https://book.example.com"
+        assert custom_body["customDomainUrl"] == "https://book.example.com"
+
+    async def test_get_hotel_ignores_unverified_custom_domain(self, client, hotel_with_property):
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        await Database.execute(
+            "UPDATE booking_hotels SET custom_domain = 'pending.example.com' WHERE id = $1",
+            hotel["id"],
+        )
+
+        with patch(
+            "app.services.hotel_service.cloudflare_service.get_hostname_status",
+            new=AsyncMock(return_value={"status": "pending", "ssl_status": "initializing"}),
+        ):
+            resp = await client.get(f"/api/hotels/{hotel['slug']}?lang=de")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["canonicalUrl"] == f"https://{hotel['slug']}.booking.vayada.com/de"
+        assert body["bookingBaseUrl"] == f"https://{hotel['slug']}.booking.vayada.com"
+        assert body["customDomainUrl"] is None
+
+    async def test_resolve_domain_requires_verified_custom_domain(
+        self, client, hotel_with_property
+    ):
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        await Database.execute(
+            "UPDATE booking_hotels SET custom_domain = 'pending.example.com' WHERE id = $1",
+            hotel["id"],
+        )
+
+        with patch(
+            "app.services.hotel_service.cloudflare_service.get_hostname_status",
+            new=AsyncMock(return_value={"status": "pending", "ssl_status": "initializing"}),
+        ):
+            pending_resp = await client.get("/api/resolve-domain?domain=pending.example.com")
+        assert pending_resp.status_code == 404
+
+        with patch(
+            "app.services.hotel_service.cloudflare_service.get_hostname_status",
+            new=AsyncMock(return_value={"status": "active", "ssl_status": "active"}),
+        ):
+            active_resp = await client.get("/api/resolve-domain?domain=pending.example.com")
+        assert active_resp.status_code == 200
+        assert active_resp.json() == {"slug": hotel["slug"]}
 
 
 class TestGetAddons:

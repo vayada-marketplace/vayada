@@ -34,6 +34,9 @@ export interface Hotel {
   id: string;
   name: string;
   slug: string;
+  canonicalUrl: string;
+  bookingBaseUrl: string;
+  customDomainUrl?: string | null;
   description: string;
   location: string;
   country: string;

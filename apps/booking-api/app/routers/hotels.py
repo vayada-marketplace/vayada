@@ -20,6 +20,7 @@ from app.services.exchange_rate_service import get_rates
 from app.services.hotel_service import (
     get_addons_by_hotel_slug,
     get_hotel_by_slug,
+    verified_custom_domain_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -194,4 +195,6 @@ async def resolve_domain(domain: str = Query(...)):
     hotel = await BookingHotelRepository.get_by_custom_domain(domain.strip().lower())
     if not hotel:
         raise HTTPException(status_code=404, detail="No hotel found for this domain")
+    if not await verified_custom_domain_url(hotel):
+        raise HTTPException(status_code=404, detail="No verified hotel found for this domain")
     return ResolveDomainResponse(slug=hotel["slug"])

@@ -10,8 +10,40 @@ from app.models.hotel import (
 from app.models.utils import parse_json, parse_json_list
 from app.repositories.booking_addon_repo import BookingAddonRepository
 from app.repositories.booking_hotel_repo import BookingHotelRepository
+from app.services import cloudflare_service
 
 logger = logging.getLogger(__name__)
+
+
+def _is_verified_custom_domain_status(status: dict | None) -> bool:
+    return bool(
+        status and status.get("status") == "active" and status.get("ssl_status") == "active"
+    )
+
+
+async def verified_custom_domain_url(row: dict) -> str | None:
+    custom_domain = (row.get("custom_domain") or "").strip().lower()
+    if not custom_domain:
+        return None
+
+    try:
+        status = await cloudflare_service.get_hostname_status(custom_domain)
+    except Exception:
+        logger.warning("Failed to verify custom domain status for %s", custom_domain, exc_info=True)
+        return None
+
+    return f"https://{custom_domain}" if _is_verified_custom_domain_status(status) else None
+
+
+async def _public_hotel_urls(row: dict, locale: str) -> dict:
+    slug = row["slug"]
+    custom_domain_url = await verified_custom_domain_url(row)
+    booking_base_url = custom_domain_url or f"https://{slug}.booking.vayada.com"
+    return {
+        "canonical_url": f"{booking_base_url}/{locale or row.get('default_language') or 'en'}",
+        "booking_base_url": booking_base_url,
+        "custom_domain_url": custom_domain_url,
+    }
 
 
 async def get_hotel_by_slug(slug: str, locale: str = "en") -> HotelResponse | None:
@@ -69,6 +101,7 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> HotelResponse | No
         id=str(row["id"]),
         name=name,
         slug=row["slug"],
+        **await _public_hotel_urls(row, locale),
         description=description,
         location=location,
         country=country,
