@@ -38,6 +38,7 @@ function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
 const publicHotelProfileRepository = config.bookingDatabaseUrl
   ? createPgPublicHotelProfileRepository({
       connectionString: config.bookingDatabaseUrl,
+      bookingHostBase: config.bookingHostBase,
     })
   : undefined;
 

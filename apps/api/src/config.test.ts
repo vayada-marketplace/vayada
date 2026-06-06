@@ -46,4 +46,12 @@ describe("api config", () => {
       }).pmsPublicApiUrl,
     ).toBe("https://api.pms.localhost");
   });
+
+  it("loads optional booking host base config", () => {
+    expect(
+      loadConfig({
+        BOOKING_HOST_BASE: "booking.localhost",
+      }).bookingHostBase,
+    ).toBe("booking.localhost");
+  });
 });
