@@ -118,7 +118,7 @@ for (const check of checks) {
     }
 
     for (const filePath of walkFiles(absoluteRoot)) {
-      const relativePath = path.relative(repoRoot, filePath);
+      const relativePath = normalizeRepoPath(path.relative(repoRoot, filePath));
       if (!check.include(relativePath)) {
         continue;
       }
@@ -269,6 +269,10 @@ function normalizeSpecifier(specifier) {
   return specifier.replaceAll("\\", "/").toLowerCase();
 }
 
+function normalizeRepoPath(filePath) {
+  return filePath.replaceAll("\\", "/");
+}
+
 function productTablePattern() {
   const tableName = String.raw`(?:pms\.)?(?:pms_\w+|channex_\w+|room_blocks|rate_plans|physical_rooms)`;
   const sqlKeyword = String.raw`\b(?:from|join|update|into|delete\s+from)\s+["'\`]?${tableName}\b`;
@@ -325,9 +329,11 @@ function validateTemporaryExceptions(exceptions) {
 }
 
 function hasTemporaryException(violation) {
+  const violationFile = normalizeRepoPath(violation.file);
+
   return temporaryExceptions.some(
     (exception) =>
-      exception.file === violation.file &&
+      normalizeRepoPath(exception.file) === violationFile &&
       exception.check === violation.check &&
       exception.rule === violation.rule,
   );

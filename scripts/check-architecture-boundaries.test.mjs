@@ -4,8 +4,9 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 
-const scriptPath = new URL("./check-architecture-boundaries.mjs", import.meta.url).pathname;
+const scriptPath = fileURLToPath(new URL("./check-architecture-boundaries.mjs", import.meta.url));
 
 test("passes clean Booking route and domain files", () => {
   const root = createFixtureRoot({
