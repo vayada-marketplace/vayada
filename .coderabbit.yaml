@@ -12,6 +12,8 @@ reviews:
     enabled: true
     drafts: false
     auto_incremental_review: true
+    base_branches:
+      - ".*"
   finishing_touches:
     docstrings:
       enabled: false
