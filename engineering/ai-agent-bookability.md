@@ -116,7 +116,7 @@ The gaps for AI-agent bookability are:
   codes.
 - Bookability status and failure reasons, for example `bookable`,
   `sold_out`, `min_stay_not_met`, `same_day_cutoff_passed`,
-  `payment_not_configured`, `unpublished`, or `policy_missing`.
+  `payment_disabled`, `unpublished`, or `policy_missing`.
 
 ## Integration surfaces
 
