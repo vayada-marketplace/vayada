@@ -34,6 +34,12 @@ Producer inputs:
   details;
 - booking-web canonical URL and deep-link rules.
 
+Field-level ownership for hotel identity, location, media, amenities, public
+contacts, locale, currency, timezone, and public policy projection is defined
+in [`public-hotel-profile-ownership.md`](public-hotel-profile-ownership.md).
+Distribution consumes those normalized catalog/profile fields; it does not
+publish PMS, Marketplace, Booking, Finance, or Channex-shaped payloads directly.
+
 Consumers:
 
 - Vayada public pages and structured data;

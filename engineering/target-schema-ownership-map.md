@@ -104,6 +104,12 @@ Explicitly deferred or retired:
 
 Owner package: `domain-hotels`.
 
+Canonical public hotel profile and location ownership is detailed in
+[`public-hotel-profile-ownership.md`](public-hotel-profile-ownership.md). That
+document is the field-level contract for public identity, address, geo,
+timezone, locale, currency, media, amenities, public contacts, and public policy
+projection.
+
 | Target table or read model           | Owner                             | Source migration histories / current tables                                                                 | Notes                                                                           |
 | ------------------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `properties`                         | Hotel/property catalog            | Booking `booking_hotels`, PMS `hotels`, marketplace `hotel_profiles` and `hotel_listings`.                  | Canonical internal property identity.                                           |
