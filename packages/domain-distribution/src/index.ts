@@ -17,6 +17,7 @@ export const PUBLIC_BOOKABILITY_REASON_CODES = [
   "min_stay_not_met",
   "max_stay_exceeded",
   "same_day_cutoff_passed",
+  "unsupported_occupancy",
   "unpublished",
   "policy_missing",
   "stale_data",
@@ -218,6 +219,7 @@ export type PublicBookabilityAvailabilityOfferInput = {
   availableRooms: number;
   refundable: boolean;
   mealPlan?: string | null;
+  paymentOptions?: PublicBookabilityOffer["paymentOptions"];
   totals: PublicBookabilityMoneyTotals;
 };
 
@@ -430,7 +432,11 @@ export function buildPublicBookabilityQuoteProjection(
       sanitizeOffer(
         offer,
         findOfferPolicy(offer, inputs.booking.offerPolicies),
-        publicPaymentOptions,
+        new Set(
+          (offer.paymentOptions ?? inputs.finance.publicPaymentOptions).filter((option) =>
+            publicPaymentOptions.has(option),
+          ),
+        ),
         buildOfferBookingUrl(
           inputs.bookingWeb.offerBookingUrlBase,
           inputs.request,
@@ -564,7 +570,20 @@ function buildQuoteUnavailableReasons(
   if (!inputs.pms.availabilityReady) {
     reasons.push({ code: "unavailable_data", detail: "Availability source is unavailable." });
   }
-  if (inputs.pms.availabilityReady && offers.length === 0) {
+  if (
+    inputs.pms.availabilityReady &&
+    offers.length === 0 &&
+    !reasons.some((reason) =>
+      [
+        "min_stay_not_met",
+        "max_stay_exceeded",
+        "same_day_cutoff_passed",
+        "unsupported_occupancy",
+        "unpublished",
+        "policy_missing",
+      ].includes(reason.code),
+    )
+  ) {
     reasons.push({ code: "sold_out" });
   }
 

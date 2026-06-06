@@ -39,6 +39,14 @@ describe("api config", () => {
     ).toBe("postgresql://booking-db");
   });
 
+  it("loads optional PMS public API config", () => {
+    expect(
+      loadConfig({
+        PMS_PUBLIC_API_URL: "https://api.pms.localhost",
+      }).pmsPublicApiUrl,
+    ).toBe("https://api.pms.localhost");
+  });
+
   it("loads optional booking host base config", () => {
     expect(
       loadConfig({
