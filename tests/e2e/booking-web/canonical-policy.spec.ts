@@ -74,4 +74,32 @@ test.describe("booking-web canonical URL policy", () => {
       ),
     ).toBe("https://hotel-alpenrose.booking.vayada.com/en?ref=creator");
   });
+
+  test("does not redirect when the request host is already canonical", () => {
+    const policy = resolvePublicHotelUrls({
+      requestHost: "hotel-alpenrose.booking.vayada.com",
+      requestProtocol: "https",
+      slug: "hotel-alpenrose",
+      locale: "en",
+      customDomainUrl: null,
+    });
+
+    expect(
+      getCanonicalHostRedirectUrl(policy, new URL("https://hotel-alpenrose.booking.vayada.com/en")),
+    ).toBeNull();
+  });
+
+  test("does not redirect non-fallback hosts", () => {
+    const policy = resolvePublicHotelUrls({
+      requestHost: "hotel-alpenrose.booking.vayada.com",
+      requestProtocol: "https",
+      slug: "hotel-alpenrose",
+      locale: "en",
+      customDomainUrl: null,
+    });
+
+    expect(
+      getCanonicalHostRedirectUrl(policy, new URL("https://book.alpenrose.example/en")),
+    ).toBeNull();
+  });
 });

@@ -108,14 +108,42 @@ New TypeScript code must follow these rules:
 Current automated enforcement:
 
 - `npm run check:architecture-boundaries` blocks TypeScript Booking route
-  adapters from using `PMS_DATABASE_URL`, Channex symbols, or PMS implementation
-  imports.
+  adapters from using cross-domain database URLs such as `PMS_DATABASE_URL`,
+  Channex symbols/imports, PMS implementation imports, or PMS/channel table
+  names.
+- `npm run typecheck` runs the same architecture-boundary check before the
+  workspace TypeScript checks.
+- `npm run test:architecture-boundaries` runs focused regression tests proving
+  the forbidden Booking/PMS/Channex cases fail.
 - `.github/workflows/pr-checks.yml` runs that check on PRs.
 
-Planned enforcement:
+Allowed dependency direction:
 
-- VAY-640 extends this into package-level import boundaries once
-  `domain-booking`, `domain-pms`, and integration packages exist.
+- Booking routes call Booking/domain application services and read models.
+- `domain-booking` may depend on stable PMS contracts/ports such as the root
+  `@vayada/domain-pms` reservation sink contract when it needs to hand off a
+  confirmed direct booking.
+- `domain-booking` must not import PMS implementation subpaths, Vayada PMS
+  adapters, Channex clients, channel-manager integration modules, PMS database
+  URLs, or PMS/channel table names.
+- Vayada PMS, Guesty, Lodgify, Hostaway, and other provider adapters implement
+  PMS contracts behind PMS-owned packages or integration modules. Booking does
+  not select or call provider adapters directly.
+
+Temporary exceptions:
+
+- Add exceptions only in `scripts/check-architecture-boundaries.mjs`, near the
+  check configuration.
+- Every exception must include a `VAY-*` issue, file, check, rule, and reason.
+- Exceptions are for short-lived compatibility only. The linked issue must
+  explain why the boundary cannot be enforced yet and how it will be removed.
+- Do not add broad path exceptions for whole domains or apps.
+
+Future enforcement:
+
+- As `domain-booking`, PMS adapters, and provider integration packages grow,
+  extend `scripts/check-architecture-boundaries.mjs` with narrow package roots
+  and rules instead of allowing direct cross-domain imports.
 - `engineering/pms-reservation-integration-contract.md` defines the PMS
   reservation integration contracts that Vayada PMS and external PMS adapters
   must implement.
