@@ -1,4 +1,5 @@
 import logging
+import time
 
 from app.models.hotel import (
     AddonResponse,
@@ -26,13 +27,31 @@ async def verified_custom_domain_url(row: dict) -> str | None:
     if not custom_domain:
         return None
 
+    start_time = time.perf_counter()
     try:
         status = await cloudflare_service.get_hostname_status(custom_domain)
     except Exception:
-        logger.warning("Failed to verify custom domain status for %s", custom_domain, exc_info=True)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.warning(
+            "Failed to verify custom domain status for %s in %.1fms",
+            custom_domain,
+            duration_ms,
+            exc_info=True,
+        )
         return None
 
-    return f"https://{custom_domain}" if _is_verified_custom_domain_status(status) else None
+    is_verified = _is_verified_custom_domain_status(status)
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    logger.debug(
+        "Verified custom domain status for %s in %.1fms: verified=%s status=%s ssl_status=%s",
+        custom_domain,
+        duration_ms,
+        is_verified,
+        status.get("status") if status else None,
+        status.get("ssl_status") if status else None,
+    )
+
+    return f"https://{custom_domain}" if is_verified else None
 
 
 async def _public_hotel_urls(row: dict, locale: str) -> dict:
