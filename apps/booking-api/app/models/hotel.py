@@ -49,6 +49,9 @@ class HotelResponse(BaseModel):
     id: str
     name: str
     slug: str
+    canonical_url: str
+    booking_base_url: str
+    custom_domain_url: str | None = None
     description: str
     location: str
     country: str

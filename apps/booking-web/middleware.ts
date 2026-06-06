@@ -1,6 +1,11 @@
 import createMiddleware from "next-intl/middleware";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { routing } from "./i18n/routing";
+import {
+  getCanonicalHostRedirectUrl,
+  isFallbackBookingHost,
+  resolvePublicHotelUrls,
+} from "./lib/server/publicUrls";
 
 const intlMiddleware = createMiddleware(routing);
 
@@ -64,6 +69,8 @@ export default async function middleware(request: NextRequest) {
   }
 
   if (slug) {
+    const canonicalRedirect = await resolveCanonicalRedirect(request, hostname, slug);
+    if (canonicalRedirect) return canonicalRedirect;
     response.cookies.set("hotel-slug", slug, { path: "/" });
   }
 
@@ -78,6 +85,37 @@ export default async function middleware(request: NextRequest) {
   }
 
   return response;
+}
+
+async function resolveCanonicalRedirect(
+  request: NextRequest,
+  hostname: string,
+  slug: string,
+): Promise<NextResponse | null> {
+  if (!isFallbackBookingHost(hostname)) return null;
+
+  try {
+    const res = await fetch(`${API_URL}/api/hotels/${slug}`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const hotel = await res.json();
+    const policy = resolvePublicHotelUrls({
+      requestHost: request.headers.get("host") || hostname,
+      requestProtocol: request.nextUrl.protocol === "http:" ? "http" : "https",
+      slug: hotel?.slug || slug,
+      locale: firstLocaleSegment(request.nextUrl.pathname) || "en",
+      supportedLocales: hotel?.supportedLanguages,
+      customDomainUrl: hotel?.customDomainUrl,
+    });
+    const redirectUrl = getCanonicalHostRedirectUrl(policy, request.nextUrl);
+    return redirectUrl ? NextResponse.redirect(redirectUrl, 308) : null;
+  } catch {
+    return null;
+  }
+}
+
+function firstLocaleSegment(pathname: string): string | null {
+  const segment = pathname.split("/").filter(Boolean)[0];
+  return routing.locales.includes(segment as (typeof routing.locales)[number]) ? segment : null;
 }
 
 export const config = {
