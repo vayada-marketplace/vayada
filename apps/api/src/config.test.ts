@@ -38,4 +38,12 @@ describe("api config", () => {
       }).bookingDatabaseUrl,
     ).toBe("postgresql://booking-db");
   });
+
+  it("loads optional booking host base config", () => {
+    expect(
+      loadConfig({
+        BOOKING_HOST_BASE: "booking.localhost",
+      }).bookingHostBase,
+    ).toBe("booking.localhost");
+  });
 });

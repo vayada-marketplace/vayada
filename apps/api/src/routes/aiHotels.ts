@@ -72,6 +72,7 @@ export async function registerAiHotelRoutes(
 export function createPgPublicHotelProfileRepository(config: {
   connectionString: string;
   max?: number;
+  bookingHostBase?: string;
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Public hotel profile repository connectionString must not be empty");
@@ -97,7 +98,11 @@ export function createPgPublicHotelProfileRepository(config: {
         [slug],
       );
       const row = result.rows[0];
-      return row ? toPublicHotelProfileProjection(row, new Date().toISOString()) : null;
+      return row
+        ? toPublicHotelProfileProjection(row, new Date().toISOString(), {
+            bookingHostBase: config.bookingHostBase,
+          })
+        : null;
     },
     async close() {
       await pool.end();
@@ -108,12 +113,21 @@ export function createPgPublicHotelProfileRepository(config: {
 export function toPublicHotelProfileProjection(
   row: BookingHotelProfileRow,
   generatedAt: string,
+  options: { bookingHostBase?: string } = {},
 ): PublicBookabilityProfileProjection {
-  const supportedLocales = nonEmptyStrings(row.supported_languages, ["en"]);
-  const defaultLocale = row.default_language || supportedLocales[0] || "en";
-  const defaultCurrency = row.currency || "EUR";
-  const supportedCurrencies = nonEmptyStrings(row.supported_currencies, [defaultCurrency]);
-  const bookingBaseUrl = `https://${row.slug}.booking.vayada.com`;
+  const defaultLocale = row.default_language?.trim() || "en";
+  const supportedLocales = withRequiredFirst(
+    nonEmptyStrings(row.supported_languages, [defaultLocale]),
+    defaultLocale,
+  );
+  const defaultCurrency = row.currency?.trim() || "EUR";
+  const supportedCurrencies = withRequiredFirst(
+    nonEmptyStrings(row.supported_currencies, [defaultCurrency]),
+    defaultCurrency,
+  );
+  const customDomainUrl = toCustomDomainUrl(row.custom_domain);
+  const bookingBaseUrl =
+    customDomainUrl ?? fallbackBookingBaseUrl(row.slug, options.bookingHostBase);
   const images = nonEmptyStrings(row.images, []);
   const heroImage = row.hero_image?.trim();
   const lastUpdatedAt = toIsoDateTime(row.updated_at) ?? generatedAt;
@@ -181,8 +195,8 @@ export function toPublicHotelProfileProjection(
     bookingWeb: {
       canonicalUrl: `${bookingBaseUrl}/${defaultLocale}`,
       bookingBaseUrl,
-      customDomainUrl: null,
-      domainVerified: false,
+      customDomainUrl,
+      domainVerified: Boolean(customDomainUrl),
       bookingDeepLinks: true,
     },
   });
@@ -303,7 +317,35 @@ function nonEmptyStrings(value: unknown, fallback: string[]): string[] {
   const values = Array.isArray(parsed)
     ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : [];
-  return values.length > 0 ? values : fallback;
+  return values.length > 0 ? values.map((value) => value.trim()) : fallback;
+}
+
+function withRequiredFirst(values: string[], required: string): string[] {
+  const normalizedRequired = required.trim();
+  return [
+    normalizedRequired,
+    ...values.filter((value) => value.trim() && value.trim() !== normalizedRequired),
+  ];
+}
+
+function toCustomDomainUrl(value: string | null): string | null {
+  const domain = value
+    ?.trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/^\.+|\.+$/g, "");
+  return domain ? `https://${domain}` : null;
+}
+
+function fallbackBookingBaseUrl(slug: string, bookingHostBase = "booking.vayada.com"): string {
+  const hostBase = bookingHostBase
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/^\.+|\.+$/g, "");
+
+  return `https://${slug}.${hostBase || "booking.vayada.com"}`;
 }
 
 function parseJson<T>(value: string, fallback: T): T {

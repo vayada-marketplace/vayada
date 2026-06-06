@@ -44,6 +44,7 @@ const app = buildApp({
   publicHotelProfileRepository: config.bookingDatabaseUrl
     ? createPgPublicHotelProfileRepository({
         connectionString: config.bookingDatabaseUrl,
+        bookingHostBase: config.bookingHostBase,
       })
     : undefined,
 });
