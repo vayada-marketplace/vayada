@@ -23,6 +23,9 @@ Booking Web must call Booking-owned and Distribution-owned public contracts.
 Vayada PMS may produce inventory, room/rate, and operational reservation facts
 through adapters or read models, but Booking Web must not call PMS public routes
 directly in the TypeScript target path.
+Where a target route triggers Marketplace, Finance, PMS, or Jobs/events/audit
+work, the public HTTP boundary still stays behind the Booking/Distribution
+route family and delegates to the owning domain behind that boundary.
 
 Target call shape:
 
@@ -33,8 +36,8 @@ Booking Web
   -> Distribution/bookability public API for hotel page projection, room offers,
      unavailable dates, quote/deep links, host resolution, canonical URLs, and
      public attribution context
-  -> Marketplace attribution plus Jobs/events/audit endpoint for affiliate
-     click intake
+  -> Booking/Distribution public attribution endpoint that delegates affiliate
+     click processing to Marketplace attribution plus Jobs/events/audit
 
 Distribution/read models
   <- Hotel catalog public profile facts
