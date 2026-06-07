@@ -43,10 +43,19 @@ describe("identity lifecycle command contract", () => {
       "identity.invite.customer.create",
     ]);
 
-    expect(identityLifecycleEventTypes).toContain("identity.user.created");
-    expect(identityLifecycleEventTypes).toContain("identity.access.granted");
-    expect(identityLifecycleEventTypes).toContain("identity.invite.affiliate.created");
-    expect(identityLifecycleEventTypes).toContain("identity.invite.customer.created");
+    expect(identityLifecycleEventTypes).toEqual([
+      "identity.user.created",
+      "identity.user.profile.updated",
+      "identity.user.email.updated",
+      "identity.user.status.updated",
+      "identity.user.suspended",
+      "identity.user.deleted",
+      "identity.access.granted",
+      "identity.access.revoked",
+      "identity.recovery.flow.created",
+      "identity.invite.affiliate.created",
+      "identity.invite.customer.created",
+    ]);
   });
 
   it("scopes idempotency by command type", () => {
