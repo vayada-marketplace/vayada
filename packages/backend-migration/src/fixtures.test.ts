@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,7 +9,7 @@ describe("loadFixtureCase", () => {
   let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = join(tmpdir(), `backend-migration-fixtures-${Date.now()}`);
+    tmpDir = await mkdtemp(join(tmpdir(), "backend-migration-fixtures-"));
     await mkdir(join(tmpDir, "cases", "multi-source"), { recursive: true });
   });
 

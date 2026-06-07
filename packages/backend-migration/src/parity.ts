@@ -246,11 +246,9 @@ async function checkCatalogPublicProfileFixtures(
     );
     const row = result.rows[0];
     const location = row?.location ?? {};
-    const hasStructuredLocation =
-      Object.hasOwn(location, "countryCode") ||
-      Object.hasOwn(location, "city") ||
-      Object.hasOwn(location, "timezone") ||
-      Object.hasOwn(location, "geo");
+    const hasStructuredLocation = ["countryCode", "city", "timezone", "geo"].some(
+      (key) => location[key] != null,
+    );
     if (
       !row ||
       row.profile_status !== "incomplete" ||

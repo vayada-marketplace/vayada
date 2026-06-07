@@ -23,7 +23,10 @@ export async function loadFixtureCase(
 ): Promise<void> {
   assertSafeFixtureCase(config.fixtureCase);
   const caseDir = join(config.fixturesDir, "cases", config.fixtureCase);
-  const sqlFiles = (await readdir(caseDir)).filter((filename) => filename.endsWith(".sql")).sort();
+  const sqlFiles = (await readdir(caseDir, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
+    .map((entry) => entry.name)
+    .sort();
 
   if (sqlFiles.length === 0) {
     throw new Error(`Fixture case "${config.fixtureCase}" does not contain any .sql files.`);

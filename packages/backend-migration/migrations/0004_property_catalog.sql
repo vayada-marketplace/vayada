@@ -21,7 +21,9 @@ CREATE TABLE hotel_catalog.properties (
                             CHECK (profile_status IN ('complete', 'incomplete', 'disabled', 'private')),
   completeness_reasons  TEXT[]      NOT NULL DEFAULT '{}',
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_properties_default_locale_supported
+    CHECK (default_locale = ANY(supported_locales))
 );
 
 CREATE TABLE hotel_catalog.property_source_links (
@@ -182,6 +184,8 @@ CREATE TABLE hotel_catalog.property_public_profile_read_model (
   public_policy        JSONB       NOT NULL DEFAULT '{}'::jsonb,
   source_freshness     JSONB       NOT NULL DEFAULT '{}'::jsonb,
   projected_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_property_public_profile_status
+    CHECK (profile_status IN ('complete', 'incomplete', 'disabled', 'private')),
   CONSTRAINT fk_property_public_profile_domain_same_property
     FOREIGN KEY (property_domain_id, property_id)
     REFERENCES hotel_catalog.property_domains(id, property_id)
