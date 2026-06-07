@@ -18,8 +18,9 @@ describe("@vayada/domain-hotels", () => {
   it("exports the hotel catalog setup fields", () => {
     expect(HOTEL_CATALOG_SETUP_FIELDS).toContain("name");
     expect(HOTEL_CATALOG_SETUP_FIELDS).toContain("slug");
-    expect(HOTEL_CATALOG_SETUP_FIELDS).toContain("currency");
     expect(HOTEL_CATALOG_SETUP_FIELDS).toContain("timezone");
+    // currency is intentionally absent — it is owned by @vayada/domain-finance
+    expect(HOTEL_CATALOG_SETUP_FIELDS).not.toContain("currency");
   });
 
   it("exports the hotel active statuses", () => {

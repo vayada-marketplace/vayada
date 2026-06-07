@@ -19,16 +19,22 @@
 export type HotelId = string;
 export type HotelSlug = string;
 export type HotelUtcDateTime = string;
-export type HotelDate = string;
 
 // ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
 
+/**
+ * Setup completion fields tracked by the hotel catalog.
+ *
+ * Note: `currency` is intentionally omitted — currency configuration is owned
+ * by `@vayada/domain-finance` (see `UpdatePropertyCurrencyCommand`).  Setup
+ * wizards and onboarding flows that need currency completion status should
+ * query the finance domain's payment settings read model.
+ */
 export const HOTEL_CATALOG_SETUP_FIELDS = [
   "name",
   "slug",
-  "currency",
   "timezone",
   "address",
   "description",
@@ -189,7 +195,9 @@ export interface HotelCatalogCommandBus {
 
 /**
  * Build a stable idempotency key for hotel catalog commands.
- * Format: `hotel.catalog.<commandType>:property:<propertyId>:<suffix>`.
+ * Format: `<commandType>:property:<propertyId>:<suffix>`.
+ *
+ * Example: `hotel.catalog.name.update:property:prop_abc123:admin-rename-2026-06`
  */
 export function hotelCatalogIdempotencyKey(
   commandType: HotelCatalogCommandType,

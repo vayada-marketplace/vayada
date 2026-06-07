@@ -51,7 +51,7 @@ export type FinanceBillingPlan = (typeof FINANCE_BILLING_PLANS)[number];
 // ---------------------------------------------------------------------------
 
 export const FINANCE_PAYMENT_METHODS = [
-  "online_card",
+  "card",
   "pay_at_property",
   "bank_transfer",
   "paypal",
@@ -160,7 +160,15 @@ export type PayoutSplitInput = {
   totalAmount: FinanceDecimalAmount;
   currency: FinanceCurrencyCode;
   billingConfig: BillingConfigReadModel;
-  /** Channel that originated the booking. */
+  /**
+   * Channel that originated the booking.
+   *
+   * Mapping note: domain-pms uses the token `"direct_booking"` for the same
+   * concept.  Adapters must translate `"direct_booking"` → `"direct"` before
+   * passing a split input to this package.  The distinction is intentional:
+   * domain-finance uses the shortest unambiguous token; domain-pms preserves
+   * the legacy Channex-sourced channel name.
+   */
   channel: FinanceBookingChannel;
   affiliate?: {
     affiliateId: string;
@@ -254,6 +262,8 @@ export type UpdateInstantBookCommand = FinanceCommandBase<
 /** Update the property default currency. Owner: Finance. */
 export type UpdatePropertyCurrencyPayload = {
   currency: FinanceCurrencyCode;
+  /** All currencies the property accepts (includes the new default). Optional — omit to leave supported currencies unchanged. */
+  supportedCurrencies?: FinanceCurrencyCode[];
 };
 
 export type UpdatePropertyCurrencyCommand = FinanceCommandBase<
@@ -368,7 +378,9 @@ export function calculatePayoutSplit(input: PayoutSplitInput): PayoutSplitResult
 
 /**
  * Build a stable idempotency key for finance commands.
- * Format: `finance.<commandType>:property:<propertyId>:<suffix>`.
+ * Format: `<commandType>:property:<propertyId>:<suffix>`.
+ *
+ * Example: `finance.billing.plan.update:property:prop_abc123:switch-to-commission-2026-07`
  */
 export function financeCommandIdempotencyKey(
   commandType: FinanceCommandType,
@@ -383,6 +395,9 @@ export function financeCommandIdempotencyKey(
 // ---------------------------------------------------------------------------
 
 function parseDecimalAmount(value: FinanceDecimalAmount): number {
+  if (value.trim() === "") {
+    throw new Error("Invalid decimal amount: empty string");
+  }
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     throw new Error(`Invalid decimal amount: ${value}`);

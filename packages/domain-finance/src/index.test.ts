@@ -49,7 +49,7 @@ describe("@vayada/domain-finance constants", () => {
   });
 
   it("exports payment methods that replace the booking_hotels flag columns", () => {
-    expect(FINANCE_PAYMENT_METHODS).toContain("online_card");
+    expect(FINANCE_PAYMENT_METHODS).toContain("card");
     expect(FINANCE_PAYMENT_METHODS).toContain("pay_at_property");
     expect(FINANCE_PAYMENT_METHODS).toContain("bank_transfer");
     expect(FINANCE_PAYMENT_METHODS).toContain("paypal");
@@ -168,6 +168,34 @@ describe("calculatePayoutSplit — commission plan", () => {
 });
 
 // ---------------------------------------------------------------------------
+// parseDecimalAmount — internal guard (exercised via calculatePayoutSplit)
+// ---------------------------------------------------------------------------
+
+describe("calculatePayoutSplit — invalid input guards", () => {
+  it("throws when totalAmount is an empty string", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "",
+        currency: "EUR",
+        billingConfig: BASE_BILLING_CONFIG,
+        channel: "direct",
+      }),
+    ).toThrow("Invalid decimal amount: empty string");
+  });
+
+  it("throws when totalAmount is whitespace only", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "   ",
+        currency: "EUR",
+        billingConfig: BASE_BILLING_CONFIG,
+        channel: "direct",
+      }),
+    ).toThrow("Invalid decimal amount: empty string");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Read ports — verify that PMS code can use these without a DB pool
 // ---------------------------------------------------------------------------
 
@@ -175,7 +203,7 @@ describe("PaymentSettingsReadPort", () => {
   it("allows PMS code to retrieve payment settings without querying booking_hotels", async () => {
     const mockSettings: PaymentSettingsReadModel = {
       propertyId: "prop_abc123",
-      enabledPaymentMethods: ["online_card", "pay_at_property"],
+      enabledPaymentMethods: ["card", "pay_at_property"],
       instantBook: true,
       defaultCurrency: "EUR",
       supportedCurrencies: ["EUR", "USD"],
@@ -189,7 +217,7 @@ describe("PaymentSettingsReadPort", () => {
     };
 
     const settings = await fakePort.getPaymentSettings("prop_abc123");
-    expect(settings?.enabledPaymentMethods).toContain("online_card");
+    expect(settings?.enabledPaymentMethods).toContain("card");
     expect(settings?.enabledPaymentMethods).toContain("pay_at_property");
     expect(settings?.instantBook).toBe(true);
     expect(settings?.defaultCurrency).toBe("EUR");
@@ -270,7 +298,7 @@ describe("FinanceCommandBus", () => {
         requestedAt: "2026-06-07T12:00:00.000Z",
       },
       payload: {
-        enabledPaymentMethods: ["online_card", "pay_at_property", "bank_transfer"],
+        enabledPaymentMethods: ["card", "pay_at_property", "bank_transfer"],
       },
     };
 
