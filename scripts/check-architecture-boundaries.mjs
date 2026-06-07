@@ -106,6 +106,39 @@ const checks = [
       ),
     ],
   },
+  {
+    name: "Target product domains must not write identity tables directly",
+    roots: [
+      "apps/api/src/routes",
+      "packages/domain-booking/src",
+      "packages/domain-distribution/src",
+      "packages/domain-finance/src",
+      "packages/domain-hotels/src",
+      "packages/domain-intelligence/src",
+      "packages/domain-marketplace/src",
+      "packages/domain-pms/src",
+      "apps/api/src/domains/booking",
+      "apps/api/src/domains/distribution",
+      "apps/api/src/domains/finance",
+      "apps/api/src/domains/hotels",
+      "apps/api/src/domains/intelligence",
+      "apps/api/src/domains/marketplace",
+      "apps/api/src/domains/pms",
+    ],
+    include: () => true,
+    rules: [
+      forbiddenPattern(
+        "Identity SQL table mutation",
+        identitySqlMutationPattern(),
+        "request an identity lifecycle command instead of mutating identity or legacy Auth DB tables",
+      ),
+      forbiddenPattern(
+        "Identity query-builder table mutation",
+        identityQueryBuilderMutationPattern(),
+        "request an identity lifecycle command instead of mutating identity or legacy Auth DB tables",
+      ),
+    ],
+  },
 ];
 
 const violations = [];
@@ -279,6 +312,40 @@ function productTablePattern() {
   const queryBuilderMethod = String.raw`\b(?:selectFrom|insertInto|updateTable|deleteFrom|innerJoin|leftJoin|rightJoin|fullJoin)\(\s*["'\`]${tableName}["'\`]`;
 
   return new RegExp(`${sqlKeyword}|${queryBuilderMethod}`, "i");
+}
+
+function identityTablePatternSource() {
+  const identityTables = [
+    "users",
+    "external_identities",
+    "organizations",
+    "organization_memberships",
+    "organization_resource_links",
+    "role_permission_grants",
+  ].join("|");
+  const legacyAuthTables = [
+    "users",
+    "password_reset_tokens",
+    "email_verification_codes",
+    "email_verification_tokens",
+    "email_change_tokens",
+  ].join("|");
+
+  return String.raw`(?:(?:"?identity"?\s*\.\s*)?"?(?:${identityTables})"?|"?(?:${legacyAuthTables})"?)`;
+}
+
+function identitySqlMutationPattern() {
+  return new RegExp(
+    String.raw`\b(?:insert\s+into|update|delete\s+from)\s+(?:${identityTablePatternSource()})\b`,
+    "i",
+  );
+}
+
+function identityQueryBuilderMutationPattern() {
+  return new RegExp(
+    String.raw`\b(?:insertInto|updateTable|deleteFrom)\(\s*["'\`](?:${identityTablePatternSource()})["'\`]`,
+    "i",
+  );
 }
 
 function resolveRelativeImport(specifier, context) {

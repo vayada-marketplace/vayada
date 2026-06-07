@@ -34,6 +34,13 @@ WorkOS owns provider identity, session state, and provider organization
 membership. Vayada owns internal users, organizations, product authorization,
 resource links, entitlements, and product audit.
 
+Mutating those identity primitives happens through the identity lifecycle
+command contract in
+[`identity-user-lifecycle-commands.md`](identity-user-lifecycle-commands.md).
+Authenticated product routes consume the resolved context; they do not write
+Auth DB or `identity.*` tables to create users, reset credentials, update
+statuses, or grant resource access.
+
 ## Contract Shape
 
 `RequestContext` contains:
