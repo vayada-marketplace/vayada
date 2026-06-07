@@ -1,0 +1,303 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  PMS_RESERVATION_CONTRACT_VERSION,
+  type CreatePmsReservationCommand,
+  type PmsReservationError,
+  type PmsReservationHandoffResult,
+  type PmsReservationSink,
+} from "@vayada/domain-pms";
+
+import {
+  buildCreatePmsReservationCommand,
+  buildCreateReservationIdempotencyKey,
+  BookingPmsHandoffContractError,
+  handOffCommittedBookingToPms,
+  type BookingPmsReservationHandoffInput,
+} from "./index.js";
+
+describe("@vayada/domain-booking PMS reservation handoff", () => {
+  it("builds deterministic create commands from committed guest bookings", () => {
+    const input = handoffInput();
+    const command = buildCreatePmsReservationCommand(input);
+
+    expect(command).toMatchObject({
+      contractVersion: PMS_RESERVATION_CONTRACT_VERSION,
+      idempotencyKey: "pms.reservation.create:property:prop_alpenrose:booking:book_123:v1",
+      audit: {
+        requestId: "req_123",
+        correlationId: "corr_123",
+        organizationId: "org_hotel_alpenrose",
+        propertyId: "prop_alpenrose",
+        actorType: "guest",
+        source: "booking_engine",
+      },
+      target: {
+        propertyId: "prop_alpenrose",
+        provider: "vayada_pms",
+        connectionId: "conn_vayada_pms_alpenrose",
+        requiredCapabilities: ["create_reservation"],
+      },
+      guestBooking: {
+        guestBookingId: "book_123",
+        bookingReference: "VAY-2026-0001",
+        status: "confirmed",
+        source: "direct_booking",
+      },
+      stay: {
+        checkInDate: "2026-09-12",
+        checkOutDate: "2026-09-15",
+      },
+    });
+    expect(command.commandId).toMatch(/^cmd_pms_create_[a-f0-9]{24}$/);
+    expect(buildCreatePmsReservationCommand(input).commandId).toBe(command.commandId);
+  });
+
+  it("submits the command through the PMS sink interface and records succeeded handoff state", async () => {
+    const input = handoffInput();
+    const sink = fakeSink((command) => ({
+      contractVersion: PMS_RESERVATION_CONTRACT_VERSION,
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      outcome: "succeeded",
+      guestBookingId: command.guestBooking.guestBookingId,
+      pmsReservationRef: "pms_res_123",
+      operationalReservationId: "ops_res_123",
+      auditEventId: "audit_123",
+      status: "confirmed",
+    }));
+
+    const state = await handOffCommittedBookingToPms(sink, input);
+
+    expect(state).toMatchObject({
+      guestBookingId: "book_123",
+      bookingReference: "VAY-2026-0001",
+      propertyId: "prop_alpenrose",
+      status: "synced",
+      outcome: "succeeded",
+      pmsReservationRef: "pms_res_123",
+      operationalReservationId: "ops_res_123",
+      auditEventId: "audit_123",
+    });
+  });
+
+  it("keeps accepted async handoffs in Booking-owned pending state", async () => {
+    const state = await handOffCommittedBookingToPms(
+      fakeSink((command) => ({
+        contractVersion: PMS_RESERVATION_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        outcome: "accepted",
+        guestBookingId: command.guestBooking.guestBookingId,
+        auditEventId: "audit_accepted",
+        status: "pending_handoff",
+        providerRequestId: "provider_req_123",
+        retryAfter: "2026-09-01T10:05:00.000Z",
+      })),
+      handoffInput(),
+    );
+
+    expect(state).toMatchObject({
+      status: "accepted_async",
+      outcome: "accepted",
+      providerRequestId: "provider_req_123",
+      retryAfter: "2026-09-01T10:05:00.000Z",
+    });
+  });
+
+  it("maps duplicate replay outcomes without treating them as new PMS writes", async () => {
+    const state = await handOffCommittedBookingToPms(
+      fakeSink((command) => ({
+        contractVersion: PMS_RESERVATION_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        outcome: "duplicate_replayed",
+        guestBookingId: command.guestBooking.guestBookingId,
+        pmsReservationRef: "pms_existing_123",
+        auditEventId: "audit_duplicate",
+        status: "confirmed",
+      })),
+      handoffInput(),
+    );
+
+    expect(state).toMatchObject({
+      status: "duplicate_replayed",
+      outcome: "duplicate_replayed",
+      pmsReservationRef: "pms_existing_123",
+    });
+  });
+
+  it.each([
+    {
+      code: "PMS_DISCONNECTED" as const,
+      retryable: false,
+      expectedStatus: "manual_review_required",
+      userVisibleCategory: "configuration_required" as const,
+    },
+    {
+      code: "MAPPING_MISSING" as const,
+      retryable: false,
+      expectedStatus: "manual_review_required",
+      userVisibleCategory: "configuration_required" as const,
+    },
+    {
+      code: "UNSUPPORTED_CAPABILITY" as const,
+      retryable: false,
+      expectedStatus: "manual_review_required",
+      userVisibleCategory: "configuration_required" as const,
+    },
+    {
+      code: "RETRYABLE_INTEGRATION_FAILURE" as const,
+      retryable: true,
+      expectedStatus: "retry_pending",
+      userVisibleCategory: "temporary_unavailable" as const,
+    },
+  ])(
+    "maps $code failures into Booking handoff state",
+    async ({ code, retryable, expectedStatus, userVisibleCategory }) => {
+      const state = await handOffCommittedBookingToPms(
+        fakeSink((command) => ({
+          contractVersion: PMS_RESERVATION_CONTRACT_VERSION,
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          outcome: "failed",
+          guestBookingId: command.guestBooking.guestBookingId,
+          auditEventId: `audit_${code.toLowerCase()}`,
+          error: pmsError({
+            code,
+            retryable,
+            userVisibleCategory,
+          }),
+        })),
+        handoffInput(),
+      );
+
+      expect(state).toMatchObject({
+        status: expectedStatus,
+        outcome: "failed",
+        error: {
+          code,
+          retryable,
+          userVisibleCategory,
+        },
+      });
+    },
+  );
+
+  it("uses the documented idempotency key format", () => {
+    expect(
+      buildCreateReservationIdempotencyKey({
+        propertyId: "prop_123",
+        guestBookingId: "book_123",
+      }),
+    ).toBe("pms.reservation.create:property:prop_123:booking:book_123:v1");
+  });
+
+  it("rejects PMS results that do not correlate to the submitted command", async () => {
+    await expect(
+      handOffCommittedBookingToPms(
+        fakeSink((command) => ({
+          contractVersion: PMS_RESERVATION_CONTRACT_VERSION,
+          commandId: command.commandId,
+          idempotencyKey: "pms.reservation.create:property:other:booking:other:v1",
+          outcome: "succeeded",
+          guestBookingId: "other_booking",
+          pmsReservationRef: "pms_other",
+          auditEventId: "audit_mismatch",
+          status: "confirmed",
+        })),
+        handoffInput(),
+      ),
+    ).rejects.toThrow(BookingPmsHandoffContractError);
+  });
+});
+
+function fakeSink(
+  createReservation: (command: CreatePmsReservationCommand) => PmsReservationHandoffResult,
+): Pick<PmsReservationSink, "createReservation"> {
+  return {
+    async createReservation(command) {
+      return createReservation(command);
+    },
+  };
+}
+
+function pmsError(input: {
+  code: PmsReservationError["code"];
+  retryable: boolean;
+  userVisibleCategory: PmsReservationError["userVisibleCategory"];
+}): PmsReservationError {
+  return {
+    code: input.code,
+    retryable: input.retryable,
+    userVisibleCategory: input.userVisibleCategory,
+    sanitizedMessage: `${input.code} fixture`,
+  };
+}
+
+function handoffInput(): BookingPmsReservationHandoffInput {
+  return {
+    requestId: "req_123",
+    correlationId: "corr_123",
+    occurredAt: "2026-09-01T10:00:00.000Z",
+    connection: {
+      provider: "vayada_pms",
+      connectionId: "conn_vayada_pms_alpenrose",
+    },
+    booking: {
+      guestBookingId: "book_123",
+      bookingReference: "VAY-2026-0001",
+      propertyId: "prop_alpenrose",
+      organizationId: "org_hotel_alpenrose",
+      createdAt: "2026-09-01T09:59:30.000Z",
+      locale: "en",
+      stay: {
+        checkInDate: "2026-09-12",
+        checkOutDate: "2026-09-15",
+        adults: 2,
+        children: 0,
+        numberOfRooms: 1,
+        estimatedArrivalTime: "16:00",
+        specialRequests: "Late arrival",
+      },
+      guests: {
+        primary: {
+          firstName: "Ada",
+          lastName: "Lovelace",
+          email: "ada@example.test",
+          phone: "+49123456789",
+          country: "GB",
+        },
+        additional: [
+          {
+            firstName: "Grace",
+            lastName: "Hopper",
+          },
+        ],
+      },
+      bookedOffer: {
+        roomTypeId: "room_deluxe",
+        ratePlanId: "rate_flexible_breakfast",
+        roomName: "Deluxe Room",
+      },
+      pricing: {
+        roomTotal: { amountDecimal: "360.00", currency: "EUR" },
+        taxesAndFees: { amountDecimal: "36.00", currency: "EUR" },
+        discounts: { amountDecimal: "0.00", currency: "EUR" },
+        grandTotal: { amountDecimal: "396.00", currency: "EUR" },
+      },
+      payment: {
+        paymentStatus: "authorized",
+        paymentMethod: "card",
+        depositAmount: { amountDecimal: "99.00", currency: "EUR" },
+        balanceAmount: { amountDecimal: "297.00", currency: "EUR" },
+        providerPaymentRef: "pay_123",
+      },
+      policy: {
+        cancellationPolicyId: "policy_flexible",
+        cancellationSummary: "Free cancellation until 7 days before arrival.",
+        refundableUntil: "2026-09-05T22:00:00.000Z",
+      },
+    },
+  };
+}

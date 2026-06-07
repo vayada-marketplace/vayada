@@ -1,0 +1,31 @@
+{
+  "name": "@vayada/domain-booking",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Booking domain application services for the TypeScript backend.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "npm --workspace @vayada/domain-pms run build",
+    "pretest": "npm --workspace @vayada/domain-pms run build",
+    "pretypecheck": "npm --workspace @vayada/domain-pms run build",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vayada/domain-pms": "0.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}
