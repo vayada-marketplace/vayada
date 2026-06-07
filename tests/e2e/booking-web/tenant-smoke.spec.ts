@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -16,6 +16,66 @@ test.describe("booking-web tenant smoke", () => {
     await expect(page.getByText("Alpine Suite")).toBeVisible();
     await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
 
+    const graph = await publicStructuredDataGraph(page);
+    const hotelNode = graph.find((node) => node["@type"] === "Hotel");
+    expect(hotelNode).toMatchObject({
+      "@type": "Hotel",
+      name: "Hotel Alpenrose",
+      url: "http://hotel-alpenrose.booking.localhost:3002/en",
+      checkinTime: "15:00",
+      checkoutTime: "11:00",
+    });
+    expect(hotelNode?.image).toContain(
+      "http://hotel-alpenrose.booking.localhost:3002/vayada-logo.png",
+    );
+
+    const availableRoom = graph.find(
+      (node) => node["@type"] === "HotelRoom" && node.name === "Alpine Suite",
+    );
+    expect(availableRoom).toMatchObject({
+      "@type": "HotelRoom",
+      name: "Alpine Suite",
+      containedInPlace: { "@id": "http://hotel-alpenrose.booking.localhost:3002/en#hotel" },
+      offers: {
+        "@type": "Offer",
+        price: 240,
+        priceCurrency: "EUR",
+        availability: "https://schema.org/InStock",
+      },
+    });
+
+    const unavailableRoom = graph.find(
+      (node) => node["@type"] === "HotelRoom" && node.name === "Garden Room",
+    );
+    expect(unavailableRoom).toBeTruthy();
+    expect(unavailableRoom?.offers).toBeUndefined();
+
     await assertHealthy();
   });
 });
+
+type JsonLdNode = {
+  "@type"?: string;
+  name?: string;
+  url?: string;
+  image?: string[];
+  checkinTime?: string;
+  checkoutTime?: string;
+  containedInPlace?: { "@id": string };
+  offers?: {
+    "@type": string;
+    price: number;
+    priceCurrency: string;
+    availability: string;
+  };
+};
+
+async function publicStructuredDataGraph(page: Page) {
+  const rawStructuredData = await page
+    .locator('script[type="application/ld+json"]#booking-web-public-structured-data')
+    .textContent();
+  expect(rawStructuredData).toBeTruthy();
+  const structuredData = JSON.parse(rawStructuredData ?? "{}") as { "@graph"?: JsonLdNode[] };
+  expect(structuredData["@graph"]).toBeTruthy();
+  return structuredData["@graph"] ?? [];
+}
