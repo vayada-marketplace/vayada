@@ -157,7 +157,8 @@ error traces.
 
 - **Booking-web public pages** consume `property_public_profile_read_model` and
   Distribution URL/bookability outputs. They should not call PMS or Marketplace
-  profile tables directly for public identity.
+  profile tables directly for public identity. VAY-655 defines the target
+  Booking Web route split in `engineering/booking-web-public-api-routing.md`.
 - **Marketplace and landing** consume catalog public profile facts and add their
   own marketplace/listing overlays where needed.
 - **Public AI/bookability APIs** consume Distribution projections from VAY-665,

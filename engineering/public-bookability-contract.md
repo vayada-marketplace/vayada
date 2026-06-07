@@ -209,6 +209,12 @@ configured or the PMS public API is unavailable, it returns `unavailable_data`.
 It must not expose Booking, PMS, Finance, Channex, or promo/provider internals
 in the HTTP response.
 
+`PMS_PUBLIC_API_URL` is a server-side Distribution compatibility input, not a
+target Booking Web dependency. VAY-655 defines the Booking Web public API split:
+Booking Web should call Booking/checkout and Distribution/bookability contracts,
+while any PMS route access remains hidden behind temporary adapters and is
+removed after canonical offer and quote read models exist.
+
 Response posture:
 
 - public, unauthenticated, read-only;
@@ -430,6 +436,8 @@ internals by using these artifacts:
 - profile route shape: `GET /api/ai/hotels/{slug}`;
 - quote route shape:
   `GET /api/ai/hotels/{slug}/quote?check_in&check_out&adults&children&rooms&currency&locale&promo_code&referral_code`;
+- Booking Web target route split:
+  `engineering/booking-web-public-api-routing.md`;
 - fixture cases in `engineering/fixtures/public-bookability/cases.json`;
 - target owners from `engineering/target-schema-ownership-map.md`;
 - freshness and parity expectations from
