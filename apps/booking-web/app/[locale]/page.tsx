@@ -13,6 +13,7 @@ import RoomDetailModal from "@/components/booking/RoomDetailModal";
 import RoomCard from "@/components/booking/RoomCard";
 import RoomFiltersBar from "@/components/booking/RoomFiltersBar";
 import RoomMapPanel from "@/components/booking/RoomMapPanel";
+import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
 import { calculateNights, formatDateShort, formatDate, ensureMinOneNight } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -277,6 +278,8 @@ function HomePageContent() {
 
   return (
     <div className="min-h-screen bg-white overflow-x-hidden">
+      <PublicStructuredData hotel={hotel} rooms={rooms} locale={locale} />
+
       {/* Hero Section */}
       <div className="relative h-[520px] w-full">
         <Image
@@ -654,6 +657,7 @@ function HomePageContent() {
               : filteredRooms.map((room, roomIndex) => (
                   <div
                     key={room.id}
+                    id={`room-${room.id}`}
                     ref={(node) => {
                       roomRefs.current[room.id] = node;
                     }}

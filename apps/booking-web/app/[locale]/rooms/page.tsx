@@ -2,15 +2,17 @@
 
 import { useEffect } from "react";
 import Image from "next/image";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
+import PublicStructuredData from "@/components/booking/PublicStructuredData";
 import { useHotel, useRooms, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { trackEvent } from "@/services/api/tracking";
 
 export default function RoomsPage() {
+  const locale = useLocale();
   const t = useTranslations("rooms");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
@@ -24,6 +26,8 @@ export default function RoomsPage() {
 
   return (
     <div className="min-h-screen bg-white">
+      <PublicStructuredData hotel={hotel} rooms={rooms} locale={locale} />
+
       {/* Mini Hero */}
       <div className="relative h-64 w-full">
         <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
@@ -41,6 +45,7 @@ export default function RoomsPage() {
           {rooms.map((room) => (
             <div
               key={room.id}
+              id={`room-${room.id}`}
               className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-lg transition-shadow group"
             >
               {/* Image */}
