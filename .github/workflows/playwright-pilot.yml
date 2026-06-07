@@ -16,6 +16,8 @@ on:
       - "apps/pms-web/**"
       - "apps/vayada-admin/**"
       - "packages/marketplace-shared/**"
+      - "packages/domain-pms/**"
+      - "packages/pms-vayada-adapter/**"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
