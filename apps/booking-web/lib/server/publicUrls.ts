@@ -17,10 +17,11 @@ export type PublicHotelUrlPolicy = {
   hreflangUrls: Record<string, string>;
 };
 
+export type PublicHotelCrawlPath = "/" | "/rooms";
+
 export function resolvePublicHotelUrls(input: PublicHotelUrlPolicyInput): PublicHotelUrlPolicy {
-  const requestHost = normalizeRequestHost(input.requestHost);
-  const protocol = input.requestProtocol ?? inferProtocol(requestHost);
-  const fallbackBaseUrl = `${protocol}://${fallbackHostForSlug(input.slug, requestHost)}`;
+  const protocol = input.requestProtocol ?? inferProtocol(input.requestHost);
+  const fallbackBaseUrl = `${protocol}://${fallbackHostForSlug(input.slug, input.requestHost)}`;
   const customDomainUrl = normalizeCustomDomainUrl(input.customDomainUrl);
   const bookingBaseUrl = customDomainUrl ?? fallbackBaseUrl;
   const canonicalUrl = withLocalePath(bookingBaseUrl, input.locale);
@@ -37,6 +38,33 @@ export function resolvePublicHotelUrls(input: PublicHotelUrlPolicyInput): Public
       locales.map((locale) => [locale, withLocalePath(bookingBaseUrl, locale)]),
     ),
   };
+}
+
+export function publicHotelPageUrl(
+  policy: PublicHotelUrlPolicy,
+  path: PublicHotelCrawlPath,
+): string {
+  if (path === "/") return policy.canonicalUrl;
+  return appendPath(policy.canonicalUrl, path);
+}
+
+export function publicHotelPageHreflangUrls(
+  policy: PublicHotelUrlPolicy,
+  path: PublicHotelCrawlPath,
+): Record<string, string> {
+  if (path === "/") return policy.hreflangUrls;
+  return Object.fromEntries(
+    Object.entries(policy.hreflangUrls).map(([locale, url]) => [locale, appendPath(url, path)]),
+  );
+}
+
+export function publicHotelSitemapEntries(
+  policy: PublicHotelUrlPolicy,
+): Array<{ url: string; alternates: Record<string, string> }> {
+  return (["/", "/rooms"] as const).map((path) => ({
+    url: publicHotelPageUrl(policy, path),
+    alternates: publicHotelPageHreflangUrls(policy, path),
+  }));
 }
 
 export function getCanonicalHostRedirectUrl(
@@ -77,6 +105,12 @@ function fallbackHostForSlug(slug: string, requestHost: string): string {
 
 function withLocalePath(baseUrl: string, locale: string): string {
   return new URL(`/${locale.replace(/^\/+/, "")}`, baseUrl).toString().replace(/\/$/, "");
+}
+
+function appendPath(localeUrl: string, path: PublicHotelCrawlPath): string {
+  const url = new URL(localeUrl);
+  url.pathname = `${url.pathname.replace(/\/$/, "")}${path}`;
+  return url.toString().replace(/\/$/, "");
 }
 
 function normalizeCustomDomainUrl(value?: string | null): string | null {
