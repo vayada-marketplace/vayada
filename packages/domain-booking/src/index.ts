@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   PMS_RESERVATION_CONTRACT_VERSION,
   type CreatePmsReservationCommand,
@@ -167,7 +165,7 @@ export async function handOffCommittedBookingToPms(
   });
 }
 
-export function mapPmsHandoffResultToBookingState(input: {
+function mapPmsHandoffResultToBookingState(input: {
   booking: Pick<CommittedGuestBooking, "guestBookingId" | "bookingReference" | "propertyId">;
   result: PmsReservationHandoffResult;
 }): BookingPmsHandoffState {
@@ -201,7 +199,17 @@ function buildCreateReservationCommandId(idempotencyKey: string): string {
 }
 
 function stableHash(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+  const seeds = [0x811c9dc5, 0x811c9dc5 ^ 0x9e3779b9, 0x811c9dc5 ^ 0x85ebca6b];
+
+  return seeds
+    .map((seed) => {
+      let hash = seed;
+      for (let index = 0; index < value.length; index += 1) {
+        hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193) >>> 0;
+      }
+      return hash.toString(16).padStart(8, "0");
+    })
+    .join("");
 }
 
 function bookingStatusForResult(result: PmsReservationHandoffResult): BookingPmsHandoffStatus {
