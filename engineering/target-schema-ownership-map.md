@@ -90,6 +90,12 @@ Owner package: `domain-identity` with infrastructure support from
 | `auth_reconciliation_events`      | Identity/auth            | WorkOS webhooks and migration/linking runs.                                                                                     | Provider reconciliation, not product audit.                                                  |
 | `request_context_resource_scope`  | Identity/auth read model | `organization_memberships`, `permission_catalog`, `organization_resource_links`, entitlements.                                  | Read model for RequestContext resolution and tests.                                          |
 
+Identity-owned user lifecycle commands are defined in
+[`identity-user-lifecycle-commands.md`](identity-user-lifecycle-commands.md).
+Target product domains request `identity.user.*`, `identity.recovery.*`, and
+`identity.invite.*` commands instead of writing these tables or legacy Auth DB
+tables directly.
+
 Explicitly deferred or retired:
 
 - `password_reset_tokens`, `email_verification_codes`,

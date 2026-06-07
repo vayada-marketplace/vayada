@@ -168,6 +168,78 @@ test("fails when Booking domain code requires PMS implementation modules", () =>
   }
 });
 
+test("fails when target product route code writes identity tables directly", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/routes/bookingSettings.ts": `
+      export async function route(db) {
+        await db.execute(sql\`insert into identity.users (email) values ('owner@example.com')\`);
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /identity lifecycle command/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when target product domain code uses query-builder identity mutations", () => {
+  const root = createFixtureRoot({
+    "packages/domain-booking/src/owner.ts": `
+      export async function createOwner(db) {
+        return db.insertInto("users").values({ email: "owner@example.com" }).execute();
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /identity lifecycle command/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when target product route code writes quoted identity table names", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/routes/bookingSettings.ts": `
+      export async function route(db) {
+        await db.execute(sql\`update "identity"."organization_memberships" set status = 'active'\`);
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /identity lifecycle command/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when future marketplace domain code writes identity tables directly", () => {
+  const root = createFixtureRoot({
+    "packages/domain-marketplace/src/adminUsers.ts": `
+      export async function createUser(db) {
+        await db.execute(sql\`delete from identity.users where id = 'user_001'\`);
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /identity lifecycle command/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function createFixtureRoot(files) {
   const root = mkdtempSync(path.join(tmpdir(), "vayada-boundaries-"));
 

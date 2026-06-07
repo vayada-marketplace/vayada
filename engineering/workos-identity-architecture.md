@@ -79,6 +79,13 @@ Vayada should own these application concerns:
   WorkOS user or organization membership, until a guest account product is
   explicitly scoped.
 
+Product domains request user lifecycle changes through the identity-owned
+command surface in
+[`identity-user-lifecycle-commands.md`](identity-user-lifecycle-commands.md).
+They must not write `users`, provider identity mappings, organization
+memberships, resource links, permission grants, or retired reset/recovery token
+tables directly in the TypeScript target path.
+
 ## Mapping model
 
 ### Users
