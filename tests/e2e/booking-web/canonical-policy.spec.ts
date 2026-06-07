@@ -175,6 +175,7 @@ test.describe("booking-web canonical URL policy", () => {
       expect.arrayContaining([
         "/book",
         "/en/book",
+        "/de/book",
         "/payment",
         "/en/payment",
         "/booking",

@@ -98,7 +98,12 @@ export function requestProtocol(headersList: Headers): "http" | "https" {
   const forwardedProto = headersList.get("x-forwarded-proto");
   if (forwardedProto === "http" || forwardedProto === "https") return forwardedProto;
   const host = headersList.get("host") || "";
-  return host.includes(":3002") || host.startsWith("127.0.0.1") ? "http" : "https";
+  return host.includes("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("::1") ||
+    host.startsWith("[::1]")
+    ? "http"
+    : "https";
 }
 
 export function absoluteImages(baseUrl: string, images: Array<string | undefined>): string[] {
