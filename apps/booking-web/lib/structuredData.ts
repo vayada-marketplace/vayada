@@ -73,7 +73,6 @@ function buildRoomNode(input: {
 }): JsonLdObject {
   const { hotel, room, canonicalUrl } = input;
   const url = `${canonicalUrl}#room-${encodeURIComponent(room.id)}`;
-  const bookableOffer = hotel.instantBook === true && room.remainingRooms > 0;
 
   return stripUndefined({
     "@type": "HotelRoom",
@@ -104,23 +103,7 @@ function buildRoomNode(input: {
       value: true,
     })),
     containedInPlace: { "@id": hotelId(canonicalUrl) },
-    offers: bookableOffer ? buildRoomOffer({ room, url }) : undefined,
   });
-}
-
-function buildRoomOffer(input: { room: RoomType; url: string }): JsonLdObject | undefined {
-  const { room, url } = input;
-  if (room.baseRate <= 0 || !room.currency) {
-    return undefined;
-  }
-
-  return {
-    "@type": "Offer",
-    url,
-    price: room.baseRate,
-    priceCurrency: room.currency,
-    availability: "https://schema.org/InStock",
-  };
 }
 
 function buildPostalAddress(hotel: Hotel): JsonLdObject {

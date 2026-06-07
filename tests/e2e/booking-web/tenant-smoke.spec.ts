@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import publicBookabilityCases from "../../../engineering/fixtures/public-bookability/cases.json";
 import { mockBookingApis, SEEDED_BOOKING_SLUG } from "../support/bookingMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -36,19 +37,24 @@ test.describe("booking-web tenant smoke", () => {
       "@type": "HotelRoom",
       name: "Alpine Suite",
       containedInPlace: { "@id": "http://hotel-alpenrose.booking.localhost:3002/en#hotel" },
-      offers: {
-        "@type": "Offer",
-        price: 240,
-        priceCurrency: "EUR",
-        availability: "https://schema.org/InStock",
-      },
     });
+    expect(availableRoom?.offers).toBeUndefined();
 
     const unavailableRoom = graph.find(
       (node) => node["@type"] === "HotelRoom" && node.name === "Garden Room",
     );
     expect(unavailableRoom).toBeTruthy();
     expect(unavailableRoom?.offers).toBeUndefined();
+
+    const quoteUnavailableCases = publicBookabilityCases.cases
+      .filter((fixture) => fixture.expected.offerCount === 0)
+      .map((fixture) => fixture.caseId);
+    expect(quoteUnavailableCases).toEqual(
+      expect.arrayContaining(["sold-out", "payment-disabled", "min-stay-not-met"]),
+    );
+    expect(
+      graph.filter((node) => node["@type"] === "HotelRoom").every((node) => !node.offers),
+    ).toBe(true);
 
     await assertHealthy();
   });
