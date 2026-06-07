@@ -11,6 +11,7 @@ import {
 } from "@vayada/domain-pms";
 
 import {
+  VayadaPmsDuplicateReservationError,
   createVayadaPmsReservationAdapter,
   type VayadaPmsConnection,
   type VayadaPmsIdempotencyRecord,
@@ -298,6 +299,28 @@ describe("@vayada/pms-vayada-adapter", () => {
       },
     });
     expect(repository.createCount).toBe(0);
+
+    await expect(
+      adapter.createReservation(
+        createCommand({
+          stay: {
+            checkInDate: "2026-09-15",
+            checkOutDate: "2026-09-15",
+            adults: 2,
+            children: 0,
+            numberOfRooms: 1,
+          },
+          idempotencyKey: "idem_invalid_dates",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      outcome: "failed",
+      error: {
+        code: "VALIDATION_FAILED",
+        sanitizedMessage: "Check-out must be after check-in.",
+      },
+    });
+    expect(repository.createCount).toBe(0);
   });
 
   it("validates update and cancel commands before repository mutation", async () => {
@@ -330,6 +353,9 @@ describe("@vayada/pms-vayada-adapter", () => {
       outcome: "failed",
       error: { code: "VALIDATION_FAILED" },
     });
+
+    expect(repository.updateCount).toBe(0);
+    expect(repository.cancelCount).toBe(0);
   });
 });
 
@@ -342,6 +368,8 @@ class InMemoryVayadaPmsRepository implements VayadaPmsReservationRepository {
   failCreates: boolean;
   readonly failIdempotencySaves: boolean;
   createCount = 0;
+  updateCount = 0;
+  cancelCount = 0;
   private auditCount = 0;
 
   constructor(
@@ -358,7 +386,16 @@ class InMemoryVayadaPmsRepository implements VayadaPmsReservationRepository {
     this.failIdempotencySaves = input.failIdempotencySaves ?? false;
   }
 
-  async getConnection(): Promise<VayadaPmsConnection | null> {
+  async getConnection(input: {
+    propertyId: string;
+    connectionId: string;
+  }): Promise<VayadaPmsConnection | null> {
+    if (
+      this.connection.propertyId !== input.propertyId ||
+      this.connection.connectionId !== input.connectionId
+    ) {
+      return null;
+    }
     return this.connection;
   }
 
@@ -373,16 +410,16 @@ class InMemoryVayadaPmsRepository implements VayadaPmsReservationRepository {
     this.idempotency.set(record.idempotencyKey, record);
   }
 
-  async resolveCreateMapping(): Promise<VayadaPmsOfferMapping | null> {
+  async resolveCreateMapping(
+    command: CreatePmsReservationCommand,
+  ): Promise<VayadaPmsOfferMapping | null> {
+    if (
+      command.target.propertyId !== this.connection.propertyId ||
+      command.target.connectionId !== this.connection.connectionId
+    ) {
+      return null;
+    }
     return this.mapping;
-  }
-
-  async findByGuestBooking(input: {
-    propertyId: string;
-    guestBookingId: string;
-  }): Promise<PmsOperationalReservationReadModel | null> {
-    const ref = this.byGuestBooking.get(`${input.propertyId}:${input.guestBookingId}`);
-    return ref ? (this.reservations.get(ref) ?? null) : null;
   }
 
   async createOperationalReservation(input: {
@@ -392,8 +429,13 @@ class InMemoryVayadaPmsRepository implements VayadaPmsReservationRepository {
     if (this.failCreates) {
       throw new Error("write unavailable");
     }
-    this.createCount += 1;
     const { command, mapping } = input;
+    if (
+      this.byGuestBooking.has(`${command.target.propertyId}:${command.guestBooking.guestBookingId}`)
+    ) {
+      throw new VayadaPmsDuplicateReservationError();
+    }
+    this.createCount += 1;
     const reservation = reservationFromCommand(command, mapping);
     this.reservations.set(reservation.pmsReservationRef, reservation);
     this.byGuestBooking.set(
@@ -406,6 +448,7 @@ class InMemoryVayadaPmsRepository implements VayadaPmsReservationRepository {
   async updateOperationalReservation(
     command: UpdatePmsReservationCommand,
   ): Promise<PmsOperationalReservationReadModel | null> {
+    this.updateCount += 1;
     const existing = this.reservations.get(command.target.pmsReservationRef);
     if (!existing) {
       return null;
@@ -428,6 +471,7 @@ class InMemoryVayadaPmsRepository implements VayadaPmsReservationRepository {
   async cancelOperationalReservation(
     command: CancelPmsReservationCommand,
   ): Promise<PmsOperationalReservationReadModel | null> {
+    this.cancelCount += 1;
     const existing = this.reservations.get(command.target.pmsReservationRef);
     if (!existing) {
       return null;

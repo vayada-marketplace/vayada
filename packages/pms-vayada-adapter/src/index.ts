@@ -64,10 +64,6 @@ export type VayadaPmsReservationRepository = {
   getIdempotencyRecord(idempotencyKey: string): Promise<VayadaPmsIdempotencyRecord | null>;
   saveIdempotencyRecord(record: VayadaPmsIdempotencyRecord): Promise<void>;
   resolveCreateMapping(command: CreatePmsReservationCommand): Promise<VayadaPmsOfferMapping | null>;
-  findByGuestBooking(input: {
-    propertyId: string;
-    guestBookingId: string;
-  }): Promise<PmsOperationalReservationReadModel | null>;
   createOperationalReservation(
     input: VayadaPmsCreateReservationInput,
   ): Promise<PmsOperationalReservationReadModel>;
@@ -88,6 +84,13 @@ export type VayadaPmsReservationRepository = {
   ): Promise<PmsOperationalReservationListResult>;
   recordAuditEvent(event: VayadaPmsAuditEventInput): Promise<string>;
 };
+
+export class VayadaPmsDuplicateReservationError extends Error {
+  constructor(message = "Operational reservation already exists for this guest booking.") {
+    super(message);
+    this.name = "VayadaPmsDuplicateReservationError";
+  }
+}
 
 export function createVayadaPmsReservationAdapter(
   repository: VayadaPmsReservationRepository,
@@ -121,17 +124,6 @@ class DefaultVayadaPmsReservationAdapter implements VayadaPmsReservationAdapter 
       return this.persistResultOrFailure(command, this.failed(command, mappingMissingError()));
     }
 
-    const duplicate = await this.repository.findByGuestBooking({
-      propertyId: command.target.propertyId,
-      guestBookingId: command.guestBooking.guestBookingId,
-    });
-    if (duplicate) {
-      return this.persistResultOrFailure(
-        command,
-        this.failed(command, duplicateReservationError()),
-      );
-    }
-
     try {
       const reservation = await this.repository.createOperationalReservation({ command, mapping });
       return await this.persistResultOrFailure(
@@ -139,6 +131,12 @@ class DefaultVayadaPmsReservationAdapter implements VayadaPmsReservationAdapter 
         await this.succeeded(command, reservation, "succeeded"),
       );
     } catch (error) {
+      if (error instanceof VayadaPmsDuplicateReservationError) {
+        return this.persistResultOrFailure(
+          command,
+          this.failed(command, duplicateReservationError()),
+        );
+      }
       return this.persistResultOrFailure(
         command,
         this.failed(command, retryableIntegrationError(error)),
@@ -484,6 +482,9 @@ function validateCommand(
     ) {
       return validationError("Stay dates must use YYYY-MM-DD and timestamps must be UTC ISO-8601.");
     }
+    if (!isCheckOutAfterCheckIn(command.stay.checkInDate, command.stay.checkOutDate)) {
+      return validationError("Check-out must be after check-in.");
+    }
     const moneyError = validateMoneyValues([
       command.pricing.roomTotal,
       command.pricing.taxesAndFees,
@@ -627,12 +628,15 @@ function isUtcDateTime(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value);
 }
 
+function isCheckOutAfterCheckIn(checkInDate: string, checkOutDate: string): boolean {
+  return Date.parse(`${checkOutDate}T00:00:00.000Z`) > Date.parse(`${checkInDate}T00:00:00.000Z`);
+}
+
 function retryAfterFiveMinutes(occurredAt: string): string {
-  const date = new Date(occurredAt);
-  if (Number.isNaN(date.valueOf())) {
-    return new Date(Date.now() + 5 * 60_000).toISOString();
-  }
-  return new Date(date.valueOf() + 5 * 60_000).toISOString();
+  const parsed = new Date(occurredAt).valueOf();
+  const parsedOrNow = Number.isNaN(parsed) ? Date.now() : parsed;
+  const base = Math.max(parsedOrNow, Date.now());
+  return new Date(base + 5 * 60_000).toISOString();
 }
 
 function pmsDisconnectedError(): PmsReservationError {
