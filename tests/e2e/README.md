@@ -72,6 +72,18 @@ cd apps/booking-web && portless
 
 Then visit `https://hotel-alpenrose.booking.localhost`.
 
+## GEO Validation
+
+The `booking-web/geo-validation.spec.ts` suite validates the GEO (Generative Engine Optimization) contract introduced in VAY-664. It asserts:
+
+- Public hotel pages emit parseable, required-field-complete JSON-LD (`Hotel` and `HotelRoom` nodes).
+- HotelRoom JSON-LD nodes never include `offers` (pricing is served by the quote API).
+- Private booking pages (`/book`, `/payment`, `/booking/*`, `/my-booking`) are excluded from search-engine indexing.
+- The public sitemap does not include any private booking paths.
+- The public AI profile/quote contract fixtures cover all required VAY-664 case IDs.
+
+All network calls are mocked via `mockBookingApis`. No seeded backend is required for this suite.
+
 ## Auth App Smokes
 
 The smoke tests for `affiliate-dashboard`, `booking-admin`, `marketplace-web`, `pms-web`, and `vayada-admin` navigate to `/login` and verify the login shell renders without errors. No API mocking is required — the login pages are fully static until the form is submitted.
