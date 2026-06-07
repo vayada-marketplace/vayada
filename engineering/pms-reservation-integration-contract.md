@@ -32,6 +32,10 @@ Non-consumers:
 
 - Booking Engine routes must not call Vayada PMS tables, Channex tables,
   `PMS_DATABASE_URL`, or provider-specific PMS clients directly.
+- Booking Web public flows must not call PMS public routes directly in the
+  TypeScript target path. They call Booking/checkout lifecycle routes and
+  Distribution/bookability read routes as defined by
+  `engineering/booking-web-public-api-routing.md`.
 - Channex remains PMS-owned channel connectivity. Booking Engine never calls
   Channex as part of this contract.
 

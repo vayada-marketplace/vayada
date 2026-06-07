@@ -159,14 +159,14 @@ Existing related tickets already cover part of the removal plan:
 
 Additional migration slices created from this audit:
 
-| Issue                                                                               | Why it is needed                                                                                | Couplings covered |
-| ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------- |
-| VAY-655: Route Booking Web public flows through Booking and distribution APIs       | Removes Booking Web dependency on PMS public APIs for rooms, payment settings, and bookings.    | C00, C01          |
-| VAY-651: Replace Booking dashboard PMS DB reads with metrics read models            | Removes Booking API dependency on PMS operational tables for revenue/source/arrival dashboards. | C04, C05          |
-| VAY-652: Move PMS hotel identity and payment settings off Booking DB reads/writes   | Removes the broadest PMS to Booking database dependency before target schema cutover.           | C02, C03, C10     |
-| VAY-653: Replace Marketplace-to-PMS affiliate provisioning cross-DB write           | Keeps Marketplace collaboration lifecycle independent from Vayada PMS implementation tables.    | C07               |
-| VAY-654: Move Channex-triggered notifications and ARI side effects into jobs/events | Makes Channex sync, email, payout, and audit side effects retryable and observable.             | C08, C09          |
-| VAY-656: Move product-owned Auth DB writes behind identity user-lifecycle commands  | Prevents Booking, Marketplace, and PMS product flows from mutating identity tables directly.    | C11               |
+| Issue                                                                               | Why it is needed                                                                                                                                                           | Couplings covered |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| VAY-655: Route Booking Web public flows through Booking and distribution APIs       | Defines `engineering/booking-web-public-api-routing.md` and removes Booking Web dependency on PMS public APIs for rooms, payment settings, bookings, and affiliate clicks. | C00, C01          |
+| VAY-651: Replace Booking dashboard PMS DB reads with metrics read models            | Removes Booking API dependency on PMS operational tables for revenue/source/arrival dashboards.                                                                            | C04, C05          |
+| VAY-652: Move PMS hotel identity and payment settings off Booking DB reads/writes   | Removes the broadest PMS to Booking database dependency before target schema cutover.                                                                                      | C02, C03, C10     |
+| VAY-653: Replace Marketplace-to-PMS affiliate provisioning cross-DB write           | Keeps Marketplace collaboration lifecycle independent from Vayada PMS implementation tables.                                                                               | C07               |
+| VAY-654: Move Channex-triggered notifications and ARI side effects into jobs/events | Makes Channex sync, email, payout, and audit side effects retryable and observable.                                                                                        | C08, C09          |
+| VAY-656: Move product-owned Auth DB writes behind identity user-lifecycle commands  | Prevents Booking, Marketplace, and PMS product flows from mutating identity tables directly.                                                                               | C11               |
 
 The legacy product auth shortcut risk is covered by VAY-608 RequestContext
 direction, identity-schema follow-up work such as VAY-616, and VAY-656 for
