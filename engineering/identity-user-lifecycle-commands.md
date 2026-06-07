@@ -34,9 +34,10 @@ should depend on the command bus contract, not on raw Auth DB tables.
 | `identity.invite.customer.create`  | Invite a customer account without granting hotel ownership or staff membership. Guest booking data remains booking-owned.      |
 
 Each accepted command emits an identity lifecycle event with the original
-`commandId`, `idempotencyKey`, actor, reason, request/correlation metadata, and
-affected identity resources. Product domains react to events or command results;
-they do not patch identity rows themselves.
+`commandId`, `idempotencyKey`, actor, reason, request/correlation metadata,
+affected identity resources, and an event-specific payload. Product domains
+react to events or command results; they do not patch identity rows themselves
+or query identity tables to infer what changed.
 
 ## Audit And Idempotency
 
@@ -56,6 +57,11 @@ Identity command handlers must treat the tuple
 `(commandType, idempotencyKey)` as replay-safe. A retry can return
 `idempotent_replay`, but it must not create duplicate users, memberships,
 resource links, reset flows, or provider invites.
+
+Recovery commands must name the recovery target at the contract boundary.
+Password reset, account recovery, and email verification require either an
+internal `userId` or an email address. Email change requires the current
+internal `userId` and the requested `newEmail`.
 
 ## Ownership Mapping
 
@@ -82,6 +88,9 @@ identity ownership primitives:
   permissions such as `booking.settings.manage` or `affiliate.payout.manage`.
 - `organization_resource_links` for booking hotels, PMS hotels, marketplace
   hotel profiles/listings, creator profiles, affiliates, and payout accounts.
+  Revoking a resource link must include the relationship so identity can
+  distinguish, for example, `owner`, `operator`, and `billing_account` links to
+  the same resource.
 
 Product tables may still keep legacy `user_id` columns as migration inputs or
 compatibility fields until cutover, but target TypeScript routes and domain

@@ -103,6 +103,10 @@ export type ProductResourceReference = {
   resourceId: string;
 };
 
+export type ResourceLinkCommandTarget = ProductResourceReference & {
+  relationship: ResourceRelationship;
+};
+
 export type PermissionGrantCommandInput = {
   organizationKind: OrganizationKind;
   roleKey: string;
@@ -172,7 +176,7 @@ export type RevokeIdentityAccessPayload = {
   userId: string;
   organizationId: string;
   membershipStatus?: Extract<MembershipStatus, "inactive" | "suspended">;
-  resourceLinks?: readonly ProductResourceReference[];
+  resourceLinks?: readonly ResourceLinkCommandTarget[];
   permissionGrants?: readonly PermissionGrantCommandInput[];
 };
 
@@ -182,13 +186,27 @@ export type RecoveryFlowKind =
   | "email_verification"
   | "email_change";
 
-export type CreateIdentityRecoveryFlowPayload = {
-  flowKind: RecoveryFlowKind;
-  userId?: string;
-  email?: string;
-  newEmail?: string;
-  redirectUrl?: string;
-};
+type RecoveryFlowTarget =
+  | {
+      userId: string;
+      email?: string;
+    }
+  | {
+      userId?: string;
+      email: string;
+    };
+
+export type CreateIdentityRecoveryFlowPayload =
+  | (RecoveryFlowTarget & {
+      flowKind: "account_recovery" | "password_reset" | "email_verification";
+      redirectUrl?: string;
+    })
+  | {
+      flowKind: "email_change";
+      userId: string;
+      newEmail: string;
+      redirectUrl?: string;
+    };
 
 export type CreateAffiliateInvitePayload = {
   email: string;
@@ -295,8 +313,8 @@ export type IdentityLifecycleCommand =
   | CreateAffiliateInviteCommand
   | CreateCustomerInviteCommand;
 
-export type IdentityLifecycleEvent = {
-  eventType: IdentityLifecycleEventType;
+export type IdentityLifecycleEventBase<TEventType extends IdentityLifecycleEventType, TPayload> = {
+  eventType: TEventType;
   eventId: string;
   commandId: string;
   idempotencyKey: string;
@@ -305,7 +323,21 @@ export type IdentityLifecycleEvent = {
   resourceLinks?: readonly ResourceLinkCommandInput[];
   occurredAt: string;
   audit: IdentityCommandAudit;
+  payload: TPayload;
 };
+
+export type IdentityLifecycleEvent =
+  | IdentityLifecycleEventBase<"identity.user.created", CreateIdentityUserPayload>
+  | IdentityLifecycleEventBase<"identity.user.profile.updated", UpdateIdentityUserProfilePayload>
+  | IdentityLifecycleEventBase<"identity.user.email.updated", UpdateIdentityUserEmailPayload>
+  | IdentityLifecycleEventBase<"identity.user.status.updated", UpdateIdentityUserStatusPayload>
+  | IdentityLifecycleEventBase<"identity.user.suspended", SuspendIdentityUserPayload>
+  | IdentityLifecycleEventBase<"identity.user.deleted", DeleteIdentityUserPayload>
+  | IdentityLifecycleEventBase<"identity.access.granted", GrantIdentityAccessPayload>
+  | IdentityLifecycleEventBase<"identity.access.revoked", RevokeIdentityAccessPayload>
+  | IdentityLifecycleEventBase<"identity.recovery.flow.created", CreateIdentityRecoveryFlowPayload>
+  | IdentityLifecycleEventBase<"identity.invite.affiliate.created", CreateAffiliateInvitePayload>
+  | IdentityLifecycleEventBase<"identity.invite.customer.created", CreateCustomerInvitePayload>;
 
 export type IdentityLifecycleCommandResult = {
   status: "accepted" | "idempotent_replay";
