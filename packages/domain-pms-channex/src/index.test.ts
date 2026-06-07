@@ -21,6 +21,7 @@ import {
   type ChannexGuestBookingAlertJob,
   type ChannexInboundRevisionJob,
   type ChannexJob,
+  type ChannexJobDeadLetterEnvelope,
   type ChannexJobQueue,
   type ChannexNotificationSettingsReadModel,
   type ChannexNotificationSettingsReadPort,
@@ -93,16 +94,36 @@ describe("@vayada/domain-pms-channex", () => {
         propertyId: "prop_1",
         channexBookingId: "chx_abc",
         revisionEvent: "booking.created",
+        revisionSequence: "2026-06-07T10:00:00.000Z",
       });
-      expect(key).toBe("channex.inbound:prop_1:chx_abc:booking.created:v1");
+      expect(key).toBe(
+        "channex.inbound:prop_1:chx_abc:booking.created:2026-06-07T10:00:00.000Z:v1",
+      );
       // Same inputs produce the same key (deterministic)
       expect(
         buildInboundRevisionIdempotencyKey({
           propertyId: "prop_1",
           channexBookingId: "chx_abc",
           revisionEvent: "booking.created",
+          revisionSequence: "2026-06-07T10:00:00.000Z",
         }),
       ).toBe(key);
+    });
+
+    it("produces distinct keys for repeated booking.modified events via revisionSequence", () => {
+      const key1 = buildInboundRevisionIdempotencyKey({
+        propertyId: "prop_1",
+        channexBookingId: "chx_abc",
+        revisionEvent: "booking.modified",
+        revisionSequence: "2026-06-07T10:00:00.000Z",
+      });
+      const key2 = buildInboundRevisionIdempotencyKey({
+        propertyId: "prop_1",
+        channexBookingId: "chx_abc",
+        revisionEvent: "booking.modified",
+        revisionSequence: "2026-06-07T10:05:00.000Z",
+      });
+      expect(key1).not.toBe(key2);
     });
 
     it("builds stable ARI room-type push keys", () => {
@@ -127,8 +148,25 @@ describe("@vayada/domain-pms-channex", () => {
       const key = buildAriRoomBlockPushIdempotencyKey({
         roomBlockId: "rb_1",
         trigger: "room_block_deleted",
+        occurredAt: "2026-06-07T10:00:00.000Z",
       });
-      expect(key).toBe("channex.ari.room_block:rb_1:room_block_deleted:v1");
+      expect(key).toBe(
+        "channex.ari.room_block:rb_1:room_block_deleted:2026-06-07T10:00:00.000Z:v1",
+      );
+    });
+
+    it("produces distinct keys for repeated room_block_updated events via occurredAt", () => {
+      const key1 = buildAriRoomBlockPushIdempotencyKey({
+        roomBlockId: "rb_1",
+        trigger: "room_block_updated",
+        occurredAt: "2026-06-07T10:00:00.000Z",
+      });
+      const key2 = buildAriRoomBlockPushIdempotencyKey({
+        roomBlockId: "rb_1",
+        trigger: "room_block_updated",
+        occurredAt: "2026-06-07T10:05:00.000Z",
+      });
+      expect(key1).not.toBe(key2);
     });
 
     it("builds stable OTA booking imported notification keys", () => {
@@ -173,6 +211,7 @@ describe("@vayada/domain-pms-channex", () => {
           propertyId: "prop_1",
           channexBookingId: "chx_abc",
           revisionEvent: "booking.created",
+          revisionSequence: "2026-06-07T10:00:00.000Z",
         }),
         audit: {
           ...sharedAudit,
@@ -188,6 +227,7 @@ describe("@vayada/domain-pms-channex", () => {
           connectionId: "conn_1",
           channexPropertyId: "chx_prop_1",
           revisionEvent: "booking.created",
+          revisionSequence: "2026-06-07T10:00:00.000Z",
           rawRevision: { id: "chx_abc", rooms: [{ room_type_id: "rt_1" }] },
           downstreamJobs: {
             ariPush: true,
@@ -252,22 +292,31 @@ describe("@vayada/domain-pms-channex", () => {
         payload: {
           propertyId: "prop_1",
           organizationId: "org_1",
+          connectionId: "conn_1",
+          channexPropertyId: "chx_prop_1",
           bookingId: "bk_1",
           trigger: "guest_change_approved",
           affectedRoomTypeIds: ["rt_1"],
         },
       };
       expect(job.payload.trigger).toBe("guest_change_approved");
+      expect(job.payload.connectionId).toBe("conn_1");
+      expect(job.payload.channexPropertyId).toBe("chx_prop_1");
     });
 
     it("accepts a well-formed ARI room-block push job covering all lifecycle triggers", () => {
       const triggers = ["room_block_created", "room_block_updated", "room_block_deleted"] as const;
 
       for (const trigger of triggers) {
+        const occurredAt = "2026-10-01T08:00:00.000Z";
         const job: ChannexAriRoomBlockPushJob = {
           jobType: "channex.ari.room_block.push",
           jobId: `job_rb_${trigger}`,
-          idempotencyKey: buildAriRoomBlockPushIdempotencyKey({ roomBlockId: "rb_1", trigger }),
+          idempotencyKey: buildAriRoomBlockPushIdempotencyKey({
+            roomBlockId: "rb_1",
+            trigger,
+            occurredAt,
+          }),
           audit: {
             ...sharedAudit,
             jobId: `job_rb_${trigger}`,
@@ -278,13 +327,19 @@ describe("@vayada/domain-pms-channex", () => {
           payload: {
             propertyId: "prop_1",
             organizationId: "org_1",
+            connectionId: "conn_1",
+            channexPropertyId: "chx_prop_1",
             roomBlockId: "rb_1",
             roomTypeId: "rt_1",
             trigger,
             dateRange: { from: "2026-10-01", to: "2026-10-07" },
+            occurredAt,
           },
         };
         expect(job.payload.trigger).toBe(trigger);
+        expect(job.payload.connectionId).toBe("conn_1");
+        expect(job.payload.channexPropertyId).toBe("chx_prop_1");
+        expect(job.payload.occurredAt).toBe(occurredAt);
       }
     });
 
@@ -311,6 +366,7 @@ describe("@vayada/domain-pms-channex", () => {
           bookingId: "bk_1",
           channexBookingId: "chx_abc",
           revisionEvent: "booking.created",
+          trigger: "ota_booking_imported",
           recipientEmail: "host@hotel.example",
           notificationPreferences: {
             emailNotificationsEnabled: true,
@@ -321,6 +377,7 @@ describe("@vayada/domain-pms-channex", () => {
       // Notification preferences are part of the payload (not a DB read inside ingestion)
       expect(job.payload.notificationPreferences.emailNotificationsEnabled).toBe(true);
       expect(job.payload.notificationPreferences.otaBookingAlertsEnabled).toBe(true);
+      expect(job.payload.trigger).toBe("ota_booking_imported");
     });
 
     it("accepts a well-formed guest booking alert job", () => {
@@ -429,6 +486,7 @@ describe("@vayada/domain-pms-channex", () => {
         idempotencyKey: buildAriRoomBlockPushIdempotencyKey({
           roomBlockId: "rb_2",
           trigger: "room_block_updated",
+          occurredAt: "2026-10-01T08:00:00.000Z",
         }),
         audit: {
           ...sharedAudit,
@@ -440,16 +498,48 @@ describe("@vayada/domain-pms-channex", () => {
         payload: {
           propertyId: "prop_1",
           organizationId: "org_1",
+          connectionId: "conn_1",
+          channexPropertyId: "chx_prop_1",
           roomBlockId: "rb_2",
           roomTypeId: "rt_1",
           trigger: "room_block_updated",
           dateRange: { from: "2026-10-01", to: "2026-10-07" },
+          occurredAt: "2026-10-01T08:00:00.000Z",
         },
       };
 
       const result = await queue.enqueue(job);
       expect(result.jobId).toBe("job_rb_2");
       expect(enqueued).toHaveLength(1);
+    });
+  });
+
+  // ── Dead-letter envelope ──────────────────────────────────────────────────────
+
+  describe("ChannexJobDeadLetterEnvelope", () => {
+    it("accepts a valid dead-letter envelope with all required fields", () => {
+      const envelope: ChannexJobDeadLetterEnvelope = {
+        contractVersion: CHANNEX_JOB_CONTRACT_VERSION,
+        jobId: "job_ari_1",
+        jobType: "channex.ari.room_type.push",
+        idempotencyKey: "channex.ari.room_type:prop_1:rt_1:room_block_created:rb_1:v1",
+        propertyId: "prop_1",
+        organizationId: "org_1",
+        correlationId: "corr_1",
+        deadLetterReason: "max_retries_exceeded",
+        lastError: "Provider returned 503 after 5 attempts",
+        failedAt: "2026-06-07T10:30:00.000Z",
+        attemptCount: 5,
+        originalPayload: {
+          propertyId: "prop_1",
+          roomTypeId: "rt_1",
+          trigger: "room_block_created",
+        },
+      };
+      expect(envelope.contractVersion).toBe("pms-channex-jobs.v1");
+      expect(envelope.deadLetterReason).toBe("max_retries_exceeded");
+      expect(envelope.attemptCount).toBe(5);
+      expect(envelope.jobType).toBe("channex.ari.room_type.push");
     });
   });
 

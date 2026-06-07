@@ -44,6 +44,14 @@ export const CHANNEX_JOB_TYPES = [
 
 export type ChannexJobType = (typeof CHANNEX_JOB_TYPES)[number];
 
+/**
+ * Job owner domains.
+ * NOTE: "booking" here refers to the Booking audit consumer — a read-only sink
+ * that records inbound revision outcomes. The Booking Engine MUST NOT import
+ * this package or any Channex implementation module. The Booking Engine
+ * interacts with PMS through the reservation sink and operational read
+ * contracts in packages/domain-pms, or through typed domain events.
+ */
 export const CHANNEX_JOB_OWNERS = ["pms", "booking", "finance", "notification"] as const;
 export type ChannexJobOwner = (typeof CHANNEX_JOB_OWNERS)[number];
 
@@ -72,6 +80,11 @@ export const CHANNEX_INBOUND_REVISION_EVENTS = [
 ] as const;
 export type ChannexInboundRevisionEvent = (typeof CHANNEX_INBOUND_REVISION_EVENTS)[number];
 
+/**
+ * Why the notification was dispatched. Used as the `trigger` field on
+ * ChannexOtaBookingImportedNotificationJob to discriminate notification cause
+ * without re-inspecting revisionEvent.
+ */
 export const CHANNEX_NOTIFICATION_TRIGGER_REASONS = [
   "ota_booking_imported",
   "ota_booking_modified",
@@ -130,7 +143,7 @@ export type ChannexJobDeadLetterEnvelope = {
 // ── 1. Channex inbound revision job ─────────────────────────────────────────
 //
 // Owner: pms
-// Idempotency key: channex.inbound:{propertyId}:{channexBookingId}:{revisionEvent}:v1
+// Idempotency key: channex.inbound:{propertyId}:{channexBookingId}:{revisionEvent}:{revisionSequence}:v1
 // Retry policy: exponential_backoff (retryable integration failures)
 // Dead-letter reason: max_retries_exceeded | mapping_missing | validation_failed
 //
@@ -151,6 +164,13 @@ export type ChannexInboundRevisionJobPayload = {
   channexPropertyId: string;
   /** The revision event type that triggered this job. */
   revisionEvent: ChannexInboundRevisionEvent;
+  /**
+   * Revision discriminator from the Channex webhook payload — either a
+   * monotonically increasing sequence number or the webhook received-timestamp
+   * (ISO-8601). Used in the idempotency key to disambiguate repeated events of
+   * the same type for the same booking.
+   */
+  revisionSequence: string | number;
   /**
    * Opaque revision payload from Channex.
    * The PMS inbound handler owns deserialization and validation.
@@ -229,6 +249,10 @@ export type ChannexAriRoomTypePushJob = {
 export type ChannexAriBookingPushPayload = {
   propertyId: string;
   organizationId: string;
+  /** Channex connection ID for this property. */
+  connectionId: string;
+  /** Channex property ID on the channel-manager side. */
+  channexPropertyId: string;
   bookingId: string;
   trigger: Extract<
     ChannexAriPushTrigger,
@@ -257,15 +281,20 @@ export type ChannexAriBookingPushJob = {
 // ── 4. ARI push triggered by a room-block event ──────────────────────────────
 //
 // Owner: pms
-// Idempotency key: channex.ari.room_block:{roomBlockId}:{trigger}:v1
+// Idempotency key: channex.ari.room_block:{roomBlockId}:{trigger}:{occurredAt}:v1
 // Retry policy: exponential_backoff
 //
 // Replaces asyncio.create_task(push_ari_for_room_type(...)) calls in
 // admin_room_blocks.py. Covers create/update/delete lifecycle.
+// The occurredAt component disambiguates repeated room_block_updated events.
 
 export type ChannexAriRoomBlockPushPayload = {
   propertyId: string;
   organizationId: string;
+  /** Channex connection ID for this property. */
+  connectionId: string;
+  /** Channex property ID on the channel-manager side. */
+  channexPropertyId: string;
   roomBlockId: string;
   roomTypeId: string;
   trigger: Extract<
@@ -276,6 +305,11 @@ export type ChannexAriRoomBlockPushPayload = {
     from: ChannexDate;
     to: ChannexDate;
   };
+  /**
+   * ISO-8601 timestamp of the triggering event. Required for `room_block_updated`
+   * to disambiguate repeated updates on the same room block in the idempotency key.
+   */
+  occurredAt: ChannexUtcDateTime;
 };
 
 export type ChannexAriRoomBlockPushJob = {
@@ -306,6 +340,8 @@ export type ChannexOtaBookingImportedNotificationPayload = {
   bookingId: string;
   channexBookingId: string;
   revisionEvent: ChannexInboundRevisionEvent;
+  /** Why the notification was triggered. Discriminates cause without re-inspecting revisionEvent. */
+  trigger: ChannexNotificationTriggerReason;
   /**
    * Recipient resolved from the hotel's notification settings read model.
    * If the settings read model is unavailable at dispatch time, the job
@@ -470,8 +506,15 @@ export function buildInboundRevisionIdempotencyKey(input: {
   propertyId: string;
   channexBookingId: string;
   revisionEvent: ChannexInboundRevisionEvent;
+  /**
+   * Revision discriminator from the Channex webhook payload — either a
+   * monotonically increasing sequence number or the webhook received-timestamp
+   * (ISO-8601). Required to disambiguate repeated events of the same type for
+   * the same booking (e.g. two successive `booking.modified` deliveries).
+   */
+  revisionSequence: string | number;
 }): string {
-  return `channex.inbound:${input.propertyId}:${input.channexBookingId}:${input.revisionEvent}:v1`;
+  return `channex.inbound:${input.propertyId}:${input.channexBookingId}:${input.revisionEvent}:${input.revisionSequence}:v1`;
 }
 
 export function buildAriRoomTypePushIdempotencyKey(input: {
@@ -493,8 +536,13 @@ export function buildAriBookingPushIdempotencyKey(input: {
 export function buildAriRoomBlockPushIdempotencyKey(input: {
   roomBlockId: string;
   trigger: ChannexAriRoomBlockPushPayload["trigger"];
+  /**
+   * ISO-8601 timestamp of the triggering event. Included in the key to
+   * disambiguate repeated `room_block_updated` events on the same room block.
+   */
+  occurredAt: ChannexUtcDateTime;
 }): string {
-  return `channex.ari.room_block:${input.roomBlockId}:${input.trigger}:v1`;
+  return `channex.ari.room_block:${input.roomBlockId}:${input.trigger}:${input.occurredAt}:v1`;
 }
 
 export function buildOtaBookingImportedNotificationIdempotencyKey(input: {
