@@ -64,7 +64,9 @@ export default function MyBookingPageClient() {
 
   const isPending = booking?.status === "pending";
   const isConfirmed = booking?.status === "confirmed";
-  const isFutureCheckIn = booking ? new Date(booking.checkIn) > new Date() : false;
+  const isFutureCheckIn = booking
+    ? booking.checkIn >= new Date().toISOString().slice(0, 10)
+    : false;
   const canCancel = (isPending || isConfirmed) && isFutureCheckIn;
 
   const handleCancelClick = async () => {
@@ -294,9 +296,9 @@ export default function MyBookingPageClient() {
               <div className="flex justify-between py-3">
                 <span className="text-gray-600 text-sm">{t("guests")}</span>
                 <span className="font-medium text-gray-900 text-sm">
-                  {booking.adults} Adult{booking.adults !== 1 ? "s" : ""}
+                  {tc("adults", { count: booking.adults })}
                   {booking.children > 0 &&
-                    `, ${booking.children} Child${booking.children !== 1 ? "ren" : ""}`}
+                    `, ${tc("children", { count: booking.children })}`}
                 </span>
               </div>
               <div className="flex justify-between py-3">

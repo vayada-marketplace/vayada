@@ -383,7 +383,7 @@ export default function BookingConfirmationPageClient({
                 <span className="text-gray-600">{t("guests")}</span>
                 <span className="font-medium text-gray-900">
                   {booking
-                    ? `${booking.adults} ${booking.adults === 1 ? "Adult" : "Adults"}${booking.children > 0 ? `, ${booking.children} ${booking.children === 1 ? "Child" : "Children"}` : ""}`
+                    ? `${tc("adults", { count: booking.adults })}${booking.children > 0 ? `, ${tc("children", { count: booking.children })}` : ""}`
                     : "—"}
                 </span>
               </div>
@@ -457,7 +457,7 @@ export default function BookingConfirmationPageClient({
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
               <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
               <p className="text-xs text-blue-700 mt-1">
-                Send {booking.currency} {booking.totalAmount} to {paypalInfo.email} and include{" "}
+                Send {formatPrice(booking.totalAmount, booking.currency)} to {paypalInfo.email} and include{" "}
                 {booking.bookingReference} in the PayPal note so we can match it. Payment must be
                 confirmed within {paypalInfo.windowHours} hours.
               </p>

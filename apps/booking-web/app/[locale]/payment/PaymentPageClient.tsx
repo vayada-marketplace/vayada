@@ -286,9 +286,7 @@ function PaymentPageContent() {
 
       if (blob.includes("same-day bookings are no longer available")) {
         setSoldOut(true);
-        setError(
-          "Same-day bookings are no longer available for today. Please select tomorrow or another available date.",
-        );
+        setError(t("errorSameDaySoldOut"));
       } else if (availabilityGone) {
         setSoldOut(true);
         setError(t("errorSoldOut"));
