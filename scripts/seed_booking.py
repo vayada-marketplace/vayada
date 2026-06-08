@@ -561,9 +561,9 @@ INSERT_BOOKING_SQL = """
         hotel_id, room_type_id, booking_reference,
         guest_first_name, guest_last_name, guest_email, guest_phone,
         check_in, check_out, adults, children,
-        nightly_rate, total_amount, currency, status
+        nightly_rate, total_amount, balance_amount, currency, status
     ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
     ) ON CONFLICT (booking_reference) DO NOTHING
 """
 
@@ -760,6 +760,7 @@ async def main():
                 b["adults"],
                 b["children"],
                 nightly_rate,
+                total_amount,
                 total_amount,
                 rt["currency"],
                 b["status"],
