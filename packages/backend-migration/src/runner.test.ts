@@ -227,7 +227,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     }
   });
 
-  it("applies booking, PMS, finance, and marketplace DDL with private data boundaries", async () => {
+  it("applies booking, PMS, finance, marketplace, and distribution DDL with private data boundaries", async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -252,6 +252,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     expect(result.applied).toContain("0006");
     expect(result.applied).toContain("0007");
     expect(result.applied).toContain("0008");
+    expect(result.applied).toContain("0009");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();
@@ -1666,6 +1667,724 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
             ]),
             listingId,
           ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      const { rows: distributionTableRows } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'distribution'
+         ORDER BY table_name`,
+      );
+
+      expect(distributionTableRows.map((row) => row.table_name)).toEqual([
+        "booking_deep_link_contexts",
+        "external_api_clients",
+        "external_api_usage_events",
+        "public_hotel_bookability_profiles",
+        "public_quote_read_models",
+        "public_room_offer_snapshots",
+      ]);
+
+      const { rows: distributionIntegrityConstraints } = await verifyClient.query<{
+        constraint_name: string;
+      }>(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = 'distribution'
+           AND constraint_name IN (
+             'chk_distribution_bookability_profiles_contract',
+             'chk_distribution_bookability_profiles_currency_upper',
+             'chk_distribution_bookability_profiles_finance_property',
+             'chk_distribution_bookability_profiles_locale_supported',
+             'chk_distribution_bookability_profiles_public_json',
+             'chk_distribution_bookability_profiles_public_visibility',
+             'chk_distribution_bookability_profiles_sources',
+             'chk_distribution_bookability_profiles_timezone',
+             'chk_distribution_deep_link_contexts_checkout_quote_pair',
+             'chk_distribution_deep_link_contexts_currency_upper',
+             'chk_distribution_deep_link_contexts_date_order',
+             'chk_distribution_deep_link_contexts_preserves',
+             'chk_distribution_deep_link_contexts_public_json',
+             'chk_distribution_external_api_clients_public_metadata',
+             'chk_distribution_external_api_clients_revocation',
+             'chk_distribution_external_api_clients_surfaces',
+             'chk_distribution_quote_read_models_contract',
+             'chk_distribution_quote_read_models_currency_upper',
+             'chk_distribution_quote_read_models_public_json',
+             'chk_distribution_quote_read_models_public_visibility',
+             'chk_distribution_quote_read_models_sources',
+             'chk_distribution_room_offer_snapshots_contract',
+             'chk_distribution_room_offer_snapshots_currency_upper',
+             'chk_distribution_room_offer_snapshots_payment_options',
+             'chk_distribution_room_offer_snapshots_public_json',
+             'chk_distribution_room_offer_snapshots_public_visibility',
+             'chk_distribution_room_offer_snapshots_sources',
+             'chk_distribution_usage_events_deep_link_property',
+             'chk_distribution_usage_events_public_metadata',
+             'chk_distribution_usage_events_quote_property',
+             'fk_distribution_bookability_profiles_catalog_profile',
+             'fk_distribution_bookability_profiles_finance_settings',
+             'fk_distribution_deep_link_contexts_bookability_profile',
+             'fk_distribution_deep_link_contexts_checkout_property',
+             'fk_distribution_deep_link_contexts_quote_property',
+             'fk_distribution_quote_read_models_bookability_profile',
+             'fk_distribution_quote_read_models_quote_property',
+             'fk_distribution_room_offer_snapshots_bookability_profile',
+             'fk_distribution_room_offer_snapshots_inventory_day',
+             'fk_distribution_room_offer_snapshots_rate_plan',
+             'fk_distribution_usage_events_deep_link_property',
+             'fk_distribution_usage_events_quote_property',
+             'uq_distribution_bookability_profiles_public_id',
+             'uq_distribution_deep_link_contexts_id_property',
+             'uq_distribution_deep_link_contexts_token_hash',
+             'uq_distribution_external_api_clients_public_id',
+             'uq_distribution_quote_read_models_public_reference',
+             'uq_distribution_room_offer_snapshots_id_property',
+             'uq_distribution_room_offer_snapshots_offer_date'
+           )
+         ORDER BY constraint_name`,
+      );
+
+      expect(distributionIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_distribution_bookability_profiles_contract",
+        "chk_distribution_bookability_profiles_currency_upper",
+        "chk_distribution_bookability_profiles_finance_property",
+        "chk_distribution_bookability_profiles_locale_supported",
+        "chk_distribution_bookability_profiles_public_json",
+        "chk_distribution_bookability_profiles_public_visibility",
+        "chk_distribution_bookability_profiles_sources",
+        "chk_distribution_bookability_profiles_timezone",
+        "chk_distribution_deep_link_contexts_checkout_quote_pair",
+        "chk_distribution_deep_link_contexts_currency_upper",
+        "chk_distribution_deep_link_contexts_date_order",
+        "chk_distribution_deep_link_contexts_preserves",
+        "chk_distribution_deep_link_contexts_public_json",
+        "chk_distribution_external_api_clients_public_metadata",
+        "chk_distribution_external_api_clients_revocation",
+        "chk_distribution_external_api_clients_surfaces",
+        "chk_distribution_quote_read_models_contract",
+        "chk_distribution_quote_read_models_currency_upper",
+        "chk_distribution_quote_read_models_public_json",
+        "chk_distribution_quote_read_models_public_visibility",
+        "chk_distribution_quote_read_models_sources",
+        "chk_distribution_room_offer_snapshots_contract",
+        "chk_distribution_room_offer_snapshots_currency_upper",
+        "chk_distribution_room_offer_snapshots_payment_options",
+        "chk_distribution_room_offer_snapshots_public_json",
+        "chk_distribution_room_offer_snapshots_public_visibility",
+        "chk_distribution_room_offer_snapshots_sources",
+        "chk_distribution_usage_events_deep_link_property",
+        "chk_distribution_usage_events_public_metadata",
+        "chk_distribution_usage_events_quote_property",
+        "fk_distribution_bookability_profiles_catalog_profile",
+        "fk_distribution_bookability_profiles_finance_settings",
+        "fk_distribution_deep_link_contexts_bookability_profile",
+        "fk_distribution_deep_link_contexts_checkout_property",
+        "fk_distribution_deep_link_contexts_quote_property",
+        "fk_distribution_quote_read_models_bookability_profile",
+        "fk_distribution_quote_read_models_quote_property",
+        "fk_distribution_room_offer_snapshots_bookability_profile",
+        "fk_distribution_room_offer_snapshots_inventory_day",
+        "fk_distribution_room_offer_snapshots_rate_plan",
+        "fk_distribution_usage_events_deep_link_property",
+        "fk_distribution_usage_events_quote_property",
+        "uq_distribution_bookability_profiles_public_id",
+        "uq_distribution_deep_link_contexts_id_property",
+        "uq_distribution_deep_link_contexts_token_hash",
+        "uq_distribution_external_api_clients_public_id",
+        "uq_distribution_quote_read_models_public_reference",
+        "uq_distribution_room_offer_snapshots_id_property",
+        "uq_distribution_room_offer_snapshots_offer_date",
+      ]);
+
+      const { rows: distributionForeignKeyShapes } = await verifyClient.query<{
+        constraint_name: string;
+        table_name: string;
+        columns: string;
+        referenced_schema: string;
+        referenced_table: string;
+        referenced_columns: string;
+      }>(
+        `SELECT
+           con.conname AS constraint_name,
+           src.relname AS table_name,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.conrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS columns,
+           ref_ns.nspname AS referenced_schema,
+           ref.relname AS referenced_table,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.confkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.confrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS referenced_columns
+         FROM pg_constraint con
+         JOIN pg_class src ON src.oid = con.conrelid
+         JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+         JOIN pg_class ref ON ref.oid = con.confrelid
+         JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace
+         WHERE src_ns.nspname = 'distribution'
+           AND con.contype = 'f'
+           AND con.conname IN (
+             'fk_distribution_bookability_profiles_catalog_profile',
+             'fk_distribution_bookability_profiles_finance_settings',
+             'fk_distribution_deep_link_contexts_bookability_profile',
+             'fk_distribution_deep_link_contexts_checkout_property',
+             'fk_distribution_deep_link_contexts_quote_property',
+             'fk_distribution_quote_read_models_bookability_profile',
+             'fk_distribution_quote_read_models_quote_property',
+             'fk_distribution_room_offer_snapshots_bookability_profile',
+             'fk_distribution_room_offer_snapshots_inventory_day',
+             'fk_distribution_room_offer_snapshots_rate_plan',
+             'fk_distribution_usage_events_deep_link_property',
+             'fk_distribution_usage_events_quote_property'
+           )
+         ORDER BY con.conname`,
+      );
+
+      expect(distributionForeignKeyShapes).toEqual([
+        {
+          columns: "property_id",
+          constraint_name: "fk_distribution_bookability_profiles_catalog_profile",
+          referenced_columns: "property_id",
+          referenced_schema: "hotel_catalog",
+          referenced_table: "property_public_profile_read_model",
+          table_name: "public_hotel_bookability_profiles",
+        },
+        {
+          columns: "finance_payment_settings_property_id",
+          constraint_name: "fk_distribution_bookability_profiles_finance_settings",
+          referenced_columns: "property_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_settings",
+          table_name: "public_hotel_bookability_profiles",
+        },
+        {
+          columns: "property_id",
+          constraint_name: "fk_distribution_deep_link_contexts_bookability_profile",
+          referenced_columns: "property_id",
+          referenced_schema: "distribution",
+          referenced_table: "public_hotel_bookability_profiles",
+          table_name: "booking_deep_link_contexts",
+        },
+        {
+          columns: "checkout_context_id,property_id,quote_session_id",
+          constraint_name: "fk_distribution_deep_link_contexts_checkout_property",
+          referenced_columns: "id,property_id,quote_session_id",
+          referenced_schema: "booking",
+          referenced_table: "checkout_contexts",
+          table_name: "booking_deep_link_contexts",
+        },
+        {
+          columns: "quote_session_id,property_id",
+          constraint_name: "fk_distribution_deep_link_contexts_quote_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "booking",
+          referenced_table: "quote_sessions",
+          table_name: "booking_deep_link_contexts",
+        },
+        {
+          columns: "property_id",
+          constraint_name: "fk_distribution_quote_read_models_bookability_profile",
+          referenced_columns: "property_id",
+          referenced_schema: "distribution",
+          referenced_table: "public_hotel_bookability_profiles",
+          table_name: "public_quote_read_models",
+        },
+        {
+          columns: "quote_session_id,property_id",
+          constraint_name: "fk_distribution_quote_read_models_quote_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "booking",
+          referenced_table: "quote_sessions",
+          table_name: "public_quote_read_models",
+        },
+        {
+          columns: "property_id",
+          constraint_name: "fk_distribution_room_offer_snapshots_bookability_profile",
+          referenced_columns: "property_id",
+          referenced_schema: "distribution",
+          referenced_table: "public_hotel_bookability_profiles",
+          table_name: "public_room_offer_snapshots",
+        },
+        {
+          columns: "property_id,room_type_id,stay_date",
+          constraint_name: "fk_distribution_room_offer_snapshots_inventory_day",
+          referenced_columns: "property_id,room_type_id,stay_date",
+          referenced_schema: "pms",
+          referenced_table: "inventory_days",
+          table_name: "public_room_offer_snapshots",
+        },
+        {
+          columns: "rate_plan_id,property_id,room_type_id",
+          constraint_name: "fk_distribution_room_offer_snapshots_rate_plan",
+          referenced_columns: "id,property_id,room_type_id",
+          referenced_schema: "pms",
+          referenced_table: "rate_plans",
+          table_name: "public_room_offer_snapshots",
+        },
+        {
+          columns: "deep_link_context_id,property_id",
+          constraint_name: "fk_distribution_usage_events_deep_link_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "distribution",
+          referenced_table: "booking_deep_link_contexts",
+          table_name: "external_api_usage_events",
+        },
+        {
+          columns: "quote_session_id,property_id",
+          constraint_name: "fk_distribution_usage_events_quote_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "booking",
+          referenced_table: "quote_sessions",
+          table_name: "external_api_usage_events",
+        },
+      ]);
+
+      const { rows: distributionForeignKeySchemas } = await verifyClient.query<{
+        constraint_name: string;
+        referenced_schema: string;
+      }>(
+        `SELECT DISTINCT
+           tc.constraint_name,
+           ccu.table_schema AS referenced_schema
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.constraint_column_usage ccu
+           ON ccu.constraint_schema = tc.constraint_schema
+          AND ccu.constraint_name = tc.constraint_name
+         WHERE tc.table_schema = 'distribution'
+           AND tc.constraint_type = 'FOREIGN KEY'
+           AND ccu.table_schema NOT IN ('booking', 'distribution', 'finance', 'hotel_catalog', 'identity', 'pms')
+         ORDER BY tc.constraint_name`,
+      );
+
+      expect(distributionForeignKeySchemas).toHaveLength(0);
+
+      const { rows: distributionReadModelSensitiveColumns } = await verifyClient.query<{
+        table_name: string;
+        column_name: string;
+      }>(
+        `SELECT table_name, column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'distribution'
+           AND table_name IN (
+             'public_hotel_bookability_profiles',
+             'public_room_offer_snapshots',
+             'public_quote_read_models'
+           )
+           AND column_name IN (
+             'first_name', 'last_name', 'email', 'phone',
+             'guest_name', 'guest_email', 'guest_phone',
+             'special_requests', 'private_notes', 'message_body',
+             'provider_account_id', 'provider_transaction_id',
+             'provider_payment_intent_id', 'payout_setting_id',
+             'commission_rule_id', 'room_id', 'room_number',
+             'assignment_id', 'channel_connection_id', 'raw_payload',
+             'raw_headers', 'raw_body'
+           )`,
+      );
+
+      expect(distributionReadModelSensitiveColumns).toHaveLength(0);
+
+      const { rows: externalApiSecretColumns } = await verifyClient.query<{
+        column_name: string;
+      }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'distribution'
+           AND table_name = 'external_api_clients'
+           AND column_name IN (
+             'api_key', 'secret', 'client_secret',
+             'raw_secret', 'token', 'access_token'
+           )`,
+      );
+
+      expect(externalApiSecretColumns).toHaveLength(0);
+
+      const distributionUserId = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaa1";
+      const distributionPropertyId = "aaaaaaaa-2222-4222-8222-aaaaaaaaaaa1";
+      const distributionRoomTypeId = "aaaaaaaa-3333-4333-8333-aaaaaaaaaaa1";
+      const distributionRatePlanId = "aaaaaaaa-4444-4444-8444-aaaaaaaaaaa1";
+      const distributionQuoteSessionId = "aaaaaaaa-5555-4555-8555-aaaaaaaaaaa1";
+      const distributionCheckoutContextId = "aaaaaaaa-6666-4666-8666-aaaaaaaaaaa1";
+      const distributionDeepLinkContextId = "aaaaaaaa-7777-4777-8777-aaaaaaaaaaa1";
+      const distributionClientId = "aaaaaaaa-8888-4888-8888-aaaaaaaaaaa1";
+      const distributionMismatchQuoteSessionId = "aaaaaaaa-5555-4555-8555-aaaaaaaaaaa2";
+      const distributionMismatchCheckoutContextId = "aaaaaaaa-6666-4666-8666-aaaaaaaaaaa2";
+
+      await verifyClient.query(
+        `INSERT INTO identity.users (id, email, name, status)
+         VALUES ($1, 'distribution-client-admin@example.com', 'Distribution Client Admin', 'active')`,
+        [distributionUserId],
+      );
+      await verifyClient.query(
+        `INSERT INTO hotel_catalog.properties
+           (id, public_id, display_name, default_locale, supported_locales, profile_status)
+         VALUES ($1, 'distribution-property-one', 'Distribution Property One', 'en', ARRAY['en', 'de']::TEXT[], 'complete')`,
+        [distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO hotel_catalog.property_public_profile_read_model
+           (
+             property_id, public_id, display_name, canonical_slug,
+             default_locale, supported_locales, profile_status,
+             location, descriptions, media, amenities, public_policy,
+             source_freshness
+           )
+         VALUES (
+           $1, 'distribution-property-one', 'Distribution Property One',
+           'distribution-property-one', 'en', ARRAY['en', 'de']::TEXT[],
+           'complete',
+           '{"country":"US","city":"Austin","timezone":"America/Chicago"}'::jsonb,
+           '{"summary":"Public distribution test property."}'::jsonb,
+           '[]'::jsonb,
+           '["wifi"]'::jsonb,
+           '{"checkInFrom":"15:00","checkOutUntil":"11:00"}'::jsonb,
+           '{"sources":[{"owner":"hotel_catalog","status":"fresh"}]}'::jsonb
+         )`,
+        [distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO finance.payment_settings
+           (property_id, payments_enabled, accepted_methods, default_currency)
+         VALUES ($1, TRUE, ARRAY['card', 'pay_at_property']::TEXT[], 'USD')`,
+        [distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO distribution.public_hotel_bookability_profiles
+           (
+             property_id, finance_payment_settings_property_id, public_id,
+             canonical_slug, canonical_url, booking_base_url, timezone,
+             default_locale, supported_locales, default_currency,
+             supported_currencies, profile_status, public_identity,
+             capabilities, supported_quote_parameters, source_freshness,
+             freshness_status, data_sources
+           )
+         VALUES (
+             $1, $1, 'distribution-property-one',
+             'distribution-property-one',
+             'https://distribution-property-one.booking.localhost/en',
+             'https://distribution-property-one.booking.localhost',
+             'America/Chicago', 'en', ARRAY['en', 'de']::TEXT[],
+             'USD', ARRAY['USD']::TEXT[], 'public',
+             '{"name":"Distribution Property One"}'::jsonb,
+             '{"instantBook":true,"onlinePayment":true}'::jsonb,
+             '{"minRooms":1,"maxRooms":3,"minAdults":1,"maxAdults":6}'::jsonb,
+             '{"sources":[{"owner":"hotel_catalog","status":"fresh"},{"owner":"finance","status":"fresh"}]}'::jsonb,
+             'fresh',
+             ARRAY['hotel_catalog', 'finance', 'distribution']::TEXT[]
+         )`,
+        [distributionPropertyId],
+      );
+      await expect(
+        verifyClient.query(
+          `UPDATE distribution.public_hotel_bookability_profiles
+           SET source_freshness = $1::jsonb
+           WHERE property_id = $2`,
+          [
+            JSON.stringify({
+              sources: [{ owner: "booking", guestEmail: "guest@example.com" }],
+            }),
+            distributionPropertyId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO pms.room_types
+           (id, property_id, name, description, base_rate_amount, currency)
+         VALUES ($1, $2, 'Public Suite', 'Public suite description.', 200, 'USD')`,
+        [distributionRoomTypeId, distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO pms.rate_plans
+           (id, property_id, room_type_id, code, name, base_rate_amount, currency)
+         VALUES ($1, $2, $3, 'FLEX', 'Flexible public rate', 200, 'USD')`,
+        [distributionRatePlanId, distributionPropertyId, distributionRoomTypeId],
+      );
+      await verifyClient.query(
+        `INSERT INTO pms.inventory_days
+           (property_id, room_type_id, stay_date, total_count, available_count, source_freshness)
+         VALUES (
+           $1, $2, DATE '2026-03-01', 5, 4,
+           '{"sources":[{"owner":"pms","status":"fresh"}]}'::jsonb
+         )`,
+        [distributionPropertyId, distributionRoomTypeId],
+      );
+      await verifyClient.query(
+        `INSERT INTO distribution.public_room_offer_snapshots
+           (
+             property_id, room_type_id, rate_plan_id, stay_date,
+             public_offer_key, available_rooms, base_price_amount,
+             taxes_and_fees_amount, currency, occupancy,
+             room_summary, rate_summary, payment_options,
+             public_policy, source_freshness, freshness_status
+           )
+         VALUES (
+           $1, $2, $3, DATE '2026-03-01',
+           'suite-flex-2026-03-01', 4, 200, 20, 'USD',
+           '{"maxAdults":2,"maxChildren":1}'::jsonb,
+           '{"name":"Public Suite"}'::jsonb,
+           '{"name":"Flexible public rate","refundable":true}'::jsonb,
+           ARRAY['card', 'pay_at_property']::TEXT[],
+           '{"cancellation":"Free cancellation summary."}'::jsonb,
+           '{"sources":[{"owner":"pms","status":"fresh"}]}'::jsonb,
+           'fresh'
+         )`,
+        [distributionPropertyId, distributionRoomTypeId, distributionRatePlanId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO distribution.public_room_offer_snapshots
+             (
+               property_id, room_type_id, rate_plan_id, stay_date,
+               public_offer_key, currency
+             )
+           VALUES ($1, $2, $3, DATE '2026-03-01', 'bad-rate-plan', 'USD')`,
+          [distributionPropertyId, distributionRoomTypeId, "aaaaaaaa-4444-4444-8444-aaaaaaaaaaa2"],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+
+      await verifyClient.query(
+        `INSERT INTO booking.quote_sessions
+           (
+             id, property_id, request_hash, public_quote_reference,
+             requested_check_in, requested_check_out, adults,
+             children, requested_room_count, currency, expires_at
+           )
+         VALUES (
+           $1, $2, 'sha256:distribution-test',
+           'DIST-QUOTE-ONE', DATE '2026-03-01', DATE '2026-03-03',
+           2, 0, 1, 'USD', now() + INTERVAL '15 minutes'
+         )`,
+        [distributionQuoteSessionId, distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO booking.checkout_contexts
+           (id, quote_session_id, property_id, locale, currency, expires_at)
+         VALUES ($1, $2, $3, 'en', 'USD', now() + INTERVAL '15 minutes')`,
+        [distributionCheckoutContextId, distributionQuoteSessionId, distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO booking.quote_sessions
+           (
+             id, property_id, request_hash, public_quote_reference,
+             requested_check_in, requested_check_out, adults,
+             children, requested_room_count, currency, expires_at
+           )
+         VALUES (
+           $1, $2, 'sha256:distribution-mismatch-test',
+           'DIST-QUOTE-TWO', DATE '2026-03-01', DATE '2026-03-03',
+           2, 0, 1, 'USD', now() + INTERVAL '15 minutes'
+         )`,
+        [distributionMismatchQuoteSessionId, distributionPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO booking.checkout_contexts
+           (id, quote_session_id, property_id, locale, currency, expires_at)
+         VALUES ($1, $2, $3, 'en', 'USD', now() + INTERVAL '15 minutes')`,
+        [
+          distributionMismatchCheckoutContextId,
+          distributionMismatchQuoteSessionId,
+          distributionPropertyId,
+        ],
+      );
+      await verifyClient.query(
+        `INSERT INTO distribution.public_quote_read_models
+           (
+             quote_session_id, property_id, public_quote_reference,
+             quote_hash, request_snapshot, quote_status,
+             offers, totals, deep_link_url, currency,
+             source_freshness, freshness_status, expires_at
+           )
+         VALUES (
+           $1, $2, 'DIST-QUOTE-ONE', 'sha256:distribution-test',
+           '{"checkIn":"2026-03-01","checkOut":"2026-03-03","adults":2,"rooms":1}'::jsonb,
+           'bookable',
+           '[{"offerId":"suite-flex","paymentOptions":["card","pay_at_property"]}]'::jsonb,
+           '{"currency":"USD","grandTotal":440}'::jsonb,
+           'https://distribution-property-one.booking.localhost/en/book?quote_id=DIST-QUOTE-ONE',
+           'USD',
+           '{"sources":[{"owner":"booking","status":"fresh"},{"owner":"pms","status":"fresh"}]}'::jsonb,
+           'fresh',
+           now() + INTERVAL '15 minutes'
+         )`,
+        [distributionQuoteSessionId, distributionPropertyId],
+      );
+      await expect(
+        verifyClient.query(
+          `UPDATE distribution.public_quote_read_models
+           SET offers = $1::jsonb
+           WHERE quote_session_id = $2`,
+          [
+            JSON.stringify([
+              {
+                offerId: "suite-flex",
+                finance: { providerAccountId: "acct_private" },
+              },
+            ]),
+            distributionQuoteSessionId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await expect(
+        verifyClient.query(
+          `INSERT INTO distribution.booking_deep_link_contexts
+             (
+               property_id, quote_session_id, checkout_context_id,
+               context_token_hash, deep_link_url, locale, currency,
+               check_in, check_out, adults, children, rooms,
+               expires_at
+             )
+           VALUES (
+             $1, $2, $3, 'sha256:mismatched-deep-link',
+             'https://distribution-property-one.booking.localhost/en/book?quote_id=DIST-QUOTE-ONE',
+             'en', 'USD', DATE '2026-03-01', DATE '2026-03-03',
+             2, 0, 1, now() + INTERVAL '15 minutes'
+           )`,
+          [
+            distributionPropertyId,
+            distributionQuoteSessionId,
+            distributionMismatchCheckoutContextId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+
+      await verifyClient.query(
+        `INSERT INTO distribution.booking_deep_link_contexts
+           (
+             id, property_id, quote_session_id, checkout_context_id,
+             public_quote_reference, context_token_hash, deep_link_url,
+             locale, currency, check_in, check_out, adults,
+             children, rooms, referral_code, request_context,
+             source_freshness, expires_at
+           )
+         VALUES (
+           $1, $2, $3, $4, 'DIST-QUOTE-ONE',
+           'sha256:deep-link-context',
+           'https://distribution-property-one.booking.localhost/en/book?quote_id=DIST-QUOTE-ONE',
+           'en', 'USD', DATE '2026-03-01', DATE '2026-03-03',
+           2, 0, 1, 'creator-public',
+           '{"preserves":["dates","guests","quote_id"]}'::jsonb,
+           '{"sources":[{"owner":"distribution","status":"fresh"}]}'::jsonb,
+           now() + INTERVAL '15 minutes'
+         )`,
+        [
+          distributionDeepLinkContextId,
+          distributionPropertyId,
+          distributionQuoteSessionId,
+          distributionCheckoutContextId,
+        ],
+      );
+
+      await verifyClient.query(
+        `INSERT INTO distribution.external_api_clients
+           (
+             id, public_client_id, client_name, contact_email,
+             allowed_surfaces, rate_limit_tier, terms_version,
+             credential_hash_ref, created_by_user_id, client_metadata
+           )
+         VALUES (
+           $1, 'client_public_distribution_test',
+           'Distribution Public Client',
+           'partner@example.com',
+           ARRAY['public_profile', 'public_quote']::TEXT[],
+           'partner', 'public-bookability-v1',
+           'sha256:credential-hash-ref',
+           $2,
+           '{"owner":"partner-success"}'::jsonb
+         )`,
+        [distributionClientId, distributionUserId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO distribution.external_api_clients
+             (public_client_id, client_name, rate_limit_tier, terms_version)
+           VALUES (
+             'client_public_distribution_test',
+             'Duplicate Client', 'partner', 'public-bookability-v1'
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO distribution.external_api_clients
+             (
+               public_client_id, client_name, status, rate_limit_tier,
+               terms_version, revoked_at
+             )
+           VALUES (
+             'client_public_distribution_active_revoked',
+             'Active But Revoked Client', 'active', 'partner',
+             'public-bookability-v1', now()
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO distribution.external_api_clients
+             (public_client_id, client_name, rate_limit_tier, terms_version, client_metadata)
+           VALUES (
+             'client_public_distribution_bad_secret',
+             'Bad Secret Client', 'partner', 'public-bookability-v1',
+             '{"apiKey":"raw-key-should-not-live-here"}'::jsonb
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO distribution.external_api_usage_events
+           (
+             client_id, property_id, quote_session_id, deep_link_context_id,
+             surface, request_method, route_template, response_status,
+             rate_limit_policy, rate_limit_tier, rate_limit_key_hash,
+             request_fingerprint_hash, ip_address_hash, user_agent_hash,
+             cache_status, latency_ms, usage_metadata
+           )
+         VALUES (
+           $1, $2, $3, $4, 'public_quote', 'GET',
+           '/api/ai/hotels/{slug}/quote', 200,
+           'public-ai-quote-read', 'partner',
+           'sha256:rate-limit-key', 'sha256:request-fingerprint',
+           'sha256:ip-address', 'sha256:user-agent', 'miss', 42,
+           '{"cacheKey":"public-quote"}'::jsonb
+         )`,
+        [
+          distributionClientId,
+          distributionPropertyId,
+          distributionQuoteSessionId,
+          distributionDeepLinkContextId,
+        ],
+      );
+      await expect(
+        verifyClient.query(`DELETE FROM distribution.external_api_clients WHERE id = $1`, [
+          distributionClientId,
+        ]),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO distribution.external_api_usage_events
+             (
+               client_id, surface, request_method, route_template,
+               response_status, rate_limit_policy, rate_limit_tier,
+               usage_metadata
+             )
+           VALUES (
+             $1, 'public_quote', 'GET', '/api/ai/hotels/{slug}/quote',
+             200, 'public-ai-quote-read', 'partner',
+             '{"requestBody":{"raw":"private request body"}}'::jsonb
+           )`,
+          [distributionClientId],
         ),
       ).rejects.toMatchObject({ code: "23514" });
     } finally {
