@@ -166,3 +166,45 @@ describe("@vayada/domain-pms", () => {
     expect(succeededWithError.outcome).toBe("succeeded");
   });
 });
+
+describe("@vayada/domain-pms RoomInventoryReadPort contract", () => {
+  it("RoomInventoryReadPort is satisfied by an in-memory stub (no PMS DB required)", async () => {
+    const stub: import("./index.js").RoomInventoryReadPort = {
+      async getRoomInventorySnapshot(propertyId) {
+        if (propertyId === "prop_alpenrose") {
+          return { propertyId, activeRoomCount: 12, capturedAt: "2026-06-08T07:00:00.000Z" };
+        }
+        return null;
+      },
+    };
+
+    const snapshot = await stub.getRoomInventorySnapshot("prop_alpenrose");
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.activeRoomCount).toBe(12);
+    expect(snapshot!.propertyId).toBe("prop_alpenrose");
+    expect(snapshot!.capturedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("returns null for a property with no PMS rooms configured", async () => {
+    const stub: import("./index.js").RoomInventoryReadPort = {
+      async getRoomInventorySnapshot() {
+        return null;
+      },
+    };
+
+    const snapshot = await stub.getRoomInventorySnapshot("prop_unknown");
+    expect(snapshot).toBeNull();
+  });
+
+  it("activeRoomCount is a non-negative integer", async () => {
+    const stub: import("./index.js").RoomInventoryReadPort = {
+      async getRoomInventorySnapshot(propertyId) {
+        return { propertyId, activeRoomCount: 0, capturedAt: "2026-06-08T07:00:00.000Z" };
+      },
+    };
+
+    const snapshot = await stub.getRoomInventorySnapshot("prop_new");
+    expect(snapshot!.activeRoomCount).toBeGreaterThanOrEqual(0);
+    expect(Number.isInteger(snapshot!.activeRoomCount)).toBe(true);
+  });
+});

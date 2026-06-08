@@ -15,6 +15,95 @@ export type BookingUtcDateTime = string;
 export type BookingDate = string;
 export type BookingMoney = PmsMoney;
 
+// ─── Dashboard metrics read model ────────────────────────────────────────────
+// Owner: Booking/checkout read model.
+// These types represent the target contract for Booking dashboard data so that
+// TypeScript Booking code never opens PMS_DATABASE_URL directly (C04 in the
+// booking-pms-coupling-audit).
+
+export type BookingRevenueStats = {
+  totalRevenue: BookingMoney;
+  bookingCount: number;
+  avgNightlyRate: BookingMoney;
+};
+
+export type BookingSourceMixItem = {
+  /** Booking channel, e.g. "direct", "airbnb", "booking.com" */
+  source: string;
+  revenue: BookingMoney;
+  bookingCount: number;
+  /** Revenue share as 0–100, rounded to one decimal place */
+  revenueSharePercent: number;
+};
+
+export type BookingSourceMixReadModel = {
+  propertyId: string;
+  periodStart: BookingDate;
+  periodEnd: BookingDate;
+  totalRevenue: BookingMoney;
+  items: readonly BookingSourceMixItem[];
+};
+
+export type BookingSparklinePoint = {
+  /** Start of the bucket (inclusive) */
+  bucketStart: BookingDate;
+  /** End of the bucket (inclusive) */
+  bucketEnd: BookingDate;
+  revenue: BookingMoney;
+  bookingCount: number;
+  avgNightlyRate: BookingMoney;
+};
+
+export type BookingSparklineReadModel = {
+  propertyId: string;
+  /** 7 contiguous non-overlapping date buckets */
+  points: readonly BookingSparklinePoint[];
+};
+
+export type BookingDashboardMetricsReadModel = {
+  propertyId: string;
+  current: BookingRevenueStats;
+  previous: BookingRevenueStats;
+  /**
+   * Next confirmed check-in date for this property, or null if none upcoming.
+   * Served from the Booking confirmed-bookings read model; does NOT require
+   * an operational PMS reservation query.
+   */
+  nextArrivalDate: BookingDate | null;
+  /**
+   * Date of the first confirmed booking ever recorded for this property,
+   * or null if no bookings yet.
+   */
+  liveSinceDate: BookingDate | null;
+};
+
+export type BookingDashboardMetricsPeriodInput = {
+  propertyId: string;
+  periodStart: BookingDate;
+  periodEnd: BookingDate;
+  previousPeriodStart: BookingDate;
+  previousPeriodEnd: BookingDate;
+};
+
+/**
+ * Read port for Booking dashboard metrics.
+ * Implemented by the Booking domain; consumed by Booking API dashboard routes.
+ * Must never open PMS_DATABASE_URL — see engineering/booking-pms-coupling-audit.md C04.
+ */
+export type BookingDashboardMetricsReadPort = {
+  getDashboardMetrics(
+    input: BookingDashboardMetricsPeriodInput,
+  ): Promise<BookingDashboardMetricsReadModel | null>;
+  getSourceMix(
+    input: Omit<BookingDashboardMetricsPeriodInput, "previousPeriodStart" | "previousPeriodEnd">,
+  ): Promise<BookingSourceMixReadModel>;
+  getSparklines(input: {
+    propertyId: string;
+    windowStart: BookingDate;
+    windowEnd: BookingDate;
+  }): Promise<BookingSparklineReadModel>;
+};
+
 export type BookingPrimaryGuest = PmsGuest;
 
 export type CommittedGuestBooking = {

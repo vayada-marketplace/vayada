@@ -357,3 +357,24 @@ export type CanonicalJsonValue =
   | { [key: string]: CanonicalJsonValue };
 
 export type CanonicalizePayloadForIdempotency = (command: unknown) => string;
+
+/**
+ * Point-in-time snapshot of the active physical room inventory for a property.
+ * Owner: PMS operations.
+ * Consumer: Finance billing (fixed-plan fee calculation).
+ */
+export type RoomInventorySnapshot = {
+  propertyId: string;
+  /** Count of rooms belonging to active room types at the time of capture. */
+  activeRoomCount: number;
+  capturedAt: PmsUtcDateTime;
+};
+
+/**
+ * Read port for querying physical room inventory.
+ * Implemented by the PMS adapter; consumed by Finance billing to price
+ * fixed-plan subscriptions without opening the PMS database directly.
+ */
+export type RoomInventoryReadPort = {
+  getRoomInventorySnapshot(propertyId: string): Promise<RoomInventorySnapshot | null>;
+};
