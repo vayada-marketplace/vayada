@@ -140,8 +140,25 @@ describe("@vayada/domain-pms-channex", () => {
       const key = buildAriBookingPushIdempotencyKey({
         bookingId: "bk_1",
         trigger: "admin_booking_cancelled",
+        occurredAt: "2026-06-07T10:00:00.000Z",
       });
-      expect(key).toBe("channex.ari.booking:bk_1:admin_booking_cancelled:v1");
+      expect(key).toBe(
+        "channex.ari.booking:bk_1:admin_booking_cancelled:2026-06-07T10:00:00.000Z:v1",
+      );
+    });
+
+    it("produces distinct keys for repeated guest_change_approved events via occurredAt", () => {
+      const key1 = buildAriBookingPushIdempotencyKey({
+        bookingId: "bk_1",
+        trigger: "guest_change_approved",
+        occurredAt: "2026-06-07T10:00:00.000Z",
+      });
+      const key2 = buildAriBookingPushIdempotencyKey({
+        bookingId: "bk_1",
+        trigger: "guest_change_approved",
+        occurredAt: "2026-06-07T10:05:00.000Z",
+      });
+      expect(key1).not.toBe(key2);
     });
 
     it("builds stable ARI room-block push keys", () => {
@@ -275,12 +292,14 @@ describe("@vayada/domain-pms-channex", () => {
     });
 
     it("accepts a well-formed ARI booking push job", () => {
+      const occurredAt = "2026-06-07T10:00:00.000Z";
       const job: ChannexAriBookingPushJob = {
         jobType: "channex.ari.booking.push",
         jobId: "job_ari_bk_1",
         idempotencyKey: buildAriBookingPushIdempotencyKey({
           bookingId: "bk_1",
           trigger: "guest_change_approved",
+          occurredAt,
         }),
         audit: {
           ...sharedAudit,
@@ -296,12 +315,14 @@ describe("@vayada/domain-pms-channex", () => {
           channexPropertyId: "chx_prop_1",
           bookingId: "bk_1",
           trigger: "guest_change_approved",
+          occurredAt,
           affectedRoomTypeIds: ["rt_1"],
         },
       };
       expect(job.payload.trigger).toBe("guest_change_approved");
       expect(job.payload.connectionId).toBe("conn_1");
       expect(job.payload.channexPropertyId).toBe("chx_prop_1");
+      expect(job.payload.occurredAt).toBe(occurredAt);
     });
 
     it("accepts a well-formed ARI room-block push job covering all lifecycle triggers", () => {

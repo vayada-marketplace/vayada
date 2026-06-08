@@ -240,11 +240,14 @@ export type ChannexAriRoomTypePushJob = {
 // ── 3. ARI push triggered by a booking event ────────────────────────────────
 //
 // Owner: pms
-// Idempotency key: channex.ari.booking:{bookingId}:{trigger}:v1
+// Idempotency key: channex.ari.booking:{bookingId}:{trigger}:{occurredAt}:v1
 // Retry policy: exponential_backoff
 //
 // Replaces asyncio.create_task(push_ari_for_booking(...)) calls in
 // booking_change_service.py and admin_bookings.py.
+//
+// The occurredAt component disambiguates repeated guest_change_approved or
+// guest_change_cancelled events on the same booking.
 
 export type ChannexAriBookingPushPayload = {
   propertyId: string;
@@ -261,6 +264,12 @@ export type ChannexAriBookingPushPayload = {
     | "guest_change_approved"
     | "guest_change_cancelled"
   >;
+  /**
+   * ISO-8601 timestamp of the triggering event. Included in the idempotency
+   * key to disambiguate repeated guest_change_approved / guest_change_cancelled
+   * events on the same booking.
+   */
+  occurredAt: ChannexUtcDateTime;
   /**
    * Room type IDs whose ARI must be refreshed. The PMS job handler derives
    * channex mapping IDs from these.
@@ -529,8 +538,14 @@ export function buildAriRoomTypePushIdempotencyKey(input: {
 export function buildAriBookingPushIdempotencyKey(input: {
   bookingId: string;
   trigger: ChannexAriBookingPushPayload["trigger"];
+  /**
+   * ISO-8601 timestamp of the triggering event. Included in the key to
+   * disambiguate repeated `guest_change_approved` / `guest_change_cancelled`
+   * events on the same booking.
+   */
+  occurredAt: ChannexUtcDateTime;
 }): string {
-  return `channex.ari.booking:${input.bookingId}:${input.trigger}:v1`;
+  return `channex.ari.booking:${input.bookingId}:${input.trigger}:${input.occurredAt}:v1`;
 }
 
 export function buildAriRoomBlockPushIdempotencyKey(input: {
@@ -545,6 +560,19 @@ export function buildAriRoomBlockPushIdempotencyKey(input: {
   return `channex.ari.room_block:${input.roomBlockId}:${input.trigger}:${input.occurredAt}:v1`;
 }
 
+/**
+ * Builds the idempotency key for an OTA booking-imported notification job.
+ *
+ * Deduplication behaviour (intentional): a single `revisionEvent` per booking
+ * per property produces the same key, so a second `booking.modified`
+ * notification for the same booking will be deduplicated by the job runner.
+ * This is deliberate — host email notifications are edge-triggered (one alert
+ * per lifecycle event type, not per revision sequence), so repeated
+ * `booking.modified` revisions from the OTA do not generate duplicate emails.
+ * If fine-grained per-revision notifications are needed in the future, add a
+ * `revisionSequence` discriminator here (matching the inbound revision job
+ * pattern used by `buildInboundRevisionIdempotencyKey`).
+ */
 export function buildOtaBookingImportedNotificationIdempotencyKey(input: {
   propertyId: string;
   bookingId: string;
