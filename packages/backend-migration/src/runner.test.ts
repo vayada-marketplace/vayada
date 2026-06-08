@@ -227,7 +227,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     }
   });
 
-  it("applies booking, PMS, finance, marketplace, and distribution DDL with private data boundaries", async () => {
+  it("applies booking, PMS, finance, marketplace, distribution, and platform DDL with private data boundaries", async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -253,6 +253,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     expect(result.applied).toContain("0007");
     expect(result.applied).toContain("0008");
     expect(result.applied).toContain("0009");
+    expect(result.applied).toContain("0010");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();
@@ -2387,6 +2388,1319 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           [distributionClientId],
         ),
       ).rejects.toMatchObject({ code: "23514" });
+
+      const { rows: platformTableRows } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'platform'
+         ORDER BY table_name`,
+      );
+
+      expect(platformTableRows.map((row) => row.table_name)).toEqual([
+        "dead_letter_events",
+        "domain_events",
+        "external_webhook_events",
+        "idempotency_keys",
+        "job_attempts",
+        "jobs",
+        "outbox_events",
+        "product_audit_events",
+        "schema_migrations",
+      ]);
+
+      const { rows: platformLedgerIndexes } = await verifyClient.query<{
+        indexname: string;
+      }>(
+        `SELECT indexname
+         FROM pg_indexes
+         WHERE schemaname = 'platform'
+           AND tablename = 'schema_migrations'
+           AND indexname IN (
+             'idx_platform_schema_migrations_environment_version',
+             'uq_platform_schema_migrations_applied_version'
+           )
+         ORDER BY indexname`,
+      );
+
+      expect(platformLedgerIndexes.map((row) => row.indexname)).toEqual([
+        "idx_platform_schema_migrations_environment_version",
+        "uq_platform_schema_migrations_applied_version",
+      ]);
+
+      const { rows: platformDeduplicationIndexes } = await verifyClient.query<{
+        indexname: string;
+      }>(
+        `SELECT indexname
+         FROM pg_indexes
+         WHERE schemaname = 'platform'
+           AND indexname IN (
+             'uq_platform_external_webhook_events_webhook_key_hash',
+             'uq_platform_idempotency_keys_operation_scope_hash'
+           )
+         ORDER BY indexname`,
+      );
+
+      expect(platformDeduplicationIndexes.map((row) => row.indexname)).toEqual([
+        "uq_platform_external_webhook_events_webhook_key_hash",
+        "uq_platform_idempotency_keys_operation_scope_hash",
+      ]);
+
+      const { rows: platformAppendOnlyTriggers } = await verifyClient.query<{
+        trigger_name: string;
+        event_object_table: string;
+      }>(
+        `SELECT trigger_name, event_object_table
+         FROM information_schema.triggers
+         WHERE trigger_schema = 'platform'
+           AND trigger_name IN (
+             'trg_platform_domain_events_append_only',
+             'trg_platform_external_webhook_events_append_only',
+             'trg_platform_product_audit_events_append_only'
+           )
+         GROUP BY trigger_name, event_object_table
+         ORDER BY trigger_name`,
+      );
+
+      expect(platformAppendOnlyTriggers).toEqual([
+        {
+          event_object_table: "domain_events",
+          trigger_name: "trg_platform_domain_events_append_only",
+        },
+        {
+          event_object_table: "external_webhook_events",
+          trigger_name: "trg_platform_external_webhook_events_append_only",
+        },
+        {
+          event_object_table: "product_audit_events",
+          trigger_name: "trg_platform_product_audit_events_append_only",
+        },
+      ]);
+
+      const { rows: platformIntegrityConstraints } = await verifyClient.query<{
+        constraint_name: string;
+      }>(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = 'platform'
+           AND constraint_name IN (
+             'chk_platform_dead_letter_events_acknowledged',
+             'chk_platform_dead_letter_events_private',
+             'chk_platform_dead_letter_events_requeue',
+             'chk_platform_dead_letter_events_resolution',
+             'chk_platform_dead_letter_events_scope',
+             'chk_platform_dead_letter_events_source',
+             'chk_platform_domain_events_private',
+             'chk_platform_domain_events_scope',
+             'chk_platform_domain_events_version',
+             'chk_platform_external_webhook_events_dedupe_key',
+             'chk_platform_external_webhook_events_private',
+             'chk_platform_external_webhook_events_processing',
+             'chk_platform_external_webhook_events_scope',
+             'chk_platform_idempotency_keys_completion',
+             'chk_platform_idempotency_keys_private',
+             'chk_platform_idempotency_keys_response_resource',
+             'chk_platform_idempotency_keys_scope',
+             'chk_platform_job_attempts_private',
+             'chk_platform_job_attempts_terminal_time',
+             'chk_platform_job_attempts_time',
+             'chk_platform_jobs_attempts',
+             'chk_platform_jobs_private',
+             'chk_platform_jobs_running_lock',
+             'chk_platform_jobs_scope',
+             'chk_platform_jobs_source_pair',
+             'chk_platform_jobs_terminal_time',
+             'chk_platform_outbox_events_attempts',
+             'chk_platform_outbox_events_lease_state',
+             'chk_platform_outbox_events_private',
+             'chk_platform_outbox_events_publish_state',
+             'chk_platform_outbox_events_scope',
+             'chk_platform_product_audit_events_private',
+             'chk_platform_product_audit_events_scope',
+             'fk_platform_dead_letter_events_domain_event',
+             'fk_platform_dead_letter_events_domain_event_scope',
+             'fk_platform_dead_letter_events_job',
+             'fk_platform_dead_letter_events_job_attempt',
+             'fk_platform_dead_letter_events_job_scope',
+             'fk_platform_dead_letter_events_organization',
+             'fk_platform_dead_letter_events_outbox_event',
+             'fk_platform_dead_letter_events_outbox_event_scope',
+             'fk_platform_dead_letter_events_property',
+             'fk_platform_dead_letter_events_requeued_job',
+             'fk_platform_dead_letter_events_requeued_job_scope',
+             'fk_platform_dead_letter_events_webhook_event',
+             'fk_platform_dead_letter_events_webhook_event_scope',
+             'fk_platform_domain_events_actor',
+             'fk_platform_domain_events_organization',
+             'fk_platform_domain_events_property',
+             'fk_platform_external_webhook_events_domain_event',
+             'fk_platform_external_webhook_events_domain_event_property',
+             'fk_platform_external_webhook_events_domain_event_scope',
+             'fk_platform_external_webhook_events_organization',
+             'fk_platform_external_webhook_events_property',
+             'fk_platform_idempotency_keys_organization',
+             'fk_platform_idempotency_keys_property',
+             'fk_platform_job_attempts_job',
+             'fk_platform_jobs_domain_event',
+             'fk_platform_jobs_domain_event_scope',
+             'fk_platform_jobs_organization',
+             'fk_platform_jobs_outbox_domain_event',
+             'fk_platform_jobs_outbox_event',
+             'fk_platform_jobs_outbox_event_scope',
+             'fk_platform_jobs_property',
+             'fk_platform_outbox_events_domain_event',
+             'fk_platform_outbox_events_domain_event_scope',
+             'fk_platform_outbox_events_organization',
+             'fk_platform_outbox_events_property',
+             'fk_platform_product_audit_events_actor',
+             'fk_platform_product_audit_events_domain_event',
+             'fk_platform_product_audit_events_domain_event_scope',
+             'fk_platform_product_audit_events_idempotency_key',
+             'fk_platform_product_audit_events_idempotency_key_scope',
+             'fk_platform_product_audit_events_job',
+             'fk_platform_product_audit_events_job_scope',
+             'fk_platform_product_audit_events_organization',
+             'fk_platform_product_audit_events_property',
+             'fk_platform_product_audit_events_webhook_event',
+             'fk_platform_product_audit_events_webhook_event_scope',
+             'uq_platform_domain_events_id_property',
+             'uq_platform_domain_events_id_scope',
+             'uq_platform_domain_events_source_event_key',
+             'uq_platform_external_webhook_events_id_scope',
+             'uq_platform_external_webhook_events_provider_event',
+             'uq_platform_idempotency_keys_id_scope',
+             'uq_platform_job_attempts_id_job',
+             'uq_platform_job_attempts_job_number',
+             'uq_platform_jobs_id_scope',
+             'uq_platform_jobs_key',
+             'uq_platform_outbox_events_id_domain_event',
+             'uq_platform_outbox_events_id_scope',
+             'uq_platform_outbox_events_key',
+             'uq_platform_product_audit_events_key'
+           )
+         ORDER BY constraint_name`,
+      );
+
+      expect(platformIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_platform_dead_letter_events_acknowledged",
+        "chk_platform_dead_letter_events_private",
+        "chk_platform_dead_letter_events_requeue",
+        "chk_platform_dead_letter_events_resolution",
+        "chk_platform_dead_letter_events_scope",
+        "chk_platform_dead_letter_events_source",
+        "chk_platform_domain_events_private",
+        "chk_platform_domain_events_scope",
+        "chk_platform_domain_events_version",
+        "chk_platform_external_webhook_events_dedupe_key",
+        "chk_platform_external_webhook_events_private",
+        "chk_platform_external_webhook_events_processing",
+        "chk_platform_external_webhook_events_scope",
+        "chk_platform_idempotency_keys_completion",
+        "chk_platform_idempotency_keys_private",
+        "chk_platform_idempotency_keys_response_resource",
+        "chk_platform_idempotency_keys_scope",
+        "chk_platform_job_attempts_private",
+        "chk_platform_job_attempts_terminal_time",
+        "chk_platform_job_attempts_time",
+        "chk_platform_jobs_attempts",
+        "chk_platform_jobs_private",
+        "chk_platform_jobs_running_lock",
+        "chk_platform_jobs_scope",
+        "chk_platform_jobs_source_pair",
+        "chk_platform_jobs_terminal_time",
+        "chk_platform_outbox_events_attempts",
+        "chk_platform_outbox_events_lease_state",
+        "chk_platform_outbox_events_private",
+        "chk_platform_outbox_events_publish_state",
+        "chk_platform_outbox_events_scope",
+        "chk_platform_product_audit_events_private",
+        "chk_platform_product_audit_events_scope",
+        "fk_platform_dead_letter_events_domain_event",
+        "fk_platform_dead_letter_events_domain_event_scope",
+        "fk_platform_dead_letter_events_job",
+        "fk_platform_dead_letter_events_job_attempt",
+        "fk_platform_dead_letter_events_job_scope",
+        "fk_platform_dead_letter_events_organization",
+        "fk_platform_dead_letter_events_outbox_event",
+        "fk_platform_dead_letter_events_outbox_event_scope",
+        "fk_platform_dead_letter_events_property",
+        "fk_platform_dead_letter_events_requeued_job",
+        "fk_platform_dead_letter_events_requeued_job_scope",
+        "fk_platform_dead_letter_events_webhook_event",
+        "fk_platform_dead_letter_events_webhook_event_scope",
+        "fk_platform_domain_events_actor",
+        "fk_platform_domain_events_organization",
+        "fk_platform_domain_events_property",
+        "fk_platform_external_webhook_events_domain_event",
+        "fk_platform_external_webhook_events_domain_event_property",
+        "fk_platform_external_webhook_events_domain_event_scope",
+        "fk_platform_external_webhook_events_organization",
+        "fk_platform_external_webhook_events_property",
+        "fk_platform_idempotency_keys_organization",
+        "fk_platform_idempotency_keys_property",
+        "fk_platform_job_attempts_job",
+        "fk_platform_jobs_domain_event",
+        "fk_platform_jobs_domain_event_scope",
+        "fk_platform_jobs_organization",
+        "fk_platform_jobs_outbox_domain_event",
+        "fk_platform_jobs_outbox_event",
+        "fk_platform_jobs_outbox_event_scope",
+        "fk_platform_jobs_property",
+        "fk_platform_outbox_events_domain_event",
+        "fk_platform_outbox_events_domain_event_scope",
+        "fk_platform_outbox_events_organization",
+        "fk_platform_outbox_events_property",
+        "fk_platform_product_audit_events_actor",
+        "fk_platform_product_audit_events_domain_event",
+        "fk_platform_product_audit_events_domain_event_scope",
+        "fk_platform_product_audit_events_idempotency_key",
+        "fk_platform_product_audit_events_idempotency_key_scope",
+        "fk_platform_product_audit_events_job",
+        "fk_platform_product_audit_events_job_scope",
+        "fk_platform_product_audit_events_organization",
+        "fk_platform_product_audit_events_property",
+        "fk_platform_product_audit_events_webhook_event",
+        "fk_platform_product_audit_events_webhook_event_scope",
+        "uq_platform_domain_events_id_property",
+        "uq_platform_domain_events_id_scope",
+        "uq_platform_domain_events_source_event_key",
+        "uq_platform_external_webhook_events_id_scope",
+        "uq_platform_external_webhook_events_provider_event",
+        "uq_platform_idempotency_keys_id_scope",
+        "uq_platform_job_attempts_id_job",
+        "uq_platform_job_attempts_job_number",
+        "uq_platform_jobs_id_scope",
+        "uq_platform_jobs_key",
+        "uq_platform_outbox_events_id_domain_event",
+        "uq_platform_outbox_events_id_scope",
+        "uq_platform_outbox_events_key",
+        "uq_platform_product_audit_events_key",
+      ]);
+
+      const { rows: platformForeignKeyShapes } = await verifyClient.query<{
+        constraint_name: string;
+        table_name: string;
+        columns: string;
+        referenced_schema: string;
+        referenced_table: string;
+        referenced_columns: string;
+      }>(
+        `SELECT
+           con.conname AS constraint_name,
+           src.relname AS table_name,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.conrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS columns,
+           ref_ns.nspname AS referenced_schema,
+           ref.relname AS referenced_table,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.confkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.confrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS referenced_columns
+         FROM pg_constraint con
+         JOIN pg_class src ON src.oid = con.conrelid
+         JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+         JOIN pg_class ref ON ref.oid = con.confrelid
+         JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace
+         WHERE src_ns.nspname = 'platform'
+           AND con.contype = 'f'
+           AND con.conname IN (
+             'fk_platform_dead_letter_events_domain_event_scope',
+             'fk_platform_dead_letter_events_job_attempt',
+             'fk_platform_dead_letter_events_job_scope',
+             'fk_platform_dead_letter_events_outbox_event_scope',
+             'fk_platform_dead_letter_events_requeued_job_scope',
+             'fk_platform_dead_letter_events_webhook_event_scope',
+             'fk_platform_external_webhook_events_domain_event_property',
+             'fk_platform_external_webhook_events_domain_event_scope',
+             'fk_platform_jobs_domain_event_scope',
+             'fk_platform_jobs_outbox_domain_event',
+             'fk_platform_jobs_outbox_event_scope',
+             'fk_platform_outbox_events_domain_event_scope',
+             'fk_platform_product_audit_events_domain_event_scope',
+             'fk_platform_product_audit_events_idempotency_key',
+             'fk_platform_product_audit_events_idempotency_key_scope',
+             'fk_platform_product_audit_events_job_scope',
+             'fk_platform_product_audit_events_webhook_event',
+             'fk_platform_product_audit_events_webhook_event_scope'
+           )
+         ORDER BY con.conname`,
+      );
+
+      expect(platformForeignKeyShapes).toEqual([
+        {
+          columns: "domain_event_id,scope_key",
+          constraint_name: "fk_platform_dead_letter_events_domain_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "domain_events",
+          table_name: "dead_letter_events",
+        },
+        {
+          columns: "job_attempt_id,job_id",
+          constraint_name: "fk_platform_dead_letter_events_job_attempt",
+          referenced_columns: "id,job_id",
+          referenced_schema: "platform",
+          referenced_table: "job_attempts",
+          table_name: "dead_letter_events",
+        },
+        {
+          columns: "job_id,scope_key",
+          constraint_name: "fk_platform_dead_letter_events_job_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "jobs",
+          table_name: "dead_letter_events",
+        },
+        {
+          columns: "outbox_event_id,scope_key",
+          constraint_name: "fk_platform_dead_letter_events_outbox_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "outbox_events",
+          table_name: "dead_letter_events",
+        },
+        {
+          columns: "requeued_job_id,scope_key",
+          constraint_name: "fk_platform_dead_letter_events_requeued_job_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "jobs",
+          table_name: "dead_letter_events",
+        },
+        {
+          columns: "webhook_event_id,scope_key",
+          constraint_name: "fk_platform_dead_letter_events_webhook_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "external_webhook_events",
+          table_name: "dead_letter_events",
+        },
+        {
+          columns: "normalized_domain_event_id,property_id",
+          constraint_name: "fk_platform_external_webhook_events_domain_event_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "platform",
+          referenced_table: "domain_events",
+          table_name: "external_webhook_events",
+        },
+        {
+          columns: "normalized_domain_event_id,scope_key",
+          constraint_name: "fk_platform_external_webhook_events_domain_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "domain_events",
+          table_name: "external_webhook_events",
+        },
+        {
+          columns: "source_domain_event_id,scope_key",
+          constraint_name: "fk_platform_jobs_domain_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "domain_events",
+          table_name: "jobs",
+        },
+        {
+          columns: "source_outbox_event_id,source_domain_event_id",
+          constraint_name: "fk_platform_jobs_outbox_domain_event",
+          referenced_columns: "id,domain_event_id",
+          referenced_schema: "platform",
+          referenced_table: "outbox_events",
+          table_name: "jobs",
+        },
+        {
+          columns: "source_outbox_event_id,scope_key",
+          constraint_name: "fk_platform_jobs_outbox_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "outbox_events",
+          table_name: "jobs",
+        },
+        {
+          columns: "domain_event_id,scope_key",
+          constraint_name: "fk_platform_outbox_events_domain_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "domain_events",
+          table_name: "outbox_events",
+        },
+        {
+          columns: "domain_event_id,scope_key",
+          constraint_name: "fk_platform_product_audit_events_domain_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "domain_events",
+          table_name: "product_audit_events",
+        },
+        {
+          columns: "idempotency_key_id",
+          constraint_name: "fk_platform_product_audit_events_idempotency_key",
+          referenced_columns: "id",
+          referenced_schema: "platform",
+          referenced_table: "idempotency_keys",
+          table_name: "product_audit_events",
+        },
+        {
+          columns: "idempotency_key_id,scope_key",
+          constraint_name: "fk_platform_product_audit_events_idempotency_key_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "idempotency_keys",
+          table_name: "product_audit_events",
+        },
+        {
+          columns: "job_id,scope_key",
+          constraint_name: "fk_platform_product_audit_events_job_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "jobs",
+          table_name: "product_audit_events",
+        },
+        {
+          columns: "external_webhook_event_id",
+          constraint_name: "fk_platform_product_audit_events_webhook_event",
+          referenced_columns: "id",
+          referenced_schema: "platform",
+          referenced_table: "external_webhook_events",
+          table_name: "product_audit_events",
+        },
+        {
+          columns: "external_webhook_event_id,scope_key",
+          constraint_name: "fk_platform_product_audit_events_webhook_event_scope",
+          referenced_columns: "id,scope_key",
+          referenced_schema: "platform",
+          referenced_table: "external_webhook_events",
+          table_name: "product_audit_events",
+        },
+      ]);
+
+      const { rows: platformForeignKeySchemas } = await verifyClient.query<{
+        constraint_name: string;
+        referenced_schema: string;
+      }>(
+        `SELECT DISTINCT
+           tc.constraint_name,
+           ccu.table_schema AS referenced_schema
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.constraint_column_usage ccu
+           ON ccu.constraint_schema = tc.constraint_schema
+          AND ccu.constraint_name = tc.constraint_name
+         WHERE tc.table_schema = 'platform'
+           AND tc.constraint_type = 'FOREIGN KEY'
+           AND ccu.table_schema NOT IN ('hotel_catalog', 'identity', 'platform')
+         ORDER BY tc.constraint_name`,
+      );
+
+      expect(platformForeignKeySchemas).toHaveLength(0);
+
+      const { rows: platformAiDefaults } = await verifyClient.query<{
+        table_name: string;
+        default_expr: string;
+      }>(
+        `SELECT rel.relname AS table_name, pg_get_expr(def.adbin, def.adrelid) AS default_expr
+         FROM pg_namespace ns
+         JOIN pg_class rel ON rel.relnamespace = ns.oid
+         JOIN pg_attribute att ON att.attrelid = rel.oid
+         JOIN pg_attrdef def
+           ON def.adrelid = rel.oid
+          AND def.adnum = att.attnum
+         WHERE ns.nspname = 'platform'
+           AND rel.relname IN (
+             'domain_events', 'external_webhook_events', 'outbox_events',
+             'jobs', 'job_attempts', 'idempotency_keys',
+             'dead_letter_events', 'product_audit_events'
+           )
+           AND att.attname = 'ai_visible'
+         ORDER BY rel.relname`,
+      );
+
+      expect(platformAiDefaults).toEqual([
+        { table_name: "dead_letter_events", default_expr: "false" },
+        { table_name: "domain_events", default_expr: "false" },
+        { table_name: "external_webhook_events", default_expr: "false" },
+        { table_name: "idempotency_keys", default_expr: "false" },
+        { table_name: "job_attempts", default_expr: "false" },
+        { table_name: "jobs", default_expr: "false" },
+        { table_name: "outbox_events", default_expr: "false" },
+        { table_name: "product_audit_events", default_expr: "false" },
+      ]);
+
+      const { rows: platformRawSecretColumns } = await verifyClient.query<{
+        table_name: string;
+        column_name: string;
+      }>(
+        `SELECT table_name, column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'platform'
+           AND column_name IN (
+             'api_key', 'secret', 'client_secret', 'raw_secret',
+             'token', 'access_token', 'idempotency_key', 'webhook_secret'
+           )`,
+      );
+
+      expect(platformRawSecretColumns).toHaveLength(0);
+
+      const { rows: platformScopedColumns } = await verifyClient.query<{
+        table_name: string;
+        column_name: string;
+      }>(
+        `SELECT table_name, column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'platform'
+           AND (
+             (table_name = 'domain_events' AND column_name IN (
+               'event_status', 'tenant_scope', 'scope_key', 'correlation_id',
+               'idempotency_key_hash'
+             ))
+             OR
+             (table_name = 'outbox_events' AND column_name IN (
+               'tenant_scope', 'scope_key', 'resource_product',
+               'resource_type', 'resource_id', 'correlation_id',
+               'idempotency_key_hash'
+             ))
+             OR
+             (table_name = 'dead_letter_events' AND column_name IN (
+               'tenant_scope', 'scope_key', 'resource_product',
+               'resource_type', 'resource_id', 'correlation_id',
+               'idempotency_key_hash', 'recovery_status'
+             ))
+             OR
+             (table_name = 'product_audit_events' AND column_name IN (
+               'tenant_scope', 'scope_key', 'correlation_id'
+             ))
+           )
+         ORDER BY table_name, column_name`,
+      );
+
+      expect(platformScopedColumns).toEqual([
+        { table_name: "dead_letter_events", column_name: "correlation_id" },
+        { table_name: "dead_letter_events", column_name: "idempotency_key_hash" },
+        { table_name: "dead_letter_events", column_name: "recovery_status" },
+        { table_name: "dead_letter_events", column_name: "resource_id" },
+        { table_name: "dead_letter_events", column_name: "resource_product" },
+        { table_name: "dead_letter_events", column_name: "resource_type" },
+        { table_name: "dead_letter_events", column_name: "scope_key" },
+        { table_name: "dead_letter_events", column_name: "tenant_scope" },
+        { table_name: "domain_events", column_name: "correlation_id" },
+        { table_name: "domain_events", column_name: "event_status" },
+        { table_name: "domain_events", column_name: "idempotency_key_hash" },
+        { table_name: "domain_events", column_name: "scope_key" },
+        { table_name: "domain_events", column_name: "tenant_scope" },
+        { table_name: "outbox_events", column_name: "correlation_id" },
+        { table_name: "outbox_events", column_name: "idempotency_key_hash" },
+        { table_name: "outbox_events", column_name: "resource_id" },
+        { table_name: "outbox_events", column_name: "resource_product" },
+        { table_name: "outbox_events", column_name: "resource_type" },
+        { table_name: "outbox_events", column_name: "scope_key" },
+        { table_name: "outbox_events", column_name: "tenant_scope" },
+        { table_name: "product_audit_events", column_name: "correlation_id" },
+        { table_name: "product_audit_events", column_name: "scope_key" },
+        { table_name: "product_audit_events", column_name: "tenant_scope" },
+      ]);
+
+      const platformDomainEventId = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbb1";
+      const platformOtherDomainEventId = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbb2";
+      const platformWebhookEventId = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbb1";
+      const platformOutboxEventId = "bbbbbbbb-3333-4333-8333-bbbbbbbbbbb1";
+      const platformJobId = "bbbbbbbb-4444-4444-8444-bbbbbbbbbbb1";
+      const platformOtherJobId = "bbbbbbbb-4444-4444-8444-bbbbbbbbbbb2";
+      const platformJobAttemptId = "bbbbbbbb-5555-4555-8555-bbbbbbbbbbb1";
+      const platformOtherJobAttemptId = "bbbbbbbb-5555-4555-8555-bbbbbbbbbbb2";
+      const platformIdempotencyKeyId = "bbbbbbbb-6666-4666-8666-bbbbbbbbbbb1";
+      const platformOtherIdempotencyKeyId = "bbbbbbbb-6666-4666-8666-bbbbbbbbbbb2";
+      const platformOtherPropertyId = "bbbbbbbb-7777-4777-8777-bbbbbbbbbbb1";
+
+      await verifyClient.query(
+        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+         VALUES ($1, 'platform-other-property', 'Platform Other Property')`,
+        [platformOtherPropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO platform.domain_events
+           (
+             id, source_system, event_key, event_type, event_version,
+             occurred_at, tenant_scope, property_id,
+             resource_product, resource_type, resource_id, actor_type,
+             actor_user_id, correlation_id, idempotency_key_hash,
+             payload, event_metadata, privacy_scope
+           )
+         VALUES (
+           $1, 'booking', 'booking.created.platform-test',
+           'booking.guest_booking.created', 1, now(), 'property',
+           $2, 'booking', 'guest_booking', $3, 'user',
+           $4, 'corr-platform-test', 'sha256:platform-idempotency',
+           '{"bookingStatus":"confirmed"}'::jsonb,
+           '{"source":"target-schema-smoke"}'::jsonb,
+           'confidential'
+         )`,
+        [platformDomainEventId, distributionPropertyId, distributionQuoteSessionId, hotelUserId],
+      );
+      await verifyClient.query(
+        `INSERT INTO platform.domain_events
+           (
+             id, source_system, event_key, event_type, occurred_at,
+             tenant_scope, property_id, resource_product, resource_type,
+             resource_id, actor_type, privacy_scope
+           )
+         VALUES (
+           $1, 'booking', 'booking.updated.platform-test',
+           'booking.guest_booking.updated', now(), 'property',
+           $2, 'booking', 'guest_booking', $3, 'system', 'confidential'
+         )`,
+        [platformOtherDomainEventId, distributionPropertyId, distributionQuoteSessionId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.domain_events
+             (
+               source_system, event_key, event_type, occurred_at,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id
+             )
+           VALUES (
+             'booking', 'booking.created.platform-test',
+             'booking.guest_booking.created', now(), 'property',
+             $1, 'booking', 'guest_booking', $2
+           )`,
+          [distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.domain_events
+             (
+               source_system, event_key, event_type, occurred_at,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, ai_visible
+             )
+           VALUES (
+             'booking', 'booking.private-ai.platform-test',
+             'booking.guest_booking.created', now(), 'property',
+             $1, 'booking', 'guest_booking', $2, TRUE
+           )`,
+          [distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.domain_events
+             (
+               source_system, event_key, event_type, occurred_at,
+               tenant_scope, organization_id, property_id, resource_product,
+               resource_type, resource_id
+             )
+           VALUES (
+             'booking', 'booking.invalid-scope.platform-test',
+             'booking.guest_booking.created', now(), 'property',
+             $1, $2, 'booking', 'guest_booking', $3
+           )`,
+          [hotelOrganizationId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.external_webhook_events
+           (
+             id, provider, provider_event_id, webhook_key_hash,
+             event_type, delivery_status, signature_verified,
+             tenant_scope, property_id, normalized_domain_event_id,
+             correlation_id, payload_hash, raw_headers, raw_payload,
+             privacy_scope
+           )
+         VALUES (
+           $1, 'channex', 'channex-platform-event-1',
+           'sha256:webhook-key', 'booking.updated', 'normalized',
+           TRUE, 'property', $2, $3, 'corr-platform-test', 'sha256:payload',
+           '{"xSignature":"redacted"}'::jsonb,
+           '{"bookingId":"external-booking-1","status":"modified"}'::jsonb,
+           'restricted'
+        )`,
+        [platformWebhookEventId, distributionPropertyId, platformDomainEventId],
+      );
+      await expect(
+        verifyClient.query(
+          `UPDATE platform.external_webhook_events
+           SET raw_payload = '{"bookingId":"tampered"}'::jsonb
+           WHERE id = $1`,
+          [platformWebhookEventId],
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.external_webhook_events
+             (
+               provider, provider_event_id, webhook_key_hash, event_type,
+               delivery_status, payload_hash, raw_payload
+             )
+           VALUES (
+             'channex', 'channex-platform-event-1', 'sha256:webhook-key-duplicate',
+             'booking.updated', 'received', 'sha256:payload-duplicate', '{}'::jsonb
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await verifyClient.query(
+        `INSERT INTO platform.external_webhook_events
+           (
+             provider, webhook_key_hash, event_type, delivery_status,
+             payload_hash, raw_payload
+           )
+         VALUES (
+           'stripe', 'sha256:webhook-delivery-key',
+           'payment.updated', 'received',
+           'sha256:stripe-payload', '{}'::jsonb
+         )`,
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.external_webhook_events
+             (
+               provider, webhook_key_hash, event_type, delivery_status,
+               payload_hash, raw_payload
+             )
+           VALUES (
+             'stripe', 'sha256:webhook-delivery-key',
+             'payment.updated', 'received',
+             'sha256:stripe-payload-duplicate', '{}'::jsonb
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.external_webhook_events
+             (
+               provider, provider_event_id, webhook_key_hash, event_type,
+               delivery_status, tenant_scope, property_id,
+               normalized_domain_event_id, payload_hash, raw_payload
+             )
+           VALUES (
+             'channex', 'channex-platform-event-mismatch',
+             'sha256:webhook-key-mismatch', 'booking.updated',
+             'normalized', 'property', $1, $2,
+             'sha256:mismatch', '{}'::jsonb
+           )`,
+          [platformOtherPropertyId, platformDomainEventId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.external_webhook_events
+             (provider, event_type, delivery_status, payload_hash, raw_payload)
+           VALUES ('stripe', 'payment.updated', 'received', 'sha256:no-key', '{}'::jsonb)`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.external_webhook_events
+             (
+               provider, provider_event_id, event_type, delivery_status,
+               tenant_scope, organization_id, payload_hash, raw_payload
+             )
+           VALUES (
+             'stripe', 'stripe-invalid-scope-platform-test',
+             'payment.updated', 'received', 'external', $1,
+             'sha256:invalid-scope', '{}'::jsonb
+           )`,
+          [hotelOrganizationId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.external_webhook_events
+             (
+               provider, provider_event_id, event_type, delivery_status,
+               payload_hash, raw_payload
+             )
+           VALUES (
+             'channex', 'channex-normalized-no-domain',
+             'booking.updated', 'normalized', 'sha256:no-domain', '{}'::jsonb
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.outbox_events
+           (
+             id, domain_event_id, outbox_key, destination, event_type,
+             tenant_scope, property_id, resource_product,
+             resource_type, resource_id, status, correlation_id,
+             idempotency_key_hash, payload
+           )
+         VALUES (
+           $1, $2, 'booking-confirmation-email-platform-test',
+           'email', 'booking.confirmation.email', 'property',
+           $3, 'booking', 'guest_booking', $4, 'pending',
+           'corr-platform-test', 'sha256:platform-idempotency',
+           '{"template":"booking-confirmed"}'::jsonb
+         )`,
+        [
+          platformOutboxEventId,
+          platformDomainEventId,
+          distributionPropertyId,
+          distributionQuoteSessionId,
+        ],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.outbox_events
+             (
+               domain_event_id, outbox_key, destination, event_type,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, status
+             )
+           VALUES (
+             $1, 'booking-confirmation-email-platform-test',
+             'email', 'booking.confirmation.email', 'property',
+             $2, 'booking', 'guest_booking', $3, 'pending'
+           )`,
+          [platformDomainEventId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.outbox_events
+             (
+               domain_event_id, outbox_key, destination, event_type,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, status
+             )
+           VALUES (
+             $1, 'published-without-time', 'email', 'booking.email',
+             'property', $2, 'booking', 'guest_booking', $3, 'published'
+           )`,
+          [platformDomainEventId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.outbox_events
+             (
+               domain_event_id, outbox_key, destination, event_type,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, status
+             )
+           VALUES (
+             $1, 'leased-without-time', 'email', 'booking.email',
+             'property', $2, 'booking', 'guest_booking', $3, 'leased'
+           )`,
+          [platformDomainEventId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.jobs
+           (
+             id, job_key, queue_name, job_type, source_domain_event_id,
+             source_outbox_event_id, status, attempts_count, locked_at,
+             locked_by, tenant_scope, property_id,
+             resource_product, resource_type, resource_id,
+             correlation_id, idempotency_key_hash, payload
+           )
+         VALUES (
+           $1, 'send-booking-confirmation-platform-test',
+           'email', 'send_booking_confirmation', $2, $3,
+           'running', 1, now(), 'worker-1', 'property',
+           $4, 'booking', 'guest_booking', $5,
+           'corr-platform-test', 'sha256:platform-idempotency',
+           '{"template":"booking-confirmed"}'::jsonb
+         )`,
+        [
+          platformJobId,
+          platformDomainEventId,
+          platformOutboxEventId,
+          distributionPropertyId,
+          distributionQuoteSessionId,
+        ],
+      );
+      await verifyClient.query(
+        `INSERT INTO platform.jobs
+           (
+             id, job_key, queue_name, job_type, status, finished_at,
+             tenant_scope, resource_product, resource_type, resource_id
+           )
+         VALUES (
+           $1, 'other-job-platform-test', 'email',
+           'send_booking_confirmation', 'succeeded', now(),
+           'platform', 'platform', 'platform_job', 'other-job'
+         )`,
+        [platformOtherJobId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.jobs
+             (
+               job_key, queue_name, job_type, source_domain_event_id,
+               source_outbox_event_id, tenant_scope, resource_product,
+               property_id, resource_type, resource_id
+             )
+           VALUES (
+             'mismatched-outbox-domain-platform-test', 'email',
+             'send_booking_confirmation', $1, $2, 'property',
+             'booking', $3, 'guest_booking', $4
+           )`,
+          [
+            platformOtherDomainEventId,
+            platformOutboxEventId,
+            distributionPropertyId,
+            distributionQuoteSessionId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.jobs
+             (
+               job_key, queue_name, job_type, source_outbox_event_id,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id
+             )
+           VALUES (
+             'outbox-without-domain-platform-test', 'email',
+             'send_booking_confirmation', $1, 'property',
+             $2, 'booking', 'guest_booking', $3
+           )`,
+          [platformOutboxEventId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.jobs
+             (job_key, queue_name, job_type, status)
+           VALUES ('running-without-lock-platform-test', 'email', 'send_booking_confirmation', 'running')`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.jobs
+             (job_key, queue_name, job_type, status, locked_at)
+           VALUES (
+             'running-without-worker-platform-test', 'email',
+             'send_booking_confirmation', 'running', now()
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.job_attempts
+           (
+             id, job_id, attempt_number, status, worker_id,
+             finished_at, duration_ms, error_type, error_message
+           )
+         VALUES (
+           $1, $2, 1, 'failed', 'worker-1', now(), 25,
+           'ProviderTimeout', 'Email provider timed out'
+         )`,
+        [platformJobAttemptId, platformJobId],
+      );
+      await verifyClient.query(
+        `INSERT INTO platform.job_attempts
+           (id, job_id, attempt_number, status, worker_id, finished_at, duration_ms)
+         VALUES ($1, $2, 1, 'succeeded', 'worker-1', now(), 10)`,
+        [platformOtherJobAttemptId, platformOtherJobId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.job_attempts
+             (job_id, attempt_number, status, finished_at)
+           VALUES ($1, 1, 'failed', now())`,
+          [platformJobId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.job_attempts
+             (job_id, attempt_number, status)
+           VALUES ($1, 2, 'succeeded')`,
+          [platformJobId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.idempotency_keys
+           (
+             id, operation_scope, operation, key_hash,
+             request_fingerprint_hash, status, tenant_scope,
+             property_id, response_status_code,
+             response_body_hash, response_resource_product,
+             response_resource_type, response_resource_id,
+             correlation_id, completed_at, expires_at
+           )
+         VALUES (
+           $1, 'booking', 'create_guest_booking',
+           'sha256:platform-idempotency',
+           'sha256:platform-request-fingerprint',
+           'completed', 'property', $2, 201,
+           'sha256:response-body', 'booking',
+           'guest_booking', $3, 'corr-platform-test',
+           now(), now() + INTERVAL '1 day'
+         )`,
+        [platformIdempotencyKeyId, distributionPropertyId, distributionQuoteSessionId],
+      );
+      await verifyClient.query(
+        `INSERT INTO platform.idempotency_keys
+           (
+             id, operation_scope, operation, key_hash,
+             request_fingerprint_hash, tenant_scope, property_id,
+             expires_at
+           )
+         VALUES (
+           $1, 'booking', 'create_guest_booking',
+           'sha256:platform-idempotency',
+           'sha256:other-property-request', 'property', $2,
+           now() + INTERVAL '1 day'
+         )`,
+        [platformOtherIdempotencyKeyId, platformOtherPropertyId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.idempotency_keys
+             (
+               operation_scope, operation, key_hash,
+               request_fingerprint_hash, tenant_scope, property_id,
+               expires_at
+             )
+           VALUES (
+             'booking', 'create_guest_booking',
+             'sha256:platform-idempotency',
+             'sha256:other-request', 'property', $1,
+             now() + INTERVAL '1 day'
+           )`,
+          [distributionPropertyId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.idempotency_keys
+             (
+               operation_scope, operation, key_hash,
+               request_fingerprint_hash, status, expires_at
+             )
+           VALUES (
+             'booking', 'create_guest_booking',
+             'sha256:completed-without-time',
+             'sha256:request', 'completed', now() + INTERVAL '1 day'
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.idempotency_keys
+             (
+               operation_scope, operation, key_hash,
+               request_fingerprint_hash, status, completed_at,
+               expires_at
+             )
+           VALUES (
+             'booking', 'create_guest_booking',
+             'sha256:completed-without-response',
+             'sha256:request', 'completed', now(),
+             now() + INTERVAL '1 day'
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.idempotency_keys
+             (
+               operation_scope, operation, key_hash,
+               request_fingerprint_hash, response_resource_product,
+               expires_at
+             )
+           VALUES (
+             'booking', 'create_guest_booking',
+             'sha256:partial-response-resource',
+             'sha256:request', 'booking', now() + INTERVAL '1 day'
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.dead_letter_events
+           (
+             source_kind, job_id, job_attempt_id, reason_code,
+             tenant_scope, property_id, resource_product,
+             resource_type, resource_id, correlation_id,
+             idempotency_key_hash, failure_summary, failure_payload
+           )
+         VALUES (
+             'job', $1, $2, 'provider_timeout', 'property',
+             $3, 'booking', 'guest_booking', $4,
+             'corr-platform-test', 'sha256:platform-idempotency',
+             'Email provider timed out after retry budget.',
+             '{"attempt":1}'::jsonb
+           )`,
+        [platformJobId, platformJobAttemptId, distributionPropertyId, distributionQuoteSessionId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.dead_letter_events
+             (
+               source_kind, job_id, job_attempt_id, reason_code,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, failure_summary
+             )
+           VALUES (
+             'job', $1, $2, 'mismatched_attempt', 'property',
+             $3, 'booking', 'guest_booking', $4,
+             'Attempt belongs to another job'
+           )`,
+          [
+            platformJobId,
+            platformOtherJobAttemptId,
+            distributionPropertyId,
+            distributionQuoteSessionId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.dead_letter_events
+             (
+               source_kind, job_id, reason_code, failure_summary,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, recovery_status
+             )
+           VALUES (
+             'job', $1, 'resolved_without_time',
+             'Missing resolution timestamp', 'property',
+             $2, 'booking', 'guest_booking', $3, 'resolved'
+           )`,
+          [platformJobId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.dead_letter_events
+             (
+               source_kind, job_id, reason_code, failure_summary,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, recovery_status
+             )
+           VALUES (
+             'job', $1, 'acknowledged_without_time',
+             'Missing acknowledgement timestamp', 'property',
+             $2, 'booking', 'guest_booking', $3, 'acknowledged'
+           )`,
+          [platformJobId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.dead_letter_events
+             (
+               source_kind, job_id, reason_code, failure_summary,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, recovery_status
+             )
+           VALUES (
+             'job', $1, 'requeued_without_job',
+             'Missing requeued job reference', 'property',
+             $2, 'booking', 'guest_booking', $3, 'requeued'
+           )`,
+          [platformJobId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.product_audit_events
+           (
+             audit_key, product, action, occurred_at, tenant_scope,
+             property_id, actor_type, actor_user_id,
+             target_resource_product, target_resource_type,
+             target_resource_id, domain_event_id,
+             external_webhook_event_id, job_id, idempotency_key_id,
+             correlation_id, redacted_payload, private_payload,
+             retention_class, privacy_scope
+           )
+         VALUES (
+             'booking-confirmed-platform-test', 'booking',
+             'booking.confirmed', now(), 'property', $1,
+             'user', $2, 'booking', 'guest_booking', $3,
+             $4, $5, $6, $7, 'corr-platform-test',
+             '{"status":"confirmed"}'::jsonb,
+             '{"guestEmail":"private@example.com"}'::jsonb,
+             'guest_pii', 'restricted'
+           )`,
+        [
+          distributionPropertyId,
+          hotelUserId,
+          distributionQuoteSessionId,
+          platformDomainEventId,
+          platformWebhookEventId,
+          platformJobId,
+          platformIdempotencyKeyId,
+        ],
+      );
+      await expect(
+        verifyClient.query(
+          `UPDATE platform.domain_events
+           SET event_status = 'projected'
+           WHERE id = $1`,
+          [platformDomainEventId],
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.product_audit_events
+             (
+               audit_key, product, action, occurred_at, tenant_scope,
+               property_id, target_resource_product, target_resource_type,
+               target_resource_id, domain_event_id
+             )
+           VALUES (
+             'scope-mismatch-platform-test', 'booking',
+             'booking.confirmed', now(), 'property', $1,
+             'booking', 'guest_booking', $2, $3
+           )`,
+          [platformOtherPropertyId, distributionQuoteSessionId, platformDomainEventId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.product_audit_events
+             (
+               audit_key, product, action, occurred_at, tenant_scope,
+               property_id, target_resource_product, target_resource_type,
+               target_resource_id
+             )
+           VALUES (
+             'booking-confirmed-platform-test', 'booking',
+             'booking.confirmed', now(), 'property', $1,
+             'booking', 'guest_booking', $2
+           )`,
+          [distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.product_audit_events
+             (
+               audit_key, product, action, occurred_at, tenant_scope,
+               property_id, target_resource_product, target_resource_type,
+               target_resource_id, ai_visible
+             )
+           VALUES (
+             'ai-visible-platform-test', 'booking',
+             'booking.confirmed', now(), 'property', $1,
+             'booking', 'guest_booking', $2, TRUE
+           )`,
+          [distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `DELETE FROM platform.product_audit_events
+           WHERE product = 'booking'
+             AND audit_key = 'booking-confirmed-platform-test'`,
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
     } finally {
       await verifyClient.end();
     }
