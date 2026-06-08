@@ -109,6 +109,15 @@ Output:
   checks where practical
 - mismatch reports that are actionable in staging rehearsals
 
+Current status:
+
+- Booking/checkout DDL is merged in VAY-671 through
+  `packages/backend-migration/migrations/0005_booking_checkout.sql`.
+- Booking source-to-target transforms and parity fixtures remain open; the
+  merged DDL only establishes the target tables and migration-runner checks.
+- PMS operations is the next open domain DDL slice before finance,
+  marketplace, distribution/bookability, jobs/events/audit, and intelligence.
+
 ### 5. Domain implementation slices
 
 Goal: implement one domain capability at a time behind contracts.
