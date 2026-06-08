@@ -219,7 +219,11 @@ CREATE TABLE booking.promo_applications (
   metadata               JSONB       NOT NULL DEFAULT '{}'::jsonb,
   created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_promo_applications_target
-    CHECK (quote_session_id IS NOT NULL OR guest_booking_id IS NOT NULL),
+    CHECK (
+      (quote_session_id IS NOT NULL AND guest_booking_id IS NULL)
+      OR
+      (quote_session_id IS NULL AND guest_booking_id IS NOT NULL)
+    ),
   CONSTRAINT chk_promo_applications_currency_upper
     CHECK (currency = upper(currency)),
   CONSTRAINT fk_promo_applications_quote_property
@@ -282,7 +286,7 @@ CREATE TABLE booking.booking_notes_public (
 -- Permissioned read model. Deliberately excludes guest names, emails, phone
 -- numbers, special requests, note bodies, and raw checkout input.
 CREATE TABLE booking.direct_booking_summary_read_model (
-  guest_booking_id      UUID        PRIMARY KEY REFERENCES booking.guest_bookings(id) ON DELETE CASCADE,
+  guest_booking_id      UUID        PRIMARY KEY,
   property_id           UUID        NOT NULL REFERENCES hotel_catalog.properties(id),
   public_reference      TEXT        NOT NULL UNIQUE,
   lifecycle_status      TEXT        NOT NULL,
@@ -295,6 +299,10 @@ CREATE TABLE booking.direct_booking_summary_read_model (
   public_policy         JSONB       NOT NULL DEFAULT '{}'::jsonb,
   source_freshness      JSONB       NOT NULL DEFAULT '{}'::jsonb,
   projected_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT fk_direct_booking_summary_booking_property
+    FOREIGN KEY (guest_booking_id, property_id)
+    REFERENCES booking.guest_bookings(id, property_id)
+    ON DELETE CASCADE,
   CONSTRAINT chk_direct_booking_summary_date_order
     CHECK (check_in < check_out)
 );

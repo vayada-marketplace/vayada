@@ -308,16 +308,20 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'fk_booking_addon_selections_quote_property',
              'fk_booking_addon_selections_definition_property',
              'fk_promo_applications_quote_property',
-             'fk_promo_applications_booking_property'
+             'fk_promo_applications_booking_property',
+             'fk_direct_booking_summary_booking_property',
+             'chk_promo_applications_target'
            )
          ORDER BY constraint_name`,
       );
 
       expect(integrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_promo_applications_target",
         "fk_booking_addon_selections_booking_property",
         "fk_booking_addon_selections_definition_property",
         "fk_booking_addon_selections_quote_property",
         "fk_checkout_contexts_quote_property",
+        "fk_direct_booking_summary_booking_property",
         "fk_guest_bookings_checkout_property",
         "fk_guest_bookings_quote_property",
         "fk_promo_applications_booking_property",
