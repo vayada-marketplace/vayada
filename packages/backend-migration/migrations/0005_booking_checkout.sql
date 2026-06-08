@@ -38,12 +38,14 @@ CREATE TABLE booking.quote_sessions (
   CONSTRAINT chk_quote_sessions_date_order
     CHECK (requested_check_in < requested_check_out),
   CONSTRAINT chk_quote_sessions_currency_upper
-    CHECK (currency = upper(currency))
+    CHECK (currency = upper(currency)),
+  CONSTRAINT uq_quote_sessions_id_property
+    UNIQUE (id, property_id)
 );
 
 CREATE TABLE booking.checkout_contexts (
   id                       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  quote_session_id         UUID        REFERENCES booking.quote_sessions(id) ON DELETE SET NULL,
+  quote_session_id         UUID,
   property_id              UUID        NOT NULL REFERENCES hotel_catalog.properties(id),
   locale                   TEXT        NOT NULL DEFAULT 'en',
   currency                 CHAR(3)     NOT NULL,
@@ -54,18 +56,23 @@ CREATE TABLE booking.checkout_contexts (
   payment_context          JSONB       NOT NULL DEFAULT '{}'::jsonb,
   promo_context            JSONB       NOT NULL DEFAULT '{}'::jsonb,
   expires_at               TIMESTAMPTZ NOT NULL,
-  converted_guest_booking_id UUID,
   created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_checkout_contexts_currency_upper
-    CHECK (currency = upper(currency))
+    CHECK (currency = upper(currency)),
+  CONSTRAINT uq_checkout_contexts_id_property
+    UNIQUE (id, property_id),
+  CONSTRAINT fk_checkout_contexts_quote_property
+    FOREIGN KEY (quote_session_id, property_id)
+    REFERENCES booking.quote_sessions(id, property_id)
+    ON DELETE SET NULL (quote_session_id)
 );
 
 CREATE TABLE booking.guest_bookings (
   id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   property_id           UUID        NOT NULL REFERENCES hotel_catalog.properties(id),
-  quote_session_id      UUID        REFERENCES booking.quote_sessions(id) ON DELETE SET NULL,
-  checkout_context_id   UUID        REFERENCES booking.checkout_contexts(id) ON DELETE SET NULL,
+  quote_session_id      UUID,
+  checkout_context_id   UUID,
   public_reference      TEXT        NOT NULL UNIQUE,
   source_system         TEXT        NOT NULL DEFAULT 'booking'
                             CHECK (source_system IN ('booking', 'pms', 'migration')),
@@ -94,19 +101,25 @@ CREATE TABLE booking.guest_bookings (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_guest_bookings_source
     UNIQUE (source_system, source_booking_id),
+  CONSTRAINT uq_guest_bookings_id_property
+    UNIQUE (id, property_id),
+  CONSTRAINT uq_guest_bookings_checkout_context
+    UNIQUE (checkout_context_id),
   CONSTRAINT chk_guest_bookings_date_order
     CHECK (check_in < check_out),
   CONSTRAINT chk_guest_bookings_currency_upper
     CHECK (currency = upper(currency)),
   CONSTRAINT chk_guest_bookings_source_id
-    CHECK (source_system = 'booking' OR source_booking_id IS NOT NULL)
+    CHECK (source_system = 'booking' OR source_booking_id IS NOT NULL),
+  CONSTRAINT fk_guest_bookings_quote_property
+    FOREIGN KEY (quote_session_id, property_id)
+    REFERENCES booking.quote_sessions(id, property_id)
+    ON DELETE SET NULL (quote_session_id),
+  CONSTRAINT fk_guest_bookings_checkout_property
+    FOREIGN KEY (checkout_context_id, property_id)
+    REFERENCES booking.checkout_contexts(id, property_id)
+    ON DELETE SET NULL (checkout_context_id)
 );
-
-ALTER TABLE booking.checkout_contexts
-  ADD CONSTRAINT fk_checkout_contexts_converted_booking
-  FOREIGN KEY (converted_guest_booking_id)
-  REFERENCES booking.guest_bookings(id)
-  DEFERRABLE INITIALLY DEFERRED;
 
 CREATE TABLE booking.booking_guests (
   id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -151,6 +164,8 @@ CREATE TABLE booking.addon_definitions (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_addon_definitions_source
     UNIQUE (source_system, source_addon_id),
+  CONSTRAINT uq_addon_definitions_id_property
+    UNIQUE (id, property_id),
   CONSTRAINT chk_addon_definitions_currency_upper
     CHECK (currency = upper(currency)),
   CONSTRAINT chk_addon_definitions_source_id
@@ -159,9 +174,10 @@ CREATE TABLE booking.addon_definitions (
 
 CREATE TABLE booking.booking_addon_selections (
   id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  guest_booking_id      UUID        REFERENCES booking.guest_bookings(id) ON DELETE CASCADE,
-  quote_session_id      UUID        REFERENCES booking.quote_sessions(id) ON DELETE CASCADE,
-  addon_definition_id   UUID        REFERENCES booking.addon_definitions(id) ON DELETE SET NULL,
+  property_id            UUID        NOT NULL REFERENCES hotel_catalog.properties(id),
+  guest_booking_id      UUID,
+  quote_session_id      UUID,
+  addon_definition_id   UUID,
   addon_snapshot        JSONB       NOT NULL DEFAULT '{}'::jsonb,
   quantity              INTEGER     NOT NULL DEFAULT 1 CHECK (quantity >= 1),
   service_date          DATE,
@@ -175,14 +191,26 @@ CREATE TABLE booking.booking_addon_selections (
       (guest_booking_id IS NULL AND quote_session_id IS NOT NULL)
     ),
   CONSTRAINT chk_booking_addon_selections_currency_upper
-    CHECK (currency = upper(currency))
+    CHECK (currency = upper(currency)),
+  CONSTRAINT fk_booking_addon_selections_booking_property
+    FOREIGN KEY (guest_booking_id, property_id)
+    REFERENCES booking.guest_bookings(id, property_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_booking_addon_selections_quote_property
+    FOREIGN KEY (quote_session_id, property_id)
+    REFERENCES booking.quote_sessions(id, property_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_booking_addon_selections_definition_property
+    FOREIGN KEY (addon_definition_id, property_id)
+    REFERENCES booking.addon_definitions(id, property_id)
+    ON DELETE SET NULL (addon_definition_id)
 );
 
 CREATE TABLE booking.promo_applications (
   id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   property_id            UUID        NOT NULL REFERENCES hotel_catalog.properties(id),
-  quote_session_id       UUID        REFERENCES booking.quote_sessions(id) ON DELETE CASCADE,
-  guest_booking_id       UUID        REFERENCES booking.guest_bookings(id) ON DELETE CASCADE,
+  quote_session_id       UUID,
+  guest_booking_id       UUID,
   promo_code             TEXT        NOT NULL,
   application_status     TEXT        NOT NULL
                               CHECK (application_status IN ('applied', 'rejected', 'expired', 'reversed')),
@@ -193,7 +221,15 @@ CREATE TABLE booking.promo_applications (
   CONSTRAINT chk_promo_applications_target
     CHECK (quote_session_id IS NOT NULL OR guest_booking_id IS NOT NULL),
   CONSTRAINT chk_promo_applications_currency_upper
-    CHECK (currency = upper(currency))
+    CHECK (currency = upper(currency)),
+  CONSTRAINT fk_promo_applications_quote_property
+    FOREIGN KEY (quote_session_id, property_id)
+    REFERENCES booking.quote_sessions(id, property_id)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_promo_applications_booking_property
+    FOREIGN KEY (guest_booking_id, property_id)
+    REFERENCES booking.guest_bookings(id, property_id)
+    ON DELETE CASCADE
 );
 
 CREATE TABLE booking.booking_status_events (
@@ -270,7 +306,13 @@ CREATE INDEX idx_quote_sessions_request_hash
   ON booking.quote_sessions (property_id, request_hash);
 
 CREATE INDEX idx_checkout_contexts_quote
-  ON booking.checkout_contexts (quote_session_id);
+  ON booking.checkout_contexts (quote_session_id, property_id);
+
+CREATE INDEX idx_guest_bookings_quote
+  ON booking.guest_bookings (quote_session_id, property_id);
+
+CREATE INDEX idx_guest_bookings_checkout
+  ON booking.guest_bookings (checkout_context_id, property_id);
 
 CREATE INDEX idx_guest_bookings_property_dates
   ON booking.guest_bookings (property_id, check_in, check_out);
@@ -285,16 +327,19 @@ CREATE INDEX idx_addon_definitions_property_status
   ON booking.addon_definitions (property_id, status);
 
 CREATE INDEX idx_booking_addon_selections_booking
-  ON booking.booking_addon_selections (guest_booking_id);
+  ON booking.booking_addon_selections (guest_booking_id, property_id);
 
 CREATE INDEX idx_booking_addon_selections_quote
-  ON booking.booking_addon_selections (quote_session_id);
+  ON booking.booking_addon_selections (quote_session_id, property_id);
+
+CREATE INDEX idx_booking_addon_selections_definition
+  ON booking.booking_addon_selections (addon_definition_id, property_id);
 
 CREATE INDEX idx_promo_applications_quote
-  ON booking.promo_applications (quote_session_id);
+  ON booking.promo_applications (quote_session_id, property_id);
 
 CREATE INDEX idx_promo_applications_booking
-  ON booking.promo_applications (guest_booking_id);
+  ON booking.promo_applications (guest_booking_id, property_id);
 
 CREATE INDEX idx_booking_status_events_booking
   ON booking.booking_status_events (guest_booking_id, occurred_at);

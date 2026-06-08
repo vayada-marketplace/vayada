@@ -274,6 +274,57 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "quote_sessions",
       ]);
 
+      const { rows: bookingColumns } = await verifyClient.query<{
+        table_name: string;
+        column_name: string;
+      }>(
+        `SELECT table_name, column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'booking'
+           AND (
+             (table_name = 'booking_addon_selections' AND column_name = 'property_id')
+             OR
+             (table_name = 'checkout_contexts' AND column_name = 'converted_guest_booking_id')
+           )
+         ORDER BY table_name, column_name`,
+      );
+
+      expect(bookingColumns).toEqual([
+        { table_name: "booking_addon_selections", column_name: "property_id" },
+      ]);
+
+      const { rows: integrityConstraints } = await verifyClient.query<{
+        constraint_name: string;
+      }>(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = 'booking'
+           AND constraint_name IN (
+             'uq_guest_bookings_checkout_context',
+             'fk_checkout_contexts_quote_property',
+             'fk_guest_bookings_quote_property',
+             'fk_guest_bookings_checkout_property',
+             'fk_booking_addon_selections_booking_property',
+             'fk_booking_addon_selections_quote_property',
+             'fk_booking_addon_selections_definition_property',
+             'fk_promo_applications_quote_property',
+             'fk_promo_applications_booking_property'
+           )
+         ORDER BY constraint_name`,
+      );
+
+      expect(integrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "fk_booking_addon_selections_booking_property",
+        "fk_booking_addon_selections_definition_property",
+        "fk_booking_addon_selections_quote_property",
+        "fk_checkout_contexts_quote_property",
+        "fk_guest_bookings_checkout_property",
+        "fk_guest_bookings_quote_property",
+        "fk_promo_applications_booking_property",
+        "fk_promo_applications_quote_property",
+        "uq_guest_bookings_checkout_context",
+      ]);
+
       const { rows: piiColumns } = await verifyClient.query<{ column_name: string }>(
         `SELECT column_name
          FROM information_schema.columns
