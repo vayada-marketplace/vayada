@@ -10,7 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
 const DEFAULT_FIXTURES_DIR = join(__dirname, "../../fixtures");
 
-const DEFAULT_SCHEMAS = ["platform", "identity", "hotel_catalog", "booking"] as const;
+const DEFAULT_SCHEMAS = ["platform", "identity", "hotel_catalog", "booking", "pms"] as const;
 
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;
