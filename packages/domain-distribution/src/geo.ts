@@ -26,6 +26,10 @@ export const GEO_REQUIRED_HOTEL_JSON_LD_FIELDS = [
   "@id",
   "name",
   "url",
+  "description",
+  "address",
+  "checkinTime",
+  "checkoutTime",
 ] as const;
 
 export const GEO_REQUIRED_HOTEL_ROOM_JSON_LD_FIELDS = [
@@ -401,7 +405,7 @@ export const GEO_AI_CONTRACT_REQUIRED_CASE_IDS = [
   "bookable",
   "unavailable",
   "stale_availability",
-  "no_payment_readiness",
+  "missing_payment_readiness",
   "custom_domain",
   "renamed_property",
   "private_hotel",
@@ -448,7 +452,7 @@ export const GEO_AI_CONTRACT_CASE_SPECS: readonly GeoAiContractCaseSpec[] = [
     mustBeIndexable: true,
   },
   {
-    caseId: "no_payment_readiness",
+    caseId: "missing_payment_readiness",
     description: "Hotel has no configured public payment method.",
     expectedProfileBookabilityStatus: "unavailable",
     expectedQuoteStatus: "unavailable",

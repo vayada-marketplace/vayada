@@ -143,16 +143,10 @@ test.describe("booking-web robots / indexability GEO contract", () => {
 
     const status = response?.status() ?? 0;
 
-    // Redirects away from /book are acceptable — the page is not indexed.
-    if ([301, 302, 303, 307, 308].includes(status)) {
-      return;
-    }
-
-    // Any page that returns 200 with HTML MUST have a noindex robots meta.
-    // This is an unconditional requirement: a 200 HTML response from the
-    // checkout route without noindex is a GEO regression.
-    expect(status, "Checkout must return 200 or a redirect, not an error").not.toBeGreaterThanOrEqual(500);
-    expect(status, "Checkout must return 200 or a redirect").not.toBe(404);
+    // A redirect from /book is a GEO failure: the page is not being served
+    // with a proper noindex directive. Treat any non-200 response as a failure
+    // unless it is a server error we want to surface separately.
+    expect(status, "Checkout must return 200 (with noindex), not a redirect or error").toBe(200);
 
     const contentType = response?.headers()["content-type"] ?? "";
     expect(contentType, "Checkout 200 response must be HTML").toContain("text/html");
@@ -160,6 +154,49 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     const robots = await getMetaRobots(page);
     expect(robots, "Checkout page must have noindex robots meta").not.toBeNull();
     expect(robots, "Checkout page robots meta must contain noindex").toContain("noindex");
+
+    await assertHealthy();
+  });
+
+  test("payment page is excluded from indexing", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    const response = await page.goto("/en/payment");
+
+    const status = response?.status() ?? 0;
+
+    // The payment step must return 200 with a noindex directive.
+    // A redirect without noindex on the final destination is a GEO regression.
+    expect(status, "Payment page must return 200 (with noindex), not a redirect or error").toBe(200);
+
+    const contentType = response?.headers()["content-type"] ?? "";
+    expect(contentType, "Payment 200 response must be HTML").toContain("text/html");
+
+    const robots = await getMetaRobots(page);
+    expect(robots, "Payment page must have noindex robots meta").not.toBeNull();
+    expect(robots, "Payment page robots meta must contain noindex").toContain("noindex");
+
+    await assertHealthy();
+  });
+
+  test("my-booking page is excluded from indexing", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    const response = await page.goto("/en/my-booking");
+
+    const status = response?.status() ?? 0;
+
+    // The guest private booking dashboard must return 200 with a noindex directive.
+    expect(status, "My-booking page must return 200 (with noindex), not a redirect or error").toBe(200);
+
+    const contentType = response?.headers()["content-type"] ?? "";
+    expect(contentType, "My-booking 200 response must be HTML").toContain("text/html");
+
+    const robots = await getMetaRobots(page);
+    expect(robots, "My-booking page must have noindex robots meta").not.toBeNull();
+    expect(robots, "My-booking page robots meta must contain noindex").toContain("noindex");
 
     await assertHealthy();
   });
@@ -221,21 +258,9 @@ test.describe("public AI profile/quote GEO contract case coverage", () => {
   test("fixtures include all required GEO AI contract case IDs from VAY-664", () => {
     const fixtureIds = new Set(PUBLIC_BOOKABILITY_FIXTURE_CASE_IDS);
 
-    // Map GEO AI contract case IDs to the fixture IDs they require.
-    const required: Record<string, string> = {
-      bookable: "bookable",
-      unavailable: "unavailable",
-      stale_availability: "stale_availability",
-      no_payment_readiness: "missing_payment_readiness",
-      custom_domain: "custom_domain",
-      renamed_property: "renamed_property",
-      private_hotel: "private_hotel",
-    };
-
-    for (const [geoCase, fixtureCase] of Object.entries(required)) {
-      expect(fixtureIds, `Missing fixture for GEO case "${geoCase}": need "${fixtureCase}"`).toContain(
-        fixtureCase,
-      );
+    // Every GEO AI contract case ID must have a matching fixture case ID.
+    for (const caseId of GEO_AI_CONTRACT_REQUIRED_CASE_IDS) {
+      expect(fixtureIds, `Missing fixture for GEO contract case "${caseId}"`).toContain(caseId);
     }
   });
 

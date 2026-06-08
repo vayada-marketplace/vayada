@@ -27,6 +27,12 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
         "@id": "https://hotel-alpenrose.booking.localhost/en#hotel",
         name: "Hotel Alpenrose",
         url: "https://hotel-alpenrose.booking.localhost/en",
+        description: "Independent alpine hotel near the old town.",
+        address: {
+          "@type": "PostalAddress",
+          addressLocality: "Innsbruck",
+          addressCountry: "AT",
+        },
         checkinTime: "15:00",
         checkoutTime: "11:00",
       });
@@ -40,13 +46,17 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
     it("rejects a node missing required fields", () => {
       const result = validateHotelJsonLdNode({
         "@type": "Hotel",
-        // missing @id, name, url
+        // missing @id, name, url, description, address, checkinTime, checkoutTime
       });
 
       expect(result.valid).toBe(false);
       expect(result.missingRequiredFields).toContain("@id");
       expect(result.missingRequiredFields).toContain("name");
       expect(result.missingRequiredFields).toContain("url");
+      expect(result.missingRequiredFields).toContain("description");
+      expect(result.missingRequiredFields).toContain("address");
+      expect(result.missingRequiredFields).toContain("checkinTime");
+      expect(result.missingRequiredFields).toContain("checkoutTime");
     });
 
     it("rejects a node that exposes private data", () => {
@@ -55,6 +65,14 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
         "@id": "https://hotel-alpenrose.booking.localhost/en#hotel",
         name: "Hotel Alpenrose",
         url: "https://hotel-alpenrose.booking.localhost/en",
+        description: "Independent alpine hotel near the old town.",
+        address: {
+          "@type": "PostalAddress",
+          addressLocality: "Innsbruck",
+          addressCountry: "AT",
+        },
+        checkinTime: "15:00",
+        checkoutTime: "11:00",
         guestEmail: "guest@example.com",
       });
 
@@ -68,6 +86,14 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
         "@id": "https://hotel-alpenrose.booking.localhost/en#hotel",
         name: "Hotel Alpenrose",
         url: "https://hotel-alpenrose.booking.localhost/en",
+        description: "Independent alpine hotel near the old town.",
+        address: {
+          "@type": "PostalAddress",
+          addressLocality: "Innsbruck",
+          addressCountry: "AT",
+        },
+        checkinTime: "15:00",
+        checkoutTime: "11:00",
       });
 
       expect(result.valid).toBe(false);
