@@ -29,9 +29,11 @@ Column definitions:
   needed; source rows not carried forward), `source snapshot only` (kept as
   rollback/audit evidence; no live target owner), `defer` (ownership or
   transform not yet resolved).
-- **Status** — `done` (DDL merged and fixture coverage exists), `in progress`
-  (DDL or fixture open in a current ticket), `planned` (ticket exists or this
-  doc is the planning artifact), `not started`.
+- **Status** — `done` (DDL merged and fixture coverage exists),
+  `done (DDL only)` (target DDL is merged, but source-to-target transforms and
+  parity fixtures are still open), `in progress` (DDL or fixture open in a
+  current ticket), `planned` (ticket exists or this doc is the planning
+  artifact), `not started`.
 - **Parity check** — the harness check category from
   [`migration-parity-harness.md`](migration-parity-harness.md).
 - **PII/exposure** — `PII` (table contains personal data subject to retention
