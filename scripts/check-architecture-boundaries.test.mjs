@@ -295,7 +295,6 @@ test("fails when Marketplace domain code imports a PMS implementation adapter", 
   }
 });
 
-
 function createFixtureRoot(files) {
   const root = mkdtempSync(path.join(tmpdir(), "vayada-boundaries-"));
 

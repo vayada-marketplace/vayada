@@ -194,10 +194,16 @@ describe("@vayada/domain-marketplace", () => {
     expect(command.hotel.organizationId).toBe("org_hotel_bnd");
 
     // Compile-time guards: the type must not accept pmsHotelId or pmsDatabase.
-    // @ts-expect-error — pmsHotelId must not exist on ProvisionCollaborationAffiliateCommand
-    const _withPmsHotelId: ProvisionCollaborationAffiliateCommand = { ...command, hotel: { ...command.hotel, pmsHotelId: "pms_001" } };
-    // @ts-expect-error — pmsDatabase must not exist on ProvisionCollaborationAffiliateCommand
-    const _withPmsDatabase: ProvisionCollaborationAffiliateCommand = { ...command, hotel: { ...command.hotel, pmsDatabase: "pms_db_url" } };
+    const _withPmsHotelId: ProvisionCollaborationAffiliateCommand = {
+      ...command,
+      // @ts-expect-error — pmsHotelId must not exist on AffiliateHotelReference
+      hotel: { ...command.hotel, pmsHotelId: "pms_001" },
+    };
+    const _withPmsDatabase: ProvisionCollaborationAffiliateCommand = {
+      ...command,
+      // @ts-expect-error — pmsDatabase must not exist on AffiliateHotelReference
+      hotel: { ...command.hotel, pmsDatabase: "pms_db_url" },
+    };
     void _withPmsHotelId;
     void _withPmsDatabase;
   });

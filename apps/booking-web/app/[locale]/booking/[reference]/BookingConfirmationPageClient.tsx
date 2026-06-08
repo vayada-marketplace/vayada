@@ -457,9 +457,9 @@ export default function BookingConfirmationPageClient({
             <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
               <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
               <p className="text-xs text-blue-700 mt-1">
-                Send {formatPrice(booking.totalAmount, booking.currency)} to {paypalInfo.email} and include{" "}
-                {booking.bookingReference} in the PayPal note so we can match it. Payment must be
-                confirmed within {paypalInfo.windowHours} hours.
+                Send {formatPrice(booking.totalAmount, booking.currency)} to {paypalInfo.email} and
+                include {booking.bookingReference} in the PayPal note so we can match it. Payment
+                must be confirmed within {paypalInfo.windowHours} hours.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button

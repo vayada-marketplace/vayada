@@ -34,9 +34,7 @@ import { watchPageHealth } from "../support/pageHealth";
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function publicStructuredDataGraph(
-  page: Page,
-): Promise<Array<Record<string, unknown>>> {
+async function publicStructuredDataGraph(page: Page): Promise<Array<Record<string, unknown>>> {
   const rawStructuredData = await page
     .locator('script[type="application/ld+json"]#booking-web-public-structured-data')
     .textContent();
@@ -119,9 +117,7 @@ test.describe("booking-web JSON-LD GEO contract", () => {
     expect(hotelNode?.["@id"]).toBeTruthy();
 
     for (const roomNode of roomNodes) {
-      const containedInPlace = roomNode["containedInPlace"] as
-        | { "@id": string }
-        | undefined;
+      const containedInPlace = roomNode["containedInPlace"] as { "@id": string } | undefined;
       expect(containedInPlace?.["@id"]).toBe(hotelNode?.["@id"]);
     }
 
@@ -139,7 +135,9 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     await mockBookingApis(page);
 
     // Navigate to the checkout page path; mock any room/payment redirects.
-    const response = await page.goto("/en/book?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible");
+    const response = await page.goto(
+      "/en/book?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
+    );
 
     const status = response?.status() ?? 0;
 
@@ -168,7 +166,9 @@ test.describe("booking-web robots / indexability GEO contract", () => {
 
     // The payment step must return 200 with a noindex directive.
     // A redirect without noindex on the final destination is a GEO regression.
-    expect(status, "Payment page must return 200 (with noindex), not a redirect or error").toBe(200);
+    expect(status, "Payment page must return 200 (with noindex), not a redirect or error").toBe(
+      200,
+    );
 
     const contentType = response?.headers()["content-type"] ?? "";
     expect(contentType, "Payment 200 response must be HTML").toContain("text/html");
@@ -189,7 +189,9 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     const status = response?.status() ?? 0;
 
     // The guest private booking dashboard must return 200 with a noindex directive.
-    expect(status, "My-booking page must return 200 (with noindex), not a redirect or error").toBe(200);
+    expect(status, "My-booking page must return 200 (with noindex), not a redirect or error").toBe(
+      200,
+    );
 
     const contentType = response?.headers()["content-type"] ?? "";
     expect(contentType, "My-booking 200 response must be HTML").toContain("text/html");
@@ -202,9 +204,7 @@ test.describe("booking-web robots / indexability GEO contract", () => {
   });
 
   test("GEO robots policy contract lists noindex rules for all private page kinds", () => {
-    const noindexPolicies = GEO_BOOKING_WEB_ROBOTS_POLICIES.filter(
-      (p) => !p.shouldBeIndexable,
-    );
+    const noindexPolicies = GEO_BOOKING_WEB_ROBOTS_POLICIES.filter((p) => !p.shouldBeIndexable);
     const noindexPaths = noindexPolicies.map((p) => p.pathPattern);
 
     // All private checkout-related paths must be listed in the contract.

@@ -39,8 +39,7 @@ export const GEO_REQUIRED_HOTEL_ROOM_JSON_LD_FIELDS = [
   "containedInPlace",
 ] as const;
 
-export type GeoRequiredHotelJsonLdField =
-  (typeof GEO_REQUIRED_HOTEL_JSON_LD_FIELDS)[number];
+export type GeoRequiredHotelJsonLdField = (typeof GEO_REQUIRED_HOTEL_JSON_LD_FIELDS)[number];
 
 export type GeoRequiredHotelRoomJsonLdField =
   (typeof GEO_REQUIRED_HOTEL_ROOM_JSON_LD_FIELDS)[number];
@@ -134,9 +133,7 @@ function collectJsonLdKeys(value: unknown, out: Set<string>): void {
  * Validates a parsed JSON-LD Hotel node against the GEO contract.
  * Returns a typed result that tests can assert on without branching.
  */
-export function validateHotelJsonLdNode(
-  node: Record<string, unknown>,
-): GeoJsonLdValidationResult {
+export function validateHotelJsonLdNode(node: Record<string, unknown>): GeoJsonLdValidationResult {
   const missingRequiredFields: string[] = [];
   const forbiddenFields: string[] = [];
   const errors: string[] = [];
@@ -161,7 +158,8 @@ export function validateHotelJsonLdNode(
   }
 
   return {
-    valid: missingRequiredFields.length === 0 && forbiddenFields.length === 0 && errors.length === 0,
+    valid:
+      missingRequiredFields.length === 0 && forbiddenFields.length === 0 && errors.length === 0,
     missingRequiredFields,
     forbiddenFields,
     errors,
@@ -204,7 +202,8 @@ export function validateHotelRoomJsonLdNode(
   }
 
   return {
-    valid: missingRequiredFields.length === 0 && forbiddenFields.length === 0 && errors.length === 0,
+    valid:
+      missingRequiredFields.length === 0 && forbiddenFields.length === 0 && errors.length === 0,
     missingRequiredFields,
     forbiddenFields,
     errors,
@@ -316,7 +315,9 @@ export function geoRobotsPolicyForPageKind(kind: GeoPageKind): {
   shouldBeIndexable: boolean;
   directive: "index,follow" | "noindex,nofollow";
 } {
-  const shouldBeIndexable = GEO_INDEXABLE_PAGE_KINDS.includes(kind as (typeof GEO_INDEXABLE_PAGE_KINDS)[number]);
+  const shouldBeIndexable = GEO_INDEXABLE_PAGE_KINDS.includes(
+    kind as (typeof GEO_INDEXABLE_PAGE_KINDS)[number],
+  );
   return {
     shouldBeIndexable,
     directive: shouldBeIndexable ? "index,follow" : "noindex,nofollow",
@@ -357,8 +358,7 @@ export const GEO_SITEMAP_FORBIDDEN_PATH_FRAGMENTS = [
   "/addons",
 ] as const;
 
-export type GeoSitemapForbiddenFragment =
-  (typeof GEO_SITEMAP_FORBIDDEN_PATH_FRAGMENTS)[number];
+export type GeoSitemapForbiddenFragment = (typeof GEO_SITEMAP_FORBIDDEN_PATH_FRAGMENTS)[number];
 
 /**
  * Validates a list of sitemap entries against the GEO contract.

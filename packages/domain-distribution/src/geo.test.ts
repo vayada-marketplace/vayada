@@ -185,9 +185,7 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
     });
 
     it("has a robots policy entry for every private booking path pattern", () => {
-      const noindexPolicies = GEO_BOOKING_WEB_ROBOTS_POLICIES.filter(
-        (p) => !p.shouldBeIndexable,
-      );
+      const noindexPolicies = GEO_BOOKING_WEB_ROBOTS_POLICIES.filter((p) => !p.shouldBeIndexable);
       const noindexPaths = noindexPolicies.map((p) => p.pathPattern);
       // All checkout-related paths must be listed
       expect(noindexPaths.some((p) => p.includes("book"))).toBe(true);
@@ -208,9 +206,7 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
         { loc: "https://hotel-alpenrose.booking.localhost/en" },
         { loc: "https://hotel-alpenrose.booking.localhost/de" },
       ];
-      const result = validateGeoSitemap(entries, [
-        "https://hotel-alpenrose.booking.localhost/en",
-      ]);
+      const result = validateGeoSitemap(entries, ["https://hotel-alpenrose.booking.localhost/en"]);
 
       expect(result.valid).toBe(true);
       expect(result.missingUrls).toEqual([]);
@@ -219,9 +215,7 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
 
     it("reports missing expected locale URLs", () => {
       const entries = [{ loc: "https://hotel-alpenrose.booking.localhost/de" }];
-      const result = validateGeoSitemap(entries, [
-        "https://hotel-alpenrose.booking.localhost/en",
-      ]);
+      const result = validateGeoSitemap(entries, ["https://hotel-alpenrose.booking.localhost/en"]);
 
       expect(result.valid).toBe(false);
       expect(result.missingUrls).toContain("https://hotel-alpenrose.booking.localhost/en");
@@ -233,9 +227,7 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
         { loc: "https://hotel-alpenrose.booking.localhost/en/book?check_in=2026-09-12" },
         { loc: "https://hotel-alpenrose.booking.localhost/en/payment" },
       ];
-      const result = validateGeoSitemap(entries, [
-        "https://hotel-alpenrose.booking.localhost/en",
-      ]);
+      const result = validateGeoSitemap(entries, ["https://hotel-alpenrose.booking.localhost/en"]);
 
       expect(result.valid).toBe(false);
       expect(result.forbiddenUrls.length).toBeGreaterThanOrEqual(2);

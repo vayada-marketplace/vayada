@@ -297,8 +297,7 @@ export default function MyBookingPageClient() {
                 <span className="text-gray-600 text-sm">{t("guests")}</span>
                 <span className="font-medium text-gray-900 text-sm">
                   {tc("adults", { count: booking.adults })}
-                  {booking.children > 0 &&
-                    `, ${tc("children", { count: booking.children })}`}
+                  {booking.children > 0 && `, ${tc("children", { count: booking.children })}`}
                 </span>
               </div>
               <div className="flex justify-between py-3">

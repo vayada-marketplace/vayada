@@ -1,0 +1,25 @@
+{
+  "name": "@vayada/domain-finance",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Finance domain contracts for the TypeScript backend.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5",
+    "vitest": "^4.0.15"
+  }
+}
