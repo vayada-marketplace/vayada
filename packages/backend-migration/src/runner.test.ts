@@ -2483,6 +2483,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          FROM information_schema.table_constraints
          WHERE table_schema = 'platform'
            AND constraint_name IN (
+             'chk_platform_dead_letter_events_acknowledged',
              'chk_platform_dead_letter_events_private',
              'chk_platform_dead_letter_events_requeue',
              'chk_platform_dead_letter_events_resolution',
@@ -2580,6 +2581,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(platformIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_platform_dead_letter_events_acknowledged",
         "chk_platform_dead_letter_events_private",
         "chk_platform_dead_letter_events_requeue",
         "chk_platform_dead_letter_events_resolution",
@@ -3569,6 +3571,22 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'job', $1, 'resolved_without_time',
              'Missing resolution timestamp', 'property',
              $2, 'booking', 'guest_booking', $3, 'resolved'
+           )`,
+          [platformJobId, distributionPropertyId, distributionQuoteSessionId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.dead_letter_events
+             (
+               source_kind, job_id, reason_code, failure_summary,
+               tenant_scope, property_id, resource_product,
+               resource_type, resource_id, recovery_status
+             )
+           VALUES (
+             'job', $1, 'acknowledged_without_time',
+             'Missing acknowledgement timestamp', 'property',
+             $2, 'booking', 'guest_booking', $3, 'acknowledged'
            )`,
           [platformJobId, distributionPropertyId, distributionQuoteSessionId],
         ),

@@ -639,6 +639,8 @@ CREATE TABLE platform.dead_letter_events (
     CHECK (platform.valid_tenant_scope(tenant_scope, organization_id, property_id)),
   CONSTRAINT chk_platform_dead_letter_events_resolution
     CHECK (recovery_status <> 'resolved' OR resolved_at IS NOT NULL),
+  CONSTRAINT chk_platform_dead_letter_events_acknowledged
+    CHECK (recovery_status <> 'acknowledged' OR acknowledged_at IS NOT NULL),
   CONSTRAINT chk_platform_dead_letter_events_requeue
     CHECK (recovery_status <> 'requeued' OR requeued_job_id IS NOT NULL),
   CONSTRAINT chk_platform_dead_letter_events_private
