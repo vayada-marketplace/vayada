@@ -7,4 +7,5 @@ export const DEFAULT_TARGET_SCHEMAS = [
   "finance",
   "marketplace",
   "distribution",
+  "intelligence",
 ] as const;
