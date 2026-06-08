@@ -93,7 +93,7 @@ ALTER TABLE finance.commission_rules
 CREATE TABLE marketplace.creator_profiles (
   id                         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id            UUID        NOT NULL REFERENCES identity.organizations(id),
-  owner_user_id              UUID        REFERENCES identity.users(id),
+  owner_user_id              UUID        REFERENCES identity.users(id) ON DELETE SET NULL,
   source_system              TEXT        NOT NULL DEFAULT 'marketplace'
                                   CHECK (source_system IN ('marketplace', 'migration')),
   source_creator_id          TEXT,
