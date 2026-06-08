@@ -1,0 +1,555 @@
+"use client";
+
+import { useState, useEffect, use } from "react";
+import { useTranslations } from "next-intl";
+import { Link } from "@/i18n/navigation";
+import BookingNavigation from "@/components/layout/BookingNavigation";
+import BookingFooter from "@/components/layout/BookingFooter";
+import Image from "next/image";
+import { useHotel, useSlug } from "@/contexts/HotelContext";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import { Booking } from "@/lib/types";
+import { bookingService, BookingChangeRequest } from "@/services/api/booking";
+import { trackEvent } from "@/services/api/tracking";
+import { readLastBooking, saveLastBooking } from "@/lib/storage/bookingDraft";
+
+function CountdownTimer({ deadline }: { deadline: string }) {
+  const [timeLeft, setTimeLeft] = useState("");
+
+  useEffect(() => {
+    const update = () => {
+      const now = new Date().getTime();
+      const end = new Date(deadline).getTime();
+      const diff = end - now;
+
+      if (diff <= 0) {
+        setTimeLeft("Expired");
+        return;
+      }
+
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+    };
+
+    update();
+    const interval = setInterval(update, 1000);
+    return () => clearInterval(interval);
+  }, [deadline]);
+
+  return <span className="font-mono text-lg font-bold text-amber-600">{timeLeft}</span>;
+}
+
+export default function BookingConfirmationPageClient({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ reference: string }>;
+  searchParams: Promise<{ email?: string }>;
+}) {
+  const { reference } = use(params);
+  const { email: emailParam } = use(searchParams);
+  const t = useTranslations("confirmation");
+  const tc = useTranslations("common");
+  const { hotel } = useHotel();
+  const { slug } = useSlug();
+  const { formatPrice } = useCurrency();
+  const [booking, setBooking] = useState<Booking | null>(null);
+  const [status, setStatus] = useState<string>("pending");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState("");
+  const [hydrating, setHydrating] = useState(false);
+  const [hydrateError, setHydrateError] = useState(false);
+  const [changeRequest, setChangeRequest] = useState<BookingChangeRequest | null>(null);
+  const [paypalInfo, setPaypalInfo] = useState<{
+    email: string;
+    windowHours: number;
+  } | null>(null);
+
+  // Booking details are written to sessionStorage on the checkout flow, but
+  // sessionStorage is per-tab, so a guest who opens the "View My Booking" link
+  // from the confirmation email on a different device sees no details. The
+  // backend now appends ?email=… to that link — when present, hydrate from the
+  // lookup endpoint so the page works cross-device.
+  useEffect(() => {
+    trackEvent(slug, "completed_booking");
+    const stored = readLastBooking();
+    if (stored && stored.bookingReference === reference) {
+      setBooking(stored);
+      setStatus(stored.status || "pending");
+      return;
+    }
+
+    const email = emailParam;
+    if (!email) return;
+
+    let cancelled = false;
+    setHydrating(true);
+    bookingService
+      .lookup(slug, reference, email)
+      .then((fetched) => {
+        if (cancelled) return;
+        setBooking(fetched);
+        setStatus(fetched.status || "pending");
+        saveLastBooking(fetched);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHydrateError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setHydrating(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reference, emailParam, slug]);
+
+  useEffect(() => {
+    if (booking?.paymentMethod !== "paypal") return;
+    bookingService
+      .getPaymentSettings(slug)
+      .then((settings) => {
+        if (settings.paypalEmail) {
+          setPaypalInfo({
+            email: settings.paypalEmail,
+            windowHours: settings.paypalPaymentWindowHours || 24,
+          });
+        }
+      })
+      .catch(() => {});
+  }, [booking?.paymentMethod, slug]);
+
+  // Fetch any existing change request once we know the booking + email.
+  useEffect(() => {
+    const email = booking?.guestEmail || emailParam;
+    if (!booking?.id || !email) return;
+    let cancelled = false;
+    bookingService
+      .getChangeRequest(slug, booking.id, email)
+      .then((cr) => {
+        if (!cancelled) setChangeRequest(cr);
+      })
+      .catch(() => {
+        /* 404 / network — leave null */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [booking?.id, booking?.guestEmail, emailParam, slug]);
+
+  // Poll for status updates every 30s when pending
+  useEffect(() => {
+    if (status !== "pending" || !booking?.guestEmail) return;
+
+    const poll = async () => {
+      try {
+        const result = await bookingService.getStatus(slug, reference, booking.guestEmail);
+        if (result.status !== status) {
+          setStatus(result.status);
+          // Update stored booking
+          if (booking) {
+            const updated = { ...booking, status: result.status as Booking["status"] };
+            setBooking(updated);
+            saveLastBooking(updated);
+          }
+        }
+      } catch {
+        // Ignore polling errors
+      }
+    };
+
+    const interval = setInterval(poll, 30000);
+    return () => clearInterval(interval);
+  }, [status, booking, slug, reference]);
+
+  const handleWithdraw = async () => {
+    if (!booking) return;
+    setWithdrawing(true);
+    setWithdrawError("");
+
+    try {
+      await bookingService.withdraw(slug, booking.id, booking.guestEmail);
+      setStatus("cancelled");
+      const updated = { ...booking, status: "cancelled" as const };
+      setBooking(updated);
+      saveLastBooking(updated);
+    } catch (err: any) {
+      setWithdrawError(err.message || "Failed to withdraw booking");
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  const isPending = status === "pending";
+  const isConfirmed = status === "confirmed";
+  const isCancelled = status === "cancelled";
+  // VAY-404: host-rejected request. Shares the red-X visual with cancelled
+  // but uses different copy so the guest doesn't think they cancelled.
+  const isDeclined = status === "declined";
+  const isExpired = status === "expired";
+
+  return (
+    <div className="min-h-screen bg-surface">
+      {/* Mini Hero */}
+      <div className="relative h-32 w-full">
+        <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
+        <BookingNavigation />
+      </div>
+
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center">
+          {/* Status Icon */}
+          {isPending && (
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg
+                className="w-8 h-8 text-amber-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+          )}
+          {isConfirmed && (
+            <div className="w-16 h-16 bg-success-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg
+                className="w-8 h-8 text-success-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </div>
+          )}
+          {(isCancelled || isDeclined || isExpired) && (
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg
+                className="w-8 h-8 text-red-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </div>
+          )}
+
+          {/* Status Title */}
+          {isPending && (
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {t("requestSubmitted") || "Booking Request Submitted"}
+              </h1>
+              <p className="text-gray-600 mb-4">
+                {t("pendingSubtitle") ||
+                  "Your booking request has been submitted. We'll respond within 24 hours."}
+              </p>
+              {booking?.hostResponseDeadline && (
+                <div className="mb-6">
+                  <p className="text-sm text-gray-500 mb-1">
+                    {t("hostResponseIn") || "We'll respond latest:"}
+                  </p>
+                  <CountdownTimer deadline={booking.hostResponseDeadline} />
+                </div>
+              )}
+            </>
+          )}
+          {isConfirmed && (
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">{t("title")}</h1>
+              <p className="text-gray-600 mb-6">{t("subtitle")}</p>
+            </>
+          )}
+          {isCancelled && (
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {t("cancelledTitle") || "Booking Cancelled"}
+              </h1>
+              <p className="text-gray-600 mb-6">
+                {booking?.paymentMethod === "card"
+                  ? t("cancelledCardSubtitle") ||
+                    "Your booking has been cancelled. Any authorization hold on your card has been released."
+                  : t("cancelledSubtitle") || "Your booking has been cancelled."}
+              </p>
+            </>
+          )}
+          {isDeclined && (
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {t("declinedTitle") || "Booking Request Declined"}
+              </h1>
+              <p className="text-gray-600 mb-6">
+                {booking?.paymentMethod === "card"
+                  ? t("declinedCardSubtitle") ||
+                    "We declined your booking request. Any authorization hold on your card has been released."
+                  : t("declinedSubtitle") ||
+                    "We declined your booking request. We encourage you to explore alternative dates or properties."}
+              </p>
+            </>
+          )}
+          {isExpired && (
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mb-2">
+                {t("expiredTitle") || "Booking Request Expired"}
+              </h1>
+              <p className="text-gray-600 mb-6">
+                {t("expiredSubtitle") ||
+                  "Your booking request expired because we did not respond within 24 hours. Any card hold has been released."}
+              </p>
+            </>
+          )}
+
+          {/* Booking Reference */}
+          <div className="bg-accent rounded-xl p-4 mb-8 inline-block">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+              {t("bookingReference")}
+            </p>
+            <p className="text-2xl font-bold text-primary-600 tracking-wider">{reference}</p>
+          </div>
+
+          {/* Booking Details */}
+          {hydrating && !booking ? (
+            <div className="py-8 text-center text-gray-500 text-sm">
+              {t("loadingDetails") || "Loading booking details…"}
+            </div>
+          ) : !booking && hydrateError ? (
+            <div className="py-6 text-center">
+              <p className="text-sm text-gray-600 mb-3">
+                {t("detailsUnavailable") || "We couldn't load your booking details here."}
+              </p>
+              <Link
+                href={`/my-booking?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(emailParam || "")}`}
+                className="text-sm font-medium text-primary-600 hover:text-primary-700 underline"
+              >
+                {t("manageBooking") || "Manage your booking"}
+              </Link>
+            </div>
+          ) : (
+            <div className="text-left space-y-0 divide-y divide-gray-100">
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t("hotel")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking?.hotelName || hotel.name}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t("room")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking
+                    ? `${booking.numberOfRooms && booking.numberOfRooms > 1 ? `${booking.numberOfRooms}× ` : ""}${booking.roomName}`
+                    : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t("checkIn")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking?.checkIn ? `${booking.checkIn}, ${hotel.checkInTime}` : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t("checkOut")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking?.checkOut ? `${booking.checkOut}, ${hotel.checkOutTime}` : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t("duration")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking ? tc("nights", { count: booking.nights }) : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">{t("guests")}</span>
+                <span className="font-medium text-gray-900">
+                  {booking
+                    ? `${tc("adults", { count: booking.adults })}${booking.children > 0 ? `, ${tc("children", { count: booking.children })}` : ""}`
+                    : "—"}
+                </span>
+              </div>
+              {booking?.addonIds && booking.addonIds.length > 0 && (
+                <div className="py-3">
+                  <p className="text-gray-600 mb-2">{t("addons") || "Add-ons"}</p>
+                  <div className="space-y-1.5">
+                    {booking.addonIds.map((addonId, idx) => {
+                      const qty = booking.addonQuantities?.[addonId];
+                      const name = booking.addonNames?.[idx] || addonId;
+                      return (
+                        <div key={addonId} className="flex justify-between text-sm">
+                          <span className="font-medium text-gray-900">{name}</span>
+                          {qty && qty > 1 ? <span className="text-gray-500">× {qty}</span> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-between py-3">
+                <span className="text-gray-600">
+                  {booking?.depositRequired ? "Booking total" : t("totalPaid")}
+                </span>
+                <span className="font-bold text-gray-900 text-lg">
+                  {booking ? formatPrice(booking.totalAmount, booking.currency) : "—"}
+                </span>
+              </div>
+              {booking?.depositRequired && (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">
+                      {booking.paymentStatus === "captured"
+                        ? "Deposit paid"
+                        : booking.paymentStatus === "refunded"
+                          ? "Deposit refunded"
+                          : "Deposit pending"}
+                    </span>
+                    <span className="font-semibold text-gray-900">
+                      {formatPrice(booking.depositAmount || 0, booking.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">Remaining balance due at check-in</span>
+                    <span className="font-semibold text-gray-900">
+                      {formatPrice(booking.balanceAmount || 0, booking.currency)}
+                    </span>
+                  </div>
+                </div>
+              )}
+              {booking?.paymentMethod && (
+                <div className="flex justify-between py-3">
+                  <span className="text-gray-600">{t("paymentMethodLabel") || "Payment"}</span>
+                  <span className="font-medium text-gray-900">
+                    {booking.paymentMethod === "card"
+                      ? "Card"
+                      : booking.paymentMethod === "paypal"
+                        ? "PayPal"
+                        : booking.paymentMethod === "bank_transfer"
+                          ? "Bank transfer"
+                          : booking.paymentMethod === "xendit"
+                            ? "Xendit"
+                            : booking.paymentMethod || "Other"}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isPending && booking?.paymentMethod === "paypal" && paypalInfo && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
+              <p className="text-sm font-semibold text-blue-900">PayPal payment pending</p>
+              <p className="text-xs text-blue-700 mt-1">
+                Send {formatPrice(booking.totalAmount, booking.currency)} to {paypalInfo.email} and include{" "}
+                {booking.bookingReference} in the PayPal note so we can match it. Payment must be
+                confirmed within {paypalInfo.windowHours} hours.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(paypalInfo.email)}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                >
+                  Copy email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(booking.bookingReference)}
+                  className="px-3 py-1.5 rounded-lg bg-white border border-blue-200 text-xs font-semibold text-blue-700"
+                >
+                  Copy booking reference
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Change request status (VAY-379) */}
+          {changeRequest && changeRequest.status === "pending" && (
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl text-left">
+              <p className="text-sm font-semibold text-blue-900">
+                {t("changePending") || "Change request pending approval"}
+              </p>
+              <p className="text-xs text-blue-700 mt-1">
+                {t("changePendingDesc") ||
+                  "We'll review your requested change and email you once we respond."}
+              </p>
+              <p className="text-xs text-blue-700 mt-2">
+                {changeRequest.requestedCheckIn} → {changeRequest.requestedCheckOut}
+                {" · "}
+                {changeRequest.priceDifference > 0
+                  ? `+${formatPrice(changeRequest.priceDifference, changeRequest.currency)}`
+                  : formatPrice(changeRequest.priceDifference, changeRequest.currency)}
+              </p>
+            </div>
+          )}
+
+          {/* Request Changes — only for confirmed bookings without a pending request. */}
+          {isConfirmed && (!changeRequest || changeRequest.status !== "pending") && booking && (
+            <div className="mt-6">
+              <Link
+                href={`/booking/${reference}/request-change?email=${encodeURIComponent(booking.guestEmail || emailParam || "")}`}
+                className="inline-flex px-6 py-3 border border-primary-200 text-primary-700 font-semibold rounded-full hover:bg-primary-50 transition-colors"
+              >
+                {t("requestChanges") || "Request Changes"}
+              </Link>
+            </div>
+          )}
+
+          {/* Withdraw button for pending bookings */}
+          {isPending && (
+            <div className="mt-8">
+              {withdrawError && <p className="text-sm text-red-600 mb-3">{withdrawError}</p>}
+              <button
+                onClick={handleWithdraw}
+                disabled={withdrawing}
+                className="px-6 py-3 border border-red-300 text-red-600 font-semibold rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
+              >
+                {withdrawing
+                  ? t("withdrawing") || "Withdrawing..."
+                  : t("withdrawRequest") || "Withdraw Request"}
+              </button>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+            <Link
+              href="/"
+              className="px-6 py-3 bg-primary-600 text-white font-semibold rounded-full hover:bg-primary-700 transition-colors"
+            >
+              {t("backToHotel")}
+            </Link>
+            <Link
+              href={`/my-booking?reference=${encodeURIComponent(reference)}&email=${encodeURIComponent(booking?.guestEmail || emailParam || "")}`}
+              className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-full hover:bg-gray-50 transition-colors"
+            >
+              {t("manageBooking")}
+            </Link>
+          </div>
+        </div>
+
+        {/* Email notice */}
+        <p className="text-center text-sm text-gray-500 mt-6">{t("emailNotice")}</p>
+      </div>
+
+      <BookingFooter />
+    </div>
+  );
+}

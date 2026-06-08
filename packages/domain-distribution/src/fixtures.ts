@@ -13,6 +13,7 @@ export const PUBLIC_BOOKABILITY_FIXTURE_CASE_IDS = [
   "missing_payment_readiness",
   "custom_domain",
   "renamed_property",
+  "private_hotel",
 ] as const;
 
 export type PublicBookabilityFixtureCaseId = (typeof PUBLIC_BOOKABILITY_FIXTURE_CASE_IDS)[number];
@@ -127,6 +128,34 @@ export const PUBLIC_BOOKABILITY_FIXTURES: PublicBookabilityFixtureCase[] = [
         canonicalUrl: "https://alpenrose-resort.booking.localhost/en",
         bookingBaseUrl: "https://alpenrose-resort.booking.localhost",
       },
+    }),
+  },
+  {
+    caseId: "private_hotel",
+    description:
+      "Disabled or unpublished hotel must not appear in public sitemap, " +
+      "must not emit indexable JSON-LD, and the quote API must return an " +
+      "unavailable status with an 'unpublished' reason code.",
+    profile: profileFixture({
+      hotel: {
+        trust: {
+          profileComplete: false,
+          profileVerified: false,
+          domainVerified: false,
+          bookabilityStatus: "unavailable",
+          reasonCodes: ["unpublished"],
+        },
+      },
+    }),
+    quote: quoteFixture({
+      status: "unavailable",
+      unavailableReasons: [
+        {
+          code: "unpublished",
+          detail: "Hotel is not published and cannot be booked publicly.",
+        },
+      ],
+      quote: undefined,
     }),
   },
 ];
