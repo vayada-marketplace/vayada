@@ -23,6 +23,7 @@ async function dropTargetSchemas(): Promise<void> {
     for (const schema of DEFAULT_TARGET_SCHEMAS) {
       await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
     }
+    await client.query(`DROP SCHEMA IF EXISTS migration_source_auth CASCADE`);
   } finally {
     await client.end();
   }
@@ -36,7 +37,7 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
       connectionString: TEST_DATABASE_URL!,
       migrationsDir: MIGRATIONS_DIR,
       environment: "local",
-      schemas: ["platform", "identity"],
+      schemas: [...DEFAULT_TARGET_SCHEMAS],
       fixtureCase: "identity-organization-links",
       fixturesDir: FIXTURES_DIR,
     });
@@ -59,23 +60,25 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
     expect(report.findings.filter((f) => f.severity === "fail")).toHaveLength(0);
   });
 
-  it("reports UNIQUENESS_VIOLATION when duplicate provider_user_id rows exist", async () => {
-    // Drop the partial unique index first so we can insert a duplicate row.
-    // The parity checker's SQL detects duplicates independently of the index;
-    // this test validates that detection path. The afterEach drops the schema.
+  it("reports SOURCE_EXTERNAL_IDENTITY_DUPLICATE when source WorkOS IDs are duplicated", async () => {
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
-      await client.query(`DROP INDEX IF EXISTS identity.uq_external_identities_provider_user_id`);
       await client.query(`
-        INSERT INTO identity.users (id, email, status)
-        VALUES ('ffffffff-0000-0000-0000-000000000099', 'dup@example.com', 'active')
-      `);
-      await client.query(`
-        INSERT INTO identity.external_identities
-          (user_id, provider, provider_user_id, provider_email, provider_email_verified)
+        INSERT INTO migration_source_auth.users
+          (id, email, name, type, status, email_verified, workos_user_id, created_at, updated_at)
         VALUES
-          ('ffffffff-0000-0000-0000-000000000099', 'workos', 'user_workos_hotel_owner', 'dup@example.com', FALSE)
+          (
+            'ffffffff-0000-0000-0000-000000000099',
+            'dup@example.com',
+            'Duplicate User',
+            'hotel',
+            'verified',
+            TRUE,
+            'user_workos_hotel_owner',
+            now(),
+            now()
+          )
       `);
     } finally {
       await client.end();
@@ -89,9 +92,11 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
     });
 
     expect(report.status).toBe("failed");
-    const violations = report.findings.filter((f) => f.code === "UNIQUENESS_VIOLATION");
+    const violations = report.findings.filter(
+      (f) => f.code === "SOURCE_EXTERNAL_IDENTITY_DUPLICATE",
+    );
     expect(violations.length).toBeGreaterThan(0);
-    expect(violations[0].targetObject).toBe("identity.external_identities");
+    expect(violations[0].targetObject).toBe("migration_source_auth.users");
   });
 
   it("reports ID_STABILITY_VIOLATION when a source user ID is not preserved", async () => {
@@ -124,6 +129,142 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
     const violations = report.findings.filter((f) => f.code === "ID_STABILITY_VIOLATION");
     expect(violations.length).toBeGreaterThan(0);
   });
+
+  it("reports SOURCE_RESOURCE_LINK_DUPLICATE when source ownership rows are duplicated", async () => {
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query(`
+        INSERT INTO migration_source_auth.identity_organization_links
+          (
+            source_row_id,
+            user_id,
+            organization_id,
+            organization_kind,
+            organization_name,
+            organization_slug,
+            organization_status,
+            workos_org_id,
+            workos_external_id,
+            membership_status,
+            role_key,
+            workos_membership_id,
+            workos_role_slugs,
+            product,
+            resource_type,
+            resource_id,
+            relationship,
+            resource_status,
+            created_at,
+            updated_at
+          )
+        SELECT
+          'booking-hotel-owner-duplicate',
+          user_id,
+          organization_id,
+          organization_kind,
+          organization_name,
+          organization_slug,
+          organization_status,
+          workos_org_id,
+          workos_external_id,
+          membership_status,
+          role_key,
+          workos_membership_id,
+          workos_role_slugs,
+          product,
+          resource_type,
+          resource_id,
+          relationship,
+          resource_status,
+          created_at,
+          updated_at
+        FROM migration_source_auth.identity_organization_links
+        WHERE source_row_id = 'booking-hotel-owner'
+      `);
+    } finally {
+      await client.end();
+    }
+
+    const report = await runParityChecks({
+      connectionString: TEST_DATABASE_URL!,
+      fixtureCase: "identity-organization-links",
+      fixturesDir: FIXTURES_DIR,
+      environment: "local",
+    });
+
+    expect(report.status).toBe("failed");
+    const violations = report.findings.filter((f) => f.code === "SOURCE_RESOURCE_LINK_DUPLICATE");
+    expect(violations.length).toBeGreaterThan(0);
+  });
+
+  it("reports SOURCE_RESOURCE_LINK_AMBIGUOUS when one resource maps to two organizations", async () => {
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query(`
+        INSERT INTO migration_source_auth.identity_organization_links
+          (
+            source_row_id,
+            user_id,
+            organization_id,
+            organization_kind,
+            organization_name,
+            organization_slug,
+            organization_status,
+            workos_org_id,
+            workos_external_id,
+            membership_status,
+            role_key,
+            workos_membership_id,
+            workos_role_slugs,
+            product,
+            resource_type,
+            resource_id,
+            relationship,
+            resource_status,
+            created_at,
+            updated_at
+          )
+        SELECT
+          'booking-hotel-owner-ambiguous',
+          user_id,
+          'b2c3d4e5-0000-0000-0000-000000000099',
+          organization_kind,
+          'Ambiguous Hotel Group',
+          'ambiguous-hotel-group',
+          organization_status,
+          'org_workos_ambiguous_hotel_group',
+          'b2c3d4e5-0000-0000-0000-000000000099',
+          membership_status,
+          role_key,
+          'om_ambiguous_hotel_owner',
+          workos_role_slugs,
+          product,
+          resource_type,
+          resource_id,
+          relationship,
+          resource_status,
+          created_at,
+          updated_at
+        FROM migration_source_auth.identity_organization_links
+        WHERE source_row_id = 'booking-hotel-owner'
+      `);
+    } finally {
+      await client.end();
+    }
+
+    const report = await runParityChecks({
+      connectionString: TEST_DATABASE_URL!,
+      fixtureCase: "identity-organization-links",
+      fixturesDir: FIXTURES_DIR,
+      environment: "local",
+    });
+
+    expect(report.status).toBe("failed");
+    const violations = report.findings.filter((f) => f.code === "SOURCE_RESOURCE_LINK_AMBIGUOUS");
+    expect(violations.length).toBeGreaterThan(0);
+  });
 });
 
 describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)", () => {
@@ -136,7 +277,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
       connectionString: TEST_DATABASE_URL!,
       migrationsDir: MIGRATIONS_DIR,
       environment: "local",
-      schemas: ["platform", "identity"],
+      schemas: [...DEFAULT_TARGET_SCHEMAS],
       fixtureCase: "identity-organization-links",
       fixturesDir: FIXTURES_DIR,
     });
@@ -149,6 +290,36 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
     try {
       const { rows } = await client.query(`SELECT count(*)::int AS count FROM identity.users`);
       expect(rows[0].count).toBe(1);
+
+      const memberships = await client.query(
+        `SELECT count(*)::int AS count
+         FROM identity.organization_memberships
+         WHERE organization_id = 'b2c3d4e5-0000-0000-0000-000000000001'
+           AND user_id = 'a1b2c3d4-0000-0000-0000-000000000001'
+           AND role_key = 'hotel_owner'
+           AND status = 'active'`,
+      );
+      expect(memberships.rows[0].count).toBe(1);
+
+      const resourceLinks = await client.query(
+        `SELECT product, resource_type, resource_id, relationship
+         FROM identity.organization_resource_links
+         ORDER BY product, resource_type`,
+      );
+      expect(resourceLinks.rows).toEqual([
+        {
+          product: "booking",
+          resource_type: "booking_hotel",
+          resource_id: "booking_hotel_alpenrose",
+          relationship: "owner",
+        },
+        {
+          product: "pms",
+          resource_type: "pms_hotel",
+          resource_id: "pms_hotel_alpenrose",
+          relationship: "operator",
+        },
+      ]);
 
       const perms = await client.query(
         `SELECT count(*)::int AS count FROM identity.permission_catalog`,

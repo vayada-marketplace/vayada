@@ -7,7 +7,8 @@
     "identity.external_identities": 1,
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
-    "identity.organization_resource_links": 2
+    "identity.organization_resource_links": 2,
+    "identity.product_entitlements": 2
   },
   "expectedFailures": [],
   "publicExposureAllowlist": []

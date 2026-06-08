@@ -85,5 +85,5 @@ if (result.failed) {
   process.exit(1);
 }
 if (fixtures) {
-  console.log(`Fixtures: loaded "${fixtures}"`);
+  console.log(`Fixtures: loaded and transformed "${fixtures}"`);
 }

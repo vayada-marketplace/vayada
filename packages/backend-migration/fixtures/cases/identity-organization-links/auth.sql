@@ -1,45 +1,185 @@
 -- Fixture: identity-organization-links / auth.sql
 --
--- Represents the target-schema rows that the ETL transform would produce
--- from one hotel owner user in the legacy auth-db. Stable UUIDs are used
--- so parity checks can assert ID stability.
---
--- Source: auth-db.users (one hotel owner)
--- Target: identity schema tables
+-- Represents source-side auth and legacy ownership inputs for one hotel owner.
+-- The rebuild command loads these rows into a migration-only fixture schema,
+-- then packages/backend-migration transforms them into identity target tables.
 
-INSERT INTO identity.users (id, email, name, status) VALUES
-  ('a1b2c3d4-0000-0000-0000-000000000001', 'owner@example.com', 'Hotel Owner', 'active');
+DROP SCHEMA IF EXISTS migration_source_auth CASCADE;
+CREATE SCHEMA migration_source_auth;
 
--- WorkOS provider identity linked to the internal user.
-INSERT INTO identity.external_identities
-  (user_id, provider, provider_user_id, provider_email, provider_email_verified)
+CREATE TABLE migration_source_auth.users (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  workos_user_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_auth.identity_organization_links (
+  source_row_id TEXT PRIMARY KEY,
+  user_id UUID NOT NULL,
+  organization_id UUID NOT NULL,
+  organization_kind TEXT NOT NULL,
+  organization_name TEXT NOT NULL,
+  organization_slug TEXT NOT NULL,
+  organization_status TEXT NOT NULL DEFAULT 'active',
+  workos_org_id TEXT,
+  workos_external_id TEXT,
+  membership_status TEXT NOT NULL DEFAULT 'active',
+  role_key TEXT NOT NULL,
+  workos_membership_id TEXT,
+  workos_role_slugs TEXT[] NOT NULL DEFAULT '{}',
+  product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  resource_status TEXT NOT NULL DEFAULT 'active',
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_auth.identity_entitlement_inputs (
+  source_row_id TEXT PRIMARY KEY,
+  organization_id UUID NOT NULL,
+  product TEXT NOT NULL,
+  entitlement_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  resource_product TEXT,
+  resource_type TEXT,
+  resource_id TEXT,
+  starts_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+INSERT INTO migration_source_auth.users
+  (id, email, name, type, status, email_verified, workos_user_id, created_at, updated_at)
 VALUES
-  ('a1b2c3d4-0000-0000-0000-000000000001', 'workos', 'user_workos_hotel_owner', 'owner@example.com', TRUE);
+  (
+    'a1b2c3d4-0000-0000-0000-000000000001',
+    'owner@example.com',
+    'Hotel Owner',
+    'hotel',
+    'verified',
+    TRUE,
+    'user_workos_hotel_owner',
+    '2026-01-01T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
--- Hotel-group organization with a WorkOS org mapping.
-INSERT INTO identity.organizations
-  (id, kind, name, slug, status, workos_org_id, workos_external_id)
+INSERT INTO migration_source_auth.identity_organization_links
+  (
+    source_row_id,
+    user_id,
+    organization_id,
+    organization_kind,
+    organization_name,
+    organization_slug,
+    organization_status,
+    workos_org_id,
+    workos_external_id,
+    membership_status,
+    role_key,
+    workos_membership_id,
+    workos_role_slugs,
+    product,
+    resource_type,
+    resource_id,
+    relationship,
+    resource_status,
+    created_at,
+    updated_at
+  )
 VALUES
-  ('b2c3d4e5-0000-0000-0000-000000000001', 'hotel_group', 'Hotel Alpenrose Group', 'hotel-alpenrose-group', 'active',
-   'org_workos_hotel_group', 'b2c3d4e5-0000-0000-0000-000000000001');
+  (
+    'booking-hotel-owner',
+    'a1b2c3d4-0000-0000-0000-000000000001',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'hotel_group',
+    'Hotel Alpenrose Group',
+    'hotel-alpenrose-group',
+    'active',
+    'org_workos_hotel_group',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'active',
+    'hotel_owner',
+    'om_hotel_owner',
+    ARRAY['hotel_owner'],
+    'booking',
+    'booking_hotel',
+    'booking_hotel_alpenrose',
+    'owner',
+    'active',
+    '2026-01-01T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  ),
+  (
+    'pms-hotel-operator',
+    'a1b2c3d4-0000-0000-0000-000000000001',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'hotel_group',
+    'Hotel Alpenrose Group',
+    'hotel-alpenrose-group',
+    'active',
+    'org_workos_hotel_group',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'active',
+    'hotel_owner',
+    'om_hotel_owner',
+    ARRAY['hotel_owner'],
+    'pms',
+    'pms_hotel',
+    'pms_hotel_alpenrose',
+    'operator',
+    'active',
+    '2026-01-01T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
 
--- Active hotel_owner membership for the user in the hotel-group org.
-INSERT INTO identity.organization_memberships
-  (organization_id, user_id, status, role_key, workos_membership_id, workos_role_slugs)
+INSERT INTO migration_source_auth.identity_entitlement_inputs
+  (
+    source_row_id,
+    organization_id,
+    product,
+    entitlement_key,
+    status,
+    resource_product,
+    resource_type,
+    resource_id,
+    metadata,
+    created_at,
+    updated_at
+  )
 VALUES
-  ('b2c3d4e5-0000-0000-0000-000000000001', 'a1b2c3d4-0000-0000-0000-000000000001',
-   'active', 'hotel_owner', 'om_hotel_owner', ARRAY['hotel_owner']);
-
--- Resource links: owner of the booking hotel, operator of the PMS hotel.
-INSERT INTO identity.organization_resource_links
-  (organization_id, product, resource_type, resource_id, relationship, status)
-VALUES
-  ('b2c3d4e5-0000-0000-0000-000000000001', 'booking', 'booking_hotel', 'booking_hotel_alpenrose', 'owner',    'active'),
-  ('b2c3d4e5-0000-0000-0000-000000000001', 'pms',     'pms_hotel',     'pms_hotel_alpenrose',     'operator', 'active');
-
--- Product/module entitlements for the selected organization and linked resources.
-INSERT INTO identity.product_entitlements
-  (organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id)
-VALUES
-  ('b2c3d4e5-0000-0000-0000-000000000001', 'booking', 'booking-engine', 'active', NULL,      NULL,            NULL),
-  ('b2c3d4e5-0000-0000-0000-000000000001', 'pms',     'pms-core',        'active', 'pms',     'pms_hotel',     'pms_hotel_alpenrose');
+  (
+    'booking-engine-org-entitlement',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'booking',
+    'booking-engine',
+    'active',
+    NULL,
+    NULL,
+    NULL,
+    '{"source":"booking_hotels.platform_status"}'::jsonb,
+    '2026-01-01T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  ),
+  (
+    'pms-core-resource-entitlement',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'pms',
+    'pms-core',
+    'active',
+    'pms',
+    'pms_hotel',
+    'pms_hotel_alpenrose',
+    '{"source":"property_module_activations"}'::jsonb,
+    '2026-01-01T00:00:00Z',
+    '2026-01-02T00:00:00Z'
+  );
