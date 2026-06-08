@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -80,6 +81,9 @@ describe("discoverMigrations", () => {
 // ---------------------------------------------------------------------------
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REAL_MIGRATIONS_DIR = join(__dirname, "../migrations");
+const TARGET_SCHEMAS = ["platform", "identity", "hotel_catalog", "booking"];
 
 describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
   let tmpDir: string;
@@ -204,6 +208,86 @@ describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
       expect(rows[0].failure_reason).toMatch(/Checksum mismatch/);
     } finally {
       await client.end();
+    }
+  });
+});
+
+describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", () => {
+  afterEach(async () => {
+    assertSafeTestDatabase(TEST_DATABASE_URL!);
+
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      for (const schema of TARGET_SCHEMAS) {
+        await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      }
+    } finally {
+      await client.end();
+    }
+  });
+
+  it("applies booking checkout DDL and keeps summary rows free of guest PII columns", async () => {
+    assertSafeTestDatabase(TEST_DATABASE_URL!);
+
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      for (const schema of TARGET_SCHEMAS) {
+        await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      }
+    } finally {
+      await client.end();
+    }
+
+    const result = await runMigrations({
+      connectionString: TEST_DATABASE_URL!,
+      migrationsDir: REAL_MIGRATIONS_DIR,
+      environment: "local",
+      appliedBy: "test",
+    });
+
+    expect(result.failed).toBeNull();
+    expect(result.applied).toContain("0005");
+
+    const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await verifyClient.connect();
+    try {
+      const { rows: tableRows } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'booking'
+         ORDER BY table_name`,
+      );
+
+      expect(tableRows.map((row) => row.table_name)).toEqual([
+        "addon_definitions",
+        "booking_addon_selections",
+        "booking_change_requests",
+        "booking_guests",
+        "booking_notes_public",
+        "booking_status_events",
+        "checkout_contexts",
+        "direct_booking_summary_read_model",
+        "guest_bookings",
+        "promo_applications",
+        "quote_sessions",
+      ]);
+
+      const { rows: piiColumns } = await verifyClient.query<{ column_name: string }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'booking'
+           AND table_name = 'direct_booking_summary_read_model'
+           AND column_name IN (
+             'first_name', 'last_name', 'email', 'phone',
+             'special_requests', 'guest_input', 'body'
+           )`,
+      );
+
+      expect(piiColumns).toHaveLength(0);
+    } finally {
+      await verifyClient.end();
     }
   });
 });
