@@ -212,6 +212,29 @@ test.describe("booking-web robots / indexability GEO contract", () => {
     expect(noindexPaths.some((p) => p.includes("payment"))).toBe(true);
     expect(noindexPaths.some((p) => p.includes("booking"))).toBe(true);
     expect(noindexPaths.some((p) => p.includes("my-booking"))).toBe(true);
+    // Add-ons selection step must also be listed as a private (noindex) path.
+    expect(noindexPaths.some((p) => p.includes("addons"))).toBe(true);
+  });
+
+  test("addons page is excluded from indexing", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    const response = await page.goto("/en/addons");
+
+    const status = response?.status() ?? 0;
+
+    // The add-ons selection step must return 200 with a noindex directive.
+    expect(status, "Addons page must return 200 (with noindex), not a redirect or error").toBe(200);
+
+    const contentType = response?.headers()["content-type"] ?? "";
+    expect(contentType, "Addons 200 response must be HTML").toContain("text/html");
+
+    const robots = await getMetaRobots(page);
+    expect(robots, "Addons page must have noindex robots meta").not.toBeNull();
+    expect(robots, "Addons page robots meta must contain noindex").toContain("noindex");
+
+    await assertHealthy();
   });
 });
 

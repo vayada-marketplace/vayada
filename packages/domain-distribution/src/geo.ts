@@ -301,6 +301,12 @@ export const GEO_BOOKING_WEB_ROBOTS_POLICIES: readonly GeoPageRobotsPolicy[] = [
     shouldBeIndexable: false,
     description: "Guest private booking dashboard must not be indexed.",
   },
+  {
+    pathPattern: "/{locale}/addons",
+    pageKind: "guest_private",
+    shouldBeIndexable: false,
+    description: "Add-ons selection step must not be indexed.",
+  },
 ] as const;
 
 /**

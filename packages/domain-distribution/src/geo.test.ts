@@ -194,6 +194,7 @@ describe("@vayada/domain-distribution — GEO validation contracts", () => {
       expect(noindexPaths.some((p) => p.includes("payment"))).toBe(true);
       expect(noindexPaths.some((p) => p.includes("booking"))).toBe(true);
       expect(noindexPaths.some((p) => p.includes("my-booking"))).toBe(true);
+      expect(noindexPaths.some((p) => p.includes("addons"))).toBe(true);
     });
   });
 
