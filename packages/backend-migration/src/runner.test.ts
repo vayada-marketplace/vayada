@@ -3734,6 +3734,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'chk_intelligence_ask_answer_audits_claim_support',
              'chk_intelligence_ask_answer_audits_private_json',
              'chk_intelligence_ask_answer_audits_retention',
+             'chk_intelligence_ask_answer_audits_revision',
              'chk_intelligence_ask_answer_audits_visibility',
              'chk_intelligence_ask_conversations_expiry',
              'chk_intelligence_ask_conversations_resource_link_scope',
@@ -3742,7 +3743,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'chk_intelligence_ask_conversations_visibility',
              'chk_intelligence_ask_runs_private_json',
              'chk_intelligence_ask_runs_question_redacted',
-             'chk_intelligence_ask_runs_resource_link_scope',
              'chk_intelligence_ask_runs_terminal_time',
              'chk_intelligence_ask_tool_calls_authorization',
              'chk_intelligence_ask_tool_calls_available_evidence',
@@ -3763,14 +3763,16 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'fk_intelligence_ask_tool_calls_tool',
              'fk_intelligence_ask_tool_calls_tool_permission',
              'fk_intelligence_metric_definitions_permission',
+             'fk_intelligence_metric_snapshot_runs_metric_key',
              'fk_intelligence_metric_snapshot_runs_metric_permission',
              'fk_intelligence_setup_snapshots_bookability_profile',
              'uq_intelligence_ai_evidence_catalog_tool',
              'uq_intelligence_ai_evidence_catalog_tool_permission',
-             'uq_intelligence_ask_answer_audits_run',
+             'uq_intelligence_ask_answer_audits_run_revision',
              'uq_intelligence_ask_conversations_id_actor_scope',
              'uq_intelligence_ask_conversations_id_scope',
              'uq_intelligence_ask_runs_id_conversation_scope',
+             'uq_intelligence_metric_definitions_id_key',
              'uq_intelligence_metric_definitions_key',
              'uq_intelligence_metric_snapshot_runs_id_scope'
            )
@@ -3784,6 +3786,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "chk_intelligence_ask_answer_audits_claim_support",
         "chk_intelligence_ask_answer_audits_private_json",
         "chk_intelligence_ask_answer_audits_retention",
+        "chk_intelligence_ask_answer_audits_revision",
         "chk_intelligence_ask_answer_audits_visibility",
         "chk_intelligence_ask_conversations_expiry",
         "chk_intelligence_ask_conversations_resource_link_scope",
@@ -3792,7 +3795,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "chk_intelligence_ask_conversations_visibility",
         "chk_intelligence_ask_runs_private_json",
         "chk_intelligence_ask_runs_question_redacted",
-        "chk_intelligence_ask_runs_resource_link_scope",
         "chk_intelligence_ask_runs_terminal_time",
         "chk_intelligence_ask_tool_calls_authorization",
         "chk_intelligence_ask_tool_calls_available_evidence",
@@ -3813,14 +3815,16 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "fk_intelligence_ask_tool_calls_tool",
         "fk_intelligence_ask_tool_calls_tool_permission",
         "fk_intelligence_metric_definitions_permission",
+        "fk_intelligence_metric_snapshot_runs_metric_key",
         "fk_intelligence_metric_snapshot_runs_metric_permission",
         "fk_intelligence_setup_snapshots_bookability_profile",
         "uq_intelligence_ai_evidence_catalog_tool",
         "uq_intelligence_ai_evidence_catalog_tool_permission",
-        "uq_intelligence_ask_answer_audits_run",
+        "uq_intelligence_ask_answer_audits_run_revision",
         "uq_intelligence_ask_conversations_id_actor_scope",
         "uq_intelligence_ask_conversations_id_scope",
         "uq_intelligence_ask_runs_id_conversation_scope",
+        "uq_intelligence_metric_definitions_id_key",
         "uq_intelligence_metric_definitions_key",
         "uq_intelligence_metric_snapshot_runs_id_scope",
       ]);
@@ -3862,6 +3866,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          WHERE src_ns.nspname = 'intelligence'
            AND con.contype = 'f'
            AND con.conname IN (
+             'fk_intelligence_metric_snapshot_runs_metric_key',
              'fk_intelligence_metric_snapshot_runs_metric_permission',
              'fk_intelligence_setup_snapshots_bookability_profile',
              'fk_intelligence_ask_runs_conversation_actor_scope',
@@ -3940,6 +3945,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           referenced_schema: "intelligence",
           referenced_table: "ai_evidence_catalog",
           table_name: "ask_tool_calls",
+        },
+        {
+          columns: "metric_definition_id,metric_key",
+          constraint_name: "fk_intelligence_metric_snapshot_runs_metric_key",
+          referenced_columns: "id,metric_key",
+          referenced_schema: "intelligence",
+          referenced_table: "metric_definitions",
+          table_name: "metric_snapshot_runs",
         },
         {
           columns: "metric_definition_id,required_permission_key",
@@ -4210,6 +4223,25 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
                source_fresh_at
              )
            VALUES (
+               $1, 'finance.net_revenue',
+               'booking.direct_share.mismatched-metric-key',
+               'property', $2, $3, 'booking',
+               'direct_booking_summary_read_model',
+               'booking.analytics.read', now()
+           )`,
+          [intelligenceBookingMetricId, hotelOrganizationId, distributionPropertyId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO intelligence.metric_snapshot_runs
+             (
+               metric_definition_id, metric_key, snapshot_key,
+               resource_scope, organization_id, property_id,
+               source_owner, source_view, required_permission_key,
+               source_fresh_at
+             )
+           VALUES (
                $1, 'booking.direct_share',
                'booking.direct_share.invalid-source-view',
                'property', $2, $3, 'booking',
@@ -4466,8 +4498,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         `INSERT INTO intelligence.ask_runs
            (
              id, run_key, conversation_id, actor_user_id,
-             organization_id, property_id, resource_link_id,
-             resource_scope, request_id, correlation_id,
+             organization_id, property_id, resource_scope,
+             request_id, correlation_id,
              idempotency_key_id, question_redacted_text, question_hash,
              detected_intent, required_permission_key, run_status,
              confidence_level, model_provider, model_name,
@@ -4477,9 +4509,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
            )
          VALUES (
              $1, 'ask-run-property-one-march',
-             $2, $3, $4, $5, $6, 'property',
+             $2, $3, $4, $5, 'property',
              'req-intelligence-test', 'corr-platform-test',
-             $7, 'Why did my direct booking share improve in March?',
+             $6, 'Why did my direct booking share improve in March?',
              'sha256:ask-question-march',
              'booking_performance', 'intelligence.ask.read',
              'answered', 'high', 'openai', 'gpt-4.1',
@@ -4496,7 +4528,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           hotelUserId,
           hotelOrganizationId,
           distributionPropertyId,
-          intelligenceResourceLinkId,
           platformIdempotencyKeyId,
         ],
       );
@@ -4581,15 +4612,15 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         `INSERT INTO intelligence.ask_runs
            (
              id, run_key, conversation_id, actor_user_id,
-             organization_id, property_id, resource_link_id,
-             resource_scope, request_id, question_redacted_text,
+             organization_id, property_id, resource_scope,
+             request_id, question_redacted_text,
              question_hash, detected_intent, required_permission_key,
              run_status, confidence_level, prompt_version,
              unavailable_data, finished_at
            )
          VALUES (
              $1, 'ask-run-invalid-audit-probe',
-             $2, $3, $4, $5, $6, 'property',
+             $2, $3, $4, $5, 'property',
              'req-invalid-audit-probe',
              'Can this unsupported answer be audited?',
              'sha256:invalid-audit-probe',
@@ -4604,7 +4635,6 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           hotelUserId,
           hotelOrganizationId,
           distributionPropertyId,
-          intelligenceResourceLinkId,
         ],
       );
       await expect(
@@ -4762,6 +4792,56 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           distributionPropertyId,
         ],
       );
+      await verifyClient.query(
+        `INSERT INTO intelligence.ask_answer_audits
+           (
+             answer_id, run_id, conversation_id,
+             organization_id, property_id, resource_scope,
+             answer_status, confidence_level, question_hash,
+             audit_revision, generated_answer, evidence_references,
+             material_claims, review_status, reviewed_by_user_id,
+             reviewed_at, retention_class
+           )
+         VALUES (
+             'ask-answer-property-one-march-reviewed', $1, $2,
+             $3, $4, 'property', 'answered', 'high',
+             'sha256:ask-question-march', 2,
+             '{"blocks":[{"type":"metric","metricKey":"booking.direct_share"}]}'::jsonb,
+             '[{"evidenceId":"booking-direct-share-2026-03","toolCallId":"cccccccc-7777-4777-8777-ccccccccccc1"}]'::jsonb,
+             '[{"claim":"Direct share improved in March","evidenceId":"booking-direct-share-2026-03"}]'::jsonb,
+             'approved', $5, now(), 'guest_pii_excluded'
+         )`,
+        [
+          intelligenceRunId,
+          intelligenceConversationId,
+          hotelOrganizationId,
+          distributionPropertyId,
+          hotelUserId,
+        ],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO intelligence.ask_answer_audits
+             (
+               answer_id, run_id, conversation_id,
+               organization_id, property_id, resource_scope,
+               answer_status, confidence_level, question_hash,
+               audit_revision, unavailable_data
+             )
+           VALUES (
+               'ask-answer-property-one-march-duplicate-revision',
+               $1, $2, $3, $4, 'property',
+               'unavailable', 'unknown', 'sha256:duplicate-revision',
+               2, '[{"reason":"empty_result"}]'::jsonb
+           )`,
+          [
+            intelligenceRunId,
+            intelligenceConversationId,
+            hotelOrganizationId,
+            distributionPropertyId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
       await expect(
         verifyClient.query(
           `INSERT INTO intelligence.ask_answer_audits

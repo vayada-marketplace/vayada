@@ -212,6 +212,8 @@ CREATE TABLE intelligence.metric_definitions (
     UNIQUE (metric_key),
   CONSTRAINT uq_intelligence_metric_definitions_id_permission
     UNIQUE (id, required_permission_key),
+  CONSTRAINT uq_intelligence_metric_definitions_id_key
+    UNIQUE (id, metric_key),
   CONSTRAINT chk_intelligence_metric_definitions_key
     CHECK (metric_key ~ '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'),
   CONSTRAINT chk_intelligence_metric_definitions_finance_visibility
@@ -324,6 +326,9 @@ CREATE TABLE intelligence.metric_snapshot_runs (
   CONSTRAINT fk_intelligence_metric_snapshot_runs_metric
     FOREIGN KEY (metric_definition_id)
     REFERENCES intelligence.metric_definitions(id),
+  CONSTRAINT fk_intelligence_metric_snapshot_runs_metric_key
+    FOREIGN KEY (metric_definition_id, metric_key)
+    REFERENCES intelligence.metric_definitions(id, metric_key),
   CONSTRAINT fk_intelligence_metric_snapshot_runs_metric_permission
     FOREIGN KEY (metric_definition_id, required_permission_key)
     REFERENCES intelligence.metric_definitions(id, required_permission_key),
@@ -623,13 +628,6 @@ CREATE TABLE intelligence.ask_runs (
   actor_user_id              UUID        NOT NULL,
   organization_id            UUID,
   property_id                UUID,
-  resource_link_id           UUID,
-  resource_link_resource_id  TEXT        GENERATED ALWAYS AS (
-                                      CASE
-                                        WHEN property_id IS NULL THEN NULL
-                                        ELSE property_id::TEXT
-                                      END
-                                    ) STORED,
   resource_scope             TEXT        NOT NULL DEFAULT 'property'
                                       CHECK (resource_scope IN (
                                         'property', 'organization', 'platform'
@@ -695,15 +693,6 @@ CREATE TABLE intelligence.ask_runs (
       run_status NOT IN ('answered', 'partial')
       OR jsonb_array_length(tool_plan) > 0
     ),
-  CONSTRAINT chk_intelligence_ask_runs_resource_link_scope
-    CHECK (
-      resource_link_id IS NULL
-      OR (
-        resource_scope = 'property'
-        AND organization_id IS NOT NULL
-        AND property_id IS NOT NULL
-      )
-    ),
   CONSTRAINT chk_intelligence_ask_runs_private_json
     CHECK (
       NOT intelligence.jsonb_has_forbidden_evidence_key(tool_plan)
@@ -727,9 +716,6 @@ CREATE TABLE intelligence.ask_runs (
   CONSTRAINT fk_intelligence_ask_runs_property
     FOREIGN KEY (property_id)
     REFERENCES hotel_catalog.properties(id),
-  CONSTRAINT fk_intelligence_ask_runs_resource_link
-    FOREIGN KEY (resource_link_id, organization_id, resource_link_resource_id)
-    REFERENCES identity.organization_resource_links(id, organization_id, resource_id),
   CONSTRAINT fk_intelligence_ask_runs_permission
     FOREIGN KEY (required_permission_key)
     REFERENCES identity.permission_catalog(key),
@@ -867,6 +853,7 @@ CREATE TABLE intelligence.ask_answer_audits (
                                         'high', 'medium', 'low', 'unknown'
                                       )),
   question_hash              TEXT        NOT NULL,
+  audit_revision             INTEGER     NOT NULL DEFAULT 1,
   summary                    TEXT,
   generated_answer           JSONB       NOT NULL DEFAULT '{}'::jsonb,
   evidence_references        JSONB       NOT NULL DEFAULT '[]'::jsonb,
@@ -895,10 +882,12 @@ CREATE TABLE intelligence.ask_answer_audits (
   created_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_intelligence_ask_answer_audits_answer
     UNIQUE (answer_id),
-  CONSTRAINT uq_intelligence_ask_answer_audits_run
-    UNIQUE (run_id),
+  CONSTRAINT uq_intelligence_ask_answer_audits_run_revision
+    UNIQUE (run_id, audit_revision),
   CONSTRAINT chk_intelligence_ask_answer_audits_scope
     CHECK (intelligence.valid_resource_scope(resource_scope, organization_id, property_id)),
+  CONSTRAINT chk_intelligence_ask_answer_audits_revision
+    CHECK (audit_revision >= 1),
   CONSTRAINT chk_intelligence_ask_answer_audits_visibility
     CHECK (privacy_scope IN ('internal', 'confidential', 'restricted')),
   CONSTRAINT chk_intelligence_ask_answer_audits_retention
