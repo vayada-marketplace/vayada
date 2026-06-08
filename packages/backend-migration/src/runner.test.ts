@@ -227,7 +227,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     }
   });
 
-  it("applies booking and PMS DDL with private operational data boundaries", async () => {
+  it("applies booking, PMS, and finance DDL with private data boundaries", async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -250,6 +250,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     expect(result.failed).toBeNull();
     expect(result.applied).toContain("0005");
     expect(result.applied).toContain("0006");
+    expect(result.applied).toContain("0007");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();
@@ -603,6 +604,495 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(pmsReadModels).toHaveLength(0);
+
+      const { rows: financeTableRows } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'finance'
+         ORDER BY table_name`,
+      );
+
+      expect(financeTableRows.map((row) => row.table_name)).toEqual([
+        "billing_entitlements",
+        "commission_rate_changes",
+        "commission_rules",
+        "finance_visibility_read_model",
+        "payment_provider_accounts",
+        "payment_settings",
+        "payments",
+        "payout_settings",
+        "payouts",
+      ]);
+
+      const { rows: financeIntegrityConstraints } = await verifyClient.query<{
+        constraint_name: string;
+      }>(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = 'finance'
+           AND constraint_name IN (
+             'chk_finance_billing_entitlements_source_id',
+             'chk_finance_payment_provider_accounts_scope',
+             'chk_finance_payment_settings_accepted_methods',
+             'chk_finance_payment_settings_currency_upper',
+             'chk_finance_payments_refund_amount',
+             'chk_finance_payout_settings_provider_scope',
+             'chk_finance_payout_settings_scope',
+             'chk_finance_payouts_property_owner_related_property',
+             'chk_finance_payouts_provider_scope',
+             'chk_finance_payouts_related_property',
+             'chk_finance_payouts_scope',
+             'chk_finance_visibility_requires_permission',
+             'chk_finance_visibility_scope_permission',
+             'chk_finance_visibility_scope_shape',
+             'fk_finance_billing_entitlements_identity_entitlement',
+             'fk_finance_commission_changes_actor',
+             'fk_finance_commission_changes_rule',
+             'fk_finance_payment_settings_provider_account_property',
+             'fk_finance_payments_booking_property',
+             'fk_finance_payments_provider_account_property',
+             'fk_finance_payout_settings_organization_provider_account',
+             'fk_finance_payout_settings_property_provider_account',
+             'fk_finance_payouts_booking_property',
+             'fk_finance_payouts_organization_payout_setting',
+             'fk_finance_payouts_organization_provider_account',
+             'fk_finance_payouts_payment_booking',
+             'fk_finance_payouts_payment_property',
+             'fk_finance_payouts_property_payout_setting',
+             'fk_finance_payouts_property_provider_account',
+             'fk_finance_visibility_permission_key',
+             'fk_finance_visibility_property',
+             'uq_finance_billing_entitlements_source',
+             'uq_finance_commission_rules_source',
+             'uq_finance_payment_provider_accounts_id_organization',
+             'uq_finance_payment_provider_accounts_id_property',
+             'uq_finance_payments_id_property_booking',
+             'uq_finance_payments_id_property',
+             'uq_finance_payments_source',
+             'uq_finance_payout_settings_id_organization',
+             'uq_finance_payout_settings_id_property',
+             'uq_finance_payouts_id_property',
+             'uq_finance_payouts_source'
+           )
+         ORDER BY constraint_name`,
+      );
+
+      expect(financeIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_finance_billing_entitlements_source_id",
+        "chk_finance_payment_provider_accounts_scope",
+        "chk_finance_payment_settings_accepted_methods",
+        "chk_finance_payment_settings_currency_upper",
+        "chk_finance_payments_refund_amount",
+        "chk_finance_payout_settings_provider_scope",
+        "chk_finance_payout_settings_scope",
+        "chk_finance_payouts_property_owner_related_property",
+        "chk_finance_payouts_provider_scope",
+        "chk_finance_payouts_related_property",
+        "chk_finance_payouts_scope",
+        "chk_finance_visibility_requires_permission",
+        "chk_finance_visibility_scope_permission",
+        "chk_finance_visibility_scope_shape",
+        "fk_finance_billing_entitlements_identity_entitlement",
+        "fk_finance_commission_changes_actor",
+        "fk_finance_commission_changes_rule",
+        "fk_finance_payment_settings_provider_account_property",
+        "fk_finance_payments_booking_property",
+        "fk_finance_payments_provider_account_property",
+        "fk_finance_payout_settings_organization_provider_account",
+        "fk_finance_payout_settings_property_provider_account",
+        "fk_finance_payouts_booking_property",
+        "fk_finance_payouts_organization_payout_setting",
+        "fk_finance_payouts_organization_provider_account",
+        "fk_finance_payouts_payment_booking",
+        "fk_finance_payouts_payment_property",
+        "fk_finance_payouts_property_payout_setting",
+        "fk_finance_payouts_property_provider_account",
+        "fk_finance_visibility_permission_key",
+        "fk_finance_visibility_property",
+        "uq_finance_billing_entitlements_source",
+        "uq_finance_commission_rules_source",
+        "uq_finance_payment_provider_accounts_id_organization",
+        "uq_finance_payment_provider_accounts_id_property",
+        "uq_finance_payments_id_property",
+        "uq_finance_payments_id_property_booking",
+        "uq_finance_payments_source",
+        "uq_finance_payout_settings_id_organization",
+        "uq_finance_payout_settings_id_property",
+        "uq_finance_payouts_id_property",
+        "uq_finance_payouts_source",
+      ]);
+
+      const { rows: financeForeignKeyShapes } = await verifyClient.query<{
+        constraint_name: string;
+        table_name: string;
+        columns: string;
+        referenced_schema: string;
+        referenced_table: string;
+        referenced_columns: string;
+      }>(
+        `SELECT
+           con.conname AS constraint_name,
+           src.relname AS table_name,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.conrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS columns,
+           ref_ns.nspname AS referenced_schema,
+           ref.relname AS referenced_table,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.confkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.confrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS referenced_columns
+         FROM pg_constraint con
+         JOIN pg_class src ON src.oid = con.conrelid
+         JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+         JOIN pg_class ref ON ref.oid = con.confrelid
+         JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace
+         WHERE src_ns.nspname = 'finance'
+           AND con.contype = 'f'
+           AND con.conname IN (
+             'fk_finance_billing_entitlements_identity_entitlement',
+             'fk_finance_commission_changes_rule',
+             'fk_finance_payment_settings_provider_account_property',
+             'fk_finance_payments_booking_property',
+             'fk_finance_payments_provider_account_property',
+             'fk_finance_payout_settings_organization_provider_account',
+             'fk_finance_payout_settings_property_provider_account',
+             'fk_finance_payouts_booking_property',
+             'fk_finance_payouts_organization_payout_setting',
+             'fk_finance_payouts_organization_provider_account',
+             'fk_finance_payouts_payment_booking',
+             'fk_finance_payouts_payment_property',
+             'fk_finance_payouts_property_payout_setting',
+             'fk_finance_payouts_property_provider_account',
+             'fk_finance_visibility_permission_key',
+             'fk_finance_visibility_property'
+           )
+         ORDER BY con.conname`,
+      );
+
+      expect(financeForeignKeyShapes).toEqual([
+        {
+          columns: "identity_entitlement_id",
+          constraint_name: "fk_finance_billing_entitlements_identity_entitlement",
+          referenced_columns: "id",
+          referenced_schema: "identity",
+          referenced_table: "product_entitlements",
+          table_name: "billing_entitlements",
+        },
+        {
+          columns: "commission_rule_id",
+          constraint_name: "fk_finance_commission_changes_rule",
+          referenced_columns: "id",
+          referenced_schema: "finance",
+          referenced_table: "commission_rules",
+          table_name: "commission_rate_changes",
+        },
+        {
+          columns: "provider_account_id,property_id",
+          constraint_name: "fk_finance_payment_settings_provider_account_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_provider_accounts",
+          table_name: "payment_settings",
+        },
+        {
+          columns: "guest_booking_id,property_id",
+          constraint_name: "fk_finance_payments_booking_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "booking",
+          referenced_table: "guest_bookings",
+          table_name: "payments",
+        },
+        {
+          columns: "provider_account_id,property_id",
+          constraint_name: "fk_finance_payments_provider_account_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_provider_accounts",
+          table_name: "payments",
+        },
+        {
+          columns: "organization_provider_account_id,organization_id",
+          constraint_name: "fk_finance_payout_settings_organization_provider_account",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_provider_accounts",
+          table_name: "payout_settings",
+        },
+        {
+          columns: "property_provider_account_id,property_id",
+          constraint_name: "fk_finance_payout_settings_property_provider_account",
+          referenced_columns: "id,property_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_provider_accounts",
+          table_name: "payout_settings",
+        },
+        {
+          columns: "guest_booking_id,related_property_id",
+          constraint_name: "fk_finance_payouts_booking_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "booking",
+          referenced_table: "guest_bookings",
+          table_name: "payouts",
+        },
+        {
+          columns: "payout_setting_id,organization_id",
+          constraint_name: "fk_finance_payouts_organization_payout_setting",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "finance",
+          referenced_table: "payout_settings",
+          table_name: "payouts",
+        },
+        {
+          columns: "organization_provider_account_id,organization_id",
+          constraint_name: "fk_finance_payouts_organization_provider_account",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_provider_accounts",
+          table_name: "payouts",
+        },
+        {
+          columns: "payment_id,related_property_id,guest_booking_id",
+          constraint_name: "fk_finance_payouts_payment_booking",
+          referenced_columns: "id,property_id,guest_booking_id",
+          referenced_schema: "finance",
+          referenced_table: "payments",
+          table_name: "payouts",
+        },
+        {
+          columns: "payment_id,related_property_id",
+          constraint_name: "fk_finance_payouts_payment_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "finance",
+          referenced_table: "payments",
+          table_name: "payouts",
+        },
+        {
+          columns: "payout_setting_id,property_id",
+          constraint_name: "fk_finance_payouts_property_payout_setting",
+          referenced_columns: "id,property_id",
+          referenced_schema: "finance",
+          referenced_table: "payout_settings",
+          table_name: "payouts",
+        },
+        {
+          columns: "property_provider_account_id,property_id",
+          constraint_name: "fk_finance_payouts_property_provider_account",
+          referenced_columns: "id,property_id",
+          referenced_schema: "finance",
+          referenced_table: "payment_provider_accounts",
+          table_name: "payouts",
+        },
+        {
+          columns: "required_permission_key",
+          constraint_name: "fk_finance_visibility_permission_key",
+          referenced_columns: "key",
+          referenced_schema: "identity",
+          referenced_table: "permission_catalog",
+          table_name: "finance_visibility_read_model",
+        },
+        {
+          columns: "property_id",
+          constraint_name: "fk_finance_visibility_property",
+          referenced_columns: "id",
+          referenced_schema: "hotel_catalog",
+          referenced_table: "properties",
+          table_name: "finance_visibility_read_model",
+        },
+      ]);
+
+      const { rows: financeForeignKeySchemas } = await verifyClient.query<{
+        constraint_name: string;
+        referenced_schema: string;
+      }>(
+        `SELECT DISTINCT
+           tc.constraint_name,
+           ccu.table_schema AS referenced_schema
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.constraint_column_usage ccu
+           ON ccu.constraint_schema = tc.constraint_schema
+          AND ccu.constraint_name = tc.constraint_name
+         WHERE tc.table_schema = 'finance'
+           AND tc.constraint_type = 'FOREIGN KEY'
+           AND ccu.table_schema NOT IN ('booking', 'finance', 'hotel_catalog', 'identity')
+         ORDER BY tc.constraint_name`,
+      );
+
+      expect(financeForeignKeySchemas).toHaveLength(0);
+
+      const { rows: financePermissionKeys } = await verifyClient.query<{ key: string }>(
+        `SELECT key
+         FROM identity.permission_catalog
+         WHERE key IN (
+           'affiliate.payout.manage',
+           'marketplace.finance.read',
+           'platform.finance.read',
+           'pms.finance.read'
+         )
+         ORDER BY key`,
+      );
+
+      expect(financePermissionKeys.map((row) => row.key)).toEqual([
+        "affiliate.payout.manage",
+        "marketplace.finance.read",
+        "platform.finance.read",
+        "pms.finance.read",
+      ]);
+
+      const organizationId = "11111111-1111-4111-8111-111111111111";
+      const propertyOneId = "22222222-2222-4222-8222-222222222222";
+      const propertyTwoId = "33333333-3333-4333-8333-333333333333";
+      const propertyProviderAccountId = "44444444-4444-4444-8444-444444444444";
+      const bookingOneId = "55555555-5555-4555-8555-555555555555";
+      const bookingTwoId = "66666666-6666-4666-8666-666666666666";
+      const paymentId = "77777777-7777-4777-8777-777777777777";
+
+      await verifyClient.query(
+        `INSERT INTO identity.organizations (id, kind, name, slug)
+         VALUES ($1, 'hotel_group', 'Finance Test Group', 'finance-test-group')`,
+        [organizationId],
+      );
+      await verifyClient.query(
+        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+         VALUES
+           ($1, 'finance-property-one', 'Finance Property One'),
+           ($2, 'finance-property-two', 'Finance Property Two')`,
+        [propertyOneId, propertyTwoId],
+      );
+      await verifyClient.query(
+        `INSERT INTO finance.payment_provider_accounts
+           (id, property_id, account_scope, provider, status, onboarding_status, default_currency)
+         VALUES ($1, $2, 'property', 'vayada', 'active', 'completed', 'USD')`,
+        [propertyProviderAccountId, propertyOneId],
+      );
+      await verifyClient.query(
+        `INSERT INTO finance.payment_settings
+           (property_id, provider_account_id, payments_enabled, accepted_methods, default_currency)
+         VALUES (
+           $1,
+           $2,
+           TRUE,
+           ARRAY['card', 'pay_at_property', 'xendit', 'manual_card', 'other']::TEXT[],
+           'USD'
+         )`,
+        [propertyOneId, propertyProviderAccountId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO finance.payment_settings
+             (property_id, provider_account_id, default_currency)
+           VALUES ($1, $2, 'USD')`,
+          [propertyTwoId, propertyProviderAccountId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+
+      await verifyClient.query(
+        `INSERT INTO booking.guest_bookings
+           (id, property_id, public_reference, lifecycle_status, check_in, check_out, currency)
+         VALUES
+           ($1, $2, 'FIN-BOOKING-ONE', 'confirmed', DATE '2026-01-01', DATE '2026-01-02', 'USD'),
+           ($3, $2, 'FIN-BOOKING-TWO', 'confirmed', DATE '2026-01-03', DATE '2026-01-04', 'USD')`,
+        [bookingOneId, propertyOneId, bookingTwoId],
+      );
+      await verifyClient.query(
+        `INSERT INTO finance.payments
+           (id, property_id, guest_booking_id, payment_kind, status, amount, net_amount, currency)
+         VALUES ($1, $2, $3, 'full', 'paid', 100, 95, 'USD')`,
+        [paymentId, propertyOneId, bookingOneId],
+      );
+      await verifyClient.query(
+        `INSERT INTO finance.payouts
+           (
+             owner_scope, organization_id, related_property_id, payment_id,
+             guest_booking_id, payout_status, amount, net_amount, currency
+           )
+         VALUES ('organization', $1, $2, $3, $4, 'paid', 100, 95, 'USD')`,
+        [organizationId, propertyOneId, paymentId, bookingOneId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO finance.payouts
+             (owner_scope, organization_id, payment_id, payout_status, amount, currency)
+           VALUES ('organization', $1, $2, 'paid', 100, 'USD')`,
+          [organizationId, paymentId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO finance.payouts
+             (
+               owner_scope, organization_id, related_property_id, payment_id,
+               guest_booking_id, payout_status, amount, currency
+             )
+           VALUES ('organization', $1, $2, $3, $4, 'paid', 100, 'USD')`,
+          [organizationId, propertyOneId, paymentId, bookingTwoId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+
+      await verifyClient.query(
+        `INSERT INTO finance.finance_visibility_read_model
+           (
+             organization_id, property_id, visibility_scope, resource_type,
+             resource_id, required_permission_key, currency
+           )
+         VALUES ($1, $2, 'property_finance', 'property', $3, 'pms.finance.read', 'USD')`,
+        [organizationId, propertyOneId, propertyOneId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO finance.finance_visibility_read_model
+             (
+               organization_id, visibility_scope, resource_type,
+               resource_id, required_permission_key, currency
+             )
+           VALUES ($1, 'platform_finance', 'platform', 'platform', 'pms.finance.read', 'USD')`,
+          [organizationId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      const { rows: financeVisibilityPermissionColumns } = await verifyClient.query<{
+        column_name: string;
+      }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'finance'
+           AND table_name = 'finance_visibility_read_model'
+           AND column_name IN ('visibility_scope', 'required_permission_key')
+         ORDER BY ordinal_position`,
+      );
+
+      expect(financeVisibilityPermissionColumns).toEqual([
+        { column_name: "visibility_scope" },
+        { column_name: "required_permission_key" },
+      ]);
+
+      const { rows: financeVisibilitySensitiveColumns } = await verifyClient.query<{
+        column_name: string;
+      }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = 'finance'
+           AND table_name = 'finance_visibility_read_model'
+           AND column_name IN (
+             'first_name', 'last_name', 'email', 'phone',
+             'guest_name', 'guest_email', 'provider_account_id',
+             'provider_transaction_id', 'provider_payment_intent_id',
+             'billing_customer_ref', 'billing_subscription_ref',
+             'sensitive_config_ref', 'sensitive_destination_ref',
+             'processor_fee_breakdown', 'risk_review', 'raw_payload'
+           )`,
+      );
+
+      expect(financeVisibilitySensitiveColumns).toHaveLength(0);
     } finally {
       await verifyClient.end();
     }
