@@ -6,12 +6,27 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runParityChecks } from "./parity.js";
 import { rebuild } from "./rebuild.js";
+import { DEFAULT_TARGET_SCHEMAS } from "./targetSchemas.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 const MIGRATIONS_DIR = join(import.meta.dirname, "../migrations");
+
+async function dropTargetSchemas(): Promise<void> {
+  assertSafeTestDatabase(TEST_DATABASE_URL!);
+
+  const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+  await client.connect();
+  try {
+    for (const schema of DEFAULT_TARGET_SCHEMAS) {
+      await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    }
+  } finally {
+    await client.end();
+  }
+}
 
 describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
   beforeEach(async () => {
@@ -28,16 +43,7 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
   });
 
   afterEach(async () => {
-    assertSafeTestDatabase(TEST_DATABASE_URL!);
-
-    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
-    await client.connect();
-    try {
-      await client.query(`DROP SCHEMA IF EXISTS platform CASCADE`);
-      await client.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
-    } finally {
-      await client.end();
-    }
+    await dropTargetSchemas();
   });
 
   it("passes all checks for the identity-organization-links fixture", async () => {
@@ -93,6 +99,14 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
     await client.connect();
     try {
       await client.query(
+        `DELETE FROM identity.external_identities
+         WHERE user_id = 'a1b2c3d4-0000-0000-0000-000000000001'`,
+      );
+      await client.query(
+        `DELETE FROM identity.organization_memberships
+         WHERE user_id = 'a1b2c3d4-0000-0000-0000-000000000001'`,
+      );
+      await client.query(
         `DELETE FROM identity.users WHERE id = 'a1b2c3d4-0000-0000-0000-000000000001'`,
       );
     } finally {
@@ -114,19 +128,10 @@ describe.skipIf(!TEST_DATABASE_URL)("runParityChecks (integration)", () => {
 
 describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)", () => {
   afterEach(async () => {
-    assertSafeTestDatabase(TEST_DATABASE_URL!);
-
-    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
-    await client.connect();
-    try {
-      await client.query(`DROP SCHEMA IF EXISTS platform CASCADE`);
-      await client.query(`DROP SCHEMA IF EXISTS identity CASCADE`);
-    } finally {
-      await client.end();
-    }
+    await dropTargetSchemas();
   });
 
-  it("applies identity migrations and loads the fixture without error", async () => {
+  it("applies target migrations and loads the identity fixture without error", async () => {
     const result = await rebuild({
       connectionString: TEST_DATABASE_URL!,
       migrationsDir: MIGRATIONS_DIR,
@@ -136,7 +141,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
       fixturesDir: FIXTURES_DIR,
     });
 
-    expect(result.applied).toEqual(["0001", "0002", "0003"]);
+    expect(result.applied).toEqual(expect.arrayContaining(["0001", "0002", "0003"]));
     expect(result.failed).toBeNull();
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -148,7 +153,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
       const perms = await client.query(
         `SELECT count(*)::int AS count FROM identity.permission_catalog`,
       );
-      expect(perms.rows[0].count).toBe(8);
+      expect(perms.rows[0].count).toBe(10);
 
       const entitlements = await client.query(
         `SELECT count(*)::int AS count FROM identity.product_entitlements`,

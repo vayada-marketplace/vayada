@@ -4,4 +4,5 @@ export const DEFAULT_TARGET_SCHEMAS = [
   "hotel_catalog",
   "booking",
   "pms",
+  "finance",
 ] as const;
