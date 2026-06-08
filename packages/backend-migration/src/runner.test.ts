@@ -7,6 +7,7 @@ import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { computeChecksum, discoverMigrations, runMigrations } from "./runner.js";
+import { DEFAULT_TARGET_SCHEMAS } from "./targetSchemas.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 // ---------------------------------------------------------------------------
@@ -83,7 +84,6 @@ describe("discoverMigrations", () => {
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REAL_MIGRATIONS_DIR = join(__dirname, "../migrations");
-const TARGET_SCHEMAS = ["platform", "identity", "hotel_catalog", "booking"];
 
 describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
   let tmpDir: string;
@@ -219,7 +219,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
-      for (const schema of TARGET_SCHEMAS) {
+      for (const schema of DEFAULT_TARGET_SCHEMAS) {
         await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       }
     } finally {
@@ -227,13 +227,13 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     }
   });
 
-  it("applies booking checkout DDL and keeps summary rows free of guest PII columns", async () => {
+  it("applies booking and PMS DDL with private operational data boundaries", async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
-      for (const schema of TARGET_SCHEMAS) {
+      for (const schema of DEFAULT_TARGET_SCHEMAS) {
         await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       }
     } finally {
@@ -249,6 +249,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
 
     expect(result.failed).toBeNull();
     expect(result.applied).toContain("0005");
+    expect(result.applied).toContain("0006");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();
@@ -341,6 +342,267 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(piiColumns).toHaveLength(0);
+
+      const { rows: pmsTableRows } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'pms'
+         ORDER BY table_name`,
+      );
+
+      expect(pmsTableRows.map((row) => row.table_name)).toEqual([
+        "booking_checkin_records",
+        "booking_checkout_charges",
+        "booking_checkout_records",
+        "booking_notes_private",
+        "channel_booking_mappings",
+        "channel_connections",
+        "channel_rate_plan_mappings",
+        "channel_room_type_mappings",
+        "channel_sync_status",
+        "checkin_checklist_templates",
+        "checkout_inspection_templates",
+        "inventory_days",
+        "message_attachments",
+        "message_threads",
+        "messages",
+        "operational_booking_assignments",
+        "rate_plans",
+        "rate_rules",
+        "room_blocks",
+        "room_types",
+        "rooms",
+      ]);
+
+      const { rows: pmsIntegrityConstraints } = await verifyClient.query<{
+        constraint_name: string;
+      }>(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = 'pms'
+           AND constraint_name IN (
+             'chk_pms_operational_assignments_position',
+             'fk_pms_operational_assignments_booking_property',
+             'fk_pms_operational_assignments_room_type_property',
+             'fk_pms_rate_rules_rate_plan_property',
+             'fk_pms_room_blocks_room_property',
+             'fk_pms_checkin_records_assignment_property',
+             'fk_pms_checkout_charges_assignment_property',
+             'fk_pms_checkout_records_assignment_property',
+             'fk_pms_operational_assignments_rate_plan_property',
+             'fk_pms_operational_assignments_room_property',
+             'uq_pms_operational_assignments_booking_position',
+             'uq_pms_operational_assignments_id_property_booking',
+             'uq_pms_rate_plans_id_property_room_type',
+             'uq_pms_rooms_id_property_room_type',
+             'fk_pms_booking_notes_booking_property',
+             'fk_pms_messages_thread_property',
+             'fk_pms_channel_booking_mappings_booking_property',
+             'fk_pms_channel_booking_mappings_assignment_property',
+             'fk_pms_channel_room_mappings_connection_property',
+             'fk_pms_channel_rate_mappings_rate_plan_property',
+             'fk_pms_channel_sync_status_connection_property',
+             'uq_pms_channel_booking_mappings_external_slot',
+             'uq_pms_channel_rate_mappings_external'
+           )
+         ORDER BY constraint_name`,
+      );
+
+      expect(pmsIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_pms_operational_assignments_position",
+        "fk_pms_booking_notes_booking_property",
+        "fk_pms_channel_booking_mappings_assignment_property",
+        "fk_pms_channel_booking_mappings_booking_property",
+        "fk_pms_channel_rate_mappings_rate_plan_property",
+        "fk_pms_channel_room_mappings_connection_property",
+        "fk_pms_channel_sync_status_connection_property",
+        "fk_pms_checkin_records_assignment_property",
+        "fk_pms_checkout_charges_assignment_property",
+        "fk_pms_checkout_records_assignment_property",
+        "fk_pms_messages_thread_property",
+        "fk_pms_operational_assignments_booking_property",
+        "fk_pms_operational_assignments_rate_plan_property",
+        "fk_pms_operational_assignments_room_property",
+        "fk_pms_operational_assignments_room_type_property",
+        "fk_pms_rate_rules_rate_plan_property",
+        "fk_pms_room_blocks_room_property",
+        "uq_pms_channel_booking_mappings_external_slot",
+        "uq_pms_channel_rate_mappings_external",
+        "uq_pms_operational_assignments_booking_position",
+        "uq_pms_operational_assignments_id_property_booking",
+        "uq_pms_rate_plans_id_property_room_type",
+        "uq_pms_rooms_id_property_room_type",
+      ]);
+
+      const { rows: assignmentPositionDefaults } = await verifyClient.query<{
+        default_expr: string;
+      }>(
+        `SELECT pg_get_expr(def.adbin, def.adrelid) AS default_expr
+         FROM pg_namespace ns
+         JOIN pg_class rel ON rel.relnamespace = ns.oid
+         JOIN pg_attribute att ON att.attrelid = rel.oid
+         JOIN pg_attrdef def
+           ON def.adrelid = rel.oid
+          AND def.adnum = att.attnum
+         WHERE ns.nspname = 'pms'
+           AND rel.relname = 'operational_booking_assignments'
+           AND att.attname = 'position'`,
+      );
+
+      expect(assignmentPositionDefaults).toEqual([{ default_expr: "1" }]);
+
+      const { rows: pmsForeignKeyShapes } = await verifyClient.query<{
+        constraint_name: string;
+        table_name: string;
+        columns: string;
+        referenced_schema: string;
+        referenced_table: string;
+        referenced_columns: string;
+      }>(
+        `SELECT
+           con.conname AS constraint_name,
+           src.relname AS table_name,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.conrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS columns,
+           ref_ns.nspname AS referenced_schema,
+           ref.relname AS referenced_table,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.confkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.confrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS referenced_columns
+         FROM pg_constraint con
+         JOIN pg_class src ON src.oid = con.conrelid
+         JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+         JOIN pg_class ref ON ref.oid = con.confrelid
+         JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace
+         WHERE src_ns.nspname = 'pms'
+           AND con.contype = 'f'
+           AND con.conname IN (
+             'fk_pms_checkin_records_assignment_property',
+             'fk_pms_checkout_charges_assignment_property',
+             'fk_pms_checkout_records_assignment_property',
+             'fk_pms_channel_booking_mappings_assignment_property',
+             'fk_pms_operational_assignments_rate_plan_property',
+             'fk_pms_operational_assignments_room_property',
+             'fk_pms_channel_rate_mappings_rate_plan_property',
+             'fk_pms_rate_rules_rate_plan_property',
+             'fk_pms_room_blocks_room_property'
+           )
+         ORDER BY con.conname`,
+      );
+
+      expect(pmsForeignKeyShapes).toEqual([
+        {
+          columns: "assignment_id,property_id,guest_booking_id",
+          constraint_name: "fk_pms_channel_booking_mappings_assignment_property",
+          referenced_columns: "id,property_id,guest_booking_id",
+          referenced_schema: "pms",
+          referenced_table: "operational_booking_assignments",
+          table_name: "channel_booking_mappings",
+        },
+        {
+          columns: "rate_plan_id,property_id,room_type_id",
+          constraint_name: "fk_pms_channel_rate_mappings_rate_plan_property",
+          referenced_columns: "id,property_id,room_type_id",
+          referenced_schema: "pms",
+          referenced_table: "rate_plans",
+          table_name: "channel_rate_plan_mappings",
+        },
+        {
+          columns: "assignment_id,property_id,guest_booking_id",
+          constraint_name: "fk_pms_checkin_records_assignment_property",
+          referenced_columns: "id,property_id,guest_booking_id",
+          referenced_schema: "pms",
+          referenced_table: "operational_booking_assignments",
+          table_name: "booking_checkin_records",
+        },
+        {
+          columns: "assignment_id,property_id,guest_booking_id",
+          constraint_name: "fk_pms_checkout_charges_assignment_property",
+          referenced_columns: "id,property_id,guest_booking_id",
+          referenced_schema: "pms",
+          referenced_table: "operational_booking_assignments",
+          table_name: "booking_checkout_charges",
+        },
+        {
+          columns: "assignment_id,property_id,guest_booking_id",
+          constraint_name: "fk_pms_checkout_records_assignment_property",
+          referenced_columns: "id,property_id,guest_booking_id",
+          referenced_schema: "pms",
+          referenced_table: "operational_booking_assignments",
+          table_name: "booking_checkout_records",
+        },
+        {
+          columns: "rate_plan_id,property_id,room_type_id",
+          constraint_name: "fk_pms_operational_assignments_rate_plan_property",
+          referenced_columns: "id,property_id,room_type_id",
+          referenced_schema: "pms",
+          referenced_table: "rate_plans",
+          table_name: "operational_booking_assignments",
+        },
+        {
+          columns: "room_id,property_id,room_type_id",
+          constraint_name: "fk_pms_operational_assignments_room_property",
+          referenced_columns: "id,property_id,room_type_id",
+          referenced_schema: "pms",
+          referenced_table: "rooms",
+          table_name: "operational_booking_assignments",
+        },
+        {
+          columns: "rate_plan_id,property_id,room_type_id",
+          constraint_name: "fk_pms_rate_rules_rate_plan_property",
+          referenced_columns: "id,property_id,room_type_id",
+          referenced_schema: "pms",
+          referenced_table: "rate_plans",
+          table_name: "rate_rules",
+        },
+        {
+          columns: "room_id,property_id,room_type_id",
+          constraint_name: "fk_pms_room_blocks_room_property",
+          referenced_columns: "id,property_id,room_type_id",
+          referenced_schema: "pms",
+          referenced_table: "rooms",
+          table_name: "room_blocks",
+        },
+      ]);
+
+      const { rows: pmsForeignKeySchemas } = await verifyClient.query<{
+        constraint_name: string;
+        referenced_schema: string;
+      }>(
+        `SELECT DISTINCT
+           tc.constraint_name,
+           ccu.table_schema AS referenced_schema
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.constraint_column_usage ccu
+           ON ccu.constraint_schema = tc.constraint_schema
+          AND ccu.constraint_name = tc.constraint_name
+         WHERE tc.table_schema = 'pms'
+           AND tc.constraint_type = 'FOREIGN KEY'
+           AND ccu.table_schema NOT IN ('booking', 'hotel_catalog', 'identity', 'pms')
+         ORDER BY tc.constraint_name`,
+      );
+
+      expect(pmsForeignKeySchemas).toHaveLength(0);
+
+      const { rows: pmsReadModels } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'pms'
+           AND table_name LIKE '%read_model%'`,
+      );
+
+      expect(pmsReadModels).toHaveLength(0);
     } finally {
       await verifyClient.end();
     }

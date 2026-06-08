@@ -4,13 +4,12 @@ import { fileURLToPath } from "node:url";
 
 import { rebuild } from "../rebuild.js";
 import { type MigrationEnvironment } from "../runner.js";
+import { DEFAULT_TARGET_SCHEMAS } from "../targetSchemas.js";
 import { assertValidEnvironment } from "./utils.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MIGRATIONS_DIR = join(__dirname, "../../migrations");
 const DEFAULT_FIXTURES_DIR = join(__dirname, "../../fixtures");
-
-const DEFAULT_SCHEMAS = ["platform", "identity", "hotel_catalog", "booking"] as const;
 
 function parseArgs(argv: string[]): {
   env: MigrationEnvironment;
@@ -26,7 +25,7 @@ function parseArgs(argv: string[]): {
   let migrationsDir = DEFAULT_MIGRATIONS_DIR;
   let fixturesDir = DEFAULT_FIXTURES_DIR;
   let fixtures: string | null = null;
-  let schemas: string[] = [...DEFAULT_SCHEMAS];
+  let schemas: string[] = [...DEFAULT_TARGET_SCHEMAS];
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--env" && args[i + 1]) {
