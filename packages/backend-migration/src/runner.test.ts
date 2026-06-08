@@ -7,6 +7,7 @@ import pg from "pg";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { computeChecksum, discoverMigrations, runMigrations } from "./runner.js";
+import { DEFAULT_TARGET_SCHEMAS } from "./targetSchemas.js";
 import { assertSafeTestDatabase } from "./testUtils.js";
 
 // ---------------------------------------------------------------------------
@@ -83,7 +84,6 @@ describe("discoverMigrations", () => {
 const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REAL_MIGRATIONS_DIR = join(__dirname, "../migrations");
-const TARGET_SCHEMAS = ["platform", "identity", "hotel_catalog", "booking", "pms"];
 
 describe.skipIf(!TEST_DATABASE_URL)("runMigrations (integration)", () => {
   let tmpDir: string;
@@ -219,7 +219,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
-      for (const schema of TARGET_SCHEMAS) {
+      for (const schema of DEFAULT_TARGET_SCHEMAS) {
         await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       }
     } finally {
@@ -233,7 +233,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await client.connect();
     try {
-      for (const schema of TARGET_SCHEMAS) {
+      for (const schema of DEFAULT_TARGET_SCHEMAS) {
         await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       }
     } finally {
@@ -381,6 +381,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
          FROM information_schema.table_constraints
          WHERE table_schema = 'pms'
            AND constraint_name IN (
+             'chk_pms_operational_assignments_position',
              'fk_pms_operational_assignments_booking_property',
              'fk_pms_operational_assignments_room_type_property',
              'fk_pms_rate_rules_rate_plan_property',
@@ -408,6 +409,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(pmsIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_pms_operational_assignments_position",
         "fk_pms_booking_notes_booking_property",
         "fk_pms_channel_booking_mappings_assignment_property",
         "fk_pms_channel_booking_mappings_booking_property",
@@ -431,6 +433,23 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "uq_pms_rate_plans_id_property_room_type",
         "uq_pms_rooms_id_property_room_type",
       ]);
+
+      const { rows: assignmentPositionDefaults } = await verifyClient.query<{
+        default_expr: string;
+      }>(
+        `SELECT pg_get_expr(def.adbin, def.adrelid) AS default_expr
+         FROM pg_namespace ns
+         JOIN pg_class rel ON rel.relnamespace = ns.oid
+         JOIN pg_attribute att ON att.attrelid = rel.oid
+         JOIN pg_attrdef def
+           ON def.adrelid = rel.oid
+          AND def.adnum = att.attnum
+         WHERE ns.nspname = 'pms'
+           AND rel.relname = 'operational_booking_assignments'
+           AND att.attname = 'position'`,
+      );
+
+      expect(assignmentPositionDefaults).toEqual([{ default_expr: "1" }]);
 
       const { rows: pmsForeignKeyShapes } = await verifyClient.query<{
         constraint_name: string;

@@ -201,7 +201,7 @@ CREATE TABLE pms.operational_booking_assignments (
   room_type_id          UUID        NOT NULL,
   rate_plan_id          UUID,
   room_id               UUID,
-  position              INTEGER     NOT NULL DEFAULT 0 CHECK (position >= 0),
+  position              INTEGER     NOT NULL DEFAULT 1,
   assignment_status     TEXT        NOT NULL DEFAULT 'pending'
                             CHECK (assignment_status IN (
                               'pending', 'assigned', 'checked_in', 'in_house',
@@ -218,6 +218,8 @@ CREATE TABLE pms.operational_booking_assignments (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_pms_operational_assignments_booking_position
     UNIQUE (guest_booking_id, position),
+  CONSTRAINT chk_pms_operational_assignments_position
+    CHECK (position >= 1),
   CONSTRAINT uq_pms_operational_assignments_id_property
     UNIQUE (id, property_id),
   CONSTRAINT uq_pms_operational_assignments_id_property_booking
