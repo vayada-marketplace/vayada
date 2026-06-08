@@ -2,6 +2,44 @@ import type pg from "pg";
 
 import type { ExpectedTarget, ParityFinding, ParityHandlerContext } from "../../parityTypes.js";
 
+const IDENTITY_UNIQUENESS_CHECKS = [
+  "external_identities",
+  "organization_memberships",
+  "organization_resource_links",
+  "product_entitlements",
+  "source_external_identities",
+  "source_organization_memberships",
+  "source_organization_resource_links",
+] as const;
+
+const ALLOWED_IDENTITY_UNIQUENESS_CHECKS = new Set<string>(IDENTITY_UNIQUENESS_CHECKS);
+
+function validateIdentityUniquenessChecks(
+  checks: string[] | undefined,
+  findings: ParityFinding[],
+): boolean {
+  if (!checks) return true;
+
+  let isValid = true;
+  for (const check of checks) {
+    if (ALLOWED_IDENTITY_UNIQUENESS_CHECKS.has(check)) continue;
+
+    isValid = false;
+    findings.push({
+      severity: "fail",
+      code: "INVALID_FIXTURE_CONFIG",
+      owner: "Parity harness",
+      targetObject: "expected-target.json",
+      message: `Unknown uniquenessChecks entry: ${check}`,
+      expected: `One of: ${IDENTITY_UNIQUENESS_CHECKS.join(", ")}`,
+      actual: check,
+      suggestedAction: "Fix uniquenessChecks in expected-target.json.",
+    });
+  }
+
+  return isValid;
+}
+
 // Identity-domain uniqueness checks. These mirror the constraints in the
 // identity DDL and catch source ambiguity before future product transforms
 // silently choose a tenant/resource owner.
@@ -12,6 +50,7 @@ async function checkIdentityUniqueness(
 ): Promise<void> {
   const checks = expected.uniquenessChecks;
   const runAll = !checks;
+  if (!validateIdentityUniquenessChecks(checks, findings)) return;
 
   if (runAll || checks.includes("external_identities")) {
     const extIdDupes = await client.query<{ count: string }>(`

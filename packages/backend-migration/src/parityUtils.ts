@@ -48,7 +48,7 @@ export async function checkRowCounts(
       findings.push({
         severity: "fail",
         code: "ROW_COUNT_MISMATCH",
-        owner: "Identity/auth",
+        owner: "Parity harness",
         targetObject: tableRef,
         message: `Row count mismatch for ${tableRef}`,
         expected: String(expectedCount),
@@ -77,7 +77,7 @@ export async function checkIdStability(
         findings.push({
           severity: "fail",
           code: "ID_STABILITY_VIOLATION",
-          owner: "Identity/auth",
+          owner: "Parity harness",
           targetObject: tableRef,
           message: `Source ID ${id} not found in ${tableRef} — ID was not preserved`,
           expected: `Row with id = ${id}`,
