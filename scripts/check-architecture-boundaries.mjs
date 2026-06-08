@@ -107,6 +107,28 @@ const checks = [
     ],
   },
   {
+    name: "Marketplace domain must not depend on PMS implementations",
+    roots: ["packages/domain-marketplace/src", "apps/api/src/domains/marketplace"],
+    include: () => true,
+    rules: [
+      forbiddenPattern(
+        "PMS database env",
+        /\bPMS_DATABASE_URL\b/,
+        "Marketplace domain must not open PMS database connections; use CollaborationAffiliatePort instead",
+      ),
+      forbiddenPattern(
+        "PMS table dependency",
+        productTablePattern(),
+        "Marketplace domain must not reference PMS table names; use typed command/port boundaries",
+      ),
+      forbiddenImport(
+        "PMS implementation import",
+        isPmsImplementationImport,
+        "Marketplace domain must not import PMS implementations or adapters; depend on CollaborationAffiliatePort, not PMS internals",
+      ),
+    ],
+  },
+  {
     name: "Target product domains must not write identity tables directly",
     roots: [
       "apps/api/src/routes",

@@ -2,8 +2,15 @@ import { expect, test } from "@playwright/test";
 
 import {
   getCanonicalHostRedirectUrl,
+  publicHotelPageHreflangUrls,
+  publicHotelPageUrl,
+  publicHotelSitemapEntries,
   resolvePublicHotelUrls,
 } from "../../../apps/booking-web/lib/server/publicUrls";
+import {
+  privateDisallowRules,
+  publicAllowRules,
+} from "../../../apps/booking-web/lib/server/crawlRules";
 
 test.describe("booking-web canonical URL policy", () => {
   test("prefers a verified custom domain for canonical public URLs", () => {
@@ -101,5 +108,84 @@ test.describe("booking-web canonical URL policy", () => {
     expect(
       getCanonicalHostRedirectUrl(policy, new URL("https://book.alpenrose.example/en")),
     ).toBeNull();
+  });
+
+  test("derives localized room-page URLs from the canonical hotel policy", () => {
+    const policy = resolvePublicHotelUrls({
+      requestHost: "hotel-alpenrose.booking.localhost:3002",
+      requestProtocol: "http",
+      slug: "hotel-alpenrose",
+      locale: "en",
+      supportedLocales: ["en", "de"],
+      customDomainUrl: null,
+    });
+
+    expect(publicHotelPageUrl(policy, "/")).toBe(
+      "http://hotel-alpenrose.booking.localhost:3002/en",
+    );
+    expect(publicHotelPageUrl(policy, "/rooms")).toBe(
+      "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
+    );
+    expect(publicHotelPageHreflangUrls(policy, "/rooms")).toEqual({
+      en: "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
+      de: "http://hotel-alpenrose.booking.localhost:3002/de/rooms",
+    });
+  });
+
+  test("exposes seeded hotel and room pages through sitemap entries only", () => {
+    const policy = resolvePublicHotelUrls({
+      requestHost: "hotel-alpenrose.booking.localhost:3002",
+      requestProtocol: "http",
+      slug: "hotel-alpenrose",
+      locale: "en",
+      supportedLocales: ["en", "de"],
+      customDomainUrl: null,
+    });
+
+    expect(publicHotelSitemapEntries(policy)).toEqual([
+      {
+        url: "http://hotel-alpenrose.booking.localhost:3002/en",
+        alternates: {
+          en: "http://hotel-alpenrose.booking.localhost:3002/en",
+          de: "http://hotel-alpenrose.booking.localhost:3002/de",
+        },
+      },
+      {
+        url: "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
+        alternates: {
+          en: "http://hotel-alpenrose.booking.localhost:3002/en/rooms",
+          de: "http://hotel-alpenrose.booking.localhost:3002/de/rooms",
+        },
+      },
+    ]);
+  });
+
+  test("allows public hotel routes and excludes private booking flows from robots", () => {
+    const locales = ["en", "de"];
+
+    expect(publicAllowRules(locales)).toEqual([
+      "/",
+      "/rooms",
+      "/en",
+      "/en/rooms",
+      "/de",
+      "/de/rooms",
+    ]);
+    expect(privateDisallowRules(locales)).toEqual(
+      expect.arrayContaining([
+        "/book",
+        "/en/book",
+        "/de/book",
+        "/payment",
+        "/en/payment",
+        "/booking",
+        "/en/booking",
+        "/booking-status",
+        "/en/booking-status",
+        "/my-booking",
+        "/en/my-booking",
+      ]),
+    );
+    expect(privateDisallowRules(locales)).not.toContain("/rooms");
   });
 });

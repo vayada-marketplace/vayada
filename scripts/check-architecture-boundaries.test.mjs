@@ -240,6 +240,63 @@ test("fails when future marketplace domain code writes identity tables directly"
   }
 });
 
+// ─── VAY-653: Marketplace→PMS affiliate provisioning boundary fixtures ───────────
+
+test("passes when Marketplace domain code imports only CollaborationAffiliatePort (allowed)", () => {
+  const root = createFixtureRoot({
+    "packages/domain-marketplace/src/collaborationRouter.ts": `
+      import type { CollaborationAffiliatePort } from "@vayada/domain-marketplace";
+      export function buildRouter(port: CollaborationAffiliatePort) {
+        return port;
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Architecture boundary check passed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when Marketplace domain code references PMS_DATABASE_URL", () => {
+  const root = createFixtureRoot({
+    "packages/domain-marketplace/src/affiliateProvisioner.ts": `
+      export function provision() {
+        const db = process.env.PMS_DATABASE_URL;
+        return db;
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PMS database/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when Marketplace domain code imports a PMS implementation adapter", () => {
+  const root = createFixtureRoot({
+    "packages/domain-marketplace/src/affiliateProvisioner.ts": `
+      import { createVayadaPmsAdapter } from "@vayada/domain-pms/adapters/vayada";
+      export const adapter = createVayadaPmsAdapter;
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PMS implementations/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ─── VAY-651: Booking dashboard metrics — C04/C05 regression fixtures ─────────
 
 test("allows Booking dashboard route that uses BookingDashboardMetricsReadPort", () => {
