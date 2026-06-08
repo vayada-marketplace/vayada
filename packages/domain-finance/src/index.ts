@@ -291,17 +291,37 @@ export type UpdateBillingPlanCommand = FinanceCommandBase<
   UpdateBillingPlanPayload
 >;
 
+/**
+ * Update the price of a booking add-on. Owner: Finance.
+ *
+ * Replaces direct writes to `booking_addons` from
+ * `hotel_identity_service.update_addon_price()`.  The command carries an
+ * idempotency key so concurrent PMS saves cannot produce duplicate price rows.
+ */
+export type UpdateAddOnPricePayload = {
+  addOnId: string;
+  price: FinanceDecimalAmount;
+  currency: FinanceCurrencyCode;
+};
+
+export type UpdateAddOnPriceCommand = FinanceCommandBase<
+  "finance.add_on.price.update",
+  UpdateAddOnPricePayload
+>;
+
 export type FinanceCommand =
   | UpdatePaymentMethodsCommand
   | UpdateInstantBookCommand
   | UpdatePropertyCurrencyCommand
-  | UpdateBillingPlanCommand;
+  | UpdateBillingPlanCommand
+  | UpdateAddOnPriceCommand;
 
 export const financeCommandTypes = [
   "finance.payment.methods.update",
   "finance.payment.instant_book.update",
   "finance.currency.update",
   "finance.billing.plan.update",
+  "finance.add_on.price.update",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 
 export type FinanceCommandType = (typeof financeCommandTypes)[number];
@@ -390,6 +410,20 @@ export function financeCommandIdempotencyKey(
   return `${commandType}:property:${propertyId}:${suffix}`;
 }
 
+/**
+ * Build a stable idempotency key for UpdateAddOnPriceCommand.
+ * Format: `finance.add_on.price.update:property:<propertyId>:add_on:<addOnId>`.
+ *
+ * Using the propertyId + addOnId pair as the natural key prevents duplicate
+ * price-update commands when PMS retries a save after a transient failure.
+ */
+export function buildUpdateAddOnPriceIdempotencyKey(
+  propertyId: FinancePropertyId,
+  addOnId: string,
+): string {
+  return `finance.add_on.price.update:property:${propertyId}:add_on:${addOnId}`;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -401,6 +435,9 @@ function parseDecimalAmount(value: FinanceDecimalAmount): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     throw new Error(`Invalid decimal amount: ${value}`);
+  }
+  if (parsed < 0) {
+    throw new Error(`Invalid decimal amount: negative value: ${value}`);
   }
   return parsed;
 }

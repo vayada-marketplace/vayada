@@ -31,6 +31,13 @@ export type HotelUtcDateTime = string;
  * by `@vayada/domain-finance` (see `UpdatePropertyCurrencyCommand`).  Setup
  * wizards and onboarding flows that need currency completion status should
  * query the finance domain's payment settings read model.
+ *
+ * `payment` tracks binary setup completion (has at least one payment method
+ * configured).  This flag is DERIVED from `@vayada/domain-finance`
+ * (PaymentSettingsReadPort.getPaymentSettings → enabledPaymentMethods.length >
+ * 0) — it is not a data field owned by the hotel catalog.  The catalog stores
+ * only the boolean completion status; the authoritative list of enabled
+ * payment methods lives in the Finance domain.
  */
 export const HOTEL_CATALOG_SETUP_FIELDS = [
   "name",
@@ -82,6 +89,32 @@ export type HotelIdentityReadModel = {
   status: HotelActiveStatus;
   /** ISO 8601 timestamp of last catalog update. */
   updatedAt: HotelUtcDateTime;
+};
+
+// ---------------------------------------------------------------------------
+// Guest policy read port
+//
+// Read port for guest-visible booking terms and cancellation policy.
+// Owned by the Booking domain; consumed by PMS checkout flows without direct
+// Booking DB access.
+//
+// Disposition note (VAY-652 / VAY-655): terms_text and
+// cancellation_policy_text currently live in `booking_hotels` (Booking DB).
+// Serving them through this port decouples PMS from the Booking DB without
+// requiring an immediate data migration.  The authoritative move to a
+// dedicated Booking-domain table is deferred to the C01 removal slice
+// (VAY-655).
+// ---------------------------------------------------------------------------
+
+/**
+ * Read port for guest-visible booking terms and cancellation policy.
+ * Owned by the Booking domain; consumed by PMS checkout flows without direct
+ * Booking DB access.
+ */
+export type GuestPolicyReadPort = {
+  getGuestPolicy(
+    propertyId: string,
+  ): Promise<{ termsText: string | null; cancellationPolicyText: string | null }>;
 };
 
 // ---------------------------------------------------------------------------

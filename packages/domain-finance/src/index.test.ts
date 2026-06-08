@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FINANCE_BILLING_PLANS,
   FINANCE_PAYMENT_METHODS,
+  buildUpdateAddOnPriceIdempotencyKey,
   calculatePayoutSplit,
   financeCommandIdempotencyKey,
   financeCommandTypes,
@@ -13,6 +14,7 @@ import {
   type FinanceCommandResult,
   type PaymentSettingsReadModel,
   type PaymentSettingsReadPort,
+  type UpdateAddOnPriceCommand,
   type UpdatePaymentMethodsCommand,
 } from "./index.js";
 
@@ -60,6 +62,7 @@ describe("@vayada/domain-finance constants", () => {
     expect(financeCommandTypes).toContain("finance.payment.instant_book.update");
     expect(financeCommandTypes).toContain("finance.currency.update");
     expect(financeCommandTypes).toContain("finance.billing.plan.update");
+    expect(financeCommandTypes).toContain("finance.add_on.price.update");
   });
 });
 
@@ -193,6 +196,17 @@ describe("calculatePayoutSplit — invalid input guards", () => {
       }),
     ).toThrow("Invalid decimal amount: empty string");
   });
+
+  it("throws when totalAmount is negative", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "-100.00",
+        currency: "EUR",
+        billingConfig: BASE_BILLING_CONFIG,
+        channel: "direct",
+      }),
+    ).toThrow("Invalid decimal amount: negative value: -100.00");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -324,5 +338,66 @@ describe("financeCommandIdempotencyKey", () => {
     expect(key).toBe(
       "finance.billing.plan.update:property:prop_abc123:switch-to-commission-2026-07",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UpdateAddOnPriceCommand
+// ---------------------------------------------------------------------------
+
+describe("UpdateAddOnPriceCommand", () => {
+  it("is dispatchable through FinanceCommandBus and carries idempotency key", async () => {
+    const received: UpdateAddOnPriceCommand[] = [];
+
+    const fakeBus: FinanceCommandBus = {
+      async execute(command): Promise<FinanceCommandResult> {
+        if (command.commandType === "finance.add_on.price.update") {
+          received.push(command as UpdateAddOnPriceCommand);
+        }
+        return {
+          status: "accepted",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          propertyId: command.propertyId,
+        };
+      },
+    };
+
+    const cmd: UpdateAddOnPriceCommand = {
+      commandType: "finance.add_on.price.update",
+      commandId: "cmd_addon_001",
+      idempotencyKey: buildUpdateAddOnPriceIdempotencyKey("prop_abc123", "addon_breakfast"),
+      propertyId: "prop_abc123",
+      audit: {
+        actor: { kind: "user", userId: "user_123", organizationId: "org_456" },
+        requestId: "req_addon_001",
+        reason: "Hotel manager updated breakfast add-on price",
+        requestedAt: "2026-06-08T09:00:00.000Z",
+      },
+      payload: {
+        addOnId: "addon_breakfast",
+        price: "25.00",
+        currency: "EUR",
+      },
+    };
+
+    const result = await fakeBus.execute(cmd);
+    expect(result.status).toBe("accepted");
+    expect(result.propertyId).toBe("prop_abc123");
+    expect(received).toHaveLength(1);
+    expect(received[0].payload.addOnId).toBe("addon_breakfast");
+    expect(received[0].payload.price).toBe("25.00");
+    expect(received[0].payload.currency).toBe("EUR");
+  });
+
+  it("produces a stable idempotency key scoped to property and add-on", () => {
+    const key = buildUpdateAddOnPriceIdempotencyKey("prop_abc123", "addon_breakfast");
+    expect(key).toBe("finance.add_on.price.update:property:prop_abc123:add_on:addon_breakfast");
+  });
+
+  it("produces distinct keys for different add-ons on the same property", () => {
+    const key1 = buildUpdateAddOnPriceIdempotencyKey("prop_abc123", "addon_breakfast");
+    const key2 = buildUpdateAddOnPriceIdempotencyKey("prop_abc123", "addon_parking");
+    expect(key1).not.toBe(key2);
   });
 });
