@@ -113,7 +113,7 @@ export type HotelIdentityReadModel = {
  */
 export type GuestPolicyReadPort = {
   getGuestPolicy(
-    propertyId: string,
+    propertyId: HotelId,
   ): Promise<{ termsText: string | null; cancellationPolicyText: string | null }>;
 };
 
@@ -237,5 +237,9 @@ export function hotelCatalogIdempotencyKey(
   propertyId: HotelId,
   suffix: string,
 ): string {
-  return `${commandType}:property:${propertyId}:${suffix}`;
+  const trimmedSuffix = suffix.trim();
+  if (trimmedSuffix.length === 0) {
+    throw new Error("hotelCatalogIdempotencyKey: suffix must not be empty or blank");
+  }
+  return `${commandType}:property:${propertyId}:${trimmedSuffix}`;
 }

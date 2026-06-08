@@ -378,12 +378,21 @@ export function calculatePayoutSplit(input: PayoutSplitInput): PayoutSplitResult
   } else if (input.affiliate) {
     platformFeePct = config.affiliatePlatformFeePercent;
   }
+  platformFeePct = clampPercent(platformFeePct, "platformFeePct");
 
-  const platformFee = round2(total * (platformFeePct / 100));
-  const affiliateCommission = input.affiliate
-    ? round2(total * (input.affiliate.commissionPercent / 100))
+  const affiliateCommissionPct = input.affiliate
+    ? clampPercent(input.affiliate.commissionPercent, "affiliate.commissionPercent")
     : 0;
-  const propertyPayout = round2(total - platformFee - affiliateCommission);
+
+  // Use integer-cent arithmetic to avoid floating-point accumulation errors.
+  const centsTotal = Math.round(total * 100);
+  const platformFeeCents = Math.round((centsTotal * platformFeePct) / 100);
+  const affiliateCommissionCents = Math.round((centsTotal * affiliateCommissionPct) / 100);
+  const propertyPayoutCents = centsTotal - platformFeeCents - affiliateCommissionCents;
+
+  const platformFee = round2(platformFeeCents / 100);
+  const affiliateCommission = round2(affiliateCommissionCents / 100);
+  const propertyPayout = round2(propertyPayoutCents / 100);
 
   return {
     platformFee: String(platformFee),
@@ -444,4 +453,21 @@ function parseDecimalAmount(value: FinanceDecimalAmount): number {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Validate that a percentage value is a finite number in the range [0, 100].
+ * Throws a descriptive error for NaN, non-finite, negative, or >100 values.
+ */
+function clampPercent(value: number, fieldName: string): number {
+  if (!Number.isFinite(value) || Number.isNaN(value)) {
+    throw new Error(`Invalid percent for ${fieldName}: must be a finite number, got ${value}`);
+  }
+  if (value < 0) {
+    throw new Error(`Invalid percent for ${fieldName}: must be >= 0, got ${value}`);
+  }
+  if (value > 100) {
+    throw new Error(`Invalid percent for ${fieldName}: must be <= 100, got ${value}`);
+  }
+  return value;
 }

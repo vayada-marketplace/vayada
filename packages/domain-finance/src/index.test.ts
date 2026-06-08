@@ -210,6 +210,104 @@ describe("calculatePayoutSplit — invalid input guards", () => {
 });
 
 // ---------------------------------------------------------------------------
+// calculatePayoutSplit — invalid percent guards
+// ---------------------------------------------------------------------------
+
+describe("calculatePayoutSplit — invalid percent guards", () => {
+  it("throws when bookingEngineFeePercent is NaN (commission plan, direct)", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: { ...COMMISSION_BILLING_CONFIG, bookingEngineFeePercent: NaN },
+        channel: "direct",
+      }),
+    ).toThrow("Invalid percent for platformFeePct");
+  });
+
+  it("throws when channelManagerFeePercent is NaN (commission plan, channel)", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: { ...COMMISSION_BILLING_CONFIG, channelManagerFeePercent: NaN },
+        channel: "channel",
+      }),
+    ).toThrow("Invalid percent for platformFeePct");
+  });
+
+  it("throws when affiliatePlatformFeePercent is NaN (fixed plan with affiliate)", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: { ...BASE_BILLING_CONFIG, affiliatePlatformFeePercent: NaN },
+        channel: "direct",
+        affiliate: { affiliateId: "aff_001", commissionPercent: 10 },
+      }),
+    ).toThrow("Invalid percent for platformFeePct");
+  });
+
+  it("throws when bookingEngineFeePercent is negative", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: { ...COMMISSION_BILLING_CONFIG, bookingEngineFeePercent: -1 },
+        channel: "direct",
+      }),
+    ).toThrow("Invalid percent for platformFeePct");
+  });
+
+  it("throws when bookingEngineFeePercent is greater than 100", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: { ...COMMISSION_BILLING_CONFIG, bookingEngineFeePercent: 101 },
+        channel: "direct",
+      }),
+    ).toThrow("Invalid percent for platformFeePct");
+  });
+
+  it("throws when affiliate commissionPercent is NaN", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: COMMISSION_BILLING_CONFIG,
+        channel: "direct",
+        affiliate: { affiliateId: "aff_001", commissionPercent: NaN },
+      }),
+    ).toThrow("Invalid percent for affiliate.commissionPercent");
+  });
+
+  it("throws when affiliate commissionPercent is negative", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: COMMISSION_BILLING_CONFIG,
+        channel: "direct",
+        affiliate: { affiliateId: "aff_001", commissionPercent: -5 },
+      }),
+    ).toThrow("Invalid percent for affiliate.commissionPercent");
+  });
+
+  it("throws when affiliate commissionPercent is greater than 100", () => {
+    expect(() =>
+      calculatePayoutSplit({
+        totalAmount: "100.00",
+        currency: "EUR",
+        billingConfig: COMMISSION_BILLING_CONFIG,
+        channel: "direct",
+        affiliate: { affiliateId: "aff_001", commissionPercent: 150 },
+      }),
+    ).toThrow("Invalid percent for affiliate.commissionPercent");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Read ports — verify that PMS code can use these without a DB pool
 // ---------------------------------------------------------------------------
 

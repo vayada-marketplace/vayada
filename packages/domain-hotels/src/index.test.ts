@@ -43,6 +43,18 @@ describe("@vayada/domain-hotels", () => {
     expect(key).toBe("hotel.catalog.name.update:property:prop_abc123:admin-rename-2026-06");
   });
 
+  it("throws when suffix is an empty string", () => {
+    expect(() =>
+      hotelCatalogIdempotencyKey("hotel.catalog.name.update", "prop_abc123", ""),
+    ).toThrow("hotelCatalogIdempotencyKey: suffix must not be empty or blank");
+  });
+
+  it("throws when suffix is blank (whitespace only)", () => {
+    expect(() =>
+      hotelCatalogIdempotencyKey("hotel.catalog.name.update", "prop_abc123", "   "),
+    ).toThrow("hotelCatalogIdempotencyKey: suffix must not be empty or blank");
+  });
+
   it("allows downstream code to implement HotelIdentityReadPort without importing BookingEngineDatabase", async () => {
     const mockIdentity: HotelIdentityReadModel = {
       propertyId: "prop_abc123",
