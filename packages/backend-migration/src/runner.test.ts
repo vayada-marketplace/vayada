@@ -227,7 +227,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     }
   });
 
-  it("applies booking, PMS, and finance DDL with private data boundaries", async () => {
+  it("applies booking, PMS, finance, and marketplace DDL with private data boundaries", async () => {
     assertSafeTestDatabase(TEST_DATABASE_URL!);
 
     const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
@@ -251,6 +251,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     expect(result.applied).toContain("0005");
     expect(result.applied).toContain("0006");
     expect(result.applied).toContain("0007");
+    expect(result.applied).toContain("0008");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();
@@ -1093,6 +1094,580 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
       );
 
       expect(financeVisibilitySensitiveColumns).toHaveLength(0);
+
+      const { rows: marketplaceTableRows } = await verifyClient.query<{ table_name: string }>(
+        `SELECT table_name
+         FROM information_schema.tables
+         WHERE table_schema = 'marketplace'
+         ORDER BY table_name`,
+      );
+
+      expect(marketplaceTableRows.map((row) => row.table_name)).toEqual([
+        "collaboration_deliverables",
+        "collaborations",
+        "creator_platforms",
+        "creator_profiles",
+        "creator_ratings",
+        "external_collaborations",
+        "invite_codes",
+        "listing_collaboration_offerings",
+        "listing_creator_requirements",
+        "marketplace_chat_messages",
+        "marketplace_hotel_listings",
+        "marketplace_hotel_profiles",
+        "marketplace_listing_read_model",
+        "marketplace_notifications",
+        "newsletter_preferences",
+        "trips",
+      ]);
+
+      const { rows: marketplaceIntegrityConstraints } = await verifyClient.query<{
+        constraint_name: string;
+      }>(
+        `SELECT constraint_name
+         FROM information_schema.table_constraints
+         WHERE table_schema = 'marketplace'
+           AND constraint_name IN (
+             'chk_marketplace_chat_sender_shape',
+             'chk_marketplace_collaborations_currency_upper',
+             'chk_marketplace_collaborations_preferred_dates',
+             'chk_marketplace_collaborations_source_id',
+             'chk_marketplace_collaborations_status',
+             'chk_marketplace_collaborations_travel_dates',
+             'chk_marketplace_collaborations_type_terms',
+             'chk_marketplace_creator_platform_engagement',
+             'chk_marketplace_creator_platform_followers',
+             'chk_marketplace_creator_platforms_source_id',
+             'chk_marketplace_creator_profiles_source_id',
+             'chk_marketplace_creator_ratings_score',
+             'chk_marketplace_deliverables_quantity',
+             'chk_marketplace_external_collaborations_date_order',
+             'chk_marketplace_external_collaborations_source_id',
+             'chk_marketplace_hotel_listings_source_id',
+             'chk_marketplace_hotel_listings_status',
+             'chk_marketplace_hotel_profiles_source_id',
+             'chk_marketplace_hotel_profiles_status',
+             'chk_marketplace_invite_codes_dates',
+             'chk_marketplace_invite_codes_status',
+             'chk_marketplace_listing_read_model_public_json',
+             'chk_marketplace_newsletter_preferences_source_id',
+             'chk_marketplace_offerings_currency_upper',
+             'chk_marketplace_offerings_source_id',
+             'chk_marketplace_offerings_type_terms',
+             'chk_marketplace_requirements_age_range',
+             'chk_marketplace_requirements_source_id',
+             'chk_marketplace_trips_date_order',
+             'chk_marketplace_trips_source_id',
+             'fk_marketplace_chat_collaboration_property',
+             'fk_marketplace_collaborations_commission_rule',
+             'fk_marketplace_collaborations_creator_org',
+             'fk_marketplace_collaborations_listing_org',
+             'fk_marketplace_creator_platforms_creator_org',
+             'fk_marketplace_deliverables_collaboration_property',
+             'fk_marketplace_external_collaborations_creator_org',
+             'fk_marketplace_external_collaborations_trip_creator',
+             'fk_marketplace_hotel_listings_profile_org',
+             'fk_marketplace_invite_codes_creator_org',
+             'fk_marketplace_offerings_listing_org',
+             'fk_marketplace_ratings_collaboration_creator',
+             'fk_marketplace_ratings_creator_org',
+             'fk_marketplace_ratings_hotel_profile_org',
+             'fk_marketplace_read_model_listing_property',
+             'fk_marketplace_read_model_property',
+             'fk_marketplace_requirements_listing_org',
+             'fk_marketplace_trips_creator_org',
+             'uq_marketplace_collaborations_id_property',
+             'uq_marketplace_collaborations_id_property_creator',
+             'uq_marketplace_collaborations_source',
+             'uq_marketplace_creator_platforms_source',
+             'uq_marketplace_creator_profiles_id_org',
+             'uq_marketplace_creator_profiles_source',
+             'uq_marketplace_creator_ratings_collaboration',
+             'uq_marketplace_external_collaborations_source',
+             'uq_marketplace_hotel_listings_id_property',
+             'uq_marketplace_hotel_listings_id_property_org',
+             'uq_marketplace_hotel_listings_source',
+             'uq_marketplace_hotel_profiles_property_org',
+             'uq_marketplace_hotel_profiles_source',
+             'uq_marketplace_newsletter_preferences_source',
+             'uq_marketplace_offerings_source',
+             'uq_marketplace_requirements_listing',
+             'uq_marketplace_requirements_source',
+             'uq_marketplace_trips_id_creator',
+             'uq_marketplace_trips_source'
+           )
+         ORDER BY constraint_name`,
+      );
+
+      expect(marketplaceIntegrityConstraints.map((row) => row.constraint_name)).toEqual([
+        "chk_marketplace_chat_sender_shape",
+        "chk_marketplace_collaborations_currency_upper",
+        "chk_marketplace_collaborations_preferred_dates",
+        "chk_marketplace_collaborations_source_id",
+        "chk_marketplace_collaborations_status",
+        "chk_marketplace_collaborations_travel_dates",
+        "chk_marketplace_collaborations_type_terms",
+        "chk_marketplace_creator_platform_engagement",
+        "chk_marketplace_creator_platform_followers",
+        "chk_marketplace_creator_platforms_source_id",
+        "chk_marketplace_creator_profiles_source_id",
+        "chk_marketplace_creator_ratings_score",
+        "chk_marketplace_deliverables_quantity",
+        "chk_marketplace_external_collaborations_date_order",
+        "chk_marketplace_external_collaborations_source_id",
+        "chk_marketplace_hotel_listings_source_id",
+        "chk_marketplace_hotel_listings_status",
+        "chk_marketplace_hotel_profiles_source_id",
+        "chk_marketplace_hotel_profiles_status",
+        "chk_marketplace_invite_codes_dates",
+        "chk_marketplace_invite_codes_status",
+        "chk_marketplace_listing_read_model_public_json",
+        "chk_marketplace_newsletter_preferences_source_id",
+        "chk_marketplace_offerings_currency_upper",
+        "chk_marketplace_offerings_source_id",
+        "chk_marketplace_offerings_type_terms",
+        "chk_marketplace_requirements_age_range",
+        "chk_marketplace_requirements_source_id",
+        "chk_marketplace_trips_date_order",
+        "chk_marketplace_trips_source_id",
+        "fk_marketplace_chat_collaboration_property",
+        "fk_marketplace_collaborations_commission_rule",
+        "fk_marketplace_collaborations_creator_org",
+        "fk_marketplace_collaborations_listing_org",
+        "fk_marketplace_creator_platforms_creator_org",
+        "fk_marketplace_deliverables_collaboration_property",
+        "fk_marketplace_external_collaborations_creator_org",
+        "fk_marketplace_external_collaborations_trip_creator",
+        "fk_marketplace_hotel_listings_profile_org",
+        "fk_marketplace_invite_codes_creator_org",
+        "fk_marketplace_offerings_listing_org",
+        "fk_marketplace_ratings_collaboration_creator",
+        "fk_marketplace_ratings_creator_org",
+        "fk_marketplace_ratings_hotel_profile_org",
+        "fk_marketplace_read_model_listing_property",
+        "fk_marketplace_read_model_property",
+        "fk_marketplace_requirements_listing_org",
+        "fk_marketplace_trips_creator_org",
+        "uq_marketplace_collaborations_id_property",
+        "uq_marketplace_collaborations_id_property_creator",
+        "uq_marketplace_collaborations_source",
+        "uq_marketplace_creator_platforms_source",
+        "uq_marketplace_creator_profiles_id_org",
+        "uq_marketplace_creator_profiles_source",
+        "uq_marketplace_creator_ratings_collaboration",
+        "uq_marketplace_external_collaborations_source",
+        "uq_marketplace_hotel_listings_id_property",
+        "uq_marketplace_hotel_listings_id_property_org",
+        "uq_marketplace_hotel_listings_source",
+        "uq_marketplace_hotel_profiles_property_org",
+        "uq_marketplace_hotel_profiles_source",
+        "uq_marketplace_newsletter_preferences_source",
+        "uq_marketplace_offerings_source",
+        "uq_marketplace_requirements_listing",
+        "uq_marketplace_requirements_source",
+        "uq_marketplace_trips_id_creator",
+        "uq_marketplace_trips_source",
+      ]);
+
+      const { rows: marketplaceForeignKeyShapes } = await verifyClient.query<{
+        constraint_name: string;
+        table_name: string;
+        columns: string;
+        referenced_schema: string;
+        referenced_table: string;
+        referenced_columns: string;
+      }>(
+        `SELECT
+           con.conname AS constraint_name,
+           src.relname AS table_name,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.conrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS columns,
+           ref_ns.nspname AS referenced_schema,
+           ref.relname AS referenced_table,
+           array_to_string(ARRAY(
+             SELECT att.attname
+             FROM unnest(con.confkey) WITH ORDINALITY AS cols(attnum, ord)
+             JOIN pg_attribute att
+               ON att.attrelid = con.confrelid
+              AND att.attnum = cols.attnum
+             ORDER BY cols.ord
+           ), ',') AS referenced_columns
+         FROM pg_constraint con
+         JOIN pg_class src ON src.oid = con.conrelid
+         JOIN pg_namespace src_ns ON src_ns.oid = src.relnamespace
+         JOIN pg_class ref ON ref.oid = con.confrelid
+         JOIN pg_namespace ref_ns ON ref_ns.oid = ref.relnamespace
+         WHERE src_ns.nspname = 'marketplace'
+           AND con.contype = 'f'
+           AND con.conname IN (
+             'fk_marketplace_chat_collaboration_property',
+             'fk_marketplace_collaborations_commission_rule',
+             'fk_marketplace_collaborations_creator_org',
+             'fk_marketplace_collaborations_listing_org',
+             'fk_marketplace_creator_platforms_creator_org',
+             'fk_marketplace_deliverables_collaboration_property',
+             'fk_marketplace_external_collaborations_trip_creator',
+             'fk_marketplace_hotel_listings_profile_org',
+             'fk_marketplace_invite_codes_creator_org',
+             'fk_marketplace_offerings_listing_org',
+             'fk_marketplace_ratings_collaboration_creator',
+             'fk_marketplace_read_model_listing_property',
+             'fk_marketplace_requirements_listing_org',
+             'fk_marketplace_trips_creator_org'
+           )
+         ORDER BY con.conname`,
+      );
+
+      expect(marketplaceForeignKeyShapes).toEqual([
+        {
+          columns: "collaboration_id,property_id",
+          constraint_name: "fk_marketplace_chat_collaboration_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "marketplace",
+          referenced_table: "collaborations",
+          table_name: "marketplace_chat_messages",
+        },
+        {
+          columns: "commission_rule_id,hotel_organization_id",
+          constraint_name: "fk_marketplace_collaborations_commission_rule",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "finance",
+          referenced_table: "commission_rules",
+          table_name: "collaborations",
+        },
+        {
+          columns: "creator_profile_id,creator_organization_id",
+          constraint_name: "fk_marketplace_collaborations_creator_org",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "creator_profiles",
+          table_name: "collaborations",
+        },
+        {
+          columns: "listing_id,property_id,hotel_organization_id",
+          constraint_name: "fk_marketplace_collaborations_listing_org",
+          referenced_columns: "id,property_id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "marketplace_hotel_listings",
+          table_name: "collaborations",
+        },
+        {
+          columns: "creator_profile_id,organization_id",
+          constraint_name: "fk_marketplace_creator_platforms_creator_org",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "creator_profiles",
+          table_name: "creator_platforms",
+        },
+        {
+          columns: "collaboration_id,property_id",
+          constraint_name: "fk_marketplace_deliverables_collaboration_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "marketplace",
+          referenced_table: "collaborations",
+          table_name: "collaboration_deliverables",
+        },
+        {
+          columns: "trip_id,creator_profile_id",
+          constraint_name: "fk_marketplace_external_collaborations_trip_creator",
+          referenced_columns: "id,creator_profile_id",
+          referenced_schema: "marketplace",
+          referenced_table: "trips",
+          table_name: "external_collaborations",
+        },
+        {
+          columns: "property_id,organization_id",
+          constraint_name: "fk_marketplace_hotel_listings_profile_org",
+          referenced_columns: "property_id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "marketplace_hotel_profiles",
+          table_name: "marketplace_hotel_listings",
+        },
+        {
+          columns: "creator_profile_id,creator_organization_id",
+          constraint_name: "fk_marketplace_invite_codes_creator_org",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "creator_profiles",
+          table_name: "invite_codes",
+        },
+        {
+          columns: "listing_id,property_id,organization_id",
+          constraint_name: "fk_marketplace_offerings_listing_org",
+          referenced_columns: "id,property_id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "marketplace_hotel_listings",
+          table_name: "listing_collaboration_offerings",
+        },
+        {
+          columns: "collaboration_id,property_id,creator_profile_id",
+          constraint_name: "fk_marketplace_ratings_collaboration_creator",
+          referenced_columns: "id,property_id,creator_profile_id",
+          referenced_schema: "marketplace",
+          referenced_table: "collaborations",
+          table_name: "creator_ratings",
+        },
+        {
+          columns: "listing_id,property_id",
+          constraint_name: "fk_marketplace_read_model_listing_property",
+          referenced_columns: "id,property_id",
+          referenced_schema: "marketplace",
+          referenced_table: "marketplace_hotel_listings",
+          table_name: "marketplace_listing_read_model",
+        },
+        {
+          columns: "listing_id,property_id,organization_id",
+          constraint_name: "fk_marketplace_requirements_listing_org",
+          referenced_columns: "id,property_id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "marketplace_hotel_listings",
+          table_name: "listing_creator_requirements",
+        },
+        {
+          columns: "creator_profile_id,organization_id",
+          constraint_name: "fk_marketplace_trips_creator_org",
+          referenced_columns: "id,organization_id",
+          referenced_schema: "marketplace",
+          referenced_table: "creator_profiles",
+          table_name: "trips",
+        },
+      ]);
+
+      const { rows: marketplaceForeignKeySchemas } = await verifyClient.query<{
+        constraint_name: string;
+        referenced_schema: string;
+      }>(
+        `SELECT DISTINCT
+           tc.constraint_name,
+           ccu.table_schema AS referenced_schema
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.constraint_column_usage ccu
+           ON ccu.constraint_schema = tc.constraint_schema
+          AND ccu.constraint_name = tc.constraint_name
+         WHERE tc.table_schema = 'marketplace'
+           AND tc.constraint_type = 'FOREIGN KEY'
+           AND ccu.table_schema NOT IN ('finance', 'hotel_catalog', 'identity', 'marketplace')
+         ORDER BY tc.constraint_name`,
+      );
+
+      expect(marketplaceForeignKeySchemas).toHaveLength(0);
+
+      const { rows: marketplaceReadModelSensitiveColumns } = await verifyClient.query<{
+        column_name: string;
+      }>(
+        `SELECT column_name
+           FROM information_schema.columns
+           WHERE table_schema = 'marketplace'
+             AND table_name = 'marketplace_listing_read_model'
+             AND column_name IN (
+               'email', 'phone', 'user_id', 'created_by_user_id', 'redeemed_by_user_id',
+               'body', 'content', 'message_body', 'message_metadata',
+               'application_message', 'negotiated_terms', 'affiliate_link',
+               'affiliate_referral_code', 'creator_fee', 'organization_id', 'private_notes',
+               'pii_retention_until'
+             )`,
+      );
+
+      expect(marketplaceReadModelSensitiveColumns).toHaveLength(0);
+
+      const creatorUserId = "99999999-1111-4111-8111-999999999991";
+      const hotelUserId = "99999999-1111-4111-8111-999999999992";
+      const creatorOrganizationId = "99999999-2222-4222-8222-999999999991";
+      const hotelOrganizationId = "99999999-2222-4222-8222-999999999992";
+      const wrongOrganizationId = "99999999-2222-4222-8222-999999999993";
+      const marketplacePropertyId = "99999999-3333-4333-8333-999999999991";
+      const creatorProfileId = "99999999-4444-4444-8444-999999999991";
+      const listingId = "99999999-5555-4555-8555-999999999991";
+      const commissionRuleId = "99999999-6666-4666-8666-999999999991";
+      const wrongCommissionRuleId = "99999999-6666-4666-8666-999999999992";
+      const marketplaceCollaborationId = "99999999-7777-4777-8777-999999999991";
+
+      await verifyClient.query(
+        `INSERT INTO identity.users (id, email, name, status)
+         VALUES
+           ($1, 'marketplace-creator@example.com', 'Marketplace Creator', 'active'),
+           ($2, 'marketplace-hotel@example.com', 'Marketplace Hotel', 'active')`,
+        [creatorUserId, hotelUserId],
+      );
+      await verifyClient.query(
+        `INSERT INTO identity.organizations (id, kind, name, slug)
+         VALUES
+           ($1, 'creator_workspace', 'Marketplace Creator Workspace', 'marketplace-creator-workspace'),
+           ($2, 'hotel_group', 'Marketplace Hotel Group', 'marketplace-hotel-group'),
+           ($3, 'hotel_group', 'Marketplace Wrong Hotel Group', 'marketplace-wrong-hotel-group')`,
+        [creatorOrganizationId, hotelOrganizationId, wrongOrganizationId],
+      );
+      await verifyClient.query(
+        `INSERT INTO hotel_catalog.properties (id, public_id, display_name)
+         VALUES ($1, 'marketplace-property-one', 'Marketplace Property One')`,
+        [marketplacePropertyId],
+      );
+      await verifyClient.query(
+        `INSERT INTO marketplace.creator_profiles
+           (id, organization_id, owner_user_id, display_name, creator_type, profile_status)
+         VALUES ($1, $2, $3, 'Marketplace Creator', 'travel', 'active')`,
+        [creatorProfileId, creatorOrganizationId, creatorUserId],
+      );
+      await verifyClient.query(
+        `INSERT INTO marketplace.creator_platforms
+           (creator_profile_id, organization_id, platform, handle, follower_count, engagement_rate)
+         VALUES ($1, $2, 'instagram', '@marketplace_creator', 125000, 3.2)`,
+        [creatorProfileId, creatorOrganizationId],
+      );
+      await verifyClient.query(
+        `INSERT INTO marketplace.marketplace_hotel_profiles
+           (property_id, organization_id, marketplace_profile_status, profile_complete)
+         VALUES ($1, $2, 'verified', TRUE)`,
+        [marketplacePropertyId, hotelOrganizationId],
+      );
+      await verifyClient.query(
+        `INSERT INTO marketplace.marketplace_hotel_listings
+           (id, property_id, organization_id, title, listing_summary, accommodation_type, listing_status)
+         VALUES ($1, $2, $3, 'Creator Stay Listing', 'Public collaboration listing.', 'hotel', 'verified')`,
+        [listingId, marketplacePropertyId, hotelOrganizationId],
+      );
+      await verifyClient.query(
+        `INSERT INTO marketplace.listing_collaboration_offerings
+           (listing_id, property_id, organization_id, collaboration_type, commission_percentage, currency)
+         VALUES ($1, $2, $3, 'affiliate', 12.5, 'USD')`,
+        [listingId, marketplacePropertyId, hotelOrganizationId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO marketplace.listing_collaboration_offerings
+             (listing_id, property_id, organization_id, collaboration_type, commission_percentage, currency)
+           VALUES ($1, $2, $3, 'affiliate', 12.5, 'USD')`,
+          [listingId, marketplacePropertyId, wrongOrganizationId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+
+      await verifyClient.query(
+        `INSERT INTO finance.commission_rules
+           (id, organization_id, rule_scope, product, commission_type, percentage_rate)
+         VALUES
+           ($1, $2, 'marketplace', 'marketplace', 'percentage', 12.5),
+           ($3, $4, 'marketplace', 'marketplace', 'percentage', 12.5)`,
+        [commissionRuleId, hotelOrganizationId, wrongCommissionRuleId, wrongOrganizationId],
+      );
+      await verifyClient.query(
+        `INSERT INTO marketplace.collaborations
+           (
+             id, creator_profile_id, creator_organization_id, property_id,
+             hotel_organization_id, listing_id, commission_rule_id,
+             initiator_type, lifecycle_status, collaboration_type,
+             creator_fee, currency, creator_consent
+           )
+         VALUES (
+           $1, $2, $3, $4, $5, $6, $7,
+           'creator', 'pending', 'affiliate', 12.5, 'USD', TRUE
+         )`,
+        [
+          marketplaceCollaborationId,
+          creatorProfileId,
+          creatorOrganizationId,
+          marketplacePropertyId,
+          hotelOrganizationId,
+          listingId,
+          commissionRuleId,
+        ],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO marketplace.collaborations
+             (
+               creator_profile_id, creator_organization_id, property_id,
+               hotel_organization_id, listing_id, initiator_type,
+               lifecycle_status, collaboration_type, creator_fee, currency
+             )
+           VALUES ($1, $2, $3, $4, $5, 'creator', 'pending', 'affiliate', 12.5, 'USD')`,
+          [
+            creatorProfileId,
+            creatorOrganizationId,
+            marketplacePropertyId,
+            hotelOrganizationId,
+            listingId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO marketplace.collaborations
+             (
+               creator_profile_id, creator_organization_id, property_id,
+               hotel_organization_id, listing_id, initiator_type,
+               lifecycle_status, collaboration_type, creator_fee, currency,
+               creator_consent
+             )
+           VALUES ($1, $2, $3, $4, $5, 'creator', 'declined', 'affiliate', 12.5, 'USD', TRUE)`,
+          [
+            creatorProfileId,
+            creatorOrganizationId,
+            marketplacePropertyId,
+            wrongOrganizationId,
+            listingId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO marketplace.collaborations
+             (
+               creator_profile_id, creator_organization_id, property_id,
+               hotel_organization_id, listing_id, commission_rule_id,
+               initiator_type, lifecycle_status, collaboration_type,
+               creator_fee, currency, creator_consent
+             )
+           VALUES (
+             $1, $2, $3, $4, $5, $6,
+             'creator', 'declined', 'affiliate', 12.5, 'USD', TRUE
+           )`,
+          [
+            creatorProfileId,
+            creatorOrganizationId,
+            marketplacePropertyId,
+            hotelOrganizationId,
+            listingId,
+            wrongCommissionRuleId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+
+      await verifyClient.query(
+        `INSERT INTO marketplace.marketplace_listing_read_model
+           (
+             listing_id, property_id, public_id,
+             canonical_slug, display_name, listing_title, listing_summary,
+             accommodation_type, visibility_status
+           )
+         VALUES (
+           $1, $2, 'marketplace-property-one', 'marketplace-property-one',
+           'Marketplace Property One', 'Creator Stay Listing',
+           'Public collaboration listing.', 'hotel', 'public'
+         )`,
+        [listingId, marketplacePropertyId],
+      );
+      await expect(
+        verifyClient.query(
+          `UPDATE marketplace.marketplace_listing_read_model
+           SET public_offering_summary = $1::jsonb
+           WHERE listing_id = $2`,
+          [
+            JSON.stringify([
+              {
+                type: "affiliate",
+                terms: { affiliateLink: "https://private.example/affiliate" },
+              },
+            ]),
+            listingId,
+          ],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
     } finally {
       await verifyClient.end();
     }
