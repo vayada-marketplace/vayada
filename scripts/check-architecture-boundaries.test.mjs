@@ -240,6 +240,69 @@ test("fails when future marketplace domain code writes identity tables directly"
   }
 });
 
+// ─── VAY-651: Booking dashboard metrics — C04/C05 regression fixtures ─────────
+
+test("allows Booking dashboard route that uses BookingDashboardMetricsReadPort", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/routes/bookingDashboard.ts": `
+      import type { BookingDashboardMetricsReadPort } from "@vayada/domain-booking";
+      export async function dashboardRoute(port: BookingDashboardMetricsReadPort) {
+        return port.getDashboardMetrics({ propertyId: "prop_123", periodStart: "2026-01-01", periodEnd: "2026-01-31", previousPeriodStart: "2025-12-01", previousPeriodEnd: "2025-12-31" });
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Architecture boundary check passed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when Booking dashboard route opens PMS_DATABASE_URL for metrics (C04)", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/routes/bookingDashboard.ts": `
+      const pool = new Pool({ connectionString: process.env.PMS_DATABASE_URL });
+      export async function dashboardRoute() {
+        return pool.query("SELECT SUM(total_amount) FROM bookings WHERE hotel_id = $1", [id]);
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PMS_DATABASE_URL/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fails when Booking billing route opens PMS_DATABASE_URL for room count (C05)", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/routes/bookingBilling.ts": `
+      const pmsPool = new Pool({ connectionString: process.env.PMS_DATABASE_URL });
+      export async function countRooms(hotelId: string) {
+        const { rows } = await pmsPool.query(
+          "SELECT COUNT(*) FROM rooms r JOIN room_types rt ON rt.id = r.room_type_id WHERE r.hotel_id = $1 AND rt.is_active = TRUE",
+          [hotelId],
+        );
+        return Number(rows[0].count);
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /PMS_DATABASE_URL/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 function createFixtureRoot(files) {
   const root = mkdtempSync(path.join(tmpdir(), "vayada-boundaries-"));
 

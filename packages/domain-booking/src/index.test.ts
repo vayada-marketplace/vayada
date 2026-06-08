@@ -13,6 +13,10 @@ import {
   buildCreateReservationIdempotencyKey,
   BookingPmsHandoffContractError,
   handOffCommittedBookingToPms,
+  type BookingDashboardMetricsReadModel,
+  type BookingDashboardMetricsReadPort,
+  type BookingSourceMixReadModel,
+  type BookingSparklineReadModel,
   type BookingPmsReservationHandoffInput,
 } from "./index.js";
 
@@ -300,4 +304,132 @@ function handoffInput(): BookingPmsReservationHandoffInput {
       },
     },
   };
+}
+
+describe("@vayada/domain-booking dashboard metrics read model contract", () => {
+  it("BookingDashboardMetricsReadPort is satisfied by an in-memory stub (no PMS DB required)", async () => {
+    const stub: BookingDashboardMetricsReadPort = {
+      async getDashboardMetrics() {
+        return fakeMetrics();
+      },
+      async getSourceMix(input) {
+        return fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd);
+      },
+      async getSparklines(input) {
+        return fakeSparklines(input.propertyId);
+      },
+    };
+
+    const metrics = await stub.getDashboardMetrics({
+      propertyId: "prop_alpenrose",
+      periodStart: "2026-06-01",
+      periodEnd: "2026-06-30",
+      previousPeriodStart: "2026-05-01",
+      previousPeriodEnd: "2026-05-31",
+    });
+
+    expect(metrics).not.toBeNull();
+    expect(metrics!.propertyId).toBe("prop_alpenrose");
+    expect(metrics!.current.bookingCount).toBeGreaterThanOrEqual(0);
+    expect(metrics!.previous.bookingCount).toBeGreaterThanOrEqual(0);
+  });
+
+  it("getSourceMix returns a model with a non-negative totalRevenue and items array", async () => {
+    const stub: BookingDashboardMetricsReadPort = {
+      getDashboardMetrics: async () => fakeMetrics(),
+      getSourceMix: async (input) =>
+        fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd),
+      getSparklines: async (input) => fakeSparklines(input.propertyId),
+    };
+
+    const mix = await stub.getSourceMix({
+      propertyId: "prop_alpenrose",
+      periodStart: "2026-06-01",
+      periodEnd: "2026-06-30",
+    });
+
+    expect(mix.propertyId).toBe("prop_alpenrose");
+    expect(mix.items.length).toBeGreaterThanOrEqual(0);
+    const totalShare = mix.items.reduce((acc, item) => acc + item.revenueSharePercent, 0);
+    expect(totalShare).toBeLessThanOrEqual(100.1);
+  });
+
+  it("getSparklines returns exactly 7 bucket points", async () => {
+    const stub: BookingDashboardMetricsReadPort = {
+      getDashboardMetrics: async () => fakeMetrics(),
+      getSourceMix: async (input) =>
+        fakeSourceMix(input.propertyId, input.periodStart, input.periodEnd),
+      getSparklines: async (input) => fakeSparklines(input.propertyId),
+    };
+
+    const sparklines = await stub.getSparklines({
+      propertyId: "prop_alpenrose",
+      windowStart: "2026-06-01",
+      windowEnd: "2026-06-30",
+    });
+
+    expect(sparklines.propertyId).toBe("prop_alpenrose");
+    expect(sparklines.points).toHaveLength(7);
+    for (const point of sparklines.points) {
+      expect(point.bucketStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(point.bucketEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(point.bookingCount).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
+function fakeMetrics(): BookingDashboardMetricsReadModel {
+  return {
+    propertyId: "prop_alpenrose",
+    current: {
+      totalRevenue: { amountDecimal: "3600.00", currency: "EUR" },
+      bookingCount: 10,
+      avgNightlyRate: { amountDecimal: "120.00", currency: "EUR" },
+    },
+    previous: {
+      totalRevenue: { amountDecimal: "2880.00", currency: "EUR" },
+      bookingCount: 8,
+      avgNightlyRate: { amountDecimal: "120.00", currency: "EUR" },
+    },
+    nextArrivalDate: "2026-07-04",
+    liveSinceDate: "2025-01-15",
+  };
+}
+
+function fakeSourceMix(
+  propertyId: string,
+  periodStart: string,
+  periodEnd: string,
+): BookingSourceMixReadModel {
+  return {
+    propertyId,
+    periodStart,
+    periodEnd,
+    totalRevenue: { amountDecimal: "3600.00", currency: "EUR" },
+    items: [
+      {
+        source: "direct",
+        revenue: { amountDecimal: "3000.00", currency: "EUR" },
+        bookingCount: 8,
+        revenueSharePercent: 83.3,
+      },
+      {
+        source: "airbnb",
+        revenue: { amountDecimal: "600.00", currency: "EUR" },
+        bookingCount: 2,
+        revenueSharePercent: 16.7,
+      },
+    ],
+  };
+}
+
+function fakeSparklines(propertyId: string): BookingSparklineReadModel {
+  const points = Array.from({ length: 7 }, (_, i) => ({
+    bucketStart: `2026-06-0${i + 1}`,
+    bucketEnd: `2026-06-0${i + 1}`,
+    revenue: { amountDecimal: `${(i + 1) * 100}.00`, currency: "EUR" },
+    bookingCount: i + 1,
+    avgNightlyRate: { amountDecimal: "120.00", currency: "EUR" },
+  }));
+  return { propertyId, points };
 }
