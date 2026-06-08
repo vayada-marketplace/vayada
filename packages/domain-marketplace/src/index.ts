@@ -271,18 +271,18 @@ export function buildAffiliateProvisioningIdempotencyKey(input: {
  * once the Finance/affiliate domain completes its work.
  */
 export type CollaborationAcceptedEvent = {
-  eventType: "marketplace.collaboration.accepted";
-  eventId: string;
+  readonly eventType: "marketplace.collaboration.accepted";
+  readonly eventId: string;
   /** The command or action that caused this event. */
-  causationId?: string;
-  collaborationId: string;
-  creatorId: string;
-  marketplaceHotelProfileId: string;
-  organizationId: string;
-  acceptedAt: MarketplaceUtcDateTime;
+  readonly causationId?: string;
+  readonly collaborationId: string;
+  readonly creatorId: string;
+  readonly marketplaceHotelProfileId: string;
+  readonly organizationId: string;
+  readonly acceptedAt: MarketplaceUtcDateTime;
   /** Whether affiliate provisioning was requested as part of this acceptance. */
-  affiliateProvisioningRequested: boolean;
-  audit: MarketplaceCommandAudit;
+  readonly affiliateProvisioningRequested: boolean;
+  readonly audit: Readonly<MarketplaceCommandAudit>;
 };
 
 // ---------------------------------------------------------------------------
@@ -299,12 +299,12 @@ export type CollaborationAcceptedEvent = {
  * receiving this event. It never writes the affiliate table itself.
  */
 export type AffiliateProvisionedEvent = {
-  eventType: "marketplace.affiliate.provisioned";
-  eventId: string;
+  readonly eventType: "marketplace.affiliate.provisioned";
+  readonly eventId: string;
   /** The commandId from the ProvisionCollaborationAffiliateCommand that triggered provisioning. */
-  causationId: string;
-  collaborationId: string;
-  idempotencyKey: string;
-  referralOutput: CollaborationReferralOutput;
-  audit: MarketplaceCommandAudit;
+  readonly causationId: string;
+  readonly collaborationId: string;
+  readonly idempotencyKey: string;
+  readonly referralOutput: Readonly<CollaborationReferralOutput>;
+  readonly audit: Readonly<MarketplaceCommandAudit>;
 };

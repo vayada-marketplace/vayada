@@ -9,6 +9,7 @@ import {
   buildAffiliateProvisioningIdempotencyKey,
   type AffiliateProvisionedEvent,
   type AffiliateProvisioningResult,
+  type CollaborationAcceptedEvent,
   type CollaborationAffiliatePort,
   type ProvisionCollaborationAffiliateCommand,
 } from "./index.js";
@@ -191,6 +192,14 @@ describe("@vayada/domain-marketplace", () => {
     expect(command.hotel).not.toHaveProperty("pmsDatabase");
     expect(command.hotel.marketplaceHotelProfileId).toBe("mhp_bnd");
     expect(command.hotel.organizationId).toBe("org_hotel_bnd");
+
+    // Compile-time guards: the type must not accept pmsHotelId or pmsDatabase.
+    // @ts-expect-error — pmsHotelId must not exist on ProvisionCollaborationAffiliateCommand
+    const _withPmsHotelId: ProvisionCollaborationAffiliateCommand = { ...command, hotel: { ...command.hotel, pmsHotelId: "pms_001" } };
+    // @ts-expect-error — pmsDatabase must not exist on ProvisionCollaborationAffiliateCommand
+    const _withPmsDatabase: ProvisionCollaborationAffiliateCommand = { ...command, hotel: { ...command.hotel, pmsDatabase: "pms_db_url" } };
+    void _withPmsHotelId;
+    void _withPmsDatabase;
   });
 
   it("buildAffiliateProvisioningCommandId derives a stable commandId from an idempotencyKey", () => {
@@ -206,7 +215,7 @@ describe("@vayada/domain-marketplace", () => {
   it("CollaborationAcceptedEvent does not carry referralOutput (immutable acceptance snapshot)", () => {
     // Domain events must be immutable snapshots. Provisioning output belongs on
     // AffiliateProvisionedEvent, not on the acceptance event.
-    const accepted: Parameters<typeof Object.freeze>[0] = {
+    const accepted: CollaborationAcceptedEvent = {
       eventType: "marketplace.collaboration.accepted" as const,
       eventId: "evt_accepted_001",
       collaborationId: "collab_001",
