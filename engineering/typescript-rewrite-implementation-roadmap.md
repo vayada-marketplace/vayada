@@ -22,6 +22,12 @@ product route implementations belong in follow-up tickets and stacked PRs.
   cutover window.
 - New TypeScript code targets the agreed domain model and target-schema
   contracts, not the current product database split.
+- The TypeScript target runtime must not depend on legacy product databases or
+  Python APIs. Legacy Auth, Marketplace, Booking, and PMS database access is
+  allowed only in migration, backfill, parity, rehearsal, and rollback tooling.
+- Compatibility means preserving externally required contracts at the HTTP or
+  frontend boundary, not wrapping legacy runtime tables or Python services from
+  TypeScript domain code.
 - WorkOS authentication, Vayada authorization, public AI bookability, and
   authenticated Ask Intelligence are separate concerns even when they share the
   same backend app.
@@ -96,7 +102,9 @@ Output:
 
 - target schema DDL entry points
 - local fixture loader
-- source-to-target mapping tests for representative records
+- source-to-target migration inputs and mapping tests for representative
+  records; these are the only approved place for TypeScript tooling to read
+  legacy product databases before cutover
 - row count, uniqueness, checksum, ownership parity, and public/private exposure
   checks where practical
 - mismatch reports that are actionable in staging rehearsals
@@ -112,7 +120,8 @@ Recommended first domains:
 - quote contract parity
 - Ask Intelligence read-only evidence catalog
 - one jobs/events side-effect path
-- compatibility adapters for existing frontend/public HTTP shapes
+- target-backed compatibility routes for externally required frontend/public
+  HTTP shapes
 
 Each slice should include contract tests or parity fixtures before product route
 coverage expands.
@@ -126,7 +135,9 @@ Output:
 
 - rebuild target schema from production-like snapshots in staging
 - run migration and parity harness
-- run API and browser smoke tests against the TypeScript backend where routed
+- run API and browser smoke tests against the TypeScript backend using
+  target-schema data, with no runtime calls to legacy product databases or
+  Python APIs
 - document go/no-go gates and owner assignments
 - record rollback decision points
 
@@ -140,7 +151,8 @@ Output:
 - backup snapshots and legacy DB retention plan
 - final migration command sequence
 - validation gate checklist
-- deploy order for TypeScript backend, frontend config, and compatibility routes
+- deploy order for TypeScript backend, frontend config, and target-backed
+  compatibility routes where old response shapes must be preserved
 - rollback instructions while the rollback window is open
 - post-cutover monitoring and cleanup tickets
 
