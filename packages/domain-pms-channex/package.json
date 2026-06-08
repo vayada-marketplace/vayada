@@ -1,23 +1,15 @@
 {
-  "name": "@vayada/domain-distribution",
+  "name": "@vayada/domain-pms-channex",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Distribution and public bookability contracts for the TypeScript backend.",
+  "description": "Target job/event contracts for Channex inbound side effects, ARI pushes, room-block sync, notifications, payouts, and audit.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./fixtures": {
-      "types": "./dist/fixtures.d.ts",
-      "default": "./dist/fixtures.js"
-    },
-    "./geo": {
-      "types": "./dist/geo.d.ts",
-      "default": "./dist/geo.js"
     }
   },
   "scripts": {
