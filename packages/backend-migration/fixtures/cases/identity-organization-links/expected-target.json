@@ -13,5 +13,97 @@
     "identity.users": ["a1b2c3d4-0000-0000-0000-000000000001"],
     "identity.organizations": ["b2c3d4e5-0000-0000-0000-000000000001"]
   },
-  "uniquenessChecks": ["external_identities", "organization_memberships"]
+  "uniquenessChecks": [
+    "external_identities",
+    "organization_memberships",
+    "organization_resource_links",
+    "product_entitlements",
+    "source_external_identities",
+    "source_organization_memberships",
+    "source_organization_resource_links"
+  ],
+  "identityChecks": {
+    "memberships": [
+      {
+        "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
+        "userId": "a1b2c3d4-0000-0000-0000-000000000001",
+        "status": "active",
+        "roleKey": "hotel_owner"
+      }
+    ],
+    "resourceLinks": [
+      {
+        "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
+        "product": "booking",
+        "resourceType": "booking_hotel",
+        "resourceId": "booking_hotel_alpenrose",
+        "relationship": "owner",
+        "status": "active"
+      },
+      {
+        "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
+        "product": "pms",
+        "resourceType": "pms_hotel",
+        "resourceId": "pms_hotel_alpenrose",
+        "relationship": "operator",
+        "status": "active"
+      }
+    ],
+    "entitlements": [
+      {
+        "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
+        "product": "booking",
+        "entitlementKey": "booking-engine",
+        "status": "active",
+        "resourceProduct": null,
+        "resourceType": null,
+        "resourceId": null
+      },
+      {
+        "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
+        "product": "pms",
+        "entitlementKey": "pms-core",
+        "status": "active",
+        "resourceProduct": "pms",
+        "resourceType": "pms_hotel",
+        "resourceId": "pms_hotel_alpenrose"
+      }
+    ],
+    "rolePermissionGrants": [
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
+        "permissionKey": "booking.settings.manage"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
+        "permissionKey": "booking.reservation.read"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
+        "permissionKey": "pms.booking.update"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
+        "permissionKey": "pms.finance.read"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
+        "permissionKey": "marketplace.collaboration.review"
+      }
+    ],
+    "permissionKeys": [
+      "booking.settings.manage",
+      "booking.reservation.read",
+      "pms.booking.update",
+      "pms.finance.read",
+      "marketplace.collaboration.review",
+      "booking.analytics.read",
+      "intelligence.ask.read"
+    ]
+  }
 }

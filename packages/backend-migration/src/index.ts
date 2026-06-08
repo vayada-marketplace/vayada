@@ -19,6 +19,8 @@ export { rebuild, type RebuildConfig } from "./rebuild.js";
 
 export { loadFixtureCase, type FixtureLoaderConfig } from "./fixtures.js";
 
+export { transformFixtureCase, type TransformConfig } from "./transform.js";
+
 export {
   runParityChecks,
   type ParityCheckSeverity,

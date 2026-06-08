@@ -8,6 +8,7 @@ import {
   type RunnerConfig,
   type RunResult,
 } from "./runner.js";
+import { transformFixtureCase } from "./transform.js";
 
 export type RebuildConfig = RunnerConfig & {
   schemas: string[];
@@ -55,6 +56,7 @@ export async function rebuild(config: RebuildConfig): Promise<RunResult> {
         { fixtureCase: config.fixtureCase, fixturesDir: config.fixturesDir },
         client,
       );
+      await transformFixtureCase({ fixtureCase: config.fixtureCase }, client);
     }
 
     return result;
