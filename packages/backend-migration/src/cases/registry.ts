@@ -1,6 +1,7 @@
 import { checkIdentityOrganizationLinksParity } from "./identityOrganizationLinks/parity.js";
 import { transformIdentityOrganizationLinks } from "./identityOrganizationLinks/transform.js";
 import { checkPropertyCatalogPublicProfilesParity } from "./propertyCatalogPublicProfiles/parity.js";
+import { transformPropertyCatalogPublicProfiles } from "./propertyCatalogPublicProfiles/transform.js";
 import type { FixtureCaseRegistration, TransformHandler } from "./types.js";
 import type { ParityHandler } from "../parityTypes.js";
 
@@ -12,6 +13,7 @@ const fixtureCases: FixtureCaseRegistration[] = [
   },
   {
     fixtureCase: "property-catalog-public-profiles",
+    transform: transformPropertyCatalogPublicProfiles,
     parityHandlers: [checkPropertyCatalogPublicProfilesParity],
   },
 ];
