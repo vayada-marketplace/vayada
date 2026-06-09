@@ -136,6 +136,23 @@ After this pattern is accepted, repeat for broader booking-flow settings, PMS
 calendar, payments, marketplace collaborations, WorkOS auth/session, and Ask
 Intelligence.
 
+## Following Vertical
+
+After `BookingAddonSettings` is closed end-to-end, the next narrow
+booking-flow settings vertical is the guest-form settings read surface.
+
+Contract artifact:
+[`BookingGuestFormSettings`](booking-guest-form-settings-contract.md).
+
+Proposed slices:
+
+1. Define `BookingGuestFormSettings` request/response/error contract.
+2. Add the booking admin frontend API client.
+3. Implement or tighten the TypeScript backend route.
+4. Update the Guest Form tab to consume the typed client when the route is
+   ready.
+5. Run route tests, frontend build, and browser smoke.
+
 ## Cutover Model
 
 Cut over per surface, not per whole product.
