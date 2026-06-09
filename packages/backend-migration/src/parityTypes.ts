@@ -17,7 +17,7 @@ export type ParityFinding = {
 
 export type ParityReport = {
   runId: string;
-  environment: string;
+  environment: MigrationEnvironment;
   fixtureCase: string;
   startedAt: string;
   finishedAt: string;

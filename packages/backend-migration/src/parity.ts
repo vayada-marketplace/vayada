@@ -3,7 +3,7 @@ import { join } from "node:path";
 import pg from "pg";
 
 import { getParityHandlers } from "./cases/registry.js";
-import { checkIdStability, checkRowCounts } from "./parityUtils.js";
+import { checkIdStability, checkRowCounts, validateExpectedTargetConfig } from "./parityUtils.js";
 import type { ExpectedTarget, ParityConfig, ParityFinding, ParityReport } from "./parityTypes.js";
 
 export type {
@@ -16,6 +16,28 @@ export type {
   ParityReport,
 } from "./parityTypes.js";
 
+function buildParityReport(
+  config: ParityConfig,
+  runId: string,
+  startedAt: string,
+  findings: ParityFinding[],
+): ParityReport {
+  const finishedAt = new Date().toISOString();
+  const failures = findings.filter((f) => f.severity === "fail").length;
+  const warnings = findings.filter((f) => f.severity === "warn").length;
+
+  return {
+    runId,
+    environment: config.environment,
+    fixtureCase: config.fixtureCase,
+    startedAt,
+    finishedAt,
+    status: failures > 0 ? "failed" : "passed",
+    summary: { failures, warnings },
+    findings,
+  };
+}
+
 export async function runParityChecks(config: ParityConfig): Promise<ParityReport> {
   const startedAt = new Date().toISOString();
   const runId = `${config.environment}-${config.fixtureCase}-${Date.now()}`;
@@ -27,7 +49,10 @@ export async function runParityChecks(config: ParityConfig): Promise<ParityRepor
     config.fixtureCase,
     "expected-target.json",
   );
-  const expected: ExpectedTarget = JSON.parse(await readFile(expectedPath, "utf8"));
+  const expected: unknown = JSON.parse(await readFile(expectedPath, "utf8"));
+  if (!validateExpectedTargetConfig(expected, findings)) {
+    return buildParityReport(config, runId, startedAt, findings);
+  }
 
   const client = new pg.Client({ connectionString: config.connectionString });
   await client.connect();
@@ -43,18 +68,5 @@ export async function runParityChecks(config: ParityConfig): Promise<ParityRepor
     await client.end();
   }
 
-  const finishedAt = new Date().toISOString();
-  const failures = findings.filter((f) => f.severity === "fail").length;
-  const warnings = findings.filter((f) => f.severity === "warn").length;
-
-  return {
-    runId,
-    environment: config.environment,
-    fixtureCase: config.fixtureCase,
-    startedAt,
-    finishedAt,
-    status: failures > 0 ? "failed" : "passed",
-    summary: { failures, warnings },
-    findings,
-  };
+  return buildParityReport(config, runId, startedAt, findings);
 }

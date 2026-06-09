@@ -3,6 +3,147 @@ import type pg from "pg";
 import type { ExpectedTarget, ParityFinding } from "./parityTypes.js";
 
 const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const EXPECTED_TARGET_KEYS = new Set([
+  "counts",
+  "idStability",
+  "uniquenessChecks",
+  "identityChecks",
+  "catalogPublicProfileChecks",
+]);
+const IDENTITY_CHECK_KEYS = new Set([
+  "memberships",
+  "resourceLinks",
+  "entitlements",
+  "rolePermissionGrants",
+  "permissionKeys",
+]);
+const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
+  "completePropertyIds",
+  "missingLocationPropertyIds",
+  "customDomainProperties",
+  "forbiddenPublicProfileKeys",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function addInvalidFixtureConfigFinding(
+  findings: ParityFinding[],
+  targetObject: string,
+  message: string,
+  expected: string,
+  actual: string,
+): void {
+  findings.push({
+    severity: "fail",
+    code: "INVALID_FIXTURE_CONFIG",
+    owner: "Parity harness",
+    targetObject,
+    message,
+    expected,
+    actual,
+    suggestedAction: "Fix expected-target.json before running parity checks.",
+  });
+}
+
+function describeActual(value: unknown): string {
+  if (value === undefined) return "undefined";
+  const serialized = JSON.stringify(value);
+  return serialized ?? String(value);
+}
+
+function validateKnownKeys(
+  value: Record<string, unknown>,
+  allowedKeys: Set<string>,
+  targetObject: string,
+  findings: ParityFinding[],
+): void {
+  for (const key of Object.keys(value)) {
+    if (allowedKeys.has(key)) continue;
+
+    addInvalidFixtureConfigFinding(
+      findings,
+      `${targetObject}.${key}`,
+      `Unknown expected-target.json key ${key}`,
+      `One of: ${Array.from(allowedKeys).join(", ")}`,
+      key,
+    );
+  }
+}
+
+function validateStringArray(
+  value: unknown,
+  targetObject: string,
+  findings: ParityFinding[],
+): void {
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) return;
+
+  addInvalidFixtureConfigFinding(
+    findings,
+    targetObject,
+    `${targetObject} must be an array of strings when present`,
+    "string[]",
+    describeActual(value),
+  );
+}
+
+function validateObjectArray(
+  value: unknown,
+  targetObject: string,
+  requiredStringFields: string[],
+  findings: ParityFinding[],
+  nullableStringFields: string[] = [],
+): void {
+  if (!Array.isArray(value)) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      targetObject,
+      `${targetObject} must be an array of objects when present`,
+      "object[]",
+      describeActual(value),
+    );
+    return;
+  }
+
+  value.forEach((item, index) => {
+    const itemTarget = `${targetObject}[${index}]`;
+    if (!isRecord(item)) {
+      addInvalidFixtureConfigFinding(
+        findings,
+        itemTarget,
+        `${itemTarget} must be an object`,
+        "object",
+        describeActual(item),
+      );
+      return;
+    }
+
+    for (const field of requiredStringFields) {
+      if (typeof item[field] === "string") continue;
+
+      addInvalidFixtureConfigFinding(
+        findings,
+        `${itemTarget}.${field}`,
+        `${itemTarget}.${field} must be a string`,
+        "string",
+        describeActual(item[field]),
+      );
+    }
+
+    for (const field of nullableStringFields) {
+      if (typeof item[field] === "string" || item[field] === null) continue;
+
+      addInvalidFixtureConfigFinding(
+        findings,
+        `${itemTarget}.${field}`,
+        `${itemTarget}.${field} must be a string or null`,
+        "string | null",
+        describeActual(item[field]),
+      );
+    }
+  });
+}
 
 export function parseTableRef(
   tableRef: string,
@@ -29,6 +170,188 @@ export function parseTableRef(
     return null;
   }
   return { schema: parts[0], table: parts[1] };
+}
+
+export function validateExpectedTargetConfig(
+  expected: unknown,
+  findings: ParityFinding[],
+): expected is ExpectedTarget {
+  if (!isRecord(expected)) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      "expected-target.json",
+      "expected-target.json must contain a JSON object",
+      "object",
+      Array.isArray(expected) ? "array" : typeof expected,
+    );
+    return false;
+  }
+  validateKnownKeys(expected, EXPECTED_TARGET_KEYS, "expected-target.json", findings);
+
+  if (!isRecord(expected["counts"])) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      "expected-target.json.counts",
+      "expected-target.json counts must be an object keyed by schema.table",
+      "Record<schema.table, non-negative integer>",
+      Array.isArray(expected["counts"]) ? "array" : typeof expected["counts"],
+    );
+  } else {
+    for (const [tableRef, count] of Object.entries(expected["counts"])) {
+      parseTableRef(tableRef, findings);
+      if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+        addInvalidFixtureConfigFinding(
+          findings,
+          `expected-target.json.counts.${tableRef}`,
+          `Invalid expected row count for ${tableRef}`,
+          "non-negative integer",
+          JSON.stringify(count),
+        );
+      }
+    }
+  }
+
+  if (!isRecord(expected["idStability"])) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      "expected-target.json.idStability",
+      "expected-target.json idStability must be an object keyed by schema.table",
+      "Record<schema.table, string[]>",
+      Array.isArray(expected["idStability"]) ? "array" : typeof expected["idStability"],
+    );
+  } else {
+    for (const [tableRef, ids] of Object.entries(expected["idStability"])) {
+      parseTableRef(tableRef, findings);
+      if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string")) {
+        addInvalidFixtureConfigFinding(
+          findings,
+          `expected-target.json.idStability.${tableRef}`,
+          `Invalid ID stability list for ${tableRef}`,
+          "string[]",
+          JSON.stringify(ids),
+        );
+      }
+    }
+  }
+
+  const uniquenessChecks = expected["uniquenessChecks"];
+  if (
+    uniquenessChecks !== undefined &&
+    (!Array.isArray(uniquenessChecks) ||
+      !uniquenessChecks.every((check) => typeof check === "string"))
+  ) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      "expected-target.json.uniquenessChecks",
+      "expected-target.json uniquenessChecks must be an array of strings when present",
+      "string[]",
+      JSON.stringify(uniquenessChecks),
+    );
+  }
+
+  for (const extensionKey of ["identityChecks", "catalogPublicProfileChecks"]) {
+    const extension = expected[extensionKey];
+    if (extension !== undefined && !isRecord(extension)) {
+      addInvalidFixtureConfigFinding(
+        findings,
+        `expected-target.json.${extensionKey}`,
+        `expected-target.json ${extensionKey} must be an object when present`,
+        "object",
+        Array.isArray(extension) ? "array" : typeof extension,
+      );
+    }
+  }
+
+  const identityChecks = expected["identityChecks"];
+  if (isRecord(identityChecks)) {
+    validateKnownKeys(
+      identityChecks,
+      IDENTITY_CHECK_KEYS,
+      "expected-target.json.identityChecks",
+      findings,
+    );
+    if (identityChecks["memberships"] !== undefined) {
+      validateObjectArray(
+        identityChecks["memberships"],
+        "expected-target.json.identityChecks.memberships",
+        ["organizationId", "userId", "status", "roleKey"],
+        findings,
+      );
+    }
+    if (identityChecks["resourceLinks"] !== undefined) {
+      validateObjectArray(
+        identityChecks["resourceLinks"],
+        "expected-target.json.identityChecks.resourceLinks",
+        ["organizationId", "product", "resourceType", "resourceId", "relationship", "status"],
+        findings,
+      );
+    }
+    if (identityChecks["entitlements"] !== undefined) {
+      validateObjectArray(
+        identityChecks["entitlements"],
+        "expected-target.json.identityChecks.entitlements",
+        ["organizationId", "product", "entitlementKey", "status"],
+        findings,
+        ["resourceProduct", "resourceType", "resourceId"],
+      );
+    }
+    if (identityChecks["rolePermissionGrants"] !== undefined) {
+      validateObjectArray(
+        identityChecks["rolePermissionGrants"],
+        "expected-target.json.identityChecks.rolePermissionGrants",
+        ["organizationKind", "roleKey", "permissionKey"],
+        findings,
+      );
+    }
+    if (identityChecks["permissionKeys"] !== undefined) {
+      validateStringArray(
+        identityChecks["permissionKeys"],
+        "expected-target.json.identityChecks.permissionKeys",
+        findings,
+      );
+    }
+  }
+
+  const catalogPublicProfileChecks = expected["catalogPublicProfileChecks"];
+  if (isRecord(catalogPublicProfileChecks)) {
+    validateKnownKeys(
+      catalogPublicProfileChecks,
+      CATALOG_PUBLIC_PROFILE_CHECK_KEYS,
+      "expected-target.json.catalogPublicProfileChecks",
+      findings,
+    );
+    if (catalogPublicProfileChecks["completePropertyIds"] !== undefined) {
+      validateStringArray(
+        catalogPublicProfileChecks["completePropertyIds"],
+        "expected-target.json.catalogPublicProfileChecks.completePropertyIds",
+        findings,
+      );
+    }
+    if (catalogPublicProfileChecks["missingLocationPropertyIds"] !== undefined) {
+      validateStringArray(
+        catalogPublicProfileChecks["missingLocationPropertyIds"],
+        "expected-target.json.catalogPublicProfileChecks.missingLocationPropertyIds",
+        findings,
+      );
+    }
+    if (catalogPublicProfileChecks["customDomainProperties"] !== undefined) {
+      validateObjectArray(
+        catalogPublicProfileChecks["customDomainProperties"],
+        "expected-target.json.catalogPublicProfileChecks.customDomainProperties",
+        ["propertyId", "hostname"],
+        findings,
+      );
+    }
+    if (catalogPublicProfileChecks["forbiddenPublicProfileKeys"] !== undefined) {
+      validateStringArray(
+        catalogPublicProfileChecks["forbiddenPublicProfileKeys"],
+        "expected-target.json.catalogPublicProfileChecks.forbiddenPublicProfileKeys",
+        findings,
+      );
+    }
+  }
+
+  return findings.every((finding) => finding.code !== "INVALID_FIXTURE_CONFIG");
 }
 
 export async function checkRowCounts(

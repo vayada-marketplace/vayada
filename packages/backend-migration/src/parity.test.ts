@@ -1,4 +1,4 @@
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
@@ -13,6 +13,69 @@ const TEST_DATABASE_URL = process.env["TEST_DATABASE_URL"];
 
 const FIXTURES_DIR = join(import.meta.dirname, "../fixtures");
 const MIGRATIONS_DIR = join(import.meta.dirname, "../migrations");
+
+describe("runParityChecks fixture config validation", () => {
+  it("reports invalid shared expected-target config before connecting to the database", async () => {
+    const fixturesDir = join(tmpdir(), `vayada-invalid-fixture-${Date.now()}`);
+    const fixtureDir = join(fixturesDir, "cases", "invalid-config");
+    await mkdir(fixtureDir, { recursive: true });
+
+    try {
+      await writeFile(
+        join(fixtureDir, "expected-target.json"),
+        JSON.stringify({
+          counts: {
+            "identity.users": "one",
+          },
+          idStability: {
+            "identity.users": [1],
+          },
+          uniquenessChecks: ["external_identities", 2],
+          identityChecks: {
+            memberships: {},
+          },
+          catalogPublicProfileChecks: {
+            customDomainProperties: ["bad"],
+          },
+        }),
+      );
+
+      const report = await runParityChecks({
+        connectionString: "postgresql://vayada_test:vayada_test@127.0.0.1:1/not_used",
+        fixtureCase: "invalid-config",
+        fixturesDir,
+        environment: "local",
+      });
+
+      expect(report.status).toBe("failed");
+      expect(report.summary.failures).toBe(5);
+      expect(report.findings).toEqual([
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.counts.identity.users",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.idStability.identity.users",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.uniquenessChecks",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.identityChecks.memberships",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.catalogPublicProfileChecks.customDomainProperties[0]",
+        }),
+      ]);
+    } finally {
+      await rm(fixturesDir, { recursive: true, force: true });
+    }
+  });
+});
 
 async function dropTargetSchemas(): Promise<void> {
   assertSafeTestDatabase(TEST_DATABASE_URL!);
