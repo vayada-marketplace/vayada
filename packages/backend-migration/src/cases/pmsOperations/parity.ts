@@ -94,8 +94,10 @@ async function checkPmsOperationalSlice(
     channel_room_type_mapping_id: string | null;
     external_room_type_id: string | null;
     channel_rate_plan_mapping_id: string | null;
+    rate_mapping_channel: string | null;
     external_rate_plan_id: string | null;
     channel_booking_mapping_id: string | null;
+    booking_mapping_channel: string | null;
     external_booking_id: string | null;
     booking_sync_status_id: string | null;
     sync_status_count: string;
@@ -154,8 +156,10 @@ async function checkPmsOperationalSlice(
        room_mapping.id::text AS channel_room_type_mapping_id,
        room_mapping.external_room_type_id,
        rate_mapping.id::text AS channel_rate_plan_mapping_id,
+       rate_mapping.channel AS rate_mapping_channel,
        rate_mapping.external_rate_plan_id,
        booking_mapping.id::text AS channel_booking_mapping_id,
+       booking_mapping.channel AS booking_mapping_channel,
        booking_mapping.external_booking_id,
        booking_sync.id::text AS booking_sync_status_id,
        (
@@ -315,8 +319,10 @@ async function checkPmsOperationalSlice(
         channelRoomTypeMappingId: row.channel_room_type_mapping_id,
         externalRoomTypeId: row.external_room_type_id,
         channelRatePlanMappingId: row.channel_rate_plan_mapping_id,
+        rateMappingChannel: row.rate_mapping_channel,
         externalRatePlanId: row.external_rate_plan_id,
         channelBookingMappingId: row.channel_booking_mapping_id,
+        bookingMappingChannel: row.booking_mapping_channel,
         channelBookingExternalId: row.external_booking_id,
         bookingSyncStatusId: row.booking_sync_status_id,
         syncStatusCount: parseInt(row.sync_status_count, 10),
@@ -358,8 +364,10 @@ async function checkPmsOperationalSlice(
     actual.channelRoomTypeMappingId === check.channelRoomTypeMappingId &&
     actual.externalRoomTypeId === check.externalRoomTypeId &&
     actual.channelRatePlanMappingId === check.channelRatePlanMappingId &&
+    actual.rateMappingChannel === check.channel &&
     actual.externalRatePlanId === check.externalRatePlanId &&
     actual.channelBookingMappingId === check.channelBookingMappingId &&
+    actual.bookingMappingChannel === check.channel &&
     actual.channelBookingExternalId === check.externalBookingId &&
     actual.bookingSyncStatusId === check.bookingSyncStatusId &&
     actual.syncStatusCount === check.syncStatusCount;
