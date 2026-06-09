@@ -31,6 +31,12 @@ describe("runParityChecks fixture config validation", () => {
             "identity.users": [1],
           },
           uniquenessChecks: ["external_identities", 2],
+          identityChecks: {
+            memberships: {},
+          },
+          catalogPublicProfileChecks: {
+            customDomainProperties: ["bad"],
+          },
         }),
       );
 
@@ -42,7 +48,7 @@ describe("runParityChecks fixture config validation", () => {
       });
 
       expect(report.status).toBe("failed");
-      expect(report.summary.failures).toBe(3);
+      expect(report.summary.failures).toBe(5);
       expect(report.findings).toEqual([
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
@@ -55,6 +61,14 @@ describe("runParityChecks fixture config validation", () => {
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
           targetObject: "expected-target.json.uniquenessChecks",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.identityChecks.memberships",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.catalogPublicProfileChecks.customDomainProperties[0]",
         }),
       ]);
     } finally {

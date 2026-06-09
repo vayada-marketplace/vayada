@@ -3,6 +3,26 @@ import type pg from "pg";
 import type { ExpectedTarget, ParityFinding } from "./parityTypes.js";
 
 const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const EXPECTED_TARGET_KEYS = new Set([
+  "counts",
+  "idStability",
+  "uniquenessChecks",
+  "identityChecks",
+  "catalogPublicProfileChecks",
+]);
+const IDENTITY_CHECK_KEYS = new Set([
+  "memberships",
+  "resourceLinks",
+  "entitlements",
+  "rolePermissionGrants",
+  "permissionKeys",
+]);
+const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
+  "completePropertyIds",
+  "missingLocationPropertyIds",
+  "customDomainProperties",
+  "forbiddenPublicProfileKeys",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,6 +44,104 @@ function addInvalidFixtureConfigFinding(
     expected,
     actual,
     suggestedAction: "Fix expected-target.json before running parity checks.",
+  });
+}
+
+function describeActual(value: unknown): string {
+  if (value === undefined) return "undefined";
+  const serialized = JSON.stringify(value);
+  return serialized ?? String(value);
+}
+
+function validateKnownKeys(
+  value: Record<string, unknown>,
+  allowedKeys: Set<string>,
+  targetObject: string,
+  findings: ParityFinding[],
+): void {
+  for (const key of Object.keys(value)) {
+    if (allowedKeys.has(key)) continue;
+
+    addInvalidFixtureConfigFinding(
+      findings,
+      `${targetObject}.${key}`,
+      `Unknown expected-target.json key ${key}`,
+      `One of: ${Array.from(allowedKeys).join(", ")}`,
+      key,
+    );
+  }
+}
+
+function validateStringArray(
+  value: unknown,
+  targetObject: string,
+  findings: ParityFinding[],
+): void {
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) return;
+
+  addInvalidFixtureConfigFinding(
+    findings,
+    targetObject,
+    `${targetObject} must be an array of strings when present`,
+    "string[]",
+    describeActual(value),
+  );
+}
+
+function validateObjectArray(
+  value: unknown,
+  targetObject: string,
+  requiredStringFields: string[],
+  findings: ParityFinding[],
+  nullableStringFields: string[] = [],
+): void {
+  if (!Array.isArray(value)) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      targetObject,
+      `${targetObject} must be an array of objects when present`,
+      "object[]",
+      describeActual(value),
+    );
+    return;
+  }
+
+  value.forEach((item, index) => {
+    const itemTarget = `${targetObject}[${index}]`;
+    if (!isRecord(item)) {
+      addInvalidFixtureConfigFinding(
+        findings,
+        itemTarget,
+        `${itemTarget} must be an object`,
+        "object",
+        describeActual(item),
+      );
+      return;
+    }
+
+    for (const field of requiredStringFields) {
+      if (typeof item[field] === "string") continue;
+
+      addInvalidFixtureConfigFinding(
+        findings,
+        `${itemTarget}.${field}`,
+        `${itemTarget}.${field} must be a string`,
+        "string",
+        describeActual(item[field]),
+      );
+    }
+
+    for (const field of nullableStringFields) {
+      if (typeof item[field] === "string" || item[field] === null) continue;
+
+      addInvalidFixtureConfigFinding(
+        findings,
+        `${itemTarget}.${field}`,
+        `${itemTarget}.${field} must be a string or null`,
+        "string | null",
+        describeActual(item[field]),
+      );
+    }
   });
 }
 
@@ -68,6 +186,7 @@ export function validateExpectedTargetConfig(
     );
     return false;
   }
+  validateKnownKeys(expected, EXPECTED_TARGET_KEYS, "expected-target.json", findings);
 
   if (!isRecord(expected["counts"])) {
     addInvalidFixtureConfigFinding(
@@ -139,6 +258,95 @@ export function validateExpectedTargetConfig(
         `expected-target.json ${extensionKey} must be an object when present`,
         "object",
         Array.isArray(extension) ? "array" : typeof extension,
+      );
+    }
+  }
+
+  const identityChecks = expected["identityChecks"];
+  if (isRecord(identityChecks)) {
+    validateKnownKeys(
+      identityChecks,
+      IDENTITY_CHECK_KEYS,
+      "expected-target.json.identityChecks",
+      findings,
+    );
+    if (identityChecks["memberships"] !== undefined) {
+      validateObjectArray(
+        identityChecks["memberships"],
+        "expected-target.json.identityChecks.memberships",
+        ["organizationId", "userId", "status", "roleKey"],
+        findings,
+      );
+    }
+    if (identityChecks["resourceLinks"] !== undefined) {
+      validateObjectArray(
+        identityChecks["resourceLinks"],
+        "expected-target.json.identityChecks.resourceLinks",
+        ["organizationId", "product", "resourceType", "resourceId", "relationship", "status"],
+        findings,
+      );
+    }
+    if (identityChecks["entitlements"] !== undefined) {
+      validateObjectArray(
+        identityChecks["entitlements"],
+        "expected-target.json.identityChecks.entitlements",
+        ["organizationId", "product", "entitlementKey", "status"],
+        findings,
+        ["resourceProduct", "resourceType", "resourceId"],
+      );
+    }
+    if (identityChecks["rolePermissionGrants"] !== undefined) {
+      validateObjectArray(
+        identityChecks["rolePermissionGrants"],
+        "expected-target.json.identityChecks.rolePermissionGrants",
+        ["organizationKind", "roleKey", "permissionKey"],
+        findings,
+      );
+    }
+    if (identityChecks["permissionKeys"] !== undefined) {
+      validateStringArray(
+        identityChecks["permissionKeys"],
+        "expected-target.json.identityChecks.permissionKeys",
+        findings,
+      );
+    }
+  }
+
+  const catalogPublicProfileChecks = expected["catalogPublicProfileChecks"];
+  if (isRecord(catalogPublicProfileChecks)) {
+    validateKnownKeys(
+      catalogPublicProfileChecks,
+      CATALOG_PUBLIC_PROFILE_CHECK_KEYS,
+      "expected-target.json.catalogPublicProfileChecks",
+      findings,
+    );
+    if (catalogPublicProfileChecks["completePropertyIds"] !== undefined) {
+      validateStringArray(
+        catalogPublicProfileChecks["completePropertyIds"],
+        "expected-target.json.catalogPublicProfileChecks.completePropertyIds",
+        findings,
+      );
+    }
+    if (catalogPublicProfileChecks["missingLocationPropertyIds"] !== undefined) {
+      validateStringArray(
+        catalogPublicProfileChecks["missingLocationPropertyIds"],
+        "expected-target.json.catalogPublicProfileChecks.missingLocationPropertyIds",
+        findings,
+      );
+    }
+    if (catalogPublicProfileChecks["customDomainProperties"] !== undefined) {
+      validateObjectArray(
+        catalogPublicProfileChecks["customDomainProperties"],
+        "expected-target.json.catalogPublicProfileChecks.customDomainProperties",
+        ["propertyId", "hostname"],
+        findings,
+      );
+    }
+    if (catalogPublicProfileChecks["forbiddenPublicProfileKeys"] !== undefined) {
+      validateStringArray(
+        catalogPublicProfileChecks["forbiddenPublicProfileKeys"],
+        "expected-target.json.catalogPublicProfileChecks.forbiddenPublicProfileKeys",
+        findings,
       );
     }
   }
