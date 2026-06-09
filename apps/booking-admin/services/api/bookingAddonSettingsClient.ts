@@ -161,9 +161,21 @@ function readApiErrorDetail(error: ApiErrorResponse): string {
   const data = error.data as Partial<{ detail: unknown; message: unknown }> | null;
   const detail = data?.detail;
   if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) return detail.map((entry) => entry.msg).join(", ");
+  if (Array.isArray(detail)) {
+    const message = detail.map(readApiErrorDetailEntry).filter(Boolean).join(", ");
+    if (message) return message;
+  }
   if (typeof data?.message === "string") return data.message;
   return error.message || "Booking add-on settings are unavailable.";
+}
+
+function readApiErrorDetailEntry(entry: unknown): string {
+  if (typeof entry === "string") return entry;
+  if (entry && typeof entry === "object" && "msg" in entry) {
+    const message = (entry as { msg?: unknown }).msg;
+    return typeof message === "string" ? message : "";
+  }
+  return "";
 }
 
 function toAuthorizationErrorCode(
