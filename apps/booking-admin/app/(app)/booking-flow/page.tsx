@@ -19,8 +19,8 @@ import {
   type AddonSettings,
   type PromoCodeItem,
   type DesignSettings,
-  type PropertySettings,
 } from "@/services/settings";
+import { getBookingAddonSettings } from "@/services/api/bookingAddonSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -82,6 +82,16 @@ const emptyAddon = {
   includedItems: [] as string[],
 };
 
+const DEFAULT_ADDON_SETTINGS: AddonSettings = {
+  showAddonsStep: true,
+  groupAddonsByCategory: true,
+};
+
+function getSelectedBookingHotelId(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem("selectedHotelId");
+}
+
 export default function BookingFlowPage() {
   const [activeTab, setActiveTab] = useState<Tab>("rooms");
   const [loading, setLoading] = useState(true);
@@ -91,10 +101,7 @@ export default function BookingFlowPage() {
 
   // Add-ons state
   const [addons, setAddons] = useState<AddonItem[]>([]);
-  const [addonSettings, setAddonSettings] = useState<AddonSettings>({
-    showAddonsStep: true,
-    groupAddonsByCategory: true,
-  });
+  const [addonSettings, setAddonSettings] = useState<AddonSettings>(DEFAULT_ADDON_SETTINGS);
   const [showModal, setShowModal] = useState(false);
   const [editingAddon, setEditingAddon] = useState<AddonItem | null>(null);
   const [formData, setFormData] = useState(emptyAddon);
@@ -149,11 +156,22 @@ export default function BookingFlowPage() {
   const [savingCurrencyLang, setSavingCurrencyLang] = useState(false);
 
   useEffect(() => {
+    const selectedHotelId = getSelectedBookingHotelId();
+    const propertyPromise = settingsService.getPropertySettings().catch(() => null);
+    const addonSettingsPromise = selectedHotelId
+      ? getBookingAddonSettings({ hotelId: selectedHotelId }).catch(() => DEFAULT_ADDON_SETTINGS)
+      : propertyPromise
+          .then((property) => {
+            if (!property?.id) return DEFAULT_ADDON_SETTINGS;
+            return getBookingAddonSettings({ hotelId: property.id }).catch(
+              () => DEFAULT_ADDON_SETTINGS,
+            );
+          })
+          .catch(() => DEFAULT_ADDON_SETTINGS);
+
     Promise.all([
       settingsService.listAddons().catch(() => []),
-      settingsService
-        .getAddonSettings()
-        .catch(() => ({ showAddonsStep: true, groupAddonsByCategory: true })),
+      addonSettingsPromise,
       settingsService.getDesignSettings().catch(
         () =>
           ({
@@ -168,7 +186,7 @@ export default function BookingFlowPage() {
           }) as DesignSettings,
       ),
       settingsService.getBenefits().catch(() => ({ benefits: [] })),
-      settingsService.getPropertySettings().catch(() => null),
+      propertyPromise,
       settingsService.listPromoCodes().catch(() => []),
     ])
       .then(([addonList, settings, design, benefitsRes, property, promoList]) => {
