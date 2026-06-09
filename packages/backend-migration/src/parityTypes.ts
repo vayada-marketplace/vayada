@@ -149,6 +149,54 @@ export type ExpectedTarget = {
     }>;
     forbiddenVisibilityKeys?: string[];
   };
+  pmsOperationsChecks?: {
+    properties: Array<{
+      propertyId: string;
+      organizationId: string;
+      pmsHotelResourceId: string;
+      roomTypeId: string;
+      roomId: string;
+      ratePlanId: string;
+      rateRuleId: string;
+      inventoryDate: string;
+      inventoryStatus: string;
+      roomBlockId: string;
+      guestBookingId: string;
+      assignmentId: string;
+      checkinRecordId: string;
+      checkoutChargeId: string;
+      checkoutRecordId: string;
+      privateNoteId: string;
+      messageThreadId: string;
+      messageId: string;
+      messageAttachmentId: string;
+      channelConnectionId: string;
+      channelRoomTypeMappingId: string;
+      channelRatePlanMappingId: string;
+      channelBookingMappingId: string;
+      bookingSyncStatusId: string;
+      sourceRoomTypeId: string;
+      sourceRoomId: string;
+      ratePlanCode: string;
+      publicBookingReference: string;
+      assignmentStatus: string;
+      roomNumber: string;
+      channel: string;
+      externalBookingId: string;
+      externalRoomTypeId: string;
+      externalRatePlanId: string;
+      inventoryTotalCount: number;
+      inventoryAssignedCount: number;
+      inventoryBlockedCount: number;
+      inventoryAvailableCount: number;
+      messageCount: number;
+      attachmentCount: number;
+      privateNoteCount: number;
+      checkoutChargeCount: number;
+      syncStatusCount: number;
+    }>;
+    forbiddenOperationalSummaryKeys?: string[];
+  };
 };
 
 export type ParityHandlerContext = {

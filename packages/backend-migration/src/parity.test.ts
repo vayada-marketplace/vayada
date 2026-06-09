@@ -64,6 +64,10 @@ describe("runParityChecks fixture config validation", () => {
           financeChecks: {
             forbiddenVisibilityKeys: [1],
           },
+          pmsOperationsChecks: {
+            properties: {},
+            forbiddenOperationalSummaryKeys: [1],
+          },
         }),
       );
 
@@ -75,7 +79,7 @@ describe("runParityChecks fixture config validation", () => {
       });
 
       expect(report.status).toBe("failed");
-      expect(report.summary.failures).toBe(8);
+      expect(report.summary.failures).toBe(10);
       expect(report.findings).toEqual([
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
@@ -108,6 +112,14 @@ describe("runParityChecks fixture config validation", () => {
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
           targetObject: "expected-target.json.financeChecks.forbiddenVisibilityKeys",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.pmsOperationsChecks.properties",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.pmsOperationsChecks.forbiddenOperationalSummaryKeys",
         }),
       ]);
     } finally {

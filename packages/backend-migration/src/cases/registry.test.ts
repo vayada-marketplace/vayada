@@ -13,14 +13,19 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("property-catalog-public-profiles")).toHaveLength(1);
   });
 
-  it("registers booking checkout parity without a transform", () => {
-    expect(getTransformHandler("booking-checkout")).toBeUndefined();
+  it("registers booking checkout transform and parity handlers", () => {
+    expect(getTransformHandler("booking-checkout")).toBeTypeOf("function");
     expect(getParityHandlers("booking-checkout")).toHaveLength(1);
   });
 
   it("registers finance parity without a transform", () => {
     expect(getTransformHandler("finance")).toBeUndefined();
     expect(getParityHandlers("finance")).toHaveLength(1);
+  });
+
+  it("registers PMS operations parity without a transform", () => {
+    expect(getTransformHandler("pms-operations")).toBeUndefined();
+    expect(getParityHandlers("pms-operations")).toHaveLength(1);
   });
 
   it("returns empty handlers for unregistered fixture cases", () => {

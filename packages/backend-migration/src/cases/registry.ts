@@ -1,7 +1,9 @@
 import { checkBookingCheckoutParity } from "./bookingCheckout/parity.js";
+import { transformBookingCheckout } from "./bookingCheckout/transform.js";
 import { checkFinanceParity } from "./finance/parity.js";
 import { checkIdentityOrganizationLinksParity } from "./identityOrganizationLinks/parity.js";
 import { transformIdentityOrganizationLinks } from "./identityOrganizationLinks/transform.js";
+import { checkPmsOperationsParity } from "./pmsOperations/parity.js";
 import { checkPropertyCatalogPublicProfilesParity } from "./propertyCatalogPublicProfiles/parity.js";
 import { transformPropertyCatalogPublicProfiles } from "./propertyCatalogPublicProfiles/transform.js";
 import type { FixtureCaseRegistration, TransformHandler } from "./types.js";
@@ -20,11 +22,16 @@ const fixtureCases: FixtureCaseRegistration[] = [
   },
   {
     fixtureCase: "booking-checkout",
+    transform: transformBookingCheckout,
     parityHandlers: [checkBookingCheckoutParity],
   },
   {
     fixtureCase: "finance",
     parityHandlers: [checkFinanceParity],
+  },
+  {
+    fixtureCase: "pms-operations",
+    parityHandlers: [checkPmsOperationsParity],
   },
 ];
 

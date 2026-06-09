@@ -11,6 +11,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "catalogPublicProfileChecks",
   "bookingCheckoutChecks",
   "financeChecks",
+  "pmsOperationsChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -31,6 +32,7 @@ const FINANCE_CHECK_KEYS = new Set([
   "affiliatePayouts",
   "forbiddenVisibilityKeys",
 ]);
+const PMS_OPERATIONS_CHECK_KEYS = new Set(["properties", "forbiddenOperationalSummaryKeys"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -277,6 +279,7 @@ export function validateExpectedTargetConfig(
     "catalogPublicProfileChecks",
     "bookingCheckoutChecks",
     "financeChecks",
+    "pmsOperationsChecks",
   ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
@@ -488,6 +491,76 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         financeChecks["forbiddenVisibilityKeys"],
         "expected-target.json.financeChecks.forbiddenVisibilityKeys",
+        findings,
+      );
+    }
+  }
+
+  const pmsOperationsChecks = expected["pmsOperationsChecks"];
+  if (isRecord(pmsOperationsChecks)) {
+    validateKnownKeys(
+      pmsOperationsChecks,
+      PMS_OPERATIONS_CHECK_KEYS,
+      "expected-target.json.pmsOperationsChecks",
+      findings,
+    );
+    validateObjectArray(
+      pmsOperationsChecks["properties"],
+      "expected-target.json.pmsOperationsChecks.properties",
+      [
+        "propertyId",
+        "organizationId",
+        "pmsHotelResourceId",
+        "roomTypeId",
+        "roomId",
+        "ratePlanId",
+        "rateRuleId",
+        "inventoryDate",
+        "inventoryStatus",
+        "roomBlockId",
+        "guestBookingId",
+        "assignmentId",
+        "checkinRecordId",
+        "checkoutChargeId",
+        "checkoutRecordId",
+        "privateNoteId",
+        "messageThreadId",
+        "messageId",
+        "messageAttachmentId",
+        "channelConnectionId",
+        "channelRoomTypeMappingId",
+        "channelRatePlanMappingId",
+        "channelBookingMappingId",
+        "bookingSyncStatusId",
+        "sourceRoomTypeId",
+        "sourceRoomId",
+        "ratePlanCode",
+        "publicBookingReference",
+        "assignmentStatus",
+        "roomNumber",
+        "channel",
+        "externalBookingId",
+        "externalRoomTypeId",
+        "externalRatePlanId",
+      ],
+      findings,
+      [],
+      [
+        "inventoryTotalCount",
+        "inventoryAssignedCount",
+        "inventoryBlockedCount",
+        "inventoryAvailableCount",
+        "messageCount",
+        "attachmentCount",
+        "privateNoteCount",
+        "checkoutChargeCount",
+        "syncStatusCount",
+      ],
+    );
+    if (pmsOperationsChecks["forbiddenOperationalSummaryKeys"] !== undefined) {
+      validateStringArray(
+        pmsOperationsChecks["forbiddenOperationalSummaryKeys"],
+        "expected-target.json.pmsOperationsChecks.forbiddenOperationalSummaryKeys",
         findings,
       );
     }

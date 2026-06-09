@@ -1,0 +1,40 @@
+{
+  "caseId": "pms-operations",
+  "description": "Target-only PMS operations fixture covering operational room inventory, rate setup, room blocks, booking assignment, check-in/out records, private notes, guest messaging, and channel mappings. Validates PMS target schema relationships before PMS ETL exists.",
+  "sourceDatabases": ["target"],
+  "expectedOwners": {
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 1,
+    "identity.product_entitlements": 1,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 1,
+    "booking.guest_bookings": 1,
+    "booking.booking_guests": 1,
+    "booking.direct_booking_summary_read_model": 1,
+    "pms.room_types": 2,
+    "pms.rooms": 3,
+    "pms.rate_plans": 2,
+    "pms.rate_rules": 2,
+    "pms.inventory_days": 3,
+    "pms.room_blocks": 2,
+    "pms.operational_booking_assignments": 1,
+    "pms.booking_checkin_records": 1,
+    "pms.booking_checkout_charges": 1,
+    "pms.booking_checkout_records": 1,
+    "pms.booking_notes_private": 1,
+    "pms.message_threads": 1,
+    "pms.messages": 2,
+    "pms.message_attachments": 1,
+    "pms.channel_connections": 1,
+    "pms.channel_room_type_mappings": 2,
+    "pms.channel_rate_plan_mappings": 2,
+    "pms.channel_booking_mappings": 1,
+    "pms.channel_sync_status": 3
+  },
+  "expectedFailures": [],
+  "publicExposureAllowlist": [
+    "booking.guest_bookings.public_reference",
+    "booking.direct_booking_summary_read_model"
+  ]
+}
