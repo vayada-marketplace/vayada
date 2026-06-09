@@ -1,7 +1,7 @@
 {
   "caseId": "finance",
-  "description": "Target-only finance fixture covering property payment setup, payments, payouts, commission rates, billing entitlements, affiliate payouts, and permissioned finance visibility read models. Validates finance target schema relationships before finance ETL exists.",
-  "sourceDatabases": ["target"],
+  "description": "Source-to-target finance fixture covering property payment setup, payments, payouts, commission rates, billing entitlements, affiliate payouts, and permissioned finance visibility read models.",
+  "sourceDatabases": ["finance"],
   "expectedOwners": {
     "identity.organizations": 2,
     "identity.organization_memberships": 2,

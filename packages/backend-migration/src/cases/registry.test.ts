@@ -18,8 +18,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("booking-checkout")).toHaveLength(1);
   });
 
-  it("registers finance parity without a transform", () => {
-    expect(getTransformHandler("finance")).toBeUndefined();
+  it("registers finance transform and parity handlers", () => {
+    expect(getTransformHandler("finance")).toBeTypeOf("function");
     expect(getParityHandlers("finance")).toHaveLength(1);
   });
 
