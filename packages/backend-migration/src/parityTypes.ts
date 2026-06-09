@@ -102,6 +102,53 @@ export type ExpectedTarget = {
     }>;
     forbiddenSummaryKeys?: string[];
   };
+  financeChecks?: {
+    propertyFlows?: Array<{
+      propertyId: string;
+      organizationId: string;
+      ownerUserId: string;
+      bookingHotelResourceId: string;
+      pmsHotelResourceId: string;
+      providerAccountId: string;
+      paymentId: string;
+      guestBookingId: string;
+      payoutSettingsId: string;
+      payoutId: string;
+      commissionRuleId: string;
+      commissionRateChangeId: string;
+      identityEntitlementId: string;
+      billingEntitlementId: string;
+      visibilityReadModelId: string;
+      sourcePaymentId: string;
+      providerAccountRef: string;
+      providerPaymentIntentId: string;
+      providerPayoutId: string;
+      paymentAmount: string;
+      netPaymentAmount: string;
+      payoutAmount: string;
+      commissionRate: string;
+      currency: string;
+      visibilityScope: string;
+      requiredPermissionKey: string;
+    }>;
+    affiliatePayouts?: Array<{
+      organizationId: string;
+      affiliateResourceId: string;
+      providerAccountId: string;
+      payoutSettingsId: string;
+      payoutId: string;
+      identityEntitlementId: string;
+      billingEntitlementId: string;
+      visibilityReadModelId: string;
+      providerAccountRef: string;
+      providerPayoutId: string;
+      payoutAmount: string;
+      currency: string;
+      visibilityScope: string;
+      requiredPermissionKey: string;
+    }>;
+    forbiddenVisibilityKeys?: string[];
+  };
 };
 
 export type ParityHandlerContext = {

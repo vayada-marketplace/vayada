@@ -1,0 +1,122 @@
+{
+  "counts": {
+    "identity.users": 2,
+    "identity.organizations": 2,
+    "identity.organization_memberships": 2,
+    "identity.organization_resource_links": 3,
+    "identity.product_entitlements": 3,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 2,
+    "hotel_catalog.property_slugs": 1,
+    "booking.quote_sessions": 1,
+    "booking.checkout_contexts": 1,
+    "booking.guest_bookings": 1,
+    "finance.payment_provider_accounts": 2,
+    "finance.payment_settings": 1,
+    "finance.payments": 1,
+    "finance.payout_settings": 2,
+    "finance.payouts": 2,
+    "finance.commission_rules": 1,
+    "finance.commission_rate_changes": 1,
+    "finance.billing_entitlements": 2,
+    "finance.finance_visibility_read_model": 2
+  },
+  "idStability": {
+    "identity.users": [
+      "f1000000-0000-0000-0000-000000000686",
+      "f1000000-0000-0000-0000-000000000687"
+    ],
+    "identity.organizations": [
+      "f2000000-0000-0000-0000-000000000686",
+      "f2000000-0000-0000-0000-000000000687"
+    ],
+    "hotel_catalog.properties": ["f3000000-0000-0000-0000-000000000686"],
+    "booking.guest_bookings": ["f6000000-0000-0000-0000-000000000686"],
+    "finance.payment_provider_accounts": [
+      "f7000000-0000-0000-0000-000000000686",
+      "f7100000-0000-0000-0000-000000000686"
+    ],
+    "finance.payments": ["f8000000-0000-0000-0000-000000000686"],
+    "finance.payout_settings": [
+      "f9000000-0000-0000-0000-000000000686",
+      "f9100000-0000-0000-0000-000000000686"
+    ],
+    "finance.payouts": [
+      "fa000000-0000-0000-0000-000000000686",
+      "fa100000-0000-0000-0000-000000000686"
+    ],
+    "finance.commission_rules": ["fb000000-0000-0000-0000-000000000686"],
+    "finance.commission_rate_changes": ["fb100000-0000-0000-0000-000000000686"],
+    "finance.billing_entitlements": [
+      "fc000000-0000-0000-0000-000000000686",
+      "fc100000-0000-0000-0000-000000000686"
+    ],
+    "finance.finance_visibility_read_model": [
+      "fd000000-0000-0000-0000-000000000686",
+      "fd100000-0000-0000-0000-000000000686"
+    ]
+  },
+  "uniquenessChecks": [],
+  "financeChecks": {
+    "propertyFlows": [
+      {
+        "propertyId": "f3000000-0000-0000-0000-000000000686",
+        "organizationId": "f2000000-0000-0000-0000-000000000686",
+        "ownerUserId": "f1000000-0000-0000-0000-000000000686",
+        "bookingHotelResourceId": "booking_hotel_finance_alpenrose",
+        "pmsHotelResourceId": "pms_hotel_finance_alpenrose",
+        "providerAccountId": "f7000000-0000-0000-0000-000000000686",
+        "paymentId": "f8000000-0000-0000-0000-000000000686",
+        "guestBookingId": "f6000000-0000-0000-0000-000000000686",
+        "payoutSettingsId": "f9000000-0000-0000-0000-000000000686",
+        "payoutId": "fa000000-0000-0000-0000-000000000686",
+        "commissionRuleId": "fb000000-0000-0000-0000-000000000686",
+        "commissionRateChangeId": "fb100000-0000-0000-0000-000000000686",
+        "identityEntitlementId": "f2300000-0000-0000-0000-000000000686",
+        "billingEntitlementId": "fc000000-0000-0000-0000-000000000686",
+        "visibilityReadModelId": "fd000000-0000-0000-0000-000000000686",
+        "sourcePaymentId": "booking_payment_finance_686",
+        "providerAccountRef": "acct_finance_property_686",
+        "providerPaymentIntentId": "pi_finance_fixture_686",
+        "providerPayoutId": "po_finance_property_686",
+        "paymentAmount": "1200.00",
+        "netPaymentAmount": "1164.00",
+        "payoutAmount": "1164.00",
+        "commissionRate": "12.5000",
+        "currency": "EUR",
+        "visibilityScope": "property_finance",
+        "requiredPermissionKey": "pms.finance.read"
+      }
+    ],
+    "affiliatePayouts": [
+      {
+        "organizationId": "f2000000-0000-0000-0000-000000000687",
+        "affiliateResourceId": "affiliate_finance_partner_686",
+        "providerAccountId": "f7100000-0000-0000-0000-000000000686",
+        "payoutSettingsId": "f9100000-0000-0000-0000-000000000686",
+        "payoutId": "fa100000-0000-0000-0000-000000000686",
+        "identityEntitlementId": "f2320000-0000-0000-0000-000000000686",
+        "billingEntitlementId": "fc100000-0000-0000-0000-000000000686",
+        "visibilityReadModelId": "fd100000-0000-0000-0000-000000000686",
+        "providerAccountRef": "acct_finance_affiliate_686",
+        "providerPayoutId": "po_finance_affiliate_686",
+        "payoutAmount": "250.00",
+        "currency": "EUR",
+        "visibilityScope": "affiliate_payout",
+        "requiredPermissionKey": "affiliate.payout.manage"
+      }
+    ],
+    "forbiddenVisibilityKeys": [
+      "acct_finance_property_686",
+      "acct_finance_affiliate_686",
+      "pi_finance_fixture_686",
+      "txn_finance_fixture_686",
+      "po_finance_property_686",
+      "po_finance_affiliate_686",
+      "secret_ref_finance_property_686",
+      "bank_ref_finance_property_686",
+      "bank_ref_finance_affiliate_686",
+      "finance.guest@example.test"
+    ]
+  }
+}

@@ -10,6 +10,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "identityChecks",
   "catalogPublicProfileChecks",
   "bookingCheckoutChecks",
+  "financeChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -25,6 +26,11 @@ const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
   "forbiddenPublicProfileKeys",
 ]);
 const BOOKING_CHECKOUT_CHECK_KEYS = new Set(["flows", "forbiddenSummaryKeys"]);
+const FINANCE_CHECK_KEYS = new Set([
+  "propertyFlows",
+  "affiliatePayouts",
+  "forbiddenVisibilityKeys",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -270,6 +276,7 @@ export function validateExpectedTargetConfig(
     "identityChecks",
     "catalogPublicProfileChecks",
     "bookingCheckoutChecks",
+    "financeChecks",
   ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
@@ -406,6 +413,81 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         bookingCheckoutChecks["forbiddenSummaryKeys"],
         "expected-target.json.bookingCheckoutChecks.forbiddenSummaryKeys",
+        findings,
+      );
+    }
+  }
+
+  const financeChecks = expected["financeChecks"];
+  if (isRecord(financeChecks)) {
+    validateKnownKeys(
+      financeChecks,
+      FINANCE_CHECK_KEYS,
+      "expected-target.json.financeChecks",
+      findings,
+    );
+    if (financeChecks["propertyFlows"] !== undefined) {
+      validateObjectArray(
+        financeChecks["propertyFlows"],
+        "expected-target.json.financeChecks.propertyFlows",
+        [
+          "propertyId",
+          "organizationId",
+          "ownerUserId",
+          "bookingHotelResourceId",
+          "pmsHotelResourceId",
+          "providerAccountId",
+          "paymentId",
+          "guestBookingId",
+          "payoutSettingsId",
+          "payoutId",
+          "commissionRuleId",
+          "commissionRateChangeId",
+          "identityEntitlementId",
+          "billingEntitlementId",
+          "visibilityReadModelId",
+          "sourcePaymentId",
+          "providerAccountRef",
+          "providerPaymentIntentId",
+          "providerPayoutId",
+          "paymentAmount",
+          "netPaymentAmount",
+          "payoutAmount",
+          "commissionRate",
+          "currency",
+          "visibilityScope",
+          "requiredPermissionKey",
+        ],
+        findings,
+      );
+    }
+    if (financeChecks["affiliatePayouts"] !== undefined) {
+      validateObjectArray(
+        financeChecks["affiliatePayouts"],
+        "expected-target.json.financeChecks.affiliatePayouts",
+        [
+          "organizationId",
+          "affiliateResourceId",
+          "providerAccountId",
+          "payoutSettingsId",
+          "payoutId",
+          "identityEntitlementId",
+          "billingEntitlementId",
+          "visibilityReadModelId",
+          "providerAccountRef",
+          "providerPayoutId",
+          "payoutAmount",
+          "currency",
+          "visibilityScope",
+          "requiredPermissionKey",
+        ],
+        findings,
+      );
+    }
+    if (financeChecks["forbiddenVisibilityKeys"] !== undefined) {
+      validateStringArray(
+        financeChecks["forbiddenVisibilityKeys"],
+        "expected-target.json.financeChecks.forbiddenVisibilityKeys",
         findings,
       );
     }
