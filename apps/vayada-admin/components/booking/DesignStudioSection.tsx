@@ -6,7 +6,7 @@ import { bookingSettingsService } from "@/services/booking";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/booking";
 
 const GOOGLE_FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap";
+  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Italiana&display=swap";
 
 const AVAILABLE_FILTERS = [
   { key: "includeBreakfast", label: "Include Breakfast" },
