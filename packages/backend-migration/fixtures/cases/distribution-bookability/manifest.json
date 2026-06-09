@@ -1,7 +1,7 @@
 {
   "caseId": "distribution-bookability",
-  "description": "Target-only distribution/bookability fixture covering public hotel bookability profiles, public room offer snapshots, quote read models, booking deep-link contexts, external API clients, and public API usage events. Validates public-safe distribution target schema relationships before distribution ETL exists.",
-  "sourceDatabases": ["target"],
+  "description": "Source-to-target distribution/bookability fixture covering public hotel bookability profiles, public room offer snapshots, quote read models, booking deep-link contexts, external API clients, and public API usage events. Validates the distribution bookability transform and public-safe target schema relationships.",
+  "sourceDatabases": ["distribution"],
   "expectedOwners": {
     "identity.organizations": 1,
     "identity.organization_memberships": 1,

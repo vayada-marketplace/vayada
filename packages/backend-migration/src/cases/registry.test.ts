@@ -33,8 +33,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("marketplace")).toHaveLength(1);
   });
 
-  it("registers distribution bookability parity without a transform", () => {
-    expect(getTransformHandler("distribution-bookability")).toBeUndefined();
+  it("registers distribution bookability transform and parity handlers", () => {
+    expect(getTransformHandler("distribution-bookability")).toBeTypeOf("function");
     expect(getParityHandlers("distribution-bookability")).toHaveLength(1);
   });
 
