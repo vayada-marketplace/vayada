@@ -29,6 +29,7 @@ import {
 } from "./routes/bookingSettings.js";
 import {
   toReservationResponse,
+  type BookingReservationListFilters,
   type BookingReservationReadModel,
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
@@ -1108,6 +1109,96 @@ describe("vayada-api", () => {
     });
   });
 
+  it("applies booking reservation query defaults and coercion through the route", async () => {
+    const observedFilters: BookingReservationListFilters[] = [];
+
+    app = buildAuthenticatedApp({
+      reservationsRepository: {
+        async listReservationsByHotelId(hotelId, filters) {
+          expect(hotelId).toBe("booking_hotel_alpenrose");
+          observedFilters.push(filters);
+
+          return {
+            reservations: [],
+            total: 0,
+          };
+        },
+      },
+    });
+
+    const clampedResponse = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/reservations?status=%20confirmed%20&search=%20Ada%20&limit=9999&offset=-5",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(clampedResponse.statusCode).toBe(200);
+    expect(clampedResponse.body).toEqual({
+      bookings: [],
+      total: 0,
+      limit: 500,
+      offset: 0,
+    });
+
+    const defaultedResponse = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/reservations?status=%20%20&search=%20%20&limit=not-a-number&offset=not-a-number",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(defaultedResponse.statusCode).toBe(200);
+    expect(defaultedResponse.body).toEqual({
+      bookings: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+    });
+    expect(observedFilters).toEqual([
+      {
+        status: "confirmed",
+        search: "Ada",
+        limit: 500,
+        offset: 0,
+      },
+      {
+        status: undefined,
+        search: undefined,
+        limit: 50,
+        offset: 0,
+      },
+    ]);
+  });
+
+  it("returns the booking reservation read-model error contract when the repository fails", async () => {
+    app = buildAuthenticatedApp({
+      reservationsRepository: {
+        async listReservationsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/reservations",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "Booking reservations are unavailable.",
+    });
+  });
+
   it("rejects empty booking settings repository connection strings", async () => {
     expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
       "Booking settings repository connectionString must not be empty",
@@ -1236,6 +1327,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
   });
 
   it("rejects booking reservations with an invalid token", async () => {
@@ -1250,6 +1347,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
   });
 
   it("rejects booking reservations when permission is missing", async () => {
@@ -1264,6 +1367,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking reservation permission.",
+    });
   });
 
   it("rejects booking reservations when entitlement is missing", async () => {
@@ -1278,6 +1387,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_entitlement",
+      category: "authorization",
+      message: "Missing active booking engine entitlement.",
+    });
   });
 
   it("rejects booking reservations when entitlement is suspended", async () => {
@@ -1300,6 +1415,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "inactive_entitlement",
+      category: "authorization",
+      message: "Booking engine entitlement is not active.",
+    });
   });
 
   it("rejects booking reservations when linked-resource access is missing", async () => {
@@ -1314,6 +1435,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
   });
 
   it("returns 404 when the authorized booking hotel has no settings record", async () => {

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -17,6 +17,11 @@ export const BOOKING_RESERVATION_LIST_CONTRACT = {
     allowedRelationships: ["owner", "operator"],
   },
 } as const;
+
+export const BOOKING_RESERVATION_LIST_DEFAULT_LIMIT = 50;
+export const BOOKING_RESERVATION_LIST_MIN_LIMIT = 1;
+export const BOOKING_RESERVATION_LIST_MAX_LIMIT = 500;
+export const BOOKING_RESERVATION_LIST_DEFAULT_OFFSET = 0;
 
 export type BookingReservationListPathParams = {
   hotelId: string;
@@ -238,30 +243,48 @@ export async function registerBookingReservationRoutes(
   app.get<{
     Params: BookingReservationListPathParams;
     Querystring: BookingReservationListQuery;
-  }>("/hotels/:hotelId/reservations", async (request) => {
+  }>("/hotels/:hotelId/reservations", async (request, reply) => {
     const { hotelId } = request.params;
 
-    enforceRoutePolicy(request, {
-      permission: "booking.reservation.read",
-      entitlement: {
-        product: "booking",
-        key: "booking-engine",
+    try {
+      enforceRoutePolicy(request, {
+        permission: "booking.reservation.read",
+        entitlement: {
+          product: "booking",
+          key: "booking-engine",
+          resource: {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: hotelId,
+          },
+        },
         resource: {
           product: "booking",
           resourceType: "booking_hotel",
           resourceId: hotelId,
+          allowedRelationships: ["owner", "operator"],
         },
-      },
-      resource: {
-        product: "booking",
-        resourceType: "booking_hotel",
-        resourceId: hotelId,
-        allowedRelationships: ["owner", "operator"],
-      },
-    });
+      });
+    } catch (error) {
+      const contractError = toBookingReservationListAccessError(error, request, hotelId);
+      if (contractError) {
+        return sendBookingReservationListError(reply, contractError);
+      }
+      throw error;
+    }
 
     const filters = toReservationFilters(request.query);
-    const result = await repository.listReservationsByHotelId(hotelId, filters);
+    let result: BookingReservationListResult;
+    try {
+      result = await repository.listReservationsByHotelId(hotelId, filters);
+    } catch {
+      return sendBookingReservationListError(reply, {
+        statusCode: 500,
+        code: "read_model_unavailable",
+        category: "read_model",
+        message: "Booking reservations are unavailable.",
+      });
+    }
 
     return {
       bookings: result.reservations.map(toReservationResponse),
@@ -270,6 +293,104 @@ export async function registerBookingReservationRoutes(
       offset: filters.offset,
     } satisfies BookingReservationListResponse;
   });
+}
+
+function sendBookingReservationListError(
+  reply: FastifyReply,
+  error: BookingReservationListError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function toBookingReservationListAccessError(
+  error: unknown,
+  request: FastifyRequest,
+  hotelId: string,
+): BookingReservationListError | null {
+  if (!isStatusError(error)) return null;
+
+  if (error.statusCode === 401) {
+    return {
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    };
+  }
+
+  if (error.statusCode !== 403) return null;
+
+  const code = toBookingReservationAuthorizationErrorCode(error.message, request, hotelId);
+  return {
+    statusCode: 403,
+    code,
+    category: "authorization",
+    message: toBookingReservationAuthorizationMessage(code),
+  };
+}
+
+function toBookingReservationAuthorizationErrorCode(
+  message: string,
+  request: FastifyRequest,
+  hotelId: string,
+): Exclude<
+  BookingReservationListErrorCode,
+  "unauthenticated" | "invalid_token" | "invalid_query" | "read_model_unavailable"
+> {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("permission")) return "missing_permission";
+  if (normalized.includes("entitlement")) {
+    return hasInactiveBookingReservationEntitlement(request, hotelId)
+      ? "inactive_entitlement"
+      : "missing_entitlement";
+  }
+  return "missing_resource_access";
+}
+
+function toBookingReservationAuthorizationMessage(
+  code: Exclude<
+    BookingReservationListErrorCode,
+    "unauthenticated" | "invalid_token" | "invalid_query" | "read_model_unavailable"
+  >,
+): string {
+  switch (code) {
+    case "missing_permission":
+      return "Missing required booking reservation permission.";
+    case "inactive_entitlement":
+      return "Booking engine entitlement is not active.";
+    case "missing_entitlement":
+      return "Missing active booking engine entitlement.";
+    case "missing_resource_access":
+      return "Missing booking hotel access.";
+  }
+}
+
+function hasInactiveBookingReservationEntitlement(
+  request: FastifyRequest,
+  hotelId: string,
+): boolean {
+  return (
+    request.authContext?.entitlements.some((entitlement) => {
+      if (entitlement.product !== "booking" || entitlement.key !== "booking-engine") {
+        return false;
+      }
+      if (entitlement.status === "active") return false;
+      if (!entitlement.resource) return true;
+      return (
+        entitlement.resource.product === "booking" &&
+        entitlement.resource.resourceType === "booking_hotel" &&
+        entitlement.resource.resourceId === hotelId
+      );
+    }) ?? false
+  );
+}
+
+function isStatusError(error: unknown): error is Error & { statusCode: number } {
+  return (
+    error instanceof Error &&
+    "statusCode" in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === "number"
+  );
 }
 
 export function toReservationResponse(
@@ -358,8 +479,18 @@ function toReservationFilters(query: BookingReservationListQuery): BookingReserv
   return {
     status: query.status?.trim() || undefined,
     search: query.search?.trim() || undefined,
-    limit: clampInteger(query.limit, 50, 1, 500),
-    offset: clampInteger(query.offset, 0, 0, Number.MAX_SAFE_INTEGER),
+    limit: clampInteger(
+      query.limit,
+      BOOKING_RESERVATION_LIST_DEFAULT_LIMIT,
+      BOOKING_RESERVATION_LIST_MIN_LIMIT,
+      BOOKING_RESERVATION_LIST_MAX_LIMIT,
+    ),
+    offset: clampInteger(
+      query.offset,
+      BOOKING_RESERVATION_LIST_DEFAULT_OFFSET,
+      BOOKING_RESERVATION_LIST_DEFAULT_OFFSET,
+      Number.MAX_SAFE_INTEGER,
+    ),
   };
 }
 
