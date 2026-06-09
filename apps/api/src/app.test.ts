@@ -1324,6 +1324,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
   });
 
   it("rejects booking addon settings with an invalid token", async () => {
@@ -1338,6 +1344,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
   });
 
   it("rejects booking addon settings when permission is missing", async () => {
@@ -1352,6 +1364,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
   });
 
   it("rejects booking addon settings when entitlement is missing", async () => {
@@ -1366,6 +1384,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_entitlement",
+      category: "authorization",
+      message: "Missing active booking engine entitlement.",
+    });
   });
 
   it("rejects booking addon settings when entitlement is suspended", async () => {
@@ -1388,6 +1412,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "inactive_entitlement",
+      category: "authorization",
+      message: "Booking engine entitlement is not active.",
+    });
   });
 
   it("rejects booking addon settings when linked-resource access is missing", async () => {
@@ -1402,6 +1432,38 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
+  it("returns the booking addon settings read-model error contract when the repository fails", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "Booking add-on settings are unavailable.",
+    });
   });
 
   it("rejects booking reservations without authentication", async () => {
@@ -1541,6 +1603,12 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(404);
+    expect(response.body).toEqual({
+      statusCode: 404,
+      code: "not_found",
+      category: "read_model",
+      message: "Booking hotel addon settings not found.",
+    });
   });
 
   it("allows the booking policy route with auth, permission, entitlement, and linked resource", async () => {
