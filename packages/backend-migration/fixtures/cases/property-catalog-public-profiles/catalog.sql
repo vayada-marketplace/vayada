@@ -1,144 +1,328 @@
 -- Fixture: property-catalog-public-profiles / catalog.sql
--- Target: hotel_catalog schema tables.
 --
--- Covers:
--- 1. complete property: Booking + PMS + Marketplace inputs reconcile cleanly.
--- 2. missing-location property: Marketplace free-form location is preserved but
---    not promoted to canonical structured fields.
--- 3. custom-domain property: verified custom domain is available for canonical
---    URL policy consumers without becoming a second property identity.
+-- Represents source-side Booking, PMS, and Marketplace property catalog inputs.
+-- The rebuild command loads these rows into migration-only fixture schemas,
+-- then packages/backend-migration transforms them into hotel_catalog target tables.
 
-INSERT INTO hotel_catalog.properties
-  (id, public_id, display_name, property_type, category, default_locale, supported_locales, profile_status, completeness_reasons)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'prop_hotel_alpenrose', 'Hotel Alpenrose', 'hotel', 'boutique', 'en', ARRAY['en', 'de'], 'complete', '{}'),
-  ('c1000000-0000-0000-0000-000000000002', 'prop_hidden_bay', 'Hidden Bay Villas', 'villa', 'resort', 'en', ARRAY['en'], 'incomplete', ARRAY['location_unverified', 'timezone_missing']),
-  ('c1000000-0000-0000-0000-000000000003', 'prop_casa_daliya', 'Casa Daliya', 'villa', 'boutique', 'en', ARRAY['en', 'es'], 'complete', '{}');
+DROP SCHEMA IF EXISTS migration_source_booking CASCADE;
+DROP SCHEMA IF EXISTS migration_source_pms CASCADE;
+DROP SCHEMA IF EXISTS migration_source_marketplace CASCADE;
 
-INSERT INTO hotel_catalog.property_source_links
-  (property_id, source_system, source_table, source_id, relationship, metadata)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'booking', 'booking_hotels', 'booking_hotel_alpenrose', 'canonical_input', '{"display_name_priority": 1}'),
-  ('c1000000-0000-0000-0000-000000000001', 'pms', 'hotels', 'pms_hotel_alpenrose', 'operational_input', '{"timezone_source": "pms"}'),
-  ('c1000000-0000-0000-0000-000000000001', 'marketplace', 'hotel_profiles', 'marketplace_profile_alpenrose', 'profile_input', '{"copy_source": true}'),
-  ('c1000000-0000-0000-0000-000000000002', 'booking', 'booking_hotels', 'booking_hotel_hidden_bay', 'canonical_input', '{}'),
-  ('c1000000-0000-0000-0000-000000000002', 'marketplace', 'hotel_profiles', 'marketplace_profile_hidden_bay', 'profile_input', '{"free_form_location_only": true}'),
-  ('c1000000-0000-0000-0000-000000000003', 'booking', 'booking_hotels', 'booking_hotel_casa_daliya', 'canonical_input', '{"custom_domain_source": true}'),
-  ('c1000000-0000-0000-0000-000000000003', 'pms', 'hotels', 'pms_hotel_casa_daliya', 'operational_input', '{}'),
-  ('c1000000-0000-0000-0000-000000000003', 'marketplace', 'hotel_listings', 'marketplace_listing_casa_daliya', 'listing_input', '{}');
+CREATE SCHEMA migration_source_booking;
+CREATE SCHEMA migration_source_pms;
+CREATE SCHEMA migration_source_marketplace;
 
-INSERT INTO hotel_catalog.property_slugs
-  (id, property_id, slug, locale, purpose, status, redirects_to_id)
-VALUES
-  ('c2000000-0000-0000-0000-000000000001', 'c1000000-0000-0000-0000-000000000001', 'hotel-alpenrose', NULL, 'canonical', 'active', NULL),
-  ('c2000000-0000-0000-0000-000000000002', 'c1000000-0000-0000-0000-000000000001', 'alpenrose-old', NULL, 'redirect', 'redirected', 'c2000000-0000-0000-0000-000000000001'),
-  ('c2000000-0000-0000-0000-000000000003', 'c1000000-0000-0000-0000-000000000002', 'hidden-bay-villas', NULL, 'canonical', 'active', NULL),
-  ('c2000000-0000-0000-0000-000000000004', 'c1000000-0000-0000-0000-000000000003', 'casa-daliya', NULL, 'canonical', 'active', NULL);
+CREATE TABLE migration_source_booking.property_catalog_inputs (
+  source_id TEXT PRIMARY KEY,
+  property_id UUID NOT NULL,
+  public_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  property_type TEXT,
+  category TEXT,
+  default_locale TEXT NOT NULL,
+  supported_locales TEXT[] NOT NULL,
+  profile_status TEXT NOT NULL,
+  completeness_reasons TEXT[] NOT NULL,
+  canonical_slug_id UUID NOT NULL,
+  canonical_slug TEXT NOT NULL,
+  redirect_slugs JSONB NOT NULL DEFAULT '[]'::jsonb,
+  country_code CHAR(2),
+  region TEXT,
+  city TEXT,
+  street_address TEXT,
+  postal_code TEXT,
+  latitude NUMERIC(9, 6),
+  longitude NUMERIC(9, 6),
+  timezone TEXT,
+  address_public BOOLEAN NOT NULL DEFAULT FALSE,
+  geo_public BOOLEAN NOT NULL DEFAULT FALSE,
+  map_display_mode TEXT NOT NULL,
+  location_source_confidence TEXT NOT NULL,
+  media JSONB NOT NULL DEFAULT '[]'::jsonb,
+  amenities JSONB NOT NULL DEFAULT '[]'::jsonb,
+  public_contacts JSONB NOT NULL DEFAULT '[]'::jsonb,
+  policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  custom_domain_id UUID,
+  custom_domain_hostname TEXT,
+  domain_verification_status TEXT,
+  canonical_when_verified BOOLEAN,
+  domain_verified_at TIMESTAMPTZ,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
 
-INSERT INTO hotel_catalog.property_domains
-  (id, property_id, hostname, verification_status, canonical_when_verified, verified_at)
-VALUES
-  ('c3000000-0000-0000-0000-000000000003', 'c1000000-0000-0000-0000-000000000003', 'stay.casadaliya.example', 'verified', TRUE, '2026-06-06T10:00:00Z');
+CREATE TABLE migration_source_pms.property_catalog_inputs (
+  source_id TEXT PRIMARY KEY,
+  property_id UUID NOT NULL,
+  timezone TEXT,
+  amenities JSONB NOT NULL DEFAULT '[]'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
 
-INSERT INTO hotel_catalog.property_locations
-  (property_id, country_code, region, city, street_address, postal_code, raw_marketplace_location, latitude, longitude, timezone, address_public, geo_public, map_display_mode, source_confidence, migration_notes)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'AT', 'Tyrol', 'Mayrhofen', 'Alpenroseweg 7', '6290', NULL, 47.166100, 11.865900, 'Europe/Vienna', TRUE, TRUE, 'exact', 'verified', NULL),
-  ('c1000000-0000-0000-0000-000000000002', NULL, NULL, NULL, NULL, NULL, 'Somewhere near the bay', NULL, NULL, NULL, FALSE, FALSE, 'hidden', 'low', 'Marketplace free-form location preserved for manual reconciliation.'),
-  ('c1000000-0000-0000-0000-000000000003', 'MX', 'Quintana Roo', 'Isla Mujeres', 'Calle Zazil Ha 12', '77400', NULL, 21.257300, -86.751800, 'America/Cancun', TRUE, TRUE, 'exact', 'verified', NULL);
+CREATE TABLE migration_source_marketplace.property_catalog_inputs (
+  source_id TEXT PRIMARY KEY,
+  property_id UUID NOT NULL,
+  source_table TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  locale TEXT NOT NULL DEFAULT 'en',
+  short_description TEXT,
+  long_description TEXT,
+  raw_location TEXT,
+  profile_source_confidence TEXT NOT NULL,
+  media JSONB NOT NULL DEFAULT '[]'::jsonb,
+  amenities JSONB NOT NULL DEFAULT '[]'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
 
-INSERT INTO hotel_catalog.property_profiles
-  (property_id, locale, short_description, long_description, source_confidence)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'en', 'Alpine boutique stay with mountain views.', 'A public-safe profile assembled from Booking, PMS, and Marketplace seed copy.', 'verified'),
-  ('c1000000-0000-0000-0000-000000000002', 'en', 'Private villas near the coast.', 'Location is intentionally incomplete until owner confirmation.', 'medium'),
-  ('c1000000-0000-0000-0000-000000000003', 'en', 'Island villa with verified direct booking domain.', 'Custom-domain profile fixture for canonical URL consumers.', 'verified');
-
-INSERT INTO hotel_catalog.property_media
-  (property_id, media_type, url, alt_text, sort_order, source_system, public_approved)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'hero_image', 'https://cdn.example.test/alpenrose/hero.jpg', 'Hotel Alpenrose exterior', 0, 'booking', TRUE),
-  ('c1000000-0000-0000-0000-000000000002', 'hero_image', 'https://cdn.example.test/hidden-bay/hero.jpg', 'Hidden Bay Villas garden', 0, 'marketplace', TRUE),
-  ('c1000000-0000-0000-0000-000000000003', 'hero_image', 'https://cdn.example.test/casa-daliya/hero.jpg', 'Casa Daliya terrace', 0, 'booking', TRUE);
-
-INSERT INTO hotel_catalog.property_amenities
-  (property_id, amenity_key, label, source_system, public_safe)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'wifi', 'Wi-Fi', 'booking', TRUE),
-  ('c1000000-0000-0000-0000-000000000001', 'breakfast', 'Breakfast', 'pms', TRUE),
-  ('c1000000-0000-0000-0000-000000000002', 'pool', 'Pool', 'marketplace', TRUE),
-  ('c1000000-0000-0000-0000-000000000003', 'beach_access', 'Beach access', 'booking', TRUE);
-
-INSERT INTO hotel_catalog.property_contact_channels
-  (property_id, channel_type, value, is_public, source_system)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'email', 'stay@hotel-alpenrose.example', TRUE, 'booking'),
-  ('c1000000-0000-0000-0000-000000000003', 'website', 'https://stay.casadaliya.example', TRUE, 'booking');
-
-INSERT INTO hotel_catalog.property_policy_summaries
-  (property_id, check_in_time, check_out_time, cancellation_summary, cancellation_terms_url, deposit_policy_summary, payment_policy_summary, policy_source_owner)
-VALUES
-  ('c1000000-0000-0000-0000-000000000001', '15:00', '11:00', 'Flexible cancellation until 7 days before arrival.', 'https://hotel-alpenrose.booking.localhost/en/terms', 'Deposit may be required for selected rates.', 'Card and pay-at-property supported.', 'booking'),
-  ('c1000000-0000-0000-0000-000000000002', NULL, NULL, NULL, NULL, NULL, NULL, 'booking'),
-  ('c1000000-0000-0000-0000-000000000003', '16:00', '10:00', 'Moderate cancellation policy.', 'https://stay.casadaliya.example/en/terms', '50% deposit required.', 'Card payments supported.', 'booking');
-
-INSERT INTO hotel_catalog.property_public_profile_read_model
-  (property_id, public_id, display_name, canonical_slug, property_domain_id, verified_custom_domain, default_locale, supported_locales, profile_status, completeness_reasons, location, descriptions, media, amenities, public_contacts, public_policy, source_freshness)
+INSERT INTO migration_source_booking.property_catalog_inputs
+  (
+    source_id,
+    property_id,
+    public_id,
+    display_name,
+    property_type,
+    category,
+    default_locale,
+    supported_locales,
+    profile_status,
+    completeness_reasons,
+    canonical_slug_id,
+    canonical_slug,
+    redirect_slugs,
+    country_code,
+    region,
+    city,
+    street_address,
+    postal_code,
+    latitude,
+    longitude,
+    timezone,
+    address_public,
+    geo_public,
+    map_display_mode,
+    location_source_confidence,
+    media,
+    amenities,
+    public_contacts,
+    policy,
+    custom_domain_id,
+    custom_domain_hostname,
+    domain_verification_status,
+    canonical_when_verified,
+    domain_verified_at,
+    metadata,
+    created_at,
+    updated_at
+  )
 VALUES
   (
+    'booking_hotel_alpenrose',
     'c1000000-0000-0000-0000-000000000001',
     'prop_hotel_alpenrose',
     'Hotel Alpenrose',
-    'hotel-alpenrose',
-    NULL,
-    NULL,
+    'hotel',
+    'boutique',
     'en',
     ARRAY['en', 'de'],
     'complete',
     '{}',
-    '{"countryCode": "AT", "city": "Mayrhofen", "timezone": "Europe/Vienna", "geo": {"latitude": 47.1661, "longitude": 11.8659}}',
-    '{"en": {"short": "Alpine boutique stay with mountain views."}}',
-    '[{"type": "hero_image", "url": "https://cdn.example.test/alpenrose/hero.jpg"}]',
-    '[{"key": "wifi", "label": "Wi-Fi"}, {"key": "breakfast", "label": "Breakfast"}]',
-    '[{"type": "email", "value": "stay@hotel-alpenrose.example"}]',
-    '{"checkInTime": "15:00", "checkOutTime": "11:00"}',
-    '{"hotel_catalog": {"status": "fresh"}, "booking": {"status": "fresh"}, "pms": {"status": "fresh"}, "marketplace": {"status": "fresh"}}'
+    'c2000000-0000-0000-0000-000000000001',
+    'hotel-alpenrose',
+    '[{"id": "c2000000-0000-0000-0000-000000000002", "slug": "alpenrose-old"}]'::jsonb,
+    'AT',
+    'Tyrol',
+    'Mayrhofen',
+    'Alpenroseweg 7',
+    '6290',
+    47.166100,
+    11.865900,
+    'Europe/Vienna',
+    TRUE,
+    TRUE,
+    'exact',
+    'verified',
+    '[{"id": "c4000000-0000-0000-0000-000000000001", "media_type": "hero_image", "url": "https://cdn.example.test/alpenrose/hero.jpg", "alt_text": "Hotel Alpenrose exterior", "sort_order": 0, "public_approved": true}]'::jsonb,
+    '[{"amenity_key": "wifi", "label": "Wi-Fi", "public_safe": true}]'::jsonb,
+    '[{"channel_type": "email", "value": "stay@hotel-alpenrose.example", "is_public": true}]'::jsonb,
+    '{"checkInTime": "15:00", "checkOutTime": "11:00", "cancellationSummary": "Flexible cancellation until 7 days before arrival.", "cancellationTermsUrl": "https://hotel-alpenrose.booking.localhost/en/terms", "depositPolicySummary": "Deposit may be required for selected rates.", "paymentPolicySummary": "Card and pay-at-property supported."}'::jsonb,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    '{"display_name_priority": 1}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
   ),
   (
+    'booking_hotel_hidden_bay',
     'c1000000-0000-0000-0000-000000000002',
     'prop_hidden_bay',
     'Hidden Bay Villas',
-    'hidden-bay-villas',
-    NULL,
-    NULL,
+    'villa',
+    'resort',
     'en',
     ARRAY['en'],
     'incomplete',
     ARRAY['location_unverified', 'timezone_missing'],
-    '{"rawMarketplaceLocation": "Somewhere near the bay"}',
-    '{"en": {"short": "Private villas near the coast."}}',
-    '[{"type": "hero_image", "url": "https://cdn.example.test/hidden-bay/hero.jpg"}]',
-    '[{"key": "pool", "label": "Pool"}]',
-    '[]',
-    '{}',
-    '{"hotel_catalog": {"status": "stale"}, "marketplace": {"status": "fresh"}}'
+    'c2000000-0000-0000-0000-000000000003',
+    'hidden-bay-villas',
+    '[]'::jsonb,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    FALSE,
+    FALSE,
+    'hidden',
+    'low',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '{}'::jsonb,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    '{}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
   ),
   (
+    'booking_hotel_casa_daliya',
     'c1000000-0000-0000-0000-000000000003',
     'prop_casa_daliya',
     'Casa Daliya',
-    'casa-daliya',
-    'c3000000-0000-0000-0000-000000000003',
-    'stay.casadaliya.example',
+    'villa',
+    'boutique',
     'en',
     ARRAY['en', 'es'],
     'complete',
     '{}',
-    '{"countryCode": "MX", "city": "Isla Mujeres", "timezone": "America/Cancun", "geo": {"latitude": 21.2573, "longitude": -86.7518}}',
-    '{"en": {"short": "Island villa with verified direct booking domain."}}',
-    '[{"type": "hero_image", "url": "https://cdn.example.test/casa-daliya/hero.jpg"}]',
-    '[{"key": "beach_access", "label": "Beach access"}]',
-    '[{"type": "website", "value": "https://stay.casadaliya.example"}]',
-    '{"checkInTime": "16:00", "checkOutTime": "10:00"}',
-    '{"hotel_catalog": {"status": "fresh"}, "booking": {"status": "fresh"}, "pms": {"status": "fresh"}, "marketplace": {"status": "fresh"}}'
+    'c2000000-0000-0000-0000-000000000004',
+    'casa-daliya',
+    '[]'::jsonb,
+    'MX',
+    'Quintana Roo',
+    'Isla Mujeres',
+    'Calle Zazil Ha 12',
+    '77400',
+    21.257300,
+    -86.751800,
+    'America/Cancun',
+    TRUE,
+    TRUE,
+    'exact',
+    'verified',
+    '[{"id": "c4000000-0000-0000-0000-000000000003", "media_type": "hero_image", "url": "https://cdn.example.test/casa-daliya/hero.jpg", "alt_text": "Casa Daliya terrace", "sort_order": 0, "public_approved": true}]'::jsonb,
+    '[{"amenity_key": "beach_access", "label": "Beach access", "public_safe": true}]'::jsonb,
+    '[{"channel_type": "website", "value": "https://stay.casadaliya.example", "is_public": true}]'::jsonb,
+    '{"checkInTime": "16:00", "checkOutTime": "10:00", "cancellationSummary": "Moderate cancellation policy.", "cancellationTermsUrl": "https://stay.casadaliya.example/en/terms", "depositPolicySummary": "50% deposit required.", "paymentPolicySummary": "Card payments supported."}'::jsonb,
+    'c3000000-0000-0000-0000-000000000003',
+    'stay.casadaliya.example',
+    'verified',
+    TRUE,
+    '2026-06-06T10:00:00Z',
+    '{"custom_domain_source": true}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
+  );
+
+INSERT INTO migration_source_pms.property_catalog_inputs
+  (source_id, property_id, timezone, amenities, metadata, created_at, updated_at)
+VALUES
+  (
+    'pms_hotel_alpenrose',
+    'c1000000-0000-0000-0000-000000000001',
+    'Europe/Vienna',
+    '[{"amenity_key": "breakfast", "label": "Breakfast", "public_safe": true}]'::jsonb,
+    '{"timezone_source": "pms"}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
+  ),
+  (
+    'pms_hotel_casa_daliya',
+    'c1000000-0000-0000-0000-000000000003',
+    'America/Cancun',
+    '[]'::jsonb,
+    '{}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
+  );
+
+INSERT INTO migration_source_marketplace.property_catalog_inputs
+  (
+    source_id,
+    property_id,
+    source_table,
+    relationship,
+    locale,
+    short_description,
+    long_description,
+    raw_location,
+    profile_source_confidence,
+    media,
+    amenities,
+    metadata,
+    created_at,
+    updated_at
+  )
+VALUES
+  (
+    'marketplace_profile_alpenrose',
+    'c1000000-0000-0000-0000-000000000001',
+    'hotel_profiles',
+    'profile_input',
+    'en',
+    'Alpine boutique stay with mountain views.',
+    'A public-safe profile assembled from Booking, PMS, and Marketplace seed copy.',
+    NULL,
+    'verified',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '{"copy_source": true}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
+  ),
+  (
+    'marketplace_profile_hidden_bay',
+    'c1000000-0000-0000-0000-000000000002',
+    'hotel_profiles',
+    'profile_input',
+    'en',
+    'Private villas near the coast.',
+    'Location is intentionally incomplete until owner confirmation.',
+    'Somewhere near the bay',
+    'medium',
+    '[{"id": "c4000000-0000-0000-0000-000000000002", "media_type": "hero_image", "url": "https://cdn.example.test/hidden-bay/hero.jpg", "alt_text": "Hidden Bay Villas garden", "sort_order": 0, "public_approved": true}]'::jsonb,
+    '[{"amenity_key": "pool", "label": "Pool", "public_safe": true}]'::jsonb,
+    '{"free_form_location_only": true}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
+  ),
+  (
+    'marketplace_listing_casa_daliya',
+    'c1000000-0000-0000-0000-000000000003',
+    'hotel_listings',
+    'listing_input',
+    'en',
+    'Island villa with verified direct booking domain.',
+    'Custom-domain profile fixture for canonical URL consumers.',
+    NULL,
+    'verified',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    '{}'::jsonb,
+    '2026-06-06T10:00:00Z',
+    '2026-06-06T10:00:00Z'
   );

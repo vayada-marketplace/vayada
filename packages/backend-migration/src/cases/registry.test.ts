@@ -8,8 +8,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("identity-organization-links")).toHaveLength(1);
   });
 
-  it("registers property catalog parity without a transform", () => {
-    expect(getTransformHandler("property-catalog-public-profiles")).toBeUndefined();
+  it("registers property catalog transform and parity handlers", () => {
+    expect(getTransformHandler("property-catalog-public-profiles")).toBeTypeOf("function");
     expect(getParityHandlers("property-catalog-public-profiles")).toHaveLength(1);
   });
 
