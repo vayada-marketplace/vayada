@@ -6,6 +6,7 @@ import { transformFinance } from "./finance/transform.js";
 import { checkIdentityOrganizationLinksParity } from "./identityOrganizationLinks/parity.js";
 import { transformIdentityOrganizationLinks } from "./identityOrganizationLinks/transform.js";
 import { checkMarketplaceParity } from "./marketplace/parity.js";
+import { transformMarketplace } from "./marketplace/transform.js";
 import { checkPmsOperationsParity } from "./pmsOperations/parity.js";
 import { transformPmsOperations } from "./pmsOperations/transform.js";
 import { checkPropertyCatalogPublicProfilesParity } from "./propertyCatalogPublicProfiles/parity.js";
@@ -41,6 +42,7 @@ const fixtureCases: FixtureCaseRegistration[] = [
   },
   {
     fixtureCase: "marketplace",
+    transform: transformMarketplace,
     parityHandlers: [checkMarketplaceParity],
   },
   {

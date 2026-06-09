@@ -1,7 +1,7 @@
 {
   "caseId": "marketplace",
-  "description": "Target-only marketplace fixture covering creator profiles, creator platforms and ratings, marketplace hotel profiles/listings, collaboration offerings and requirements, collaborations, deliverables, chat, trips, external collaborations, notifications, invite codes, newsletter preferences, and the public-safe marketplace listing read model. Validates marketplace target schema relationships before marketplace ETL exists.",
-  "sourceDatabases": ["target"],
+  "description": "Source-to-target marketplace fixture covering creator profiles, creator platforms and ratings, marketplace hotel profiles/listings, collaboration offerings and requirements, collaborations, deliverables, chat, trips, external collaborations, notifications, invite codes, newsletter preferences, and the public-safe marketplace listing read model.",
+  "sourceDatabases": ["marketplace"],
   "expectedOwners": {
     "identity.users": 3,
     "identity.organizations": 2,
