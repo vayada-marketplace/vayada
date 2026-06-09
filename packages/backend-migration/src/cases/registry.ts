@@ -1,6 +1,7 @@
 import { checkBookingCheckoutParity } from "./bookingCheckout/parity.js";
-import { checkDistributionBookabilityParity } from "./distributionBookability/parity.js";
 import { transformBookingCheckout } from "./bookingCheckout/transform.js";
+import { checkDistributionBookabilityParity } from "./distributionBookability/parity.js";
+import { transformDistributionBookability } from "./distributionBookability/transform.js";
 import { checkFinanceParity } from "./finance/parity.js";
 import { transformFinance } from "./finance/transform.js";
 import { checkIdentityOrganizationLinksParity } from "./identityOrganizationLinks/parity.js";
@@ -47,6 +48,7 @@ const fixtureCases: FixtureCaseRegistration[] = [
   },
   {
     fixtureCase: "distribution-bookability",
+    transform: transformDistributionBookability,
     parityHandlers: [checkDistributionBookabilityParity],
   },
 ];
