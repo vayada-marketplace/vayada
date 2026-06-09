@@ -354,7 +354,7 @@ export function toReservationResponse(
   };
 }
 
-function toReservationFilters(query: BookingReservationQuery): BookingReservationListFilters {
+function toReservationFilters(query: BookingReservationListQuery): BookingReservationListFilters {
   return {
     status: query.status?.trim() || undefined,
     search: query.search?.trim() || undefined,
