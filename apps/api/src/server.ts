@@ -8,6 +8,7 @@ import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
 import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
+import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import { createPgBookingSettingsReadRepository } from "./routes/bookingSettings.js";
 
 const config = loadConfig();
@@ -44,6 +45,11 @@ const publicHotelProfileRepository = config.bookingDatabaseUrl
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
+  bookingReservationsRepository: config.bookingReservationsReadDatabaseUrl
+    ? createCompatibilityPmsBookingReservationsReadRepository({
+        connectionString: config.bookingReservationsReadDatabaseUrl,
+      })
+    : undefined,
   bookingSettingsRepository: config.bookingDatabaseUrl
     ? createPgBookingSettingsReadRepository({
         connectionString: config.bookingDatabaseUrl,
