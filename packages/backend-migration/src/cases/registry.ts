@@ -1,3 +1,4 @@
+import { checkBookingCheckoutParity } from "./bookingCheckout/parity.js";
 import { checkIdentityOrganizationLinksParity } from "./identityOrganizationLinks/parity.js";
 import { transformIdentityOrganizationLinks } from "./identityOrganizationLinks/transform.js";
 import { checkPropertyCatalogPublicProfilesParity } from "./propertyCatalogPublicProfiles/parity.js";
@@ -15,6 +16,10 @@ const fixtureCases: FixtureCaseRegistration[] = [
     fixtureCase: "property-catalog-public-profiles",
     transform: transformPropertyCatalogPublicProfiles,
     parityHandlers: [checkPropertyCatalogPublicProfilesParity],
+  },
+  {
+    fixtureCase: "booking-checkout",
+    parityHandlers: [checkBookingCheckoutParity],
   },
 ];
 
