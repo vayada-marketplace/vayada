@@ -9,6 +9,7 @@ import { transformIdentityOrganizationLinks } from "./identityOrganizationLinks/
 import { checkIntelligenceParity } from "./intelligence/parity.js";
 import { checkMarketplaceParity } from "./marketplace/parity.js";
 import { transformMarketplace } from "./marketplace/transform.js";
+import { checkPlatformJobsEventsAuditParity } from "./platformJobsEventsAudit/parity.js";
 import { checkPmsOperationsParity } from "./pmsOperations/parity.js";
 import { transformPmsOperations } from "./pmsOperations/transform.js";
 import { checkPropertyCatalogPublicProfilesParity } from "./propertyCatalogPublicProfiles/parity.js";
@@ -55,6 +56,10 @@ const fixtureCases: FixtureCaseRegistration[] = [
   {
     fixtureCase: "intelligence",
     parityHandlers: [checkIntelligenceParity],
+  },
+  {
+    fixtureCase: "platform-jobs-events-audit",
+    parityHandlers: [checkPlatformJobsEventsAuditParity],
   },
 ];
 

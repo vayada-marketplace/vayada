@@ -1,0 +1,71 @@
+{
+  "counts": {
+    "identity.users": 1,
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 2,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 2,
+    "platform.domain_events": 3,
+    "platform.external_webhook_events": 2,
+    "platform.outbox_events": 2,
+    "platform.jobs": 3,
+    "platform.job_attempts": 4,
+    "platform.idempotency_keys": 3,
+    "platform.dead_letter_events": 2,
+    "platform.product_audit_events": 3
+  },
+  "idStability": {
+    "identity.users": ["f6951000-0000-0000-0000-000000000001"],
+    "identity.organizations": ["f6952000-0000-0000-0000-000000000001"],
+    "identity.organization_memberships": ["f6952100-0000-0000-0000-000000000001"],
+    "identity.organization_resource_links": [
+      "f6952200-0000-0000-0000-000000000001",
+      "f6952200-0000-0000-0000-000000000002"
+    ],
+    "hotel_catalog.properties": ["f6953000-0000-0000-0000-000000000001"],
+    "hotel_catalog.property_source_links": [
+      "f6953100-0000-0000-0000-000000000001",
+      "f6953100-0000-0000-0000-000000000002"
+    ],
+    "platform.domain_events": [
+      "f6954000-0000-0000-0000-000000000001",
+      "f6954000-0000-0000-0000-000000000002",
+      "f6954000-0000-0000-0000-000000000003"
+    ],
+    "platform.external_webhook_events": [
+      "f6954100-0000-0000-0000-000000000001",
+      "f6954100-0000-0000-0000-000000000002"
+    ],
+    "platform.outbox_events": [
+      "f6954200-0000-0000-0000-000000000001",
+      "f6954200-0000-0000-0000-000000000002"
+    ],
+    "platform.jobs": [
+      "f6954300-0000-0000-0000-000000000001",
+      "f6954300-0000-0000-0000-000000000002",
+      "f6954300-0000-0000-0000-000000000003"
+    ],
+    "platform.job_attempts": [
+      "f6954400-0000-0000-0000-000000000001",
+      "f6954400-0000-0000-0000-000000000002",
+      "f6954400-0000-0000-0000-000000000003",
+      "f6954400-0000-0000-0000-000000000004"
+    ],
+    "platform.idempotency_keys": [
+      "f6954500-0000-0000-0000-000000000001",
+      "f6954500-0000-0000-0000-000000000002",
+      "f6954500-0000-0000-0000-000000000003"
+    ],
+    "platform.dead_letter_events": [
+      "f6954600-0000-0000-0000-000000000001",
+      "f6954600-0000-0000-0000-000000000002"
+    ],
+    "platform.product_audit_events": [
+      "f6954700-0000-0000-0000-000000000001",
+      "f6954700-0000-0000-0000-000000000002",
+      "f6954700-0000-0000-0000-000000000003"
+    ]
+  },
+  "uniquenessChecks": []
+}
