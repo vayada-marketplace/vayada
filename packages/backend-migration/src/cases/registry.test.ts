@@ -18,6 +18,11 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("booking-checkout")).toHaveLength(1);
   });
 
+  it("registers PMS operations parity without a transform", () => {
+    expect(getTransformHandler("pms-operations")).toBeUndefined();
+    expect(getParityHandlers("pms-operations")).toHaveLength(1);
+  });
+
   it("returns empty handlers for unregistered fixture cases", () => {
     expect(getTransformHandler("unknown-fixture")).toBeUndefined();
     expect(getParityHandlers("unknown-fixture")).toEqual([]);

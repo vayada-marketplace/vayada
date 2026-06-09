@@ -1,0 +1,144 @@
+{
+  "counts": {
+    "identity.users": 1,
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 1,
+    "identity.product_entitlements": 1,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 1,
+    "hotel_catalog.property_slugs": 1,
+    "booking.guest_bookings": 1,
+    "booking.booking_guests": 1,
+    "booking.direct_booking_summary_read_model": 1,
+    "pms.room_types": 2,
+    "pms.rooms": 3,
+    "pms.rate_plans": 2,
+    "pms.rate_rules": 2,
+    "pms.inventory_days": 3,
+    "pms.room_blocks": 2,
+    "pms.operational_booking_assignments": 1,
+    "pms.checkin_checklist_templates": 1,
+    "pms.checkout_inspection_templates": 1,
+    "pms.booking_checkin_records": 1,
+    "pms.booking_checkout_charges": 1,
+    "pms.booking_checkout_records": 1,
+    "pms.booking_notes_private": 1,
+    "pms.message_threads": 1,
+    "pms.messages": 2,
+    "pms.message_attachments": 1,
+    "pms.channel_connections": 1,
+    "pms.channel_room_type_mappings": 2,
+    "pms.channel_rate_plan_mappings": 2,
+    "pms.channel_booking_mappings": 1,
+    "pms.channel_sync_status": 3
+  },
+  "idStability": {
+    "identity.users": ["f6851000-0000-0000-0000-000000000001"],
+    "identity.organizations": ["f6852000-0000-0000-0000-000000000001"],
+    "hotel_catalog.properties": ["f6853000-0000-0000-0000-000000000001"],
+    "booking.guest_bookings": ["f6854000-0000-0000-0000-000000000001"],
+    "pms.room_types": [
+      "f6855000-0000-0000-0000-000000000001",
+      "f6855000-0000-0000-0000-000000000002"
+    ],
+    "pms.rooms": [
+      "f6855100-0000-0000-0000-000000000001",
+      "f6855100-0000-0000-0000-000000000002",
+      "f6855100-0000-0000-0000-000000000003"
+    ],
+    "pms.rate_plans": [
+      "f6855200-0000-0000-0000-000000000001",
+      "f6855200-0000-0000-0000-000000000002"
+    ],
+    "pms.rate_rules": [
+      "f6855300-0000-0000-0000-000000000001",
+      "f6855300-0000-0000-0000-000000000002"
+    ],
+    "pms.room_blocks": [
+      "f6855400-0000-0000-0000-000000000001",
+      "f6855400-0000-0000-0000-000000000002"
+    ],
+    "pms.operational_booking_assignments": ["f6855500-0000-0000-0000-000000000001"],
+    "pms.booking_checkin_records": ["f6855600-0000-0000-0000-000000000001"],
+    "pms.booking_checkout_charges": ["f6855700-0000-0000-0000-000000000001"],
+    "pms.booking_checkout_records": ["f6855800-0000-0000-0000-000000000001"],
+    "pms.booking_notes_private": ["f6855900-0000-0000-0000-000000000001"],
+    "pms.message_threads": ["f6856000-0000-0000-0000-000000000001"],
+    "pms.messages": [
+      "f6856100-0000-0000-0000-000000000001",
+      "f6856100-0000-0000-0000-000000000002"
+    ],
+    "pms.message_attachments": ["f6856200-0000-0000-0000-000000000001"],
+    "pms.channel_connections": ["f6856300-0000-0000-0000-000000000001"],
+    "pms.channel_room_type_mappings": [
+      "f6856400-0000-0000-0000-000000000001",
+      "f6856400-0000-0000-0000-000000000002"
+    ],
+    "pms.channel_rate_plan_mappings": [
+      "f6856500-0000-0000-0000-000000000001",
+      "f6856500-0000-0000-0000-000000000002"
+    ],
+    "pms.channel_booking_mappings": ["f6856600-0000-0000-0000-000000000001"],
+    "pms.channel_sync_status": [
+      "f6856700-0000-0000-0000-000000000001",
+      "f6856700-0000-0000-0000-000000000002",
+      "f6856700-0000-0000-0000-000000000003"
+    ]
+  },
+  "uniquenessChecks": [],
+  "pmsOperationsChecks": {
+    "properties": [
+      {
+        "propertyId": "f6853000-0000-0000-0000-000000000001",
+        "organizationId": "f6852000-0000-0000-0000-000000000001",
+        "pmsHotelResourceId": "pms_hotel_ops_alpenrose",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "roomId": "f6855100-0000-0000-0000-000000000001",
+        "ratePlanId": "f6855200-0000-0000-0000-000000000001",
+        "rateRuleId": "f6855300-0000-0000-0000-000000000001",
+        "inventoryDate": "2026-08-15",
+        "inventoryStatus": "limited",
+        "roomBlockId": "f6855400-0000-0000-0000-000000000001",
+        "guestBookingId": "f6854000-0000-0000-0000-000000000001",
+        "assignmentId": "f6855500-0000-0000-0000-000000000001",
+        "checkinRecordId": "f6855600-0000-0000-0000-000000000001",
+        "checkoutChargeId": "f6855700-0000-0000-0000-000000000001",
+        "checkoutRecordId": "f6855800-0000-0000-0000-000000000001",
+        "privateNoteId": "f6855900-0000-0000-0000-000000000001",
+        "messageThreadId": "f6856000-0000-0000-0000-000000000001",
+        "messageId": "f6856100-0000-0000-0000-000000000001",
+        "messageAttachmentId": "f6856200-0000-0000-0000-000000000001",
+        "channelConnectionId": "f6856300-0000-0000-0000-000000000001",
+        "channelRoomTypeMappingId": "f6856400-0000-0000-0000-000000000001",
+        "channelRatePlanMappingId": "f6856500-0000-0000-0000-000000000001",
+        "channelBookingMappingId": "f6856600-0000-0000-0000-000000000001",
+        "bookingSyncStatusId": "f6856700-0000-0000-0000-000000000001",
+        "sourceRoomTypeId": "pms-room-type-suite-685",
+        "sourceRoomId": "pms-room-301-685",
+        "ratePlanCode": "DIRECT-FLEX",
+        "publicBookingReference": "B-PMS-685",
+        "assignmentStatus": "checked_out",
+        "roomNumber": "301",
+        "channel": "booking_com",
+        "externalBookingId": "chnx-booking-685",
+        "externalRoomTypeId": "chnx-room-suite-685",
+        "externalRatePlanId": "chnx-rate-flex-685",
+        "inventoryTotalCount": 2,
+        "inventoryAssignedCount": 1,
+        "inventoryBlockedCount": 1,
+        "inventoryAvailableCount": 0,
+        "messageCount": 2,
+        "attachmentCount": 1,
+        "privateNoteCount": 1,
+        "checkoutChargeCount": 1,
+        "syncStatusCount": 3
+      }
+    ],
+    "forbiddenOperationalSummaryKeys": [
+      "VIP late checkout approved internally",
+      "Passport scan received",
+      "Minibar damage review"
+    ]
+  }
+}
