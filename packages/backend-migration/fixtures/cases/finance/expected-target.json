@@ -114,8 +114,11 @@
       "po_finance_property_686",
       "po_finance_affiliate_686",
       "secret_ref_finance_property_686",
+      "secret_ref_finance_affiliate_686",
       "bank_ref_finance_property_686",
       "bank_ref_finance_affiliate_686",
+      "cus_finance_property_686",
+      "sub_finance_property_686",
       "finance.guest@example.test"
     ]
   }
