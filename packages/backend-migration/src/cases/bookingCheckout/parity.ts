@@ -19,6 +19,7 @@ async function checkBookingFlow(
     payment_id: string | null;
     payment_amount: string | null;
     payment_currency: string | null;
+    payment_organization_id: string | null;
     payment_row_status: string | null;
     payment_booking_id: string | null;
     summary_reference: string | null;
@@ -37,6 +38,7 @@ async function checkBookingFlow(
        p.id::text AS payment_id,
        p.amount::text AS payment_amount,
        p.currency AS payment_currency,
+       p.organization_id::text AS payment_organization_id,
        p.status AS payment_row_status,
        p.guest_booking_id::text AS payment_booking_id,
        rm.public_reference AS summary_reference,
@@ -84,6 +86,7 @@ async function checkBookingFlow(
     row.payment_id === flow.paymentId &&
     row.payment_amount === flow.paymentAmount &&
     row.payment_currency === flow.currency &&
+    row.payment_organization_id === flow.organizationId &&
     row.payment_row_status === "paid" &&
     row.payment_booking_id === flow.guestBookingId &&
     row.summary_reference === flow.publicBookingReference &&
