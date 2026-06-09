@@ -1,55 +1,142 @@
 -- Fixture: pms-operations / pms.sql
--- Target: identity, hotel_catalog, booking, and pms schemas.
+-- Source: migration_source_pms schema.
 --
--- This parity-only fixture inserts already-migrated target rows. There is no
--- source-to-target transform handler for this case.
+-- Represents source-side PMS operational inputs for one completed booking
+-- chain. The rebuild command loads these rows into migration-only fixture
+-- tables, then packages/backend-migration transforms them into identity,
+-- hotel_catalog, booking, and pms target tables.
 
-INSERT INTO identity.users
-  (id, email, name, status)
-VALUES
-  ('f6851000-0000-0000-0000-000000000001', 'ops.owner@example.test', 'Operations Owner', 'active');
+DROP SCHEMA IF EXISTS migration_source_pms CASCADE;
+CREATE SCHEMA migration_source_pms;
 
-INSERT INTO identity.organizations
-  (id, kind, name, slug, status, workos_org_id, workos_external_id)
-VALUES
-  ('f6852000-0000-0000-0000-000000000001', 'hotel_group', 'PMS Operations Alpenrose Group', 'pms-operations-alpenrose-group', 'active', 'org_pms_operations_alpenrose', 'pms-operations-alpenrose-group');
+CREATE TABLE migration_source_pms.operations_snapshot_inputs (
+  source_row_id TEXT PRIMARY KEY,
+  owner_user_id UUID NOT NULL,
+  owner_email TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  owner_status TEXT NOT NULL,
+  organization_id UUID NOT NULL,
+  organization_kind TEXT NOT NULL,
+  organization_name TEXT NOT NULL,
+  organization_slug TEXT NOT NULL,
+  organization_status TEXT NOT NULL,
+  workos_org_id TEXT,
+  workos_external_id TEXT,
+  membership_id UUID NOT NULL,
+  membership_status TEXT NOT NULL,
+  role_key TEXT NOT NULL,
+  workos_membership_id TEXT,
+  workos_role_slugs TEXT[] NOT NULL,
+  resource_link_id UUID NOT NULL,
+  pms_hotel_resource_id TEXT NOT NULL,
+  product_entitlement_id UUID NOT NULL,
+  entitlement_key TEXT NOT NULL,
+  entitlement_starts_at TIMESTAMPTZ,
+  entitlement_metadata JSONB NOT NULL,
+  property_id UUID NOT NULL,
+  property_public_id TEXT NOT NULL,
+  property_display_name TEXT NOT NULL,
+  property_type TEXT,
+  property_category TEXT,
+  default_locale TEXT NOT NULL,
+  supported_locales TEXT[] NOT NULL,
+  profile_status TEXT NOT NULL,
+  completeness_reasons TEXT[] NOT NULL,
+  property_source_link_id UUID NOT NULL,
+  property_slug_id UUID NOT NULL,
+  property_slug TEXT NOT NULL,
+  guest_booking_id UUID NOT NULL,
+  public_reference TEXT NOT NULL,
+  source_booking_id TEXT NOT NULL,
+  lifecycle_status TEXT NOT NULL,
+  payment_status TEXT NOT NULL,
+  check_in DATE NOT NULL,
+  check_out DATE NOT NULL,
+  adults INTEGER NOT NULL,
+  children INTEGER NOT NULL,
+  room_count INTEGER NOT NULL,
+  currency CHAR(3) NOT NULL,
+  total_amount NUMERIC(15, 2) NOT NULL,
+  balance_amount NUMERIC(15, 2) NOT NULL,
+  booking_metadata JSONB NOT NULL,
+  booking_created_at TIMESTAMPTZ NOT NULL,
+  booking_updated_at TIMESTAMPTZ NOT NULL,
+  booking_guest_id UUID NOT NULL,
+  guest_role TEXT NOT NULL,
+  guest_first_name TEXT NOT NULL,
+  guest_last_name TEXT NOT NULL,
+  guest_email TEXT NOT NULL,
+  guest_phone TEXT,
+  guest_country_code TEXT,
+  pii_retention_until DATE,
+  summary_guest_counts JSONB NOT NULL,
+  summary_room JSONB NOT NULL,
+  summary_amount JSONB NOT NULL,
+  summary_public_policy JSONB NOT NULL,
+  summary_source_freshness JSONB NOT NULL,
+  summary_projected_at TIMESTAMPTZ NOT NULL,
+  room_types JSONB NOT NULL,
+  rooms JSONB NOT NULL,
+  rate_plans JSONB NOT NULL,
+  rate_rules JSONB NOT NULL,
+  inventory_days JSONB NOT NULL,
+  room_blocks JSONB NOT NULL,
+  checkin_template JSONB NOT NULL,
+  checkout_template JSONB NOT NULL,
+  assignments JSONB NOT NULL,
+  checkin_records JSONB NOT NULL,
+  checkout_charges JSONB NOT NULL,
+  checkout_records JSONB NOT NULL,
+  private_notes JSONB NOT NULL,
+  message_threads JSONB NOT NULL,
+  messages JSONB NOT NULL,
+  message_attachments JSONB NOT NULL,
+  channel_connections JSONB NOT NULL,
+  channel_room_type_mappings JSONB NOT NULL,
+  channel_rate_plan_mappings JSONB NOT NULL,
+  channel_booking_mappings JSONB NOT NULL,
+  channel_sync_statuses JSONB NOT NULL
+);
 
-INSERT INTO identity.organization_memberships
-  (id, organization_id, user_id, status, role_key, workos_membership_id, workos_role_slugs)
-VALUES
-  ('f6852100-0000-0000-0000-000000000001', 'f6852000-0000-0000-0000-000000000001', 'f6851000-0000-0000-0000-000000000001', 'active', 'hotel_owner', 'membership_pms_ops_owner', ARRAY['hotel_owner']);
-
-INSERT INTO identity.organization_resource_links
-  (id, organization_id, product, resource_type, resource_id, relationship, status)
-VALUES
-  ('f6852200-0000-0000-0000-000000000001', 'f6852000-0000-0000-0000-000000000001', 'pms', 'pms_hotel', 'pms_hotel_ops_alpenrose', 'operator', 'active');
-
-INSERT INTO identity.product_entitlements
-  (id, organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id, starts_at, metadata)
-VALUES
-  ('f6852300-0000-0000-0000-000000000001', 'f6852000-0000-0000-0000-000000000001', 'pms', 'pms-core', 'active', 'pms', 'pms_hotel', 'pms_hotel_ops_alpenrose', '2026-06-01T00:00:00Z', '{"fixture": "pms-operations"}');
-
-INSERT INTO hotel_catalog.properties
-  (id, public_id, display_name, property_type, category, default_locale, supported_locales, profile_status, completeness_reasons)
-VALUES
-  ('f6853000-0000-0000-0000-000000000001', 'prop_pms_ops_alpenrose', 'PMS Operations Alpenrose', 'hotel', 'boutique', 'en', ARRAY['en', 'de'], 'complete', '{}');
-
-INSERT INTO hotel_catalog.property_source_links
-  (id, property_id, source_system, source_table, source_id, relationship, metadata)
-VALUES
-  ('f6853100-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'pms', 'hotels', 'pms_hotel_ops_alpenrose', 'operational_input', '{"fixture": "pms-operations"}');
-
-INSERT INTO hotel_catalog.property_slugs
-  (id, property_id, slug, locale, purpose, status)
-VALUES
-  ('f6853200-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'pms-operations-alpenrose', NULL, 'canonical', 'active');
-
-INSERT INTO booking.guest_bookings
+INSERT INTO migration_source_pms.operations_snapshot_inputs
   (
-    id,
+    source_row_id,
+    owner_user_id,
+    owner_email,
+    owner_name,
+    owner_status,
+    organization_id,
+    organization_kind,
+    organization_name,
+    organization_slug,
+    organization_status,
+    workos_org_id,
+    workos_external_id,
+    membership_id,
+    membership_status,
+    role_key,
+    workos_membership_id,
+    workos_role_slugs,
+    resource_link_id,
+    pms_hotel_resource_id,
+    product_entitlement_id,
+    entitlement_key,
+    entitlement_starts_at,
+    entitlement_metadata,
     property_id,
+    property_public_id,
+    property_display_name,
+    property_type,
+    property_category,
+    default_locale,
+    supported_locales,
+    profile_status,
+    completeness_reasons,
+    property_source_link_id,
+    property_slug_id,
+    property_slug,
+    guest_booking_id,
     public_reference,
-    source_system,
     source_booking_id,
     lifecycle_status,
     payment_status,
@@ -62,15 +149,83 @@ INSERT INTO booking.guest_bookings
     total_amount,
     balance_amount,
     booking_metadata,
-    created_at,
-    updated_at
+    booking_created_at,
+    booking_updated_at,
+    booking_guest_id,
+    guest_role,
+    guest_first_name,
+    guest_last_name,
+    guest_email,
+    guest_phone,
+    guest_country_code,
+    pii_retention_until,
+    summary_guest_counts,
+    summary_room,
+    summary_amount,
+    summary_public_policy,
+    summary_source_freshness,
+    summary_projected_at,
+    room_types,
+    rooms,
+    rate_plans,
+    rate_rules,
+    inventory_days,
+    room_blocks,
+    checkin_template,
+    checkout_template,
+    assignments,
+    checkin_records,
+    checkout_charges,
+    checkout_records,
+    private_notes,
+    message_threads,
+    messages,
+    message_attachments,
+    channel_connections,
+    channel_room_type_mappings,
+    channel_rate_plan_mappings,
+    channel_booking_mappings,
+    channel_sync_statuses
   )
 VALUES
   (
-    'f6854000-0000-0000-0000-000000000001',
+    'pms-operations-alpenrose',
+    'f6851000-0000-0000-0000-000000000001',
+    'ops.owner@example.test',
+    'Operations Owner',
+    'active',
+    'f6852000-0000-0000-0000-000000000001',
+    'hotel_group',
+    'PMS Operations Alpenrose Group',
+    'pms-operations-alpenrose-group',
+    'active',
+    'org_pms_operations_alpenrose',
+    'pms-operations-alpenrose-group',
+    'f6852100-0000-0000-0000-000000000001',
+    'active',
+    'hotel_owner',
+    'membership_pms_ops_owner',
+    ARRAY['hotel_owner'],
+    'f6852200-0000-0000-0000-000000000001',
+    'pms_hotel_ops_alpenrose',
+    'f6852300-0000-0000-0000-000000000001',
+    'pms-core',
+    '2026-06-01T00:00:00Z',
+    '{"fixture": "pms-operations"}',
     'f6853000-0000-0000-0000-000000000001',
+    'prop_pms_ops_alpenrose',
+    'PMS Operations Alpenrose',
+    'hotel',
+    'boutique',
+    'en',
+    ARRAY['en', 'de'],
+    'complete',
+    '{}',
+    'f6853100-0000-0000-0000-000000000001',
+    'f6853200-0000-0000-0000-000000000001',
+    'pms-operations-alpenrose',
+    'f6854000-0000-0000-0000-000000000001',
     'B-PMS-685',
-    'pms',
     'legacy-pms-booking-685',
     'completed',
     'paid',
@@ -84,161 +239,421 @@ VALUES
     0.00,
     '{"fixture": "pms-operations", "source": "legacy-pms"}',
     '2026-06-09T08:00:00Z',
-    '2026-08-18T11:15:00Z'
-  );
-
-INSERT INTO booking.booking_guests
-  (id, guest_booking_id, guest_role, first_name, last_name, email, phone, country_code, pii_retention_until)
-VALUES
-  ('f6854100-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'booker', 'Nora', 'Ops', 'nora.ops@example.test', '+43111222333', 'AT', '2027-08-18');
-
-INSERT INTO booking.direct_booking_summary_read_model
-  (
-    guest_booking_id,
-    property_id,
-    public_reference,
-    lifecycle_status,
-    payment_status,
-    check_in,
-    check_out,
-    guest_counts,
-    room_summary,
-    amount_summary,
-    public_policy,
-    source_freshness,
-    projected_at
-  )
-VALUES
-  (
-    'f6854000-0000-0000-0000-000000000001',
-    'f6853000-0000-0000-0000-000000000001',
-    'B-PMS-685',
-    'completed',
-    'paid',
-    '2026-08-15',
-    '2026-08-18',
+    '2026-08-18T11:15:00Z',
+    'f6854100-0000-0000-0000-000000000001',
+    'booker',
+    'Nora',
+    'Ops',
+    'nora.ops@example.test',
+    '+43111222333',
+    'AT',
+    '2027-08-18',
     '{"adults": 2, "children": 0, "roomCount": 1}',
     '{"roomType": "Alpine Suite", "roomNumber": "301", "nights": 3}',
     '{"currency": "EUR", "total": "780.00", "balance": "0.00", "paid": "780.00"}',
     '{"checkout": "Public checkout completed."}',
     '{"pms": {"status": "fresh", "generatedAt": "2026-08-18T11:20:00Z"}}',
-    '2026-08-18T11:20:00Z'
+    '2026-08-18T11:20:00Z',
+    $json$[
+      {
+        "id": "f6855000-0000-0000-0000-000000000001",
+        "sourceRoomTypeId": "pms-room-type-suite-685",
+        "name": "Alpine Suite",
+        "description": "Large suite with balcony.",
+        "category": "suite",
+        "occupancyLimits": {"adults": 2, "children": 1},
+        "roomAttributes": {"bedType": "king"},
+        "amenitiesSnapshot": ["balcony", "minibar"],
+        "baseRateAmount": "260.00",
+        "currency": "EUR",
+        "active": true,
+        "sortOrder": 1,
+        "locationSummary": {"wing": "north"}
+      },
+      {
+        "id": "f6855000-0000-0000-0000-000000000002",
+        "sourceRoomTypeId": "pms-room-type-double-685",
+        "name": "Garden Double",
+        "description": "Double room facing the garden.",
+        "category": "double",
+        "occupancyLimits": {"adults": 2, "children": 0},
+        "roomAttributes": {"bedType": "queen"},
+        "amenitiesSnapshot": ["garden_view"],
+        "baseRateAmount": "180.00",
+        "currency": "EUR",
+        "active": true,
+        "sortOrder": 2,
+        "locationSummary": {"wing": "south"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855100-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "sourceRoomId": "pms-room-301-685",
+        "roomNumber": "301",
+        "floor": "3",
+        "status": "available",
+        "sortOrder": 1,
+        "roomMetadata": {"view": "mountain"}
+      },
+      {
+        "id": "f6855100-0000-0000-0000-000000000002",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "sourceRoomId": "pms-room-302-685",
+        "roomNumber": "302",
+        "floor": "3",
+        "status": "maintenance",
+        "sortOrder": 2,
+        "roomMetadata": {"view": "mountain"}
+      },
+      {
+        "id": "f6855100-0000-0000-0000-000000000003",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "sourceRoomId": "pms-room-102-685",
+        "roomNumber": "102",
+        "floor": "1",
+        "status": "available",
+        "sortOrder": 3,
+        "roomMetadata": {"view": "garden"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855200-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "code": "DIRECT-FLEX",
+        "name": "Direct Flexible",
+        "rateType": "flexible",
+        "mealPlan": "breakfast",
+        "paymentPolicy": {"payment": "card_or_property"},
+        "depositPolicy": {"depositPercent": 20},
+        "cancellationPolicySnapshot": {"freeUntilDays": 7},
+        "baseRateAmount": "260.00",
+        "currency": "EUR",
+        "active": true
+      },
+      {
+        "id": "f6855200-0000-0000-0000-000000000002",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "code": "NRF",
+        "name": "Non-refundable",
+        "rateType": "non_refundable",
+        "mealPlan": null,
+        "paymentPolicy": {"payment": "prepaid"},
+        "depositPolicy": {"depositPercent": 100},
+        "cancellationPolicySnapshot": {"refund": "none"},
+        "baseRateAmount": "165.00",
+        "currency": "EUR",
+        "active": true
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855300-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "ratePlanId": "f6855200-0000-0000-0000-000000000001",
+        "ruleType": "season",
+        "startsOn": "2026-08-01",
+        "endsOn": "2026-08-31",
+        "daysOfWeek": [1, 2, 3, 4, 5, 6, 0],
+        "minStayNights": 2,
+        "maxStayNights": 7,
+        "priceDeltaAmount": "40.00",
+        "rulePayload": {"season": "high"}
+      },
+      {
+        "id": "f6855300-0000-0000-0000-000000000002",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "ratePlanId": "f6855200-0000-0000-0000-000000000002",
+        "ruleType": "weekend_surcharge",
+        "startsOn": "2026-08-01",
+        "endsOn": "2026-08-31",
+        "daysOfWeek": [5, 6],
+        "minStayNights": 1,
+        "maxStayNights": null,
+        "priceDeltaAmount": "25.00",
+        "rulePayload": {"applies": "weekend"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "stayDate": "2026-08-15",
+        "totalCount": 2,
+        "assignedCount": 1,
+        "blockedCount": 1,
+        "availableCount": 0,
+        "status": "limited",
+        "sourceFreshness": {"pms": {"status": "fresh"}}
+      },
+      {
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "stayDate": "2026-08-16",
+        "totalCount": 2,
+        "assignedCount": 1,
+        "blockedCount": 0,
+        "availableCount": 1,
+        "status": "open",
+        "sourceFreshness": {"pms": {"status": "fresh"}}
+      },
+      {
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "stayDate": "2026-08-15",
+        "totalCount": 1,
+        "assignedCount": 0,
+        "blockedCount": 0,
+        "availableCount": 1,
+        "status": "open",
+        "sourceFreshness": {"pms": {"status": "fresh"}}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855400-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "roomId": "f6855100-0000-0000-0000-000000000002",
+        "startsOn": "2026-08-15",
+        "endsOn": "2026-08-15",
+        "blockedCount": 1,
+        "reason": "Maintenance inspection",
+        "status": "active",
+        "createdAt": "2026-08-01T09:00:00Z",
+        "releasedAt": null
+      },
+      {
+        "id": "f6855400-0000-0000-0000-000000000002",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "roomId": null,
+        "startsOn": "2026-08-20",
+        "endsOn": "2026-08-21",
+        "blockedCount": 1,
+        "reason": "Soft refurbishment",
+        "status": "released",
+        "createdAt": "2026-08-01T10:00:00Z",
+        "releasedAt": "2026-08-05T10:00:00Z"
+      }
+    ]$json$,
+    '{"steps": [{"key": "id_document", "label": "Verify ID"}, {"key": "deposit", "label": "Confirm deposit"}], "updatedAt": "2026-08-01T08:00:00Z"}',
+    '{"steps": [{"key": "minibar", "label": "Check minibar"}, {"key": "keys", "label": "Collect keys"}], "updatedAt": "2026-08-01T08:05:00Z"}',
+    $json$[
+      {
+        "id": "f6855500-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "ratePlanId": "f6855200-0000-0000-0000-000000000001",
+        "roomId": "f6855100-0000-0000-0000-000000000001",
+        "position": 1,
+        "assignmentStatus": "checked_out",
+        "pmsReservationRef": "PMS-685-301",
+        "externalReservationId": "chnx-booking-685",
+        "channel": "booking_com",
+        "source": "channel",
+        "assignmentPayload": {"channelRoomIndex": 0},
+        "assignedAt": "2026-08-14T15:00:00Z"
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855600-0000-0000-0000-000000000001",
+        "assignmentId": "f6855500-0000-0000-0000-000000000001",
+        "completedAt": "2026-08-15T15:35:00Z",
+        "stepResults": [{"key": "id_document", "status": "done"}, {"key": "deposit", "status": "done"}],
+        "pendingFlags": []
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855700-0000-0000-0000-000000000001",
+        "assignmentId": "f6855500-0000-0000-0000-000000000001",
+        "label": "Minibar damage review",
+        "amount": "35.00",
+        "originalAmount": "35.00",
+        "currency": "EUR",
+        "status": "paid",
+        "createdAt": "2026-08-18T09:30:00Z",
+        "settledAt": "2026-08-18T10:00:00Z"
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855800-0000-0000-0000-000000000001",
+        "assignmentId": "f6855500-0000-0000-0000-000000000001",
+        "completedAt": "2026-08-18T10:15:00Z",
+        "inspectionResults": [{"key": "minibar", "status": "charge_added"}, {"key": "keys", "status": "done"}],
+        "chargesSettled": [{"chargeId": "f6855700-0000-0000-0000-000000000001", "status": "paid"}],
+        "pendingFlags": [],
+        "checkoutNotes": "Internal checkout review complete."
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6855900-0000-0000-0000-000000000001",
+        "authorDisplayName": "Operations Owner",
+        "body": "VIP late checkout approved internally",
+        "source": "pms",
+        "createdAt": "2026-08-17T18:00:00Z"
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856000-0000-0000-0000-000000000001",
+        "source": "channex",
+        "sourceThreadId": "thread-685",
+        "sourceBookingId": "chnx-booking-685",
+        "channel": "booking_com",
+        "guestDisplayName": "Nora Ops",
+        "guestEmail": "nora.ops@example.test",
+        "status": "open",
+        "lastMessageAt": "2026-08-15T13:05:00Z",
+        "lastMessagePreview": "Passport scan received",
+        "lastMessageDirection": "inbound",
+        "unreadCount": 1
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856100-0000-0000-0000-000000000001",
+        "threadId": "f6856000-0000-0000-0000-000000000001",
+        "sourceMessageId": "msg-guest-685",
+        "direction": "inbound",
+        "senderType": "guest",
+        "senderUserId": null,
+        "senderDisplayName": "Nora Ops",
+        "body": "Passport scan received",
+        "sentAt": "2026-08-15T13:00:00Z",
+        "receivedAt": "2026-08-15T13:01:00Z",
+        "readAt": null,
+        "rawPayload": {"provider": "channex"},
+        "piiRetentionUntil": "2027-08-18"
+      },
+      {
+        "id": "f6856100-0000-0000-0000-000000000002",
+        "threadId": "f6856000-0000-0000-0000-000000000001",
+        "sourceMessageId": "msg-property-685",
+        "direction": "outbound",
+        "senderType": "property_user",
+        "senderUserId": "f6851000-0000-0000-0000-000000000001",
+        "senderDisplayName": "Operations Owner",
+        "body": "Thank you, we have everything for check-in.",
+        "sentAt": "2026-08-15T13:05:00Z",
+        "receivedAt": "2026-08-15T13:05:30Z",
+        "readAt": "2026-08-15T13:06:00Z",
+        "rawPayload": {"provider": "channex"},
+        "piiRetentionUntil": "2027-08-18"
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856200-0000-0000-0000-000000000001",
+        "messageId": "f6856100-0000-0000-0000-000000000001",
+        "s3Key": "fixtures/pms-operations/passport-scan-redacted.pdf",
+        "filename": "passport-scan-redacted.pdf",
+        "contentType": "application/pdf",
+        "sizeBytes": 120432,
+        "sourceAttachmentId": "att-685"
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856300-0000-0000-0000-000000000001",
+        "provider": "channex",
+        "connectionStatus": "connected",
+        "externalPropertyId": "chnx-property-685",
+        "capabilities": ["booking", "ari", "messaging"],
+        "messagingAppInstalled": true,
+        "lastBookingSyncAt": "2026-08-18T11:00:00Z",
+        "lastAriSyncAt": "2026-08-18T10:45:00Z",
+        "lastMessageSyncAt": "2026-08-15T13:10:00Z",
+        "connectionMetadata": {"fixture": "pms-operations"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856400-0000-0000-0000-000000000001",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "externalRoomTypeId": "chnx-room-suite-685",
+        "status": "active",
+        "mappingMetadata": {"source": "channex"}
+      },
+      {
+        "id": "f6856400-0000-0000-0000-000000000002",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "externalRoomTypeId": "chnx-room-double-685",
+        "status": "active",
+        "mappingMetadata": {"source": "channex"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856500-0000-0000-0000-000000000001",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+        "ratePlanId": "f6855200-0000-0000-0000-000000000001",
+        "channel": "booking_com",
+        "externalRoomTypeId": "chnx-room-suite-685",
+        "externalRatePlanId": "chnx-rate-flex-685",
+        "sellMode": "per_room",
+        "markupPercent": "7.5000",
+        "status": "active",
+        "mappingMetadata": {"source": "channex"}
+      },
+      {
+        "id": "f6856500-0000-0000-0000-000000000002",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "roomTypeId": "f6855000-0000-0000-0000-000000000002",
+        "ratePlanId": "f6855200-0000-0000-0000-000000000002",
+        "channel": "booking_com",
+        "externalRoomTypeId": "chnx-room-double-685",
+        "externalRatePlanId": "chnx-rate-nrf-685",
+        "sellMode": "per_room",
+        "markupPercent": "5.0000",
+        "status": "active",
+        "mappingMetadata": {"source": "channex"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856600-0000-0000-0000-000000000001",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "assignmentId": "f6855500-0000-0000-0000-000000000001",
+        "externalBookingId": "chnx-booking-685",
+        "externalRevisionId": "rev-2",
+        "channel": "booking_com",
+        "channelRoomIndex": 0,
+        "syncStatus": "active",
+        "lastSyncedAt": "2026-08-18T11:00:00Z",
+        "mappingMetadata": {"roomTypeMappingId": "f6856400-0000-0000-0000-000000000001"}
+      }
+    ]$json$,
+    $json$[
+      {
+        "id": "f6856700-0000-0000-0000-000000000001",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "syncDomain": "booking",
+        "status": "ok",
+        "lastAttemptAt": "2026-08-18T11:00:00Z",
+        "lastSuccessAt": "2026-08-18T11:00:00Z",
+        "syncPayload": {"fixture": "pms-operations"}
+      },
+      {
+        "id": "f6856700-0000-0000-0000-000000000002",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "syncDomain": "ari",
+        "status": "ok",
+        "lastAttemptAt": "2026-08-18T10:45:00Z",
+        "lastSuccessAt": "2026-08-18T10:45:00Z",
+        "syncPayload": {"fixture": "pms-operations"}
+      },
+      {
+        "id": "f6856700-0000-0000-0000-000000000003",
+        "connectionId": "f6856300-0000-0000-0000-000000000001",
+        "syncDomain": "message",
+        "status": "ok",
+        "lastAttemptAt": "2026-08-15T13:10:00Z",
+        "lastSuccessAt": "2026-08-15T13:10:00Z",
+        "syncPayload": {"fixture": "pms-operations"}
+      }
+    ]$json$
   );
-
-INSERT INTO pms.room_types
-  (id, property_id, source_system, source_room_type_id, name, description, category, occupancy_limits, room_attributes, amenities_snapshot, base_rate_amount, currency, active, sort_order, location_summary)
-VALUES
-  ('f6855000-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'migration', 'pms-room-type-suite-685', 'Alpine Suite', 'Large suite with balcony.', 'suite', '{"adults": 2, "children": 1}', '{"bedType": "king"}', '["balcony", "minibar"]', 260.00, 'EUR', TRUE, 1, '{"wing": "north"}'),
-  ('f6855000-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'migration', 'pms-room-type-double-685', 'Garden Double', 'Double room facing the garden.', 'double', '{"adults": 2, "children": 0}', '{"bedType": "queen"}', '["garden_view"]', 180.00, 'EUR', TRUE, 2, '{"wing": "south"}');
-
-INSERT INTO pms.rooms
-  (id, property_id, room_type_id, source_system, source_room_id, room_number, floor, status, sort_order, room_metadata)
-VALUES
-  ('f6855100-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'migration', 'pms-room-301-685', '301', '3', 'available', 1, '{"view": "mountain"}'),
-  ('f6855100-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'migration', 'pms-room-302-685', '302', '3', 'maintenance', 2, '{"view": "mountain"}'),
-  ('f6855100-0000-0000-0000-000000000003', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', 'migration', 'pms-room-102-685', '102', '1', 'available', 3, '{"view": "garden"}');
-
-INSERT INTO pms.rate_plans
-  (id, property_id, room_type_id, code, name, rate_type, meal_plan, payment_policy, deposit_policy, cancellation_policy_snapshot, base_rate_amount, currency, active)
-VALUES
-  ('f6855200-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'DIRECT-FLEX', 'Direct Flexible', 'flexible', 'breakfast', '{"payment": "card_or_property"}', '{"depositPercent": 20}', '{"freeUntilDays": 7}', 260.00, 'EUR', TRUE),
-  ('f6855200-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', 'NRF', 'Non-refundable', 'non_refundable', NULL, '{"payment": "prepaid"}', '{"depositPercent": 100}', '{"refund": "none"}', 165.00, 'EUR', TRUE);
-
-INSERT INTO pms.rate_rules
-  (id, property_id, room_type_id, rate_plan_id, rule_type, starts_on, ends_on, days_of_week, min_stay_nights, max_stay_nights, price_delta_amount, rule_payload)
-VALUES
-  ('f6855300-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'f6855200-0000-0000-0000-000000000001', 'season', '2026-08-01', '2026-08-31', ARRAY[1,2,3,4,5,6,0], 2, 7, 40.00, '{"season": "high"}'),
-  ('f6855300-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', 'f6855200-0000-0000-0000-000000000002', 'weekend_surcharge', '2026-08-01', '2026-08-31', ARRAY[5,6], 1, NULL, 25.00, '{"applies": "weekend"}');
-
-INSERT INTO pms.inventory_days
-  (property_id, room_type_id, stay_date, total_count, assigned_count, blocked_count, available_count, status, source_freshness)
-VALUES
-  ('f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', '2026-08-15', 2, 1, 1, 0, 'limited', '{"pms": {"status": "fresh"}}'),
-  ('f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', '2026-08-16', 2, 1, 0, 1, 'open', '{"pms": {"status": "fresh"}}'),
-  ('f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', '2026-08-15', 1, 0, 0, 1, 'open', '{"pms": {"status": "fresh"}}');
-
-INSERT INTO pms.room_blocks
-  (id, property_id, room_type_id, room_id, starts_on, ends_on, blocked_count, reason, status, created_by_user_id, created_at, released_at)
-VALUES
-  ('f6855400-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'f6855100-0000-0000-0000-000000000002', '2026-08-15', '2026-08-15', 1, 'Maintenance inspection', 'active', 'f6851000-0000-0000-0000-000000000001', '2026-08-01T09:00:00Z', NULL),
-  ('f6855400-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', NULL, '2026-08-20', '2026-08-21', 1, 'Soft refurbishment', 'released', 'f6851000-0000-0000-0000-000000000001', '2026-08-01T10:00:00Z', '2026-08-05T10:00:00Z');
-
-INSERT INTO pms.operational_booking_assignments
-  (id, property_id, guest_booking_id, room_type_id, rate_plan_id, room_id, position, assignment_status, pms_reservation_ref, external_reservation_id, channel, source, assignment_payload, assigned_at)
-VALUES
-  ('f6855500-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'f6855200-0000-0000-0000-000000000001', 'f6855100-0000-0000-0000-000000000001', 1, 'checked_out', 'PMS-685-301', 'chnx-booking-685', 'booking_com', 'channel', '{"channelRoomIndex": 0}', '2026-08-14T15:00:00Z');
-
-INSERT INTO pms.checkin_checklist_templates
-  (property_id, steps, updated_by_user_id, updated_at)
-VALUES
-  ('f6853000-0000-0000-0000-000000000001', '[{"key": "id_document", "label": "Verify ID"}, {"key": "deposit", "label": "Confirm deposit"}]', 'f6851000-0000-0000-0000-000000000001', '2026-08-01T08:00:00Z');
-
-INSERT INTO pms.checkout_inspection_templates
-  (property_id, steps, updated_by_user_id, updated_at)
-VALUES
-  ('f6853000-0000-0000-0000-000000000001', '[{"key": "minibar", "label": "Check minibar"}, {"key": "keys", "label": "Collect keys"}]', 'f6851000-0000-0000-0000-000000000001', '2026-08-01T08:05:00Z');
-
-INSERT INTO pms.booking_checkin_records
-  (id, property_id, guest_booking_id, assignment_id, completed_by_user_id, completed_at, step_results, pending_flags)
-VALUES
-  ('f6855600-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'f6855500-0000-0000-0000-000000000001', 'f6851000-0000-0000-0000-000000000001', '2026-08-15T15:35:00Z', '[{"key": "id_document", "status": "done"}, {"key": "deposit", "status": "done"}]', '[]');
-
-INSERT INTO pms.booking_checkout_charges
-  (id, property_id, guest_booking_id, assignment_id, label, amount, original_amount, currency, status, created_by_user_id, created_at, settled_at)
-VALUES
-  ('f6855700-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'f6855500-0000-0000-0000-000000000001', 'Minibar damage review', 35.00, 35.00, 'EUR', 'paid', 'f6851000-0000-0000-0000-000000000001', '2026-08-18T09:30:00Z', '2026-08-18T10:00:00Z');
-
-INSERT INTO pms.booking_checkout_records
-  (id, property_id, guest_booking_id, assignment_id, completed_by_user_id, completed_at, inspection_results, charges_settled, pending_flags, checkout_notes)
-VALUES
-  ('f6855800-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'f6855500-0000-0000-0000-000000000001', 'f6851000-0000-0000-0000-000000000001', '2026-08-18T10:15:00Z', '[{"key": "minibar", "status": "charge_added"}, {"key": "keys", "status": "done"}]', '[{"chargeId": "f6855700-0000-0000-0000-000000000001", "status": "paid"}]', '[]', 'Internal checkout review complete.');
-
-INSERT INTO pms.booking_notes_private
-  (id, property_id, guest_booking_id, author_user_id, author_display_name, body, source, created_at)
-VALUES
-  ('f6855900-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'f6851000-0000-0000-0000-000000000001', 'Operations Owner', 'VIP late checkout approved internally', 'pms', '2026-08-17T18:00:00Z');
-
-INSERT INTO pms.message_threads
-  (id, property_id, guest_booking_id, source, source_thread_id, source_booking_id, channel, guest_display_name, guest_email, status, last_message_at, last_message_preview, last_message_direction, unread_count)
-VALUES
-  ('f6856000-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'channex', 'thread-685', 'chnx-booking-685', 'booking_com', 'Nora Ops', 'nora.ops@example.test', 'open', '2026-08-15T13:05:00Z', 'Passport scan received', 'inbound', 1);
-
-INSERT INTO pms.messages
-  (id, property_id, thread_id, source_message_id, direction, sender_type, sender_user_id, sender_display_name, body, sent_at, received_at, read_at, raw_payload, pii_retention_until)
-VALUES
-  ('f6856100-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6856000-0000-0000-0000-000000000001', 'msg-guest-685', 'inbound', 'guest', NULL, 'Nora Ops', 'Passport scan received', '2026-08-15T13:00:00Z', '2026-08-15T13:01:00Z', NULL, '{"provider": "channex"}', '2027-08-18'),
-  ('f6856100-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6856000-0000-0000-0000-000000000001', 'msg-property-685', 'outbound', 'property_user', 'f6851000-0000-0000-0000-000000000001', 'Operations Owner', 'Thank you, we have everything for check-in.', '2026-08-15T13:05:00Z', '2026-08-15T13:05:30Z', '2026-08-15T13:06:00Z', '{"provider": "channex"}', '2027-08-18');
-
-INSERT INTO pms.message_attachments
-  (id, property_id, message_id, s3_key, filename, content_type, size_bytes, source_attachment_id)
-VALUES
-  ('f6856200-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6856100-0000-0000-0000-000000000001', 'fixtures/pms-operations/passport-scan-redacted.pdf', 'passport-scan-redacted.pdf', 'application/pdf', 120432, 'att-685');
-
-INSERT INTO pms.channel_connections
-  (id, property_id, provider, connection_status, external_property_id, capabilities, messaging_app_installed, last_booking_sync_at, last_ari_sync_at, last_message_sync_at, connection_metadata)
-VALUES
-  ('f6856300-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'channex', 'connected', 'chnx-property-685', ARRAY['booking', 'ari', 'messaging'], TRUE, '2026-08-18T11:00:00Z', '2026-08-18T10:45:00Z', '2026-08-15T13:10:00Z', '{"fixture": "pms-operations"}');
-
-INSERT INTO pms.channel_room_type_mappings
-  (id, property_id, connection_id, room_type_id, external_room_type_id, status, mapping_metadata)
-VALUES
-  ('f6856400-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'chnx-room-suite-685', 'active', '{"source": "channex"}'),
-  ('f6856400-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', 'chnx-room-double-685', 'active', '{"source": "channex"}');
-
-INSERT INTO pms.channel_rate_plan_mappings
-  (id, property_id, connection_id, room_type_id, rate_plan_id, channel, external_room_type_id, external_rate_plan_id, sell_mode, markup_percent, status, mapping_metadata)
-VALUES
-  ('f6856500-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000001', 'f6855200-0000-0000-0000-000000000001', 'booking_com', 'chnx-room-suite-685', 'chnx-rate-flex-685', 'per_room', 7.5000, 'active', '{"source": "channex"}'),
-  ('f6856500-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'f6855000-0000-0000-0000-000000000002', 'f6855200-0000-0000-0000-000000000002', 'booking_com', 'chnx-room-double-685', 'chnx-rate-nrf-685', 'per_room', 5.0000, 'active', '{"source": "channex"}');
-
-INSERT INTO pms.channel_booking_mappings
-  (id, property_id, connection_id, guest_booking_id, assignment_id, external_booking_id, external_revision_id, channel, channel_room_index, sync_status, last_synced_at, mapping_metadata)
-VALUES
-  ('f6856600-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'f6854000-0000-0000-0000-000000000001', 'f6855500-0000-0000-0000-000000000001', 'chnx-booking-685', 'rev-2', 'booking_com', 0, 'active', '2026-08-18T11:00:00Z', '{"roomTypeMappingId": "f6856400-0000-0000-0000-000000000001"}');
-
-INSERT INTO pms.channel_sync_status
-  (id, property_id, connection_id, sync_domain, status, last_attempt_at, last_success_at, sync_payload)
-VALUES
-  ('f6856700-0000-0000-0000-000000000001', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'booking', 'ok', '2026-08-18T11:00:00Z', '2026-08-18T11:00:00Z', '{"fixture": "pms-operations"}'),
-  ('f6856700-0000-0000-0000-000000000002', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'ari', 'ok', '2026-08-18T10:45:00Z', '2026-08-18T10:45:00Z', '{"fixture": "pms-operations"}'),
-  ('f6856700-0000-0000-0000-000000000003', 'f6853000-0000-0000-0000-000000000001', 'f6856300-0000-0000-0000-000000000001', 'message', 'ok', '2026-08-15T13:10:00Z', '2026-08-15T13:10:00Z', '{"fixture": "pms-operations"}');

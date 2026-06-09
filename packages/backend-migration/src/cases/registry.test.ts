@@ -23,14 +23,19 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("finance")).toHaveLength(1);
   });
 
-  it("registers PMS operations parity without a transform", () => {
-    expect(getTransformHandler("pms-operations")).toBeUndefined();
+  it("registers PMS operations transform and parity handlers", () => {
+    expect(getTransformHandler("pms-operations")).toBeTypeOf("function");
     expect(getParityHandlers("pms-operations")).toHaveLength(1);
   });
 
   it("registers marketplace parity without a transform", () => {
     expect(getTransformHandler("marketplace")).toBeUndefined();
     expect(getParityHandlers("marketplace")).toHaveLength(1);
+  });
+
+  it("registers distribution bookability parity without a transform", () => {
+    expect(getTransformHandler("distribution-bookability")).toBeUndefined();
+    expect(getParityHandlers("distribution-bookability")).toHaveLength(1);
   });
 
   it("returns empty handlers for unregistered fixture cases", () => {

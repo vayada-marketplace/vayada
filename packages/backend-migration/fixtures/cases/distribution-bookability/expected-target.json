@@ -1,0 +1,132 @@
+{
+  "counts": {
+    "identity.users": 2,
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 2,
+    "identity.product_entitlements": 2,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 2,
+    "hotel_catalog.property_slugs": 1,
+    "hotel_catalog.property_public_profile_read_model": 1,
+    "booking.quote_sessions": 1,
+    "booking.checkout_contexts": 1,
+    "pms.room_types": 1,
+    "pms.rooms": 1,
+    "pms.rate_plans": 1,
+    "pms.inventory_days": 2,
+    "finance.payment_provider_accounts": 1,
+    "finance.payment_settings": 1,
+    "distribution.public_hotel_bookability_profiles": 1,
+    "distribution.public_room_offer_snapshots": 2,
+    "distribution.public_quote_read_models": 1,
+    "distribution.booking_deep_link_contexts": 1,
+    "distribution.external_api_clients": 2,
+    "distribution.external_api_usage_events": 3
+  },
+  "idStability": {
+    "identity.users": [
+      "f6891000-0000-0000-0000-000000000001",
+      "f6891000-0000-0000-0000-000000000002"
+    ],
+    "identity.organizations": ["f6892000-0000-0000-0000-000000000001"],
+    "identity.organization_memberships": ["f6892100-0000-0000-0000-000000000001"],
+    "identity.organization_resource_links": [
+      "f6892200-0000-0000-0000-000000000001",
+      "f6892200-0000-0000-0000-000000000002"
+    ],
+    "identity.product_entitlements": [
+      "f6892300-0000-0000-0000-000000000001",
+      "f6892300-0000-0000-0000-000000000002"
+    ],
+    "hotel_catalog.properties": ["f6893000-0000-0000-0000-000000000001"],
+    "hotel_catalog.property_source_links": [
+      "f6893100-0000-0000-0000-000000000001",
+      "f6893100-0000-0000-0000-000000000002"
+    ],
+    "hotel_catalog.property_slugs": ["f6893200-0000-0000-0000-000000000001"],
+    "booking.quote_sessions": ["f6894000-0000-0000-0000-000000000001"],
+    "booking.checkout_contexts": ["f6894100-0000-0000-0000-000000000001"],
+    "pms.room_types": ["f6895000-0000-0000-0000-000000000001"],
+    "pms.rooms": ["f6895100-0000-0000-0000-000000000001"],
+    "pms.rate_plans": ["f6895200-0000-0000-0000-000000000001"],
+    "finance.payment_provider_accounts": ["f6897000-0000-0000-0000-000000000001"],
+    "distribution.public_room_offer_snapshots": [
+      "f6898000-0000-0000-0000-000000000001",
+      "f6898000-0000-0000-0000-000000000002"
+    ],
+    "distribution.booking_deep_link_contexts": ["f6898100-0000-0000-0000-000000000001"],
+    "distribution.external_api_clients": [
+      "f6898200-0000-0000-0000-000000000001",
+      "f6898200-0000-0000-0000-000000000002"
+    ],
+    "distribution.external_api_usage_events": [
+      "f6898300-0000-0000-0000-000000000001",
+      "f6898300-0000-0000-0000-000000000002",
+      "f6898300-0000-0000-0000-000000000003"
+    ]
+  },
+  "uniquenessChecks": [],
+  "distributionBookabilityChecks": {
+    "properties": [
+      {
+        "propertyId": "f6893000-0000-0000-0000-000000000001",
+        "organizationId": "f6892000-0000-0000-0000-000000000001",
+        "ownerUserId": "f6891000-0000-0000-0000-000000000001",
+        "bookingHotelResourceId": "booking_hotel_distribution_alpenrose",
+        "pmsHotelResourceId": "pms_hotel_distribution_alpenrose",
+        "providerAccountId": "f6897000-0000-0000-0000-000000000001",
+        "providerAccountRef": "acct_distribution_property_689",
+        "quoteSessionId": "f6894000-0000-0000-0000-000000000001",
+        "checkoutContextId": "f6894100-0000-0000-0000-000000000001",
+        "availableRoomOfferSnapshotId": "f6898000-0000-0000-0000-000000000001",
+        "soldOutRoomOfferSnapshotId": "f6898000-0000-0000-0000-000000000002",
+        "roomTypeId": "f6895000-0000-0000-0000-000000000001",
+        "ratePlanId": "f6895200-0000-0000-0000-000000000001",
+        "deepLinkContextId": "f6898100-0000-0000-0000-000000000001",
+        "activeApiClientId": "f6898200-0000-0000-0000-000000000001",
+        "revokedApiClientId": "f6898200-0000-0000-0000-000000000002",
+        "profileUsageEventId": "f6898300-0000-0000-0000-000000000001",
+        "quoteUsageEventId": "f6898300-0000-0000-0000-000000000002",
+        "deepLinkUsageEventId": "f6898300-0000-0000-0000-000000000003",
+        "publicId": "prop_distribution_alpenrose",
+        "canonicalSlug": "distribution-alpenrose",
+        "canonicalUrl": "https://distribution-alpenrose.booking.localhost/en",
+        "bookingBaseUrl": "https://distribution-alpenrose.booking.localhost",
+        "timezone": "Europe/Vienna",
+        "defaultLocale": "en",
+        "defaultCurrency": "EUR",
+        "publicQuoteReference": "Q-DIST-689",
+        "quoteHash": "quote_hash_distribution_689",
+        "deepLinkUrl": "https://distribution-alpenrose.booking.localhost/en/checkout?quote=Q-DIST-689&ctx=public-dist-689",
+        "contextTokenHash": "sha256:deep-link-token-689",
+        "activePublicClientId": "client_dist_partner_689",
+        "revokedPublicClientId": "client_dist_revoked_689",
+        "availableOfferKey": "dist-suite-flex-2026-09-12",
+        "soldOutOfferKey": "dist-suite-flex-2026-09-13",
+        "checkIn": "2026-09-12",
+        "checkOut": "2026-09-14",
+        "availableStayDate": "2026-09-12",
+        "soldOutStayDate": "2026-09-13",
+        "totalAmount": "708.00",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "availableRooms": 2
+      }
+    ],
+    "forbiddenPublicOutputValues": [
+      "alina.distribution@example.test",
+      "+4312345689",
+      "guestSecretNote689",
+      "promo_rule_distribution_689",
+      "acct_distribution_property_689",
+      "secret_ref_distribution_689",
+      "pi_distribution_689",
+      "409",
+      "pms-room-409-689",
+      "cred_hash_dist_partner_689",
+      "cred_hash_dist_revoked_689"
+    ]
+  }
+}

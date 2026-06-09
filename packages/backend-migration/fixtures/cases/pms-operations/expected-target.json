@@ -114,6 +114,8 @@
         "channelRatePlanMappingId": "f6856500-0000-0000-0000-000000000001",
         "channelBookingMappingId": "f6856600-0000-0000-0000-000000000001",
         "bookingSyncStatusId": "f6856700-0000-0000-0000-000000000001",
+        "roomTypeSourceSystem": "pms",
+        "roomSourceSystem": "pms",
         "sourceRoomTypeId": "pms-room-type-suite-685",
         "sourceRoomId": "pms-room-301-685",
         "ratePlanCode": "DIRECT-FLEX",
