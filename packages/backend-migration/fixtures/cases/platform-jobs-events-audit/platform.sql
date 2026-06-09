@@ -1,42 +1,314 @@
 -- Fixture: platform-jobs-events-audit / platform.sql
--- Target: identity, hotel_catalog, and platform schemas.
+-- Source: migration_source_platform schema.
 --
--- This parity-only fixture inserts already-migrated target rows. There is no
--- source-to-target transform handler for this case.
+-- Represents source-side platform operational rows for one property-scoped
+-- event/outbox/job/idempotency/dead-letter/audit chain. The rebuild command
+-- loads these migration-only source rows, then packages/backend-migration
+-- transforms them into identity, hotel_catalog, and platform target rows.
 
-INSERT INTO identity.users
+DROP SCHEMA IF EXISTS migration_source_platform CASCADE;
+CREATE SCHEMA migration_source_platform;
+
+CREATE TABLE migration_source_platform.identity_users (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+
+CREATE TABLE migration_source_platform.identity_organizations (
+  id UUID PRIMARY KEY,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  status TEXT NOT NULL,
+  workos_org_id TEXT,
+  workos_external_id TEXT
+);
+
+CREATE TABLE migration_source_platform.identity_organization_memberships (
+  id UUID PRIMARY KEY,
+  organization_id UUID NOT NULL,
+  user_id UUID NOT NULL,
+  status TEXT NOT NULL,
+  role_key TEXT NOT NULL,
+  workos_membership_id TEXT,
+  workos_role_slugs TEXT[] NOT NULL
+);
+
+CREATE TABLE migration_source_platform.identity_organization_resource_links (
+  id UUID PRIMARY KEY,
+  organization_id UUID NOT NULL,
+  product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+
+CREATE TABLE migration_source_platform.hotel_catalog_properties (
+  id UUID PRIMARY KEY,
+  public_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  property_type TEXT,
+  category TEXT,
+  default_locale TEXT NOT NULL,
+  supported_locales TEXT[] NOT NULL,
+  profile_status TEXT NOT NULL,
+  completeness_reasons TEXT[] NOT NULL
+);
+
+CREATE TABLE migration_source_platform.hotel_catalog_property_source_links (
+  id UUID PRIMARY KEY,
+  property_id UUID NOT NULL,
+  source_system TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  metadata JSONB NOT NULL
+);
+
+CREATE TABLE migration_source_platform.domain_events (
+  id UUID PRIMARY KEY,
+  source_system TEXT NOT NULL,
+  event_key TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  event_version INTEGER NOT NULL,
+  occurred_at TIMESTAMPTZ NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL,
+  event_status TEXT NOT NULL,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  resource_product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  actor_type TEXT NOT NULL,
+  actor_user_id UUID,
+  correlation_id TEXT,
+  causation_id TEXT,
+  idempotency_key_hash TEXT,
+  payload JSONB NOT NULL,
+  event_metadata JSONB NOT NULL,
+  privacy_scope TEXT NOT NULL,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.external_webhook_events (
+  id UUID PRIMARY KEY,
+  provider TEXT NOT NULL,
+  provider_event_id TEXT,
+  webhook_key_hash TEXT,
+  event_type TEXT NOT NULL,
+  delivery_status TEXT NOT NULL,
+  signature_verified BOOLEAN NOT NULL,
+  received_at TIMESTAMPTZ NOT NULL,
+  processed_at TIMESTAMPTZ,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  normalized_domain_event_id UUID,
+  correlation_id TEXT,
+  payload_hash TEXT NOT NULL,
+  raw_headers JSONB NOT NULL,
+  raw_payload JSONB NOT NULL,
+  failure_reason TEXT,
+  privacy_scope TEXT NOT NULL,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.outbox_events (
+  id UUID PRIMARY KEY,
+  domain_event_id UUID NOT NULL,
+  outbox_key TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  resource_product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL,
+  attempts_count INTEGER NOT NULL,
+  max_attempts INTEGER NOT NULL,
+  available_at TIMESTAMPTZ NOT NULL,
+  leased_until TIMESTAMPTZ,
+  published_at TIMESTAMPTZ,
+  correlation_id TEXT,
+  idempotency_key_hash TEXT,
+  payload JSONB NOT NULL,
+  outbox_metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.jobs (
+  id UUID PRIMARY KEY,
+  job_key TEXT NOT NULL,
+  queue_name TEXT NOT NULL,
+  job_type TEXT NOT NULL,
+  source_domain_event_id UUID,
+  source_outbox_event_id UUID,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL,
+  attempts_count INTEGER NOT NULL,
+  max_attempts INTEGER NOT NULL,
+  run_after TIMESTAMPTZ NOT NULL,
+  locked_at TIMESTAMPTZ,
+  locked_by TEXT,
+  finished_at TIMESTAMPTZ,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  resource_product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  correlation_id TEXT,
+  idempotency_key_hash TEXT,
+  payload JSONB NOT NULL,
+  job_metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.job_attempts (
+  id UUID PRIMARY KEY,
+  job_id UUID NOT NULL,
+  attempt_number INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  worker_id TEXT,
+  started_at TIMESTAMPTZ NOT NULL,
+  finished_at TIMESTAMPTZ,
+  duration_ms INTEGER,
+  error_type TEXT,
+  error_message TEXT,
+  error_metadata JSONB NOT NULL,
+  retry_after TIMESTAMPTZ,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.idempotency_keys (
+  id UUID PRIMARY KEY,
+  operation_scope TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  key_hash TEXT NOT NULL,
+  request_fingerprint_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  response_status_code INTEGER,
+  response_body_hash TEXT,
+  response_resource_product TEXT,
+  response_resource_type TEXT,
+  response_resource_id TEXT,
+  correlation_id TEXT,
+  first_seen_at TIMESTAMPTZ NOT NULL,
+  last_seen_at TIMESTAMPTZ NOT NULL,
+  locked_until TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  idempotency_metadata JSONB NOT NULL,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.dead_letter_events (
+  id UUID PRIMARY KEY,
+  source_kind TEXT NOT NULL,
+  domain_event_id UUID,
+  outbox_event_id UUID,
+  job_id UUID,
+  job_attempt_id UUID,
+  webhook_event_id UUID,
+  requeued_job_id UUID,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  resource_product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  correlation_id TEXT,
+  idempotency_key_hash TEXT,
+  reason_code TEXT NOT NULL,
+  failure_summary TEXT NOT NULL,
+  failure_payload JSONB NOT NULL,
+  recovery_status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  acknowledged_at TIMESTAMPTZ,
+  resolved_at TIMESTAMPTZ,
+  ai_visible BOOLEAN NOT NULL
+);
+
+CREATE TABLE migration_source_platform.product_audit_events (
+  id UUID PRIMARY KEY,
+  audit_key TEXT NOT NULL,
+  product TEXT NOT NULL,
+  action TEXT NOT NULL,
+  action_version INTEGER NOT NULL,
+  occurred_at TIMESTAMPTZ NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL,
+  tenant_scope TEXT NOT NULL,
+  organization_id UUID,
+  property_id UUID,
+  actor_type TEXT NOT NULL,
+  actor_user_id UUID,
+  target_resource_product TEXT NOT NULL,
+  target_resource_type TEXT NOT NULL,
+  target_resource_id TEXT NOT NULL,
+  secondary_resource_product TEXT,
+  secondary_resource_type TEXT,
+  secondary_resource_id TEXT,
+  domain_event_id UUID,
+  external_webhook_event_id UUID,
+  job_id UUID,
+  idempotency_key_id UUID,
+  correlation_id TEXT,
+  causation_id TEXT,
+  redacted_payload JSONB NOT NULL,
+  private_payload JSONB NOT NULL,
+  audit_metadata JSONB NOT NULL,
+  retention_class TEXT NOT NULL,
+  privacy_scope TEXT NOT NULL,
+  ai_visible BOOLEAN NOT NULL
+);
+
+INSERT INTO migration_source_platform.identity_users
   (id, email, name, status)
 VALUES
   ('f6951000-0000-0000-0000-000000000001', 'owner.platform-audit@example.test', 'Platform Audit Owner', 'active');
 
-INSERT INTO identity.organizations
+INSERT INTO migration_source_platform.identity_organizations
   (id, kind, name, slug, status, workos_org_id, workos_external_id)
 VALUES
   ('f6952000-0000-0000-0000-000000000001', 'hotel_group', 'Platform Audit Alpenrose Group', 'platform-audit-alpenrose-group', 'active', 'org_platform_audit_alpenrose', 'platform-audit-alpenrose-group');
 
-INSERT INTO identity.organization_memberships
+INSERT INTO migration_source_platform.identity_organization_memberships
   (id, organization_id, user_id, status, role_key, workos_membership_id, workos_role_slugs)
 VALUES
   ('f6952100-0000-0000-0000-000000000001', 'f6952000-0000-0000-0000-000000000001', 'f6951000-0000-0000-0000-000000000001', 'active', 'hotel_owner', 'membership_platform_audit_owner', ARRAY['hotel_owner']);
 
-INSERT INTO identity.organization_resource_links
+INSERT INTO migration_source_platform.identity_organization_resource_links
   (id, organization_id, product, resource_type, resource_id, relationship, status)
 VALUES
   ('f6952200-0000-0000-0000-000000000001', 'f6952000-0000-0000-0000-000000000001', 'booking', 'booking_hotel', 'booking_hotel_platform_audit_alpenrose', 'owner', 'active'),
   ('f6952200-0000-0000-0000-000000000002', 'f6952000-0000-0000-0000-000000000001', 'pms', 'pms_hotel', 'pms_hotel_platform_audit_alpenrose', 'operator', 'active');
 
-INSERT INTO hotel_catalog.properties
+INSERT INTO migration_source_platform.hotel_catalog_properties
   (id, public_id, display_name, property_type, category, default_locale, supported_locales, profile_status, completeness_reasons)
 VALUES
   ('f6953000-0000-0000-0000-000000000001', 'prop_platform_audit_alpenrose', 'Platform Audit Alpenrose', 'hotel', 'boutique', 'en', ARRAY['en', 'de'], 'complete', '{}');
 
-INSERT INTO hotel_catalog.property_source_links
+INSERT INTO migration_source_platform.hotel_catalog_property_source_links
   (id, property_id, source_system, source_table, source_id, relationship, metadata)
 VALUES
   ('f6953100-0000-0000-0000-000000000001', 'f6953000-0000-0000-0000-000000000001', 'booking', 'booking_hotels', 'booking_hotel_platform_audit_alpenrose', 'canonical_input', '{"fixture": "platform-jobs-events-audit"}'),
   ('f6953100-0000-0000-0000-000000000002', 'f6953000-0000-0000-0000-000000000001', 'pms', 'hotels', 'pms_hotel_platform_audit_alpenrose', 'operational_input', '{"fixture": "platform-jobs-events-audit"}');
 
-INSERT INTO platform.domain_events
+INSERT INTO migration_source_platform.domain_events
   (
     id,
     source_system,
@@ -139,7 +411,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.external_webhook_events
+INSERT INTO migration_source_platform.external_webhook_events
   (
     id,
     provider,
@@ -208,7 +480,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.outbox_events
+INSERT INTO migration_source_platform.outbox_events
   (
     id,
     domain_event_id,
@@ -292,7 +564,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.jobs
+INSERT INTO migration_source_platform.jobs
   (
     id,
     job_key,
@@ -411,7 +683,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.job_attempts
+INSERT INTO migration_source_platform.job_attempts
   (
     id,
     job_id,
@@ -489,7 +761,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.idempotency_keys
+INSERT INTO migration_source_platform.idempotency_keys
   (
     id,
     operation_scope,
@@ -588,7 +860,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.dead_letter_events
+INSERT INTO migration_source_platform.dead_letter_events
   (
     id,
     source_kind,
@@ -669,7 +941,7 @@ VALUES
     FALSE
   );
 
-INSERT INTO platform.product_audit_events
+INSERT INTO migration_source_platform.product_audit_events
   (
     id,
     audit_key,

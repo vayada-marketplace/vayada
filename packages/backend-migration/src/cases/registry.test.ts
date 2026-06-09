@@ -43,8 +43,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("intelligence")).toHaveLength(1);
   });
 
-  it("registers platform jobs/events/audit parity without a transform", () => {
-    expect(getTransformHandler("platform-jobs-events-audit")).toBeUndefined();
+  it("registers platform jobs/events/audit transform and parity handlers", () => {
+    expect(getTransformHandler("platform-jobs-events-audit")).toBeTypeOf("function");
     expect(getParityHandlers("platform-jobs-events-audit")).toHaveLength(1);
   });
 
