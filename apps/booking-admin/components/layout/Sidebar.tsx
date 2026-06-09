@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BoltIcon,
+  CalendarDaysIcon,
   ChevronLeftIcon,
   ChevronDownIcon,
   CheckIcon,
@@ -17,6 +18,7 @@ import { moduleActivationClient } from "@/services/api/moduleActivationClient";
 
 const PMS_FRONTEND_URL = process.env.NEXT_PUBLIC_PMS_FRONTEND_URL || "https://pms.vayada.com";
 const MARKETPLACE_URL = process.env.NEXT_PUBLIC_MARKETPLACE_URL || "https://app.vayada.com";
+const RESERVATIONS_NAV_ENABLED = process.env.NEXT_PUBLIC_BOOKING_RESERVATIONS_ENABLED === "true";
 
 function buildHandoffUrl(baseUrl: string): string {
   const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
@@ -42,6 +44,9 @@ interface NavItem {
 
 const coreNavItems: NavItem[] = [
   { labelKey: "layout.sidebar.dashboard", href: "/", icon: DashboardIcon },
+  ...(RESERVATIONS_NAV_ENABLED
+    ? [{ label: "Reservations", href: "/reservations", icon: CalendarDaysIcon }]
+    : []),
   { labelKey: "layout.sidebar.designStudio", href: "/design-studio", icon: DesignStudioIcon },
   { labelKey: "layout.sidebar.bookingFlow", href: "/booking-flow", icon: BookingFlowIcon },
   { labelKey: "layout.sidebar.settings", href: "/settings", icon: Cog6ToothIcon },
@@ -61,9 +66,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const navItems: NavItem[] = [
     coreNavItems[0],
     ...(activeModuleSet.has("affiliates") ? [activatableNavItems.affiliates] : []),
-    coreNavItems[1],
-    coreNavItems[2],
-    coreNavItems[3],
+    ...coreNavItems.slice(1),
   ];
 
   useEffect(() => {
