@@ -1,7 +1,7 @@
 {
   "caseId": "platform-jobs-events-audit",
-  "description": "Target-only platform jobs/events/audit fixture covering domain events, external webhook receipts, outbox events, jobs, job attempts, idempotency keys, dead-letter events, and product audit events. Validates platform operational schema relationships before platform ETL exists.",
-  "sourceDatabases": ["target"],
+  "description": "Source-backed platform jobs/events/audit fixture covering domain events, external webhook receipts, outbox events, jobs, job attempts, idempotency keys, dead-letter events, and product audit events. Validates the platform operational transform and schema relationships.",
+  "sourceDatabases": ["platform"],
   "expectedOwners": {
     "identity.users": 1,
     "identity.organizations": 1,
@@ -19,7 +19,5 @@
     "platform.product_audit_events": 3
   },
   "expectedFailures": [],
-  "publicExposureAllowlist": [
-    "platform.product_audit_events.redacted_payload"
-  ]
+  "publicExposureAllowlist": ["platform.product_audit_events.redacted_payload"]
 }

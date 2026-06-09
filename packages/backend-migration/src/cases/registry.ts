@@ -11,6 +11,7 @@ import { transformIntelligence } from "./intelligence/transform.js";
 import { checkMarketplaceParity } from "./marketplace/parity.js";
 import { transformMarketplace } from "./marketplace/transform.js";
 import { checkPlatformJobsEventsAuditParity } from "./platformJobsEventsAudit/parity.js";
+import { transformPlatformJobsEventsAudit } from "./platformJobsEventsAudit/transform.js";
 import { checkPmsOperationsParity } from "./pmsOperations/parity.js";
 import { transformPmsOperations } from "./pmsOperations/transform.js";
 import { checkPropertyCatalogPublicProfilesParity } from "./propertyCatalogPublicProfiles/parity.js";
@@ -61,6 +62,7 @@ const fixtureCases: FixtureCaseRegistration[] = [
   },
   {
     fixtureCase: "platform-jobs-events-audit",
+    transform: transformPlatformJobsEventsAudit,
     parityHandlers: [checkPlatformJobsEventsAuditParity],
   },
 ];
