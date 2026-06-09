@@ -61,6 +61,8 @@ async function checkPmsOperationalSlice(
   findings: ParityFinding[],
 ): Promise<void> {
   const result = await client.query<{
+    room_type_source_system: string | null;
+    room_source_system: string | null;
     source_room_type_id: string | null;
     source_room_id: string | null;
     room_number: string | null;
@@ -103,6 +105,8 @@ async function checkPmsOperationalSlice(
     sync_status_count: string;
   }>(
     `SELECT
+       rt.source_system AS room_type_source_system,
+       room.source_system AS room_source_system,
        rt.source_room_type_id,
        room.source_room_id,
        room.room_number,
@@ -286,6 +290,8 @@ async function checkPmsOperationalSlice(
   const row = result.rows[0];
   const actual = row
     ? {
+        roomTypeSourceSystem: row.room_type_source_system,
+        roomSourceSystem: row.room_source_system,
         sourceRoomTypeId: row.source_room_type_id,
         sourceRoomId: row.source_room_id,
         roomNumber: row.room_number,
@@ -331,6 +337,8 @@ async function checkPmsOperationalSlice(
 
   const matches =
     actual &&
+    actual.roomTypeSourceSystem === check.roomTypeSourceSystem &&
+    actual.roomSourceSystem === check.roomSourceSystem &&
     actual.sourceRoomTypeId === check.sourceRoomTypeId &&
     actual.sourceRoomId === check.sourceRoomId &&
     actual.roomNumber === check.roomNumber &&
