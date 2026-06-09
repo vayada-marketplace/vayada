@@ -28,8 +28,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("pms-operations")).toHaveLength(1);
   });
 
-  it("registers marketplace parity without a transform", () => {
-    expect(getTransformHandler("marketplace")).toBeUndefined();
+  it("registers marketplace transform and parity handlers", () => {
+    expect(getTransformHandler("marketplace")).toBeTypeOf("function");
     expect(getParityHandlers("marketplace")).toHaveLength(1);
   });
 
