@@ -77,6 +77,10 @@ export function getFixtureCaseRegistration(
   return fixtureCaseRegistry.get(fixtureCase);
 }
 
+export function getRegisteredFixtureCases(): string[] {
+  return fixtureCases.map((registration) => registration.fixtureCase);
+}
+
 export function getTransformHandler(fixtureCase: string): TransformHandler | undefined {
   return getFixtureCaseRegistration(fixtureCase)?.transform;
 }

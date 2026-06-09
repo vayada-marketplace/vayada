@@ -18,7 +18,8 @@
     "typecheck": "tsc --noEmit",
     "target:migrate": "tsx src/cli/migrate.ts",
     "target:rebuild": "tsx src/cli/rebuild.ts",
-    "target:parity": "tsx src/cli/parity.ts"
+    "target:parity": "tsx src/cli/parity.ts",
+    "target:fixtures:smoke": "tsx src/cli/smoke.ts"
   },
   "dependencies": {
     "pg": "^8.16.3"
