@@ -99,6 +99,29 @@ Empty state:
 The response has no stale-data marker in this slice. Frontend loading and stale
 state handling belongs in the typed booking-admin API client and screen.
 
+## Runtime Read Model
+
+VAY-705 wires this route into the real `apps/api` runtime through
+`BookingReservationsReadRepository`, not through SQL inside the Fastify handler.
+The temporary runtime implementation is
+`createCompatibilityPmsBookingReservationsReadRepository`.
+
+Configuration:
+
+| Field          | Value                                     |
+| -------------- | ----------------------------------------- |
+| Env var        | `BOOKING_RESERVATIONS_READ_DATABASE_URL`  |
+| Current source | Legacy PMS `bookings` read schema         |
+| Runtime owner  | `apps/api` composition in `src/server.ts` |
+| Route owner    | Booking/checkout product contract         |
+
+This compatibility repository exists only for staged cutover while the legacy
+PMS `bookings`, `room_types`, `rooms`, and `booking_rooms` tables remain the
+production reservation read source. The route itself must continue to depend on
+the product-level `BookingReservationsReadRepository` interface. The removal
+condition is an accepted target Booking/checkout read model that can implement
+the same contract without reading the legacy PMS schema.
+
 ## Reservation fields
 
 Each reservation is a product read model, not a PMS table row. IDs are stable
