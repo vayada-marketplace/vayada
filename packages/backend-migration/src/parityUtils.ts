@@ -9,6 +9,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "uniquenessChecks",
   "identityChecks",
   "catalogPublicProfileChecks",
+  "bookingCheckoutChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -23,6 +24,7 @@ const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
   "customDomainProperties",
   "forbiddenPublicProfileKeys",
 ]);
+const BOOKING_CHECKOUT_CHECK_KEYS = new Set(["flows", "forbiddenSummaryKeys"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -94,6 +96,7 @@ function validateObjectArray(
   requiredStringFields: string[],
   findings: ParityFinding[],
   nullableStringFields: string[] = [],
+  requiredIntegerFields: string[] = [],
 ): void {
   if (!Array.isArray(value)) {
     addInvalidFixtureConfigFinding(
@@ -139,6 +142,20 @@ function validateObjectArray(
         `${itemTarget}.${field}`,
         `${itemTarget}.${field} must be a string or null`,
         "string | null",
+        describeActual(item[field]),
+      );
+    }
+
+    for (const field of requiredIntegerFields) {
+      if (typeof item[field] === "number" && Number.isInteger(item[field]) && item[field] >= 0) {
+        continue;
+      }
+
+      addInvalidFixtureConfigFinding(
+        findings,
+        `${itemTarget}.${field}`,
+        `${itemTarget}.${field} must be a non-negative integer`,
+        "non-negative integer",
         describeActual(item[field]),
       );
     }
@@ -249,7 +266,11 @@ export function validateExpectedTargetConfig(
     );
   }
 
-  for (const extensionKey of ["identityChecks", "catalogPublicProfileChecks"]) {
+  for (const extensionKey of [
+    "identityChecks",
+    "catalogPublicProfileChecks",
+    "bookingCheckoutChecks",
+  ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
       addInvalidFixtureConfigFinding(
@@ -346,6 +367,45 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         catalogPublicProfileChecks["forbiddenPublicProfileKeys"],
         "expected-target.json.catalogPublicProfileChecks.forbiddenPublicProfileKeys",
+        findings,
+      );
+    }
+  }
+
+  const bookingCheckoutChecks = expected["bookingCheckoutChecks"];
+  if (isRecord(bookingCheckoutChecks)) {
+    validateKnownKeys(
+      bookingCheckoutChecks,
+      BOOKING_CHECKOUT_CHECK_KEYS,
+      "expected-target.json.bookingCheckoutChecks",
+      findings,
+    );
+    validateObjectArray(
+      bookingCheckoutChecks["flows"],
+      "expected-target.json.bookingCheckoutChecks.flows",
+      [
+        "propertyId",
+        "organizationId",
+        "bookingHotelResourceId",
+        "quoteSessionId",
+        "checkoutContextId",
+        "guestBookingId",
+        "paymentId",
+        "publicQuoteReference",
+        "publicBookingReference",
+        "lifecycleStatus",
+        "paymentStatus",
+        "paymentAmount",
+        "currency",
+      ],
+      findings,
+      [],
+      ["guestCount", "addonSelectionCount", "promoApplicationCount", "statusEventCount"],
+    );
+    if (bookingCheckoutChecks["forbiddenSummaryKeys"] !== undefined) {
+      validateStringArray(
+        bookingCheckoutChecks["forbiddenSummaryKeys"],
+        "expected-target.json.bookingCheckoutChecks.forbiddenSummaryKeys",
         findings,
       );
     }

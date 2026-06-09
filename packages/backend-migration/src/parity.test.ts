@@ -37,6 +37,30 @@ describe("runParityChecks fixture config validation", () => {
           catalogPublicProfileChecks: {
             customDomainProperties: ["bad"],
           },
+          bookingCheckoutChecks: {
+            flows: [
+              {
+                propertyId: "d3000000-0000-0000-0000-000000000682",
+                organizationId: "d2000000-0000-0000-0000-000000000682",
+                bookingHotelResourceId: "booking_hotel_checkout_alpenrose",
+                quoteSessionId: "d4000000-0000-0000-0000-000000000682",
+                checkoutContextId: "d5000000-0000-0000-0000-000000000682",
+                guestBookingId: "d6000000-0000-0000-0000-000000000682",
+                paymentId: "e2000000-0000-0000-0000-000000000682",
+                publicQuoteReference: "Q-CHK-682",
+                publicBookingReference: "B-CHK-682",
+                lifecycleStatus: "confirmed",
+                paymentStatus: "paid",
+                paymentAmount: "420.00",
+                currency: "EUR",
+                guestCount: "two",
+                addonSelectionCount: 1,
+                promoApplicationCount: 1,
+                statusEventCount: 2,
+              },
+            ],
+            forbiddenSummaryKeys: [1],
+          },
         }),
       );
 
@@ -48,7 +72,7 @@ describe("runParityChecks fixture config validation", () => {
       });
 
       expect(report.status).toBe("failed");
-      expect(report.summary.failures).toBe(5);
+      expect(report.summary.failures).toBe(7);
       expect(report.findings).toEqual([
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
@@ -69,6 +93,14 @@ describe("runParityChecks fixture config validation", () => {
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
           targetObject: "expected-target.json.catalogPublicProfileChecks.customDomainProperties[0]",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.bookingCheckoutChecks.flows[0].guestCount",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.bookingCheckoutChecks.forbiddenSummaryKeys",
         }),
       ]);
     } finally {
