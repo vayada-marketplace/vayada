@@ -1,0 +1,179 @@
+{
+  "counts": {
+    "identity.users": 3,
+    "identity.organizations": 2,
+    "identity.organization_memberships": 2,
+    "identity.organization_resource_links": 3,
+    "identity.product_entitlements": 3,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 2,
+    "hotel_catalog.property_slugs": 1,
+    "finance.commission_rules": 1,
+    "marketplace.creator_profiles": 1,
+    "marketplace.creator_platforms": 1,
+    "marketplace.creator_ratings": 1,
+    "marketplace.marketplace_hotel_profiles": 1,
+    "marketplace.marketplace_hotel_listings": 1,
+    "marketplace.listing_collaboration_offerings": 2,
+    "marketplace.listing_creator_requirements": 1,
+    "marketplace.collaborations": 1,
+    "marketplace.collaboration_deliverables": 2,
+    "marketplace.marketplace_chat_messages": 2,
+    "marketplace.trips": 1,
+    "marketplace.external_collaborations": 1,
+    "marketplace.marketplace_notifications": 2,
+    "marketplace.invite_codes": 2,
+    "marketplace.newsletter_preferences": 2,
+    "marketplace.marketplace_listing_read_model": 1
+  },
+  "idStability": {
+    "identity.users": [
+      "f6881000-0000-0000-0000-000000000001",
+      "f6881000-0000-0000-0000-000000000002",
+      "f6881000-0000-0000-0000-000000000003"
+    ],
+    "identity.organizations": [
+      "f6882000-0000-0000-0000-000000000001",
+      "f6882000-0000-0000-0000-000000000002"
+    ],
+    "identity.organization_memberships": [
+      "f6882100-0000-0000-0000-000000000001",
+      "f6882100-0000-0000-0000-000000000002"
+    ],
+    "identity.organization_resource_links": [
+      "f6882200-0000-0000-0000-000000000001",
+      "f6882200-0000-0000-0000-000000000002",
+      "f6882200-0000-0000-0000-000000000003"
+    ],
+    "identity.product_entitlements": [
+      "f6882300-0000-0000-0000-000000000001",
+      "f6882300-0000-0000-0000-000000000002",
+      "f6882300-0000-0000-0000-000000000003"
+    ],
+    "hotel_catalog.properties": ["f6883000-0000-0000-0000-000000000001"],
+    "hotel_catalog.property_source_links": [
+      "f6883100-0000-0000-0000-000000000001",
+      "f6883100-0000-0000-0000-000000000002"
+    ],
+    "hotel_catalog.property_slugs": ["f6883200-0000-0000-0000-000000000001"],
+    "finance.commission_rules": ["f6887000-0000-0000-0000-000000000001"],
+    "marketplace.creator_profiles": ["f6884000-0000-0000-0000-000000000001"],
+    "marketplace.creator_platforms": ["f6884100-0000-0000-0000-000000000001"],
+    "marketplace.creator_ratings": ["f6886200-0000-0000-0000-000000000001"],
+    "marketplace.marketplace_hotel_listings": ["f6885000-0000-0000-0000-000000000001"],
+    "marketplace.listing_collaboration_offerings": [
+      "f6885100-0000-0000-0000-000000000001",
+      "f6885100-0000-0000-0000-000000000002"
+    ],
+    "marketplace.listing_creator_requirements": ["f6885200-0000-0000-0000-000000000001"],
+    "marketplace.collaborations": ["f6886000-0000-0000-0000-000000000001"],
+    "marketplace.collaboration_deliverables": [
+      "f6886100-0000-0000-0000-000000000001",
+      "f6886100-0000-0000-0000-000000000002"
+    ],
+    "marketplace.marketplace_chat_messages": [
+      "f6886300-0000-0000-0000-000000000001",
+      "f6886300-0000-0000-0000-000000000002"
+    ],
+    "marketplace.trips": ["f6886400-0000-0000-0000-000000000001"],
+    "marketplace.external_collaborations": ["f6886500-0000-0000-0000-000000000001"],
+    "marketplace.marketplace_notifications": [
+      "f6886600-0000-0000-0000-000000000001",
+      "f6886600-0000-0000-0000-000000000002"
+    ],
+    "marketplace.invite_codes": [
+      "f6886700-0000-0000-0000-000000000001",
+      "f6886700-0000-0000-0000-000000000002"
+    ],
+    "marketplace.newsletter_preferences": [
+      "f6886800-0000-0000-0000-000000000001",
+      "f6886800-0000-0000-0000-000000000002"
+    ]
+  },
+  "uniquenessChecks": [],
+  "marketplaceChecks": {
+    "slices": [
+      {
+        "propertyId": "f6883000-0000-0000-0000-000000000001",
+        "hotelOrganizationId": "f6882000-0000-0000-0000-000000000001",
+        "hotelOwnerUserId": "f6881000-0000-0000-0000-000000000001",
+        "hotelOwnerRoleKey": "hotel_owner",
+        "creatorProfileId": "f6884000-0000-0000-0000-000000000001",
+        "creatorOrganizationId": "f6882000-0000-0000-0000-000000000002",
+        "creatorOwnerUserId": "f6881000-0000-0000-0000-000000000002",
+        "creatorOwnerRoleKey": "creator_owner",
+        "listingId": "f6885000-0000-0000-0000-000000000001",
+        "commissionRuleId": "f6887000-0000-0000-0000-000000000001",
+        "creatorPlatformId": "f6884100-0000-0000-0000-000000000001",
+        "creatorRatingId": "f6886200-0000-0000-0000-000000000001",
+        "offeringFreeStayId": "f6885100-0000-0000-0000-000000000001",
+        "offeringAffiliateId": "f6885100-0000-0000-0000-000000000002",
+        "requirementId": "f6885200-0000-0000-0000-000000000001",
+        "collaborationId": "f6886000-0000-0000-0000-000000000001",
+        "deliverableApprovedId": "f6886100-0000-0000-0000-000000000001",
+        "deliverableSubmittedId": "f6886100-0000-0000-0000-000000000002",
+        "creatorChatMessageId": "f6886300-0000-0000-0000-000000000001",
+        "hotelChatMessageId": "f6886300-0000-0000-0000-000000000002",
+        "tripId": "f6886400-0000-0000-0000-000000000001",
+        "externalCollaborationId": "f6886500-0000-0000-0000-000000000001",
+        "unreadNotificationId": "f6886600-0000-0000-0000-000000000001",
+        "readNotificationId": "f6886600-0000-0000-0000-000000000002",
+        "pendingInviteCodeId": "f6886700-0000-0000-0000-000000000001",
+        "redeemedInviteCodeId": "f6886700-0000-0000-0000-000000000002",
+        "creatorNewsletterPreferenceId": "f6886800-0000-0000-0000-000000000001",
+        "hotelNewsletterPreferenceId": "f6886800-0000-0000-0000-000000000002",
+        "sourceCreatorId": "marketplace-creator-688",
+        "sourceHotelProfileId": "marketplace-hotel-profile-688",
+        "sourceListingId": "marketplace-listing-688",
+        "sourceCollaborationId": "marketplace-collaboration-688",
+        "creatorDisplayName": "Mara Lens",
+        "platform": "instagram",
+        "listingPublicId": "marketplace-listing-688",
+        "listingSlug": "marketplace-alpenrose",
+        "visibilityStatus": "public",
+        "lifecycleStatus": "accepted",
+        "collaborationType": "affiliate",
+        "affiliateReferralCode": "AFF-PRIVATE-688",
+        "creatorChatBody": "PRIVATE_CREATOR_CHAT_688",
+        "hotelChatBody": "PRIVATE_HOTEL_CHAT_688",
+        "tripName": "June Alpine Content Trip",
+        "externalCollaborationTitle": "External Vienna Campaign",
+        "pendingInviteCode": "MARKET-688-CREATOR",
+        "redeemedInviteCode": "MARKET-688-REDEEMED",
+        "offeringCount": 2,
+        "deliverableCount": 2,
+        "chatMessageCount": 2,
+        "notificationCount": 2,
+        "inviteCodeCount": 2,
+        "newsletterPreferenceCount": 2,
+        "rating": 5,
+        "platformFollowerCount": 82400
+      }
+    ],
+    "forbiddenPublicReadModelValues": [
+      "hotel.marketplace@example.test",
+      "creator.marketplace@example.test",
+      "+43123456888",
+      "PRIVATE_CREATOR_APPLICATION_688",
+      "PRIVATE_CREATOR_CHAT_688",
+      "PRIVATE_HOTEL_CHAT_688",
+      "host-private-briefing-688",
+      "yield-private-688",
+      "EXT-PRIVATE-688",
+      "AFF-PRIVATE-688",
+      "https://private.example.test/aff-688",
+      "creatorSecretRate",
+      "private-negotiated-terms-688",
+      "creator-private-thread-688",
+      "hotel-private-thread-688",
+      "Creator-private itinerary details.",
+      "Creators receive a private briefing before arrival.",
+      "Affiliate collaboration with private tracking handled off the public listing.",
+      "Excellent collaboration; internal rating note stays private.",
+      "The hotel accepted your private collaboration terms.",
+      "MARKET-688-CREATOR",
+      "MARKET-688-REDEEMED",
+      "platform-internal-approval-688"
+    ]
+  }
+}
