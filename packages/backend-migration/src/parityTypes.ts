@@ -197,6 +197,54 @@ export type ExpectedTarget = {
     }>;
     forbiddenOperationalSummaryKeys?: string[];
   };
+  distributionBookabilityChecks?: {
+    properties: Array<{
+      propertyId: string;
+      organizationId: string;
+      ownerUserId: string;
+      bookingHotelResourceId: string;
+      pmsHotelResourceId: string;
+      providerAccountId: string;
+      providerAccountRef: string;
+      quoteSessionId: string;
+      checkoutContextId: string;
+      availableRoomOfferSnapshotId: string;
+      soldOutRoomOfferSnapshotId: string;
+      roomTypeId: string;
+      ratePlanId: string;
+      deepLinkContextId: string;
+      activeApiClientId: string;
+      revokedApiClientId: string;
+      profileUsageEventId: string;
+      quoteUsageEventId: string;
+      deepLinkUsageEventId: string;
+      publicId: string;
+      canonicalSlug: string;
+      canonicalUrl: string;
+      bookingBaseUrl: string;
+      timezone: string;
+      defaultLocale: string;
+      defaultCurrency: string;
+      publicQuoteReference: string;
+      quoteHash: string;
+      deepLinkUrl: string;
+      contextTokenHash: string;
+      activePublicClientId: string;
+      revokedPublicClientId: string;
+      availableOfferKey: string;
+      soldOutOfferKey: string;
+      checkIn: string;
+      checkOut: string;
+      availableStayDate: string;
+      soldOutStayDate: string;
+      totalAmount: string;
+      adults: number;
+      children: number;
+      rooms: number;
+      availableRooms: number;
+    }>;
+    forbiddenPublicOutputValues?: string[];
+  };
 };
 
 export type ParityHandlerContext = {

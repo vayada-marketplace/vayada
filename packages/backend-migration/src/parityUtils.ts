@@ -12,6 +12,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "bookingCheckoutChecks",
   "financeChecks",
   "pmsOperationsChecks",
+  "distributionBookabilityChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -33,6 +34,7 @@ const FINANCE_CHECK_KEYS = new Set([
   "forbiddenVisibilityKeys",
 ]);
 const PMS_OPERATIONS_CHECK_KEYS = new Set(["properties", "forbiddenOperationalSummaryKeys"]);
+const DISTRIBUTION_BOOKABILITY_CHECK_KEYS = new Set(["properties", "forbiddenPublicOutputValues"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -280,6 +282,7 @@ export function validateExpectedTargetConfig(
     "bookingCheckoutChecks",
     "financeChecks",
     "pmsOperationsChecks",
+    "distributionBookabilityChecks",
   ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
@@ -561,6 +564,71 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         pmsOperationsChecks["forbiddenOperationalSummaryKeys"],
         "expected-target.json.pmsOperationsChecks.forbiddenOperationalSummaryKeys",
+        findings,
+      );
+    }
+  }
+
+  const distributionBookabilityChecks = expected["distributionBookabilityChecks"];
+  if (isRecord(distributionBookabilityChecks)) {
+    validateKnownKeys(
+      distributionBookabilityChecks,
+      DISTRIBUTION_BOOKABILITY_CHECK_KEYS,
+      "expected-target.json.distributionBookabilityChecks",
+      findings,
+    );
+    validateObjectArray(
+      distributionBookabilityChecks["properties"],
+      "expected-target.json.distributionBookabilityChecks.properties",
+      [
+        "propertyId",
+        "organizationId",
+        "ownerUserId",
+        "bookingHotelResourceId",
+        "pmsHotelResourceId",
+        "providerAccountId",
+        "providerAccountRef",
+        "quoteSessionId",
+        "checkoutContextId",
+        "availableRoomOfferSnapshotId",
+        "soldOutRoomOfferSnapshotId",
+        "roomTypeId",
+        "ratePlanId",
+        "deepLinkContextId",
+        "activeApiClientId",
+        "revokedApiClientId",
+        "profileUsageEventId",
+        "quoteUsageEventId",
+        "deepLinkUsageEventId",
+        "publicId",
+        "canonicalSlug",
+        "canonicalUrl",
+        "bookingBaseUrl",
+        "timezone",
+        "defaultLocale",
+        "defaultCurrency",
+        "publicQuoteReference",
+        "quoteHash",
+        "deepLinkUrl",
+        "contextTokenHash",
+        "activePublicClientId",
+        "revokedPublicClientId",
+        "availableOfferKey",
+        "soldOutOfferKey",
+        "checkIn",
+        "checkOut",
+        "availableStayDate",
+        "soldOutStayDate",
+        "totalAmount",
+      ],
+      findings,
+      [],
+      ["adults", "children", "rooms", "availableRooms"],
+    );
+    if (distributionBookabilityChecks["forbiddenPublicOutputValues"] !== undefined) {
+      validateStringArray(
+        distributionBookabilityChecks["forbiddenPublicOutputValues"],
+        "expected-target.json.distributionBookabilityChecks.forbiddenPublicOutputValues",
         findings,
       );
     }

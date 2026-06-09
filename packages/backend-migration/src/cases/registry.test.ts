@@ -28,6 +28,11 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("pms-operations")).toHaveLength(1);
   });
 
+  it("registers distribution bookability parity without a transform", () => {
+    expect(getTransformHandler("distribution-bookability")).toBeUndefined();
+    expect(getParityHandlers("distribution-bookability")).toHaveLength(1);
+  });
+
   it("returns empty handlers for unregistered fixture cases", () => {
     expect(getTransformHandler("unknown-fixture")).toBeUndefined();
     expect(getParityHandlers("unknown-fixture")).toEqual([]);

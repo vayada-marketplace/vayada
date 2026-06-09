@@ -1,0 +1,43 @@
+{
+  "caseId": "distribution-bookability",
+  "description": "Target-only distribution/bookability fixture covering public hotel bookability profiles, public room offer snapshots, quote read models, booking deep-link contexts, external API clients, and public API usage events. Validates public-safe distribution target schema relationships before distribution ETL exists.",
+  "sourceDatabases": ["target"],
+  "expectedOwners": {
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 2,
+    "identity.product_entitlements": 2,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 2,
+    "hotel_catalog.property_slugs": 1,
+    "hotel_catalog.property_public_profile_read_model": 1,
+    "booking.quote_sessions": 1,
+    "booking.checkout_contexts": 1,
+    "pms.room_types": 1,
+    "pms.rooms": 1,
+    "pms.rate_plans": 1,
+    "pms.inventory_days": 2,
+    "finance.payment_provider_accounts": 1,
+    "finance.payment_settings": 1,
+    "distribution.public_hotel_bookability_profiles": 1,
+    "distribution.public_room_offer_snapshots": 2,
+    "distribution.public_quote_read_models": 1,
+    "distribution.booking_deep_link_contexts": 1,
+    "distribution.external_api_clients": 2,
+    "distribution.external_api_usage_events": 3
+  },
+  "expectedFailures": [],
+  "publicExposureAllowlist": [
+    "distribution.public_hotel_bookability_profiles.public_identity",
+    "distribution.public_hotel_bookability_profiles.location",
+    "distribution.public_hotel_bookability_profiles.media",
+    "distribution.public_hotel_bookability_profiles.amenities",
+    "distribution.public_hotel_bookability_profiles.policies",
+    "distribution.public_room_offer_snapshots.room_summary",
+    "distribution.public_room_offer_snapshots.rate_summary",
+    "distribution.public_quote_read_models.request_snapshot",
+    "distribution.public_quote_read_models.offers",
+    "distribution.public_quote_read_models.totals",
+    "distribution.booking_deep_link_contexts.deep_link_url"
+  ]
+}

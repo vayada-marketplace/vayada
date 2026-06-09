@@ -1,4 +1,5 @@
 import { checkBookingCheckoutParity } from "./bookingCheckout/parity.js";
+import { checkDistributionBookabilityParity } from "./distributionBookability/parity.js";
 import { transformBookingCheckout } from "./bookingCheckout/transform.js";
 import { checkFinanceParity } from "./finance/parity.js";
 import { checkIdentityOrganizationLinksParity } from "./identityOrganizationLinks/parity.js";
@@ -32,6 +33,10 @@ const fixtureCases: FixtureCaseRegistration[] = [
   {
     fixtureCase: "pms-operations",
     parityHandlers: [checkPmsOperationsParity],
+  },
+  {
+    fixtureCase: "distribution-bookability",
+    parityHandlers: [checkDistributionBookabilityParity],
   },
 ];
 
