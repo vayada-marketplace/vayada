@@ -1,53 +1,169 @@
 -- Fixture: booking-checkout / booking.sql
--- Target: identity, hotel_catalog, booking, and finance schemas.
+-- Source: migration_source_booking schema.
 --
--- This parity-only fixture inserts already-migrated target rows. There is no
--- source-to-target transform handler for this case.
+-- Represents source-side checkout inputs for one converted direct booking.
+-- The rebuild command loads these rows into migration-only fixture tables,
+-- then packages/backend-migration transforms them into identity,
+-- hotel_catalog, booking, and finance target tables.
 
-INSERT INTO identity.users
-  (id, email, name, status)
-VALUES
-  ('d1000000-0000-0000-0000-000000000682', 'owner.checkout@example.test', 'Checkout Owner', 'active');
+DROP SCHEMA IF EXISTS migration_source_booking CASCADE;
+CREATE SCHEMA migration_source_booking;
 
-INSERT INTO identity.organizations
-  (id, kind, name, slug, status, workos_org_id, workos_external_id)
-VALUES
-  ('d2000000-0000-0000-0000-000000000682', 'hotel_group', 'Checkout Alpenrose Group', 'checkout-alpenrose-group', 'active', 'org_checkout_alpenrose', 'checkout-alpenrose-group');
+CREATE TABLE migration_source_booking.checkout_flow_inputs (
+  source_row_id TEXT PRIMARY KEY,
+  owner_user_id UUID NOT NULL,
+  owner_email TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  owner_status TEXT NOT NULL,
+  organization_id UUID NOT NULL,
+  organization_kind TEXT NOT NULL,
+  organization_name TEXT NOT NULL,
+  organization_slug TEXT NOT NULL,
+  organization_status TEXT NOT NULL,
+  workos_org_id TEXT,
+  workos_external_id TEXT,
+  membership_id UUID NOT NULL,
+  membership_status TEXT NOT NULL,
+  role_key TEXT NOT NULL,
+  workos_membership_id TEXT,
+  workos_role_slugs TEXT[] NOT NULL,
+  resource_link_id UUID NOT NULL,
+  booking_hotel_resource_id TEXT NOT NULL,
+  product_entitlement_id UUID NOT NULL,
+  entitlement_key TEXT NOT NULL,
+  entitlement_starts_at TIMESTAMPTZ,
+  entitlement_metadata JSONB NOT NULL,
+  property_id UUID NOT NULL,
+  property_public_id TEXT NOT NULL,
+  property_display_name TEXT NOT NULL,
+  property_type TEXT,
+  property_category TEXT,
+  default_locale TEXT NOT NULL,
+  supported_locales TEXT[] NOT NULL,
+  profile_status TEXT NOT NULL,
+  completeness_reasons TEXT[] NOT NULL,
+  property_source_link_id UUID NOT NULL,
+  property_slug_id UUID NOT NULL,
+  property_slug TEXT NOT NULL,
+  quote_session_id UUID NOT NULL,
+  request_hash TEXT NOT NULL,
+  public_quote_reference TEXT NOT NULL,
+  requested_check_in DATE NOT NULL,
+  requested_check_out DATE NOT NULL,
+  adults INTEGER NOT NULL,
+  children INTEGER NOT NULL,
+  requested_room_count INTEGER NOT NULL,
+  currency CHAR(3) NOT NULL,
+  quote_status TEXT NOT NULL,
+  selected_offer_snapshot JSONB NOT NULL,
+  public_room_type_name TEXT NOT NULL,
+  totals JSONB NOT NULL,
+  policy_snapshot JSONB NOT NULL,
+  source_freshness JSONB NOT NULL,
+  promo_code TEXT,
+  referral_code TEXT,
+  quote_expires_at TIMESTAMPTZ NOT NULL,
+  quote_created_at TIMESTAMPTZ NOT NULL,
+  quote_updated_at TIMESTAMPTZ NOT NULL,
+  checkout_context_id UUID NOT NULL,
+  locale TEXT NOT NULL,
+  checkout_status TEXT NOT NULL,
+  guest_input JSONB NOT NULL,
+  selected_addons JSONB NOT NULL,
+  payment_context JSONB NOT NULL,
+  promo_context JSONB NOT NULL,
+  checkout_expires_at TIMESTAMPTZ NOT NULL,
+  checkout_created_at TIMESTAMPTZ NOT NULL,
+  checkout_updated_at TIMESTAMPTZ NOT NULL,
+  guest_booking_id UUID NOT NULL,
+  public_booking_reference TEXT NOT NULL,
+  lifecycle_status TEXT NOT NULL,
+  payment_status TEXT NOT NULL,
+  source_booking_id TEXT,
+  total_amount NUMERIC(15, 2) NOT NULL,
+  balance_amount NUMERIC(15, 2) NOT NULL,
+  booking_metadata JSONB NOT NULL,
+  booking_created_at TIMESTAMPTZ NOT NULL,
+  booking_updated_at TIMESTAMPTZ NOT NULL,
+  guests JSONB NOT NULL,
+  addon_definition JSONB NOT NULL,
+  addon_selections JSONB NOT NULL,
+  promo_applications JSONB NOT NULL,
+  status_events JSONB NOT NULL,
+  change_requests JSONB NOT NULL,
+  public_notes JSONB NOT NULL,
+  provider_account_id UUID NOT NULL,
+  provider TEXT NOT NULL,
+  provider_account_ref TEXT NOT NULL,
+  provider_account_status TEXT NOT NULL,
+  provider_onboarding_status TEXT NOT NULL,
+  charges_enabled BOOLEAN NOT NULL,
+  payouts_enabled BOOLEAN NOT NULL,
+  provider_capabilities TEXT[] NOT NULL,
+  provider_account_metadata JSONB NOT NULL,
+  payment_settings_source_id TEXT NOT NULL,
+  accepted_methods TEXT[] NOT NULL,
+  deposit_policy JSONB NOT NULL,
+  refund_policy JSONB NOT NULL,
+  tax_policy JSONB NOT NULL,
+  statement_descriptor TEXT,
+  payment_id UUID NOT NULL,
+  source_payment_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  payment_kind TEXT NOT NULL,
+  payment_method TEXT NOT NULL,
+  payment_row_status TEXT NOT NULL,
+  payment_amount NUMERIC(15, 2) NOT NULL,
+  fee_amount NUMERIC(15, 2) NOT NULL,
+  net_amount NUMERIC(15, 2) NOT NULL,
+  refunded_amount NUMERIC(15, 2) NOT NULL,
+  provider_transaction_id TEXT,
+  provider_payment_intent_id TEXT,
+  visibility_class TEXT NOT NULL,
+  authorized_at TIMESTAMPTZ,
+  paid_at TIMESTAMPTZ,
+  pii_retention_until DATE,
+  payment_metadata JSONB NOT NULL
+);
 
-INSERT INTO identity.organization_memberships
-  (id, organization_id, user_id, status, role_key, workos_membership_id, workos_role_slugs)
-VALUES
-  ('d2100000-0000-0000-0000-000000000682', 'd2000000-0000-0000-0000-000000000682', 'd1000000-0000-0000-0000-000000000682', 'active', 'hotel_owner', 'membership_checkout_owner', ARRAY['hotel_owner']);
-
-INSERT INTO identity.organization_resource_links
-  (id, organization_id, product, resource_type, resource_id, relationship, status)
-VALUES
-  ('d2200000-0000-0000-0000-000000000682', 'd2000000-0000-0000-0000-000000000682', 'booking', 'booking_hotel', 'booking_hotel_checkout_alpenrose', 'owner', 'active');
-
-INSERT INTO identity.product_entitlements
-  (id, organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id, starts_at, metadata)
-VALUES
-  ('d2300000-0000-0000-0000-000000000682', 'd2000000-0000-0000-0000-000000000682', 'booking', 'booking-engine', 'active', 'booking', 'booking_hotel', 'booking_hotel_checkout_alpenrose', '2026-06-01T00:00:00Z', '{"fixture": "booking-checkout"}');
-
-INSERT INTO hotel_catalog.properties
-  (id, public_id, display_name, property_type, category, default_locale, supported_locales, profile_status, completeness_reasons)
-VALUES
-  ('d3000000-0000-0000-0000-000000000682', 'prop_checkout_alpenrose', 'Checkout Alpenrose', 'hotel', 'boutique', 'en', ARRAY['en', 'de'], 'complete', '{}');
-
-INSERT INTO hotel_catalog.property_source_links
-  (id, property_id, source_system, source_table, source_id, relationship, metadata)
-VALUES
-  ('d3100000-0000-0000-0000-000000000682', 'd3000000-0000-0000-0000-000000000682', 'booking', 'booking_hotels', 'booking_hotel_checkout_alpenrose', 'canonical_input', '{"fixture": "booking-checkout"}');
-
-INSERT INTO hotel_catalog.property_slugs
-  (id, property_id, slug, locale, purpose, status)
-VALUES
-  ('d3200000-0000-0000-0000-000000000682', 'd3000000-0000-0000-0000-000000000682', 'checkout-alpenrose', NULL, 'canonical', 'active');
-
-INSERT INTO booking.quote_sessions
+INSERT INTO migration_source_booking.checkout_flow_inputs
   (
-    id,
+    source_row_id,
+    owner_user_id,
+    owner_email,
+    owner_name,
+    owner_status,
+    organization_id,
+    organization_kind,
+    organization_name,
+    organization_slug,
+    organization_status,
+    workos_org_id,
+    workos_external_id,
+    membership_id,
+    membership_status,
+    role_key,
+    workos_membership_id,
+    workos_role_slugs,
+    resource_link_id,
+    booking_hotel_resource_id,
+    product_entitlement_id,
+    entitlement_key,
+    entitlement_starts_at,
+    entitlement_metadata,
     property_id,
+    property_public_id,
+    property_display_name,
+    property_type,
+    property_category,
+    default_locale,
+    supported_locales,
+    profile_status,
+    completeness_reasons,
+    property_source_link_id,
+    property_slug_id,
+    property_slug,
+    quote_session_id,
     request_hash,
     public_quote_reference,
     requested_check_in,
@@ -56,219 +172,69 @@ INSERT INTO booking.quote_sessions
     children,
     requested_room_count,
     currency,
-    status,
+    quote_status,
     selected_offer_snapshot,
+    public_room_type_name,
     totals,
     policy_snapshot,
     source_freshness,
     promo_code,
     referral_code,
-    expires_at,
-    created_at,
-    updated_at
-  )
-VALUES
-  (
-    'd4000000-0000-0000-0000-000000000682',
-    'd3000000-0000-0000-0000-000000000682',
-    'checkout-fixture-2026-07-01-2026-07-04-2-1',
-    'Q-CHK-682',
-    '2026-07-01',
-    '2026-07-04',
-    2,
-    1,
-    1,
-    'EUR',
-    'converted',
-    '{"roomOfferId": "offer_alpine_suite", "roomTypeId": "room_type_alpine_suite", "ratePlanId": "direct_flexible", "nights": 3}',
-    '{"currency": "EUR", "roomTotal": "450.00", "discount": "30.00", "total": "420.00", "depositDue": "126.00"}',
-    '{"cancellation": "Flexible until 7 days before arrival.", "payment": "Card charged at checkout."}',
-    '{"booking": {"status": "fresh", "generatedAt": "2026-06-09T08:00:00Z"}}',
-    'SUMMER30',
-    'creator_ref_682',
-    '2026-06-10T08:00:00Z',
-    '2026-06-09T08:00:00Z',
-    '2026-06-09T08:05:00Z'
-  );
-
-INSERT INTO booking.checkout_contexts
-  (
-    id,
-    quote_session_id,
-    property_id,
+    quote_expires_at,
+    quote_created_at,
+    quote_updated_at,
+    checkout_context_id,
     locale,
-    currency,
-    status,
+    checkout_status,
     guest_input,
     selected_addons,
     payment_context,
     promo_context,
-    expires_at,
-    created_at,
-    updated_at
-  )
-VALUES
-  (
-    'd5000000-0000-0000-0000-000000000682',
-    'd4000000-0000-0000-0000-000000000682',
-    'd3000000-0000-0000-0000-000000000682',
-    'en',
-    'EUR',
-    'converted',
-    '{"booker": {"firstName": "Mira", "lastName": "Guest", "email": "mira.guest@example.test"}, "arrivalTime": "18:00"}',
-    '[{"addonDefinitionId": "d8000000-0000-0000-0000-000000000682", "quantity": 1}]',
-    '{"provider": "stripe", "paymentIntentId": "pi_checkout_fixture_682"}',
-    '{"promoCode": "SUMMER30", "discountAmount": "30.00"}',
-    '2026-06-10T08:00:00Z',
-    '2026-06-09T08:01:00Z',
-    '2026-06-09T08:06:00Z'
-  );
-
-INSERT INTO booking.guest_bookings
-  (
-    id,
-    property_id,
-    quote_session_id,
-    checkout_context_id,
-    public_reference,
-    source_system,
-    source_booking_id,
+    checkout_expires_at,
+    checkout_created_at,
+    checkout_updated_at,
+    guest_booking_id,
+    public_booking_reference,
     lifecycle_status,
     payment_status,
-    check_in,
-    check_out,
-    adults,
-    children,
-    room_count,
-    currency,
+    source_booking_id,
     total_amount,
     balance_amount,
     booking_metadata,
-    created_at,
-    updated_at
-  )
-VALUES
-  (
-    'd6000000-0000-0000-0000-000000000682',
-    'd3000000-0000-0000-0000-000000000682',
-    'd4000000-0000-0000-0000-000000000682',
-    'd5000000-0000-0000-0000-000000000682',
-    'B-CHK-682',
-    'booking',
-    NULL,
-    'confirmed',
-    'paid',
-    '2026-07-01',
-    '2026-07-04',
-    2,
-    1,
-    1,
-    'EUR',
-    420.00,
-    0.00,
-    '{"fixture": "booking-checkout", "publicQuoteReference": "Q-CHK-682"}',
-    '2026-06-09T08:06:00Z',
-    '2026-06-09T08:10:00Z'
-  );
-
-INSERT INTO booking.booking_guests
-  (id, guest_booking_id, guest_role, first_name, last_name, email, phone, country_code, arrival_time, special_requests, pii_retention_until)
-VALUES
-  ('d7000000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', 'booker', 'Mira', 'Guest', 'mira.guest@example.test', '+4312345678', 'AT', '18:00', 'Gluten-free breakfast if available.', '2027-07-04'),
-  ('d7100000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', 'additional_guest', 'Leo', 'Guest', NULL, NULL, 'AT', NULL, NULL, '2027-07-04');
-
-INSERT INTO booking.addon_definitions
-  (id, property_id, source_system, source_addon_id, name, description, category, pricing_model, price_amount, currency, public_visible, status, metadata)
-VALUES
-  ('d8000000-0000-0000-0000-000000000682', 'd3000000-0000-0000-0000-000000000682', 'booking', 'addon_breakfast_checkout_682', 'Breakfast basket', 'Breakfast delivered each morning.', 'food', 'per_stay', 45.00, 'EUR', TRUE, 'active', '{"fixture": "booking-checkout"}');
-
-INSERT INTO booking.booking_addon_selections
-  (id, property_id, guest_booking_id, quote_session_id, addon_definition_id, addon_snapshot, quantity, service_date, total_amount, currency)
-VALUES
-  ('d8100000-0000-0000-0000-000000000682', 'd3000000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', NULL, 'd8000000-0000-0000-0000-000000000682', '{"name": "Breakfast basket", "pricingModel": "per_stay"}', 1, '2026-07-02', 45.00, 'EUR');
-
-INSERT INTO booking.promo_applications
-  (id, property_id, quote_session_id, guest_booking_id, promo_code, application_status, discount_amount, currency, metadata)
-VALUES
-  ('d9000000-0000-0000-0000-000000000682', 'd3000000-0000-0000-0000-000000000682', NULL, 'd6000000-0000-0000-0000-000000000682', 'SUMMER30', 'applied', 30.00, 'EUR', '{"source": "quote"}');
-
-INSERT INTO booking.booking_status_events
-  (id, guest_booking_id, event_type, from_status, to_status, actor_type, actor_user_id, public_visible, public_message, event_payload, occurred_at)
-VALUES
-  ('e3000000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', 'booking_created', NULL, 'pending_payment', 'guest', NULL, TRUE, 'Booking request received.', '{"checkoutContextId": "d5000000-0000-0000-0000-000000000682"}', '2026-06-09T08:06:00Z'),
-  ('e3100000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', 'payment_captured', 'pending_payment', 'confirmed', 'system', NULL, TRUE, 'Payment received and booking confirmed.', '{"paymentId": "e2000000-0000-0000-0000-000000000682"}', '2026-06-09T08:09:00Z');
-
-INSERT INTO booking.booking_change_requests
-  (id, guest_booking_id, request_type, requested_by, status, requested_changes, created_at, updated_at)
-VALUES
-  ('e4000000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', 'date_change', 'guest', 'pending', '{"requestedCheckOut": "2026-07-05"}', '2026-06-09T09:00:00Z', '2026-06-09T09:00:00Z');
-
-INSERT INTO booking.booking_notes_public
-  (id, guest_booking_id, author_type, author_user_id, body, locale, created_at)
-VALUES
-  ('e5000000-0000-0000-0000-000000000682', 'd6000000-0000-0000-0000-000000000682', 'system', NULL, 'Payment received. We will see you soon.', 'en', '2026-06-09T08:10:00Z');
-
-INSERT INTO booking.direct_booking_summary_read_model
-  (
-    guest_booking_id,
-    property_id,
-    public_reference,
-    lifecycle_status,
-    payment_status,
-    check_in,
-    check_out,
-    guest_counts,
-    room_summary,
-    amount_summary,
-    public_policy,
-    source_freshness,
-    projected_at
-  )
-VALUES
-  (
-    'd6000000-0000-0000-0000-000000000682',
-    'd3000000-0000-0000-0000-000000000682',
-    'B-CHK-682',
-    'confirmed',
-    'paid',
-    '2026-07-01',
-    '2026-07-04',
-    '{"adults": 2, "children": 1, "roomCount": 1}',
-    '{"roomType": "Alpine Suite", "nights": 3}',
-    '{"currency": "EUR", "total": "420.00", "balance": "0.00", "paid": "420.00"}',
-    '{"cancellation": "Flexible until 7 days before arrival."}',
-    '{"booking": {"status": "fresh"}, "finance": {"status": "fresh"}}',
-    '2026-06-09T08:10:00Z'
-  );
-
-INSERT INTO finance.payment_provider_accounts
-  (id, property_id, account_scope, provider, provider_account_id, status, onboarding_status, charges_enabled, payouts_enabled, default_currency, capabilities, account_metadata)
-VALUES
-  ('e1000000-0000-0000-0000-000000000682', 'd3000000-0000-0000-0000-000000000682', 'property', 'stripe', 'acct_checkout_fixture_682', 'active', 'completed', TRUE, TRUE, 'EUR', ARRAY['card_payments', 'transfers'], '{"fixture": "booking-checkout"}');
-
-INSERT INTO finance.payment_settings
-  (property_id, provider_account_id, payments_enabled, accepted_methods, default_currency, deposit_policy, refund_policy, tax_policy, statement_descriptor, source_system, source_settings_id)
-VALUES
-  ('d3000000-0000-0000-0000-000000000682', 'e1000000-0000-0000-0000-000000000682', TRUE, ARRAY['card', 'pay_at_property'], 'EUR', '{"depositPercent": 30}', '{"refundWindowDays": 7}', '{"taxIncluded": true}', 'CHECKOUTALPENROSE', 'booking', 'booking_payment_settings_checkout_682');
-
-INSERT INTO finance.payments
-  (
-    id,
-    property_id,
-    organization_id,
-    guest_booking_id,
+    booking_created_at,
+    booking_updated_at,
+    guests,
+    addon_definition,
+    addon_selections,
+    promo_applications,
+    status_events,
+    change_requests,
+    public_notes,
     provider_account_id,
-    source_system,
+    provider,
+    provider_account_ref,
+    provider_account_status,
+    provider_onboarding_status,
+    charges_enabled,
+    payouts_enabled,
+    provider_capabilities,
+    provider_account_metadata,
+    payment_settings_source_id,
+    accepted_methods,
+    deposit_policy,
+    refund_policy,
+    tax_policy,
+    statement_descriptor,
+    payment_id,
     source_payment_id,
     idempotency_key,
     payment_kind,
     payment_method,
-    status,
-    amount,
+    payment_row_status,
+    payment_amount,
     fee_amount,
     net_amount,
     refunded_amount,
-    currency,
     provider_transaction_id,
     provider_payment_intent_id,
     visibility_class,
@@ -279,12 +245,201 @@ INSERT INTO finance.payments
   )
 VALUES
   (
-    'e2000000-0000-0000-0000-000000000682',
-    'd3000000-0000-0000-0000-000000000682',
+    'checkout-alpenrose-converted',
+    'd1000000-0000-0000-0000-000000000682',
+    'owner.checkout@example.test',
+    'Checkout Owner',
+    'active',
     'd2000000-0000-0000-0000-000000000682',
+    'hotel_group',
+    'Checkout Alpenrose Group',
+    'checkout-alpenrose-group',
+    'active',
+    'org_checkout_alpenrose',
+    'checkout-alpenrose-group',
+    'd2100000-0000-0000-0000-000000000682',
+    'active',
+    'hotel_owner',
+    'membership_checkout_owner',
+    ARRAY['hotel_owner'],
+    'd2200000-0000-0000-0000-000000000682',
+    'booking_hotel_checkout_alpenrose',
+    'd2300000-0000-0000-0000-000000000682',
+    'booking-engine',
+    '2026-06-01T00:00:00Z',
+    '{"fixture": "booking-checkout"}',
+    'd3000000-0000-0000-0000-000000000682',
+    'prop_checkout_alpenrose',
+    'Checkout Alpenrose',
+    'hotel',
+    'boutique',
+    'en',
+    ARRAY['en', 'de'],
+    'complete',
+    '{}',
+    'd3100000-0000-0000-0000-000000000682',
+    'd3200000-0000-0000-0000-000000000682',
+    'checkout-alpenrose',
+    'd4000000-0000-0000-0000-000000000682',
+    'checkout-fixture-2026-07-01-2026-07-04-2-1',
+    'Q-CHK-682',
+    '2026-07-01',
+    '2026-07-04',
+    2,
+    1,
+    1,
+    'EUR',
+    'converted',
+    '{"roomOfferId": "offer_alpine_suite", "roomTypeId": "room_type_alpine_suite", "ratePlanId": "direct_flexible", "nights": 3}',
+    'Alpine Suite',
+    '{"currency": "EUR", "roomTotal": "450.00", "discount": "30.00", "total": "420.00", "depositDue": "126.00"}',
+    '{"cancellation": "Flexible until 7 days before arrival.", "payment": "Card charged at checkout."}',
+    '{"booking": {"status": "fresh", "generatedAt": "2026-06-09T08:00:00Z"}}',
+    'SUMMER30',
+    'creator_ref_682',
+    '2026-06-10T08:00:00Z',
+    '2026-06-09T08:00:00Z',
+    '2026-06-09T08:05:00Z',
+    'd5000000-0000-0000-0000-000000000682',
+    'en',
+    'converted',
+    '{"booker": {"firstName": "Mira", "lastName": "Guest", "email": "mira.guest@example.test"}, "arrivalTime": "18:00"}',
+    '[{"addonDefinitionId": "d8000000-0000-0000-0000-000000000682", "quantity": 1}]',
+    '{"provider": "stripe", "paymentIntentId": "pi_checkout_fixture_682"}',
+    '{"promoCode": "SUMMER30", "discountAmount": "30.00"}',
+    '2026-06-10T08:00:00Z',
+    '2026-06-09T08:01:00Z',
+    '2026-06-09T08:06:00Z',
     'd6000000-0000-0000-0000-000000000682',
+    'B-CHK-682',
+    'confirmed',
+    'paid',
+    NULL,
+    420.00,
+    0.00,
+    '{"fixture": "booking-checkout", "publicQuoteReference": "Q-CHK-682"}',
+    '2026-06-09T08:06:00Z',
+    '2026-06-09T08:10:00Z',
+    '[
+      {
+        "id": "d7000000-0000-0000-0000-000000000682",
+        "guest_role": "booker",
+        "first_name": "Mira",
+        "last_name": "Guest",
+        "email": "mira.guest@example.test",
+        "phone": "+4312345678",
+        "country_code": "AT",
+        "arrival_time": "18:00",
+        "special_requests": "Gluten-free breakfast if available.",
+        "pii_retention_until": "2027-07-04"
+      },
+      {
+        "id": "d7100000-0000-0000-0000-000000000682",
+        "guest_role": "additional_guest",
+        "first_name": "Leo",
+        "last_name": "Guest",
+        "email": null,
+        "phone": null,
+        "country_code": "AT",
+        "arrival_time": null,
+        "special_requests": null,
+        "pii_retention_until": "2027-07-04"
+      }
+    ]',
+    '{
+      "id": "d8000000-0000-0000-0000-000000000682",
+      "source_addon_id": "addon_breakfast_checkout_682",
+      "name": "Breakfast basket",
+      "description": "Breakfast delivered each morning.",
+      "category": "food",
+      "pricing_model": "per_stay",
+      "price_amount": "45.00",
+      "public_visible": true,
+      "status": "active",
+      "metadata": {"fixture": "booking-checkout"}
+    }',
+    '[
+      {
+        "id": "d8100000-0000-0000-0000-000000000682",
+        "addon_definition_id": "d8000000-0000-0000-0000-000000000682",
+        "addon_snapshot": {"name": "Breakfast basket", "pricingModel": "per_stay"},
+        "quantity": 1,
+        "service_date": "2026-07-02",
+        "total_amount": "45.00"
+      }
+    ]',
+    '[
+      {
+        "id": "d9000000-0000-0000-0000-000000000682",
+        "promo_code": "SUMMER30",
+        "application_status": "applied",
+        "discount_amount": "30.00",
+        "metadata": {"source": "quote"}
+      }
+    ]',
+    '[
+      {
+        "id": "e3000000-0000-0000-0000-000000000682",
+        "event_type": "booking_created",
+        "from_status": null,
+        "to_status": "pending_payment",
+        "actor_type": "guest",
+        "actor_user_id": null,
+        "public_visible": true,
+        "public_message": "Booking request received.",
+        "event_payload": {"checkoutContextId": "d5000000-0000-0000-0000-000000000682"},
+        "occurred_at": "2026-06-09T08:06:00Z"
+      },
+      {
+        "id": "e3100000-0000-0000-0000-000000000682",
+        "event_type": "payment_captured",
+        "from_status": "pending_payment",
+        "to_status": "confirmed",
+        "actor_type": "system",
+        "actor_user_id": null,
+        "public_visible": true,
+        "public_message": "Payment received and booking confirmed.",
+        "event_payload": {"paymentId": "e2000000-0000-0000-0000-000000000682"},
+        "occurred_at": "2026-06-09T08:09:00Z"
+      }
+    ]',
+    '[
+      {
+        "id": "e4000000-0000-0000-0000-000000000682",
+        "request_type": "date_change",
+        "requested_by": "guest",
+        "status": "pending",
+        "requested_changes": {"requestedCheckOut": "2026-07-05"},
+        "created_at": "2026-06-09T09:00:00Z",
+        "updated_at": "2026-06-09T09:00:00Z"
+      }
+    ]',
+    '[
+      {
+        "id": "e5000000-0000-0000-0000-000000000682",
+        "author_type": "system",
+        "author_user_id": null,
+        "body": "Payment received. We will see you soon.",
+        "locale": "en",
+        "created_at": "2026-06-09T08:10:00Z"
+      }
+    ]',
     'e1000000-0000-0000-0000-000000000682',
-    'booking',
+    'stripe',
+    'acct_checkout_fixture_682',
+    'active',
+    'completed',
+    TRUE,
+    TRUE,
+    ARRAY['card_payments', 'transfers'],
+    '{"fixture": "booking-checkout"}',
+    'booking_payment_settings_checkout_682',
+    ARRAY['card', 'pay_at_property'],
+    '{"depositPercent": 30}',
+    '{"refundWindowDays": 7}',
+    '{"taxIncluded": true}',
+    'CHECKOUTALPENROSE',
+    'e2000000-0000-0000-0000-000000000682',
     'booking_payment_checkout_682',
     'booking-checkout-682-payment',
     'full',
@@ -294,7 +449,6 @@ VALUES
     12.60,
     407.40,
     0.00,
-    'EUR',
     'txn_checkout_fixture_682',
     'pi_checkout_fixture_682',
     'pms_finance',

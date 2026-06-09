@@ -13,8 +13,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("property-catalog-public-profiles")).toHaveLength(1);
   });
 
-  it("registers booking checkout parity without a transform", () => {
-    expect(getTransformHandler("booking-checkout")).toBeUndefined();
+  it("registers booking checkout transform and parity handlers", () => {
+    expect(getTransformHandler("booking-checkout")).toBeTypeOf("function");
     expect(getParityHandlers("booking-checkout")).toHaveLength(1);
   });
 
