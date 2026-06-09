@@ -12,6 +12,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "bookingCheckoutChecks",
   "financeChecks",
   "pmsOperationsChecks",
+  "marketplaceChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -33,6 +34,65 @@ const FINANCE_CHECK_KEYS = new Set([
   "forbiddenVisibilityKeys",
 ]);
 const PMS_OPERATIONS_CHECK_KEYS = new Set(["properties", "forbiddenOperationalSummaryKeys"]);
+const MARKETPLACE_CHECK_KEYS = new Set(["slices", "forbiddenPublicReadModelValues"]);
+const MARKETPLACE_SLICE_STRING_FIELDS = [
+  "propertyId",
+  "hotelOrganizationId",
+  "hotelOwnerUserId",
+  "hotelOwnerRoleKey",
+  "creatorProfileId",
+  "creatorOrganizationId",
+  "creatorOwnerUserId",
+  "creatorOwnerRoleKey",
+  "listingId",
+  "commissionRuleId",
+  "creatorPlatformId",
+  "creatorRatingId",
+  "offeringFreeStayId",
+  "offeringAffiliateId",
+  "requirementId",
+  "collaborationId",
+  "deliverableApprovedId",
+  "deliverableSubmittedId",
+  "creatorChatMessageId",
+  "hotelChatMessageId",
+  "tripId",
+  "externalCollaborationId",
+  "unreadNotificationId",
+  "readNotificationId",
+  "pendingInviteCodeId",
+  "redeemedInviteCodeId",
+  "creatorNewsletterPreferenceId",
+  "hotelNewsletterPreferenceId",
+  "sourceCreatorId",
+  "sourceHotelProfileId",
+  "sourceListingId",
+  "sourceCollaborationId",
+  "creatorDisplayName",
+  "platform",
+  "listingPublicId",
+  "listingSlug",
+  "visibilityStatus",
+  "lifecycleStatus",
+  "collaborationType",
+  "affiliateReferralCode",
+  "creatorChatBody",
+  "hotelChatBody",
+  "tripName",
+  "externalCollaborationTitle",
+  "pendingInviteCode",
+  "redeemedInviteCode",
+];
+const MARKETPLACE_SLICE_INTEGER_FIELDS = [
+  "offeringCount",
+  "deliverableCount",
+  "chatMessageCount",
+  "notificationCount",
+  "inviteCodeCount",
+  "newsletterPreferenceCount",
+  "rating",
+  "platformFollowerCount",
+];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -280,6 +340,7 @@ export function validateExpectedTargetConfig(
     "bookingCheckoutChecks",
     "financeChecks",
     "pmsOperationsChecks",
+    "marketplaceChecks",
   ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
@@ -561,6 +622,31 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         pmsOperationsChecks["forbiddenOperationalSummaryKeys"],
         "expected-target.json.pmsOperationsChecks.forbiddenOperationalSummaryKeys",
+        findings,
+      );
+    }
+  }
+
+  const marketplaceChecks = expected["marketplaceChecks"];
+  if (isRecord(marketplaceChecks)) {
+    validateKnownKeys(
+      marketplaceChecks,
+      MARKETPLACE_CHECK_KEYS,
+      "expected-target.json.marketplaceChecks",
+      findings,
+    );
+    validateObjectArray(
+      marketplaceChecks["slices"],
+      "expected-target.json.marketplaceChecks.slices",
+      MARKETPLACE_SLICE_STRING_FIELDS,
+      findings,
+      [],
+      MARKETPLACE_SLICE_INTEGER_FIELDS,
+    );
+    if (marketplaceChecks["forbiddenPublicReadModelValues"] !== undefined) {
+      validateStringArray(
+        marketplaceChecks["forbiddenPublicReadModelValues"],
+        "expected-target.json.marketplaceChecks.forbiddenPublicReadModelValues",
         findings,
       );
     }
