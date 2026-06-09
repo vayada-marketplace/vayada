@@ -114,8 +114,23 @@ Proposed slices:
 4. Update the booking admin reservations screen to use the new client.
 5. Run route tests, frontend build, and browser smoke.
 
-After this pattern is accepted, repeat for booking settings, PMS calendar,
-payments, marketplace collaborations, WorkOS auth/session, and Ask
+## Next Vertical
+
+The next narrow booking-flow settings vertical is the add-on display settings
+read surface.
+
+Contract artifact: [`BookingAddonSettings`](booking-addon-settings-contract.md).
+
+Proposed slices:
+
+1. Define `BookingAddonSettings` request/response/error contract.
+2. Add the booking admin frontend API client.
+3. Implement or tighten the TypeScript backend route.
+4. Update the Add-ons tab to consume the typed client when the route is ready.
+5. Run route tests, frontend build, and browser smoke.
+
+After this pattern is accepted, repeat for broader booking-flow settings, PMS
+calendar, payments, marketplace collaborations, WorkOS auth/session, and Ask
 Intelligence.
 
 ## Cutover Model
