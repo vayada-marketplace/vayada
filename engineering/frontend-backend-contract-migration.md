@@ -104,6 +104,8 @@ A migrated surface is not accepted until:
 The recommended first vertical is the booking reservations read surface because
 it is useful, read-only, and already has early TypeScript route adapter work.
 
+Contract artifact: [`BookingReservationList`](booking-reservation-list-contract.md).
+
 Proposed slices:
 
 1. Define `BookingReservationList` request/response/error contract.

@@ -2,11 +2,38 @@ import type { FastifyInstance } from "fastify";
 
 import { enforceRoutePolicy } from "./policy.js";
 
-export type BookingReservationQuery = {
+export const BOOKING_RESERVATION_LIST_CONTRACT = {
+  method: "GET",
+  path: "/api/booking/hotels/:hotelId/reservations",
+  permission: "booking.reservation.read",
+  entitlement: {
+    product: "booking",
+    key: "booking-engine",
+    resourceType: "booking_hotel",
+  },
+  resource: {
+    product: "booking",
+    resourceType: "booking_hotel",
+    allowedRelationships: ["owner", "operator"],
+  },
+} as const;
+
+export type BookingReservationListPathParams = {
+  hotelId: string;
+};
+
+export type BookingReservationListQuery = {
   status?: string;
   search?: string;
   limit?: string;
   offset?: string;
+};
+
+export type BookingReservationQuery = BookingReservationListQuery;
+
+export type BookingReservationListRequest = {
+  params: BookingReservationListPathParams;
+  query: BookingReservationListQuery;
 };
 
 export type BookingAssignedRoomResponse = {
@@ -165,8 +192,39 @@ export type BookingReservationListResponse = {
   offset: number;
 };
 
-type BookingHotelParams = {
-  hotelId: string;
+export type BookingReservation = BookingReservationResponse;
+
+export type BookingReservationListErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "validation"
+  | "read_model";
+
+export type BookingReservationListErrorCode =
+  | "unauthenticated"
+  | "invalid_token"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "invalid_query"
+  | "read_model_unavailable";
+
+export type BookingReservationListError = {
+  statusCode: 400 | 401 | 403 | 500;
+  code: BookingReservationListErrorCode;
+  category: BookingReservationListErrorCategory;
+  message: string;
+};
+
+export type BookingReservationList = BookingReservationListResponse;
+
+export type BookingReservationListContract = {
+  method: typeof BOOKING_RESERVATION_LIST_CONTRACT.method;
+  path: typeof BOOKING_RESERVATION_LIST_CONTRACT.path;
+  request: BookingReservationListRequest;
+  response: BookingReservationListResponse;
+  error: BookingReservationListError;
 };
 
 export async function registerBookingReservationRoutes(
@@ -177,41 +235,41 @@ export async function registerBookingReservationRoutes(
     await repository.close?.();
   });
 
-  app.get<{ Params: BookingHotelParams; Querystring: BookingReservationQuery }>(
-    "/hotels/:hotelId/reservations",
-    async (request) => {
-      const { hotelId } = request.params;
+  app.get<{
+    Params: BookingReservationListPathParams;
+    Querystring: BookingReservationListQuery;
+  }>("/hotels/:hotelId/reservations", async (request) => {
+    const { hotelId } = request.params;
 
-      enforceRoutePolicy(request, {
-        permission: "booking.reservation.read",
-        entitlement: {
-          product: "booking",
-          key: "booking-engine",
-          resource: {
-            product: "booking",
-            resourceType: "booking_hotel",
-            resourceId: hotelId,
-          },
-        },
+    enforceRoutePolicy(request, {
+      permission: "booking.reservation.read",
+      entitlement: {
+        product: "booking",
+        key: "booking-engine",
         resource: {
           product: "booking",
           resourceType: "booking_hotel",
           resourceId: hotelId,
-          allowedRelationships: ["owner", "operator"],
         },
-      });
+      },
+      resource: {
+        product: "booking",
+        resourceType: "booking_hotel",
+        resourceId: hotelId,
+        allowedRelationships: ["owner", "operator"],
+      },
+    });
 
-      const filters = toReservationFilters(request.query);
-      const result = await repository.listReservationsByHotelId(hotelId, filters);
+    const filters = toReservationFilters(request.query);
+    const result = await repository.listReservationsByHotelId(hotelId, filters);
 
-      return {
-        bookings: result.reservations.map(toReservationResponse),
-        total: result.total,
-        limit: filters.limit,
-        offset: filters.offset,
-      } satisfies BookingReservationListResponse;
-    },
-  );
+    return {
+      bookings: result.reservations.map(toReservationResponse),
+      total: result.total,
+      limit: filters.limit,
+      offset: filters.offset,
+    } satisfies BookingReservationListResponse;
+  });
 }
 
 export function toReservationResponse(
@@ -296,7 +354,7 @@ export function toReservationResponse(
   };
 }
 
-function toReservationFilters(query: BookingReservationQuery): BookingReservationListFilters {
+function toReservationFilters(query: BookingReservationListQuery): BookingReservationListFilters {
   return {
     status: query.status?.trim() || undefined,
     search: query.search?.trim() || undefined,
