@@ -114,6 +114,9 @@ Proposed slices:
 4. Update the booking admin reservations screen to use the new client.
 5. Run route tests, frontend build, and browser smoke.
 
+Cutover and rollback for this surface are documented in
+[`booking-reservations-cutover-runbook.md`](booking-reservations-cutover-runbook.md).
+
 ## Next Vertical
 
 The next narrow booking-flow settings vertical is the add-on display settings
