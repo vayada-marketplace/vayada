@@ -38,8 +38,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("distribution-bookability")).toHaveLength(1);
   });
 
-  it("registers intelligence parity without a transform", () => {
-    expect(getTransformHandler("intelligence")).toBeUndefined();
+  it("registers intelligence transform and parity handlers", () => {
+    expect(getTransformHandler("intelligence")).toBeTypeOf("function");
     expect(getParityHandlers("intelligence")).toHaveLength(1);
   });
 

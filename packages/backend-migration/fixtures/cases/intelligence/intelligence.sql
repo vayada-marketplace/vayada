@@ -1,76 +1,351 @@
 -- Fixture: intelligence / intelligence.sql
--- Target: identity, hotel_catalog, and intelligence schemas.
+-- Source: migration_source_intelligence schema.
 --
--- This parity-only fixture inserts already-migrated target rows. There is no
--- source-to-target transform handler for this case.
+-- Represents source-side Ask Intelligence inputs for one property-scoped owner
+-- conversation slice. The rebuild command loads these migration-only source
+-- rows, then packages/backend-migration transforms them into identity,
+-- hotel_catalog, and intelligence target rows.
 
-INSERT INTO identity.users
-  (id, email, name, status)
+DROP SCHEMA IF EXISTS migration_source_intelligence CASCADE;
+CREATE SCHEMA migration_source_intelligence;
+
+CREATE TABLE migration_source_intelligence.owner_accounts (
+  owner_user_id UUID PRIMARY KEY,
+  owner_email TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  owner_status TEXT NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.owner_organizations (
+  org_id UUID PRIMARY KEY,
+  org_kind TEXT NOT NULL,
+  org_name TEXT NOT NULL,
+  org_slug TEXT NOT NULL,
+  org_status TEXT NOT NULL,
+  workos_org_id TEXT,
+  workos_external_id TEXT
+);
+
+CREATE TABLE migration_source_intelligence.owner_memberships (
+  membership_id UUID PRIMARY KEY,
+  org_id UUID NOT NULL,
+  owner_user_id UUID NOT NULL,
+  membership_status TEXT NOT NULL,
+  role_key TEXT NOT NULL,
+  workos_membership_id TEXT,
+  workos_role_slugs TEXT[] NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.role_permission_inputs (
+  org_kind TEXT NOT NULL,
+  role_key TEXT NOT NULL,
+  permission_key TEXT NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.organization_resource_inputs (
+  link_id UUID PRIMARY KEY,
+  org_id UUID NOT NULL,
+  product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  source_resource_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  link_status TEXT NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.product_entitlement_inputs (
+  entitlement_id UUID PRIMARY KEY,
+  org_id UUID NOT NULL,
+  product TEXT NOT NULL,
+  entitlement_key TEXT NOT NULL,
+  entitlement_status TEXT NOT NULL,
+  resource_product TEXT NOT NULL,
+  resource_type TEXT NOT NULL,
+  source_resource_id TEXT NOT NULL,
+  starts_at TIMESTAMPTZ NOT NULL,
+  source_metadata JSONB NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.property_profile_inputs (
+  property_id UUID PRIMARY KEY,
+  property_public_id TEXT NOT NULL,
+  property_display_name TEXT NOT NULL,
+  property_type TEXT,
+  property_category TEXT,
+  default_locale TEXT NOT NULL,
+  supported_locales TEXT[] NOT NULL,
+  profile_status TEXT NOT NULL,
+  completeness_reasons TEXT[] NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.property_source_inputs (
+  source_link_id UUID PRIMARY KEY,
+  property_id UUID NOT NULL,
+  source_system TEXT NOT NULL,
+  source_table TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  source_metadata JSONB NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.metric_catalog_inputs (
+  metric_id UUID PRIMARY KEY,
+  metric_key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  metric_description TEXT NOT NULL,
+  product TEXT NOT NULL,
+  category TEXT NOT NULL,
+  unit TEXT NOT NULL,
+  resource_scope TEXT NOT NULL,
+  permission_key TEXT NOT NULL,
+  visibility TEXT NOT NULL,
+  freshness_slo_seconds INTEGER NOT NULL,
+  pii_policy TEXT NOT NULL,
+  allowed_filters JSONB NOT NULL,
+  metadata JSONB NOT NULL,
+  active BOOLEAN NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.metric_snapshot_inputs (
+  snapshot_run_id UUID PRIMARY KEY,
+  metric_id UUID NOT NULL,
+  metric_key TEXT NOT NULL,
+  snapshot_key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  resource_scope TEXT NOT NULL,
+  org_id UUID NOT NULL,
+  property_id UUID NOT NULL,
+  source_owner TEXT NOT NULL,
+  source_view TEXT NOT NULL,
+  permission_key TEXT NOT NULL,
+  period TEXT NOT NULL,
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  generated_at TIMESTAMPTZ NOT NULL,
+  source_fresh_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  freshness_status TEXT NOT NULL,
+  quality TEXT NOT NULL,
+  sample_size INTEGER NOT NULL,
+  aggregate_id TEXT NOT NULL,
+  value_summary JSONB NOT NULL,
+  filters JSONB NOT NULL,
+  source_freshness JSONB NOT NULL,
+  unavailable_reasons TEXT[] NOT NULL,
+  metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.setup_snapshot_inputs (
+  setup_snapshot_id UUID PRIMARY KEY,
+  snapshot_key TEXT NOT NULL,
+  org_id UUID NOT NULL,
+  property_id UUID NOT NULL,
+  setup_area TEXT NOT NULL,
+  status TEXT NOT NULL,
+  completeness_score NUMERIC NOT NULL,
+  permission_key TEXT NOT NULL,
+  source_snapshot_at TIMESTAMPTZ NOT NULL,
+  source_fresh_at TIMESTAMPTZ NOT NULL,
+  freshness_status TEXT NOT NULL,
+  missing_items JSONB NOT NULL,
+  blocking_items JSONB NOT NULL,
+  stale_items JSONB NOT NULL,
+  source_freshness JSONB NOT NULL,
+  metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.evidence_tool_inputs (
+  evidence_tool_id UUID PRIMARY KEY,
+  tool_id TEXT NOT NULL,
+  tool_version TEXT NOT NULL,
+  label TEXT NOT NULL,
+  product TEXT NOT NULL,
+  source_owner TEXT NOT NULL,
+  source_view TEXT NOT NULL,
+  metric_id UUID NOT NULL,
+  read_only BOOLEAN NOT NULL,
+  resource_scope TEXT NOT NULL,
+  permission_key TEXT NOT NULL,
+  permission_keys TEXT[] NOT NULL,
+  supported_intents TEXT[] NOT NULL,
+  allowed_filters JSONB NOT NULL,
+  freshness_slo_seconds INTEGER NOT NULL,
+  pii_policy TEXT NOT NULL,
+  unavailable_reasons TEXT[] NOT NULL,
+  contract JSONB NOT NULL,
+  status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.ask_conversation_inputs (
+  conversation_id UUID PRIMARY KEY,
+  conversation_key TEXT NOT NULL,
+  actor_user_id UUID NOT NULL,
+  org_id UUID NOT NULL,
+  property_id UUID NOT NULL,
+  resource_scope TEXT NOT NULL,
+  state TEXT NOT NULL,
+  locale TEXT NOT NULL,
+  title TEXT NOT NULL,
+  retention_policy TEXT NOT NULL,
+  last_message_at TIMESTAMPTZ NOT NULL,
+  privacy_scope TEXT NOT NULL,
+  metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.ask_run_inputs (
+  run_id UUID PRIMARY KEY,
+  run_key TEXT NOT NULL,
+  conversation_id UUID NOT NULL,
+  actor_user_id UUID NOT NULL,
+  org_id UUID NOT NULL,
+  property_id UUID NOT NULL,
+  resource_scope TEXT NOT NULL,
+  request_id TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  question_text TEXT NOT NULL,
+  question_hash TEXT NOT NULL,
+  intent TEXT NOT NULL,
+  permission_key TEXT NOT NULL,
+  status TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  model_provider TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  schema_version TEXT NOT NULL,
+  tool_plan JSONB NOT NULL,
+  unavailable_data JSONB NOT NULL,
+  caveats JSONB NOT NULL,
+  token_usage JSONB NOT NULL,
+  cost_metadata JSONB NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  finished_at TIMESTAMPTZ NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.ask_tool_call_inputs (
+  tool_call_id UUID PRIMARY KEY,
+  run_id UUID NOT NULL,
+  tool_id TEXT NOT NULL,
+  tool_version TEXT NOT NULL,
+  call_sequence INTEGER NOT NULL,
+  resource_scope TEXT NOT NULL,
+  org_id UUID NOT NULL,
+  property_id UUID NOT NULL,
+  permission_key TEXT NOT NULL,
+  authorization_status TEXT NOT NULL,
+  result_status TEXT NOT NULL,
+  input_scope JSONB NOT NULL,
+  filters JSONB NOT NULL,
+  evidence_references JSONB NOT NULL,
+  unavailable_data JSONB NOT NULL,
+  result_summary JSONB NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  finished_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE migration_source_intelligence.ask_answer_inputs (
+  audit_id UUID PRIMARY KEY,
+  answer_id TEXT NOT NULL,
+  run_id UUID NOT NULL,
+  conversation_id UUID NOT NULL,
+  org_id UUID NOT NULL,
+  property_id UUID NOT NULL,
+  resource_scope TEXT NOT NULL,
+  contract_version TEXT NOT NULL,
+  answer_status TEXT NOT NULL,
+  confidence TEXT NOT NULL,
+  question_hash TEXT NOT NULL,
+  audit_revision INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  generated_answer JSONB NOT NULL,
+  evidence_references JSONB NOT NULL,
+  material_claims JSONB NOT NULL,
+  suggested_actions JSONB NOT NULL,
+  unavailable_data JSONB NOT NULL,
+  caveats JSONB NOT NULL,
+  review_status TEXT NOT NULL,
+  retention_class TEXT NOT NULL,
+  privacy_scope TEXT NOT NULL,
+  metadata JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+INSERT INTO migration_source_intelligence.owner_accounts
+  (owner_user_id, owner_email, owner_name, owner_status)
 VALUES
   ('f6961000-0000-0000-0000-000000000001', 'owner.intelligence@example.test', 'Intelligence Hotel Owner', 'active');
 
-INSERT INTO identity.organizations
-  (id, kind, name, slug, status, workos_org_id, workos_external_id)
+INSERT INTO migration_source_intelligence.owner_organizations
+  (org_id, org_kind, org_name, org_slug, org_status, workos_org_id, workos_external_id)
 VALUES
   ('f6962000-0000-0000-0000-000000000001', 'hotel_group', 'Intelligence Alpenrose Group', 'intelligence-alpenrose-group', 'active', 'org_intelligence_alpenrose', 'intelligence-alpenrose-group');
 
-INSERT INTO identity.organization_memberships
-  (id, organization_id, user_id, status, role_key, workos_membership_id, workos_role_slugs)
+INSERT INTO migration_source_intelligence.owner_memberships
+  (membership_id, org_id, owner_user_id, membership_status, role_key, workos_membership_id, workos_role_slugs)
 VALUES
   ('f6962100-0000-0000-0000-000000000001', 'f6962000-0000-0000-0000-000000000001', 'f6961000-0000-0000-0000-000000000001', 'active', 'hotel_owner', 'membership_intelligence_owner', ARRAY['hotel_owner']);
 
-INSERT INTO identity.role_permission_grants
-  (organization_kind, role_key, permission_key)
+INSERT INTO migration_source_intelligence.role_permission_inputs
+  (org_kind, role_key, permission_key)
 VALUES
   ('hotel_group', 'hotel_owner', 'intelligence.ask.read'),
   ('hotel_group', 'hotel_owner', 'booking.analytics.read'),
   ('hotel_group', 'hotel_owner', 'booking.settings.read'),
   ('hotel_group', 'hotel_owner', 'pms.analytics.read'),
-  ('hotel_group', 'hotel_owner', 'marketplace.collaboration.read')
-ON CONFLICT (organization_kind, role_key, permission_key) DO NOTHING;
+  ('hotel_group', 'hotel_owner', 'marketplace.collaboration.read');
 
-INSERT INTO identity.organization_resource_links
-  (id, organization_id, product, resource_type, resource_id, relationship, status)
+INSERT INTO migration_source_intelligence.organization_resource_inputs
+  (link_id, org_id, product, resource_type, source_resource_id, relationship, link_status)
 VALUES
   ('f6962200-0000-0000-0000-000000000001', 'f6962000-0000-0000-0000-000000000001', 'booking', 'booking_hotel', 'booking_hotel_intelligence_alpenrose', 'owner', 'active'),
   ('f6962200-0000-0000-0000-000000000002', 'f6962000-0000-0000-0000-000000000001', 'pms', 'pms_hotel', 'pms_hotel_intelligence_alpenrose', 'operator', 'active'),
   ('f6962200-0000-0000-0000-000000000003', 'f6962000-0000-0000-0000-000000000001', 'marketplace', 'hotel_profile', 'marketplace_hotel_profile_intelligence_alpenrose', 'owner', 'active');
 
-INSERT INTO identity.product_entitlements
-  (id, organization_id, product, entitlement_key, status, resource_product, resource_type, resource_id, starts_at, metadata)
+INSERT INTO migration_source_intelligence.product_entitlement_inputs
+  (entitlement_id, org_id, product, entitlement_key, entitlement_status, resource_product, resource_type, source_resource_id, starts_at, source_metadata)
 VALUES
   ('f6962300-0000-0000-0000-000000000001', 'f6962000-0000-0000-0000-000000000001', 'booking', 'booking-engine', 'active', 'booking', 'booking_hotel', 'booking_hotel_intelligence_alpenrose', '2026-06-01T00:00:00Z', '{"fixture": "intelligence"}'),
   ('f6962300-0000-0000-0000-000000000002', 'f6962000-0000-0000-0000-000000000001', 'pms', 'pms-core', 'active', 'pms', 'pms_hotel', 'pms_hotel_intelligence_alpenrose', '2026-06-01T00:00:00Z', '{"fixture": "intelligence"}'),
   ('f6962300-0000-0000-0000-000000000003', 'f6962000-0000-0000-0000-000000000001', 'marketplace', 'marketplace-hotel-profile', 'active', 'marketplace', 'hotel_profile', 'marketplace_hotel_profile_intelligence_alpenrose', '2026-06-01T00:00:00Z', '{"fixture": "intelligence"}');
 
-INSERT INTO hotel_catalog.properties
-  (id, public_id, display_name, property_type, category, default_locale, supported_locales, profile_status, completeness_reasons)
+INSERT INTO migration_source_intelligence.property_profile_inputs
+  (property_id, property_public_id, property_display_name, property_type, property_category, default_locale, supported_locales, profile_status, completeness_reasons)
 VALUES
   ('f6963000-0000-0000-0000-000000000001', 'prop_intelligence_alpenrose', 'Intelligence Alpenrose', 'hotel', 'boutique', 'en', ARRAY['en', 'de'], 'complete', '{}');
 
-INSERT INTO hotel_catalog.property_source_links
-  (id, property_id, source_system, source_table, source_id, relationship, metadata)
+INSERT INTO migration_source_intelligence.property_source_inputs
+  (source_link_id, property_id, source_system, source_table, source_id, relationship, source_metadata)
 VALUES
   ('f6963100-0000-0000-0000-000000000001', 'f6963000-0000-0000-0000-000000000001', 'booking', 'booking_hotels', 'booking_hotel_intelligence_alpenrose', 'canonical_input', '{"fixture": "intelligence"}'),
   ('f6963100-0000-0000-0000-000000000002', 'f6963000-0000-0000-0000-000000000001', 'pms', 'hotels', 'pms_hotel_intelligence_alpenrose', 'operational_input', '{"fixture": "intelligence"}'),
   ('f6963100-0000-0000-0000-000000000003', 'f6963000-0000-0000-0000-000000000001', 'marketplace', 'hotel_profiles', 'marketplace_hotel_profile_intelligence_alpenrose', 'profile_input', '{"fixture": "intelligence"}');
 
-INSERT INTO intelligence.metric_definitions
+INSERT INTO migration_source_intelligence.metric_catalog_inputs
   (
-    id,
+    metric_id,
     metric_key,
-    display_name,
-    description,
+    label,
+    metric_description,
     product,
-    metric_category,
+    category,
     unit,
-    default_resource_scope,
-    required_permission_key,
+    resource_scope,
+    permission_key,
     visibility,
     freshness_slo_seconds,
     pii_policy,
     allowed_filters,
-    definition_metadata,
+    metadata,
     active,
     created_at,
     updated_at
@@ -134,20 +409,20 @@ VALUES
     '2026-06-09T08:00:00Z'
   );
 
-INSERT INTO intelligence.metric_snapshot_runs
+INSERT INTO migration_source_intelligence.metric_snapshot_inputs
   (
-    id,
-    metric_definition_id,
+    snapshot_run_id,
+    metric_id,
     metric_key,
     snapshot_key,
-    run_status,
+    status,
     resource_scope,
-    organization_id,
+    org_id,
     property_id,
     source_owner,
     source_view,
-    required_permission_key,
-    snapshot_period,
+    permission_key,
+    period,
     period_start,
     period_end,
     generated_at,
@@ -161,7 +436,7 @@ INSERT INTO intelligence.metric_snapshot_runs
     filters,
     source_freshness,
     unavailable_reasons,
-    snapshot_metadata,
+    metadata,
     created_at
   )
 VALUES
@@ -224,16 +499,16 @@ VALUES
     '2026-06-09T08:35:00Z'
   );
 
-INSERT INTO intelligence.setup_completeness_snapshots
+INSERT INTO migration_source_intelligence.setup_snapshot_inputs
   (
-    id,
+    setup_snapshot_id,
     snapshot_key,
-    organization_id,
+    org_id,
     property_id,
     setup_area,
-    completion_status,
+    status,
     completeness_score,
-    required_permission_key,
+    permission_key,
     source_snapshot_at,
     source_fresh_at,
     freshness_status,
@@ -241,7 +516,7 @@ INSERT INTO intelligence.setup_completeness_snapshots
     blocking_items,
     stale_items,
     source_freshness,
-    setup_metadata,
+    metadata,
     created_at
   )
 VALUES
@@ -284,26 +559,26 @@ VALUES
     '2026-06-09T08:40:00Z'
   );
 
-INSERT INTO intelligence.ai_evidence_catalog
+INSERT INTO migration_source_intelligence.evidence_tool_inputs
   (
-    id,
+    evidence_tool_id,
     tool_id,
     tool_version,
-    display_name,
+    label,
     product,
     source_owner,
     source_view,
-    primary_metric_definition_id,
+    metric_id,
     read_only,
-    required_resource_scope,
-    primary_required_permission_key,
-    required_permission_keys,
+    resource_scope,
+    permission_key,
+    permission_keys,
     supported_intents,
     allowed_filters,
     freshness_slo_seconds,
     pii_policy,
     unavailable_reasons,
-    evidence_contract,
+    contract,
     status,
     created_at,
     updated_at
@@ -379,21 +654,21 @@ VALUES
     '2026-06-09T08:45:00Z'
   );
 
-INSERT INTO intelligence.ask_conversations
+INSERT INTO migration_source_intelligence.ask_conversation_inputs
   (
-    id,
+    conversation_id,
     conversation_key,
     actor_user_id,
-    organization_id,
+    org_id,
     property_id,
     resource_scope,
-    conversation_state,
+    state,
     locale,
     title,
     retention_policy,
     last_message_at,
     privacy_scope,
-    conversation_metadata,
+    metadata,
     created_at,
     updated_at
   )
@@ -416,23 +691,23 @@ VALUES
     '2026-06-09T09:15:00Z'
   );
 
-INSERT INTO intelligence.ask_runs
+INSERT INTO migration_source_intelligence.ask_run_inputs
   (
-    id,
+    run_id,
     run_key,
     conversation_id,
     actor_user_id,
-    organization_id,
+    org_id,
     property_id,
     resource_scope,
     request_id,
     correlation_id,
-    question_redacted_text,
+    question_text,
     question_hash,
-    detected_intent,
-    required_permission_key,
-    run_status,
-    confidence_level,
+    intent,
+    permission_key,
+    status,
+    confidence,
     model_provider,
     model_name,
     prompt_version,
@@ -509,17 +784,17 @@ VALUES
     '2026-06-09T09:10:00Z'
   );
 
-INSERT INTO intelligence.ask_tool_calls
+INSERT INTO migration_source_intelligence.ask_tool_call_inputs
   (
-    id,
+    tool_call_id,
     run_id,
     tool_id,
     tool_version,
     call_sequence,
     resource_scope,
-    organization_id,
+    org_id,
     property_id,
-    required_permission_key,
+    permission_key,
     authorization_status,
     result_status,
     input_scope,
@@ -600,18 +875,18 @@ VALUES
     '2026-06-09T09:10:00Z'
   );
 
-INSERT INTO intelligence.ask_answer_audits
+INSERT INTO migration_source_intelligence.ask_answer_inputs
   (
-    id,
+    audit_id,
     answer_id,
     run_id,
     conversation_id,
-    organization_id,
+    org_id,
     property_id,
     resource_scope,
     contract_version,
     answer_status,
-    confidence_level,
+    confidence,
     question_hash,
     audit_revision,
     summary,
@@ -624,7 +899,7 @@ INSERT INTO intelligence.ask_answer_audits
     review_status,
     retention_class,
     privacy_scope,
-    audit_metadata,
+    metadata,
     created_at
   )
 VALUES
