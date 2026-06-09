@@ -23,8 +23,8 @@ describe("fixture case registry", () => {
     expect(getParityHandlers("finance")).toHaveLength(1);
   });
 
-  it("registers PMS operations parity without a transform", () => {
-    expect(getTransformHandler("pms-operations")).toBeUndefined();
+  it("registers PMS operations transform and parity handlers", () => {
+    expect(getTransformHandler("pms-operations")).toBeTypeOf("function");
     expect(getParityHandlers("pms-operations")).toHaveLength(1);
   });
 

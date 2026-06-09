@@ -175,6 +175,8 @@ export type ExpectedTarget = {
       channelRatePlanMappingId: string;
       channelBookingMappingId: string;
       bookingSyncStatusId: string;
+      roomTypeSourceSystem: string;
+      roomSourceSystem: string;
       sourceRoomTypeId: string;
       sourceRoomId: string;
       ratePlanCode: string;
