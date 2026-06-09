@@ -1,0 +1,60 @@
+{
+  "counts": {
+    "identity.users": 1,
+    "identity.organizations": 1,
+    "identity.organization_memberships": 1,
+    "identity.organization_resource_links": 1,
+    "identity.product_entitlements": 1,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 1,
+    "hotel_catalog.property_slugs": 1,
+    "booking.quote_sessions": 1,
+    "booking.checkout_contexts": 1,
+    "booking.guest_bookings": 1,
+    "booking.booking_guests": 2,
+    "booking.addon_definitions": 1,
+    "booking.booking_addon_selections": 1,
+    "booking.promo_applications": 1,
+    "booking.booking_status_events": 2,
+    "booking.booking_change_requests": 1,
+    "booking.booking_notes_public": 1,
+    "booking.direct_booking_summary_read_model": 1,
+    "finance.payment_provider_accounts": 1,
+    "finance.payment_settings": 1,
+    "finance.payments": 1
+  },
+  "idStability": {
+    "identity.users": ["d1000000-0000-0000-0000-000000000682"],
+    "identity.organizations": ["d2000000-0000-0000-0000-000000000682"],
+    "hotel_catalog.properties": ["d3000000-0000-0000-0000-000000000682"],
+    "booking.quote_sessions": ["d4000000-0000-0000-0000-000000000682"],
+    "booking.checkout_contexts": ["d5000000-0000-0000-0000-000000000682"],
+    "booking.guest_bookings": ["d6000000-0000-0000-0000-000000000682"],
+    "finance.payments": ["e2000000-0000-0000-0000-000000000682"]
+  },
+  "uniquenessChecks": [],
+  "bookingCheckoutChecks": {
+    "flows": [
+      {
+        "propertyId": "d3000000-0000-0000-0000-000000000682",
+        "organizationId": "d2000000-0000-0000-0000-000000000682",
+        "bookingHotelResourceId": "booking_hotel_checkout_alpenrose",
+        "quoteSessionId": "d4000000-0000-0000-0000-000000000682",
+        "checkoutContextId": "d5000000-0000-0000-0000-000000000682",
+        "guestBookingId": "d6000000-0000-0000-0000-000000000682",
+        "paymentId": "e2000000-0000-0000-0000-000000000682",
+        "publicQuoteReference": "Q-CHK-682",
+        "publicBookingReference": "B-CHK-682",
+        "lifecycleStatus": "confirmed",
+        "paymentStatus": "paid",
+        "paymentAmount": "420.00",
+        "currency": "EUR",
+        "guestCount": 2,
+        "addonSelectionCount": 1,
+        "promoApplicationCount": 1,
+        "statusEventCount": 2
+      }
+    ],
+    "forbiddenSummaryKeys": ["mira.guest@example.test", "+4312345678", "Gluten-free breakfast"]
+  }
+}

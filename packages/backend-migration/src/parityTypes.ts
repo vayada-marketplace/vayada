@@ -80,6 +80,28 @@ export type ExpectedTarget = {
     }>;
     forbiddenPublicProfileKeys?: string[];
   };
+  bookingCheckoutChecks?: {
+    flows: Array<{
+      propertyId: string;
+      organizationId: string;
+      bookingHotelResourceId: string;
+      quoteSessionId: string;
+      checkoutContextId: string;
+      guestBookingId: string;
+      paymentId: string;
+      publicQuoteReference: string;
+      publicBookingReference: string;
+      lifecycleStatus: string;
+      paymentStatus: string;
+      paymentAmount: string;
+      currency: string;
+      guestCount: number;
+      addonSelectionCount: number;
+      promoApplicationCount: number;
+      statusEventCount: number;
+    }>;
+    forbiddenSummaryKeys?: string[];
+  };
 };
 
 export type ParityHandlerContext = {
