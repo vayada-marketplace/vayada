@@ -127,6 +127,22 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       supportedLanguages: ["de", "en"],
     };
   },
+  async findRoomFilterSettingsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      bookingFilters: ["oceanView", "spa_access"],
+      customFilters: {
+        spa_access: "Spa access",
+      },
+      filterRooms: {
+        oceanView: ["room_101", "room_102"],
+        spa_access: ["room_102"],
+      },
+    };
+  },
 };
 
 const reservation: BookingReservationReadModel = {
@@ -359,6 +375,17 @@ describe("vayada-api", () => {
     const response = await injectJson(app, {
       method: "GET",
       url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("does not expose booking room-filter settings until a read model is configured", async () => {
+    app = buildApp({ logger: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
     });
 
     expect(response.statusCode).toBe(404);
@@ -1090,6 +1117,30 @@ describe("vayada-api", () => {
     });
   });
 
+  it("returns booking room-filter settings with auth, policy, and the documented legacy-compatible shape", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      bookingFilters: ["oceanView", "spa_access"],
+      customFilters: {
+        spa_access: "Spa access",
+      },
+      filterRooms: {
+        oceanView: ["room_101", "room_102"],
+        spa_access: ["room_102"],
+      },
+    });
+  });
+
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -1743,6 +1794,212 @@ describe("vayada-api", () => {
     });
   });
 
+  it("defaults missing booking room-filter settings fields to the contract defaults", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
+        async findRoomFilterSettingsByHotelId() {
+          return {
+            bookingFilters: null,
+            customFilters: null,
+            filterRooms: null,
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      bookingFilters: [],
+      customFilters: {},
+      filterRooms: {},
+    });
+  });
+
+  it("returns empty room-filter settings when the authorized hotel has no settings row", async () => {
+    app = buildAuthenticatedApp({ linkedHotelId: "booking_hotel_missing" });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_missing/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      bookingFilters: [],
+      customFilters: {},
+      filterRooms: {},
+    });
+  });
+
+  it("hardens malformed booking room-filter values to contract defaults", async () => {
+    const malformedValues: unknown[] = ["not json", 42, null, ["not", 1]];
+
+    for (const malformedValue of malformedValues) {
+      const malformedApp = buildAuthenticatedApp({
+        settingsRepository: {
+          async findAddonSettingsByHotelId() {
+            return null;
+          },
+          async findGuestFormSettingsByHotelId() {
+            return null;
+          },
+          async findBenefitsSettingsByHotelId() {
+            return null;
+          },
+          async findLocalizationSettingsByHotelId() {
+            return null;
+          },
+          async findRoomFilterSettingsByHotelId() {
+            return {
+              bookingFilters: malformedValue,
+              customFilters: malformedValue,
+              filterRooms: malformedValue,
+            };
+          },
+        },
+      });
+
+      const response = await injectJson(malformedApp, {
+        method: "GET",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({
+        bookingFilters:
+          typeof malformedValue === "object" && Array.isArray(malformedValue) ? ["not"] : [],
+        customFilters: {},
+        filterRooms: {},
+      });
+
+      await malformedApp.close();
+    }
+  });
+
+  it("drops invalid room-filter entries instead of failing the read", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
+        async findRoomFilterSettingsByHotelId() {
+          return {
+            bookingFilters: ["oceanView", 42, null, "suite"],
+            customFilters: {
+              oceanView: "Ocean view",
+              bad: 42,
+            },
+            filterRooms: {
+              oceanView: ["room_101", null, 123, "room_102"],
+              broken: "room_999",
+            },
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      bookingFilters: ["oceanView", "suite"],
+      customFilters: {
+        oceanView: "Ocean view",
+      },
+      filterRooms: {
+        oceanView: ["room_101", "room_102"],
+        broken: [],
+      },
+    });
+  });
+
+  it("parses JSON-encoded booking room-filter values like the legacy read path", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
+        async findRoomFilterSettingsByHotelId() {
+          return {
+            bookingFilters: '["oceanView", "spa_access"]',
+            customFilters: '{"spa_access": "Spa access"}',
+            filterRooms: '{"oceanView": ["room_101"], "spa_access": ["room_102"]}',
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      bookingFilters: ["oceanView", "spa_access"],
+      customFilters: {
+        spa_access: "Spa access",
+      },
+      filterRooms: {
+        oceanView: ["room_101"],
+        spa_access: ["room_102"],
+      },
+    });
+  });
+
   it("rejects booking addon settings without authentication", async () => {
     app = buildAuthenticatedApp();
 
@@ -2203,6 +2460,131 @@ describe("vayada-api", () => {
     });
   });
 
+  it("rejects booking room-filter settings without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking room-filter settings with an invalid token", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer invalid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking room-filter settings when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
+  });
+
+  it("rejects booking room-filter settings when entitlement is missing", async () => {
+    app = buildAuthenticatedApp({ entitlements: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_entitlement",
+      category: "authorization",
+      message: "Missing active booking engine entitlement.",
+    });
+  });
+
+  it("rejects booking room-filter settings when entitlement is suspended", async () => {
+    app = buildAuthenticatedApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "inactive_entitlement",
+      category: "authorization",
+      message: "Booking engine entitlement is not active.",
+    });
+  });
+
+  it("rejects booking room-filter settings when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_other/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
   it("returns the booking addon settings read-model error contract when the repository fails", async () => {
     app = buildAuthenticatedApp({
       settingsRepository: {
@@ -2340,6 +2722,44 @@ describe("vayada-api", () => {
       code: "read_model_unavailable",
       category: "read_model",
       message: "Booking localization settings are unavailable.",
+    });
+  });
+
+  it("returns the booking room-filter settings read-model error contract when the repository fails", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
+        async findRoomFilterSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "Booking room-filter settings are unavailable.",
     });
   });
 
