@@ -33,8 +33,12 @@ export type ResourceRelationship = "owner" | "operator" | "promotes" | "billing_
 
 export type PermissionKey =
   | "platform.user.suspend"
+  | "intelligence.ask.read"
   | "booking.settings.manage"
+  | "booking.settings.read"
+  | "booking.analytics.read"
   | "booking.reservation.read"
+  | "pms.read"
   | "pms.booking.update"
   | "pms.finance.read"
   | "marketplace.collaboration.review"
