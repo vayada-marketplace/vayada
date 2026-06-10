@@ -19,6 +19,10 @@ import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerBookingRoutes } from "./routes/booking.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
+import {
+  registerMarketplaceDiscoveryRoutes,
+  type MarketplaceDiscoveryReadRepository,
+} from "./routes/marketplaceDiscovery.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -33,6 +37,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
+  marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
+  marketplaceDiscoveryAllowedOrigins?: string[];
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -65,6 +71,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerAiHotelQuoteRoutes, {
       prefix: "/api/ai",
       repository: options.publicHotelQuoteRepository,
+    });
+  }
+  if (options.marketplaceDiscoveryRepository) {
+    app.register(registerMarketplaceDiscoveryRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceDiscoveryRepository,
+      allowedOrigins: options.marketplaceDiscoveryAllowedOrigins,
     });
   }
   app.register(registerBookingRoutes, {
