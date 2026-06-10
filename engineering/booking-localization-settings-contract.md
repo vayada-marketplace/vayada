@@ -54,8 +54,8 @@ type BookingLocalizationSettingsRequest = {
 ```
 
 There is no request body and no public query parameter for this read slice.
-Future write/update behavior must be defined by a separate contract before
-implementation.
+Typed write behavior is defined separately in
+[`booking-settings-write-contracts.md`](booking-settings-write-contracts.md).
 
 ## Response
 
@@ -142,8 +142,9 @@ rather than raw backend messages.
 ## Scalar Formats
 
 Currency values are string currency codes. Stored Booking data should be
-uppercase ISO 4217 three-letter codes when possible, but this read route must
-preserve stored strings until a write contract owns validation and migration.
+uppercase ISO 4217 three-letter codes when possible, but this read route
+preserves stored strings. The typed write contract owns validation and
+normalization for newly saved values.
 Legacy rows may or may not include `defaultCurrency` in `supportedCurrencies`.
 
 Language values are string locale codes. Stored Booking data should be BCP
@@ -188,8 +189,11 @@ Legacy write compatibility:
   `default_currency` through the same legacy property settings write path.
 - `apps/booking-admin/app/setup/page.tsx` can also write localization fields
   during setup. This read contract must not change setup behavior.
-- A future write contract must decide whether localization writes remain on the
-  broad property settings endpoint or move to a dedicated typed endpoint.
+- Booking Flow Localization tab writes move to the dedicated typed endpoint
+  defined in
+  [`booking-settings-write-contracts.md`](booking-settings-write-contracts.md).
+  Header currency-switcher writes and setup-wizard localization writes remain
+  legacy until separate contracts migrate those workflows.
 
 Removal condition: the target Booking/checkout settings read model implements
 the same response contract and the booking-admin Localization tab is cut over

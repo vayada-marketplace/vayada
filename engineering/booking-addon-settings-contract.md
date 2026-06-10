@@ -52,8 +52,8 @@ type BookingAddonSettingsRequest = {
 ```
 
 There is no request body and no public query parameter for this read slice.
-Future write/update behavior must be defined by a separate contract before
-implementation.
+Typed write behavior is defined separately in
+[`booking-settings-write-contracts.md`](booking-settings-write-contracts.md).
 
 ## Response
 
