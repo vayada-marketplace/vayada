@@ -23,6 +23,10 @@ import {
   registerMarketplaceDiscoveryRoutes,
   type MarketplaceDiscoveryReadRepository,
 } from "./routes/marketplaceDiscovery.js";
+import {
+  registerBookingWebPublicRoutes,
+  type BookingWebPublicRoutesOptions,
+} from "./routes/bookingWebPublic.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -39,6 +43,10 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
   marketplaceDiscoveryAllowedOrigins?: string[];
+  bookingPublicApiUrl?: string;
+  pmsPublicApiUrl?: string;
+  bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
+  bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -71,6 +79,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerAiHotelQuoteRoutes, {
       prefix: "/api/ai",
       repository: options.publicHotelQuoteRepository,
+    });
+  }
+  if (options.publicHotelProfileRepository) {
+    app.register(registerBookingWebPublicRoutes, {
+      prefix: "/api/booking-web",
+      profileRepository: options.publicHotelProfileRepository,
+      quoteRepository: options.publicHotelQuoteRepository,
+      bookingPublicApiUrl: options.bookingPublicApiUrl,
+      pmsPublicApiUrl: options.pmsPublicApiUrl,
+      fetch: options.bookingWebPublicFetch,
+      now: options.bookingWebPublicNow,
     });
   }
   if (options.marketplaceDiscoveryRepository) {

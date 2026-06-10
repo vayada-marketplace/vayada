@@ -254,10 +254,16 @@ const seededPublicQuote = PUBLIC_BOOKABILITY_FIXTURES.find(
 const seededUnavailableQuote = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "unavailable",
 )!.quote!;
+const seededCustomDomainProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
+  (fixture) => fixture.caseId === "custom_domain",
+)!.profile;
 
 const publicHotelProfileRepository: PublicHotelProfileRepository = {
   async findProfileBySlug(slug) {
     return slug === seededPublicProfile.hotel.slug ? seededPublicProfile : null;
+  },
+  async findProfileByCustomDomain(domain) {
+    return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
   },
 };
 
@@ -562,6 +568,255 @@ describe("vayada-api", () => {
       ],
     });
     expect(body).not.toHaveProperty("quote");
+  });
+
+  it("returns Booking Web host resolution for known booking subdomains", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hosts/hotel-alpenrose.booking.localhost",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe(
+      "public, max-age=60, stale-while-revalidate=300",
+    );
+    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-booking-web-host-read");
+    expect(body).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      publicVisibility: "public_safe",
+      host: "hotel-alpenrose.booking.localhost",
+      slug: "hotel-alpenrose",
+      canonicalUrl: "https://hotel-alpenrose.booking.localhost/en",
+      shouldRedirect: false,
+      redirectUrl: null,
+      redirectStatus: null,
+      hotel: {
+        slug: "hotel-alpenrose",
+        defaultLocale: "en",
+        supportedLocales: ["en", "de"],
+      },
+      dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    });
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("returns Booking Web custom-domain resolution and canonical redirect policy", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: {
+        async findProfileBySlug(slug) {
+          return slug === "hotel-alpenrose" ? seededCustomDomainProfile : null;
+        },
+        async findProfileByCustomDomain(domain) {
+          return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
+        },
+      },
+      publicHotelQuoteRepository,
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      async bookingWebPublicFetch(input) {
+        expect(input.toString()).toBe(
+          "https://api.booking.localhost/api/resolve-domain?domain=book.alpenrose.example",
+        );
+        return new Response(JSON.stringify({ slug: "hotel-alpenrose" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/legacy-alpenrose.booking.localhost",
+    });
+
+    expect(response.statusCode).toBe(404);
+
+    const customDomainResponse = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/book.alpenrose.example",
+    });
+
+    expect(customDomainResponse.statusCode).toBe(200);
+    expect(customDomainResponse.body).toMatchObject({
+      host: "book.alpenrose.example",
+      slug: "hotel-alpenrose",
+      canonicalUrl: "https://book.alpenrose.example/en",
+      bookingBaseUrl: "https://book.alpenrose.example",
+      customDomainUrl: "https://book.alpenrose.example",
+      shouldRedirect: false,
+      redirectUrl: null,
+    });
+    expect(findForbiddenPublicBookabilityKeys(customDomainResponse.body)).toEqual([]);
+  });
+
+  it("does not fall back to unverified custom-domain rows when legacy verification rejects", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      async bookingWebPublicFetch(input) {
+        expect(input.toString()).toBe(
+          "https://api.booking.localhost/api/resolve-domain?domain=book.alpenrose.example",
+        );
+        return new Response(JSON.stringify({ detail: "No verified hotel found for this domain" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/book.alpenrose.example",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("returns Booking Web hotel projections from the public distribution contract", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-booking-web-profile-read");
+    expect(body).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      publicVisibility: "public_safe",
+      hotel: {
+        slug: "hotel-alpenrose",
+        canonicalUrl: "https://hotel-alpenrose.booking.localhost/en",
+        capabilities: {
+          instantBook: true,
+          onlinePayment: true,
+          payAtProperty: true,
+        },
+      },
+    });
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("returns Booking Web offers from the public quote contract", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-booking-web-offers-read");
+    expect(response.headers["x-robots-tag"]).toBe("noindex");
+    expect(body).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      publicVisibility: "public_safe",
+      status: "bookable",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+      },
+      quote: {
+        offers: [
+          {
+            roomTypeId: "room_deluxe",
+          },
+        ],
+      },
+    });
+    expect(body.quote.offers[0].bookingUrl).toContain(
+      "https://hotel-alpenrose.booking.localhost/en/book?",
+    );
+    expect(body.quote.offers[0].bookingUrl).toContain("room_type=room_deluxe");
+    expect(body.quote.offers[0].bookingUrl).toContain("quote_id=quote_alpenrose_001");
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("returns Booking Web calendar projections through the PMS compatibility adapter", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+      async bookingWebPublicFetch(input) {
+        expect(input.toString()).toBe(
+          "https://api.pms.localhost/api/hotels/hotel-alpenrose/unavailable-dates?start=2026-09-12&end=2026-09-20",
+        );
+
+        return new Response(
+          JSON.stringify({
+            dates: ["2026-09-14"],
+            min_stay_by_arrival: { "2026-09-12": 2 },
+            max_stay_by_arrival: { "2026-09-15": 7 },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-20",
+    });
+    const body = response.json();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["x-vayada-ratelimit-policy"]).toBe("public-booking-web-calendar-read");
+    expect(body).toEqual({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-06T11:00:00.000Z",
+      publicVisibility: "public_safe",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-20",
+      },
+      calendar: {
+        unavailableDates: ["2026-09-14"],
+        minStayByArrival: { "2026-09-12": 2 },
+        maxStayByArrival: { "2026-09-15": 7 },
+      },
+      freshness: {
+        status: "fresh",
+        generatedAt: "2026-06-06T11:00:00.000Z",
+        sources: [
+          {
+            owner: "pms",
+            lastUpdatedAt: "2026-06-06T11:00:00.000Z",
+            status: "fresh",
+          },
+          {
+            owner: "distribution",
+            lastUpdatedAt: "2026-06-06T11:00:00.000Z",
+            status: "fresh",
+          },
+        ],
+      },
+      dataSources: ["pms", "distribution"],
+    });
+    expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
   });
 
   it("builds bookable public AI quotes from the PMS public room-search adapter", async () => {
