@@ -42,14 +42,17 @@ export const creatorService = {
    * No query parameters supported - endpoint returns all verified creators with complete profiles
    */
   getAll: async (): Promise<PaginatedResponse<Creator>> => {
-    // Backend returns direct array, not paginated response
-    // No query parameters - endpoint automatically filters to verified creators with complete profiles
-    const response = await getAllMarketplaceCreators();
+    let response: CreatorMarketplaceResponse[];
+
+    try {
+      response = (await getAllMarketplaceCreators()).map(toLegacyCreatorMarketplaceResponse);
+    } catch (error) {
+      if (!isMissingDiscoveryRoute(error)) throw error;
+      response = await apiClient.get<CreatorMarketplaceResponse[]>("/marketplace/creators");
+    }
 
     // Transform API response to frontend format
-    const creators = response
-      .map(toLegacyCreatorMarketplaceResponse)
-      .map(transformCreatorMarketplaceResponse);
+    const creators = response.map(transformCreatorMarketplaceResponse);
 
     // Return as paginated response for consistency with frontend expectations
     return {
@@ -126,6 +129,15 @@ export const creatorService = {
     return apiClient.get<CreatorProfileStatus>("/creators/me/profile-status");
   },
 };
+
+function isMissingDiscoveryRoute(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status: unknown }).status === 404
+  );
+}
 
 function toLegacyCreatorMarketplaceResponse(
   creator: MarketplaceCreatorReadModel,
