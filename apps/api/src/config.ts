@@ -7,10 +7,22 @@ export type ApiAuthConfig = {
   workosAudience: string;
 };
 
+export type ApiAuthSessionConfig = {
+  workosClientId: string;
+  workosApiKey: string;
+  authCookieSecret: string;
+  authCallbackUrl: string;
+  authLogoutUrl: string;
+  authAllowedOrigins: string[];
+  authCookieSecure: boolean;
+  authCookieDomain?: string;
+};
+
 export type ApiConfig = {
   host: string;
   port: number;
   auth?: ApiAuthConfig;
+  authSession?: ApiAuthSessionConfig;
   bookingDatabaseUrl?: string;
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
@@ -63,6 +75,39 @@ function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
     : [];
 }
 
+function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
+  const authSessionKeys = [
+    "WORKOS_CLIENT_ID",
+    "WORKOS_API_KEY",
+    "AUTH_COOKIE_SECRET",
+    "AUTH_CALLBACK_URL",
+    "AUTH_LOGOUT_URL",
+    "AUTH_ALLOWED_ORIGINS",
+  ] as const;
+  const values = Object.fromEntries(authSessionKeys.map((key) => [key, readOptionalEnv(env, key)]));
+  const configuredKeys = authSessionKeys.filter((key) => values[key]);
+
+  if (configuredKeys.length === 0) {
+    return undefined;
+  }
+
+  if (configuredKeys.length !== authSessionKeys.length) {
+    const missing = authSessionKeys.filter((key) => !values[key]).join(", ");
+    throw new Error(`Incomplete auth session config; missing ${missing}`);
+  }
+
+  return {
+    workosClientId: values["WORKOS_CLIENT_ID"]!,
+    workosApiKey: values["WORKOS_API_KEY"]!,
+    authCookieSecret: values["AUTH_COOKIE_SECRET"]!,
+    authCallbackUrl: values["AUTH_CALLBACK_URL"]!,
+    authLogoutUrl: values["AUTH_LOGOUT_URL"]!,
+    authAllowedOrigins: readOptionalCsvEnv(env, "AUTH_ALLOWED_ORIGINS"),
+    authCookieSecure: readOptionalEnv(env, "AUTH_COOKIE_SECURE") !== "false",
+    authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
+  };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const server = loadServerConfig(env, {
     host: "0.0.0.0",
@@ -72,6 +117,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   return {
     ...server,
     auth: loadAuthConfig(env),
+    authSession: loadAuthSessionConfig(env),
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
     bookingReservationsReadDatabaseUrl: readOptionalEnv(
       env,
