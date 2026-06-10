@@ -46,6 +46,13 @@ hotel-creator-network page fetches server-side (Next.js server component), so
 it needs network reachability but not CORS. No credentials are required or
 allowed on these requests.
 
+Caching: responses carry
+`Cache-Control: public, max-age=60, stale-while-revalidate=300` (same policy
+as the public AI profile route). Because the CORS allow-origin header varies
+by requester, every response on this group — allowlisted or not — must also
+carry `Vary: Origin`, or shared caches would replay un-CORSed responses to
+browser consumers.
+
 ## ID continuity (mixed legacy/target window)
 
 V1 cuts over while collaborations stay on the legacy API until V4. Consumers
@@ -82,8 +89,9 @@ type MarketplaceCreatorsRequest = {
 ```
 
 Out-of-range numeric values are **clamped**, matching the booking reservations
-list route convention. Non-numeric `limit`/`offset` return `400` with
-`code: "invalid_query"`.
+list route convention. Non-numeric, non-integer, or duplicated
+`limit`/`offset` values return `400` with `code: "invalid_query"`. An empty
+value (`?limit=`) is treated as absent.
 
 The legacy endpoints accepted no effective query parameters: the
 marketplace-web/landing clients contain `page`/`limit` plumbing but no call
