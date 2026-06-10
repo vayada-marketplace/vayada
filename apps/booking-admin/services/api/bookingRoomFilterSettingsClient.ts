@@ -1,9 +1,18 @@
-import { apiClient, ApiErrorResponse, type ApiClient } from "./client";
+import { apiClient, type ApiClient } from "./client";
+import {
+  toBookingSettingsClientErrorInput,
+  type BookingSettingsClientErrorCategory,
+  type BookingSettingsClientErrorCode,
+  type BookingSettingsClientErrorInput,
+  type BookingSettingsClientErrorStatusCode,
+  type BookingSettingsClientOperation,
+} from "./bookingSettingsClientError";
 
 export const BOOKING_ROOM_FILTER_SETTINGS_PATH =
   "/api/booking/hotels/:hotelId/settings/room-filters";
 
-type BookingRoomFilterSettingsApiClient = Pick<ApiClient, "get">;
+type BookingRoomFilterSettingsReadApiClient = Pick<ApiClient, "get">;
+type BookingRoomFilterSettingsWriteApiClient = Pick<ApiClient, "put">;
 
 export interface GetBookingRoomFilterSettingsInput {
   hotelId: string;
@@ -15,43 +24,66 @@ export interface BookingRoomFilterSettings {
   filterRooms: Record<string, string[]>;
 }
 
-export type BookingRoomFilterSettingsErrorCategory =
-  | "authentication"
-  | "authorization"
-  | "read_model";
+export type UpdateBookingRoomFilterSettingsBody = BookingRoomFilterSettings;
 
-export type BookingRoomFilterSettingsErrorCode =
+export interface UpdateBookingRoomFilterSettingsInput {
+  hotelId: string;
+  body: UpdateBookingRoomFilterSettingsBody;
+}
+
+export type BookingRoomFilterSettingsErrorCategory = Extract<
+  BookingSettingsClientErrorCategory,
+  "authentication" | "authorization" | "read_model"
+>;
+export type BookingRoomFilterSettingsWriteErrorCategory = Extract<
+  BookingSettingsClientErrorCategory,
+  "authentication" | "authorization" | "validation" | "write_model"
+>;
+export type BookingRoomFilterSettingsClientErrorCategory = BookingSettingsClientErrorCategory;
+
+export type BookingRoomFilterSettingsErrorCode = Extract<
+  BookingSettingsClientErrorCode,
   | "unauthenticated"
   | "missing_permission"
   | "missing_entitlement"
   | "inactive_entitlement"
   | "missing_resource_access"
-  | "read_model_unavailable";
+  | "read_model_unavailable"
+>;
+export type BookingRoomFilterSettingsWriteErrorCode = Extract<
+  BookingSettingsClientErrorCode,
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "invalid_payload"
+  | "not_found"
+  | "write_model_unavailable"
+>;
+export type BookingRoomFilterSettingsClientErrorCode = BookingSettingsClientErrorCode;
 
 export class BookingRoomFilterSettingsClientError extends Error {
-  statusCode: 401 | 403 | 500;
-  code: BookingRoomFilterSettingsErrorCode;
-  category: BookingRoomFilterSettingsErrorCategory;
+  statusCode: BookingSettingsClientErrorStatusCode;
+  code: BookingRoomFilterSettingsClientErrorCode;
+  category: BookingRoomFilterSettingsClientErrorCategory;
   detail: string;
+  details?: unknown;
 
-  constructor(input: {
-    statusCode: 401 | 403 | 500;
-    code: BookingRoomFilterSettingsErrorCode;
-    category: BookingRoomFilterSettingsErrorCategory;
-    detail: string;
-  }) {
+  constructor(input: BookingSettingsClientErrorInput) {
     super(input.detail);
     this.name = "BookingRoomFilterSettingsClientError";
     this.statusCode = input.statusCode;
     this.code = input.code;
     this.category = input.category;
     this.detail = input.detail;
+    this.details = input.details;
   }
 }
 
 export async function getBookingRoomFilterSettings(
   input: GetBookingRoomFilterSettingsInput,
-  client: BookingRoomFilterSettingsApiClient = apiClient,
+  client: BookingRoomFilterSettingsReadApiClient = apiClient,
 ): Promise<BookingRoomFilterSettings> {
   try {
     return await client.get<BookingRoomFilterSettings>(
@@ -59,6 +91,20 @@ export async function getBookingRoomFilterSettings(
     );
   } catch (error) {
     throw toBookingRoomFilterSettingsClientError(error);
+  }
+}
+
+export async function updateBookingRoomFilterSettings(
+  input: UpdateBookingRoomFilterSettingsInput,
+  client: BookingRoomFilterSettingsWriteApiClient = apiClient,
+): Promise<BookingRoomFilterSettings> {
+  try {
+    return await client.put<BookingRoomFilterSettings>(
+      buildBookingRoomFilterSettingsEndpoint(input),
+      input.body,
+    );
+  } catch (error) {
+    throw toBookingRoomFilterSettingsClientError(error, "write");
   }
 }
 
@@ -80,151 +126,17 @@ export function buildBookingRoomFilterSettingsEndpoint(
 
 export function toBookingRoomFilterSettingsClientError(
   error: unknown,
+  operation: BookingSettingsClientOperation = "read",
 ): BookingRoomFilterSettingsClientError {
   if (error instanceof BookingRoomFilterSettingsClientError) {
     return error;
   }
 
-  if (error instanceof ApiErrorResponse) {
-    return mapApiError(error);
-  }
-
-  return new BookingRoomFilterSettingsClientError({
-    statusCode: 500,
-    code: "read_model_unavailable",
-    category: "read_model",
-    detail:
-      error instanceof Error ? error.message : "Booking room-filter settings are unavailable.",
-  });
-}
-
-function mapApiError(error: ApiErrorResponse): BookingRoomFilterSettingsClientError {
-  const contractError = readContractErrorBody(error);
-  if (contractError) {
-    return new BookingRoomFilterSettingsClientError(contractError);
-  }
-
-  const detail = readApiErrorDetail(error);
-
-  if (error.status === 401) {
-    return new BookingRoomFilterSettingsClientError({
-      statusCode: 401,
-      code: "unauthenticated",
-      category: "authentication",
-      detail,
-    });
-  }
-
-  if (error.status === 403) {
-    return new BookingRoomFilterSettingsClientError({
-      statusCode: 403,
-      code: toAuthorizationErrorCode(detail),
-      category: "authorization",
-      detail,
-    });
-  }
-
-  return new BookingRoomFilterSettingsClientError({
-    statusCode: 500,
-    code: "read_model_unavailable",
-    category: "read_model",
-    detail,
-  });
-}
-
-function readContractErrorBody(error: ApiErrorResponse): {
-  statusCode: 401 | 403 | 500;
-  code: BookingRoomFilterSettingsErrorCode;
-  category: BookingRoomFilterSettingsErrorCategory;
-  detail: string;
-} | null {
-  const data = error.data as Partial<{
-    statusCode: unknown;
-    code: unknown;
-    category: unknown;
-    message: unknown;
-  }> | null;
-  if (!data) return null;
-  if (!isBookingRoomFilterSettingsErrorCode(data.code)) return null;
-  if (!isBookingRoomFilterSettingsErrorCategory(data.category)) return null;
-
-  return {
-    statusCode: toContractStatusCode(data.statusCode, error.status),
-    code: data.code,
-    category: data.category,
-    detail:
-      typeof data.message === "string" && data.message.trim()
-        ? data.message
-        : "Booking room-filter settings are unavailable.",
-  };
-}
-
-function readApiErrorDetail(error: ApiErrorResponse): string {
-  const data = error.data as Partial<{ detail: unknown; message: unknown }> | null;
-  const detail = data?.detail;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    const message = detail.map(readApiErrorDetailEntry).filter(Boolean).join(", ");
-    if (message) return message;
-  }
-  if (typeof data?.message === "string") return data.message;
-  return error.message || "Booking room-filter settings are unavailable.";
-}
-
-function readApiErrorDetailEntry(entry: unknown): string {
-  if (typeof entry === "string") return entry;
-  if (entry && typeof entry === "object" && "msg" in entry) {
-    const message = (entry as { msg?: unknown }).msg;
-    return typeof message === "string" ? message : "";
-  }
-  return "";
-}
-
-function toAuthorizationErrorCode(
-  detail: string,
-): Extract<
-  BookingRoomFilterSettingsErrorCode,
-  "missing_permission" | "missing_entitlement" | "inactive_entitlement" | "missing_resource_access"
-> {
-  const normalized = detail.toLowerCase();
-  if (normalized.includes("permission")) return "missing_permission";
-  if (
-    normalized.includes("inactive") ||
-    normalized.includes("suspended") ||
-    normalized.includes("disabled") ||
-    normalized.includes("not active")
-  ) {
-    return "inactive_entitlement";
-  }
-  if (normalized.includes("entitlement")) return "missing_entitlement";
-  return "missing_resource_access";
-}
-
-function toContractStatusCode(bodyStatusCode: unknown, responseStatus: number): 401 | 403 | 500 {
-  if (bodyStatusCode === 401 || bodyStatusCode === 403 || bodyStatusCode === 500) {
-    return bodyStatusCode;
-  }
-  if (responseStatus === 401 || responseStatus === 403) {
-    return responseStatus;
-  }
-  return 500;
-}
-
-function isBookingRoomFilterSettingsErrorCode(
-  value: unknown,
-): value is BookingRoomFilterSettingsErrorCode {
-  return (
-    value === "unauthenticated" ||
-    value === "missing_permission" ||
-    value === "missing_entitlement" ||
-    value === "inactive_entitlement" ||
-    value === "missing_resource_access" ||
-    value === "read_model_unavailable"
+  return new BookingRoomFilterSettingsClientError(
+    toBookingSettingsClientErrorInput(error, {
+      operation,
+      fallbackDetail: "Booking room-filter settings are unavailable.",
+      readNotFound: false,
+    }),
   );
-}
-
-function isBookingRoomFilterSettingsErrorCategory(
-  value: unknown,
-): value is BookingRoomFilterSettingsErrorCategory {
-  return value === "authentication" || value === "authorization" || value === "read_model";
 }
