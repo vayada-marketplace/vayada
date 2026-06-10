@@ -25,8 +25,11 @@ import {
   type PublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
 import {
+  createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
+  type BookingGuestFormSettingsSync,
   type BookingSettingsReadRepository,
+  type BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
 import {
   createCompatibilityPmsBookingReservationsReadRepository,
@@ -142,6 +145,29 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
         spa_access: ["room_102"],
       },
     };
+  },
+};
+
+const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
+  async updateAddonSettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return settings;
+  },
+  async updateGuestFormSettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return settings;
+  },
+  async updateBenefitsSettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return settings;
+  },
+  async updateLocalizationSettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return settings;
+  },
+  async updateRoomFilterSettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return settings;
   },
 };
 
@@ -269,12 +295,17 @@ function buildAuthenticatedApp(
     linkedHotelId?: string;
     reservationsRepository?: BookingReservationsReadRepository;
     settingsRepository?: BookingSettingsReadRepository;
+    settingsWriteRepository?: BookingSettingsWriteRepository;
+    guestFormSettingsSync?: BookingGuestFormSettingsSync;
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
+    bookingSettingsWriteRepository:
+      options.settingsWriteRepository ?? bookingSettingsWriteRepository,
+    bookingGuestFormSettingsSync: options.guestFormSettingsSync,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepositoryWithHotel(options.linkedHotelId),
@@ -1141,6 +1172,470 @@ describe("vayada-api", () => {
     });
   });
 
+  const settingsWriteCases = [
+    {
+      name: "add-on display",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      payload: {
+        showAddonsStep: false,
+        groupAddonsByCategory: true,
+      },
+      expected: {
+        showAddonsStep: false,
+        groupAddonsByCategory: true,
+      },
+    },
+    {
+      name: "guest-form",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+      },
+      expected: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+      },
+    },
+    {
+      name: "benefits",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/benefits",
+      payload: {
+        benefits: [" Free breakfast ", "Late checkout"],
+      },
+      expected: {
+        benefits: ["Free breakfast", "Late checkout"],
+      },
+    },
+    {
+      name: "localization",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      payload: {
+        defaultCurrency: " eur ",
+        defaultLanguage: " en ",
+        supportedCurrencies: ["eur", " usd "],
+        supportedLanguages: ["en", "de"],
+      },
+      expected: {
+        defaultCurrency: "EUR",
+        defaultLanguage: "en",
+        supportedCurrencies: ["USD"],
+        supportedLanguages: ["de"],
+      },
+    },
+    {
+      name: "room-filter",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      payload: {
+        bookingFilters: [" oceanView ", "spa_access"],
+        customFilters: {
+          " spa_access ": " Spa access ",
+        },
+        filterRooms: {
+          " oceanView ": [" room_101 "],
+          spa_access: [" room_102 "],
+        },
+      },
+      expected: {
+        bookingFilters: ["oceanView", "spa_access"],
+        customFilters: {
+          spa_access: "Spa access",
+        },
+        filterRooms: {
+          oceanView: ["room_101"],
+          spa_access: ["room_102"],
+        },
+      },
+    },
+  ] as const;
+
+  for (const writeCase of settingsWriteCases) {
+    it(`updates booking ${writeCase.name} settings with the typed write contract`, async () => {
+      app = buildAuthenticatedApp();
+
+      const response = await injectJson(app, {
+        method: "PUT",
+        url: writeCase.url,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+        payload: writeCase.payload,
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual(writeCase.expected);
+    });
+  }
+
+  it("best-effort syncs guest-form settings writes to PMS after the Booking write succeeds", async () => {
+    const syncCalls: Array<{
+      hotelId: string;
+      settings: {
+        specialRequestsEnabled: boolean;
+        arrivalTimeEnabled: boolean;
+        guestCountEnabled: boolean;
+      };
+      authHeader?: string;
+    }> = [];
+
+    app = buildAuthenticatedApp({
+      guestFormSettingsSync: {
+        async syncGuestFormSettingsByHotelId(hotelId, settings, authHeader) {
+          syncCalls.push({ hotelId, settings, authHeader });
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: true,
+        guestCountEnabled: false,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      specialRequestsEnabled: true,
+      arrivalTimeEnabled: true,
+      guestCountEnabled: false,
+    });
+    expect(syncCalls).toEqual([
+      {
+        hotelId: "booking_hotel_alpenrose",
+        authHeader: "Bearer valid-token",
+        settings: {
+          specialRequestsEnabled: true,
+          arrivalTimeEnabled: true,
+          guestCountEnabled: false,
+        },
+      },
+    ]);
+  });
+
+  it("keeps guest-form writes successful when PMS compatibility sync fails", async () => {
+    app = buildAuthenticatedApp({
+      guestFormSettingsSync: {
+        async syncGuestFormSettingsByHotelId() {
+          throw new Error("pms unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        specialRequestsEnabled: false,
+        arrivalTimeEnabled: true,
+        guestCountEnabled: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      specialRequestsEnabled: false,
+      arrivalTimeEnabled: true,
+      guestCountEnabled: true,
+    });
+  });
+
+  const invalidSettingsWriteCases = [
+    {
+      name: "add-on display",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      payload: {
+        showAddonsStep: true,
+      },
+    },
+    {
+      name: "guest-form",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+        legacyField: true,
+      },
+    },
+    {
+      name: "benefits",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/benefits",
+      payload: {
+        benefits: ["Free breakfast", " Free breakfast "],
+      },
+    },
+    {
+      name: "localization",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      payload: {
+        defaultCurrency: "euro",
+        defaultLanguage: "en",
+        supportedCurrencies: [],
+        supportedLanguages: [],
+      },
+    },
+    {
+      name: "room-filter",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/room-filters",
+      payload: {
+        bookingFilters: [],
+        customFilters: {
+          hidden: "Hidden filter",
+        },
+        filterRooms: {},
+      },
+    },
+  ] as const;
+
+  for (const writeCase of invalidSettingsWriteCases) {
+    it(`rejects invalid booking ${writeCase.name} settings write payloads`, async () => {
+      app = buildAuthenticatedApp();
+
+      const response = await injectJson<Record<string, unknown>>(app, {
+        method: "PUT",
+        url: writeCase.url,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+        payload: writeCase.payload,
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.body).toMatchObject({
+        statusCode: 422,
+        code: "invalid_payload",
+        category: "validation",
+        message: "Booking settings payload is invalid.",
+      });
+      expect(response.body.details).toEqual(expect.any(Array));
+    });
+  }
+
+  const addonWritePayload = {
+    showAddonsStep: true,
+    groupAddonsByCategory: false,
+  };
+
+  it("rejects booking settings writes without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking settings writes with an invalid token", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer invalid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking settings writes when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
+  });
+
+  it("rejects booking settings writes when entitlement is missing", async () => {
+    app = buildAuthenticatedApp({ entitlements: [] });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_entitlement",
+      category: "authorization",
+      message: "Missing active booking engine entitlement.",
+    });
+  });
+
+  it("rejects booking settings writes when entitlement is suspended", async () => {
+    app = buildAuthenticatedApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "inactive_entitlement",
+      category: "authorization",
+      message: "Booking engine entitlement is not active.",
+    });
+  });
+
+  it("rejects booking settings writes when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_other/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
+  it("returns the booking settings write-model not-found contract", async () => {
+    app = buildAuthenticatedApp({
+      settingsWriteRepository: {
+        async updateAddonSettingsByHotelId() {
+          return null;
+        },
+        async updateGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async updateBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async updateLocalizationSettingsByHotelId() {
+          return null;
+        },
+        async updateRoomFilterSettingsByHotelId() {
+          return null;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toEqual({
+      statusCode: 404,
+      code: "not_found",
+      category: "write_model",
+      message: "Booking settings target not found.",
+    });
+  });
+
+  it("returns the booking settings write-model unavailable contract", async () => {
+    app = buildAuthenticatedApp({
+      settingsWriteRepository: {
+        async updateAddonSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+        async updateGuestFormSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+        async updateBenefitsSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+        async updateLocalizationSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+        async updateRoomFilterSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: addonWritePayload,
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "write_model_unavailable",
+      category: "write_model",
+      message: "Booking settings could not be saved.",
+    });
+  });
+
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -1461,6 +1956,46 @@ describe("vayada-api", () => {
     expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
       "Booking settings repository connectionString must not be empty",
     );
+  });
+
+  it("sends guest-form PMS compatibility sync requests with hotel scope and auth", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const sync = createHttpPmsGuestFormSettingsSync({
+      pmsApiUrl: "https://api.pms.localhost/",
+      async fetch(url, init) {
+        calls.push({ url: url.toString(), init });
+        return new Response(null, { status: 200 });
+      },
+    });
+
+    await sync.syncGuestFormSettingsByHotelId(
+      "booking_hotel_alpenrose",
+      {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+      },
+      "Bearer valid-token",
+    );
+
+    expect(calls).toEqual([
+      {
+        url: "https://api.pms.localhost/admin/guest-form-settings",
+        init: {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            "x-hotel-id": "booking_hotel_alpenrose",
+            authorization: "Bearer valid-token",
+          },
+          body: JSON.stringify({
+            special_requests_enabled: true,
+            arrival_time_enabled: false,
+            guest_count_enabled: true,
+          }),
+        },
+      },
+    ]);
   });
 
   it("defaults missing booking addon settings fields to the legacy response defaults", async () => {

@@ -9,7 +9,10 @@ import { type ApiConfig, loadConfig } from "./config.js";
 import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
-import { createPgBookingSettingsReadRepository } from "./routes/bookingSettings.js";
+import {
+  createHttpPmsGuestFormSettingsSync,
+  createPgBookingSettingsReadRepository,
+} from "./routes/bookingSettings.js";
 
 const config = loadConfig();
 
@@ -43,6 +46,18 @@ const publicHotelProfileRepository = config.bookingDatabaseUrl
     })
   : undefined;
 
+const bookingSettingsRepository = config.bookingDatabaseUrl
+  ? createPgBookingSettingsReadRepository({
+      connectionString: config.bookingDatabaseUrl,
+    })
+  : undefined;
+
+const bookingGuestFormSettingsSync = config.pmsApiUrl
+  ? createHttpPmsGuestFormSettingsSync({
+      pmsApiUrl: config.pmsApiUrl,
+    })
+  : undefined;
+
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
   bookingReservationsRepository: config.bookingReservationsReadDatabaseUrl
@@ -50,11 +65,9 @@ const app = buildApp({
         connectionString: config.bookingReservationsReadDatabaseUrl,
       })
     : undefined,
-  bookingSettingsRepository: config.bookingDatabaseUrl
-    ? createPgBookingSettingsReadRepository({
-        connectionString: config.bookingDatabaseUrl,
-      })
-    : undefined,
+  bookingSettingsRepository,
+  bookingSettingsWriteRepository: bookingSettingsRepository,
+  bookingGuestFormSettingsSync,
   publicHotelProfileRepository,
   publicHotelQuoteRepository: publicHotelProfileRepository
     ? createCompatibilityPublicHotelQuoteRepository({
