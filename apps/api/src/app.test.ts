@@ -95,6 +95,17 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       groupAddonsByCategory: true,
     };
   },
+  async findGuestFormSettingsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      specialRequestsEnabled: false,
+      arrivalTimeEnabled: true,
+      guestCountEnabled: true,
+    };
+  },
 };
 
 const reservation: BookingReservationReadModel = {
@@ -294,6 +305,17 @@ describe("vayada-api", () => {
     const response = await injectJson(app, {
       method: "GET",
       url: "/api/booking/hotels/booking_hotel_alpenrose/settings/addons",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("does not expose booking guest-form settings until a read model is configured", async () => {
+    app = buildApp({ logger: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
     });
 
     expect(response.statusCode).toBe(404);
@@ -969,6 +991,25 @@ describe("vayada-api", () => {
     });
   });
 
+  it("returns booking guest-form settings with auth, policy, and the documented legacy-compatible shape", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      specialRequestsEnabled: false,
+      arrivalTimeEnabled: true,
+      guestCountEnabled: true,
+    });
+  });
+
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -1297,6 +1338,9 @@ describe("vayada-api", () => {
         async findAddonSettingsByHotelId() {
           return {};
         },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -1312,6 +1356,38 @@ describe("vayada-api", () => {
     expect(response.body).toEqual({
       showAddonsStep: true,
       groupAddonsByCategory: true,
+    });
+  });
+
+  it("defaults missing booking guest-form settings fields to the legacy response defaults", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return {
+            specialRequestsEnabled: null,
+            arrivalTimeEnabled: null,
+            guestCountEnabled: null,
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      specialRequestsEnabled: true,
+      arrivalTimeEnabled: false,
+      guestCountEnabled: false,
     });
   });
 
@@ -1440,11 +1516,119 @@ describe("vayada-api", () => {
     });
   });
 
+  it("rejects booking guest-form settings without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking guest-form settings when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
+  });
+
+  it("rejects booking guest-form settings when entitlement is missing", async () => {
+    app = buildAuthenticatedApp({ entitlements: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_entitlement",
+      category: "authorization",
+      message: "Missing active booking engine entitlement.",
+    });
+  });
+
+  it("rejects booking guest-form settings when entitlement is suspended", async () => {
+    app = buildAuthenticatedApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "inactive_entitlement",
+      category: "authorization",
+      message: "Booking engine entitlement is not active.",
+    });
+  });
+
+  it("rejects booking guest-form settings when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_other/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
   it("returns the booking addon settings read-model error contract when the repository fails", async () => {
     app = buildAuthenticatedApp({
       settingsRepository: {
         async findAddonSettingsByHotelId() {
           throw new Error("database unavailable");
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
         },
       },
     });
@@ -1463,6 +1647,35 @@ describe("vayada-api", () => {
       code: "read_model_unavailable",
       category: "read_model",
       message: "Booking add-on settings are unavailable.",
+    });
+  });
+
+  it("returns the booking guest-form settings read-model error contract when the repository fails", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "Booking guest-form settings are unavailable.",
     });
   });
 
@@ -1608,6 +1821,26 @@ describe("vayada-api", () => {
       code: "not_found",
       category: "read_model",
       message: "Booking hotel addon settings not found.",
+    });
+  });
+
+  it("returns 404 when the authorized booking hotel has no guest-form settings record", async () => {
+    app = buildAuthenticatedApp({ linkedHotelId: "booking_hotel_missing" });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_missing/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toEqual({
+      statusCode: 404,
+      code: "not_found",
+      category: "read_model",
+      message: "Booking hotel guest-form settings not found.",
     });
   });
 
