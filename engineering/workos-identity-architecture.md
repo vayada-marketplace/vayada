@@ -397,6 +397,8 @@ true:
 
 - VAY-582: Evaluate authentication platform and identity model.
 - VAY-600: Define WorkOS identity architecture.
+- VAY-735: Decide WorkOS rollout configuration and first login surface:
+  [`workos-rollout-configuration.md`](workos-rollout-configuration.md).
 - WorkOS AuthKit sessions:
   https://workos.com/docs/authkit/sessions
 - WorkOS users and organizations:
