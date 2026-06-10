@@ -83,6 +83,31 @@ export const BOOKING_ROOM_FILTER_SETTINGS_CONTRACT = {
   },
 } as const;
 
+export const BOOKING_ADDON_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_ADDON_SETTINGS_CONTRACT,
+  method: "PUT",
+} as const;
+
+export const BOOKING_GUEST_FORM_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_GUEST_FORM_SETTINGS_CONTRACT,
+  method: "PUT",
+} as const;
+
+export const BOOKING_BENEFITS_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_BENEFITS_SETTINGS_CONTRACT,
+  method: "PUT",
+} as const;
+
+export const BOOKING_LOCALIZATION_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_LOCALIZATION_SETTINGS_CONTRACT,
+  method: "PUT",
+} as const;
+
+export const BOOKING_ROOM_FILTER_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_ROOM_FILTER_SETTINGS_CONTRACT,
+  method: "PUT",
+} as const;
+
 export type BookingAddonSettingsReadModel = {
   showAddonsStep?: boolean | null;
   groupAddonsByCategory?: boolean | null;
@@ -158,6 +183,72 @@ export type BookingSettingsReadRepository = {
     hotelId: string,
   ): Promise<BookingRoomFilterSettingsReadModel | null>;
   close?(): Promise<void>;
+};
+
+export type UpdateBookingAddonSettingsBody = BookingAddonSettingsResponse;
+export type UpdateBookingGuestFormSettingsBody = BookingGuestFormSettingsResponse;
+export type UpdateBookingBenefitsSettingsBody = BookingBenefitsSettingsResponse;
+export type UpdateBookingLocalizationSettingsBody = BookingLocalizationSettingsResponse;
+export type UpdateBookingRoomFilterSettingsBody = BookingRoomFilterSettingsResponse;
+
+export type BookingSettingsWriteRepository = {
+  updateAddonSettingsByHotelId(
+    hotelId: string,
+    settings: UpdateBookingAddonSettingsBody,
+  ): Promise<BookingAddonSettingsReadModel | null>;
+  updateGuestFormSettingsByHotelId(
+    hotelId: string,
+    settings: UpdateBookingGuestFormSettingsBody,
+  ): Promise<BookingGuestFormSettingsReadModel | null>;
+  updateBenefitsSettingsByHotelId(
+    hotelId: string,
+    settings: UpdateBookingBenefitsSettingsBody,
+  ): Promise<BookingBenefitsSettingsReadModel | null>;
+  updateLocalizationSettingsByHotelId(
+    hotelId: string,
+    settings: UpdateBookingLocalizationSettingsBody,
+  ): Promise<BookingLocalizationSettingsReadModel | null>;
+  updateRoomFilterSettingsByHotelId(
+    hotelId: string,
+    settings: UpdateBookingRoomFilterSettingsBody,
+  ): Promise<BookingRoomFilterSettingsReadModel | null>;
+  close?(): Promise<void>;
+};
+
+export type BookingGuestFormSettingsSync = {
+  syncGuestFormSettingsByHotelId(
+    hotelId: string,
+    settings: BookingGuestFormSettingsResponse,
+    authHeader?: string,
+  ): Promise<void>;
+  close?(): Promise<void>;
+};
+
+export type BookingSettingsRepository = BookingSettingsReadRepository &
+  BookingSettingsWriteRepository;
+
+export type BookingSettingsWriteErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "validation"
+  | "write_model";
+
+export type BookingSettingsWriteErrorCode =
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "invalid_payload"
+  | "not_found"
+  | "write_model_unavailable";
+
+export type BookingSettingsWriteError = {
+  statusCode: 401 | 403 | 404 | 422 | 500;
+  code: BookingSettingsWriteErrorCode;
+  category: BookingSettingsWriteErrorCategory;
+  message: string;
+  details?: unknown;
 };
 
 export type BookingAddonSettingsErrorCategory = "authentication" | "authorization" | "read_model";
@@ -294,6 +385,26 @@ export type BookingRoomFilterSettingsRequest = {
   query: Record<string, never>;
 };
 
+export type UpdateBookingAddonSettingsRequest = BookingAddonSettingsRequest & {
+  body: UpdateBookingAddonSettingsBody;
+};
+
+export type UpdateBookingGuestFormSettingsRequest = BookingGuestFormSettingsRequest & {
+  body: UpdateBookingGuestFormSettingsBody;
+};
+
+export type UpdateBookingBenefitsSettingsRequest = BookingBenefitsSettingsRequest & {
+  body: UpdateBookingBenefitsSettingsBody;
+};
+
+export type UpdateBookingLocalizationSettingsRequest = BookingLocalizationSettingsRequest & {
+  body: UpdateBookingLocalizationSettingsBody;
+};
+
+export type UpdateBookingRoomFilterSettingsRequest = BookingRoomFilterSettingsRequest & {
+  body: UpdateBookingRoomFilterSettingsBody;
+};
+
 export type BookingAddonSettingsContract = {
   method: typeof BOOKING_ADDON_SETTINGS_CONTRACT.method;
   path: typeof BOOKING_ADDON_SETTINGS_CONTRACT.path;
@@ -334,6 +445,46 @@ export type BookingRoomFilterSettingsContract = {
   error: BookingRoomFilterSettingsError;
 };
 
+export type UpdateBookingAddonSettingsContract = {
+  method: typeof BOOKING_ADDON_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_ADDON_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingAddonSettingsRequest;
+  response: BookingAddonSettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
+export type UpdateBookingGuestFormSettingsContract = {
+  method: typeof BOOKING_GUEST_FORM_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_GUEST_FORM_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingGuestFormSettingsRequest;
+  response: BookingGuestFormSettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
+export type UpdateBookingBenefitsSettingsContract = {
+  method: typeof BOOKING_BENEFITS_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_BENEFITS_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingBenefitsSettingsRequest;
+  response: BookingBenefitsSettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
+export type UpdateBookingLocalizationSettingsContract = {
+  method: typeof BOOKING_LOCALIZATION_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_LOCALIZATION_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingLocalizationSettingsRequest;
+  response: BookingLocalizationSettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
+export type UpdateBookingRoomFilterSettingsContract = {
+  method: typeof BOOKING_ROOM_FILTER_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_ROOM_FILTER_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingRoomFilterSettingsRequest;
+  response: BookingRoomFilterSettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
 type BookingHotelParams = {
   hotelId: string;
 };
@@ -369,7 +520,7 @@ type BookingRoomFilterSettingsRow = {
 export function createPgBookingSettingsReadRepository(config: {
   connectionString: string;
   max?: number;
-}): BookingSettingsReadRepository {
+}): BookingSettingsRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Booking settings repository connectionString must not be empty");
   }
@@ -458,8 +609,156 @@ export function createPgBookingSettingsReadRepository(config: {
         filterRooms: row.filter_rooms,
       };
     },
+    async updateAddonSettingsByHotelId(hotelId, settings) {
+      const result = await pool.query<BookingAddonSettingsRow>(
+        `UPDATE booking_hotels
+         SET show_addons_step = $2,
+             group_addons_by_category = $3
+         WHERE id = $1
+         RETURNING show_addons_step, group_addons_by_category`,
+        [hotelId, settings.showAddonsStep, settings.groupAddonsByCategory],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        showAddonsStep: row.show_addons_step,
+        groupAddonsByCategory: row.group_addons_by_category,
+      };
+    },
+    async updateGuestFormSettingsByHotelId(hotelId, settings) {
+      const result = await pool.query<BookingGuestFormSettingsRow>(
+        `UPDATE booking_hotels
+         SET special_requests_enabled = $2,
+             arrival_time_enabled = $3,
+             guest_count_enabled = $4
+         WHERE id = $1
+         RETURNING special_requests_enabled, arrival_time_enabled, guest_count_enabled`,
+        [
+          hotelId,
+          settings.specialRequestsEnabled,
+          settings.arrivalTimeEnabled,
+          settings.guestCountEnabled,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        specialRequestsEnabled: row.special_requests_enabled,
+        arrivalTimeEnabled: row.arrival_time_enabled,
+        guestCountEnabled: row.guest_count_enabled,
+      };
+    },
+    async updateBenefitsSettingsByHotelId(hotelId, settings) {
+      const result = await pool.query<BookingBenefitsSettingsRow>(
+        `UPDATE booking_hotels
+         SET benefits = $2::jsonb
+         WHERE id = $1
+         RETURNING benefits`,
+        [hotelId, JSON.stringify(settings.benefits)],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        benefits: row.benefits,
+      };
+    },
+    async updateLocalizationSettingsByHotelId(hotelId, settings) {
+      const result = await pool.query<BookingLocalizationSettingsRow>(
+        `UPDATE booking_hotels
+         SET currency = $2,
+             default_language = $3,
+             supported_currencies = $4::jsonb,
+             supported_languages = $5::jsonb
+         WHERE id = $1
+         RETURNING currency, default_language, supported_currencies, supported_languages`,
+        [
+          hotelId,
+          settings.defaultCurrency,
+          settings.defaultLanguage,
+          JSON.stringify(settings.supportedCurrencies),
+          JSON.stringify(settings.supportedLanguages),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        defaultCurrency: row.currency,
+        defaultLanguage: row.default_language,
+        supportedCurrencies: row.supported_currencies,
+        supportedLanguages: row.supported_languages,
+      };
+    },
+    async updateRoomFilterSettingsByHotelId(hotelId, settings) {
+      const result = await pool.query<BookingRoomFilterSettingsRow>(
+        `UPDATE booking_hotels
+         SET booking_filters = $2::jsonb,
+             custom_filters = $3::jsonb,
+             filter_rooms = $4::jsonb
+         WHERE id = $1
+         RETURNING booking_filters, custom_filters, filter_rooms`,
+        [
+          hotelId,
+          JSON.stringify(settings.bookingFilters),
+          JSON.stringify(settings.customFilters),
+          JSON.stringify(settings.filterRooms),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        bookingFilters: row.booking_filters,
+        customFilters: row.custom_filters,
+        filterRooms: row.filter_rooms,
+      };
+    },
     async close() {
       await pool.end();
+    },
+  };
+}
+
+export function createHttpPmsGuestFormSettingsSync(config: {
+  pmsApiUrl: string;
+  fetch?: typeof fetch;
+}): BookingGuestFormSettingsSync {
+  const baseUrl = config.pmsApiUrl.trim().replace(/\/+$/, "");
+  if (!baseUrl) {
+    throw new Error("PMS guest-form settings sync pmsApiUrl must not be empty");
+  }
+
+  const endpoint = `${baseUrl}/admin/guest-form-settings`;
+  new URL(endpoint);
+
+  const fetchImpl = config.fetch ?? fetch;
+  return {
+    async syncGuestFormSettingsByHotelId(hotelId, settings, authHeader) {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "x-hotel-id": hotelId,
+      };
+      if (authHeader?.trim()) {
+        headers.authorization = authHeader;
+      }
+
+      const response = await fetchImpl(endpoint, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          special_requests_enabled: settings.specialRequestsEnabled,
+          arrival_time_enabled: settings.arrivalTimeEnabled,
+          guest_count_enabled: settings.guestCountEnabled,
+        }),
+      });
+
+      if (!response.ok) {
+        const details = await response.text().catch(() => "");
+        throw new Error(`PMS guest-form settings sync failed with ${response.status}: ${details}`);
+      }
     },
   };
 }
@@ -467,9 +766,12 @@ export function createPgBookingSettingsReadRepository(config: {
 export async function registerBookingSettingsRoutes(
   app: FastifyInstance,
   repository: BookingSettingsReadRepository,
+  writeRepository?: BookingSettingsWriteRepository,
+  guestFormSettingsSync?: BookingGuestFormSettingsSync,
 ): Promise<void> {
+  const closeables = new Set([repository, writeRepository, guestFormSettingsSync].filter(Boolean));
   app.addHook("onClose", async () => {
-    await repository.close?.();
+    await Promise.all([...closeables].map((closeable) => closeable?.close?.()));
   });
 
   app.get<{ Params: BookingHotelParams }>(
@@ -657,6 +959,326 @@ export async function registerBookingSettingsRoutes(
       return toRoomFilterSettingsResponse(settings);
     },
   );
+
+  if (!writeRepository) return;
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/addons",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseAddonSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateAddonSettingsByHotelId(hotelId, settings),
+        toResponse: toAddonSettingsResponse,
+      }),
+  );
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/guest-form",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseGuestFormSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateGuestFormSettingsByHotelId(hotelId, settings),
+        afterWrite: async (hotelId, _settings, stored, request) => {
+          if (!guestFormSettingsSync) return;
+          try {
+            await guestFormSettingsSync.syncGuestFormSettingsByHotelId(
+              hotelId,
+              toGuestFormSettingsResponse(stored),
+              request.headers.authorization,
+            );
+          } catch (error) {
+            request.log.warn(
+              { err: error, hotelId },
+              "PMS guest-form settings sync failed after Booking settings write",
+            );
+          }
+        },
+        toResponse: toGuestFormSettingsResponse,
+      }),
+  );
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/benefits",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseBenefitsSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateBenefitsSettingsByHotelId(hotelId, settings),
+        toResponse: toBenefitsSettingsResponse,
+      }),
+  );
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/localization",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseLocalizationSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateLocalizationSettingsByHotelId(hotelId, settings),
+        toResponse: toLocalizationSettingsResponse,
+      }),
+  );
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/room-filters",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseRoomFilterSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateRoomFilterSettingsByHotelId(hotelId, settings),
+        toResponse: toRoomFilterSettingsResponse,
+      }),
+  );
+}
+
+type ValidationResult<T> = { ok: true; value: T } | { ok: false; details: string[] };
+
+async function handleBookingSettingsWrite<TBody, TStored>(input: {
+  request: FastifyRequest<{ Params: BookingHotelParams; Body: unknown }>;
+  reply: FastifyReply;
+  parseBody(body: unknown): ValidationResult<TBody>;
+  write(hotelId: string, settings: TBody): Promise<TStored | null>;
+  afterWrite?(
+    hotelId: string,
+    settings: TBody,
+    stored: TStored,
+    request: FastifyRequest<{ Params: BookingHotelParams; Body: unknown }>,
+  ): Promise<void>;
+  toResponse(settings: TStored): unknown;
+}): Promise<unknown> {
+  const { hotelId } = input.request.params;
+
+  try {
+    enforceBookingSettingsPolicy(input.request, hotelId);
+  } catch (error) {
+    const contractError = toBookingSettingsAccessError(error, input.request, hotelId);
+    if (contractError) {
+      return sendBookingSettingsWriteError(input.reply, contractError);
+    }
+    throw error;
+  }
+
+  const parsed = input.parseBody(input.request.body);
+  if (!parsed.ok) {
+    return sendBookingSettingsWriteError(input.reply, {
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking settings payload is invalid.",
+      details: parsed.details,
+    });
+  }
+
+  let stored: TStored | null;
+  try {
+    stored = await input.write(hotelId, parsed.value);
+  } catch {
+    return sendBookingSettingsWriteError(input.reply, {
+      statusCode: 500,
+      code: "write_model_unavailable",
+      category: "write_model",
+      message: "Booking settings could not be saved.",
+    });
+  }
+
+  if (!stored) {
+    return sendBookingSettingsWriteError(input.reply, {
+      statusCode: 404,
+      code: "not_found",
+      category: "write_model",
+      message: "Booking settings target not found.",
+    });
+  }
+
+  await input.afterWrite?.(hotelId, parsed.value, stored, input.request);
+
+  return input.toResponse(stored);
+}
+
+function parseAddonSettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingAddonSettingsBody> {
+  const parsed = expectStrictObject(body, ["showAddonsStep", "groupAddonsByCategory"]);
+  if (!parsed.ok) return parsed;
+
+  const details: string[] = [];
+  const showAddonsStep = expectBoolean(parsed.value, "showAddonsStep", details);
+  const groupAddonsByCategory = expectBoolean(parsed.value, "groupAddonsByCategory", details);
+
+  if (details.length > 0) return { ok: false, details };
+  return {
+    ok: true,
+    value: {
+      showAddonsStep,
+      groupAddonsByCategory,
+    },
+  };
+}
+
+function parseGuestFormSettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingGuestFormSettingsBody> {
+  const parsed = expectStrictObject(body, [
+    "specialRequestsEnabled",
+    "arrivalTimeEnabled",
+    "guestCountEnabled",
+  ]);
+  if (!parsed.ok) return parsed;
+
+  const details: string[] = [];
+  const specialRequestsEnabled = expectBoolean(parsed.value, "specialRequestsEnabled", details);
+  const arrivalTimeEnabled = expectBoolean(parsed.value, "arrivalTimeEnabled", details);
+  const guestCountEnabled = expectBoolean(parsed.value, "guestCountEnabled", details);
+
+  if (details.length > 0) return { ok: false, details };
+  return {
+    ok: true,
+    value: {
+      specialRequestsEnabled,
+      arrivalTimeEnabled,
+      guestCountEnabled,
+    },
+  };
+}
+
+function parseBenefitsSettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingBenefitsSettingsBody> {
+  const parsed = expectStrictObject(body, ["benefits"]);
+  if (!parsed.ok) return parsed;
+
+  const rawBenefits = parsed.value.benefits;
+  if (!Array.isArray(rawBenefits)) {
+    return { ok: false, details: ["benefits must be an array."] };
+  }
+
+  const benefits: string[] = [];
+  const seen = new Set<string>();
+  const details: string[] = [];
+  rawBenefits.forEach((benefit, index) => {
+    if (typeof benefit !== "string") {
+      details.push(`benefits.${index} must be a string.`);
+      return;
+    }
+
+    const normalized = benefit.trim();
+    if (!normalized) {
+      details.push(`benefits.${index} must not be empty.`);
+      return;
+    }
+    if (seen.has(normalized)) {
+      details.push(`benefits.${index} duplicates another benefit.`);
+      return;
+    }
+
+    seen.add(normalized);
+    benefits.push(normalized);
+  });
+
+  if (details.length > 0) return { ok: false, details };
+  return {
+    ok: true,
+    value: {
+      benefits,
+    },
+  };
+}
+
+function parseLocalizationSettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingLocalizationSettingsBody> {
+  const parsed = expectStrictObject(body, [
+    "defaultCurrency",
+    "defaultLanguage",
+    "supportedCurrencies",
+    "supportedLanguages",
+  ]);
+  if (!parsed.ok) return parsed;
+
+  const details: string[] = [];
+  const defaultCurrency = normalizeCurrencyCode(
+    expectString(parsed.value, "defaultCurrency", details),
+    "defaultCurrency",
+    details,
+  );
+  const defaultLanguage = normalizeLanguageCode(
+    expectString(parsed.value, "defaultLanguage", details),
+    "defaultLanguage",
+    details,
+  );
+  const supportedCurrencies = normalizeCurrencyList(
+    parsed.value.supportedCurrencies,
+    "supportedCurrencies",
+    defaultCurrency,
+    details,
+  );
+  const supportedLanguages = normalizeLanguageList(
+    parsed.value.supportedLanguages,
+    "supportedLanguages",
+    defaultLanguage,
+    details,
+  );
+
+  if (details.length > 0) return { ok: false, details };
+  return {
+    ok: true,
+    value: {
+      defaultCurrency,
+      defaultLanguage,
+      supportedCurrencies,
+      supportedLanguages,
+    },
+  };
+}
+
+function parseRoomFilterSettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingRoomFilterSettingsBody> {
+  const parsed = expectStrictObject(body, ["bookingFilters", "customFilters", "filterRooms"]);
+  if (!parsed.ok) return parsed;
+
+  const details: string[] = [];
+  const bookingFilters = normalizeStringArray(
+    parsed.value.bookingFilters,
+    "bookingFilters",
+    details,
+  );
+  const allowedFilters = new Set(bookingFilters);
+  const customFilters = normalizeStringRecord(parsed.value.customFilters, "customFilters", details);
+  const filterRooms = normalizeStringArrayRecord(parsed.value.filterRooms, "filterRooms", details);
+
+  for (const key of Object.keys(customFilters)) {
+    if (!allowedFilters.has(key)) {
+      details.push(`customFilters.${key} must be present in bookingFilters.`);
+    }
+  }
+  for (const key of Object.keys(filterRooms)) {
+    if (!allowedFilters.has(key)) {
+      details.push(`filterRooms.${key} must be present in bookingFilters.`);
+    }
+  }
+
+  if (details.length > 0) return { ok: false, details };
+  return {
+    ok: true,
+    value: {
+      bookingFilters,
+      customFilters,
+      filterRooms,
+    },
+  };
 }
 
 export function toAddonSettingsResponse(
@@ -770,6 +1392,210 @@ function parseStringArrayRecord(value: unknown): Record<string, string[]> {
   );
 }
 
+function expectStrictObject(
+  value: unknown,
+  expectedKeys: readonly string[],
+): ValidationResult<Record<string, unknown>> {
+  if (!isPlainRecord(value)) {
+    return { ok: false, details: ["body must be an object."] };
+  }
+
+  const details: string[] = [];
+  const expected = new Set(expectedKeys);
+  const keys = Object.keys(value);
+  for (const key of keys) {
+    if (!expected.has(key)) {
+      details.push(`${key} is not allowed.`);
+    }
+  }
+  for (const key of expectedKeys) {
+    if (!Object.hasOwn(value, key)) {
+      details.push(`${key} is required.`);
+    }
+  }
+
+  if (details.length > 0) return { ok: false, details };
+  return { ok: true, value };
+}
+
+function expectBoolean(record: Record<string, unknown>, key: string, details: string[]): boolean {
+  const value = record[key];
+  if (typeof value !== "boolean") {
+    details.push(`${key} must be a boolean.`);
+    return false;
+  }
+  return value;
+}
+
+function expectString(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string | undefined {
+  const value = record[key];
+  if (typeof value !== "string") {
+    details.push(`${key} must be a string.`);
+    return undefined;
+  }
+  return value;
+}
+
+function normalizeCurrencyCode(value: string | undefined, path: string, details: string[]): string {
+  const normalized = value?.trim().toUpperCase() ?? "";
+  if (!/^[A-Z]{3}$/.test(normalized)) {
+    details.push(`${path} must be a three-letter currency code.`);
+  }
+  return normalized;
+}
+
+function normalizeLanguageCode(value: string | undefined, path: string, details: string[]): string {
+  const normalized = value?.trim() ?? "";
+  if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(normalized)) {
+    details.push(`${path} must be a non-empty language code.`);
+  }
+  return normalized;
+}
+
+function normalizeCurrencyList(
+  value: unknown,
+  path: string,
+  defaultCurrency: string,
+  details: string[],
+): string[] {
+  return normalizeUniqueCodeList(value, path, defaultCurrency, details, (entry, entryPath) =>
+    normalizeCurrencyCode(entry, entryPath, details),
+  );
+}
+
+function normalizeLanguageList(
+  value: unknown,
+  path: string,
+  defaultLanguage: string,
+  details: string[],
+): string[] {
+  return normalizeUniqueCodeList(value, path, defaultLanguage, details, (entry, entryPath) =>
+    normalizeLanguageCode(entry, entryPath, details),
+  );
+}
+
+function normalizeUniqueCodeList(
+  value: unknown,
+  path: string,
+  defaultValue: string,
+  details: string[],
+  normalize: (value: string | undefined, path: string) => string,
+): string[] {
+  if (!Array.isArray(value)) {
+    details.push(`${path} must be an array.`);
+    return [];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  value.forEach((entry, index) => {
+    if (typeof entry !== "string") {
+      details.push(`${path}.${index} must be a string.`);
+      return;
+    }
+
+    const normalized = normalize(entry, `${path}.${index}`);
+    if (!normalized || normalized === defaultValue) return;
+    if (seen.has(normalized)) {
+      details.push(`${path}.${index} duplicates another code.`);
+      return;
+    }
+
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result;
+}
+
+function normalizeStringArray(value: unknown, path: string, details: string[]): string[] {
+  if (!Array.isArray(value)) {
+    details.push(`${path} must be an array.`);
+    return [];
+  }
+
+  const result: string[] = [];
+  value.forEach((entry, index) => {
+    if (typeof entry !== "string") {
+      details.push(`${path}.${index} must be a string.`);
+      return;
+    }
+
+    const normalized = entry.trim();
+    if (!normalized) {
+      details.push(`${path}.${index} must not be empty.`);
+      return;
+    }
+    result.push(normalized);
+  });
+  return result;
+}
+
+function normalizeStringRecord(
+  value: unknown,
+  path: string,
+  details: string[],
+): Record<string, string> {
+  if (!isPlainRecord(value)) {
+    details.push(`${path} must be an object.`);
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = rawKey.trim();
+    if (!key) {
+      details.push(`${path} contains an empty key.`);
+      continue;
+    }
+    if (Object.hasOwn(result, key)) {
+      details.push(`${path}.${key} duplicates another key after trimming.`);
+      continue;
+    }
+    if (typeof rawValue !== "string") {
+      details.push(`${path}.${key} must be a string.`);
+      continue;
+    }
+
+    const normalizedValue = rawValue.trim();
+    if (!normalizedValue) {
+      details.push(`${path}.${key} must not be empty.`);
+      continue;
+    }
+    result[key] = normalizedValue;
+  }
+  return result;
+}
+
+function normalizeStringArrayRecord(
+  value: unknown,
+  path: string,
+  details: string[],
+): Record<string, string[]> {
+  if (!isPlainRecord(value)) {
+    details.push(`${path} must be an object.`);
+    return {};
+  }
+
+  const result: Record<string, string[]> = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = rawKey.trim();
+    if (!key) {
+      details.push(`${path} contains an empty key.`);
+      continue;
+    }
+    if (Object.hasOwn(result, key)) {
+      details.push(`${path}.${key} duplicates another key after trimming.`);
+      continue;
+    }
+    result[key] = normalizeStringArray(rawValue, `${path}.${key}`, details);
+  }
+  return result;
+}
+
 function parseJsonIfString(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try {
@@ -814,6 +1640,13 @@ function sendBookingLocalizationSettingsError(
 function sendBookingRoomFilterSettingsError(
   reply: FastifyReply,
   error: BookingRoomFilterSettingsError | BookingSettingsAccessError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingSettingsWriteError(
+  reply: FastifyReply,
+  error: BookingSettingsWriteError | BookingSettingsAccessError,
 ): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }

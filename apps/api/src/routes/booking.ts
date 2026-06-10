@@ -6,7 +6,9 @@ import {
 } from "./bookingReservations.js";
 import {
   registerBookingSettingsRoutes,
+  type BookingGuestFormSettingsSync,
   type BookingSettingsReadRepository,
+  type BookingSettingsWriteRepository,
 } from "./bookingSettings.js";
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -17,6 +19,8 @@ type BookingHotelParams = {
 export type BookingRoutesOptions = {
   reservationsRepository?: BookingReservationsReadRepository;
   settingsRepository?: BookingSettingsReadRepository;
+  settingsWriteRepository?: BookingSettingsWriteRepository;
+  guestFormSettingsSync?: BookingGuestFormSettingsSync;
 };
 
 export async function registerBookingRoutes(
@@ -24,7 +28,12 @@ export async function registerBookingRoutes(
   options: BookingRoutesOptions = {},
 ): Promise<void> {
   if (options.settingsRepository) {
-    await registerBookingSettingsRoutes(app, options.settingsRepository);
+    await registerBookingSettingsRoutes(
+      app,
+      options.settingsRepository,
+      options.settingsWriteRepository,
+      options.guestFormSettingsSync,
+    );
   }
 
   if (options.reservationsRepository) {

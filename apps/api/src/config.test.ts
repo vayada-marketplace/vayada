@@ -55,6 +55,14 @@ describe("api config", () => {
     ).toBe("https://api.pms.localhost");
   });
 
+  it("loads optional PMS admin API config", () => {
+    expect(
+      loadConfig({
+        PMS_API_URL: "https://api.pms.localhost",
+      }).pmsApiUrl,
+    ).toBe("https://api.pms.localhost");
+  });
+
   it("loads optional booking host base config", () => {
     expect(
       loadConfig({

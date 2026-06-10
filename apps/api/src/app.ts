@@ -9,7 +9,11 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastif
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
-import type { BookingSettingsReadRepository } from "./routes/bookingSettings.js";
+import type {
+  BookingGuestFormSettingsSync,
+  BookingSettingsReadRepository,
+  BookingSettingsWriteRepository,
+} from "./routes/bookingSettings.js";
 import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerBookingRoutes } from "./routes/booking.js";
@@ -25,6 +29,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingSettingsRepository?: BookingSettingsReadRepository;
+  bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
+  bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
 };
@@ -65,6 +71,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     prefix: "/api/booking",
     reservationsRepository: options.bookingReservationsRepository,
     settingsRepository: options.bookingSettingsRepository,
+    settingsWriteRepository: options.bookingSettingsWriteRepository,
+    guestFormSettingsSync: options.bookingGuestFormSettingsSync,
   });
 
   return app;
