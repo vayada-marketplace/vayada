@@ -155,7 +155,6 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
-  await page.route("**/admin/benefits", (route) => route.fulfill({ json: { benefits: [] } }));
   await page.route("**/admin/settings/property", (route) =>
     route.fulfill({ json: propertySettings }),
   );

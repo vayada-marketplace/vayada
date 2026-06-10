@@ -34,15 +34,11 @@ test.describe("booking-admin benefits settings cutover", () => {
       await route.fulfill({ json: { benefits: typedBenefits } });
     });
 
-    const legacyWrites: unknown[] = [];
-    await page.route("**/admin/benefits", async (route) => {
-      if (route.request().method() === "PUT") {
-        legacyWrites.push(route.request().postDataJSON());
-        await route.fulfill({ json: { benefits: typedBenefits } });
-        return;
+    const legacyRequests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/admin/benefits") {
+        legacyRequests.push(`${request.method()} ${request.url()}`);
       }
-
-      await route.fulfill({ json: { benefits: [] } });
     });
 
     await page.goto("/booking-flow");
@@ -58,7 +54,7 @@ test.describe("booking-admin benefits settings cutover", () => {
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_BENEFITS_SETTINGS_PATH);
     expect(typedWrites).toEqual([{ benefits: typedBenefits }]);
-    expect(legacyWrites).toEqual([]);
+    expect(legacyRequests).toEqual([]);
 
     await assertHealthy();
   });

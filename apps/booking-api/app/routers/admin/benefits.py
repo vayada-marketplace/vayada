@@ -24,6 +24,11 @@ class BenefitsUpdate(BaseModel):
 # always carries booking_hotels.id — so reads/writes line up regardless
 # of whether the PMS row was created via the multi-hotel-ids unification
 # (id-matched) or predates it (id mismatch but linked by user_id+slug).
+#
+# Retained as a legacy admin endpoint for compatibility until backend
+# contract tests in apps/booking-api/tests/test_benefits.py and any
+# external callers are migrated. booking-admin Booking Flow uses the typed
+# /api/booking/hotels/{hotel_id}/settings/benefits contract instead.
 
 
 @router.get("/benefits", response_model=BenefitsResponse)

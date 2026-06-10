@@ -260,11 +260,6 @@ export const settingsService = {
   updateAddonSettings: (data: Partial<AddonSettings>) =>
     apiClient.patch<AddonSettings>("/admin/settings/addons", data),
 
-  getBenefits: () => apiClient.get<{ benefits: string[] }>("/admin/benefits"),
-
-  updateBenefits: (benefits: string[]) =>
-    apiClient.put<{ benefits: string[] }>("/admin/benefits", { benefits }),
-
   listPromoCodes: () => apiClient.get<PromoCodeItem[]>("/admin/promo-codes"),
 
   createPromoCode: (data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">) =>
