@@ -8,6 +8,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastif
 
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
+import type { AskAuditRepository } from "./routes/ask.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import type {
   BookingGuestFormSettingsSync,
@@ -16,6 +17,7 @@ import type {
 } from "./routes/bookingSettings.js";
 import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
+import { registerAskRoutes } from "./routes/ask.js";
 import { registerBookingRoutes } from "./routes/booking.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -42,6 +44,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
+  askAuditRepository?: AskAuditRepository;
   marketplaceDiscoveryAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
   pmsPublicApiUrl?: string;
@@ -69,6 +72,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
 
   app.register(registerHealthRoutes);
   app.register(registerRouteGroups, { prefix: "/api" });
+  app.register(registerAskRoutes, {
+    prefix: "/api/ai",
+    auditRepository: options.askAuditRepository,
+  });
   if (options.publicHotelProfileRepository) {
     app.register(registerAiHotelRoutes, {
       prefix: "/api/ai",
