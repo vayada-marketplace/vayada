@@ -6,6 +6,9 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
+import { createPgProductAuditSink } from "./platform/productAudit.js";
+import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
@@ -61,6 +64,36 @@ const bookingGuestFormSettingsSync = config.pmsApiUrl
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
+  authSession:
+    config.auth && config.authSession
+      ? {
+          authKitClient: createWorkOSAuthKitClient({
+            apiKey: config.authSession.workosApiKey,
+            clientId: config.authSession.workosClientId,
+            cookiePassword: config.authSession.authCookieSecret,
+          }),
+          identityRepository: createPgIdentityRepository({
+            connectionString: config.auth.databaseUrl,
+          }),
+          lifecycleCommandBus: createPgIdentityLifecycleCommandBus({
+            connectionString: config.auth.databaseUrl,
+          }),
+          productAuditSink: createPgProductAuditSink({
+            connectionString: config.auth.databaseUrl,
+          }),
+          tokenVerifier: createWorkOSVerifier({
+            jwksUrl: config.auth.workosJwksUrl,
+            issuer: config.auth.workosIssuer,
+            audience: config.auth.workosAudience,
+          }),
+          callbackUrl: config.authSession.authCallbackUrl,
+          logoutReturnUrl: config.authSession.authLogoutUrl,
+          allowedOrigins: config.authSession.authAllowedOrigins,
+          requiredOrganizationKind: "platform",
+          cookieSecure: config.authSession.authCookieSecure,
+          cookieDomain: config.authSession.authCookieDomain,
+        }
+      : undefined,
   bookingReservationsRepository: config.bookingReservationsReadDatabaseUrl
     ? createCompatibilityPmsBookingReservationsReadRepository({
         connectionString: config.bookingReservationsReadDatabaseUrl,

@@ -31,6 +31,38 @@ describe("api config", () => {
     ).toThrow("Incomplete auth config");
   });
 
+  it("loads AuthKit session route config when all session env values are present", () => {
+    expect(
+      loadConfig({
+        WORKOS_CLIENT_ID: "client",
+        WORKOS_API_KEY: "sk_test",
+        AUTH_COOKIE_SECRET: "cookie-secret",
+        AUTH_CALLBACK_URL: "https://api.localhost/auth/workos/callback",
+        AUTH_LOGOUT_URL: "https://admin.localhost/login",
+        AUTH_ALLOWED_ORIGINS: "https://admin.localhost, https://api.localhost",
+        AUTH_COOKIE_SECURE: "false",
+        AUTH_COOKIE_DOMAIN: "localhost",
+      }).authSession,
+    ).toEqual({
+      workosClientId: "client",
+      workosApiKey: "sk_test",
+      authCookieSecret: "cookie-secret",
+      authCallbackUrl: "https://api.localhost/auth/workos/callback",
+      authLogoutUrl: "https://admin.localhost/login",
+      authAllowedOrigins: ["https://admin.localhost", "https://api.localhost"],
+      authCookieSecure: false,
+      authCookieDomain: "localhost",
+    });
+  });
+
+  it("rejects partial AuthKit session route config", () => {
+    expect(() =>
+      loadConfig({
+        WORKOS_CLIENT_ID: "client",
+      }),
+    ).toThrow("Incomplete auth session config");
+  });
+
   it("loads optional booking database config", () => {
     expect(
       loadConfig({

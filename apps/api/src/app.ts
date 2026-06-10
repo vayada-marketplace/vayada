@@ -10,6 +10,7 @@ import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import type { AskAuditRepository } from "./routes/ask.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
+import type { AuthSessionRouteOptions } from "./routes/authSession.js";
 import type {
   BookingGuestFormSettingsSync,
   BookingSettingsReadRepository,
@@ -18,6 +19,7 @@ import type {
 import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAskRoutes } from "./routes/ask.js";
+import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import { registerBookingRoutes } from "./routes/booking.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
@@ -37,6 +39,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 
 type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
+  authSession?: AuthSessionRouteOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
@@ -71,6 +74,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
 
   app.register(registerHealthRoutes);
+  if (options.authSession) {
+    app.register(registerAuthSessionRoutes, {
+      prefix: "/auth",
+      ...options.authSession,
+    });
+  }
   app.register(registerRouteGroups, { prefix: "/api" });
   app.register(registerAskRoutes, {
     prefix: "/api/ai",
