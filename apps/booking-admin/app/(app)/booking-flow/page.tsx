@@ -25,6 +25,10 @@ import {
   getBookingGuestFormSettings,
   type BookingGuestFormSettings,
 } from "@/services/api/bookingGuestFormSettingsClient";
+import {
+  getBookingLocalizationSettings,
+  type BookingLocalizationSettings,
+} from "@/services/api/bookingLocalizationSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -95,6 +99,13 @@ const DEFAULT_GUEST_FORM_SETTINGS: BookingGuestFormSettings = {
   specialRequestsEnabled: true,
   arrivalTimeEnabled: false,
   guestCountEnabled: false,
+};
+
+const DEFAULT_LOCALIZATION_SETTINGS: BookingLocalizationSettings = {
+  defaultCurrency: "EUR",
+  defaultLanguage: "en",
+  supportedCurrencies: [],
+  supportedLanguages: [],
 };
 
 function getSelectedBookingHotelId(): string | null {
@@ -196,6 +207,18 @@ export default function BookingFlowPage() {
             );
           })
           .catch(() => DEFAULT_GUEST_FORM_SETTINGS);
+    const localizationSettingsPromise = selectedHotelId
+      ? getBookingLocalizationSettings({ hotelId: selectedHotelId }).catch(
+          () => DEFAULT_LOCALIZATION_SETTINGS,
+        )
+      : propertyPromise
+          .then((property) => {
+            if (!property?.id) return DEFAULT_LOCALIZATION_SETTINGS;
+            return getBookingLocalizationSettings({ hotelId: property.id }).catch(
+              () => DEFAULT_LOCALIZATION_SETTINGS,
+            );
+          })
+          .catch(() => DEFAULT_LOCALIZATION_SETTINGS);
 
     Promise.all([
       settingsService.listAddons().catch(() => []),
@@ -215,11 +238,21 @@ export default function BookingFlowPage() {
       ),
       settingsService.getBenefits().catch(() => ({ benefits: [] })),
       guestFormSettingsPromise,
+      localizationSettingsPromise,
       propertyPromise,
       settingsService.listPromoCodes().catch(() => []),
     ])
       .then(
-        ([addonList, settings, design, benefitsRes, guestFormSettings, property, promoList]) => {
+        ([
+          addonList,
+          settings,
+          design,
+          benefitsRes,
+          guestFormSettings,
+          localizationSettings,
+          property,
+          promoList,
+        ]) => {
           setAddons(addonList);
           setAddonSettings(settings);
           setPromoCodes(promoList);
@@ -227,6 +260,10 @@ export default function BookingFlowPage() {
           setSpecialRequestsEnabled(guestFormSettings.specialRequestsEnabled);
           setArrivalTimeEnabled(guestFormSettings.arrivalTimeEnabled);
           setGuestCountEnabled(guestFormSettings.guestCountEnabled);
+          setDefaultCurrency(localizationSettings.defaultCurrency);
+          setDefaultLanguage(localizationSettings.defaultLanguage);
+          setSupportedCurrencies(localizationSettings.supportedCurrencies);
+          setSupportedLanguages(localizationSettings.supportedLanguages);
           if (design.booking_filters) {
             setBookingFilters(design.booking_filters);
             setFiltersEnabled(design.booking_filters.length > 0);
@@ -236,13 +273,6 @@ export default function BookingFlowPage() {
           }
           if (design.filter_rooms) {
             setFilterRooms(design.filter_rooms);
-          }
-          // Populate currency and language settings
-          if (property) {
-            setDefaultCurrency(property.default_currency || "EUR");
-            setDefaultLanguage(property.default_language || "en");
-            setSupportedCurrencies(property.supported_currencies || []);
-            setSupportedLanguages(property.supported_languages || []);
           }
           // Fetch rooms from PMS
           if (property?.slug) {

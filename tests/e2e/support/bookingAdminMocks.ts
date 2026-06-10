@@ -4,6 +4,7 @@ export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
+export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -28,6 +29,13 @@ export interface BookingAdminGuestFormSettingsFixture {
   guestCountEnabled: boolean;
 }
 
+export interface BookingAdminLocalizationSettingsFixture {
+  defaultCurrency: string;
+  defaultLanguage: string;
+  supportedCurrencies: string[];
+  supportedLanguages: string[];
+}
+
 export interface BookingAdminShellMocksOptions {
   propertySettings?: BookingAdminPropertySettingsFixture;
 }
@@ -35,6 +43,7 @@ export interface BookingAdminShellMocksOptions {
 export interface BookingAdminBookingFlowMocksOptions {
   addonSettings?: BookingAdminAddonSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
+  localizationSettings?: BookingAdminLocalizationSettingsFixture;
 }
 
 export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFixture = {
@@ -58,6 +67,13 @@ const defaultGuestFormSettings: BookingAdminGuestFormSettingsFixture = {
   specialRequestsEnabled: true,
   arrivalTimeEnabled: false,
   guestCountEnabled: false,
+};
+
+const defaultLocalizationSettings: BookingAdminLocalizationSettingsFixture = {
+  defaultCurrency: "EUR",
+  defaultLanguage: "en",
+  supportedCurrencies: [],
+  supportedLanguages: [],
 };
 
 export async function mockBookingAdminAuthenticatedSession(page: Page): Promise<void> {
@@ -136,5 +152,8 @@ export async function mockBookingAdminBookingFlow(
   );
   await page.route(`**${BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.guestFormSettings ?? defaultGuestFormSettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({ json: options.localizationSettings ?? defaultLocalizationSettings }),
   );
 }
