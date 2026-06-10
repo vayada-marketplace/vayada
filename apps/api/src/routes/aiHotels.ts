@@ -11,6 +11,7 @@ import pg from "pg";
 
 export type PublicHotelProfileRepository = {
   findProfileBySlug(slug: string): Promise<PublicBookabilityProfileProjection | null>;
+  findProfileByCustomDomain?(domain: string): Promise<PublicBookabilityProfileProjection | null>;
   close?(): Promise<void>;
 };
 
@@ -96,6 +97,26 @@ export function createPgPublicHotelProfileRepository(config: {
          FROM booking_hotels
          WHERE slug = $1`,
         [slug],
+      );
+      const row = result.rows[0];
+      return row
+        ? toPublicHotelProfileProjection(row, new Date().toISOString(), {
+            bookingHostBase: config.bookingHostBase,
+          })
+        : null;
+    },
+    async findProfileByCustomDomain(domain) {
+      const result = await pool.query<BookingHotelProfileRow>(
+        `SELECT id, name, slug, description, location, country, currency,
+                supported_currencies, hero_image, images, amenities,
+                check_in_time, check_out_time, timezone, default_language,
+                supported_languages, custom_domain, instant_book,
+                online_card_payment, pay_at_property_enabled,
+                free_cancellation_days, terms_text, cancellation_policy_text,
+                updated_at
+         FROM booking_hotels
+         WHERE custom_domain = lower($1)`,
+        [domain],
       );
       const row = result.rows[0];
       return row

@@ -75,6 +75,8 @@ const app = buildApp({
         pmsPublicApiUrl: config.pmsPublicApiUrl,
       })
     : undefined,
+  bookingPublicApiUrl: config.bookingPublicApiUrl,
+  pmsPublicApiUrl: config.pmsPublicApiUrl,
 });
 
 try {
