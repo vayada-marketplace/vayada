@@ -42,6 +42,71 @@ const hotel = {
   mapViewEnabled: false,
 };
 
+const publicHotelProfile = {
+  contractVersion: "public-bookability.v1",
+  generatedAt: "2026-06-06T11:00:00.000Z",
+  publicVisibility: "public_safe",
+  hotel: {
+    propertyId: hotel.id,
+    slug: hotel.slug,
+    name: hotel.name,
+    canonicalUrl: hotel.canonicalUrl,
+    bookingBaseUrl: hotel.bookingBaseUrl,
+    customDomainUrl: hotel.customDomainUrl,
+    timezone: hotel.timezone,
+    defaultLocale: hotel.defaultLanguage,
+    supportedLocales: hotel.supportedLanguages,
+    defaultCurrency: hotel.currency,
+    supportedCurrencies: hotel.supportedCurrencies,
+    location: {
+      country: hotel.country,
+      city: hotel.location,
+      region: null,
+      latitude: null,
+      longitude: null,
+    },
+    summary: hotel.description,
+    images: hotel.images.map((url) => ({ url, alt: hotel.name })),
+    amenities: hotel.amenities,
+    policies: {
+      checkInFrom: hotel.checkInTime,
+      checkOutUntil: hotel.checkOutTime,
+      cancellationSummary: null,
+      termsUrl: null,
+    },
+    capabilities: {
+      instantBook: hotel.instantBook,
+      onlinePayment: true,
+      payAtProperty: true,
+      promoCodes: true,
+      referralCodes: hotel.referAGuestEnabled,
+      bookingDeepLinks: true,
+    },
+    supportedQuoteParameters: {
+      minRooms: 1,
+      maxRooms: 4,
+      minAdults: 1,
+      maxAdults: 8,
+      childrenSupported: true,
+      supportedCurrencies: hotel.supportedCurrencies,
+      supportedLocales: hotel.supportedLanguages,
+    },
+    trust: {
+      profileComplete: true,
+      profileVerified: true,
+      domainVerified: true,
+      bookabilityStatus: "bookable",
+      reasonCodes: [],
+    },
+  },
+  freshness: {
+    status: "fresh",
+    generatedAt: "2026-06-06T11:00:00.000Z",
+    sources: [],
+  },
+  dataSources: ["hotel_catalog", "booking", "pms", "distribution"],
+};
+
 const rooms = [
   {
     id: "alpine-suite",
@@ -101,9 +166,145 @@ const rooms = [
   },
 ];
 
+const publicOffers = {
+  contractVersion: "public-bookability.v1",
+  generatedAt: "2026-06-06T11:00:00.000Z",
+  publicVisibility: "public_safe",
+  request: {
+    hotelSlug: SEEDED_BOOKING_SLUG,
+    checkIn: "2026-09-12",
+    checkOut: "2026-09-15",
+    nights: 3,
+    adults: 2,
+    children: 0,
+    rooms: 1,
+    currency: "EUR",
+    locale: "en",
+    promoCode: null,
+    referralCode: null,
+  },
+  status: "bookable",
+  unavailableReasons: [],
+  quote: {
+    quoteId: "quote_alpenrose_001",
+    quoteHash: "sha256:booking-web-smoke",
+    expiresAt: "2026-09-12T12:00:00.000Z",
+    priceGuarantee: "instant",
+    offers: [
+      {
+        offerId: "alpine-suite_flexible",
+        roomTypeId: "alpine-suite",
+        ratePlanId: "flexible",
+        name: "Alpine Suite",
+        occupancy: {
+          maxAdults: 3,
+          maxChildren: 1,
+        },
+        availableRooms: 2,
+        refundable: true,
+        mealPlan: "Breakfast",
+        paymentOptions: ["card", "pay_at_property"],
+        totals: {
+          currency: "EUR",
+          roomTotal: 720,
+          taxesAndFees: 0,
+          discounts: 0,
+          grandTotal: 720,
+        },
+        policies: {
+          cancellation: "free_until_7_days",
+          deposit: "No deposit required",
+        },
+        bookingUrl:
+          "http://hotel-alpenrose.booking.localhost:3002/en/book?room_type=alpine-suite&rate_plan=flexible&quote_id=quote_alpenrose_001",
+      },
+      {
+        offerId: "alpine-suite_nonrefundable",
+        roomTypeId: "alpine-suite",
+        ratePlanId: "nonrefundable",
+        name: "Alpine Suite - Non-refundable",
+        occupancy: {
+          maxAdults: 3,
+          maxChildren: 1,
+        },
+        availableRooms: 2,
+        refundable: false,
+        mealPlan: "Breakfast",
+        paymentOptions: ["card"],
+        totals: {
+          currency: "EUR",
+          roomTotal: 630,
+          taxesAndFees: 0,
+          discounts: 0,
+          grandTotal: 630,
+        },
+        policies: {
+          cancellation: "Non-refundable from booking",
+          deposit: "No deposit required",
+        },
+        bookingUrl:
+          "http://hotel-alpenrose.booking.localhost:3002/en/book?room_type=alpine-suite&rate_plan=nonrefundable&quote_id=quote_alpenrose_001",
+      },
+      {
+        offerId: "garden-room_flexible",
+        roomTypeId: "garden-room",
+        ratePlanId: "flexible",
+        name: "Garden Room",
+        occupancy: {
+          maxAdults: 2,
+          maxChildren: 1,
+        },
+        availableRooms: 0,
+        refundable: true,
+        mealPlan: null,
+        paymentOptions: ["card", "pay_at_property"],
+        totals: {
+          currency: "EUR",
+          roomTotal: 480,
+          taxesAndFees: 0,
+          discounts: 0,
+          grandTotal: 480,
+        },
+        policies: {
+          cancellation: "free_until_7_days",
+          deposit: "No deposit required",
+        },
+        bookingUrl:
+          "http://hotel-alpenrose.booking.localhost:3002/en/book?room_type=garden-room&rate_plan=flexible&quote_id=quote_alpenrose_001",
+      },
+    ],
+  },
+  freshness: {
+    status: "fresh",
+    generatedAt: "2026-06-06T11:00:00.000Z",
+    sources: [],
+  },
+  dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+};
+
 export async function mockBookingApis(page: Page) {
   await page.route("**/api/events", async (route) => {
     await route.fulfill({ status: 204, body: "" });
+  });
+
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}**`, async (route) => {
+    await route.fulfill({ json: publicHotelProfile });
+  });
+
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/offers**`, async (route) => {
+    await route.fulfill({ json: publicOffers });
+  });
+
+  await page.route(`**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/calendar**`, async (route) => {
+    await route.fulfill({
+      json: {
+        calendar: {
+          unavailableDates: [],
+          minStayByArrival: {},
+          maxStayByArrival: {},
+        },
+      },
+    });
   });
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}`, async (route) => {

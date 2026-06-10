@@ -1,0 +1,325 @@
+import type { Hotel, RoomType } from "@/lib/types";
+
+import { bookingWebPublic } from "./client";
+
+const FALLBACK_IMAGE = "/vayada-logo.png";
+
+export type BookingWebPublicHotelResponse = {
+  hotel: {
+    propertyId: string;
+    slug: string;
+    name: string;
+    canonicalUrl: string;
+    bookingBaseUrl: string;
+    customDomainUrl: string | null;
+    timezone: string;
+    defaultLocale: string;
+    supportedLocales: string[];
+    defaultCurrency: string;
+    supportedCurrencies: string[];
+    location: {
+      country: string;
+      city: string;
+      region: string | null;
+      latitude: number | null;
+      longitude: number | null;
+    };
+    summary: string | null;
+    images: Array<{ url: string; alt: string | null }>;
+    amenities: string[];
+    policies: {
+      checkInFrom: string | null;
+      checkOutUntil: string | null;
+      cancellationSummary: string | null;
+      termsUrl: string | null;
+    };
+    capabilities: {
+      instantBook: boolean;
+      onlinePayment: boolean;
+      payAtProperty: boolean;
+      promoCodes: boolean;
+      referralCodes: boolean;
+      bookingDeepLinks: boolean;
+    };
+  };
+};
+
+export type BookingWebPublicOffer = {
+  offerId: string;
+  roomTypeId: string;
+  ratePlanId: string | null;
+  name: string;
+  occupancy: {
+    maxAdults: number;
+    maxChildren: number;
+  };
+  availableRooms: number;
+  refundable: boolean;
+  mealPlan: string | null;
+  paymentOptions: string[];
+  totals: {
+    currency: string;
+    roomTotal: number;
+    taxesAndFees: number;
+    discounts: number;
+    grandTotal: number;
+  };
+  policies: {
+    cancellation: string | null;
+    deposit: string | null;
+  };
+  bookingUrl: string;
+};
+
+export type BookingWebPublicOffersResponse = {
+  request: {
+    nights: number;
+    rooms: number;
+  };
+  status: "bookable" | "unavailable" | "stale";
+  quote?: {
+    offers: BookingWebPublicOffer[];
+  };
+};
+
+export type BookingWebPublicCalendarResponse = {
+  calendar: {
+    unavailableDates: string[];
+    minStayByArrival: Record<string, number>;
+    maxStayByArrival: Record<string, number>;
+  };
+};
+
+export type BookingWebPublicHostResponse = {
+  slug: string;
+  canonicalUrl: string;
+  bookingBaseUrl: string;
+  customDomainUrl: string | null;
+  shouldRedirect: boolean;
+  redirectUrl: string | null;
+  redirectStatus: 308 | null;
+  hotel: {
+    slug: string;
+    name: string;
+    defaultLocale: string;
+    supportedLocales: string[];
+  };
+};
+
+export const bookingWebPublicApi = {
+  async resolveHost(host: string): Promise<BookingWebPublicHostResponse> {
+    return bookingWebPublic.get<BookingWebPublicHostResponse>(
+      `/api/booking-web/hosts/${encodeURIComponent(host)}`,
+    );
+  },
+
+  async getHotel(
+    slug: string,
+    query: { locale?: string } = {},
+  ): Promise<BookingWebPublicHotelResponse> {
+    const params = new URLSearchParams();
+    if (query.locale) params.set("locale", query.locale);
+    const qs = params.toString();
+    return bookingWebPublic.get<BookingWebPublicHotelResponse>(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  async getOffers(
+    slug: string,
+    query: {
+      checkIn: string;
+      checkOut: string;
+      adults?: number;
+      children?: number;
+      rooms?: number;
+      currency?: string;
+      locale?: string;
+    },
+  ): Promise<BookingWebPublicOffersResponse> {
+    const params = new URLSearchParams({
+      check_in: query.checkIn,
+      check_out: query.checkOut,
+      rooms: String(query.rooms || 1),
+    });
+    if (query.adults) params.set("adults", String(query.adults));
+    if (query.children !== undefined) params.set("children", String(query.children));
+    if (query.currency) params.set("currency", query.currency);
+    if (query.locale) params.set("locale", query.locale);
+    return bookingWebPublic.get<BookingWebPublicOffersResponse>(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/offers?${params.toString()}`,
+    );
+  },
+
+  async getCalendar(
+    slug: string,
+    start: string,
+    end: string,
+  ): Promise<BookingWebPublicCalendarResponse> {
+    const params = new URLSearchParams({ start, end });
+    return bookingWebPublic.get<BookingWebPublicCalendarResponse>(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/calendar?${params.toString()}`,
+    );
+  },
+};
+
+export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
+  const hotel = data.hotel;
+  const images = hotel.images.map((image) => image.url).filter(Boolean);
+  const heroImage = images[0] || FALLBACK_IMAGE;
+
+  return {
+    id: hotel.propertyId,
+    name: hotel.name,
+    slug: hotel.slug,
+    canonicalUrl: hotel.canonicalUrl,
+    bookingBaseUrl: hotel.bookingBaseUrl,
+    customDomainUrl: hotel.customDomainUrl,
+    description: hotel.summary || "",
+    location: [hotel.location.city, hotel.location.region].filter(Boolean).join(", "),
+    country: hotel.location.country,
+    starRating: 0,
+    currency: hotel.defaultCurrency,
+    supportedCurrencies: hotel.supportedCurrencies,
+    heroImage,
+    images: images.length > 0 ? images : [heroImage],
+    amenities: hotel.amenities,
+    checkInTime: hotel.policies.checkInFrom || "",
+    checkOutTime: hotel.policies.checkOutUntil || "",
+    timezone: hotel.timezone,
+    contact: {
+      address: "",
+      phone: "",
+      email: "",
+    },
+    bookingFilters: [],
+    customFilters: {},
+    filterRooms: {},
+    socialLinks: {},
+    defaultLanguage: hotel.defaultLocale,
+    supportedLanguages: hotel.supportedLocales,
+    referAGuestEnabled: hotel.capabilities.referralCodes,
+    instantBook: hotel.capabilities.instantBook,
+    mapViewEnabled: false,
+    showRoomDetailMap: false,
+    pointsOfInterest: [],
+  };
+}
+
+export function toLegacyRooms(
+  data: BookingWebPublicOffersResponse,
+  displayRooms: RoomType[] = [],
+): RoomType[] {
+  const offers = data.quote?.offers || [];
+  const grouped = new Map<string, BookingWebPublicOffer[]>();
+  const displayRoomById = new Map(displayRooms.map((room) => [room.id, room]));
+  for (const offer of offers) {
+    const existing = grouped.get(offer.roomTypeId) || [];
+    existing.push(offer);
+    grouped.set(offer.roomTypeId, existing);
+  }
+
+  return Array.from(grouped.entries()).map(([roomTypeId, roomOffers]) => {
+    const flexible = roomOffers.find((offer) => offer.refundable) || roomOffers[0]!;
+    const nonRefundable = roomOffers.find((offer) => !offer.refundable) || null;
+    const displayRoom = displayRoomById.get(roomTypeId);
+    const nights = Math.max(data.request.nights || 1, 1);
+    const rooms = Math.max(data.request.rooms || 1, 1);
+    const baseRate = nightlyRoomRate(flexible.totals.roomTotal, nights, rooms);
+    const nonRefundableRate = nonRefundable
+      ? nightlyRoomRate(nonRefundable.totals.roomTotal, nights, rooms)
+      : null;
+    const maxAdults = flexible.occupancy.maxAdults;
+    const maxChildren = flexible.occupancy.maxChildren;
+
+    return {
+      ...displayRoom,
+      id: roomTypeId,
+      name: displayRoom?.name || roomName(flexible.name),
+      category: displayRoom?.category || "",
+      description: displayRoom?.description || flexible.policies.cancellation || flexible.name,
+      shortDescription:
+        displayRoom?.shortDescription ||
+        flexible.mealPlan ||
+        flexible.policies.cancellation ||
+        flexible.name,
+      maxOccupancy: Math.max(maxAdults + maxChildren, maxAdults, 1),
+      maxAdults,
+      maxChildren,
+      size: displayRoom?.size || 0,
+      baseRate,
+      nonRefundableRate,
+      nightlyRates: Array.from({ length: nights }, () => baseRate),
+      nonRefundableNightlyRates:
+        nonRefundableRate === null
+          ? undefined
+          : Array.from({ length: nights }, () => nonRefundableRate),
+      currency: flexible.totals.currency,
+      amenities: displayRoom?.amenities?.length
+        ? displayRoom.amenities
+        : flexible.mealPlan
+          ? [flexible.mealPlan]
+          : [],
+      images: displayRoom?.images?.length ? displayRoom.images : [FALLBACK_IMAGE],
+      bedType: displayRoom?.bedType || "",
+      remainingRooms: Math.max(0, flexible.availableRooms),
+      features: displayRoom?.features || [],
+      benefits: displayRoom?.benefits || [],
+      flexibleRateEnabled: Boolean(roomOffers.find((offer) => offer.refundable)),
+      cancellationPolicy: flexible.policies.cancellation || undefined,
+      ratePaymentMethods: {
+        flexible: flexible.paymentOptions,
+        ...(nonRefundable ? { nonrefundable: nonRefundable.paymentOptions } : {}),
+      },
+      rateDepositSettings: {
+        flexible: depositSettings(flexible.policies.deposit),
+        ...(nonRefundable
+          ? { nonrefundable: depositSettings(nonRefundable.policies.deposit) }
+          : {}),
+      },
+    };
+  });
+}
+
+export function toLegacyCalendar(data: BookingWebPublicCalendarResponse): {
+  dates: string[];
+  minStayByArrival: Record<string, number>;
+  maxStayByArrival: Record<string, number>;
+} {
+  return {
+    dates: data.calendar.unavailableDates,
+    minStayByArrival: data.calendar.minStayByArrival,
+    maxStayByArrival: data.calendar.maxStayByArrival,
+  };
+}
+
+export function defaultOfferDates(): { checkIn: string; checkOut: string } {
+  const today = new Date();
+  const checkIn = new Date(today);
+  checkIn.setDate(today.getDate() + 1);
+  const checkOut = new Date(today);
+  checkOut.setDate(today.getDate() + 2);
+  return {
+    checkIn: checkIn.toISOString().slice(0, 10),
+    checkOut: checkOut.toISOString().slice(0, 10),
+  };
+}
+
+function nightlyRoomRate(total: number, nights: number, rooms: number): number {
+  return Math.round((total / Math.max(nights * rooms, 1)) * 100) / 100;
+}
+
+function roomName(value: string): string {
+  return value.replace(/\s+-\s+Non-refundable$/i, "");
+}
+
+function depositSettings(summary: string | null): { enabled: boolean; percentage: number | null } {
+  if (!summary || /no deposit/i.test(summary)) {
+    return { enabled: false, percentage: null };
+  }
+  const percentage = summary.match(/(\d+(?:\.\d+)?)%/);
+  return {
+    enabled: true,
+    percentage: percentage ? Number(percentage[1]) : null,
+  };
+}

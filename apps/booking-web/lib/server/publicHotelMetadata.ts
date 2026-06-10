@@ -26,6 +26,31 @@ export type PublicHotelMetadata = {
   supportedLanguages?: string[];
 };
 
+type PublicHotelProfileResponse = {
+  hotel: {
+    slug: string;
+    name: string;
+    description?: string | null;
+    summary?: string | null;
+    country?: string;
+    location: {
+      country: string;
+      city: string;
+      region?: string | null;
+    };
+    starRating?: number;
+    canonicalUrl: string;
+    bookingBaseUrl: string;
+    customDomainUrl: string | null;
+    images: Array<{ url: string; alt?: string | null }>;
+    policies: {
+      checkInFrom: string | null;
+      checkOutUntil: string | null;
+    };
+    supportedLocales: string[];
+  };
+};
+
 export const fallbackHotelMetadata: Metadata = {
   title: "Book Your Stay",
   description: "Book your perfect hotel stay.",
@@ -36,12 +61,19 @@ export async function fetchPublicHotel(
   slug: string,
   locale: string,
 ): Promise<PublicHotelMetadata | null> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
-  const langParam = locale !== "en" ? `?lang=${locale}` : "";
+  const apiUrl = process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL || "https://api.localhost";
+  const params = new URLSearchParams();
+  if (locale) params.set("locale", locale);
+  const qs = params.toString();
   try {
-    const res = await fetch(`${apiUrl}/api/hotels/${slug}${langParam}`, { cache: "no-store" });
+    const res = await fetch(
+      `${apiUrl}/api/booking-web/hotels/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`,
+      {
+        cache: "no-store",
+      },
+    );
     if (!res.ok) return null;
-    return (await res.json()) as PublicHotelMetadata;
+    return toPublicHotelMetadata((await res.json()) as PublicHotelProfileResponse);
   } catch {
     return null;
   }
@@ -120,4 +152,23 @@ function supportedRoutingLocales(locales: string[] | undefined, fallbackLocale: 
   return routing.locales.includes(fallbackLocale as (typeof routing.locales)[number])
     ? [fallbackLocale]
     : [routing.defaultLocale];
+}
+
+function toPublicHotelMetadata(data: PublicHotelProfileResponse): PublicHotelMetadata {
+  const hotel = data.hotel;
+  const images = hotel.images.map((image) => image.url).filter(Boolean);
+  return {
+    name: hotel.name,
+    slug: hotel.slug,
+    description: hotel.summary || hotel.description || undefined,
+    country: hotel.location.country || hotel.country,
+    location: [hotel.location.city, hotel.location.region].filter(Boolean).join(", "),
+    starRating: hotel.starRating || 0,
+    heroImage: images[0],
+    images,
+    checkInTime: hotel.policies.checkInFrom || undefined,
+    checkOutTime: hotel.policies.checkOutUntil || undefined,
+    customDomainUrl: hotel.customDomainUrl,
+    supportedLanguages: hotel.supportedLocales,
+  };
 }

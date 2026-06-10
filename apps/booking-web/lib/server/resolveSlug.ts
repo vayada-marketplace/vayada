@@ -1,3 +1,5 @@
+import { bookingWebPublicApi } from "@/services/api/bookingWebPublic";
+
 /**
  * Server-side hostname → hotel-slug resolver. Mirrors the client-edge
  * middleware so the locale layout and generateMetadata can share one
@@ -48,16 +50,9 @@ export async function resolveSlugFromHost(hostname: string): Promise<string | nu
     return sub || process.env.NEXT_PUBLIC_HOTEL_SLUG || null;
   }
 
-  // Custom domain — resolve via the booking-engine API.
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
   try {
-    const res = await fetch(`${apiUrl}/api/resolve-domain?domain=${encodeURIComponent(host)}`, {
-      cache: "no-store",
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.slug) return data.slug as string;
-    }
+    const data = await bookingWebPublicApi.resolveHost(host);
+    if (data?.slug) return data.slug;
   } catch {
     // fall through
   }

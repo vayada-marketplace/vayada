@@ -1,12 +1,12 @@
 /**
  * One ApiClient class, instantiated once per backend:
- *   - bookingEngine: marketing/CMS backend at NEXT_PUBLIC_API_URL
- *   - pms:           reservations/inventory backend at NEXT_PUBLIC_PMS_URL
+ *   - bookingWebPublic: TypeScript public Booking Web read API
+ *   - bookingEngine:   legacy booking API for checkout-adjacent calls
+ *   - pms:             legacy PMS API for checkout/inventory calls not yet cut over
  *
- * The two backends serve different routes (hotel info & promo codes live on
- * the booking engine; rooms, bookings, and payment settings live on the PMS),
- * so callers must pick the right namespace. The PMS_URL falls back to the
- * booking-engine URL for environments where one process serves both.
+ * Callers must pick the right namespace until the Booking Web cutover is
+ * complete. The PMS_URL falls back to the booking-engine URL for environments
+ * where one process serves both.
  */
 
 class ApiError extends Error {
@@ -28,7 +28,7 @@ class ApiClient {
 
   async get<T>(path: string): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`);
-    return parse<T>(res, "GET");
+    return parse<T>(res);
   }
 
   async post<T>(path: string, body?: unknown): Promise<T> {
@@ -37,7 +37,7 @@ class ApiClient {
       headers: { "Content-Type": "application/json" },
       ...(body !== undefined && { body: JSON.stringify(body) }),
     });
-    return parse<T>(res, "POST");
+    return parse<T>(res);
   }
 }
 
@@ -60,7 +60,7 @@ function messageFromDetail(detail: unknown): string | null {
   return null;
 }
 
-async function parse<T>(res: Response, _method: string): Promise<T> {
+async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail: unknown = null;
     try {
@@ -78,7 +78,10 @@ async function parse<T>(res: Response, _method: string): Promise<T> {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || API_URL;
+const BOOKING_WEB_PUBLIC_API_URL =
+  process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL || "https://api.localhost";
 
+export const bookingWebPublic = new ApiClient(BOOKING_WEB_PUBLIC_API_URL);
 export const bookingEngine = new ApiClient(API_URL);
 export const pms = new ApiClient(PMS_URL);
 export { ApiError };

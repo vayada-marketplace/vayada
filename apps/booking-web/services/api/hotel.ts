@@ -1,10 +1,16 @@
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { bookingEngine, pms } from "./client";
+import {
+  bookingWebPublicApi,
+  defaultOfferDates,
+  toLegacyCalendar,
+  toLegacyHotel,
+  toLegacyRooms,
+} from "./bookingWebPublic";
 
 export const hotelService = {
   async getHotel(slug: string, locale: string = "en"): Promise<Hotel> {
-    const langParam = locale !== "en" ? `?lang=${locale}` : "";
-    return bookingEngine.get<Hotel>(`/api/hotels/${slug}${langParam}`);
+    return toLegacyHotel(await bookingWebPublicApi.getHotel(slug, { locale }));
   },
 
   async recordAffiliateClick(slug: string, referralCode: string): Promise<void> {
@@ -24,14 +30,27 @@ export const hotelService = {
     checkOut?: string,
     adults?: number,
     children?: number,
+    locale?: string,
   ): Promise<RoomType[]> {
+    const dates = checkIn && checkOut ? { checkIn, checkOut } : defaultOfferDates();
     const params = new URLSearchParams();
-    if (checkIn) params.set("check_in", checkIn);
-    if (checkOut) params.set("check_out", checkOut);
+    params.set("check_in", dates.checkIn);
+    params.set("check_out", dates.checkOut);
     if (adults) params.set("adults", String(adults));
     if (children !== undefined) params.set("children", String(children));
     const qs = params.toString();
-    return pms.get<RoomType[]>(`/api/hotels/${slug}/rooms${qs ? `?${qs}` : ""}`);
+    const [data, displayRooms] = await Promise.all([
+      bookingWebPublicApi.getOffers(slug, {
+        checkIn: dates.checkIn,
+        checkOut: dates.checkOut,
+        adults,
+        children,
+        rooms: 1,
+        locale,
+      }),
+      pms.get<RoomType[]>(`/api/hotels/${slug}/rooms${qs ? `?${qs}` : ""}`).catch(() => []),
+    ]);
+    return toLegacyRooms(data, displayRooms);
   },
 
   async getAddons(slug: string): Promise<Addon[]> {
@@ -48,16 +67,7 @@ export const hotelService = {
     maxStayByArrival: Record<string, number>;
   }> {
     try {
-      const data = await pms.get<{
-        dates?: string[];
-        min_stay_by_arrival?: Record<string, number>;
-        max_stay_by_arrival?: Record<string, number>;
-      }>(`/api/hotels/${slug}/unavailable-dates?start=${start}&end=${end}`);
-      return {
-        dates: data.dates || [],
-        minStayByArrival: data.min_stay_by_arrival || {},
-        maxStayByArrival: data.max_stay_by_arrival || {},
-      };
+      return toLegacyCalendar(await bookingWebPublicApi.getCalendar(slug, start, end));
     } catch {
       return { dates: [], minStayByArrival: {}, maxStayByArrival: {} };
     }

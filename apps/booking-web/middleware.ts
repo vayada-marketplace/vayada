@@ -6,10 +6,12 @@ import {
   isFallbackBookingHost,
   resolvePublicHotelUrls,
 } from "./lib/server/publicUrls";
+import {
+  bookingWebPublicApi,
+  type BookingWebPublicHostResponse,
+} from "./services/api/bookingWebPublic";
 
 const intlMiddleware = createMiddleware(routing);
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 
 function normalizeHost(hostname: string): string {
   const normalized = hostname.trim().toLowerCase();
@@ -46,30 +48,22 @@ export default async function middleware(request: NextRequest) {
   // uppercase Host header still resolves.
   const hostname = normalizeHost(request.headers.get("host") || "");
 
-  let slug = getKnownSubdomainSlug(hostname);
+  const knownSlug = getKnownSubdomainSlug(hostname);
+  let hostResolution: BookingWebPublicHostResponse | null = null;
+  let slug = knownSlug;
 
   if (
-    !slug &&
-    !hostname.includes("localhost") &&
     !isLocalHost(hostname) &&
-    !hostname.endsWith(".booking.vayada.com")
+    (knownSlug || (!hostname.includes("localhost") && !hostname.endsWith(".booking.vayada.com")))
   ) {
-    // Custom domain: resolve slug via API
-    try {
-      const res = await fetch(
-        `${API_URL}/api/resolve-domain?domain=${encodeURIComponent(hostname)}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        slug = data.slug;
-      }
-    } catch {
-      // Resolution failed — slug stays null
-    }
+    hostResolution = await fetchHostResolution(hostname);
+    slug = hostResolution?.slug || knownSlug;
   }
 
   if (slug) {
-    const canonicalRedirect = await resolveCanonicalRedirect(request, hostname, slug);
+    const canonicalRedirect = hostResolution
+      ? resolveCanonicalRedirect(request, hostname, slug, hostResolution)
+      : null;
     if (canonicalRedirect) return canonicalRedirect;
     response.cookies.set("hotel-slug", slug, { path: "/" });
   }
@@ -87,30 +81,32 @@ export default async function middleware(request: NextRequest) {
   return response;
 }
 
-async function resolveCanonicalRedirect(
-  request: NextRequest,
-  hostname: string,
-  slug: string,
-): Promise<NextResponse | null> {
-  if (!isFallbackBookingHost(hostname)) return null;
-
+async function fetchHostResolution(hostname: string): Promise<BookingWebPublicHostResponse | null> {
   try {
-    const res = await fetch(`${API_URL}/api/hotels/${slug}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    const hotel = await res.json();
-    const policy = resolvePublicHotelUrls({
-      requestHost: request.headers.get("host") || hostname,
-      requestProtocol: request.nextUrl.protocol === "http:" ? "http" : "https",
-      slug: hotel?.slug || slug,
-      locale: firstLocaleSegment(request.nextUrl.pathname) || "en",
-      supportedLocales: hotel?.supportedLanguages,
-      customDomainUrl: hotel?.customDomainUrl,
-    });
-    const redirectUrl = getCanonicalHostRedirectUrl(policy, request.nextUrl);
-    return redirectUrl ? NextResponse.redirect(redirectUrl, 308) : null;
+    return await bookingWebPublicApi.resolveHost(hostname);
   } catch {
     return null;
   }
+}
+
+function resolveCanonicalRedirect(
+  request: NextRequest,
+  hostname: string,
+  slug: string,
+  hostResolution: BookingWebPublicHostResponse,
+): NextResponse | null {
+  if (!isFallbackBookingHost(hostname)) return null;
+
+  const policy = resolvePublicHotelUrls({
+    requestHost: request.headers.get("host") || hostname,
+    requestProtocol: request.nextUrl.protocol === "http:" ? "http" : "https",
+    slug: hostResolution.hotel?.slug || slug,
+    locale: firstLocaleSegment(request.nextUrl.pathname) || "en",
+    supportedLocales: hostResolution.hotel?.supportedLocales,
+    customDomainUrl: hostResolution.customDomainUrl,
+  });
+  const redirectUrl = getCanonicalHostRedirectUrl(policy, request.nextUrl);
+  return redirectUrl ? NextResponse.redirect(redirectUrl, 308) : null;
 }
 
 function firstLocaleSegment(pathname: string): string | null {
