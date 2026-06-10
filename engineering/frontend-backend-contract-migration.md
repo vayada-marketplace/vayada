@@ -169,6 +169,23 @@ Proposed slices:
 4. Update the Benefits tab to consume the typed client when the route is ready.
 5. Run route tests, frontend build, and browser smoke.
 
+## Room Filters Vertical
+
+The next parallel booking-flow settings vertical is the Filters/Rooms tab read
+surface.
+
+Contract artifact:
+[`BookingRoomFilterSettings`](booking-room-filter-settings-contract.md).
+
+Proposed slices:
+
+1. Define `BookingRoomFilterSettings` request/response/error contract.
+2. Add the booking admin frontend API client.
+3. Implement or tighten the TypeScript backend route.
+4. Update the Filters tab read path to consume the typed client when the route
+   is ready.
+5. Run route tests, frontend build, and browser smoke.
+
 ## Cutover Model
 
 Cut over per surface, not per whole product.
