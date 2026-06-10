@@ -21,6 +21,10 @@ import {
 } from "@/services/settings";
 import { getBookingAddonSettings } from "@/services/api/bookingAddonSettingsClient";
 import {
+  getBookingBenefitsSettings,
+  type BookingBenefitsSettings,
+} from "@/services/api/bookingBenefitsSettingsClient";
+import {
   getBookingGuestFormSettings,
   type BookingGuestFormSettings,
 } from "@/services/api/bookingGuestFormSettingsClient";
@@ -104,6 +108,10 @@ const DEFAULT_GUEST_FORM_SETTINGS: BookingGuestFormSettings = {
   guestCountEnabled: false,
 };
 
+const DEFAULT_BENEFITS_SETTINGS: BookingBenefitsSettings = {
+  benefits: [],
+};
+
 const DEFAULT_LOCALIZATION_SETTINGS: BookingLocalizationSettings = {
   defaultCurrency: "EUR",
   defaultLanguage: "en",
@@ -116,6 +124,16 @@ const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
   customFilters: {},
   filterRooms: {},
 };
+
+function normalizeBenefitsSettings(settings: unknown): BookingBenefitsSettings {
+  if (!isRecord(settings) || !Array.isArray(settings.benefits)) {
+    return DEFAULT_BENEFITS_SETTINGS;
+  }
+
+  return {
+    benefits: settings.benefits.filter((benefit): benefit is string => typeof benefit === "string"),
+  };
+}
 
 function normalizeRoomFilterSettings(settings: unknown): BookingRoomFilterSettings {
   if (!isRecord(settings)) return DEFAULT_ROOM_FILTER_SETTINGS;
@@ -255,6 +273,18 @@ export default function BookingFlowPage() {
             );
           })
           .catch(() => DEFAULT_GUEST_FORM_SETTINGS);
+    const benefitsSettingsPromise = selectedHotelId
+      ? getBookingBenefitsSettings({ hotelId: selectedHotelId }).catch(
+          () => DEFAULT_BENEFITS_SETTINGS,
+        )
+      : propertyPromise
+          .then((property) => {
+            if (!property?.id) return DEFAULT_BENEFITS_SETTINGS;
+            return getBookingBenefitsSettings({ hotelId: property.id }).catch(
+              () => DEFAULT_BENEFITS_SETTINGS,
+            );
+          })
+          .catch(() => DEFAULT_BENEFITS_SETTINGS);
     const localizationSettingsPromise = selectedHotelId
       ? getBookingLocalizationSettings({ hotelId: selectedHotelId }).catch(
           () => DEFAULT_LOCALIZATION_SETTINGS,
@@ -283,7 +313,7 @@ export default function BookingFlowPage() {
     Promise.all([
       settingsService.listAddons().catch(() => []),
       addonSettingsPromise,
-      settingsService.getBenefits().catch(() => ({ benefits: [] })),
+      benefitsSettingsPromise,
       guestFormSettingsPromise,
       localizationSettingsPromise,
       roomFilterSettingsPromise,
@@ -304,7 +334,7 @@ export default function BookingFlowPage() {
           setAddons(addonList);
           setAddonSettings(settings);
           setPromoCodes(promoList);
-          setBenefits(benefitsRes.benefits || []);
+          setBenefits(normalizeBenefitsSettings(benefitsRes).benefits);
           setSpecialRequestsEnabled(guestFormSettings.specialRequestsEnabled);
           setArrivalTimeEnabled(guestFormSettings.arrivalTimeEnabled);
           setGuestCountEnabled(guestFormSettings.guestCountEnabled);

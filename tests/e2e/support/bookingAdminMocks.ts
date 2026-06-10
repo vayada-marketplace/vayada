@@ -3,6 +3,7 @@ import type { Page } from "@playwright/test";
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
+export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
 export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
@@ -22,6 +23,10 @@ export interface BookingAdminPropertySettingsFixture {
 export interface BookingAdminAddonSettingsFixture {
   showAddonsStep: boolean;
   groupAddonsByCategory: boolean;
+}
+
+export interface BookingAdminBenefitsSettingsFixture {
+  benefits: string[];
 }
 
 export interface BookingAdminGuestFormSettingsFixture {
@@ -49,6 +54,7 @@ export interface BookingAdminShellMocksOptions {
 
 export interface BookingAdminBookingFlowMocksOptions {
   addonSettings?: BookingAdminAddonSettingsFixture;
+  benefitsSettings?: BookingAdminBenefitsSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
   localizationSettings?: BookingAdminLocalizationSettingsFixture;
   roomFilterSettings?: BookingAdminRoomFilterSettingsFixture;
@@ -69,6 +75,10 @@ export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFi
 const defaultAddonSettings: BookingAdminAddonSettingsFixture = {
   showAddonsStep: true,
   groupAddonsByCategory: true,
+};
+
+const defaultBenefitsSettings: BookingAdminBenefitsSettingsFixture = {
+  benefits: [],
 };
 
 const defaultGuestFormSettings: BookingAdminGuestFormSettingsFixture = {
@@ -163,6 +173,9 @@ export async function mockBookingAdminBookingFlow(
   await mockBookingAdminShellRoutes(page);
   await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.addonSettings ?? defaultAddonSettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_BENEFITS_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({ json: options.benefitsSettings ?? defaultBenefitsSettings }),
   );
   await page.route(`**${BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.guestFormSettings ?? defaultGuestFormSettings }),
