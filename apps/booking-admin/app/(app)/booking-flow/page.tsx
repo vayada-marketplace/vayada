@@ -18,7 +18,6 @@ import {
   type AddonItem,
   type AddonSettings,
   type PromoCodeItem,
-  type DesignSettings,
 } from "@/services/settings";
 import { getBookingAddonSettings } from "@/services/api/bookingAddonSettingsClient";
 import {
@@ -29,6 +28,10 @@ import {
   getBookingLocalizationSettings,
   type BookingLocalizationSettings,
 } from "@/services/api/bookingLocalizationSettingsClient";
+import {
+  getBookingRoomFilterSettings,
+  type BookingRoomFilterSettings,
+} from "@/services/api/bookingRoomFilterSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -106,6 +109,12 @@ const DEFAULT_LOCALIZATION_SETTINGS: BookingLocalizationSettings = {
   defaultLanguage: "en",
   supportedCurrencies: [],
   supportedLanguages: [],
+};
+
+const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
+  bookingFilters: [],
+  customFilters: {},
+  filterRooms: {},
 };
 
 function getSelectedBookingHotelId(): string | null {
@@ -219,26 +228,26 @@ export default function BookingFlowPage() {
             );
           })
           .catch(() => DEFAULT_LOCALIZATION_SETTINGS);
+    const roomFilterSettingsPromise = selectedHotelId
+      ? getBookingRoomFilterSettings({ hotelId: selectedHotelId }).catch(
+          () => DEFAULT_ROOM_FILTER_SETTINGS,
+        )
+      : propertyPromise
+          .then((property) => {
+            if (!property?.id) return DEFAULT_ROOM_FILTER_SETTINGS;
+            return getBookingRoomFilterSettings({ hotelId: property.id }).catch(
+              () => DEFAULT_ROOM_FILTER_SETTINGS,
+            );
+          })
+          .catch(() => DEFAULT_ROOM_FILTER_SETTINGS);
 
     Promise.all([
       settingsService.listAddons().catch(() => []),
       addonSettingsPromise,
-      settingsService.getDesignSettings().catch(
-        () =>
-          ({
-            hero_image: "",
-            hero_heading: "",
-            hero_subtext: "",
-            primary_color: "",
-            font_pairing: "",
-            booking_filters: [],
-            custom_filters: {},
-            filter_rooms: {},
-          }) as DesignSettings,
-      ),
       settingsService.getBenefits().catch(() => ({ benefits: [] })),
       guestFormSettingsPromise,
       localizationSettingsPromise,
+      roomFilterSettingsPromise,
       propertyPromise,
       settingsService.listPromoCodes().catch(() => []),
     ])
@@ -246,10 +255,10 @@ export default function BookingFlowPage() {
         ([
           addonList,
           settings,
-          design,
           benefitsRes,
           guestFormSettings,
           localizationSettings,
+          roomFilterSettings,
           property,
           promoList,
         ]) => {
@@ -264,16 +273,10 @@ export default function BookingFlowPage() {
           setDefaultLanguage(localizationSettings.defaultLanguage);
           setSupportedCurrencies(localizationSettings.supportedCurrencies);
           setSupportedLanguages(localizationSettings.supportedLanguages);
-          if (design.booking_filters) {
-            setBookingFilters(design.booking_filters);
-            setFiltersEnabled(design.booking_filters.length > 0);
-          }
-          if (design.custom_filters) {
-            setCustomFilters(design.custom_filters);
-          }
-          if (design.filter_rooms) {
-            setFilterRooms(design.filter_rooms);
-          }
+          setBookingFilters(roomFilterSettings.bookingFilters);
+          setFiltersEnabled(roomFilterSettings.bookingFilters.length > 0);
+          setCustomFilters(roomFilterSettings.customFilters);
+          setFilterRooms(roomFilterSettings.filterRooms);
           // Fetch rooms from PMS
           if (property?.slug) {
             setPmsRoomsLoading(true);

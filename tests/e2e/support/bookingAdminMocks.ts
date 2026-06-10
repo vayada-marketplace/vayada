@@ -5,6 +5,7 @@ export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
+export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -36,6 +37,12 @@ export interface BookingAdminLocalizationSettingsFixture {
   supportedLanguages: string[];
 }
 
+export interface BookingAdminRoomFilterSettingsFixture {
+  bookingFilters: string[];
+  customFilters: Record<string, string>;
+  filterRooms: Record<string, string[]>;
+}
+
 export interface BookingAdminShellMocksOptions {
   propertySettings?: BookingAdminPropertySettingsFixture;
 }
@@ -44,6 +51,7 @@ export interface BookingAdminBookingFlowMocksOptions {
   addonSettings?: BookingAdminAddonSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
   localizationSettings?: BookingAdminLocalizationSettingsFixture;
+  roomFilterSettings?: BookingAdminRoomFilterSettingsFixture;
 }
 
 export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFixture = {
@@ -74,6 +82,12 @@ const defaultLocalizationSettings: BookingAdminLocalizationSettingsFixture = {
   defaultLanguage: "en",
   supportedCurrencies: [],
   supportedLanguages: [],
+};
+
+const defaultRoomFilterSettings: BookingAdminRoomFilterSettingsFixture = {
+  bookingFilters: [],
+  customFilters: {},
+  filterRooms: {},
 };
 
 export async function mockBookingAdminAuthenticatedSession(page: Page): Promise<void> {
@@ -155,5 +169,8 @@ export async function mockBookingAdminBookingFlow(
   );
   await page.route(`**${BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.localizationSettings ?? defaultLocalizationSettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({ json: options.roomFilterSettings ?? defaultRoomFilterSettings }),
   );
 }
