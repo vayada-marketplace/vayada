@@ -35,6 +35,22 @@ export const BOOKING_GUEST_FORM_SETTINGS_CONTRACT = {
   },
 } as const;
 
+export const BOOKING_BENEFITS_SETTINGS_CONTRACT = {
+  method: "GET",
+  path: "/api/booking/hotels/:hotelId/settings/benefits",
+  permission: "booking.settings.manage",
+  entitlement: {
+    product: "booking",
+    key: "booking-engine",
+    resourceType: "booking_hotel",
+  },
+  resource: {
+    product: "booking",
+    resourceType: "booking_hotel",
+    allowedRelationships: ["owner", "operator"],
+  },
+} as const;
+
 export type BookingAddonSettingsReadModel = {
   showAddonsStep?: boolean | null;
   groupAddonsByCategory?: boolean | null;
@@ -44,6 +60,10 @@ export type BookingGuestFormSettingsReadModel = {
   specialRequestsEnabled?: boolean | null;
   arrivalTimeEnabled?: boolean | null;
   guestCountEnabled?: boolean | null;
+};
+
+export type BookingBenefitsSettingsReadModel = {
+  benefits?: unknown;
 };
 
 export type BookingAddonSettingsResponse = {
@@ -57,14 +77,20 @@ export type BookingGuestFormSettingsResponse = {
   guestCountEnabled: boolean;
 };
 
+export type BookingBenefitsSettingsResponse = {
+  benefits: string[];
+};
+
 export type BookingAddonSettings = BookingAddonSettingsResponse;
 export type BookingGuestFormSettings = BookingGuestFormSettingsResponse;
+export type BookingBenefitsSettings = BookingBenefitsSettingsResponse;
 
 export type BookingSettingsReadRepository = {
   findAddonSettingsByHotelId(hotelId: string): Promise<BookingAddonSettingsReadModel | null>;
   findGuestFormSettingsByHotelId(
     hotelId: string,
   ): Promise<BookingGuestFormSettingsReadModel | null>;
+  findBenefitsSettingsByHotelId(hotelId: string): Promise<BookingBenefitsSettingsReadModel | null>;
   close?(): Promise<void>;
 };
 
@@ -92,6 +118,19 @@ export type BookingGuestFormSettingsErrorCode =
   | "not_found"
   | "read_model_unavailable";
 
+export type BookingBenefitsSettingsErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "read_model";
+
+export type BookingBenefitsSettingsErrorCode =
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "read_model_unavailable";
+
 export type BookingAddonSettingsError = {
   statusCode: 401 | 403 | 404 | 500;
   code: BookingAddonSettingsErrorCode;
@@ -106,6 +145,13 @@ export type BookingGuestFormSettingsError = {
   message: string;
 };
 
+export type BookingBenefitsSettingsError = {
+  statusCode: 401 | 403 | 500;
+  code: BookingBenefitsSettingsErrorCode;
+  category: BookingBenefitsSettingsErrorCategory;
+  message: string;
+};
+
 export type BookingAddonSettingsRequest = {
   params: {
     hotelId: string;
@@ -114,6 +160,13 @@ export type BookingAddonSettingsRequest = {
 };
 
 export type BookingGuestFormSettingsRequest = {
+  params: {
+    hotelId: string;
+  };
+  query: Record<string, never>;
+};
+
+export type BookingBenefitsSettingsRequest = {
   params: {
     hotelId: string;
   };
@@ -136,6 +189,14 @@ export type BookingGuestFormSettingsContract = {
   error: BookingGuestFormSettingsError;
 };
 
+export type BookingBenefitsSettingsContract = {
+  method: typeof BOOKING_BENEFITS_SETTINGS_CONTRACT.method;
+  path: typeof BOOKING_BENEFITS_SETTINGS_CONTRACT.path;
+  request: BookingBenefitsSettingsRequest;
+  response: BookingBenefitsSettingsResponse;
+  error: BookingBenefitsSettingsError;
+};
+
 type BookingHotelParams = {
   hotelId: string;
 };
@@ -149,6 +210,10 @@ type BookingGuestFormSettingsRow = {
   special_requests_enabled: boolean | null;
   arrival_time_enabled: boolean | null;
   guest_count_enabled: boolean | null;
+};
+
+type BookingBenefitsSettingsRow = {
+  benefits: unknown;
 };
 
 export function createPgBookingSettingsReadRepository(config: {
@@ -194,6 +259,20 @@ export function createPgBookingSettingsReadRepository(config: {
         specialRequestsEnabled: row.special_requests_enabled,
         arrivalTimeEnabled: row.arrival_time_enabled,
         guestCountEnabled: row.guest_count_enabled,
+      };
+    },
+    async findBenefitsSettingsByHotelId(hotelId) {
+      const result = await pool.query<BookingBenefitsSettingsRow>(
+        `SELECT benefits
+         FROM booking_hotels
+         WHERE id = $1`,
+        [hotelId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        benefits: row.benefits,
       };
     },
     async close() {
@@ -289,6 +368,39 @@ export async function registerBookingSettingsRoutes(
       return toGuestFormSettingsResponse(settings);
     },
   );
+
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/settings/benefits",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) {
+          return sendBookingBenefitsSettingsError(reply, contractError);
+        }
+        throw error;
+      }
+
+      let settings: BookingBenefitsSettingsReadModel | null;
+      try {
+        settings = await repository.findBenefitsSettingsByHotelId(hotelId);
+      } catch {
+        return sendBookingBenefitsSettingsError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking benefits settings are unavailable.",
+        });
+      }
+
+      // Legacy `/admin/benefits` compatibility: a missing hotel row or unset
+      // benefits value is an empty hotel-level list, never a 404.
+      return toBenefitsSettingsResponse(settings);
+    },
+  );
 }
 
 export function toAddonSettingsResponse(
@@ -310,6 +422,32 @@ export function toGuestFormSettingsResponse(
   };
 }
 
+export function toBenefitsSettingsResponse(
+  settings: BookingBenefitsSettingsReadModel | null,
+): BookingBenefitsSettingsResponse {
+  return {
+    benefits: parseBenefitsValue(settings?.benefits),
+  };
+}
+
+// Mirrors the legacy booking-api `parse_json` handling of
+// `booking_hotels.benefits`: the JSONB value may arrive as a native array, a
+// JSON-encoded string, or NULL. NULL, malformed, and non-list values all
+// default to an empty list, and non-string entries are dropped rather than
+// failing the read.
+function parseBenefitsValue(value: unknown): string[] {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is string => typeof entry === "string");
+}
+
 function sendBookingAddonSettingsError(
   reply: FastifyReply,
   error: BookingAddonSettingsError,
@@ -320,6 +458,13 @@ function sendBookingAddonSettingsError(
 function sendBookingGuestFormSettingsError(
   reply: FastifyReply,
   error: BookingGuestFormSettingsError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingBenefitsSettingsError(
+  reply: FastifyReply,
+  error: BookingBenefitsSettingsError,
 ): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }
