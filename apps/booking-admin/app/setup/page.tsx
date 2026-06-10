@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
+import { updateBookingBenefitsSettings } from "@/services/api/bookingBenefitsSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
@@ -525,7 +526,12 @@ export default function SetupPage() {
       // 8. Save benefits
       if (benefits.length > 0) {
         try {
-          await settingsService.updateBenefits(benefits);
+          if (savedSettings.id) {
+            await updateBookingBenefitsSettings({
+              hotelId: savedSettings.id,
+              body: { benefits },
+            });
+          }
         } catch {
           // Non-fatal: benefits can be added later from Settings
         }
