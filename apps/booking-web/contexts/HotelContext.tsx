@@ -138,7 +138,7 @@ export function HotelProvider({
     setLoading(true);
     Promise.all([
       hotelService.getHotel(slug, locale),
-      hotelService.getRooms(slug),
+      hotelService.getRooms(slug, undefined, undefined, undefined, undefined, locale),
       hotelService.getAddons(slug).catch(() => [] as Addon[]),
     ])
       .then(([hotelData, roomsData, addonsData]) => {
@@ -177,7 +177,14 @@ export function HotelProvider({
     setRoomsLoading(true);
     try {
       if (!slug) return;
-      const roomsData = await hotelService.getRooms(slug, checkIn, checkOut, adults, children);
+      const roomsData = await hotelService.getRooms(
+        slug,
+        checkIn,
+        checkOut,
+        adults,
+        children,
+        locale,
+      );
       setRooms(roomsData);
     } catch (err) {
       console.error("Failed to refetch rooms", err);

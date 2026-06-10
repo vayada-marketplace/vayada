@@ -108,6 +108,7 @@ export default defineConfig({
     {
       name: "booking-web-chromium",
       testMatch: /booking-web\/.*\.spec\.ts/,
+      workers: 1,
       use: {
         ...devices["Desktop Chrome"],
         baseURL: bookingBaseURL,
