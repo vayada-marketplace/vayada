@@ -18,7 +18,6 @@ import {
   type AddonItem,
   type AddonSettings,
   type PromoCodeItem,
-  type DesignSettings,
 } from "@/services/settings";
 import { getBookingAddonSettings } from "@/services/api/bookingAddonSettingsClient";
 import {
@@ -29,6 +28,10 @@ import {
   getBookingLocalizationSettings,
   type BookingLocalizationSettings,
 } from "@/services/api/bookingLocalizationSettingsClient";
+import {
+  getBookingRoomFilterSettings,
+  type BookingRoomFilterSettings,
+} from "@/services/api/bookingRoomFilterSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -107,6 +110,51 @@ const DEFAULT_LOCALIZATION_SETTINGS: BookingLocalizationSettings = {
   supportedCurrencies: [],
   supportedLanguages: [],
 };
+
+const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
+  bookingFilters: [],
+  customFilters: {},
+  filterRooms: {},
+};
+
+function normalizeRoomFilterSettings(settings: unknown): BookingRoomFilterSettings {
+  if (!isRecord(settings)) return DEFAULT_ROOM_FILTER_SETTINGS;
+
+  return {
+    bookingFilters: Array.isArray(settings.bookingFilters)
+      ? settings.bookingFilters.filter((key): key is string => typeof key === "string")
+      : [],
+    customFilters: toStringRecord(settings.customFilters),
+    filterRooms: toStringArrayRecord(settings.filterRooms),
+  };
+}
+
+function toStringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+function toStringArrayRecord(value: unknown): Record<string, string[]> {
+  if (!isRecord(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1]))
+      .map(([key, roomIds]) => [
+        key,
+        roomIds.filter((roomId): roomId is string => typeof roomId === "string"),
+      ]),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 function getSelectedBookingHotelId(): string | null {
   if (typeof window === "undefined") return null;
@@ -219,26 +267,26 @@ export default function BookingFlowPage() {
             );
           })
           .catch(() => DEFAULT_LOCALIZATION_SETTINGS);
+    const roomFilterSettingsPromise = selectedHotelId
+      ? getBookingRoomFilterSettings({ hotelId: selectedHotelId }).catch(
+          () => DEFAULT_ROOM_FILTER_SETTINGS,
+        )
+      : propertyPromise
+          .then((property) => {
+            if (!property?.id) return DEFAULT_ROOM_FILTER_SETTINGS;
+            return getBookingRoomFilterSettings({ hotelId: property.id }).catch(
+              () => DEFAULT_ROOM_FILTER_SETTINGS,
+            );
+          })
+          .catch(() => DEFAULT_ROOM_FILTER_SETTINGS);
 
     Promise.all([
       settingsService.listAddons().catch(() => []),
       addonSettingsPromise,
-      settingsService.getDesignSettings().catch(
-        () =>
-          ({
-            hero_image: "",
-            hero_heading: "",
-            hero_subtext: "",
-            primary_color: "",
-            font_pairing: "",
-            booking_filters: [],
-            custom_filters: {},
-            filter_rooms: {},
-          }) as DesignSettings,
-      ),
       settingsService.getBenefits().catch(() => ({ benefits: [] })),
       guestFormSettingsPromise,
       localizationSettingsPromise,
+      roomFilterSettingsPromise,
       propertyPromise,
       settingsService.listPromoCodes().catch(() => []),
     ])
@@ -246,10 +294,10 @@ export default function BookingFlowPage() {
         ([
           addonList,
           settings,
-          design,
           benefitsRes,
           guestFormSettings,
           localizationSettings,
+          roomFilterSettings,
           property,
           promoList,
         ]) => {
@@ -264,16 +312,11 @@ export default function BookingFlowPage() {
           setDefaultLanguage(localizationSettings.defaultLanguage);
           setSupportedCurrencies(localizationSettings.supportedCurrencies);
           setSupportedLanguages(localizationSettings.supportedLanguages);
-          if (design.booking_filters) {
-            setBookingFilters(design.booking_filters);
-            setFiltersEnabled(design.booking_filters.length > 0);
-          }
-          if (design.custom_filters) {
-            setCustomFilters(design.custom_filters);
-          }
-          if (design.filter_rooms) {
-            setFilterRooms(design.filter_rooms);
-          }
+          const normalizedRoomFilterSettings = normalizeRoomFilterSettings(roomFilterSettings);
+          setBookingFilters(normalizedRoomFilterSettings.bookingFilters);
+          setFiltersEnabled(normalizedRoomFilterSettings.bookingFilters.length > 0);
+          setCustomFilters(normalizedRoomFilterSettings.customFilters);
+          setFilterRooms(normalizedRoomFilterSettings.filterRooms);
           // Fetch rooms from PMS
           if (property?.slug) {
             setPmsRoomsLoading(true);
