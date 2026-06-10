@@ -359,8 +359,10 @@ services:
     container_name: vayada-booking-frontend
     ports:
       - "3002:3002"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - NEXT_PUBLIC_BOOKING_WEB_API_URL=http://localhost:8003
+      - NEXT_PUBLIC_BOOKING_WEB_API_URL=http://host.docker.internal:8003
       - NEXT_PUBLIC_API_URL=http://localhost:8001
       - NEXT_PUBLIC_PMS_URL=http://localhost:8002
       - NEXT_PUBLIC_HOTEL_SLUG=testvayada

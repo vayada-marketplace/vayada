@@ -219,8 +219,10 @@ export function toLegacyRooms(
     grouped.set(offer.roomTypeId, existing);
   }
 
-  return Array.from(grouped.entries()).map(([roomTypeId, roomOffers]) => {
-    const flexible = roomOffers.find((offer) => offer.refundable) || roomOffers[0]!;
+  return Array.from(grouped.entries()).flatMap(([roomTypeId, roomOffers]) => {
+    const fallbackOffer = roomOffers[0];
+    if (!fallbackOffer) return [];
+    const flexible = roomOffers.find((offer) => offer.refundable) || fallbackOffer;
     const nonRefundable = roomOffers.find((offer) => !offer.refundable) || null;
     const displayRoom = displayRoomById.get(roomTypeId);
     const nights = Math.max(data.request.nights || 1, 1);
@@ -317,7 +319,8 @@ function depositSettings(summary: string | null): { enabled: boolean; percentage
   if (!summary || /no deposit/i.test(summary)) {
     return { enabled: false, percentage: null };
   }
-  const percentage = summary.match(/(\d+(?:\.\d+)?)%/);
+  // TODO: Replace summary parsing when the public API exposes structured deposit settings.
+  const percentage = summary.match(/(\d+(?:\.\d+)?)\s*%/i);
   return {
     enabled: true,
     percentage: percentage ? Number(percentage[1]) : null,
