@@ -5,11 +5,13 @@ import type { FastifyInstance } from "fastify";
 
 import { buildApp } from "./app.js";
 import {
+  createPgMarketplaceDiscoveryReadRepository,
   findForbiddenMarketplaceDiscoveryKeys,
   type MarketplaceCreatorPage,
   type MarketplaceCreatorReadModel,
   type MarketplaceDiscoveryError,
   type MarketplaceDiscoveryPageRequest,
+  type MarketplaceDiscoveryReadPool,
   type MarketplaceDiscoveryReadRepository,
   type MarketplaceListingPage,
   type MarketplaceListingReadModel,
@@ -564,5 +566,158 @@ describe("marketplace discovery public-safety guard", () => {
 
     const response = await app.inject({ method: "GET", url: "/api/marketplace/listings" });
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("pg marketplace discovery repository", () => {
+  function createFakePool(results: unknown[][]): MarketplaceDiscoveryReadPool & { sql: string[] } {
+    const sql: string[] = [];
+    return {
+      sql,
+      async query(text) {
+        sql.push(text);
+        return { rows: (results.shift() ?? []) as never[] };
+      },
+      async end() {},
+    };
+  }
+
+  it("maps public listing read-model rows with legacy IDs and total", async () => {
+    const pool = createFakePool([
+      [
+        {
+          listingId: LEGACY_LISTING_ID_A,
+          publicId: "mlst_alpenrose",
+          canonicalSlug: "hotel-alpenrose",
+          displayName: "Hotel Alpenrose",
+          listingTitle: "Alpine getaway collaboration",
+          listingSummary: "Boutique alpine hotel.",
+          accommodationType: "boutique_hotel",
+          location: { display: "Innsbruck, Austria", countryCode: "AT", city: "Innsbruck" },
+          coverImageUrl: "https://cdn.example.com/cover.jpg",
+          imageUrls: ["https://cdn.example.com/listing.jpg"],
+          offerings: [
+            {
+              id: "offering-1",
+              type: "affiliate",
+              months: ["June"],
+              platforms: ["instagram"],
+              commissionPercent: 12,
+              minFollowers: 5000,
+            },
+          ],
+          creatorRequirements: {
+            platforms: ["instagram"],
+            countries: ["AT"],
+            targetAgeMin: 20,
+            targetAgeMax: 40,
+            ageGroups: ["25-34"],
+          },
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          projectedAt: new Date("2026-06-01T10:00:00.000Z"),
+        },
+      ],
+      [{ total: "3" }],
+    ]);
+    const repository = createPgMarketplaceDiscoveryReadRepository({
+      connectionString: "postgresql://marketplace-db",
+      pool,
+    });
+
+    const result = await repository.listPublicListings({ limit: 1, offset: 2 });
+
+    expect(result.total).toBe(3);
+    expect(result.items[0]).toMatchObject({
+      listingId: LEGACY_LISTING_ID_A,
+      publicId: "mlst_alpenrose",
+      canonicalSlug: "hotel-alpenrose",
+      coverImageUrl: "https://cdn.example.com/cover.jpg",
+      location: { displayText: "Innsbruck, Austria", countryCode: "AT", city: "Innsbruck" },
+      imageUrls: ["https://cdn.example.com/listing.jpg"],
+      offerings: [
+        {
+          offeringId: "offering-1",
+          collaborationType: "affiliate",
+          availabilityMonths: ["June"],
+          platforms: ["instagram"],
+          commissionPercentage: 12,
+          minFollowers: 5000,
+        },
+      ],
+      creatorRequirements: {
+        platforms: ["instagram"],
+        targetCountries: ["AT"],
+        targetAgeMin: 20,
+        targetAgeMax: 40,
+        targetAgeGroups: ["25-34"],
+      },
+      createdAt: "2026-05-01T10:00:00.000Z",
+      projectedAt: "2026-06-01T10:00:00.000Z",
+    });
+    expect(pool.sql.join("\n")).toContain("read_model.visibility_status = 'public'");
+    expect(pool.sql.join("\n")).toContain("listing.source_listing_id");
+    expect(pool.sql.join("\n")).toContain("property_public_profile_read_model");
+    expect(pool.sql.join("\n")).not.toMatch(/\bauth\b|users/i);
+  });
+
+  it("maps active creator rows with source IDs, platforms, and rounded ratings", async () => {
+    const pool = createFakePool([
+      [
+        {
+          creatorId: LEGACY_CREATOR_ID_A,
+          displayName: "Anna Alps",
+          locationText: "Vienna, Austria",
+          shortDescription: "Alpine travel storytelling.",
+          portfolioUrl: "https://annaalps.example.com",
+          profilePictureUrl: "https://cdn.example.com/anna.jpg",
+          creatorType: "migration",
+          platforms: [
+            {
+              platformId: "platform-1",
+              platform: "instagram",
+              handle: "@annaalps",
+              followerCount: 12000,
+              engagementRate: "4.20",
+              audienceCountries: [{ country: "AT", percentage: 45 }],
+              audienceAgeGroups: [{ ageRange: "25-34", percentage: 40 }],
+              audienceGenderSplit: { male: 30, female: 70 },
+            },
+          ],
+          averageRating: "4.33",
+          totalReviews: "3",
+          createdAt: "2026-04-15T09:00:00.000Z",
+        },
+      ],
+      [{ total: "1" }],
+    ]);
+    const repository = createPgMarketplaceDiscoveryReadRepository({
+      connectionString: "postgresql://marketplace-db",
+      pool,
+    });
+
+    const result = await repository.listPublicCreators({ limit: 100, offset: 0 });
+
+    expect(result.total).toBe(1);
+    expect(result.items[0]).toMatchObject({
+      creatorId: LEGACY_CREATOR_ID_A,
+      displayName: "Anna Alps",
+      creatorType: "other",
+      averageRating: 4.33,
+      totalReviews: 3,
+      platforms: [
+        {
+          platformId: "platform-1",
+          platform: "instagram",
+          handle: "@annaalps",
+          followerCount: 12000,
+          engagementRate: 4.2,
+        },
+      ],
+    });
+    const sql = pool.sql.join("\n");
+    expect(sql).toContain("creator.profile_complete = TRUE");
+    expect(sql).toContain("creator.profile_status = 'active'");
+    expect(sql).toContain("creator.source_creator_id");
+    expect(sql).not.toMatch(/\bauth\b|users/i);
   });
 });

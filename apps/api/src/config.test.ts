@@ -47,6 +47,23 @@ describe("api config", () => {
     ).toBe("postgresql://booking-reservations-read");
   });
 
+  it("loads optional marketplace discovery database config", () => {
+    expect(
+      loadConfig({
+        MARKETPLACE_DATABASE_URL: "postgresql://marketplace-db",
+      }).marketplaceDatabaseUrl,
+    ).toBe("postgresql://marketplace-db");
+  });
+
+  it("loads marketplace discovery allowed origins from comma-separated config", () => {
+    expect(
+      loadConfig({
+        MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS:
+          "https://marketplace.localhost, https://admin.localhost,",
+      }).marketplaceDiscoveryAllowedOrigins,
+    ).toEqual(["https://marketplace.localhost", "https://admin.localhost"]);
+  });
+
   it("loads optional PMS public API config", () => {
     expect(
       loadConfig({
