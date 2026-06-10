@@ -237,7 +237,7 @@ interface CreatorMarketplaceResponse {
   creator_type: "Lifestyle" | "Travel";
   platforms: Array<{
     id: string;
-    name: "Instagram" | "TikTok" | "YouTube" | "Facebook";
+    name: string;
     handle: string;
     followers: number;
     engagement_rate: number;
@@ -267,7 +267,7 @@ interface ListingMarketplaceResponse {
     listing_id: string;
     collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate";
     availability_months: string[];
-    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[];
+    platforms: string[];
     free_stay_min_nights: number | null;
     free_stay_max_nights: number | null;
     paid_max_amount: string | null; // Backend returns as string (e.g., "2000.00")
@@ -281,7 +281,7 @@ interface ListingMarketplaceResponse {
   creator_requirements?: {
     id: string;
     listing_id: string;
-    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[];
+    platforms: string[];
     target_countries: string[];
     target_age_min: number | null;
     target_age_max: number | null;
