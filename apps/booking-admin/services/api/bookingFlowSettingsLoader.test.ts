@@ -1,6 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { loadBookingFlowSetting } from "./bookingFlowSettingsLoader";
+import {
+  loadBookingFlowSetting,
+  normalizeBookingBenefitsSettings,
+  normalizeBookingRoomFilterSettings,
+} from "./bookingFlowSettingsLoader";
+import type { BookingBenefitsSettings } from "./bookingBenefitsSettingsClient";
+import type { BookingRoomFilterSettings } from "./bookingRoomFilterSettingsClient";
+
+const DEFAULT_BENEFITS_SETTINGS: BookingBenefitsSettings = {
+  benefits: [],
+};
+
+const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
+  bookingFilters: [],
+  customFilters: {},
+  filterRooms: {},
+};
 
 describe("loadBookingFlowSetting", () => {
   it("loads settings for the selected hotel without waiting for property fallback", async () => {
@@ -78,5 +94,109 @@ describe("loadBookingFlowSetting", () => {
         defaultValue,
       }),
     ).resolves.toBe(defaultValue);
+  });
+});
+
+describe("normalizeBookingBenefitsSettings", () => {
+  it.each([null, undefined, "not a response", [], {}, { benefits: "not an array" }])(
+    "returns defaults for malformed benefits settings %#",
+    (settings) => {
+      expect(normalizeBookingBenefitsSettings(settings, DEFAULT_BENEFITS_SETTINGS)).toBe(
+        DEFAULT_BENEFITS_SETTINGS,
+      );
+    },
+  );
+
+  it("keeps only string benefits", () => {
+    expect(
+      normalizeBookingBenefitsSettings(
+        {
+          benefits: ["Breakfast", null, "Late checkout", 42, { label: "Spa" }],
+        },
+        DEFAULT_BENEFITS_SETTINGS,
+      ),
+    ).toEqual({
+      benefits: ["Breakfast", "Late checkout"],
+    });
+  });
+});
+
+describe("normalizeBookingRoomFilterSettings", () => {
+  it.each([null, undefined, "not a response", []])(
+    "returns defaults for non-record room filter settings %#",
+    (settings) => {
+      expect(normalizeBookingRoomFilterSettings(settings, DEFAULT_ROOM_FILTER_SETTINGS)).toBe(
+        DEFAULT_ROOM_FILTER_SETTINGS,
+      );
+    },
+  );
+
+  it("defaults malformed optional room filter fields to empty structures", () => {
+    expect(
+      normalizeBookingRoomFilterSettings(
+        {
+          bookingFilters: "not an array",
+          customFilters: ["not a record"],
+          filterRooms: "not a record",
+        },
+        DEFAULT_ROOM_FILTER_SETTINGS,
+      ),
+    ).toEqual(DEFAULT_ROOM_FILTER_SETTINGS);
+  });
+
+  it("normalizes an empty room filter response to empty structures", () => {
+    expect(normalizeBookingRoomFilterSettings({}, DEFAULT_ROOM_FILTER_SETTINGS)).toEqual(
+      DEFAULT_ROOM_FILTER_SETTINGS,
+    );
+  });
+
+  it("keeps only string filter keys, labels, and room ids", () => {
+    expect(
+      normalizeBookingRoomFilterSettings(
+        {
+          bookingFilters: ["oceanView", 123, "spa_access", null],
+          customFilters: {
+            oceanView: "Ocean view",
+            spa_access: "Spa access",
+            invalid: 42,
+          },
+          filterRooms: {
+            oceanView: ["room_101", 101, "room_102", null],
+            spa_access: ["room_201"],
+            invalid: "not an array",
+          },
+        },
+        DEFAULT_ROOM_FILTER_SETTINGS,
+      ),
+    ).toEqual({
+      bookingFilters: ["oceanView", "spa_access"],
+      customFilters: {
+        oceanView: "Ocean view",
+        spa_access: "Spa access",
+      },
+      filterRooms: {
+        oceanView: ["room_101", "room_102"],
+        spa_access: ["room_201"],
+      },
+    });
+  });
+
+  it("keeps array-valued filter room entries even when all room ids are malformed", () => {
+    expect(
+      normalizeBookingRoomFilterSettings(
+        {
+          filterRooms: {
+            emptyAfterFiltering: [1, null, false],
+          },
+        },
+        DEFAULT_ROOM_FILTER_SETTINGS,
+      ),
+    ).toEqual({
+      bookingFilters: [],
+      customFilters: {},
+      filterRooms: {
+        emptyAfterFiltering: [],
+      },
+    });
   });
 });

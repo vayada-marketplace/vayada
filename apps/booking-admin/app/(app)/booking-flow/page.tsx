@@ -43,7 +43,11 @@ import {
   updateBookingRoomFilterSettings,
   type BookingRoomFilterSettings,
 } from "@/services/api/bookingRoomFilterSettingsClient";
-import { loadBookingFlowSetting } from "@/services/api/bookingFlowSettingsLoader";
+import {
+  loadBookingFlowSetting,
+  normalizeBookingBenefitsSettings,
+  normalizeBookingRoomFilterSettings,
+} from "@/services/api/bookingFlowSettingsLoader";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -132,55 +136,6 @@ const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
   customFilters: {},
   filterRooms: {},
 };
-
-function normalizeBenefitsSettings(settings: unknown): BookingBenefitsSettings {
-  if (!isRecord(settings) || !Array.isArray(settings.benefits)) {
-    return DEFAULT_BENEFITS_SETTINGS;
-  }
-
-  return {
-    benefits: settings.benefits.filter((benefit): benefit is string => typeof benefit === "string"),
-  };
-}
-
-function normalizeRoomFilterSettings(settings: unknown): BookingRoomFilterSettings {
-  if (!isRecord(settings)) return DEFAULT_ROOM_FILTER_SETTINGS;
-
-  return {
-    bookingFilters: Array.isArray(settings.bookingFilters)
-      ? settings.bookingFilters.filter((key): key is string => typeof key === "string")
-      : [],
-    customFilters: toStringRecord(settings.customFilters),
-    filterRooms: toStringArrayRecord(settings.filterRooms),
-  };
-}
-
-function toStringRecord(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {};
-
-  return Object.fromEntries(
-    Object.entries(value).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
-}
-
-function toStringArrayRecord(value: unknown): Record<string, string[]> {
-  if (!isRecord(value)) return {};
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1]))
-      .map(([key, roomIds]) => [
-        key,
-        roomIds.filter((roomId): roomId is string => typeof roomId === "string"),
-      ]),
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function pickRecordByKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
   const allowedKeys = new Set(keys);
@@ -325,7 +280,9 @@ export default function BookingFlowPage() {
           addonSettingsRef.current = settings;
           setAddonSettings(settings);
           setPromoCodes(promoList);
-          setBenefits(normalizeBenefitsSettings(benefitsRes).benefits);
+          setBenefits(
+            normalizeBookingBenefitsSettings(benefitsRes, DEFAULT_BENEFITS_SETTINGS).benefits,
+          );
           setSpecialRequestsEnabled(guestFormSettings.specialRequestsEnabled);
           setArrivalTimeEnabled(guestFormSettings.arrivalTimeEnabled);
           setGuestCountEnabled(guestFormSettings.guestCountEnabled);
@@ -333,7 +290,10 @@ export default function BookingFlowPage() {
           setDefaultLanguage(localizationSettings.defaultLanguage);
           setSupportedCurrencies(localizationSettings.supportedCurrencies);
           setSupportedLanguages(localizationSettings.supportedLanguages);
-          const normalizedRoomFilterSettings = normalizeRoomFilterSettings(roomFilterSettings);
+          const normalizedRoomFilterSettings = normalizeBookingRoomFilterSettings(
+            roomFilterSettings,
+            DEFAULT_ROOM_FILTER_SETTINGS,
+          );
           setBookingFilters(normalizedRoomFilterSettings.bookingFilters);
           setFiltersEnabled(normalizedRoomFilterSettings.bookingFilters.length > 0);
           setCustomFilters(normalizedRoomFilterSettings.customFilters);
