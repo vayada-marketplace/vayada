@@ -67,6 +67,22 @@ export const BOOKING_LOCALIZATION_SETTINGS_CONTRACT = {
   },
 } as const;
 
+export const BOOKING_ROOM_FILTER_SETTINGS_CONTRACT = {
+  method: "GET",
+  path: "/api/booking/hotels/:hotelId/settings/room-filters",
+  permission: "booking.settings.manage",
+  entitlement: {
+    product: "booking",
+    key: "booking-engine",
+    resourceType: "booking_hotel",
+  },
+  resource: {
+    product: "booking",
+    resourceType: "booking_hotel",
+    allowedRelationships: ["owner", "operator"],
+  },
+} as const;
+
 export type BookingAddonSettingsReadModel = {
   showAddonsStep?: boolean | null;
   groupAddonsByCategory?: boolean | null;
@@ -87,6 +103,12 @@ export type BookingLocalizationSettingsReadModel = {
   defaultLanguage?: string | null;
   supportedCurrencies?: unknown;
   supportedLanguages?: unknown;
+};
+
+export type BookingRoomFilterSettingsReadModel = {
+  bookingFilters?: unknown;
+  customFilters?: unknown;
+  filterRooms?: unknown;
 };
 
 export type BookingAddonSettingsResponse = {
@@ -111,10 +133,17 @@ export type BookingLocalizationSettingsResponse = {
   supportedLanguages: string[];
 };
 
+export type BookingRoomFilterSettingsResponse = {
+  bookingFilters: string[];
+  customFilters: Record<string, string>;
+  filterRooms: Record<string, string[]>;
+};
+
 export type BookingAddonSettings = BookingAddonSettingsResponse;
 export type BookingGuestFormSettings = BookingGuestFormSettingsResponse;
 export type BookingBenefitsSettings = BookingBenefitsSettingsResponse;
 export type BookingLocalizationSettings = BookingLocalizationSettingsResponse;
+export type BookingRoomFilterSettings = BookingRoomFilterSettingsResponse;
 
 export type BookingSettingsReadRepository = {
   findAddonSettingsByHotelId(hotelId: string): Promise<BookingAddonSettingsReadModel | null>;
@@ -125,6 +154,9 @@ export type BookingSettingsReadRepository = {
   findLocalizationSettingsByHotelId(
     hotelId: string,
   ): Promise<BookingLocalizationSettingsReadModel | null>;
+  findRoomFilterSettingsByHotelId?(
+    hotelId: string,
+  ): Promise<BookingRoomFilterSettingsReadModel | null>;
   close?(): Promise<void>;
 };
 
@@ -162,6 +194,11 @@ export type BookingLocalizationSettingsErrorCategory =
   | "authorization"
   | "read_model";
 
+export type BookingRoomFilterSettingsErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "read_model";
+
 export type BookingBenefitsSettingsErrorCode =
   | "unauthenticated"
   | "missing_permission"
@@ -177,6 +214,14 @@ export type BookingLocalizationSettingsErrorCode =
   | "inactive_entitlement"
   | "missing_resource_access"
   | "not_found"
+  | "read_model_unavailable";
+
+export type BookingRoomFilterSettingsErrorCode =
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
   | "read_model_unavailable";
 
 export type BookingAddonSettingsError = {
@@ -207,6 +252,13 @@ export type BookingLocalizationSettingsError = {
   message: string;
 };
 
+export type BookingRoomFilterSettingsError = {
+  statusCode: 401 | 403 | 500;
+  code: BookingRoomFilterSettingsErrorCode;
+  category: BookingRoomFilterSettingsErrorCategory;
+  message: string;
+};
+
 export type BookingAddonSettingsRequest = {
   params: {
     hotelId: string;
@@ -229,6 +281,13 @@ export type BookingBenefitsSettingsRequest = {
 };
 
 export type BookingLocalizationSettingsRequest = {
+  params: {
+    hotelId: string;
+  };
+  query: Record<string, never>;
+};
+
+export type BookingRoomFilterSettingsRequest = {
   params: {
     hotelId: string;
   };
@@ -267,6 +326,14 @@ export type BookingLocalizationSettingsContract = {
   error: BookingLocalizationSettingsError;
 };
 
+export type BookingRoomFilterSettingsContract = {
+  method: typeof BOOKING_ROOM_FILTER_SETTINGS_CONTRACT.method;
+  path: typeof BOOKING_ROOM_FILTER_SETTINGS_CONTRACT.path;
+  request: BookingRoomFilterSettingsRequest;
+  response: BookingRoomFilterSettingsResponse;
+  error: BookingRoomFilterSettingsError;
+};
+
 type BookingHotelParams = {
   hotelId: string;
 };
@@ -291,6 +358,12 @@ type BookingLocalizationSettingsRow = {
   default_language: string | null;
   supported_currencies: unknown;
   supported_languages: unknown;
+};
+
+type BookingRoomFilterSettingsRow = {
+  booking_filters: unknown;
+  custom_filters: unknown;
+  filter_rooms: unknown;
 };
 
 export function createPgBookingSettingsReadRepository(config: {
@@ -367,6 +440,22 @@ export function createPgBookingSettingsReadRepository(config: {
         defaultLanguage: row.default_language,
         supportedCurrencies: row.supported_currencies,
         supportedLanguages: row.supported_languages,
+      };
+    },
+    async findRoomFilterSettingsByHotelId(hotelId) {
+      const result = await pool.query<BookingRoomFilterSettingsRow>(
+        `SELECT booking_filters, custom_filters, filter_rooms
+         FROM booking_hotels
+         WHERE id = $1`,
+        [hotelId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        bookingFilters: row.booking_filters,
+        customFilters: row.custom_filters,
+        filterRooms: row.filter_rooms,
       };
     },
     async close() {
@@ -535,6 +624,39 @@ export async function registerBookingSettingsRoutes(
       return toLocalizationSettingsResponse(settings);
     },
   );
+
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/settings/room-filters",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) {
+          return sendBookingRoomFilterSettingsError(reply, contractError);
+        }
+        throw error;
+      }
+
+      let settings: BookingRoomFilterSettingsReadModel | null;
+      try {
+        settings = (await repository.findRoomFilterSettingsByHotelId?.(hotelId)) ?? null;
+      } catch {
+        return sendBookingRoomFilterSettingsError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking room-filter settings are unavailable.",
+        });
+      }
+
+      // Legacy design-settings compatibility: missing hotel rows read as empty
+      // filter settings after authorization, not as not-found errors.
+      return toRoomFilterSettingsResponse(settings);
+    },
+  );
 }
 
 export function toAddonSettingsResponse(
@@ -575,6 +697,16 @@ export function toLocalizationSettingsResponse(
   };
 }
 
+export function toRoomFilterSettingsResponse(
+  settings: BookingRoomFilterSettingsReadModel | null,
+): BookingRoomFilterSettingsResponse {
+  return {
+    bookingFilters: parseLooseStringList(settings?.bookingFilters),
+    customFilters: parseStringRecord(settings?.customFilters),
+    filterRooms: parseStringArrayRecord(settings?.filterRooms),
+  };
+}
+
 // Mirrors the legacy booking-api `parse_json` handling of
 // `booking_hotels.benefits`: the JSONB value may arrive as a native array, a
 // JSON-encoded string, or NULL. NULL, malformed, and non-list values all
@@ -607,6 +739,50 @@ function parseStringList(value: unknown, fallback: string[]): string[] {
   return parsed;
 }
 
+function parseLooseStringList(value: unknown): string[] {
+  const parsed = parseJsonIfString(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter((entry): entry is string => typeof entry === "string");
+}
+
+function parseStringRecord(value: unknown): Record<string, string> {
+  const parsed = parseJsonIfString(value);
+  if (!isPlainRecord(parsed)) return {};
+
+  return Object.fromEntries(
+    Object.entries(parsed).filter((entry): entry is [string, string] => {
+      return typeof entry[1] === "string";
+    }),
+  );
+}
+
+function parseStringArrayRecord(value: unknown): Record<string, string[]> {
+  const parsed = parseJsonIfString(value);
+  if (!isPlainRecord(parsed)) return {};
+
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, entry]) => [
+      key,
+      Array.isArray(entry)
+        ? entry.filter((roomId): roomId is string => typeof roomId === "string")
+        : [],
+    ]),
+  );
+}
+
+function parseJsonIfString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function sendBookingAddonSettingsError(
   reply: FastifyReply,
   error: BookingAddonSettingsError,
@@ -631,6 +807,13 @@ function sendBookingBenefitsSettingsError(
 function sendBookingLocalizationSettingsError(
   reply: FastifyReply,
   error: BookingLocalizationSettingsError | BookingSettingsAccessError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingRoomFilterSettingsError(
+  reply: FastifyReply,
+  error: BookingRoomFilterSettingsError | BookingSettingsAccessError,
 ): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }
