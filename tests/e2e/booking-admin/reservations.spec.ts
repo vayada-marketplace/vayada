@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
 import type { BookingReservationList } from "../../../apps/booking-admin/services/api/bookingReservationsClient";
+import {
+  BOOKING_ADMIN_HOTEL_ID,
+  mockBookingAdminAuthenticatedSession,
+  mockBookingAdminShellRoutes,
+} from "../support/bookingAdminMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
 // VAY-706: cutover smoke for the booking-admin reservations surface.
@@ -29,8 +34,7 @@ import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
-const HOTEL_ID = "booking_hotel_alpenrose";
-const RESERVATIONS_CONTRACT_PATH = `/api/booking/hotels/${HOTEL_ID}/reservations`;
+const RESERVATIONS_CONTRACT_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/reservations`;
 
 const reservationListFixture: BookingReservationList = {
   bookings: [
@@ -109,31 +113,8 @@ test.describe("booking-admin reservations cutover", () => {
 
     const assertHealthy = watchPageHealth(page, testInfo);
 
-    await page.addInitScript((hotelId) => {
-      const oneHourFromNow = Date.now() + 60 * 60 * 1000;
-      window.localStorage.setItem("access_token", "e2e-booking-admin-token");
-      window.localStorage.setItem("token_expires_at", String(oneHourFromNow));
-      window.localStorage.setItem("isLoggedIn", "true");
-      window.localStorage.setItem("userType", "hotel");
-      window.localStorage.setItem("isSuperAdmin", "false");
-      window.localStorage.setItem("selectedHotelId", hotelId);
-      window.localStorage.setItem(
-        "user",
-        JSON.stringify({ id: "user_1", email: "owner@example.com", type: "hotel" }),
-      );
-    }, HOTEL_ID);
-
-    // Keep the admin shell quiet so the smoke isolates the reservations surface.
-    // Register the broad fallback first; Playwright lets later, more specific
-    // routes win, so the explicit stubs below take precedence over this one.
-    await page.route("**/admin/**", (route) => route.fulfill({ json: {} }));
-    await page.route("**/admin/module-activations", (route) =>
-      route.fulfill({ json: { activations: [] } }),
-    );
-    await page.route("**/admin/hotels", (route) =>
-      route.fulfill({ json: [{ id: HOTEL_ID, name: "Alpenrose", slug: "hotel-alpenrose" }] }),
-    );
-    await page.route("**/admin/superadmin/hotels", (route) => route.fulfill({ json: [] }));
+    await mockBookingAdminAuthenticatedSession(page);
+    await mockBookingAdminShellRoutes(page);
 
     const contractRequests: string[] = [];
     await page.route(`**${RESERVATIONS_CONTRACT_PATH}*`, async (route) => {
