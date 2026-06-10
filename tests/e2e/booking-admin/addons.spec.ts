@@ -8,7 +8,7 @@ import { watchPageHealth } from "../support/pageHealth";
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
 test.describe("booking-admin add-ons settings cutover", () => {
-  test("loads display settings from the TypeScript contract and preserves legacy writes", async ({
+  test("loads and saves display settings through the TypeScript contract", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -21,7 +21,15 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await mockBookingAdminBookingFlow(page);
 
     const contractRequests: string[] = [];
+    const typedWrites: unknown[] = [];
     await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        typedWrites.push(body);
+        await route.fulfill({ json: body });
+        return;
+      }
+
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
       await route.fulfill({
@@ -32,8 +40,6 @@ test.describe("booking-admin add-ons settings cutover", () => {
     const legacyWrites: string[] = [];
     await page.route("**/admin/settings/addons", async (route) => {
       legacyWrites.push(route.request().postData() ?? "");
-      expect(route.request().method()).toBe("PATCH");
-      expect(route.request().postDataJSON()).toEqual({ groupAddonsByCategory: true });
       await route.fulfill({
         json: { showAddonsStep: true, groupAddonsByCategory: true },
       });
@@ -49,9 +55,12 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await expect(groupToggle).toBeVisible();
     await groupToggle.click();
 
+    await expect.poll(() => typedWrites.length).toBe(1);
+
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_ADDON_SETTINGS_PATH);
-    expect(legacyWrites).toEqual([JSON.stringify({ groupAddonsByCategory: true })]);
+    expect(typedWrites).toEqual([{ showAddonsStep: true, groupAddonsByCategory: true }]);
+    expect(legacyWrites).toEqual([]);
 
     await assertHealthy();
   });

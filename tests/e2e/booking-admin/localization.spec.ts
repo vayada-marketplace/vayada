@@ -10,7 +10,7 @@ import { watchPageHealth } from "../support/pageHealth";
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
 test.describe("booking-admin localization settings cutover", () => {
-  test("loads localization settings from the TypeScript contract and preserves legacy writes", async ({
+  test("loads and saves localization settings through the TypeScript contract", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -58,7 +58,15 @@ test.describe("booking-admin localization settings cutover", () => {
     });
 
     const contractRequests: string[] = [];
+    const typedWrites: unknown[] = [];
     await page.route(`**${BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        typedWrites.push(body);
+        await route.fulfill({ json: body });
+        return;
+      }
+
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
       await route.fulfill({
@@ -85,18 +93,19 @@ test.describe("booking-admin localization settings cutover", () => {
 
     await page.getByRole("button", { name: /^Save Changes$/ }).click();
 
-    await expect.poll(() => legacyWrites.length).toBe(1);
+    await expect.poll(() => typedWrites.length).toBe(1);
 
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH);
-    expect(legacyWrites).toEqual([
+    expect(typedWrites).toEqual([
       {
-        default_currency: "CHF",
-        default_language: "de",
-        supported_currencies: ["EUR", "USD"],
-        supported_languages: ["en", "fr"],
+        defaultCurrency: "CHF",
+        defaultLanguage: "de",
+        supportedCurrencies: ["EUR", "USD"],
+        supportedLanguages: ["en", "fr"],
       },
     ]);
+    expect(legacyWrites).toEqual([]);
 
     await assertHealthy();
   });

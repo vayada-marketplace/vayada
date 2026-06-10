@@ -9,7 +9,7 @@ import { watchPageHealth } from "../support/pageHealth";
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
 test.describe("booking-admin room-filter settings cutover", () => {
-  test("loads room filters from the TypeScript contract and preserves legacy writes", async ({
+  test("loads and saves room filters through the TypeScript contract", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -22,7 +22,15 @@ test.describe("booking-admin room-filter settings cutover", () => {
     await mockBookingAdminBookingFlow(page);
 
     const contractRequests: string[] = [];
+    const typedWrites: unknown[] = [];
     await page.route(`**${BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        typedWrites.push(body);
+        await route.fulfill({ json: body });
+        return;
+      }
+
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
       await route.fulfill({
@@ -76,20 +84,21 @@ test.describe("booking-admin room-filter settings cutover", () => {
 
     await page.getByRole("button", { name: /^Save Filters$/ }).click();
 
-    await expect.poll(() => legacyWrites.length).toBe(1);
+    await expect.poll(() => typedWrites.length).toBe(1);
 
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH);
-    expect(legacyWrites).toEqual([
+    expect(typedWrites).toEqual([
       {
-        booking_filters: ["includeBreakfast", "rooftop"],
-        custom_filters: { rooftop: "Rooftop Terrace" },
-        filter_rooms: {
+        bookingFilters: ["includeBreakfast", "rooftop"],
+        customFilters: { rooftop: "Rooftop Terrace" },
+        filterRooms: {
           includeBreakfast: ["room-suite"],
           rooftop: ["room-suite", "room-deluxe"],
         },
       },
     ]);
+    expect(legacyWrites).toEqual([]);
 
     await assertHealthy();
   });

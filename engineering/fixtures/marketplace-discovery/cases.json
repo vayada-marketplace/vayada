@@ -1,0 +1,201 @@
+{
+  "contractVersion": "marketplace-discovery.v1",
+  "cases": [
+    {
+      "caseId": "listings-populated",
+      "description": "Two public listings with offerings and creator requirements.",
+      "request": { "path": "/api/marketplace/listings", "query": {} },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "mustInclude": [
+          "items[0].listingId",
+          "items[0].publicId",
+          "items[0].canonicalSlug",
+          "items[0].displayName",
+          "items[0].listingTitle",
+          "items[0].location.displayText",
+          "items[0].coverImageUrl",
+          "items[0].imageUrls",
+          "items[0].offerings[0].collaborationType",
+          "items[0].creatorRequirements.platforms",
+          "items[0].createdAt",
+          "items[0].projectedAt",
+          "pagination.total"
+        ],
+        "mustExclude": [
+          "owner_email",
+          "ownerEmail",
+          "owner_user_id",
+          "ownerUserId",
+          "hotel_profile_id",
+          "status"
+        ],
+        "idContinuity": "items[].listingId equals the legacy hotel_listings.id seeded in the fixture",
+        "enums": {
+          "items[].offerings[].collaborationType": ["free_stay", "paid", "discount", "affiliate"],
+          "items[].offerings[].platforms[]": [
+            "instagram",
+            "tiktok",
+            "youtube",
+            "facebook",
+            "blog",
+            "x",
+            "other"
+          ]
+        }
+      }
+    },
+    {
+      "caseId": "listings-excludes-non-public",
+      "description": "Non-public visibility rows and an incomplete-profile hotel's listing are absent.",
+      "request": { "path": "/api/marketplace/listings", "query": {} },
+      "fixtureNotes": "Seed one row per non-public visibility_status plus one listing whose hotel profile is incomplete (projects to non-public), alongside public rows.",
+      "expected": {
+        "status": 200,
+        "onlyVisibilityStatus": "public",
+        "absentListingFixtures": [
+          "listing-private",
+          "listing-unlisted",
+          "listing-disabled",
+          "listing-incomplete-profile-hotel"
+        ]
+      }
+    },
+    {
+      "caseId": "listings-empty",
+      "description": "No public listings exist.",
+      "request": { "path": "/api/marketplace/listings", "query": {} },
+      "expected": {
+        "status": 200,
+        "itemCount": 0,
+        "pagination": { "total": 0 }
+      }
+    },
+    {
+      "caseId": "listings-pagination",
+      "description": "limit/offset slice the documented ordering and total reflects the full count.",
+      "request": {
+        "path": "/api/marketplace/listings",
+        "query": { "limit": 1, "offset": 1 }
+      },
+      "fixtureNotes": "Seed three public listings with distinct created_at values.",
+      "expected": {
+        "status": 200,
+        "itemCount": 1,
+        "pagination": { "limit": 1, "offset": 1, "total": 3 },
+        "stableOrdering": "createdAt DESC, listingId ASC"
+      }
+    },
+    {
+      "caseId": "listings-clamps-out-of-range",
+      "description": "Out-of-range numeric pagination values are clamped, not rejected.",
+      "request": {
+        "path": "/api/marketplace/listings",
+        "query": { "limit": 999, "offset": -5 }
+      },
+      "expected": {
+        "status": 200,
+        "pagination": { "limit": 200, "offset": 0 },
+        "alsoClamps": { "limit=0": 1 }
+      }
+    },
+    {
+      "caseId": "listings-invalid-query",
+      "description": "Non-numeric pagination parameters are rejected.",
+      "request": {
+        "path": "/api/marketplace/listings",
+        "query": { "limit": "abc" }
+      },
+      "expected": { "status": 400, "errorCode": "invalid_query" }
+    },
+    {
+      "caseId": "creators-populated",
+      "description": "Active, complete creators with platform breakdowns.",
+      "request": { "path": "/api/marketplace/creators", "query": {} },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "mustInclude": [
+          "items[0].creatorId",
+          "items[0].displayName",
+          "items[0].creatorType",
+          "items[0].platforms[0].platform",
+          "items[0].platforms[0].handle",
+          "items[0].platforms[0].followerCount",
+          "items[0].platforms[0].engagementRate",
+          "items[0].audienceSize",
+          "items[0].averageRating",
+          "items[0].totalReviews",
+          "items[0].createdAt"
+        ],
+        "mustExclude": ["user_id", "userId", "email", "phone"],
+        "idContinuity": "items[].creatorId equals the legacy creators.id seeded in the fixture",
+        "enums": {
+          "items[].creatorType": ["lifestyle", "travel", "other"],
+          "items[].platforms[].platform": [
+            "instagram",
+            "tiktok",
+            "youtube",
+            "facebook",
+            "blog",
+            "x",
+            "other"
+          ]
+        },
+        "mappings": { "creator_type 'migration'": "other" }
+      }
+    },
+    {
+      "caseId": "creators-audience-aggregates",
+      "description": "audienceSize sums platform followers; rating aggregates match ratings rows.",
+      "request": { "path": "/api/marketplace/creators", "query": {} },
+      "fixtureNotes": "Seed one creator with two platforms (12000 + 8000 followers) and three ratings (5, 4, 4).",
+      "expected": {
+        "status": 200,
+        "creator": {
+          "audienceSize": 20000,
+          "averageRating": 4.33,
+          "totalReviews": 3
+        }
+      }
+    },
+    {
+      "caseId": "creators-empty-platforms",
+      "description": "A creator with no platform rows still appears with empty platforms.",
+      "request": { "path": "/api/marketplace/creators", "query": {} },
+      "expected": {
+        "status": 200,
+        "creator": {
+          "platforms": [],
+          "audienceSize": 0
+        }
+      }
+    },
+    {
+      "caseId": "creators-excludes-ineligible",
+      "description": "Incomplete, non-active, and null-display-name creators are absent.",
+      "request": { "path": "/api/marketplace/creators", "query": {} },
+      "fixtureNotes": "Seed creators with profile_complete=false, profile_status in (pending, rejected, suspended, archived), and display_name NULL alongside eligible rows.",
+      "expected": {
+        "status": 200,
+        "absentCreatorFixtures": [
+          "creator-incomplete-profile",
+          "creator-pending-status",
+          "creator-suspended-status",
+          "creator-null-display-name"
+        ]
+      }
+    },
+    {
+      "caseId": "creators-empty",
+      "description": "No active complete creators exist.",
+      "request": { "path": "/api/marketplace/creators", "query": {} },
+      "expected": {
+        "status": 200,
+        "itemCount": 0,
+        "pagination": { "total": 0 }
+      }
+    }
+  ]
+}

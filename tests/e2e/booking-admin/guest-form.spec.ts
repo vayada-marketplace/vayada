@@ -10,7 +10,7 @@ import { watchPageHealth } from "../support/pageHealth";
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
 test.describe("booking-admin guest-form settings cutover", () => {
-  test("loads guest-form toggles from the TypeScript contract and preserves legacy writes", async ({
+  test("loads and saves guest-form toggles through the TypeScript contract", async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -58,7 +58,15 @@ test.describe("booking-admin guest-form settings cutover", () => {
     });
 
     const contractRequests: string[] = [];
+    const typedWrites: unknown[] = [];
     await page.route(`**${BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        typedWrites.push(body);
+        await route.fulfill({ json: body });
+        return;
+      }
+
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
       await route.fulfill({
@@ -95,25 +103,19 @@ test.describe("booking-admin guest-form settings cutover", () => {
 
     await page.getByRole("button", { name: /^Save Changes$/ }).click();
 
-    await expect.poll(() => bookingSettingsWrites.length).toBe(1);
-    await expect.poll(() => pmsSyncWrites.length).toBe(1);
+    await expect.poll(() => typedWrites.length).toBe(1);
 
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH);
-    expect(bookingSettingsWrites).toEqual([
+    expect(typedWrites).toEqual([
       {
-        special_requests_enabled: true,
-        arrival_time_enabled: true,
-        guest_count_enabled: false,
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: true,
+        guestCountEnabled: false,
       },
     ]);
-    expect(pmsSyncWrites).toEqual([
-      {
-        special_requests_enabled: true,
-        arrival_time_enabled: true,
-        guest_count_enabled: false,
-      },
-    ]);
+    expect(bookingSettingsWrites).toEqual([]);
+    expect(pmsSyncWrites).toEqual([]);
 
     await assertHealthy();
   });

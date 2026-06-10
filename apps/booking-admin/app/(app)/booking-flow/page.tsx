@@ -19,21 +19,28 @@ import {
   type AddonSettings,
   type PromoCodeItem,
 } from "@/services/settings";
-import { getBookingAddonSettings } from "@/services/api/bookingAddonSettingsClient";
+import {
+  getBookingAddonSettings,
+  updateBookingAddonSettings,
+} from "@/services/api/bookingAddonSettingsClient";
 import {
   getBookingBenefitsSettings,
+  updateBookingBenefitsSettings,
   type BookingBenefitsSettings,
 } from "@/services/api/bookingBenefitsSettingsClient";
 import {
   getBookingGuestFormSettings,
+  updateBookingGuestFormSettings,
   type BookingGuestFormSettings,
 } from "@/services/api/bookingGuestFormSettingsClient";
 import {
   getBookingLocalizationSettings,
+  updateBookingLocalizationSettings,
   type BookingLocalizationSettings,
 } from "@/services/api/bookingLocalizationSettingsClient";
 import {
   getBookingRoomFilterSettings,
+  updateBookingRoomFilterSettings,
   type BookingRoomFilterSettings,
 } from "@/services/api/bookingRoomFilterSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
@@ -174,6 +181,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function pickRecordByKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
+  const allowedKeys = new Set(keys);
+  return Object.fromEntries(Object.entries(record).filter(([key]) => allowedKeys.has(key)));
+}
+
 function getSelectedBookingHotelId(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("selectedHotelId");
@@ -197,6 +209,9 @@ export default function BookingFlowPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [highlightInput, setHighlightInput] = useState("");
   const [includedItemInput, setIncludedItemInput] = useState("");
+  const addonSettingsRef = useRef<AddonSettings>(DEFAULT_ADDON_SETTINGS);
+  const addonSettingsWriteSeqRef = useRef(0);
+  const addonSettingsSaveChainRef = useRef<Promise<unknown>>(Promise.resolve());
   const addonFileInputRef = useRef<HTMLInputElement>(null);
 
   // Pending delete confirmation
@@ -219,6 +234,7 @@ export default function BookingFlowPage() {
   const [savingBenefits, setSavingBenefits] = useState(false);
 
   // Rooms state (filters)
+  const [bookingHotelId, setBookingHotelId] = useState<string | null>(null);
   const [bookingFilters, setBookingFilters] = useState<string[]>([]);
   const [customFilters, setCustomFilters] = useState<Record<string, string>>({});
   const [filterRooms, setFilterRooms] = useState<Record<string, string[]>>({});
@@ -331,7 +347,9 @@ export default function BookingFlowPage() {
           property,
           promoList,
         ]) => {
+          setBookingHotelId(selectedHotelId || property?.id || null);
           setAddons(addonList);
+          addonSettingsRef.current = settings;
           setAddonSettings(settings);
           setPromoCodes(promoList);
           setBenefits(normalizeBenefitsSettings(benefitsRes).benefits);
@@ -364,6 +382,14 @@ export default function BookingFlowPage() {
   const showFeedback = (type: "success" | "error", message: string) => {
     setFeedback({ type, message });
     setTimeout(() => setFeedback(null), 3000);
+  };
+
+  const getBookingHotelIdForSave = () => {
+    const hotelId = bookingHotelId || getSelectedBookingHotelId();
+    if (!hotelId) {
+      throw new Error("Booking hotel id is required.");
+    }
+    return hotelId;
   };
 
   // ── Add-on CRUD handlers ──
@@ -478,14 +504,33 @@ export default function BookingFlowPage() {
   };
 
   const handleToggleAddonSetting = async (key: keyof AddonSettings) => {
-    const newValue = !addonSettings[key];
-    const updated = { ...addonSettings, [key]: newValue };
+    const previous = addonSettingsRef.current;
+    const newValue = !previous[key];
+    const updated = { ...previous, [key]: newValue };
+    const writeSeq = ++addonSettingsWriteSeqRef.current;
+    addonSettingsRef.current = updated;
     setAddonSettings(updated);
+
+    const savePromise = addonSettingsSaveChainRef.current.then(() =>
+      updateBookingAddonSettings({
+        hotelId: getBookingHotelIdForSave(),
+        body: updated,
+      }),
+    );
+    addonSettingsSaveChainRef.current = savePromise.catch(() => undefined);
+
     try {
-      await settingsService.updateAddonSettings({ [key]: newValue });
+      const saved = await savePromise;
+      if (writeSeq === addonSettingsWriteSeqRef.current) {
+        addonSettingsRef.current = saved;
+        setAddonSettings(saved);
+      }
     } catch {
-      setAddonSettings(addonSettings);
-      showFeedback("error", t("bookingFlow.addons.feedback.settingError"));
+      if (writeSeq === addonSettingsWriteSeqRef.current) {
+        addonSettingsRef.current = previous;
+        setAddonSettings(previous);
+        showFeedback("error", t("bookingFlow.addons.feedback.settingError"));
+      }
     }
   };
 
@@ -567,11 +612,16 @@ export default function BookingFlowPage() {
     if (!newEnabled) {
       // Auto-save when disabling filters
       try {
-        await settingsService.updateDesignSettings({
-          booking_filters: [],
-          custom_filters: customFilters,
-          filter_rooms: {},
+        const saved = await updateBookingRoomFilterSettings({
+          hotelId: getBookingHotelIdForSave(),
+          body: {
+            bookingFilters: [],
+            customFilters: {},
+            filterRooms: {},
+          },
         });
+        setBookingFilters(saved.bookingFilters);
+        setFilterRooms(saved.filterRooms);
       } catch {
         setFiltersEnabled(true);
         setFeedback({ type: "error", message: t("bookingFlow.rooms.feedback.disableError") });
@@ -583,12 +633,22 @@ export default function BookingFlowPage() {
     try {
       setSavingFilters(true);
       const filters = filtersEnabled ? bookingFilters : [];
-      const rooms = filtersEnabled ? filterRooms : {};
-      await settingsService.updateDesignSettings({
-        booking_filters: filters,
-        custom_filters: customFilters,
-        filter_rooms: rooms,
+      const rooms = filtersEnabled ? pickRecordByKeys(filterRooms, filters) : {};
+      const nextCustomFilters = filtersEnabled ? pickRecordByKeys(customFilters, filters) : {};
+      const saved = await updateBookingRoomFilterSettings({
+        hotelId: getBookingHotelIdForSave(),
+        body: {
+          bookingFilters: filters,
+          customFilters: nextCustomFilters,
+          filterRooms: rooms,
+        },
       });
+      setBookingFilters(saved.bookingFilters);
+      setFiltersEnabled(saved.bookingFilters.length > 0);
+      if (saved.bookingFilters.length > 0) {
+        setCustomFilters(saved.customFilters);
+      }
+      setFilterRooms(saved.filterRooms);
       showFeedback("success", t("bookingFlow.rooms.feedback.saveSuccess"));
     } catch {
       showFeedback("error", t("bookingFlow.rooms.feedback.saveError"));
@@ -610,7 +670,11 @@ export default function BookingFlowPage() {
         setBenefits(finalBenefits);
         setBenefitInput("");
       }
-      await settingsService.updateBenefits(finalBenefits);
+      const saved = await updateBookingBenefitsSettings({
+        hotelId: getBookingHotelIdForSave(),
+        body: { benefits: finalBenefits },
+      });
+      setBenefits(saved.benefits);
       showFeedback("success", t("bookingFlow.benefits.feedback.saveSuccess"));
     } catch {
       showFeedback("error", t("bookingFlow.benefits.feedback.saveError"));
@@ -625,17 +689,17 @@ export default function BookingFlowPage() {
     try {
       setSavingGuestForm(true);
       const guestFormData = {
-        special_requests_enabled: specialRequestsEnabled,
-        arrival_time_enabled: arrivalTimeEnabled,
-        guest_count_enabled: guestCountEnabled,
+        specialRequestsEnabled,
+        arrivalTimeEnabled,
+        guestCountEnabled,
       };
-      await settingsService.updatePropertySettings(guestFormData);
-      // Sync to PMS so guest-facing booking page picks up the changes
-      try {
-        await pmsClient.patch("/admin/guest-form-settings", guestFormData);
-      } catch {
-        // Non-fatal: PMS sync may fail if not using vayada PMS
-      }
+      const saved = await updateBookingGuestFormSettings({
+        hotelId: getBookingHotelIdForSave(),
+        body: guestFormData,
+      });
+      setSpecialRequestsEnabled(saved.specialRequestsEnabled);
+      setArrivalTimeEnabled(saved.arrivalTimeEnabled);
+      setGuestCountEnabled(saved.guestCountEnabled);
       showFeedback("success", t("bookingFlow.guestForm.feedback.saveSuccess"));
     } catch {
       showFeedback("error", t("bookingFlow.guestForm.feedback.saveError"));
@@ -661,12 +725,19 @@ export default function BookingFlowPage() {
   const handleSaveCurrencyLang = async () => {
     try {
       setSavingCurrencyLang(true);
-      await settingsService.updatePropertySettings({
-        default_currency: defaultCurrency,
-        default_language: defaultLanguage,
-        supported_currencies: supportedCurrencies,
-        supported_languages: supportedLanguages,
+      const saved = await updateBookingLocalizationSettings({
+        hotelId: getBookingHotelIdForSave(),
+        body: {
+          defaultCurrency,
+          defaultLanguage,
+          supportedCurrencies,
+          supportedLanguages,
+        },
       });
+      setDefaultCurrency(saved.defaultCurrency);
+      setDefaultLanguage(saved.defaultLanguage);
+      setSupportedCurrencies(saved.supportedCurrencies);
+      setSupportedLanguages(saved.supportedLanguages);
       showFeedback("success", t("bookingFlow.localization.feedback.saveSuccess"));
     } catch {
       showFeedback("error", t("bookingFlow.localization.feedback.saveError"));
