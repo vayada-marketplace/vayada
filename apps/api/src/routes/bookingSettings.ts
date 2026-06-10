@@ -51,6 +51,22 @@ export const BOOKING_BENEFITS_SETTINGS_CONTRACT = {
   },
 } as const;
 
+export const BOOKING_LOCALIZATION_SETTINGS_CONTRACT = {
+  method: "GET",
+  path: "/api/booking/hotels/:hotelId/settings/localization",
+  permission: "booking.settings.manage",
+  entitlement: {
+    product: "booking",
+    key: "booking-engine",
+    resourceType: "booking_hotel",
+  },
+  resource: {
+    product: "booking",
+    resourceType: "booking_hotel",
+    allowedRelationships: ["owner", "operator"],
+  },
+} as const;
+
 export type BookingAddonSettingsReadModel = {
   showAddonsStep?: boolean | null;
   groupAddonsByCategory?: boolean | null;
@@ -64,6 +80,13 @@ export type BookingGuestFormSettingsReadModel = {
 
 export type BookingBenefitsSettingsReadModel = {
   benefits?: unknown;
+};
+
+export type BookingLocalizationSettingsReadModel = {
+  defaultCurrency?: string | null;
+  defaultLanguage?: string | null;
+  supportedCurrencies?: unknown;
+  supportedLanguages?: unknown;
 };
 
 export type BookingAddonSettingsResponse = {
@@ -81,9 +104,17 @@ export type BookingBenefitsSettingsResponse = {
   benefits: string[];
 };
 
+export type BookingLocalizationSettingsResponse = {
+  defaultCurrency: string;
+  defaultLanguage: string;
+  supportedCurrencies: string[];
+  supportedLanguages: string[];
+};
+
 export type BookingAddonSettings = BookingAddonSettingsResponse;
 export type BookingGuestFormSettings = BookingGuestFormSettingsResponse;
 export type BookingBenefitsSettings = BookingBenefitsSettingsResponse;
+export type BookingLocalizationSettings = BookingLocalizationSettingsResponse;
 
 export type BookingSettingsReadRepository = {
   findAddonSettingsByHotelId(hotelId: string): Promise<BookingAddonSettingsReadModel | null>;
@@ -91,6 +122,9 @@ export type BookingSettingsReadRepository = {
     hotelId: string,
   ): Promise<BookingGuestFormSettingsReadModel | null>;
   findBenefitsSettingsByHotelId(hotelId: string): Promise<BookingBenefitsSettingsReadModel | null>;
+  findLocalizationSettingsByHotelId(
+    hotelId: string,
+  ): Promise<BookingLocalizationSettingsReadModel | null>;
   close?(): Promise<void>;
 };
 
@@ -123,12 +157,26 @@ export type BookingBenefitsSettingsErrorCategory =
   | "authorization"
   | "read_model";
 
+export type BookingLocalizationSettingsErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "read_model";
+
 export type BookingBenefitsSettingsErrorCode =
   | "unauthenticated"
   | "missing_permission"
   | "missing_entitlement"
   | "inactive_entitlement"
   | "missing_resource_access"
+  | "read_model_unavailable";
+
+export type BookingLocalizationSettingsErrorCode =
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "not_found"
   | "read_model_unavailable";
 
 export type BookingAddonSettingsError = {
@@ -152,6 +200,13 @@ export type BookingBenefitsSettingsError = {
   message: string;
 };
 
+export type BookingLocalizationSettingsError = {
+  statusCode: 401 | 403 | 404 | 500;
+  code: BookingLocalizationSettingsErrorCode;
+  category: BookingLocalizationSettingsErrorCategory;
+  message: string;
+};
+
 export type BookingAddonSettingsRequest = {
   params: {
     hotelId: string;
@@ -167,6 +222,13 @@ export type BookingGuestFormSettingsRequest = {
 };
 
 export type BookingBenefitsSettingsRequest = {
+  params: {
+    hotelId: string;
+  };
+  query: Record<string, never>;
+};
+
+export type BookingLocalizationSettingsRequest = {
   params: {
     hotelId: string;
   };
@@ -197,6 +259,14 @@ export type BookingBenefitsSettingsContract = {
   error: BookingBenefitsSettingsError;
 };
 
+export type BookingLocalizationSettingsContract = {
+  method: typeof BOOKING_LOCALIZATION_SETTINGS_CONTRACT.method;
+  path: typeof BOOKING_LOCALIZATION_SETTINGS_CONTRACT.path;
+  request: BookingLocalizationSettingsRequest;
+  response: BookingLocalizationSettingsResponse;
+  error: BookingLocalizationSettingsError;
+};
+
 type BookingHotelParams = {
   hotelId: string;
 };
@@ -214,6 +284,13 @@ type BookingGuestFormSettingsRow = {
 
 type BookingBenefitsSettingsRow = {
   benefits: unknown;
+};
+
+type BookingLocalizationSettingsRow = {
+  currency: string | null;
+  default_language: string | null;
+  supported_currencies: unknown;
+  supported_languages: unknown;
 };
 
 export function createPgBookingSettingsReadRepository(config: {
@@ -273,6 +350,23 @@ export function createPgBookingSettingsReadRepository(config: {
 
       return {
         benefits: row.benefits,
+      };
+    },
+    async findLocalizationSettingsByHotelId(hotelId) {
+      const result = await pool.query<BookingLocalizationSettingsRow>(
+        `SELECT currency, default_language, supported_currencies, supported_languages
+         FROM booking_hotels
+         WHERE id = $1`,
+        [hotelId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        defaultCurrency: row.currency,
+        defaultLanguage: row.default_language,
+        supportedCurrencies: row.supported_currencies,
+        supportedLanguages: row.supported_languages,
       };
     },
     async close() {
@@ -401,6 +495,46 @@ export async function registerBookingSettingsRoutes(
       return toBenefitsSettingsResponse(settings);
     },
   );
+
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/settings/localization",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) {
+          return sendBookingLocalizationSettingsError(reply, contractError);
+        }
+        throw error;
+      }
+
+      let settings: BookingLocalizationSettingsReadModel | null;
+      try {
+        settings = await repository.findLocalizationSettingsByHotelId(hotelId);
+      } catch {
+        return sendBookingLocalizationSettingsError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking localization settings are unavailable.",
+        });
+      }
+
+      if (!settings) {
+        return sendBookingLocalizationSettingsError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "read_model",
+          message: "Booking hotel localization settings not found.",
+        });
+      }
+
+      return toLocalizationSettingsResponse(settings);
+    },
+  );
 }
 
 export function toAddonSettingsResponse(
@@ -430,6 +564,17 @@ export function toBenefitsSettingsResponse(
   };
 }
 
+export function toLocalizationSettingsResponse(
+  settings: BookingLocalizationSettingsReadModel,
+): BookingLocalizationSettingsResponse {
+  return {
+    defaultCurrency: settings.defaultCurrency ?? "EUR",
+    defaultLanguage: settings.defaultLanguage ?? "en",
+    supportedCurrencies: parseStringList(settings.supportedCurrencies, []),
+    supportedLanguages: parseStringList(settings.supportedLanguages, ["en"]),
+  };
+}
+
 // Mirrors the legacy booking-api `parse_json` handling of
 // `booking_hotels.benefits`: the JSONB value may arrive as a native array, a
 // JSON-encoded string, or NULL. NULL, malformed, and non-list values all
@@ -446,6 +591,20 @@ function parseBenefitsValue(value: unknown): string[] {
   }
   if (!Array.isArray(parsed)) return [];
   return parsed.filter((entry): entry is string => typeof entry === "string");
+}
+
+function parseStringList(value: unknown, fallback: string[]): string[] {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return fallback;
+    }
+  }
+  if (!Array.isArray(parsed)) return fallback;
+  if (!parsed.every((entry) => typeof entry === "string")) return fallback;
+  return parsed;
 }
 
 function sendBookingAddonSettingsError(
@@ -465,6 +624,13 @@ function sendBookingGuestFormSettingsError(
 function sendBookingBenefitsSettingsError(
   reply: FastifyReply,
   error: BookingBenefitsSettingsError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingLocalizationSettingsError(
+  reply: FastifyReply,
+  error: BookingLocalizationSettingsError | BookingSettingsAccessError,
 ): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }

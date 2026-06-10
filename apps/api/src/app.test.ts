@@ -115,6 +115,18 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       benefits: ["Free breakfast", "Late checkout"],
     };
   },
+  async findLocalizationSettingsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      defaultCurrency: "CHF",
+      defaultLanguage: "de",
+      supportedCurrencies: ["CHF", "EUR"],
+      supportedLanguages: ["de", "en"],
+    };
+  },
 };
 
 const reservation: BookingReservationReadModel = {
@@ -336,6 +348,17 @@ describe("vayada-api", () => {
     const response = await injectJson(app, {
       method: "GET",
       url: "/api/booking/hotels/booking_hotel_alpenrose/settings/benefits",
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("does not expose booking localization settings until a read model is configured", async () => {
+    app = buildApp({ logger: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
     });
 
     expect(response.statusCode).toBe(404);
@@ -1047,6 +1070,26 @@ describe("vayada-api", () => {
     });
   });
 
+  it("returns booking localization settings with auth, policy, and the documented legacy-compatible shape", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      defaultCurrency: "CHF",
+      defaultLanguage: "de",
+      supportedCurrencies: ["CHF", "EUR"],
+      supportedLanguages: ["de", "en"],
+    });
+  });
+
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -1381,6 +1424,9 @@ describe("vayada-api", () => {
         async findBenefitsSettingsByHotelId() {
           return null;
         },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -1415,6 +1461,9 @@ describe("vayada-api", () => {
         async findBenefitsSettingsByHotelId() {
           return null;
         },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -1445,6 +1494,9 @@ describe("vayada-api", () => {
         },
         async findBenefitsSettingsByHotelId() {
           return { benefits: null };
+        },
+        async findLocalizationSettingsByHotelId() {
+          return null;
         },
       },
     });
@@ -1478,6 +1530,9 @@ describe("vayada-api", () => {
           async findBenefitsSettingsByHotelId() {
             return { benefits };
           },
+          async findLocalizationSettingsByHotelId() {
+            return null;
+          },
         },
       });
 
@@ -1510,6 +1565,9 @@ describe("vayada-api", () => {
         async findBenefitsSettingsByHotelId() {
           return { benefits: ["Free breakfast", 42, null, { label: "Spa" }, "Late checkout"] };
         },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -1539,6 +1597,9 @@ describe("vayada-api", () => {
         async findBenefitsSettingsByHotelId() {
           return { benefits: '["Free parking", "Welcome drink"]' };
         },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -1553,6 +1614,132 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
       benefits: ["Free parking", "Welcome drink"],
+    });
+  });
+
+  it("defaults missing booking localization settings fields to the contract defaults", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return {
+            defaultCurrency: null,
+            defaultLanguage: null,
+            supportedCurrencies: null,
+            supportedLanguages: null,
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      defaultCurrency: "EUR",
+      defaultLanguage: "en",
+      supportedCurrencies: [],
+      supportedLanguages: ["en"],
+    });
+  });
+
+  it("defaults malformed booking localization lists to the contract defaults", async () => {
+    const malformedValues: unknown[] = ['{"not": "a list"}', "not json", 42, { nested: true }];
+
+    for (const malformedValue of malformedValues) {
+      const malformedApp = buildAuthenticatedApp({
+        settingsRepository: {
+          async findAddonSettingsByHotelId() {
+            return null;
+          },
+          async findGuestFormSettingsByHotelId() {
+            return null;
+          },
+          async findBenefitsSettingsByHotelId() {
+            return null;
+          },
+          async findLocalizationSettingsByHotelId() {
+            return {
+              defaultCurrency: "EUR",
+              defaultLanguage: "en",
+              supportedCurrencies: malformedValue,
+              supportedLanguages: malformedValue,
+            };
+          },
+        },
+      });
+
+      const response = await injectJson(malformedApp, {
+        method: "GET",
+        url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toEqual({
+        defaultCurrency: "EUR",
+        defaultLanguage: "en",
+        supportedCurrencies: [],
+        supportedLanguages: ["en"],
+      });
+
+      await malformedApp.close();
+    }
+  });
+
+  it("parses JSON-encoded booking localization lists like the legacy read path", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          return {
+            defaultCurrency: "EUR",
+            defaultLanguage: "en",
+            supportedCurrencies: '["EUR", "USD"]',
+            supportedLanguages: '["en", "de"]',
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      defaultCurrency: "EUR",
+      defaultLanguage: "en",
+      supportedCurrencies: ["EUR", "USD"],
+      supportedLanguages: ["en", "de"],
     });
   });
 
@@ -1911,6 +2098,111 @@ describe("vayada-api", () => {
     });
   });
 
+  it("rejects booking localization settings when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
+  });
+
+  it("rejects booking localization settings without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking localization settings when entitlement is missing", async () => {
+    app = buildAuthenticatedApp({ entitlements: [] });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_entitlement",
+      category: "authorization",
+      message: "Missing active booking engine entitlement.",
+    });
+  });
+
+  it("rejects booking localization settings when entitlement is suspended", async () => {
+    app = buildAuthenticatedApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "inactive_entitlement",
+      category: "authorization",
+      message: "Booking engine entitlement is not active.",
+    });
+  });
+
+  it("rejects booking localization settings when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_other/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
   it("returns the booking addon settings read-model error contract when the repository fails", async () => {
     app = buildAuthenticatedApp({
       settingsRepository: {
@@ -1921,6 +2213,9 @@ describe("vayada-api", () => {
           return null;
         },
         async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
           return null;
         },
       },
@@ -1955,6 +2250,9 @@ describe("vayada-api", () => {
         async findBenefitsSettingsByHotelId() {
           return null;
         },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -1987,6 +2285,9 @@ describe("vayada-api", () => {
         async findBenefitsSettingsByHotelId() {
           throw new Error("database unavailable");
         },
+        async findLocalizationSettingsByHotelId() {
+          return null;
+        },
       },
     });
 
@@ -2004,6 +2305,41 @@ describe("vayada-api", () => {
       code: "read_model_unavailable",
       category: "read_model",
       message: "Booking benefits settings are unavailable.",
+    });
+  });
+
+  it("returns the booking localization settings read-model error contract when the repository fails", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return null;
+        },
+        async findLocalizationSettingsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "Booking localization settings are unavailable.",
     });
   });
 
@@ -2186,6 +2522,26 @@ describe("vayada-api", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toEqual({
       benefits: [],
+    });
+  });
+
+  it("returns 404 when the authorized booking hotel has no localization settings record", async () => {
+    app = buildAuthenticatedApp({ linkedHotelId: "booking_hotel_missing" });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_missing/settings/localization",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toEqual({
+      statusCode: 404,
+      code: "not_found",
+      category: "read_model",
+      message: "Booking hotel localization settings not found.",
     });
   });
 
