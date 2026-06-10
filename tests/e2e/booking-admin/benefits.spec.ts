@@ -8,9 +8,7 @@ import { watchPageHealth } from "../support/pageHealth";
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
 
 test.describe("booking-admin benefits settings cutover", () => {
-  test("loads benefits from the TypeScript contract and preserves legacy writes", async ({
-    page,
-  }, testInfo) => {
+  test("loads and saves benefits through the TypeScript contract", async ({ page }, testInfo) => {
     test.skip(
       !PROD,
       "Requires a production booking-admin build so the authenticated shell hydrates.",
@@ -22,7 +20,15 @@ test.describe("booking-admin benefits settings cutover", () => {
 
     const typedBenefits = ["Welcome Drink on Arrival", "Complimentary sunset cocktail"];
     const contractRequests: string[] = [];
+    const typedWrites: unknown[] = [];
     await page.route(`**${BOOKING_ADMIN_BENEFITS_SETTINGS_PATH}*`, async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        typedWrites.push(body);
+        await route.fulfill({ json: body });
+        return;
+      }
+
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
       await route.fulfill({ json: { benefits: typedBenefits } });
@@ -47,11 +53,12 @@ test.describe("booking-admin benefits settings cutover", () => {
 
     await page.getByRole("button", { name: /^Save Benefits$/ }).click();
 
-    await expect.poll(() => legacyWrites.length).toBe(1);
+    await expect.poll(() => typedWrites.length).toBe(1);
 
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_BENEFITS_SETTINGS_PATH);
-    expect(legacyWrites).toEqual([{ benefits: typedBenefits }]);
+    expect(typedWrites).toEqual([{ benefits: typedBenefits }]);
+    expect(legacyWrites).toEqual([]);
 
     await assertHealthy();
   });
