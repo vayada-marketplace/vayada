@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
+import {
+  BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH,
+  BOOKING_ADMIN_HOTEL_ID,
+  BOOKING_ADMIN_HOTEL_SLUG,
+  mockBookingAdminBookingFlow,
+} from "../support/bookingAdminMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
-
-const HOTEL_ID = "booking_hotel_alpenrose";
-const ADDON_SETTINGS_CONTRACT_PATH = `/api/booking/hotels/${HOTEL_ID}/settings/addons`;
-const GUEST_FORM_SETTINGS_CONTRACT_PATH = `/api/booking/hotels/${HOTEL_ID}/settings/guest-form`;
 
 test.describe("booking-admin guest-form settings cutover", () => {
   test("loads guest-form toggles from the TypeScript contract and preserves legacy writes", async ({
@@ -18,50 +20,7 @@ test.describe("booking-admin guest-form settings cutover", () => {
 
     const assertHealthy = watchPageHealth(page, testInfo);
 
-    await page.addInitScript((hotelId) => {
-      const oneHourFromNow = Date.now() + 60 * 60 * 1000;
-      window.localStorage.setItem("access_token", "e2e-booking-admin-token");
-      window.localStorage.setItem("token_expires_at", String(oneHourFromNow));
-      window.localStorage.setItem("isLoggedIn", "true");
-      window.localStorage.setItem("userType", "hotel");
-      window.localStorage.setItem("isSuperAdmin", "false");
-      window.localStorage.setItem("selectedHotelId", hotelId);
-      window.localStorage.setItem(
-        "user",
-        JSON.stringify({ id: "user_1", email: "owner@example.com", type: "hotel" }),
-      );
-    }, HOTEL_ID);
-
-    await page.route("**/admin/module-activations", (route) =>
-      route.fulfill({ json: { activations: [] } }),
-    );
-    await page.route("**/admin/hotels", (route) =>
-      route.fulfill({ json: [{ id: HOTEL_ID, name: "Alpenrose", slug: "hotel-alpenrose" }] }),
-    );
-    await page.route("**/admin/superadmin/hotels", (route) => route.fulfill({ json: [] }));
-    await page.route("**/admin/addons", (route) => route.fulfill({ json: [] }));
-    await page.route("**/admin/settings/design", (route) =>
-      route.fulfill({
-        json: {
-          hero_image: "",
-          hero_heading: "",
-          hero_subtext: "",
-          primary_color: "",
-          font_pairing: "",
-          booking_filters: [],
-          custom_filters: {},
-          filter_rooms: {},
-        },
-      }),
-    );
-    await page.route("**/admin/benefits", (route) => route.fulfill({ json: { benefits: [] } }));
-    await page.route("**/admin/promo-codes", (route) => route.fulfill({ json: [] }));
-    await page.route("**/api/hotels/hotel-alpenrose/rooms", (route) => route.fulfill({ json: [] }));
-    await page.route(`**${ADDON_SETTINGS_CONTRACT_PATH}*`, (route) =>
-      route.fulfill({
-        json: { showAddonsStep: true, groupAddonsByCategory: true },
-      }),
-    );
+    await mockBookingAdminBookingFlow(page);
 
     const bookingSettingsWrites: unknown[] = [];
     await page.route("**/admin/settings/property", async (route) => {
@@ -69,8 +28,8 @@ test.describe("booking-admin guest-form settings cutover", () => {
         bookingSettingsWrites.push(route.request().postDataJSON());
         await route.fulfill({
           json: {
-            id: HOTEL_ID,
-            slug: "hotel-alpenrose",
+            id: BOOKING_ADMIN_HOTEL_ID,
+            slug: BOOKING_ADMIN_HOTEL_SLUG,
             default_currency: "EUR",
             default_language: "en",
             supported_currencies: [],
@@ -85,8 +44,8 @@ test.describe("booking-admin guest-form settings cutover", () => {
 
       await route.fulfill({
         json: {
-          id: HOTEL_ID,
-          slug: "hotel-alpenrose",
+          id: BOOKING_ADMIN_HOTEL_ID,
+          slug: BOOKING_ADMIN_HOTEL_SLUG,
           default_currency: "EUR",
           default_language: "en",
           supported_currencies: [],
@@ -99,7 +58,7 @@ test.describe("booking-admin guest-form settings cutover", () => {
     });
 
     const contractRequests: string[] = [];
-    await page.route(`**${GUEST_FORM_SETTINGS_CONTRACT_PATH}*`, async (route) => {
+    await page.route(`**${BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH}*`, async (route) => {
       contractRequests.push(route.request().url());
       expect(route.request().method()).toBe("GET");
       await route.fulfill({
@@ -140,7 +99,7 @@ test.describe("booking-admin guest-form settings cutover", () => {
     await expect.poll(() => pmsSyncWrites.length).toBe(1);
 
     expect(contractRequests.length).toBeGreaterThan(0);
-    expect(new URL(contractRequests[0]!).pathname).toBe(GUEST_FORM_SETTINGS_CONTRACT_PATH);
+    expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH);
     expect(bookingSettingsWrites).toEqual([
       {
         special_requests_enabled: true,
