@@ -102,11 +102,12 @@
     },
     {
       "caseId": "listings-invalid-query",
-      "description": "Non-numeric pagination parameters are rejected.",
+      "description": "Non-numeric, non-integer, and duplicated pagination parameters are rejected; empty values are treated as absent.",
       "request": {
         "path": "/api/marketplace/listings",
         "query": { "limit": "abc" }
       },
+      "alsoRejects": ["limit=1.5", "limit=1&limit=2", "offset=1&offset=2"],
       "expected": { "status": 400, "errorCode": "invalid_query" }
     },
     {
@@ -182,7 +183,9 @@
         "absentCreatorFixtures": [
           "creator-incomplete-profile",
           "creator-pending-status",
+          "creator-rejected-status",
           "creator-suspended-status",
+          "creator-archived-status",
           "creator-null-display-name"
         ]
       }
