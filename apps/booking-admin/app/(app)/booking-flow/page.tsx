@@ -43,6 +43,7 @@ import {
   updateBookingRoomFilterSettings,
   type BookingRoomFilterSettings,
 } from "@/services/api/bookingRoomFilterSettingsClient";
+import { loadBookingFlowSetting } from "@/services/api/bookingFlowSettingsLoader";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -267,64 +268,36 @@ export default function BookingFlowPage() {
   useEffect(() => {
     const selectedHotelId = getSelectedBookingHotelId();
     const propertyPromise = settingsService.getPropertySettings().catch(() => null);
-    const addonSettingsPromise = selectedHotelId
-      ? getBookingAddonSettings({ hotelId: selectedHotelId }).catch(() => DEFAULT_ADDON_SETTINGS)
-      : propertyPromise
-          .then((property) => {
-            if (!property?.id) return DEFAULT_ADDON_SETTINGS;
-            return getBookingAddonSettings({ hotelId: property.id }).catch(
-              () => DEFAULT_ADDON_SETTINGS,
-            );
-          })
-          .catch(() => DEFAULT_ADDON_SETTINGS);
-    const guestFormSettingsPromise = selectedHotelId
-      ? getBookingGuestFormSettings({ hotelId: selectedHotelId }).catch(
-          () => DEFAULT_GUEST_FORM_SETTINGS,
-        )
-      : propertyPromise
-          .then((property) => {
-            if (!property?.id) return DEFAULT_GUEST_FORM_SETTINGS;
-            return getBookingGuestFormSettings({ hotelId: property.id }).catch(
-              () => DEFAULT_GUEST_FORM_SETTINGS,
-            );
-          })
-          .catch(() => DEFAULT_GUEST_FORM_SETTINGS);
-    const benefitsSettingsPromise = selectedHotelId
-      ? getBookingBenefitsSettings({ hotelId: selectedHotelId }).catch(
-          () => DEFAULT_BENEFITS_SETTINGS,
-        )
-      : propertyPromise
-          .then((property) => {
-            if (!property?.id) return DEFAULT_BENEFITS_SETTINGS;
-            return getBookingBenefitsSettings({ hotelId: property.id }).catch(
-              () => DEFAULT_BENEFITS_SETTINGS,
-            );
-          })
-          .catch(() => DEFAULT_BENEFITS_SETTINGS);
-    const localizationSettingsPromise = selectedHotelId
-      ? getBookingLocalizationSettings({ hotelId: selectedHotelId }).catch(
-          () => DEFAULT_LOCALIZATION_SETTINGS,
-        )
-      : propertyPromise
-          .then((property) => {
-            if (!property?.id) return DEFAULT_LOCALIZATION_SETTINGS;
-            return getBookingLocalizationSettings({ hotelId: property.id }).catch(
-              () => DEFAULT_LOCALIZATION_SETTINGS,
-            );
-          })
-          .catch(() => DEFAULT_LOCALIZATION_SETTINGS);
-    const roomFilterSettingsPromise = selectedHotelId
-      ? getBookingRoomFilterSettings({ hotelId: selectedHotelId }).catch(
-          () => DEFAULT_ROOM_FILTER_SETTINGS,
-        )
-      : propertyPromise
-          .then((property) => {
-            if (!property?.id) return DEFAULT_ROOM_FILTER_SETTINGS;
-            return getBookingRoomFilterSettings({ hotelId: property.id }).catch(
-              () => DEFAULT_ROOM_FILTER_SETTINGS,
-            );
-          })
-          .catch(() => DEFAULT_ROOM_FILTER_SETTINGS);
+    const loadTypedSetting = <TSettings,>(
+      read: (hotelId: string) => Promise<TSettings>,
+      defaultValue: TSettings,
+    ) =>
+      loadBookingFlowSetting({
+        selectedHotelId,
+        propertyPromise,
+        read,
+        defaultValue,
+      });
+    const addonSettingsPromise = loadTypedSetting(
+      (hotelId) => getBookingAddonSettings({ hotelId }),
+      DEFAULT_ADDON_SETTINGS,
+    );
+    const guestFormSettingsPromise = loadTypedSetting(
+      (hotelId) => getBookingGuestFormSettings({ hotelId }),
+      DEFAULT_GUEST_FORM_SETTINGS,
+    );
+    const benefitsSettingsPromise = loadTypedSetting(
+      (hotelId) => getBookingBenefitsSettings({ hotelId }),
+      DEFAULT_BENEFITS_SETTINGS,
+    );
+    const localizationSettingsPromise = loadTypedSetting(
+      (hotelId) => getBookingLocalizationSettings({ hotelId }),
+      DEFAULT_LOCALIZATION_SETTINGS,
+    );
+    const roomFilterSettingsPromise = loadTypedSetting(
+      (hotelId) => getBookingRoomFilterSettings({ hotelId }),
+      DEFAULT_ROOM_FILTER_SETTINGS,
+    );
 
     Promise.all([
       settingsService.listAddons().catch(() => []),
