@@ -1498,6 +1498,35 @@ describe("vayada-api", () => {
     }
   });
 
+  it("drops non-string booking benefits entries instead of failing the read", async () => {
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        async findAddonSettingsByHotelId() {
+          return null;
+        },
+        async findGuestFormSettingsByHotelId() {
+          return null;
+        },
+        async findBenefitsSettingsByHotelId() {
+          return { benefits: ["Free breakfast", 42, null, { label: "Spa" }, "Late checkout"] };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/benefits",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      benefits: ["Free breakfast", "Late checkout"],
+    });
+  });
+
   it("parses JSON-encoded booking benefits strings like the legacy read path", async () => {
     app = buildAuthenticatedApp({
       settingsRepository: {
