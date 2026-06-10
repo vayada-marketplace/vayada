@@ -58,8 +58,8 @@ type BookingRoomFilterSettingsRequest = {
 ```
 
 There is no request body and no public query parameter for this read slice.
-Future write/update behavior must be defined by a separate contract before
-implementation.
+Typed write behavior is defined separately in
+[`booking-settings-write-contracts.md`](booking-settings-write-contracts.md).
 
 ## Response
 
@@ -209,8 +209,8 @@ Legacy Booking source fields (all JSONB on `booking_hotels`):
   is missing or a stored value is a malformed JSON string.
 - The current booking-admin save flow writes all three fields through
   `PATCH /admin/settings/design` (`settingsService.updateDesignSettings()`).
-  This read contract must not change that write path; a future write contract
-  must be defined before any write migration.
+  The typed write replacement for the Booking Flow Filters tab is defined in
+  [`booking-settings-write-contracts.md`](booking-settings-write-contracts.md).
 - Guest-facing booking-web room filtering continues to read filters through the
   legacy public surfaces. This read contract must not change guest-facing
   behavior.

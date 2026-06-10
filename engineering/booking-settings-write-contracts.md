@@ -1,0 +1,344 @@
+# Booking settings write contracts
+
+This document defines the typed write contracts for the Booking Flow settings
+surfaces whose reads have already moved to typed contracts:
+
+- [`BookingAddonSettings`](booking-addon-settings-contract.md)
+- [`BookingGuestFormSettings`](booking-guest-form-settings-contract.md)
+- [`BookingBenefitsSettings`](booking-benefits-settings-contract.md)
+- [`BookingLocalizationSettings`](booking-localization-settings-contract.md)
+- [`BookingRoomFilterSettings`](booking-room-filter-settings-contract.md)
+
+The current booking-admin save paths still write through legacy admin endpoints
+from `settingsService`. These contracts define the target TypeScript backend
+write surface so follow-up tickets can implement routes, frontend clients, and
+Booking Flow save migration without inventing payloads in code.
+
+## Contract Shape
+
+All five settings writes use full-surface replacement semantics:
+
+| Field         | Value                                                  |
+| ------------- | ------------------------------------------------------ |
+| Method        | `PUT`                                                  |
+| Path pattern  | `/api/booking/hotels/:hotelId/settings/<surface>`      |
+| Route adapter | `registerBookingSettingsRoutes`                        |
+| Success       | `200` with the normalized settings response            |
+| Body          | Complete settings object for that surface, no partials |
+| Query         | No public query parameters                             |
+
+`hotelId` is the Booking product hotel id. It is the resource scope for the
+settings row and every authorization check. Writes are idempotent: sending the
+same body twice produces the same stored settings and response.
+
+The write response shape for each surface matches its typed read response. The
+frontend should update local state from the response instead of assuming the
+submitted body is already normalized.
+
+All write bodies are strict: unknown fields are rejected, required fields may
+not be omitted, and `null` is invalid unless a future surface explicitly
+documents a nullable field.
+
+## Authorization
+
+Every route is protected and must use `enforceRoutePolicy` at the route
+boundary.
+
+Required checks:
+
+| Check                 | Contract value                              |
+| --------------------- | ------------------------------------------- |
+| Permission            | `booking.settings.manage`                   |
+| Entitlement           | active `booking:booking-engine`             |
+| Entitlement resource  | `booking_hotel` with `resourceId = hotelId` |
+| Linked resource       | `booking_hotel` with `resourceId = hotelId` |
+| Allowed relationships | `owner`, `operator`                         |
+
+Authentication failures return `401`. Permission, entitlement, inactive
+entitlement, or linked-resource failures return `403`.
+
+## Common Error Contract
+
+```ts
+type BookingSettingsWriteErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "validation"
+  | "write_model";
+
+type BookingSettingsWriteErrorCode =
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "invalid_payload"
+  | "not_found"
+  | "write_model_unavailable";
+
+type BookingSettingsWriteError = {
+  statusCode: 401 | 403 | 404 | 422 | 500;
+  code: BookingSettingsWriteErrorCode;
+  category: BookingSettingsWriteErrorCategory;
+  message: string;
+  details?: unknown;
+};
+```
+
+Expected mapping:
+
+| Condition                         | Status | Code                      | Category         | Message                                         |
+| --------------------------------- | ------ | ------------------------- | ---------------- | ----------------------------------------------- |
+| Missing bearer/session            | `401`  | `unauthenticated`         | `authentication` | `A valid access token is required.`             |
+| Invalid bearer/session            | `401`  | `unauthenticated`         | `authentication` | `A valid access token is required.`             |
+| Missing permission                | `403`  | `missing_permission`      | `authorization`  | `Missing required booking settings permission.` |
+| Missing entitlement               | `403`  | `missing_entitlement`     | `authorization`  | `Missing active booking engine entitlement.`    |
+| Inactive entitlement              | `403`  | `inactive_entitlement`    | `authorization`  | `Booking engine entitlement is not active.`     |
+| Missing linked-resource access    | `403`  | `missing_resource_access` | `authorization`  | `Missing booking hotel access.`                 |
+| Hotel/settings row disappeared    | `404`  | `not_found`               | `write_model`    | `Booking settings target not found.`            |
+| Invalid body shape or field value | `422`  | `invalid_payload`         | `validation`     | `Booking settings payload is invalid.`          |
+| Repository/write-model error      | `500`  | `write_model_unavailable` | `write_model`    | `Booking settings could not be saved.`          |
+
+Surface-specific clients may map these shared errors to more specific error
+class names, but the wire format and status/category/code vocabulary should
+stay common across the five write routes.
+
+## Add-on Display Settings
+
+| Field                  | Value                                                                      |
+| ---------------------- | -------------------------------------------------------------------------- |
+| Path                   | `/api/booking/hotels/:hotelId/settings/addons`                             |
+| Frontend client target | `updateBookingAddonSettings(input) -> BookingAddonSettings`                |
+| Legacy write path      | `PATCH /admin/settings/addons` via `settingsService.updateAddonSettings()` |
+
+```ts
+type UpdateBookingAddonSettingsRequest = {
+  params: { hotelId: string };
+  query: Record<string, never>;
+  body: {
+    showAddonsStep: boolean;
+    groupAddonsByCategory: boolean;
+  };
+};
+
+type BookingAddonSettings = {
+  showAddonsStep: boolean;
+  groupAddonsByCategory: boolean;
+};
+```
+
+Validation and behavior:
+
+- Both booleans are required. Partial updates are not accepted by the typed
+  route.
+- `showAddonsStep: false` with `groupAddonsByCategory: true` is valid; guest
+  checkout may ignore grouping while the add-ons step is hidden, but the setting
+  remains persisted.
+- The response returns the stored boolean values after normalization.
+- This contract covers display settings only. Add-on CRUD remains on the
+  existing add-on endpoints until a separate add-on management contract exists.
+
+## Guest Form Settings
+
+| Field                  | Value                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| Path                   | `/api/booking/hotels/:hotelId/settings/guest-form`                                   |
+| Frontend client target | `updateBookingGuestFormSettings(input) -> BookingGuestFormSettings`                  |
+| Legacy write path      | `PATCH /admin/settings/property` plus best-effort `PATCH /admin/guest-form-settings` |
+
+```ts
+type UpdateBookingGuestFormSettingsRequest = {
+  params: { hotelId: string };
+  query: Record<string, never>;
+  body: {
+    specialRequestsEnabled: boolean;
+    arrivalTimeEnabled: boolean;
+    guestCountEnabled: boolean;
+  };
+};
+
+type BookingGuestFormSettings = {
+  specialRequestsEnabled: boolean;
+  arrivalTimeEnabled: boolean;
+  guestCountEnabled: boolean;
+};
+```
+
+Validation and behavior:
+
+- All three booleans are required. Partial updates are not accepted by the typed
+  route.
+- The Booking write is authoritative for this contract.
+- Until the PMS guest-facing flow reads these flags from a Booking-owned or
+  distribution-owned model, the typed route owns the existing compatibility
+  sync to PMS. PMS sync failure is non-fatal and must not fail the request after
+  the Booking write succeeds; it should be logged or emitted through the
+  backend's operational telemetry.
+- The response returns the Booking settings state, not PMS sync state.
+
+## Benefits Settings
+
+| Field                  | Value                                                             |
+| ---------------------- | ----------------------------------------------------------------- |
+| Path                   | `/api/booking/hotels/:hotelId/settings/benefits`                  |
+| Frontend client target | `updateBookingBenefitsSettings(input) -> BookingBenefitsSettings` |
+| Legacy write path      | `PUT /admin/benefits` via `settingsService.updateBenefits()`      |
+
+```ts
+type UpdateBookingBenefitsSettingsRequest = {
+  params: { hotelId: string };
+  query: Record<string, never>;
+  body: {
+    benefits: string[];
+  };
+};
+
+type BookingBenefitsSettings = {
+  benefits: string[];
+};
+```
+
+Validation and behavior:
+
+- `benefits` is required and replaces the full hotel-level Book Direct Benefits
+  list.
+- Each item must be a string. The route trims leading/trailing whitespace.
+- Empty strings after trimming are invalid.
+- Duplicate benefit labels after trimming are invalid; the frontend should keep
+  its current duplicate prevention.
+- The route preserves order and custom owner-typed strings.
+- The route does not translate, categorize, assign ids to, or sync benefits to
+  PMS.
+
+## Localization Settings
+
+| Field                  | Value                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| Path                   | `/api/booking/hotels/:hotelId/settings/localization`                            |
+| Frontend client target | `updateBookingLocalizationSettings(input) -> BookingLocalizationSettings`       |
+| Legacy write path      | `PATCH /admin/settings/property` via `settingsService.updatePropertySettings()` |
+
+```ts
+type UpdateBookingLocalizationSettingsRequest = {
+  params: { hotelId: string };
+  query: Record<string, never>;
+  body: {
+    defaultCurrency: string;
+    defaultLanguage: string;
+    supportedCurrencies: string[];
+    supportedLanguages: string[];
+  };
+};
+
+type BookingLocalizationSettings = {
+  defaultCurrency: string;
+  defaultLanguage: string;
+  supportedCurrencies: string[];
+  supportedLanguages: string[];
+};
+```
+
+Validation and behavior:
+
+- All four fields are required. Partial updates are not accepted by the typed
+  route.
+- Currency codes are trimmed, uppercased, and must be three ASCII letters.
+- Language codes are trimmed and must be non-empty BCP-47-style strings made of
+  letters, digits, and hyphen separators.
+- `supportedCurrencies` and `supportedLanguages` are additional selectable
+  options. If either array contains the default value after normalization, the
+  route drops that duplicate default from the array instead of storing it twice.
+- Duplicate supported codes after normalization are invalid.
+- The response returns normalized currency/language strings.
+- Header currency-switcher writes and setup-wizard localization writes remain
+  on their existing legacy paths until separate contracts migrate those
+  workflows.
+
+## Room Filter Settings
+
+| Field                  | Value                                                                       |
+| ---------------------- | --------------------------------------------------------------------------- |
+| Path                   | `/api/booking/hotels/:hotelId/settings/room-filters`                        |
+| Frontend client target | `updateBookingRoomFilterSettings(input) -> BookingRoomFilterSettings`       |
+| Legacy write path      | `PATCH /admin/settings/design` via `settingsService.updateDesignSettings()` |
+
+```ts
+type UpdateBookingRoomFilterSettingsRequest = {
+  params: { hotelId: string };
+  query: Record<string, never>;
+  body: {
+    bookingFilters: string[];
+    customFilters: Record<string, string>;
+    filterRooms: Record<string, string[]>;
+  };
+};
+
+type BookingRoomFilterSettings = {
+  bookingFilters: string[];
+  customFilters: Record<string, string>;
+  filterRooms: Record<string, string[]>;
+};
+```
+
+Validation and behavior:
+
+- All three fields are required and replace the full room-filter settings
+  surface.
+- Filter keys are trimmed strings and must not be empty. The route preserves
+  key spelling after trimming.
+- `bookingFilters` preserves order and may contain built-in filter keys or
+  custom filter keys.
+- `customFilters` maps custom filter keys to owner-typed display labels.
+  Labels are trimmed and must not be empty.
+- `filterRooms` maps filter keys to PMS room ids. Room ids are trimmed strings
+  and must not be empty.
+- Keys in `customFilters` and `filterRooms` that are not present in
+  `bookingFilters` are invalid. This prevents hidden stale assignments from
+  being written by the typed route.
+- The route does not synchronously validate PMS room ids against PMS inventory;
+  stale room ids can still be returned by the read contract and resolved by the
+  UI fallback.
+- Disabling filters is represented by:
+
+```json
+{
+  "bookingFilters": [],
+  "customFilters": {},
+  "filterRooms": {}
+}
+```
+
+Hero image, heading, subtext, colors, and font pairing remain on the legacy
+design settings endpoint until a separate design-settings contract exists.
+
+## Deferred Legacy Surfaces
+
+The following writes intentionally remain legacy after this contract:
+
+| Surface                                   | Reason                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------- |
+| Add-on CRUD                               | Product item management, not add-on display settings.                  |
+| Promo-code CRUD                           | Separate Booking Flow tab with a different domain contract.            |
+| Last-minute configuration                 | Not part of the migrated read contract batch.                          |
+| Header default-currency switcher          | Shares localization fields but is not the Booking Flow tab workflow.   |
+| Setup-wizard localization/property writes | Setup owns hotel creation and broader property initialization.         |
+| Hero/branding design settings             | Broad design surface, distinct from room-filter settings.              |
+| Backend legacy endpoint removal           | Removal waits until booking-admin and any other consumers are audited. |
+
+These deferred writes need their own Linear tickets and contracts before they
+move off legacy admin endpoints.
+
+## Implementation Notes
+
+- Backend implementation should add a `BookingSettingsWriteRepository`
+  interface next to the existing read repository instead of writing SQL from
+  React-facing route handlers.
+- Route tests should cover success, validation failure, missing/invalid auth,
+  missing permission, missing entitlement, inactive entitlement, missing linked
+  resource, not found, and write-model failure.
+- Frontend clients should live under `apps/booking-admin/services/api/` and
+  mirror the existing typed read-client error mapping style.
+- Booking-admin save migration should replace legacy writes one surface at a
+  time and keep production-mode e2e assertions for the affected tab.
+- Legacy `settingsService` methods should only be removed after all migrated
+  Booking Flow read and write consumers are gone.

@@ -202,6 +202,25 @@ Proposed slices:
    is ready.
 5. Run route tests, frontend build, and browser smoke.
 
+## Booking Flow Settings Writes
+
+After the Booking Flow settings read paths are migrated, save behavior should
+move one surface at a time from legacy broad admin endpoints to typed write
+contracts.
+
+Contract artifact:
+[`Booking settings write contracts`](booking-settings-write-contracts.md).
+
+Proposed slices:
+
+1. Define typed write contracts for add-ons display settings, guest form,
+   benefits, localization, and room filters.
+2. Implement typed TypeScript backend write routes.
+3. Add booking-admin typed write clients.
+4. Update Booking Flow save handlers to use typed write clients.
+5. Remove unused legacy booking-admin settings helpers after all consumers are
+   gone.
+
 ## Cutover Model
 
 Cut over per surface, not per whole product.

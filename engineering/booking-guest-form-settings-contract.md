@@ -54,8 +54,8 @@ type BookingGuestFormSettingsRequest = {
 ```
 
 There is no request body and no public query parameter for this read slice.
-Future write/update behavior must be defined by a separate contract before
-implementation.
+Typed write behavior is defined separately in
+[`booking-settings-write-contracts.md`](booking-settings-write-contracts.md).
 
 ## Response
 
@@ -168,9 +168,10 @@ Legacy PMS compatibility:
   the guest-facing payment-settings response.
 - The current booking-admin save flow writes Booking first, then performs a
   best-effort PMS PATCH so guest-facing booking pages pick up the changes.
-- This read contract must not change PMS sync behavior. A future write contract
-  should define whether guest-form settings writes remain dual-write, move to a
-  durable job/event, or read from a Booking/distribution-owned model.
+- This read contract must not change PMS sync behavior. The typed write
+  contract keeps PMS sync as non-fatal compatibility behavior until the
+  guest-facing flow reads these flags from a Booking-owned or
+  distribution-owned model.
 
 Removal condition: the target Booking/checkout settings read model implements
 the same response contract and the booking-admin Guest Form tab is cut over
