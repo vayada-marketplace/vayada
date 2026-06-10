@@ -2,21 +2,21 @@
  * Hotel API service
  */
 
-import { apiClient } from "./client";
 import type {
   Hotel,
   PaginatedResponse,
   HotelProfile,
   HotelListing,
-  CollaborationOffering,
-  CreatorRequirements,
   HotelProfileStatus,
 } from "@/lib/types";
+import { transformHotelListingToHotel, transformListingMarketplaceResponse } from "@/lib/utils";
 import {
-  transformHotelListingToHotel,
-  transformListingMarketplaceResponse,
-  buildQueryString,
-} from "@/lib/utils";
+  getAllMarketplaceListings,
+  type MarketplaceListingReadModel,
+  type MarketplaceOfferingSummary,
+  type MarketplacePlatformName,
+} from "@vayada/marketplace-shared/api/discovery";
+import { apiClient } from "./client";
 
 // Backend API response type for marketplace endpoint (snake_case)
 interface ListingMarketplaceResponse {
@@ -35,7 +35,7 @@ interface ListingMarketplaceResponse {
     listing_id: string;
     collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate";
     availability_months: string[];
-    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[];
+    platforms: string[];
     free_stay_min_nights: number | null;
     free_stay_max_nights: number | null;
     paid_max_amount: string | null; // Backend returns as string (e.g., "2000.00")
@@ -49,7 +49,7 @@ interface ListingMarketplaceResponse {
   creator_requirements?: {
     id: string;
     listing_id: string;
-    platforms: ("Instagram" | "TikTok" | "YouTube" | "Facebook")[];
+    platforms: string[];
     target_countries: string[];
     target_age_min: number | null;
     target_age_max: number | null;
@@ -99,7 +99,7 @@ export interface CreateListingRequest {
   };
 }
 
-export interface UpdateListingRequest extends Partial<CreateListingRequest> {}
+export type UpdateListingRequest = Partial<CreateListingRequest>;
 
 export interface UploadPictureResponse {
   url: string;
@@ -114,17 +114,12 @@ export const hotelService = {
    * Get all hotel listings (public marketplace endpoint - returns direct array)
    */
   getAll: async (params?: { page?: number; limit?: number }): Promise<PaginatedResponse<Hotel>> => {
-    const query = buildQueryString({
-      page: params?.page,
-      limit: params?.limit,
-    });
-    // Backend returns direct array, not paginated response
-    const response = await apiClient.get<ListingMarketplaceResponse[]>(
-      `/marketplace/listings${query}`,
-    );
+    const response = await getAllMarketplaceListings();
 
     // Transform API response to frontend format
-    const hotels = response.map(transformListingMarketplaceResponse);
+    const hotels = response
+      .map(toLegacyListingMarketplaceResponse)
+      .map(transformListingMarketplaceResponse);
 
     // Return as paginated response for consistency with frontend expectations
     return {
@@ -292,3 +287,93 @@ export const hotelService = {
     return apiClient.get<HotelProfileStatus>("/hotels/me/profile-status");
   },
 };
+
+function toLegacyListingMarketplaceResponse(
+  listing: MarketplaceListingReadModel,
+): ListingMarketplaceResponse {
+  return {
+    id: listing.listingId,
+    hotel_profile_id: listing.publicId,
+    hotel_name: listing.displayName,
+    hotel_picture: listing.coverImageUrl,
+    name: listing.listingTitle,
+    location: listing.location.displayText,
+    description: listing.listingSummary ?? "",
+    accommodation_type: listing.accommodationType,
+    images: listing.imageUrls,
+    status: "verified",
+    collaboration_offerings: listing.offerings.map((offering) =>
+      toLegacyCollaborationOffering(offering, listing),
+    ),
+    creator_requirements: listing.creatorRequirements
+      ? {
+          id: `${listing.listingId}:requirements`,
+          listing_id: listing.listingId,
+          platforms: listing.creatorRequirements.platforms.map(toLegacyPlatformName),
+          target_countries: listing.creatorRequirements.targetCountries,
+          target_age_min: listing.creatorRequirements.targetAgeMin,
+          target_age_max: listing.creatorRequirements.targetAgeMax,
+          target_age_groups: listing.creatorRequirements.targetAgeGroups,
+          created_at: listing.createdAt,
+          updated_at: listing.projectedAt,
+        }
+      : undefined,
+    created_at: listing.createdAt,
+  };
+}
+
+function toLegacyCollaborationOffering(
+  offering: MarketplaceOfferingSummary,
+  listing: MarketplaceListingReadModel,
+): ListingMarketplaceResponse["collaboration_offerings"][number] {
+  return {
+    id: offering.offeringId,
+    listing_id: listing.listingId,
+    collaboration_type: toLegacyCollaborationType(offering.collaborationType),
+    availability_months: offering.availabilityMonths,
+    platforms: offering.platforms.map(toLegacyPlatformName),
+    free_stay_min_nights: offering.freeStayMinNights,
+    free_stay_max_nights: offering.freeStayMaxNights,
+    paid_max_amount: offering.paidMaxAmount,
+    currency: offering.currency,
+    discount_percentage: offering.discountPercentage,
+    commission_percentage: offering.commissionPercentage,
+    min_followers: offering.minFollowers,
+    created_at: listing.createdAt,
+    updated_at: listing.projectedAt,
+  };
+}
+
+function toLegacyCollaborationType(
+  type: MarketplaceOfferingSummary["collaborationType"],
+): "Free Stay" | "Paid" | "Discount" | "Affiliate" {
+  switch (type) {
+    case "paid":
+      return "Paid";
+    case "discount":
+      return "Discount";
+    case "affiliate":
+      return "Affiliate";
+    case "free_stay":
+      return "Free Stay";
+  }
+}
+
+function toLegacyPlatformName(platform: MarketplacePlatformName): string {
+  switch (platform) {
+    case "instagram":
+      return "Instagram";
+    case "tiktok":
+      return "TikTok";
+    case "youtube":
+      return "YouTube";
+    case "facebook":
+      return "Facebook";
+    case "blog":
+      return "Blog";
+    case "x":
+      return "X";
+    case "other":
+      return "Other";
+  }
+}

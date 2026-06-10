@@ -13,6 +13,7 @@ import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
 } from "./routes/bookingSettings.js";
+import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 
 const config = loadConfig();
 
@@ -68,6 +69,12 @@ const app = buildApp({
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,
+  marketplaceDiscoveryRepository: config.marketplaceDatabaseUrl
+    ? createPgMarketplaceDiscoveryReadRepository({
+        connectionString: config.marketplaceDatabaseUrl,
+      })
+    : undefined,
+  marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   publicHotelProfileRepository,
   publicHotelQuoteRepository: publicHotelProfileRepository
     ? createCompatibilityPublicHotelQuoteRepository({

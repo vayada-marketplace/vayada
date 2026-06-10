@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 export const MARKETPLACE_LISTINGS_CONTRACT = {
   method: "GET",
@@ -135,6 +136,386 @@ export type MarketplaceDiscoveryReadRepository = {
   ): Promise<{ items: Omit<MarketplaceCreatorReadModel, "audienceSize">[]; total: number }>;
   close?(): Promise<void>;
 };
+
+export type MarketplaceDiscoveryReadPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
+
+type MarketplaceListingRow = {
+  listingId: string;
+  publicId: string;
+  canonicalSlug: string;
+  displayName: string;
+  listingTitle: string;
+  listingSummary: string | null;
+  accommodationType: string | null;
+  location: unknown;
+  coverImageUrl: string | null;
+  imageUrls: string[] | null;
+  offerings: unknown;
+  creatorRequirements: unknown;
+  createdAt: Date | string;
+  projectedAt: Date | string;
+};
+
+type MarketplaceCreatorRow = {
+  creatorId: string;
+  displayName: string;
+  locationText: string | null;
+  shortDescription: string | null;
+  portfolioUrl: string | null;
+  profilePictureUrl: string | null;
+  creatorType: string;
+  platforms: unknown;
+  averageRating: number | string | null;
+  totalReviews: number | string | null;
+  createdAt: Date | string;
+};
+
+export function createPgMarketplaceDiscoveryReadRepository(config: {
+  connectionString: string;
+  max?: number;
+  pool?: MarketplaceDiscoveryReadPool;
+}): MarketplaceDiscoveryReadRepository {
+  if (!config.connectionString.trim()) {
+    throw new Error("Marketplace discovery repository connectionString must not be empty");
+  }
+
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max,
+    });
+
+  return {
+    async listPublicListings(page) {
+      const [listingResult, countResult] = await Promise.all([
+        pool.query<MarketplaceListingRow>(
+          `SELECT
+             COALESCE(listing.source_listing_id, read_model.listing_id::text) AS "listingId",
+             read_model.public_id AS "publicId",
+             read_model.canonical_slug AS "canonicalSlug",
+             read_model.display_name AS "displayName",
+             read_model.listing_title AS "listingTitle",
+             read_model.listing_summary AS "listingSummary",
+             read_model.accommodation_type AS "accommodationType",
+             read_model.location,
+             media.cover_image_url AS "coverImageUrl",
+             read_model.image_urls AS "imageUrls",
+             read_model.public_offering_summary AS offerings,
+             read_model.public_creator_requirements AS "creatorRequirements",
+             listing.created_at AS "createdAt",
+             read_model.projected_at AS "projectedAt"
+           FROM marketplace.marketplace_listing_read_model read_model
+           JOIN marketplace.marketplace_hotel_listings listing
+             ON listing.id = read_model.listing_id
+            AND listing.property_id = read_model.property_id
+           LEFT JOIN hotel_catalog.property_public_profile_read_model property_profile
+             ON property_profile.property_id = read_model.property_id
+           LEFT JOIN LATERAL (
+             SELECT media_entry->>'url' AS cover_image_url
+             FROM jsonb_array_elements(COALESCE(property_profile.media, '[]'::jsonb)) media_entry
+             WHERE media_entry->>'type' IN ('hero_image', 'gallery_image')
+             ORDER BY CASE WHEN media_entry->>'type' = 'hero_image' THEN 0 ELSE 1 END
+             LIMIT 1
+           ) media ON TRUE
+           WHERE read_model.visibility_status = 'public'
+           ORDER BY listing.created_at DESC, COALESCE(listing.source_listing_id, read_model.listing_id::text) ASC
+           LIMIT $1 OFFSET $2`,
+          [page.limit, page.offset],
+        ),
+        pool.query<{ total: string }>(
+          `SELECT COUNT(*)::text AS total
+           FROM marketplace.marketplace_listing_read_model
+           WHERE visibility_status = 'public'`,
+        ),
+      ]);
+
+      return {
+        items: listingResult.rows.map(mapMarketplaceListingRow),
+        total: parseCount(countResult.rows[0]?.total),
+      };
+    },
+    async listPublicCreators(page) {
+      const [creatorResult, countResult] = await Promise.all([
+        pool.query<MarketplaceCreatorRow>(
+          `SELECT
+             COALESCE(creator.source_creator_id, creator.id::text) AS "creatorId",
+             creator.display_name AS "displayName",
+             creator.location_text AS "locationText",
+             creator.short_description AS "shortDescription",
+             creator.portfolio_url AS "portfolioUrl",
+             creator.profile_picture_url AS "profilePictureUrl",
+             creator.creator_type AS "creatorType",
+             COALESCE(platforms.platforms, '[]'::jsonb) AS platforms,
+             COALESCE(ROUND(ratings.average_rating::numeric, 2), 0) AS "averageRating",
+             COALESCE(ratings.total_reviews, 0)::text AS "totalReviews",
+             creator.created_at AS "createdAt"
+           FROM marketplace.creator_profiles creator
+           LEFT JOIN LATERAL (
+             SELECT jsonb_agg(
+                      jsonb_build_object(
+                        'platformId', platform.id::text,
+                        'platform', platform.platform,
+                        'handle', platform.handle,
+                        'followerCount', platform.follower_count,
+                        'engagementRate', platform.engagement_rate,
+                        'audienceCountries', platform.audience_countries,
+                        'audienceAgeGroups', platform.audience_age_groups,
+                        'audienceGenderSplit', platform.audience_gender_split
+                      )
+                      ORDER BY platform.created_at DESC, platform.id ASC
+                    ) AS platforms
+             FROM marketplace.creator_platforms platform
+             WHERE platform.creator_profile_id = creator.id
+               AND platform.organization_id = creator.organization_id
+           ) platforms ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT AVG(rating.rating) AS average_rating,
+                    COUNT(*) AS total_reviews
+             FROM marketplace.creator_ratings rating
+             WHERE rating.creator_profile_id = creator.id
+               AND rating.creator_organization_id = creator.organization_id
+           ) ratings ON TRUE
+           WHERE creator.profile_complete = TRUE
+             AND creator.profile_status = 'active'
+             AND creator.display_name IS NOT NULL
+           ORDER BY creator.created_at DESC, COALESCE(creator.source_creator_id, creator.id::text) ASC
+           LIMIT $1 OFFSET $2`,
+          [page.limit, page.offset],
+        ),
+        pool.query<{ total: string }>(
+          `SELECT COUNT(*)::text AS total
+           FROM marketplace.creator_profiles creator
+           WHERE creator.profile_complete = TRUE
+             AND creator.profile_status = 'active'
+             AND creator.display_name IS NOT NULL`,
+        ),
+      ]);
+
+      return {
+        items: creatorResult.rows.map(mapMarketplaceCreatorRow),
+        total: parseCount(countResult.rows[0]?.total),
+      };
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
+function mapMarketplaceListingRow(row: MarketplaceListingRow): MarketplaceListingReadModel {
+  return {
+    listingId: row.listingId,
+    publicId: row.publicId,
+    canonicalSlug: row.canonicalSlug,
+    displayName: row.displayName,
+    listingTitle: row.listingTitle,
+    listingSummary: row.listingSummary,
+    accommodationType: row.accommodationType,
+    location: toMarketplaceLocation(row.location),
+    coverImageUrl: row.coverImageUrl,
+    imageUrls: Array.isArray(row.imageUrls) ? row.imageUrls : [],
+    offerings: toMarketplaceOfferings(row.offerings),
+    creatorRequirements: toMarketplaceCreatorRequirements(row.creatorRequirements),
+    createdAt: toIsoString(row.createdAt),
+    projectedAt: toIsoString(row.projectedAt),
+  };
+}
+
+function mapMarketplaceCreatorRow(
+  row: MarketplaceCreatorRow,
+): Omit<MarketplaceCreatorReadModel, "audienceSize"> {
+  return {
+    creatorId: row.creatorId,
+    displayName: row.displayName,
+    locationText: row.locationText,
+    shortDescription: row.shortDescription,
+    portfolioUrl: row.portfolioUrl,
+    profilePictureUrl: row.profilePictureUrl,
+    creatorType: toPublicCreatorType(row.creatorType),
+    platforms: toMarketplaceCreatorPlatforms(row.platforms),
+    averageRating: toNumber(row.averageRating),
+    totalReviews: parseCount(row.totalReviews),
+    createdAt: toIsoString(row.createdAt),
+  };
+}
+
+function toMarketplaceLocation(value: unknown): MarketplaceListingReadModel["location"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { displayText: "" };
+  }
+  const location = value as Record<string, unknown>;
+  const displayText = readString(location.displayText) ?? readString(location.display) ?? "";
+  const countryCode = readString(location.countryCode);
+  const city = readString(location.city);
+  return {
+    displayText,
+    ...(countryCode ? { countryCode } : {}),
+    ...(city ? { city } : {}),
+  };
+}
+
+function toMarketplaceOfferings(value: unknown): MarketplaceOfferingSummary[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((offering) => {
+    const row = isRecord(offering) ? offering : {};
+    const nights = isRecord(row.nights) ? row.nights : {};
+    const collaborationType = readString(row.collaborationType) ?? readString(row.type);
+    return {
+      offeringId: readString(row.offeringId) ?? readString(row.id) ?? "",
+      collaborationType: toCollaborationType(collaborationType),
+      availabilityMonths: toStringArray(row.availabilityMonths ?? row.months),
+      platforms: toPlatformArray(row.platforms),
+      freeStayMinNights: toNullableNumber(row.freeStayMinNights ?? nights.min),
+      freeStayMaxNights: toNullableNumber(row.freeStayMaxNights ?? nights.max),
+      paidMaxAmount: readString(row.paidMaxAmount),
+      currency: readString(row.currency),
+      discountPercentage: toNullableNumber(row.discountPercentage),
+      commissionPercentage: toNullableNumber(row.commissionPercentage ?? row.commissionPercent),
+      minFollowers: toNullableNumber(row.minFollowers),
+    };
+  });
+}
+
+function toMarketplaceCreatorRequirements(value: unknown): MarketplaceCreatorRequirements | null {
+  if (!value || !isRecord(value)) return null;
+  return {
+    platforms: toPlatformArray(value.platforms),
+    targetCountries: toStringArray(value.targetCountries ?? value.countries),
+    targetAgeMin: toNullableNumber(value.targetAgeMin),
+    targetAgeMax: toNullableNumber(value.targetAgeMax),
+    targetAgeGroups:
+      value.targetAgeGroups === null
+        ? null
+        : toStringArray(value.targetAgeGroups ?? value.ageGroups),
+  };
+}
+
+function toMarketplaceCreatorPlatforms(value: unknown): MarketplaceCreatorPlatform[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((platform) => {
+    const row = isRecord(platform) ? platform : {};
+    const platformName = readString(row.platform) ?? readString(row.name);
+    return {
+      platformId: readString(row.platformId) ?? readString(row.id) ?? "",
+      platform: toPlatformName(platformName),
+      handle: readString(row.handle) ?? "",
+      followerCount: toNumber(row.followerCount ?? row.followers),
+      engagementRate: toNumber(row.engagementRate ?? row.engagement_rate),
+      audienceCountries: toAudienceCountries(row.audienceCountries ?? row.top_countries),
+      audienceAgeGroups: toAudienceAgeGroups(row.audienceAgeGroups ?? row.top_age_groups),
+      audienceGenderSplit: toAudienceGenderSplit(row.audienceGenderSplit ?? row.gender_split),
+    };
+  });
+}
+
+function toAudienceCountries(value: unknown): MarketplaceCreatorPlatform["audienceCountries"] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((entry) => ({
+      country: readString(entry.country) ?? "",
+      percentage: toNumber(entry.percentage),
+    }))
+    .filter((entry) => entry.country);
+}
+
+function toAudienceAgeGroups(value: unknown): MarketplaceCreatorPlatform["audienceAgeGroups"] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((entry) => ({
+      ageRange: readString(entry.ageRange) ?? readString(entry.age_range) ?? "",
+      percentage: toNumber(entry.percentage),
+    }))
+    .filter((entry) => entry.ageRange);
+}
+
+function toAudienceGenderSplit(value: unknown): MarketplaceCreatorPlatform["audienceGenderSplit"] {
+  if (!value || !isRecord(value) || Object.keys(value).length === 0) return null;
+  const other = value.other === undefined ? undefined : toNumber(value.other);
+  return {
+    male: toNumber(value.male),
+    female: toNumber(value.female),
+    ...(other !== undefined ? { other } : {}),
+  };
+}
+
+function parseCount(value: number | string | null | undefined): number {
+  if (typeof value === "number") return value;
+  if (!value) return 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  return toNumber(value);
+}
+
+function toIsoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry)).filter((entry) => entry.length > 0)
+    : [];
+}
+
+function toPlatformArray(value: unknown): MarketplacePlatformName[] {
+  return toStringArray(value).map(toPlatformName);
+}
+
+function toPlatformName(value: string | null | undefined): MarketplacePlatformName {
+  switch (value) {
+    case "instagram":
+    case "tiktok":
+    case "youtube":
+    case "facebook":
+    case "blog":
+    case "x":
+      return value;
+    default:
+      return "other";
+  }
+}
+
+function toCollaborationType(
+  value: string | null | undefined,
+): MarketplaceOfferingSummary["collaborationType"] {
+  switch (value) {
+    case "paid":
+    case "discount":
+    case "affiliate":
+      return value;
+    default:
+      return "free_stay";
+  }
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
 
 export type MarketplaceDiscoveryRoutesOptions = {
   repository: MarketplaceDiscoveryReadRepository;

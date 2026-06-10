@@ -14,6 +14,8 @@ export type ApiConfig = {
   bookingDatabaseUrl?: string;
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
+  marketplaceDatabaseUrl?: string;
+  marketplaceDiscoveryAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
   bookingHostBase?: string;
@@ -51,6 +53,16 @@ function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
   };
 }
 
+function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+  const value = readOptionalEnv(env, key);
+  return value
+    ? value
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    : [];
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const server = loadServerConfig(env, {
     host: "0.0.0.0",
@@ -66,6 +78,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "BOOKING_RESERVATIONS_READ_DATABASE_URL",
     ),
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
+    marketplaceDatabaseUrl: readOptionalEnv(env, "MARKETPLACE_DATABASE_URL"),
+    marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
+      env,
+      "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
+    ),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
