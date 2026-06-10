@@ -21,6 +21,10 @@ import {
   type DesignSettings,
 } from "@/services/settings";
 import { getBookingAddonSettings } from "@/services/api/bookingAddonSettingsClient";
+import {
+  getBookingGuestFormSettings,
+  type BookingGuestFormSettings,
+} from "@/services/api/bookingGuestFormSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { ToggleSwitch, FeedbackAlert, SaveButton, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
@@ -87,6 +91,12 @@ const DEFAULT_ADDON_SETTINGS: AddonSettings = {
   groupAddonsByCategory: true,
 };
 
+const DEFAULT_GUEST_FORM_SETTINGS: BookingGuestFormSettings = {
+  specialRequestsEnabled: true,
+  arrivalTimeEnabled: false,
+  guestCountEnabled: false,
+};
+
 function getSelectedBookingHotelId(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("selectedHotelId");
@@ -141,9 +151,15 @@ export default function BookingFlowPage() {
   const [pmsRoomsLoading, setPmsRoomsLoading] = useState(false);
 
   // Guest Information Form state
-  const [specialRequestsEnabled, setSpecialRequestsEnabled] = useState(false);
-  const [arrivalTimeEnabled, setArrivalTimeEnabled] = useState(false);
-  const [guestCountEnabled, setGuestCountEnabled] = useState(false);
+  const [specialRequestsEnabled, setSpecialRequestsEnabled] = useState(
+    DEFAULT_GUEST_FORM_SETTINGS.specialRequestsEnabled,
+  );
+  const [arrivalTimeEnabled, setArrivalTimeEnabled] = useState(
+    DEFAULT_GUEST_FORM_SETTINGS.arrivalTimeEnabled,
+  );
+  const [guestCountEnabled, setGuestCountEnabled] = useState(
+    DEFAULT_GUEST_FORM_SETTINGS.guestCountEnabled,
+  );
   const [savingGuestForm, setSavingGuestForm] = useState(false);
 
   const { t } = useTranslation();
@@ -168,6 +184,18 @@ export default function BookingFlowPage() {
             );
           })
           .catch(() => DEFAULT_ADDON_SETTINGS);
+    const guestFormSettingsPromise = selectedHotelId
+      ? getBookingGuestFormSettings({ hotelId: selectedHotelId }).catch(
+          () => DEFAULT_GUEST_FORM_SETTINGS,
+        )
+      : propertyPromise
+          .then((property) => {
+            if (!property?.id) return DEFAULT_GUEST_FORM_SETTINGS;
+            return getBookingGuestFormSettings({ hotelId: property.id }).catch(
+              () => DEFAULT_GUEST_FORM_SETTINGS,
+            );
+          })
+          .catch(() => DEFAULT_GUEST_FORM_SETTINGS);
 
     Promise.all([
       settingsService.listAddons().catch(() => []),
@@ -186,44 +214,47 @@ export default function BookingFlowPage() {
           }) as DesignSettings,
       ),
       settingsService.getBenefits().catch(() => ({ benefits: [] })),
+      guestFormSettingsPromise,
       propertyPromise,
       settingsService.listPromoCodes().catch(() => []),
     ])
-      .then(([addonList, settings, design, benefitsRes, property, promoList]) => {
-        setAddons(addonList);
-        setAddonSettings(settings);
-        setPromoCodes(promoList);
-        setBenefits(benefitsRes.benefits || []);
-        if (design.booking_filters) {
-          setBookingFilters(design.booking_filters);
-          setFiltersEnabled(design.booking_filters.length > 0);
-        }
-        if (design.custom_filters) {
-          setCustomFilters(design.custom_filters);
-        }
-        if (design.filter_rooms) {
-          setFilterRooms(design.filter_rooms);
-        }
-        // Populate currency, language & guest form settings
-        if (property) {
-          setDefaultCurrency(property.default_currency || "EUR");
-          setDefaultLanguage(property.default_language || "en");
-          setSupportedCurrencies(property.supported_currencies || []);
-          setSupportedLanguages(property.supported_languages || []);
-          setSpecialRequestsEnabled(property.special_requests_enabled ?? false);
-          setArrivalTimeEnabled(property.arrival_time_enabled ?? false);
-          setGuestCountEnabled(property.guest_count_enabled ?? false);
-        }
-        // Fetch rooms from PMS
-        if (property?.slug) {
-          setPmsRoomsLoading(true);
-          pmsClient
-            .get<{ id: string; name: string }[]>(`/api/hotels/${property.slug}/rooms`)
-            .then((rooms) => setPmsRooms(rooms.map((r) => ({ id: r.id, name: r.name }))))
-            .catch(() => setPmsRooms([]))
-            .finally(() => setPmsRoomsLoading(false));
-        }
-      })
+      .then(
+        ([addonList, settings, design, benefitsRes, guestFormSettings, property, promoList]) => {
+          setAddons(addonList);
+          setAddonSettings(settings);
+          setPromoCodes(promoList);
+          setBenefits(benefitsRes.benefits || []);
+          setSpecialRequestsEnabled(guestFormSettings.specialRequestsEnabled);
+          setArrivalTimeEnabled(guestFormSettings.arrivalTimeEnabled);
+          setGuestCountEnabled(guestFormSettings.guestCountEnabled);
+          if (design.booking_filters) {
+            setBookingFilters(design.booking_filters);
+            setFiltersEnabled(design.booking_filters.length > 0);
+          }
+          if (design.custom_filters) {
+            setCustomFilters(design.custom_filters);
+          }
+          if (design.filter_rooms) {
+            setFilterRooms(design.filter_rooms);
+          }
+          // Populate currency and language settings
+          if (property) {
+            setDefaultCurrency(property.default_currency || "EUR");
+            setDefaultLanguage(property.default_language || "en");
+            setSupportedCurrencies(property.supported_currencies || []);
+            setSupportedLanguages(property.supported_languages || []);
+          }
+          // Fetch rooms from PMS
+          if (property?.slug) {
+            setPmsRoomsLoading(true);
+            pmsClient
+              .get<{ id: string; name: string }[]>(`/api/hotels/${property.slug}/rooms`)
+              .then((rooms) => setPmsRooms(rooms.map((r) => ({ id: r.id, name: r.name }))))
+              .catch(() => setPmsRooms([]))
+              .finally(() => setPmsRoomsLoading(false));
+          }
+        },
+      )
       .finally(() => setLoading(false));
   }, []);
 
@@ -762,6 +793,8 @@ export default function BookingFlowPage() {
                 </div>
                 <button
                   type="button"
+                  aria-label={t("bookingFlow.guestForm.specialRequests")}
+                  aria-pressed={specialRequestsEnabled}
                   onClick={() => setSpecialRequestsEnabled(!specialRequestsEnabled)}
                   className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${specialRequestsEnabled ? "bg-primary-500" : "bg-gray-300"}`}
                 >
@@ -778,6 +811,8 @@ export default function BookingFlowPage() {
                 </span>
                 <button
                   type="button"
+                  aria-label={t("bookingFlow.guestForm.estimatedArrivalTime")}
+                  aria-pressed={arrivalTimeEnabled}
                   onClick={() => setArrivalTimeEnabled(!arrivalTimeEnabled)}
                   className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${arrivalTimeEnabled ? "bg-primary-500" : "bg-gray-300"}`}
                 >
@@ -794,6 +829,8 @@ export default function BookingFlowPage() {
                 </span>
                 <button
                   type="button"
+                  aria-label={t("bookingFlow.guestForm.numberOfGuests")}
+                  aria-pressed={guestCountEnabled}
                   onClick={() => setGuestCountEnabled(!guestCountEnabled)}
                   className={`w-9 h-5 rounded-full transition-colors relative shrink-0 ${guestCountEnabled ? "bg-primary-500" : "bg-gray-300"}`}
                 >
