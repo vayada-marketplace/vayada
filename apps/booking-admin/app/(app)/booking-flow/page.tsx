@@ -117,6 +117,45 @@ const DEFAULT_ROOM_FILTER_SETTINGS: BookingRoomFilterSettings = {
   filterRooms: {},
 };
 
+function normalizeRoomFilterSettings(settings: unknown): BookingRoomFilterSettings {
+  if (!isRecord(settings)) return DEFAULT_ROOM_FILTER_SETTINGS;
+
+  return {
+    bookingFilters: Array.isArray(settings.bookingFilters)
+      ? settings.bookingFilters.filter((key): key is string => typeof key === "string")
+      : [],
+    customFilters: toStringRecord(settings.customFilters),
+    filterRooms: toStringArrayRecord(settings.filterRooms),
+  };
+}
+
+function toStringRecord(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+}
+
+function toStringArrayRecord(value: unknown): Record<string, string[]> {
+  if (!isRecord(value)) return {};
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter((entry): entry is [string, unknown[]] => Array.isArray(entry[1]))
+      .map(([key, roomIds]) => [
+        key,
+        roomIds.filter((roomId): roomId is string => typeof roomId === "string"),
+      ]),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function getSelectedBookingHotelId(): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem("selectedHotelId");
@@ -273,10 +312,11 @@ export default function BookingFlowPage() {
           setDefaultLanguage(localizationSettings.defaultLanguage);
           setSupportedCurrencies(localizationSettings.supportedCurrencies);
           setSupportedLanguages(localizationSettings.supportedLanguages);
-          setBookingFilters(roomFilterSettings.bookingFilters);
-          setFiltersEnabled(roomFilterSettings.bookingFilters.length > 0);
-          setCustomFilters(roomFilterSettings.customFilters);
-          setFilterRooms(roomFilterSettings.filterRooms);
+          const normalizedRoomFilterSettings = normalizeRoomFilterSettings(roomFilterSettings);
+          setBookingFilters(normalizedRoomFilterSettings.bookingFilters);
+          setFiltersEnabled(normalizedRoomFilterSettings.bookingFilters.length > 0);
+          setCustomFilters(normalizedRoomFilterSettings.customFilters);
+          setFilterRooms(normalizedRoomFilterSettings.filterRooms);
           // Fetch rooms from PMS
           if (property?.slug) {
             setPmsRoomsLoading(true);
