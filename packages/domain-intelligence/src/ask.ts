@@ -53,6 +53,26 @@ export type AskAuditRecord = Pick<AskAnswer, "answerId" | "generatedAt" | "quest
   actorInternalUserId: string | null;
   organizationId: string | null;
   bookingHotelId: string | null;
+  toolPlan: Record<string, unknown> | null;
+  toolCallIds: string[];
+  deniedToolCallIds: string[];
+  evidenceIds: string[];
+  modelProvider: string | null;
+  modelName: string | null;
+  promptVersion: string | null;
+  answerSchemaVersion: string | null;
+  traceId: string | null;
+  modelResponseIds: string[];
+  modelRequestIds: string[];
+  latencyMs: number | null;
+  usage: {
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } | null;
+  estimatedCostUsd: number | null;
+  failure: string | null;
 };
 
 export type AskAuditRepository = {

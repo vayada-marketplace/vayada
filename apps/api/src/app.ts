@@ -8,7 +8,7 @@ import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastif
 
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
-import type { AskAuditRepository } from "./routes/ask.js";
+import type { AskAuditRepository, AskRoutesOptions } from "./routes/ask.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import type { AuthSessionRouteOptions } from "./routes/authSession.js";
 import type {
@@ -54,6 +54,12 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
   askAuditRepository?: AskAuditRepository;
+  askRuntime?: AskRoutesOptions["runtime"];
+  askEvidenceRepository?: AskRoutesOptions["evidenceRepository"];
+  askModel?: AskRoutesOptions["model"];
+  askModelMetadata?: AskRoutesOptions["modelMetadata"];
+  askBudgets?: AskRoutesOptions["budgets"];
+  askNow?: AskRoutesOptions["now"];
   marketplaceDiscoveryAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
   pmsPublicApiUrl?: string;
@@ -98,6 +104,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(registerAskRoutes, {
     prefix: "/api/ai",
     auditRepository: options.askAuditRepository,
+    runtime: options.askRuntime,
+    evidenceRepository: options.askEvidenceRepository,
+    model: options.askModel,
+    modelMetadata: options.askModelMetadata,
+    budgets: options.askBudgets,
+    now: options.askNow,
   });
   if (options.publicHotelProfileRepository) {
     app.register(registerAiHotelRoutes, {

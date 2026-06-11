@@ -8,6 +8,7 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
+import { Usage, type Model, type ModelRequest, type ModelResponse } from "@openai/agents";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
@@ -16,6 +17,7 @@ import {
   type AskAnswer,
   type AskAuditRecord,
   type AskAuditRepository,
+  type AskRoutesOptions,
 } from "./routes/ask.js";
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
@@ -74,17 +76,27 @@ function buildAskApp(
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
     auditRepository?: AskAuditTestRepository;
+    askModel?: Model;
+    askBudgets?: AskRoutesOptions["budgets"];
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
     askAuditRepository: options.auditRepository ?? createInMemoryAskAuditRepository(),
+    askModel: options.askModel,
+    askBudgets: options.askBudgets,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository,
       rolePermissionRepository: {
         async findPermissionsForRole() {
-          return options.permissions ?? ["intelligence.ask.read"];
+          return (
+            options.permissions ?? [
+              "intelligence.ask.read",
+              "booking.analytics.read",
+              "booking.settings.read",
+            ]
+          );
         },
       },
       entitlementRepository: {
@@ -102,6 +114,30 @@ function buildAskApp(
       },
     },
   });
+}
+
+class RepeatingToolCallModel implements Model {
+  readonly requests: ModelRequest[] = [];
+
+  async getResponse(request: ModelRequest): Promise<ModelResponse> {
+    this.requests.push(request);
+    return {
+      usage: new Usage({ requests: 1, inputTokens: 10, outputTokens: 5, totalTokens: 15 }),
+      output: [
+        {
+          type: "function_call",
+          callId: `call_loop_${this.requests.length}`,
+          name: "get_booking_performance",
+          arguments: JSON.stringify({ filters: {} }),
+          status: "completed",
+        },
+      ],
+    };
+  }
+
+  async *getStreamedResponse() {
+    throw new Error("Streaming is not used in Ask route tests");
+  }
 }
 
 function askPayload(overrides: Partial<Record<"question" | "scope", unknown>> = {}) {
@@ -219,18 +255,69 @@ describe("Ask Intelligence route", () => {
       metricKey: "booking.direct_booking_share",
       sourceView: "direct_booking_summary_read_model",
     });
+    expect(response.body.audit.toolCallIds).toEqual([
+      "ask_tool_call_1_get_booking_performance",
+      "ask_tool_call_2_get_booking_source_mix",
+    ]);
     expect(auditRepository.records).toMatchObject([
       {
         actorInternalUserId: "user_hotel_owner",
         organizationId: "org_hotel_group",
         bookingHotelId: "booking_hotel_alpenrose",
         status: "answered",
+        toolCallIds: [
+          "ask_tool_call_1_get_booking_performance",
+          "ask_tool_call_2_get_booking_source_mix",
+        ],
+        evidenceIds: expect.arrayContaining(["ev_booking_direct_share", "ev_booking_source_mix"]),
+        modelProvider: "fixture",
+        modelName: "deterministic-ask-route-fixture.v1",
+        promptVersion: "ask-prompt.v1",
+        answerSchemaVersion: "ask-answer-schema.v1",
+        latencyMs: expect.any(Number),
+        usage: { requests: 2, inputTokens: 20, outputTokens: 10, totalTokens: 30 },
+        estimatedCostUsd: null,
       },
     ]);
+    expect(auditRepository.records[0].modelResponseIds).toHaveLength(2);
+    expect(auditRepository.records[0].modelRequestIds).toHaveLength(2);
+    expect(auditRepository.records[0].traceId).toBe(
+      `ask_trace_ask_run_${response.body.audit.requestId}`,
+    );
+  });
+
+  it("answers booking source mix through the runtime evidence tool plan", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({ auditRepository });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload({ question: "Which booking source generated the most revenue?" }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("answered");
+    expect(response.body.evidenceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolId: "get_booking_source_mix",
+          metricKey: "booking.booking_source_mix",
+        }),
+      ]),
+    );
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "answered",
+      toolCallIds: expect.arrayContaining(["ask_tool_call_1_get_booking_source_mix"]),
+      evidenceIds: expect.arrayContaining(["ev_booking_source_mix"]),
+    });
   });
 
   it("returns partial setup completeness fixture answers", async () => {
-    app = buildAskApp();
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({ auditRepository });
 
     const response = await injectJson<AskAnswer>(app, {
       method: "POST",
@@ -245,6 +332,20 @@ describe("Ask Intelligence route", () => {
     expect(response.body.blocks[0]).toMatchObject({
       type: "setup_gap",
       metricKey: "hotel_catalog.setup_completeness_score",
+    });
+    expect(response.body.evidenceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          evidenceId: "ev_setup_payment_gap",
+          toolId: "get_setup_gaps",
+          metricKey: "hotel_catalog.setup_completeness_score",
+        }),
+      ]),
+    );
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "partial",
+      toolCallIds: expect.arrayContaining(["ask_tool_call_1_get_setup_gaps"]),
+      evidenceIds: expect.arrayContaining(["ev_setup_payment_gap"]),
     });
   });
 
@@ -271,7 +372,8 @@ describe("Ask Intelligence route", () => {
   });
 
   it("returns unavailable for approved catalog questions whose source is not loaded", async () => {
-    app = buildAskApp();
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({ auditRepository });
 
     const response = await injectJson<AskAnswer>(app, {
       method: "POST",
@@ -286,6 +388,11 @@ describe("Ask Intelligence route", () => {
     expect(response.body.unavailableData[0]).toMatchObject({
       reason: "source_unavailable",
       requestedToolId: "get_conversion_funnel",
+    });
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "unavailable",
+      toolCallIds: ["ask_tool_call_1_get_conversion_funnel"],
+      evidenceIds: [],
     });
   });
 
@@ -303,6 +410,28 @@ describe("Ask Intelligence route", () => {
     expectValidAskAnswerEnvelope(response.body);
     expect(response.body.status).toBe("external_data_needed");
     expect(response.body.unavailableData[0].reason).toBe("external_data_needed");
+  });
+
+  it("returns not_authorized and audits cross-tenant benchmark questions", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({ auditRepository });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload({ question: "Benchmark my hotel against all hotels." }),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("not_authorized");
+    expect(response.body.audit.deniedToolCallIds).toHaveLength(1);
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "not_authorized",
+      deniedToolCallIds: response.body.audit.deniedToolCallIds,
+      toolPlan: { kind: "cross_tenant" },
+    });
   });
 
   it("returns not_authorized and audits tenant-scope rejection", async () => {
@@ -352,6 +481,36 @@ describe("Ask Intelligence route", () => {
     expectValidAskAnswerEnvelope(response.body);
     expect(response.body.status).toBe("not_authorized");
     expect(response.body.unavailableData[0].reason).toBe("missing_permission");
+  });
+
+  it("audits budget exhaustion from a misbehaving model", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    const model = new RepeatingToolCallModel();
+    app = buildAskApp({
+      auditRepository,
+      askModel: model,
+      askBudgets: { maxModelTurns: 1 },
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("partial");
+    expect(response.body.unavailableData.at(-1)).toMatchObject({
+      reason: "tool_budget_exhausted",
+    });
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "partial",
+      failure: "budget_exhausted",
+      toolCallIds: ["call_loop_1"],
+      evidenceIds: expect.arrayContaining(["ev_booking_direct_share"]),
+    });
   });
 
   it("checks authentication before processing Ask request validation", async () => {
