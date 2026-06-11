@@ -1,6 +1,8 @@
 import { hasActiveLinkedResource, hasPermission } from "@vayada/backend-authorization";
 import type { PermissionKey, RequestContext } from "@vayada/backend-auth";
 import type {
+  AskEvidenceToolExecutor,
+  AskEvidenceToolExecutors,
   AskEvidenceEntry,
   AskEvidenceRepository,
   AskEvidenceToolId,
@@ -12,6 +14,8 @@ import type {
 
 export type {
   AskEvidenceEntry,
+  AskEvidenceToolExecutor,
+  AskEvidenceToolExecutors,
   AskEvidenceRepository,
   AskEvidenceToolId,
   AskEvidenceToolResult,
@@ -74,6 +78,22 @@ const toolDefinitions = {
     metricKeys: ["hotel_catalog.setup_completeness_score"],
   },
 } as const satisfies Record<AskEvidenceToolId, ToolDefinition>;
+
+export function createAskEvidenceToolExecutors(
+  repository: AskEvidenceRepository,
+): AskEvidenceToolExecutors {
+  return {
+    get_booking_performance: (context, scope, filters) =>
+      getBookingPerformance(context, repository, scope, filters),
+    get_booking_source_mix: (context, scope, filters) =>
+      getBookingSourceMix(context, repository, scope, filters),
+    get_conversion_funnel: (context, scope, filters) =>
+      getConversionFunnel(context, repository, scope, filters),
+    get_setup_gaps: (context, scope, filters) => getSetupGaps(context, repository, scope, filters),
+    get_hotel_settings_summary: (context, scope, filters) =>
+      getHotelSettingsSummary(context, repository, scope, filters),
+  };
+}
 
 export async function getBookingPerformance(
   context: RequestContext,
