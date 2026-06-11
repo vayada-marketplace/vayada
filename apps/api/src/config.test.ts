@@ -241,6 +241,46 @@ describe("api config", () => {
     ).toBe("https://api.pms.localhost");
   });
 
+  it("defaults public bookability to the legacy source", () => {
+    expect(loadConfig({}).publicBookabilitySource).toBe("legacy");
+  });
+
+  it("loads target public bookability config", () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+      PUBLIC_BOOKABILITY_SOURCE: "target",
+    });
+
+    expect(config.targetDatabaseUrl).toBe("postgresql://target-db");
+    expect(config.publicBookabilitySource).toBe("target");
+  });
+
+  it("requires target database config for target public bookability", () => {
+    expect(() =>
+      loadConfig({
+        PUBLIC_BOOKABILITY_SOURCE: "target",
+      }),
+    ).toThrow("PUBLIC_BOOKABILITY_SOURCE=target requires TARGET_DATABASE_URL");
+  });
+
+  it("requires target public profiles for target public bookability", () => {
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        PUBLIC_BOOKABILITY_SOURCE: "target",
+      }),
+    ).toThrow("PUBLIC_BOOKABILITY_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target");
+  });
+
+  it("rejects unsupported public bookability source config", () => {
+    expect(() =>
+      loadConfig({
+        PUBLIC_BOOKABILITY_SOURCE: "preview",
+      }),
+    ).toThrow("PUBLIC_BOOKABILITY_SOURCE must be one of: legacy, target");
+  });
+
   it("keeps Booking Web legacy command proxy disabled by default", () => {
     expect(loadConfig({}).bookingWebLegacyCheckoutCommandProxyEnabled).toBe(false);
   });

@@ -14,8 +14,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createCompatibilityPublicHotelQuoteRepository,
+  createTargetPublicHotelQuoteRepository,
   serializePublicHotelQuoteProjection,
   toUnavailablePublicHotelQuoteProjection,
+  type PublicHotelQuoteReadPool,
   type PublicHotelQuoteRepository,
 } from "./routes/aiHotelQuotes.js";
 import { buildApp } from "./app.js";
@@ -37,6 +39,10 @@ import {
   type BookingSettingsReadRepository,
   type BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
+import {
+  createTargetBookingWebCalendarRepository,
+  type BookingWebCalendarReadPool,
+} from "./routes/bookingWebPublic.js";
 import {
   createCompatibilityPmsBookingReservationsReadRepository,
   toReservationResponse,
@@ -987,6 +993,76 @@ describe("vayada-api", () => {
       dataSources: ["pms", "distribution"],
     });
     expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("serves quote, offers, and calendar routes from target repositories with PMS public API unset", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+      bookingWebCalendarRepository: {
+        async findCalendarByHotel(hotel, query) {
+          return {
+            contractVersion: "public-bookability.v1",
+            generatedAt: "2026-06-09T09:00:00.000Z",
+            publicVisibility: "public_safe",
+            request: {
+              hotelSlug: hotel.slug,
+              start: query.start ?? "",
+              end: query.end ?? "",
+            },
+            calendar: {
+              unavailableDates: ["2026-09-14"],
+              minStayByArrival: {},
+              maxStayByArrival: {},
+            },
+            freshness: {
+              status: "fresh",
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              sources: [
+                {
+                  owner: "pms",
+                  lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  status: "fresh",
+                },
+                {
+                  owner: "distribution",
+                  lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  status: "fresh",
+                },
+              ],
+            },
+            dataSources: ["pms", "distribution"],
+          };
+        },
+      },
+      async bookingWebPublicFetch() {
+        throw new Error("target bookability routes must not call PMS public API");
+      },
+    });
+
+    const quote = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
+    });
+    const offers = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
+    });
+    const calendar = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-15",
+    });
+
+    expect(quote.statusCode).toBe(200);
+    expect(quote.json()).toMatchObject({ status: "bookable" });
+    expect(offers.statusCode).toBe(200);
+    expect(offers.json()).toMatchObject({ status: "bookable" });
+    expect(calendar.statusCode).toBe(200);
+    expect(calendar.json()).toMatchObject({
+      calendar: { unavailableDates: ["2026-09-14"] },
+      freshness: { status: "fresh" },
+    });
   });
 
   it("builds bookable public AI quotes from the PMS public room-search adapter", async () => {
@@ -2640,6 +2716,471 @@ describe("vayada-api", () => {
     expect(queries[0]?.text).toContain("slug_alias.purpose = 'redirect'");
     expect(queries[0]?.values).toEqual(["distribution-alpenrose"]);
     expect(findForbiddenPublicBookabilityKeys(profile)).toEqual([]);
+  });
+
+  it("reads target public quotes from distribution read models without PMS public API", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000001",
+              publicQuoteReference: "quote_target_alpenrose",
+              quoteHash: "sha256:target-alpenrose",
+              requestSnapshot: {},
+              quoteStatus: "bookable",
+              unavailableReasons: [],
+              offers: [
+                {
+                  offerId: "offer_deluxe_flexible",
+                  roomTypeId: "room_deluxe",
+                  ratePlanId: "rate_flexible",
+                  name: "Deluxe Double Room",
+                  availableRooms: 2,
+                  paymentOptions: ["card", "pay_at_property"],
+                  totals: {
+                    currency: "EUR",
+                    roomTotal: 540,
+                    taxesAndFees: 54,
+                    discounts: 0,
+                    grandTotal: 594,
+                  },
+                  bookingUrl:
+                    "https://hotel-alpenrose.booking.localhost/en/book?quote_id=quote_target_alpenrose",
+                },
+              ],
+              totals: {},
+              deepLinkUrl:
+                "https://hotel-alpenrose.booking.localhost/en/book?quote_id=quote_target_alpenrose",
+              priceGuarantee: "expires_at",
+              currency: "EUR",
+              sourceFreshness: {
+                sources: [
+                  {
+                    owner: "pms",
+                    status: "fresh",
+                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  },
+                  {
+                    owner: "finance",
+                    status: "fresh",
+                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  },
+                ],
+              },
+              freshnessStatus: "fresh",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-09T09:00:00.000Z",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        adults: 2,
+        children: 0,
+        rooms: 1,
+      },
+      status: "bookable",
+      quote: {
+        quoteId: "quote_target_alpenrose",
+        offers: [
+          {
+            offerId: "offer_deluxe_flexible",
+            roomTypeId: "room_deluxe",
+            paymentOptions: ["card", "pay_at_property"],
+            totals: {
+              grandTotal: 594,
+            },
+          },
+        ],
+      },
+      freshness: {
+        status: "fresh",
+      },
+    });
+    expect(queries[0]?.text).toContain("distribution.public_quote_read_models");
+    expect(queries[0]?.text).toContain("read_model.expires_at > $11::timestamptz");
+    expect(queries[0]?.text).not.toContain("PMS_PUBLIC_API_URL");
+    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
+  });
+
+  it("builds target offer fallback booking URLs from the hotel booking base URL", async () => {
+    const customDomainProfile = {
+      ...seededPublicProfile,
+      hotel: {
+        ...seededPublicProfile.hotel,
+        bookingBaseUrl: "https://book.alpenrose.example",
+      },
+    };
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000003",
+              publicQuoteReference: "quote_target_fallback_url",
+              quoteHash: "sha256:target-fallback-url",
+              requestSnapshot: {},
+              quoteStatus: "bookable",
+              unavailableReasons: [],
+              offers: [
+                {
+                  offerId: "offer_deluxe_flexible",
+                  roomTypeId: "room_deluxe",
+                  name: "Deluxe Double Room",
+                  availableRooms: 2,
+                  totals: {
+                    currency: "EUR",
+                    roomTotal: 540,
+                    taxesAndFees: 54,
+                    discounts: 0,
+                    grandTotal: 594,
+                  },
+                },
+              ],
+              totals: {},
+              deepLinkUrl: null,
+              priceGuarantee: "expires_at",
+              currency: "EUR",
+              sourceFreshness: { sources: [{ owner: "pms", status: "fresh" }] },
+              freshnessStatus: "fresh",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: {
+        async findProfileBySlug(slug) {
+          return slug === customDomainProfile.hotel.slug ? customDomainProfile : null;
+        },
+      },
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+      referral_code: "creator-anna",
+    });
+
+    const bookingUrl = quote?.quote?.offers[0]?.bookingUrl;
+    expect(bookingUrl).toMatch(/^https:\/\/book\.alpenrose\.example\/en\/book\?/);
+    expect(bookingUrl).toContain("check_in=2026-09-12");
+    expect(bookingUrl).toContain("referral_code=creator-anna");
+    expect(bookingUrl).not.toContain("booking.localhost");
+  });
+
+  it("preserves public detail for target unavailable quote reasons", async () => {
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000002",
+              publicQuoteReference: "quote_target_unavailable_alpenrose",
+              quoteHash: "sha256:target-unavailable-alpenrose",
+              requestSnapshot: {},
+              quoteStatus: "stale",
+              unavailableReasons: [
+                {
+                  code: "stale_data",
+                  publicDetail: {
+                    sourceOwner: "pms",
+                    maximumAgeSeconds: 300,
+                  },
+                },
+              ],
+              offers: [],
+              totals: {},
+              deepLinkUrl: null,
+              priceGuarantee: "none",
+              currency: "EUR",
+              sourceFreshness: {
+                sources: [{ owner: "pms", status: "stale", reasonCode: "source_stale" }],
+              },
+              freshnessStatus: "stale",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "stale",
+      unavailableReasons: [
+        {
+          code: "stale_data",
+          detail: '{"sourceOwner":"pms","maximumAgeSeconds":300}',
+        },
+      ],
+      freshness: {
+        status: "stale",
+      },
+    });
+    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
+  });
+
+  it("returns unavailable target public quotes when the read model query fails", async () => {
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        throw new Error("target database unavailable");
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [
+        {
+          code: "unavailable_data",
+          detail: "Public quote read model is not ready yet.",
+        },
+      ],
+      freshness: {
+        status: "unavailable",
+      },
+    });
+  });
+
+  it("reads target Booking Web calendar from distribution offer snapshots", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              stayDate: "2026-09-12",
+              hasAvailability: true,
+              hasUnavailableState: false,
+              sourceFreshnessValues: [
+                JSON.stringify({
+                  sources: [{ owner: "pms", status: "fresh" }],
+                }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+            {
+              stayDate: "2026-09-13",
+              hasAvailability: true,
+              hasUnavailableState: false,
+              sourceFreshnessValues: [
+                JSON.stringify({
+                  sources: [{ owner: "pms", status: "fresh" }],
+                }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+            {
+              stayDate: "2026-09-14",
+              hasAvailability: false,
+              hasUnavailableState: true,
+              sourceFreshnessValues: [
+                JSON.stringify({
+                  sources: [{ owner: "pms", status: "fresh" }],
+                }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-15",
+    });
+
+    expect(calendar).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-09T09:00:00.000Z",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-15",
+      },
+      calendar: {
+        unavailableDates: ["2026-09-14"],
+      },
+      freshness: {
+        status: "fresh",
+      },
+      dataSources: ["pms", "distribution"],
+    });
+    expect(queries[0]?.text).toContain("distribution.public_room_offer_snapshots");
+    expect(queries[0]?.values).toEqual([
+      seededPublicProfile.hotel.propertyId,
+      "hotel-alpenrose",
+      "2026-09-12",
+      "2026-09-15",
+    ]);
+    expect(findForbiddenPublicBookabilityKeys(calendar)).toEqual([]);
+  });
+
+  it("returns unavailable target Booking Web calendar when the read model query fails", async () => {
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>() {
+        throw new Error("target database unavailable");
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-15",
+    });
+
+    expect(calendar).toMatchObject({
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-15",
+      },
+      calendar: {
+        unavailableDates: [],
+      },
+      freshness: {
+        status: "unavailable",
+      },
+    });
+  });
+
+  it("marks target Booking Web calendar unavailable when snapshot coverage is partial", async () => {
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              stayDate: "2026-09-12",
+              hasAvailability: true,
+              hasUnavailableState: false,
+              sourceFreshnessValues: [
+                JSON.stringify({ sources: [{ owner: "pms", status: "fresh" }] }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-14",
+    });
+
+    expect(calendar).toMatchObject({
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-14",
+      },
+      calendar: {
+        unavailableDates: [],
+      },
+      freshness: {
+        status: "unavailable",
+      },
+    });
   });
 
   it("looks up target custom domains through verified property-domain ownership", async () => {

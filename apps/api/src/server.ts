@@ -16,12 +16,16 @@ import {
   createPgWorkosWebhookStore,
   createWorkosWebhookVerifier,
 } from "./platform/workosWebhooks.js";
-import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
+import {
+  createCompatibilityPublicHotelQuoteRepository,
+  createTargetPublicHotelQuoteRepository,
+} from "./routes/aiHotelQuotes.js";
 import {
   createPgPublicHotelProfileRepository,
   createTargetPublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
+import { createTargetBookingWebCalendarRepository } from "./routes/bookingWebPublic.js";
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
@@ -103,6 +107,26 @@ const bookingReservationsRepository =
         })
       : undefined;
 
+const publicHotelQuoteRepository =
+  publicHotelProfileRepository && config.publicBookabilitySource === "target"
+    ? createTargetPublicHotelQuoteRepository({
+        connectionString: config.targetDatabaseUrl!,
+        profileRepository: publicHotelProfileRepository,
+      })
+    : publicHotelProfileRepository
+      ? createCompatibilityPublicHotelQuoteRepository({
+          profileRepository: publicHotelProfileRepository,
+          pmsPublicApiUrl: config.pmsPublicApiUrl,
+        })
+      : undefined;
+
+const bookingWebCalendarRepository =
+  config.publicBookabilitySource === "target"
+    ? createTargetBookingWebCalendarRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
@@ -167,15 +191,11 @@ const app = buildApp({
       : undefined,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   publicHotelProfileRepository,
-  publicHotelQuoteRepository: publicHotelProfileRepository
-    ? createCompatibilityPublicHotelQuoteRepository({
-        profileRepository: publicHotelProfileRepository,
-        pmsPublicApiUrl: config.pmsPublicApiUrl,
-      })
-    : undefined,
+  publicHotelQuoteRepository,
   bookingPublicApiUrl: config.bookingPublicApiUrl,
   bookingDomainResolutionSource: config.bookingDomainResolutionSource,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
+  bookingWebCalendarRepository,
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
