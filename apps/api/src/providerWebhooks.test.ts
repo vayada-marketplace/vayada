@@ -153,6 +153,14 @@ describe("target provider webhook routes", () => {
       },
     };
 
+    const unconfiguredStripe = await postProviderFixture(app, "stripe");
+    const unconfiguredXendit = await postProviderFixture(app, "xendit");
+    expect(unconfiguredStripe.statusCode).toBe(503);
+    expect(unconfiguredXendit.statusCode).toBe(503);
+    expect(store.receipts).toHaveLength(0);
+    expect(store.domainEvents).toHaveLength(0);
+    expect(store.jobs).toHaveLength(0);
+
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/channex",
@@ -251,6 +259,40 @@ describe("target provider webhook routes", () => {
     expect(store.jobs).toHaveLength(1);
     await mutatingApp.close();
   });
+
+  it("runs promotion for normalized duplicate receipts in mutating mode", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const observedApp = buildApp({
+      providerWebhooks: {
+        secrets: { stripe: "whsec_stripe_test" },
+        modes: { stripe: "observe_only" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+
+    await postProviderFixture(observedApp, "stripe");
+    await observedApp.close();
+    store.receipts[0]!.lifecycleStatus = "normalized";
+
+    const mutatingApp = buildApp({
+      providerWebhooks: {
+        secrets: { stripe: "whsec_stripe_test" },
+        modes: { stripe: "mutating" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+
+    const response = await postProviderFixture(mutatingApp, "stripe");
+
+    expect(response.json()).toMatchObject({ status: "already_normalized" });
+    expect(store.receipts).toHaveLength(1);
+    expect(store.receipts[0]!.lifecycleStatus).toBe("normalized");
+    expect(store.domainEvents).toHaveLength(1);
+    expect(store.jobs).toHaveLength(1);
+    await mutatingApp.close();
+  });
 });
 
 type MemoryProviderWebhookStore = ProviderWebhookStore & {
@@ -305,15 +347,6 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
         (event) => event.domainEventKey === input.normalizedPreview.domainEventKey,
       );
       const existingJob = jobs.find((job) => job.jobKey === input.normalizedPreview.jobKey);
-      if (receipt.lifecycleStatus !== "observed") {
-        return {
-          status: "duplicate",
-          receiptId: input.receiptId,
-          domainEventId: existingEvent?.domainEventId,
-          jobIds: existingJob ? [existingJob.jobId] : [],
-        };
-      }
-
       const domainEventId = existingEvent?.domainEventId ?? `event_${domainEvents.length + 1}`;
       if (!existingEvent) {
         domainEvents.push({
@@ -325,6 +358,16 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
       if (!existingJob) {
         jobs.push({ jobId, jobKey: input.normalizedPreview.jobKey });
       }
+
+      if (receipt.lifecycleStatus !== "observed") {
+        return {
+          status: promotionStatusForReceipt(receipt.lifecycleStatus),
+          receiptId: input.receiptId,
+          domainEventId,
+          jobIds: [jobId],
+        };
+      }
+
       idempotencyKeys.push(input.normalizedPreview.domainEventKey);
       idempotencyKeys.push(input.normalizedPreview.jobKey);
       receipt.lifecycleStatus = "promoted";
@@ -336,6 +379,23 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
       };
     },
   };
+}
+
+function promotionStatusForReceipt(
+  status: ProviderWebhookReceiptLifecycleStatus,
+): Awaited<ReturnType<ProviderWebhookStore["promoteReceipt"]>>["status"] {
+  switch (status) {
+    case "promoted":
+      return "already_promoted";
+    case "normalized":
+      return "already_normalized";
+    case "failed":
+      return "failed";
+    case "dead_lettered":
+      return "dead_lettered";
+    default:
+      return "incompatible_terminal_state";
+  }
 }
 
 async function postProviderFixture(

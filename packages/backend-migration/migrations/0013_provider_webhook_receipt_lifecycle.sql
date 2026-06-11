@@ -62,6 +62,7 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
+  -- Per channex-webhook-cutover-plan, failed remains retryable; dead_lettered is terminal.
   IF OLD.delivery_status IN ('promoted', 'normalized', 'succeeded', 'ignored', 'dead_lettered')
     AND NEW.delivery_status IS DISTINCT FROM OLD.delivery_status
   THEN

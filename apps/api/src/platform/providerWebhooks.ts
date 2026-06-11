@@ -29,6 +29,9 @@ export function createPgProviderWebhookStore(
     async promoteReceipt(input) {
       return promoteReceipt(pool, input);
     },
+    async close() {
+      await pool.end();
+    },
   };
 }
 
@@ -180,9 +183,13 @@ async function promoteReceipt(
       [input.receiptId, eventId, input.receiptKey],
     );
 
+    const promotionStatus = updated.rows[0]
+      ? "promoted"
+      : promotionStatusForReceipt(await selectReceiptStatusById(client, input.receiptId));
+
     await client.query("COMMIT");
     return {
-      status: updated.rows[0] ? "promoted" : "duplicate",
+      status: promotionStatus,
       receiptId: input.receiptId,
       domainEventId: eventId,
       jobIds: [jobId],
@@ -212,6 +219,37 @@ async function selectExistingReceipt(
     [provider, providerEventId],
   );
   return existing.rows[0] ?? null;
+}
+
+async function selectReceiptStatusById(
+  client: pg.PoolClient,
+  receiptId: string,
+): Promise<string | null> {
+  const existing = await client.query<{ delivery_status: string }>(
+    `SELECT delivery_status
+     FROM platform.external_webhook_events
+     WHERE id = $1
+     LIMIT 1`,
+    [receiptId],
+  );
+  return existing.rows[0]?.delivery_status ?? null;
+}
+
+function promotionStatusForReceipt(
+  status: string | null,
+): ProviderWebhookPromotionResult["status"] {
+  switch (status) {
+    case "promoted":
+      return "already_promoted";
+    case "normalized":
+      return "already_normalized";
+    case "failed":
+      return "failed";
+    case "dead_lettered":
+      return "dead_lettered";
+    default:
+      return "incompatible_terminal_state";
+  }
 }
 
 async function insertOrFindDomainEvent(

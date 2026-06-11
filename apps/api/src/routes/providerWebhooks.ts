@@ -61,7 +61,13 @@ export type ProviderWebhookPromotionInput = {
 };
 
 export type ProviderWebhookPromotionResult = {
-  status: "promoted" | "duplicate";
+  status:
+    | "promoted"
+    | "already_promoted"
+    | "already_normalized"
+    | "failed"
+    | "dead_lettered"
+    | "incompatible_terminal_state";
   receiptId: string;
   domainEventId?: string;
   jobIds: string[];
@@ -70,6 +76,7 @@ export type ProviderWebhookPromotionResult = {
 export type ProviderWebhookStore = {
   recordReceipt(input: ProviderWebhookReceiptInput): Promise<ProviderWebhookReceiptResult>;
   promoteReceipt(input: ProviderWebhookPromotionInput): Promise<ProviderWebhookPromotionResult>;
+  close?(): Promise<void>;
 };
 
 export type ProviderWebhookRoutesOptions = {
@@ -259,7 +266,8 @@ async function handleAuthenticatedProviderWebhook(input: {
     receipt.status === "duplicate" &&
     receipt.lifecycleStatus !== "observed" &&
     receipt.lifecycleStatus !== "received" &&
-    receipt.lifecycleStatus !== "validated"
+    receipt.lifecycleStatus !== "validated" &&
+    receipt.lifecycleStatus !== "normalized"
   ) {
     return input.reply.code(200).send({
       status: "duplicate",
