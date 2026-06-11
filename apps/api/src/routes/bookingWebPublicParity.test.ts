@@ -454,6 +454,158 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
+  it("routes cancel, withdraw, and change-request lifecycle calls through Booking Web target paths", async () => {
+    const decisionToken = "must-not-cross-public-boundary";
+    const legacyCalls: Array<{ method: string; path: string; body: unknown }> = [];
+    const legacyResponses = new Map<string, unknown>([
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_refundable/cancel-preview",
+        { refundAmount: 660, refundPercentage: 100 },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_nonrefundable/cancel-preview",
+        { refundAmount: 0, refundPercentage: 0 },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_deposit/cancel-preview",
+        {
+          refundAmount: 100,
+          refundPercentage: 50,
+          depositAmount: 200,
+          depositRefundAmount: 100,
+          freeCancellationDays: 7,
+          daysUntilCheckIn: 3,
+          currency: "CHF",
+        },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_refundable/cancel",
+        { status: "cancelled" },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_pending/withdraw",
+        { status: "withdrawn" },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_internal_1/change-request/preview",
+        {
+          oldTotal: 660,
+          newTotal: 735,
+          priceDifference: 75,
+          currency: "CHF",
+          blocked: false,
+          blockReason: null,
+          available: true,
+        },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_internal_1/change-request",
+        { status: "pending", priceDifference: 75, decisionToken },
+      ],
+      [
+        "GET /api/hotels/hotel-alpenrose/bookings/booking_change_approved/change-request?email=guest%40example.com",
+        { status: "approved", decision_token: decisionToken },
+      ],
+      [
+        "GET /api/hotels/hotel-alpenrose/bookings/booking_change_declined/change-request?email=guest%40example.com",
+        {
+          status: "declined",
+          declineReason: "Requested dates are unavailable",
+          decisionToken,
+        },
+      ],
+    ]);
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      legacyCheckoutCommandProxyEnabled: true,
+      async bookingWebPublicFetch(input, init) {
+        legacyCalls.push({
+          method: init?.method ?? "GET",
+          path: `${input.pathname}${input.search}`,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        return jsonResponse(
+          legacyResponses.get(`${init?.method ?? "GET"} ${input.pathname}${input.search}`) ?? {
+            detail: "Not found",
+          },
+          legacyResponses.has(`${init?.method ?? "GET"} ${input.pathname}${input.search}`)
+            ? 200
+            : 404,
+        );
+      },
+    });
+
+    const requests = [
+      ["booking_refundable/cancel-preview", { guestEmail: "guest@example.com" }],
+      ["booking_nonrefundable/cancel-preview", { guestEmail: "guest@example.com" }],
+      ["booking_deposit/cancel-preview", { guestEmail: "guest@example.com" }],
+      ["booking_refundable/cancel", { guestEmail: "guest@example.com" }],
+      ["booking_pending/withdraw", { guestEmail: "pending@example.com" }],
+      ["booking_internal_1/change-request/preview", changeRequestPayload()],
+      ["booking_internal_1/change-request", changeRequestPayload()],
+    ] as const;
+    const responses = await Promise.all(
+      requests.map(([path, payload]) =>
+        app.inject({
+          method: "POST",
+          url: `/api/booking-web/hotels/hotel-alpenrose/bookings/${path}`,
+          payload,
+        }),
+      ),
+    );
+    responses.push(
+      await app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_change_approved/change-request?email=guest%40example.com",
+      }),
+      await app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_change_declined/change-request?email=guest%40example.com",
+      }),
+    );
+    const bodies = responses.map((response) => response.json());
+
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(9).fill(200));
+    expect(bodies[0]).toMatchObject({ refundAmount: 660, refundPercentage: 100 });
+    expect(bodies[1]).toMatchObject({ refundAmount: 0, refundPercentage: 0 });
+    expect(bodies[2]).toMatchObject({
+      depositAmount: 200,
+      depositRefundAmount: 100,
+      refundAmount: 100,
+    });
+    expect(bodies[3]).toEqual({ status: "cancelled" });
+    expect(bodies[4]).toEqual({ status: "withdrawn" });
+    expect(bodies[5]).toMatchObject({
+      oldTotal: 660,
+      newTotal: 735,
+      blocked: false,
+      available: true,
+    });
+    expect(bodies[6]).toMatchObject({ status: "pending", priceDifference: 75 });
+    expect(bodies[7]).toMatchObject({ status: "approved" });
+    expect(bodies[8]).toMatchObject({
+      status: "declined",
+      declineReason: "Requested dates are unavailable",
+    });
+    expect(bodies[6]).not.toHaveProperty("decisionToken");
+    expect(bodies[7]).not.toHaveProperty("decision_token");
+    expect(bodies[8]).not.toHaveProperty("decisionToken");
+    expect(legacyCalls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      ...legacyResponses.keys(),
+    ]);
+    expect(legacyCalls[0]?.body).toEqual({ guest_email: "guest@example.com" });
+    expect(legacyCalls[4]?.body).toEqual({ guest_email: "pending@example.com" });
+    expect(legacyCalls[5]?.body).toMatchObject({
+      guestEmail: "guest@example.com",
+      checkIn: "2026-09-13",
+      checkOut: "2026-09-16",
+      addonIds: ["addon_breakfast"],
+    });
+    await app.close();
+  });
+
   it("does not proxy checkout commands to legacy PMS unless explicitly enabled", async () => {
     const legacyCalls: string[] = [];
     const app = buildApp({
@@ -476,9 +628,27 @@ describe("Booking Web public bootstrap parity", () => {
       method: "POST",
       url: "/api/booking-web/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
     });
+    const withdraw = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_pending/withdraw",
+      payload: { guestEmail: "guest@example.com" },
+    });
+    const cancelPreview = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_1/cancel-preview",
+      payload: { guestEmail: "guest@example.com" },
+    });
+    const changePreview = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_1/change-request/preview",
+      payload: changeRequestPayload(),
+    });
 
     expect(create.statusCode).toBe(404);
     expect(confirm.statusCode).toBe(404);
+    expect(withdraw.statusCode).toBe(404);
+    expect(cancelPreview.statusCode).toBe(404);
+    expect(changePreview.statusCode).toBe(404);
     expect(legacyCalls).toEqual([]);
     await app.close();
   });
@@ -578,6 +748,17 @@ function jsonResponse(payload: unknown, status = 200): Response {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+function changeRequestPayload(): Record<string, unknown> {
+  return {
+    guestEmail: "guest@example.com",
+    checkIn: "2026-09-13",
+    checkOut: "2026-09-16",
+    addonIds: ["addon_breakfast"],
+    addonQuantities: { addon_breakfast: 2 },
+    addonDates: { addon_breakfast: ["2026-09-14"] },
+  };
 }
 
 function createProfileRepository(

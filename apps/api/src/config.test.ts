@@ -112,6 +112,26 @@ describe("api config", () => {
     ).toBe("https://api.pms.localhost");
   });
 
+  it("keeps Booking Web legacy command proxy disabled by default", () => {
+    expect(loadConfig({}).bookingWebLegacyCheckoutCommandProxyEnabled).toBe(false);
+  });
+
+  it("loads optional Booking Web legacy command proxy config", () => {
+    expect(
+      loadConfig({
+        BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED: "true",
+      }).bookingWebLegacyCheckoutCommandProxyEnabled,
+    ).toBe(true);
+  });
+
+  it("rejects invalid Booking Web legacy command proxy config", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED: "sometimes",
+      }),
+    ).toThrow("BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED must be true or false");
+  });
+
   it("loads optional PMS admin API config", () => {
     expect(
       loadConfig({

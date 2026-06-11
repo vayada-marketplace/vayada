@@ -31,6 +31,7 @@ export type ApiConfig = {
   marketplaceDiscoveryAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
+  bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingHostBase?: string;
 };
 
@@ -74,6 +75,14 @@ function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
         .map((entry) => entry.trim())
         .filter(Boolean)
     : [];
+}
+
+function readBooleanEnv(env: NodeJS.ProcessEnv, key: string, defaultValue = false): boolean {
+  const value = readOptionalEnv(env, key);
+  if (value === undefined) return defaultValue;
+  if (/^(1|true|yes)$/i.test(value)) return true;
+  if (/^(0|false|no)$/i.test(value)) return false;
+  throw new Error(`${key} must be true or false`);
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -133,6 +142,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
+    bookingWebLegacyCheckoutCommandProxyEnabled: readBooleanEnv(
+      env,
+      "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
+    ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
   };
 }
