@@ -1,5 +1,5 @@
 import { Booking } from "@/lib/types";
-import { bookingWebPublic, pms } from "./client";
+import { bookingWebPublic } from "./client";
 
 export interface BookingRequestResponse {
   // For card payments (VAY-388) `booking` is a placeholder preview —
@@ -85,7 +85,10 @@ export const bookingService = {
       promoCode?: string;
     },
   ): Promise<BookingRequestResponse> {
-    return pms.post(`/api/hotels/${slug}/bookings`, data);
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings`,
+      data,
+    );
   },
 
   // Materializes the soft-hold draft into a real booking row after
@@ -94,7 +97,9 @@ export const bookingService = {
   // Stripe webhook has already materialized the draft returns the same
   // booking. Accepts a draft id (VAY-388) or a legacy booking id.
   async confirmAuthorization(slug: string, handle: string): Promise<Booking> {
-    return pms.post(`/api/hotels/${slug}/bookings/${handle}/confirm-authorization`);
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
+    );
   },
 
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {
@@ -120,12 +125,16 @@ export const bookingService = {
 
   async getStatus(slug: string, reference: string, email: string): Promise<BookingStatus> {
     const params = new URLSearchParams({ reference, email });
-    return pms.get(`/api/hotels/${slug}/bookings/status?${params}`);
+    return bookingWebPublic.get(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/status?${params}`,
+    );
   },
 
   async getPaymentSettings(slug: string): Promise<PaymentSettings> {
     try {
-      return await pms.get<PaymentSettings>(`/api/hotels/${slug}/payment-settings`);
+      return await bookingWebPublic.get<PaymentSettings>(
+        `/api/booking-web/hotels/${encodeURIComponent(slug)}/checkout-config`,
+      );
     } catch {
       // Settings endpoint is best-effort — return a permissive default so the
       // checkout form still renders if the backend is briefly unreachable.
@@ -134,7 +143,10 @@ export const bookingService = {
   },
 
   async lookup(slug: string, bookingReference: string, guestEmail: string): Promise<Booking> {
-    return pms.post(`/api/hotels/${slug}/bookings/lookup`, { bookingReference, guestEmail });
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/lookup`,
+      { bookingReference, guestEmail },
+    );
   },
 
   // Guest-initiated booking change requests (VAY-379)

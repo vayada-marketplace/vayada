@@ -72,6 +72,61 @@ type BookingWebChangeRequestQuery = {
 type BookingWebPromoValidationRequest = {
   code?: string;
 };
+type BookingWebAttributionClickRequest = {
+  referralCode?: string;
+  referral_code?: string;
+  sessionId?: string;
+  session_id?: string;
+  landingUrl?: string;
+  landing_url?: string;
+  referrer?: string;
+  metadata?: Record<string, unknown>;
+};
+type BookingWebTelemetryEventRequest = {
+  hotelSlug?: string;
+  hotel_slug?: string;
+  eventType?: string;
+  event_type?: string;
+  sessionId?: string;
+  session_id?: string;
+  metadata?: Record<string, unknown>;
+};
+type BookingWebAffiliateCheckEmailQuery = {
+  email?: string;
+};
+type BookingWebAffiliateRequest = Record<string, unknown>;
+type BookingWebAffiliateParams = BookingWebHotelParams & {
+  affiliateId: string;
+};
+
+export type BookingWebAttributionSink = {
+  recordAffiliateClick(event: BookingWebAffiliateClickEvent): Promise<void>;
+  recordTelemetryEvent(event: BookingWebTelemetryEvent): Promise<void>;
+};
+
+export type BookingWebAffiliateClickEvent = {
+  slug: string;
+  referralCode: string;
+  sessionId?: string;
+  landingUrl?: string;
+  referrer?: string;
+  requestId: string;
+  occurredAt: Date;
+  userAgent?: string;
+  ipAddress?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type BookingWebTelemetryEvent = {
+  hotelSlug: string;
+  eventType: string;
+  sessionId?: string;
+  requestId: string;
+  occurredAt: Date;
+  userAgent?: string;
+  ipAddress?: string;
+  metadata: Record<string, unknown>;
+};
 
 export type BookingWebPaymentInstructions = {
   bankTransfer: {
@@ -121,6 +176,16 @@ export type BookingWebCheckoutAdapter = {
   validatePromo(slug: string, request: BookingWebPromoValidationRequest): Promise<unknown>;
 };
 
+export type BookingWebAffiliateAdapter = {
+  checkEmail(slug: string, email: string): Promise<unknown>;
+  register(slug: string, request: BookingWebAffiliateRequest): Promise<unknown>;
+  createStripeConnectLink(
+    slug: string,
+    affiliateId: string,
+    request: BookingWebAffiliateRequest,
+  ): Promise<unknown>;
+};
+
 export type BookingWebHostResolution = {
   contractVersion: typeof PUBLIC_BOOKABILITY_CONTRACT_VERSION;
   publicVisibility: typeof PUBLIC_BOOKABILITY_VISIBILITY;
@@ -164,6 +229,8 @@ export type BookingWebPublicRoutesOptions = {
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   checkoutAdapter?: BookingWebCheckoutAdapter;
+  affiliateAdapter?: BookingWebAffiliateAdapter;
+  attributionSink?: BookingWebAttributionSink;
   fetch?: FetchLike;
   now?: () => Date;
 };
@@ -180,6 +247,12 @@ export async function registerBookingWebPublicRoutes(
       pmsPublicApiUrl: options.pmsPublicApiUrl,
       bookingPublicApiUrl: options.bookingPublicApiUrl,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
+      fetch: fetchImpl,
+    });
+  const affiliateAdapter =
+    options.affiliateAdapter ??
+    createCompatibilityBookingWebAffiliateAdapter({
+      pmsPublicApiUrl: options.pmsPublicApiUrl,
       fetch: fetchImpl,
     });
 
@@ -434,6 +507,105 @@ export async function registerBookingWebPublicRoutes(
       return response;
     },
   );
+
+  app.post<{ Params: BookingWebHotelParams; Body: BookingWebAttributionClickRequest }>(
+    "/hotels/:slug/attribution/clicks",
+    async (request, reply) => {
+      const referralCode = firstString(request.body?.referralCode, request.body?.referral_code);
+      if (!referralCode) {
+        throw createHttpError(400, "Referral code is required.");
+      }
+      if (options.attributionSink) {
+        await options.attributionSink.recordAffiliateClick({
+          slug: request.params.slug,
+          referralCode,
+          sessionId: firstString(request.body?.sessionId, request.body?.session_id),
+          landingUrl: firstString(request.body?.landingUrl, request.body?.landing_url),
+          referrer: firstString(request.body?.referrer, request.headers.referer),
+          requestId: String(request.id),
+          occurredAt: now(),
+          userAgent: request.headers["user-agent"],
+          ipAddress: request.ip,
+          metadata: recordBody(request.body?.metadata),
+        });
+      }
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-attribution-click");
+      return reply.status(204).send();
+    },
+  );
+
+  app.post<{ Body: BookingWebTelemetryEventRequest }>("/events", async (request, reply) => {
+    const hotelSlug = firstString(request.body?.hotelSlug, request.body?.hotel_slug);
+    const eventType = firstString(request.body?.eventType, request.body?.event_type);
+    if (!hotelSlug || !eventType) {
+      throw createHttpError(400, "Hotel slug and event type are required.");
+    }
+    if (options.attributionSink) {
+      await options.attributionSink.recordTelemetryEvent({
+        hotelSlug,
+        eventType,
+        sessionId: firstString(request.body?.sessionId, request.body?.session_id),
+        requestId: String(request.id),
+        occurredAt: now(),
+        userAgent: request.headers["user-agent"],
+        ipAddress: request.ip,
+        metadata: recordBody(request.body?.metadata),
+      });
+    }
+    await forwardLegacyBookingTelemetry({
+      bookingPublicApiUrl: options.bookingPublicApiUrl,
+      fetch: fetchImpl,
+      hotelSlug,
+      eventType,
+      sessionId: firstString(request.body?.sessionId, request.body?.session_id),
+      metadata: recordBody(request.body?.metadata),
+    });
+    reply.header("Cache-Control", "no-store");
+    reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
+    return reply.status(204).send();
+  });
+
+  app.get<{ Params: BookingWebHotelParams; Querystring: BookingWebAffiliateCheckEmailQuery }>(
+    "/hotels/:slug/affiliates/check-email",
+    async (request, reply) => {
+      const email = firstString(request.query.email);
+      if (!email) {
+        throw createHttpError(400, "Email is required.");
+      }
+      const response = await affiliateAdapter.checkEmail(request.params.slug, email);
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-check-email");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams; Body: BookingWebAffiliateRequest }>(
+    "/hotels/:slug/affiliates",
+    async (request, reply) => {
+      const response = await affiliateAdapter.register(request.params.slug, request.body ?? {});
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-register");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebAffiliateParams; Body: BookingWebAffiliateRequest }>(
+    "/hotels/:slug/affiliates/:affiliateId/stripe/connect",
+    async (request, reply) => {
+      const response = await affiliateAdapter.createStripeConnectLink(
+        request.params.slug,
+        request.params.affiliateId,
+        request.body ?? {},
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-stripe-connect");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
 }
 
 export function createCompatibilityBookingWebCheckoutAdapter(config: {
@@ -585,6 +757,41 @@ export function createCompatibilityBookingWebCheckoutAdapter(config: {
           code,
         }).toString()}`,
         method: "GET",
+        fetch: fetchImpl,
+      });
+    },
+  };
+}
+
+export function createCompatibilityBookingWebAffiliateAdapter(config: {
+  pmsPublicApiUrl?: string;
+  fetch?: FetchLike;
+}): BookingWebAffiliateAdapter {
+  const fetchImpl = config.fetch ?? fetch;
+  return {
+    async checkEmail(slug, email) {
+      return fetchJson({
+        baseUrl: config.pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/affiliates/check-email?${new URLSearchParams({ email }).toString()}`,
+        method: "GET",
+        fetch: fetchImpl,
+      });
+    },
+    async register(slug, request) {
+      return fetchJson({
+        baseUrl: config.pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/affiliates`,
+        method: "POST",
+        body: request,
+        fetch: fetchImpl,
+      });
+    },
+    async createStripeConnectLink(slug, affiliateId, request) {
+      return fetchJson({
+        baseUrl: config.pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/affiliates/${encodeURIComponent(affiliateId)}/stripe/connect`,
+        method: "POST",
+        body: request,
         fetch: fetchImpl,
       });
     },
@@ -863,6 +1070,51 @@ function numberRecord(value: unknown): Record<string, number> {
         Number.isFinite(entry[1]),
     ),
   );
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function recordBody(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+async function forwardLegacyBookingTelemetry(config: {
+  bookingPublicApiUrl?: string;
+  fetch: FetchLike;
+  hotelSlug: string;
+  eventType: string;
+  sessionId?: string;
+  metadata: Record<string, unknown>;
+}): Promise<void> {
+  if (!config.bookingPublicApiUrl?.trim()) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2_000);
+  try {
+    await config.fetch(new URL("/api/events", config.bookingPublicApiUrl), {
+      signal: controller.signal,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        hotel_slug: config.hotelSlug,
+        event_type: config.eventType,
+        session_id: config.sessionId,
+        metadata: config.metadata,
+      }),
+    });
+  } catch {
+    // Telemetry is best-effort. Platform events remain the durable target;
+    // legacy forwarding keeps current booking dashboards populated during cutover.
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function sanitizeCheckoutConfig(settings: Record<string, unknown>): Record<string, unknown> {

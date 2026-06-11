@@ -1,14 +1,5 @@
-import { bookingEngine } from "./client";
-
-function getSessionId(): string {
-  if (typeof window === "undefined") return "";
-  let sid = sessionStorage.getItem("vayada_sid");
-  if (!sid) {
-    sid = crypto.randomUUID();
-    sessionStorage.setItem("vayada_sid", sid);
-  }
-  return sid;
-}
+import { bookingWebPublic } from "./client";
+import { getBookingWebSessionId } from "./session";
 
 export function trackEvent(
   hotelSlug: string,
@@ -16,13 +7,13 @@ export function trackEvent(
   metadata?: Record<string, unknown>,
 ) {
   if (typeof window === "undefined" || !hotelSlug) return;
-  fetch(`${bookingEngine.baseURL}/api/events`, {
+  fetch(`${bookingWebPublic.baseURL}/api/booking-web/events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      hotel_slug: hotelSlug,
-      event_type: eventType,
-      session_id: getSessionId(),
+      hotelSlug,
+      eventType,
+      sessionId: getBookingWebSessionId(),
       metadata,
     }),
     keepalive: true,
