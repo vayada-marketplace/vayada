@@ -190,6 +190,130 @@ const legacyBooking = {
 };
 
 describe("Booking Web public bootstrap parity", () => {
+  it("records affiliate click attribution through the configured sink", async () => {
+    const events: unknown[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+      bookingWebAttributionSink: {
+        async recordAffiliateClick(event) {
+          events.push(event);
+        },
+        async recordTelemetryEvent() {},
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/attribution/clicks",
+      payload: {
+        referralCode: "REF-123",
+        sessionId: "sid_123",
+        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(events).toMatchObject([
+      {
+        slug: "hotel-alpenrose",
+        referralCode: "REF-123",
+        sessionId: "sid_123",
+        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+      },
+    ]);
+    await app.close();
+  });
+
+  it("records booking-web telemetry through the configured sink", async () => {
+    const events: unknown[] = [];
+    const legacyRequests: unknown[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+      bookingWebAttributionSink: {
+        async recordAffiliateClick() {},
+        async recordTelemetryEvent(event) {
+          events.push(event);
+        },
+      },
+      async bookingWebPublicFetch(input, init) {
+        legacyRequests.push({
+          url: input.toString(),
+          method: init?.method,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        return jsonResponse({ ok: true });
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      payload: {
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        sessionId: "sid_123",
+        metadata: { locale: "de" },
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(events).toMatchObject([
+      {
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        sessionId: "sid_123",
+        metadata: { locale: "de" },
+      },
+    ]);
+    expect(legacyRequests).toEqual([
+      {
+        url: "https://api.booking.localhost/api/events",
+        method: "POST",
+        body: {
+          hotel_slug: "hotel-alpenrose",
+          event_type: "page_visit",
+          session_id: "sid_123",
+          metadata: { locale: "de" },
+        },
+      },
+    ]);
+    await app.close();
+  });
+
+  it("proxies booking-web public affiliate registration away from browser PMS calls", async () => {
+    const seen: Array<{ pathname: string; method: string }> = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      async bookingWebPublicFetch(input, init) {
+        seen.push({ pathname: input.pathname, method: init?.method ?? "GET" });
+        return jsonResponse({ id: "affiliate_123", referralCode: "REF-123" });
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
+      payload: { email: "guest@example.com", fullName: "Guest Example" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.payload)).toMatchObject({
+      id: "affiliate_123",
+      referralCode: "REF-123",
+    });
+    expect(seen).toEqual([
+      { pathname: "/api/hotels/hotel-alpenrose/affiliates", method: "POST" },
+    ]);
+    await app.close();
+  });
+
   it("preserves hotel page bootstrap fields across the target adapter", async () => {
     const app = buildParityApp({
       hotel: legacyHotel,

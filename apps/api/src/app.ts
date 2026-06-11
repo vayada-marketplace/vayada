@@ -33,6 +33,7 @@ import {
 } from "./routes/marketplaceDiscovery.js";
 import {
   registerBookingWebPublicRoutes,
+  type BookingWebAttributionSink,
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
 } from "./routes/bookingWebPublic.js";
@@ -65,6 +66,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
+  bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
 };
@@ -132,6 +134,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       pmsPublicApiUrl: options.pmsPublicApiUrl,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
       checkoutAdapter: options.bookingWebCheckoutAdapter,
+      attributionSink: options.bookingWebAttributionSink,
       fetch: options.bookingWebPublicFetch,
       now: options.bookingWebPublicNow,
     });

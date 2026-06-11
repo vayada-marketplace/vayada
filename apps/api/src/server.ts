@@ -7,6 +7,7 @@ import {
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
 import { createOpenAIAskModel } from "./platform/askIntelligence.js";
+import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
@@ -145,6 +146,11 @@ const app = buildApp({
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
+  bookingWebAttributionSink: config.auth
+    ? createPgBookingWebEventSink({
+        connectionString: config.auth.databaseUrl,
+      })
+    : undefined,
 });
 
 try {

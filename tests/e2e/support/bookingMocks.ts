@@ -287,10 +287,21 @@ export async function mockBookingApis(page: Page) {
     await route.fulfill({ status: 204, body: "" });
   });
 
+  await page.route("**/api/booking-web/events", async (route) => {
+    await route.fulfill({ status: 204, body: "" });
+  });
+
   await page.route(
     new RegExp(`/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}(?:\\\\?.*)?$`),
     async (route) => {
       await route.fulfill({ json: publicHotelProfile });
+    },
+  );
+
+  await page.route(
+    `**/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}/attribution/clicks`,
+    async (route) => {
+      await route.fulfill({ status: 204, body: "" });
     },
   );
 

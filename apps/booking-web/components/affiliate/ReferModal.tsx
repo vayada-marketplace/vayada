@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { pms } from "@/services/api/client";
+import { bookingWebPublic } from "@/services/api/client";
 
-const PMS_URL = pms.baseURL;
+const BOOKING_WEB_PUBLIC_URL = bookingWebPublic.baseURL;
 
 function formatApiError(err: any, fallback: string): string {
   const detail = err?.detail;
@@ -63,7 +63,7 @@ export default function ReferModal({
     setApiError("");
     try {
       const res = await fetch(
-        `${PMS_URL}/api/hotels/${hotelSlug}/affiliates/check-email?email=${encodeURIComponent(email.trim())}`,
+        `${BOOKING_WEB_PUBLIC_URL}/api/booking-web/hotels/${encodeURIComponent(hotelSlug)}/affiliates/check-email?email=${encodeURIComponent(email.trim())}`,
       );
       if (res.ok) {
         const data = await res.json();
@@ -113,23 +113,26 @@ export default function ReferModal({
     setSubmitting(true);
     setApiError("");
     try {
-      const res = await fetch(`${PMS_URL}/api/hotels/${hotelSlug}/affiliates`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName,
-          email,
-          socialMedia: social,
-          userType,
-          paymentMethod,
-          paypalEmail: paymentMethod === "paypal" ? paypalEmail : "",
-          bankIban: paymentMethod === "bank" ? bankIban : "",
-          bankAccountHolder: paymentMethod === "bank" ? bankAccountHolder : "",
-          bankSwiftBic: paymentMethod === "bank" ? bankSwiftBic : "",
-          bankName: paymentMethod === "bank" ? bankName : "",
-          bankCountry: paymentMethod === "bank" ? bankCountry : "",
-        }),
-      });
+      const res = await fetch(
+        `${BOOKING_WEB_PUBLIC_URL}/api/booking-web/hotels/${encodeURIComponent(hotelSlug)}/affiliates`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fullName,
+            email,
+            socialMedia: social,
+            userType,
+            paymentMethod,
+            paypalEmail: paymentMethod === "paypal" ? paypalEmail : "",
+            bankIban: paymentMethod === "bank" ? bankIban : "",
+            bankAccountHolder: paymentMethod === "bank" ? bankAccountHolder : "",
+            bankSwiftBic: paymentMethod === "bank" ? bankSwiftBic : "",
+            bankName: paymentMethod === "bank" ? bankName : "",
+            bankCountry: paymentMethod === "bank" ? bankCountry : "",
+          }),
+        },
+      );
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Registration failed" }));
         throw new Error(formatApiError(err, "Registration failed"));
@@ -141,7 +144,7 @@ export default function ReferModal({
       if (paymentMethod === "stripe") {
         try {
           const stripeRes = await fetch(
-            `${PMS_URL}/api/hotels/${hotelSlug}/affiliates/${data.id}/stripe/connect`,
+            `${BOOKING_WEB_PUBLIC_URL}/api/booking-web/hotels/${encodeURIComponent(hotelSlug)}/affiliates/${encodeURIComponent(data.id)}/stripe/connect`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
