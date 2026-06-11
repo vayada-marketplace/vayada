@@ -127,4 +127,48 @@ describe("api config", () => {
       }).bookingHostBase,
     ).toBe("booking.localhost");
   });
+
+  it("keeps Ask Intelligence on the fixture provider by default", () => {
+    expect(loadConfig({}).askIntelligence).toEqual({ provider: "fixture" });
+    expect(
+      loadConfig({
+        ASK_INTELLIGENCE_MODEL: "gpt-5.4-mini",
+        OPENAI_API_KEY: "sk_test",
+      }).askIntelligence,
+    ).toEqual({ provider: "fixture" });
+  });
+
+  it("loads Ask Intelligence OpenAI provider config only when explicitly enabled", () => {
+    expect(
+      loadConfig({
+        ASK_INTELLIGENCE_PROVIDER: "openai",
+        ASK_INTELLIGENCE_MODEL: "gpt-5.4-mini",
+        OPENAI_API_KEY: "sk_test",
+        OPENAI_BASE_URL: "https://api.openai.com/v1",
+        OPENAI_ORGANIZATION: "org_test",
+        OPENAI_PROJECT: "proj_test",
+      }).askIntelligence,
+    ).toEqual({
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      apiKey: "sk_test",
+      baseUrl: "https://api.openai.com/v1",
+      organization: "org_test",
+      project: "proj_test",
+    });
+  });
+
+  it("rejects incomplete or unsupported Ask Intelligence provider config", () => {
+    expect(() =>
+      loadConfig({
+        ASK_INTELLIGENCE_PROVIDER: "openai",
+        ASK_INTELLIGENCE_MODEL: "gpt-5.4-mini",
+      }),
+    ).toThrow("Incomplete Ask Intelligence OpenAI config");
+    expect(() =>
+      loadConfig({
+        ASK_INTELLIGENCE_PROVIDER: "anthropic",
+      }),
+    ).toThrow("Unsupported Ask Intelligence provider");
+  });
 });

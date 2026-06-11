@@ -19,11 +19,23 @@ export type ApiAuthSessionConfig = {
   authCookieDomain?: string;
 };
 
+export type ApiAskIntelligenceConfig =
+  | { provider: "fixture" }
+  | {
+      provider: "openai";
+      apiKey: string;
+      model: string;
+      baseUrl?: string;
+      organization?: string;
+      project?: string;
+    };
+
 export type ApiConfig = {
   host: string;
   port: number;
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
+  askIntelligence: ApiAskIntelligenceConfig;
   bookingDatabaseUrl?: string;
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
@@ -110,6 +122,30 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
   };
 }
 
+function loadAskIntelligenceConfig(env: NodeJS.ProcessEnv): ApiAskIntelligenceConfig {
+  const provider = readOptionalEnv(env, "ASK_INTELLIGENCE_PROVIDER") ?? "fixture";
+  if (provider === "fixture") return { provider };
+  if (provider !== "openai") {
+    throw new Error("Unsupported Ask Intelligence provider; expected fixture or openai");
+  }
+
+  const requiredKeys = ["OPENAI_API_KEY", "ASK_INTELLIGENCE_MODEL"] as const;
+  const values = Object.fromEntries(requiredKeys.map((key) => [key, readOptionalEnv(env, key)]));
+  const missing = requiredKeys.filter((key) => !values[key]);
+  if (missing.length > 0) {
+    throw new Error(`Incomplete Ask Intelligence OpenAI config; missing ${missing.join(", ")}`);
+  }
+
+  return {
+    provider,
+    apiKey: values["OPENAI_API_KEY"]!,
+    model: values["ASK_INTELLIGENCE_MODEL"]!,
+    baseUrl: readOptionalEnv(env, "OPENAI_BASE_URL"),
+    organization: readOptionalEnv(env, "OPENAI_ORGANIZATION"),
+    project: readOptionalEnv(env, "OPENAI_PROJECT"),
+  };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const server = loadServerConfig(env, {
     host: "0.0.0.0",
@@ -120,6 +156,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ...server,
     auth: loadAuthConfig(env),
     authSession: loadAuthSessionConfig(env),
+    askIntelligence: loadAskIntelligenceConfig(env),
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
     bookingReservationsReadDatabaseUrl: readOptionalEnv(
       env,
