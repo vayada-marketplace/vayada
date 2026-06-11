@@ -36,6 +36,7 @@ import {
   type BookingWebAttributionSink,
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
+  type BookingDomainResolutionSource,
 } from "./routes/bookingWebPublic.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
@@ -63,6 +64,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   askNow?: AskRoutesOptions["now"];
   marketplaceDiscoveryAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
+  bookingDomainResolutionSource?: BookingDomainResolutionSource;
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
@@ -131,6 +133,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       profileRepository: options.publicHotelProfileRepository,
       quoteRepository: options.publicHotelQuoteRepository,
       bookingPublicApiUrl: options.bookingPublicApiUrl,
+      bookingDomainResolutionSource: options.bookingDomainResolutionSource,
       pmsPublicApiUrl: options.pmsPublicApiUrl,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
       checkoutAdapter: options.bookingWebCheckoutAdapter,

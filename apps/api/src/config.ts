@@ -32,6 +32,9 @@ export type ApiAskIntelligenceConfig =
       project?: string;
     };
 
+export type PublicHotelProfileSource = "legacy" | "target";
+export type BookingDomainResolutionSource = "legacy" | "target";
+
 export type ApiConfig = {
   host: string;
   port: number;
@@ -41,6 +44,8 @@ export type ApiConfig = {
   targetDatabaseUrl?: string;
   bookingDatabaseUrl?: string;
   bookingReservationsSource: "legacy" | "target";
+  publicHotelProfileSource: PublicHotelProfileSource;
+  bookingDomainResolutionSource: BookingDomainResolutionSource;
   bookingSettingsSource: "legacy" | "target";
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
@@ -179,6 +184,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     port: 8003,
   });
   const targetDatabaseUrl = readOptionalEnv(env, "TARGET_DATABASE_URL");
+  const publicHotelProfileSource = readSourceEnv(
+    env,
+    "PUBLIC_HOTEL_PROFILE_SOURCE",
+    ["legacy", "target"],
+    "legacy",
+  );
+  const bookingDomainResolutionSource = readSourceEnv(
+    env,
+    "BOOKING_DOMAIN_RESOLUTION_SOURCE",
+    ["legacy", "target"],
+    "legacy",
+  );
   const bookingSettingsSource = readSourceEnv(
     env,
     "BOOKING_SETTINGS_SOURCE",
@@ -187,6 +204,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   );
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
+  }
+  if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
+    throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
+  }
+  if (bookingDomainResolutionSource === "target" && publicHotelProfileSource !== "target") {
+    throw new Error(
+      "BOOKING_DOMAIN_RESOLUTION_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target",
+    );
   }
 
   return {
@@ -202,6 +227,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       ["legacy", "target"] as const,
       "legacy",
     ),
+    publicHotelProfileSource,
+    bookingDomainResolutionSource,
     bookingSettingsSource,
     bookingReservationsReadDatabaseUrl: readOptionalEnv(
       env,

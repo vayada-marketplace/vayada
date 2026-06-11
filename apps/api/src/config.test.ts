@@ -75,6 +75,48 @@ describe("api config", () => {
     ).toBe("postgresql://booking-db");
   });
 
+  it("loads target public hotel profile and domain resolution config without the legacy booking DB", () => {
+    expect(
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+        BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+      }),
+    ).toMatchObject({
+      bookingDatabaseUrl: undefined,
+      targetDatabaseUrl: "postgresql://target-db",
+      publicHotelProfileSource: "target",
+      bookingDomainResolutionSource: "target",
+    });
+  });
+
+  it("rejects target public hotel profile config without the target DB", () => {
+    expect(() =>
+      loadConfig({
+        PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+      }),
+    ).toThrow("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
+  });
+
+  it("rejects target domain resolution without target public profiles", () => {
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+      }),
+    ).toThrow(
+      "BOOKING_DOMAIN_RESOLUTION_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target",
+    );
+  });
+
+  it("rejects unsupported public profile source config", () => {
+    expect(() =>
+      loadConfig({
+        PUBLIC_HOTEL_PROFILE_SOURCE: "booking",
+      }),
+    ).toThrow("PUBLIC_HOTEL_PROFILE_SOURCE must be one of: legacy, target");
+  });
+
   it("loads optional target database config", () => {
     expect(
       loadConfig({
