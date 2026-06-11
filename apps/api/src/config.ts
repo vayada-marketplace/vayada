@@ -13,10 +13,12 @@ export type ApiAuthSessionConfig = {
   workosWebhookSecret?: string;
   authCookieSecret: string;
   authCallbackUrl: string;
+  authSuccessUrl?: string;
   authLogoutUrl: string;
   authAllowedOrigins: string[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
+  authLegacyMarketplaceJwtSecret?: string;
 };
 
 export type ApiConfig = {
@@ -103,10 +105,12 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     workosWebhookSecret: readOptionalEnv(env, "WORKOS_WEBHOOK_SECRET"),
     authCookieSecret: values["AUTH_COOKIE_SECRET"]!,
     authCallbackUrl: values["AUTH_CALLBACK_URL"]!,
+    authSuccessUrl: readOptionalEnv(env, "AUTH_SUCCESS_URL"),
     authLogoutUrl: values["AUTH_LOGOUT_URL"]!,
     authAllowedOrigins: readOptionalCsvEnv(env, "AUTH_ALLOWED_ORIGINS"),
     authCookieSecure: readOptionalEnv(env, "AUTH_COOKIE_SECURE") !== "false",
     authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
+    authLegacyMarketplaceJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_MARKETPLACE_JWT_SECRET"),
   };
 }
 

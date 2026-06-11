@@ -91,11 +91,13 @@ const app = buildApp({
             audience: config.auth.workosAudience,
           }),
           callbackUrl: config.authSession.authCallbackUrl,
+          callbackReturnUrl: config.authSession.authSuccessUrl,
           logoutReturnUrl: config.authSession.authLogoutUrl,
           allowedOrigins: config.authSession.authAllowedOrigins,
           requiredOrganizationKind: "platform",
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
+          legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
         }
       : undefined,
   workosWebhooks:

@@ -36,12 +36,18 @@ export default function MarketplacePreviewPage() {
   const [selectedCreator, setSelectedCreator] = useState<MarketplaceCreator | null>(null);
 
   useEffect(() => {
-    if (!authService.isLoggedIn() || !authService.isAdmin()) {
-      router.push("/login");
-      return;
-    }
-
-    loadData();
+    let cancelled = false;
+    authService.ensureSession().then((authorized) => {
+      if (cancelled) return;
+      if (!authorized) {
+        router.push("/login");
+        return;
+      }
+      loadData();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   const loadData = async () => {

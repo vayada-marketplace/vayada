@@ -8,12 +8,14 @@ export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Redirect to login if not authenticated, or dashboard if authenticated
-    if (authService.isLoggedIn() && authService.isAdmin()) {
-      router.push("/dashboard");
-    } else {
-      router.push("/login");
-    }
+    let cancelled = false;
+    authService.ensureSession().then((authorized) => {
+      if (cancelled) return;
+      router.push(authorized ? "/dashboard" : "/login");
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   return (
