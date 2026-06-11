@@ -8,7 +8,8 @@ import pytest
 from app.database import AuthDatabase, Database
 from httpx import AsyncClient
 
-from app.jwt_utils import create_access_token
+from app.jwt_utils import create_access_token, create_totp_session_token
+from app.repositories.user_repo import UserRepository
 
 from tests.conftest import (
     create_test_admin,
@@ -401,6 +402,23 @@ class TestForgotPassword:
         # Still returns 200 for security
         assert response.status_code == 200
 
+    async def test_forgot_password_workos_linked_platform_user_does_not_create_token(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """WorkOS-linked platform users cannot start legacy password reset."""
+        user = await create_test_user(user_type="admin")
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+
+        response = await client.post("/auth/forgot-password", json={"email": user["email"]})
+
+        assert response.status_code == 200
+        token_row = await AuthDatabase.fetchrow(
+            "SELECT token FROM password_reset_tokens WHERE user_id = $1", user["id"]
+        )
+        assert token_row is None
+
 
 class TestResetPassword:
     """Tests for POST /auth/reset-password"""
@@ -476,6 +494,26 @@ class TestResetPassword:
 
             assert response.status_code == 400
 
+    async def test_reset_password_workos_linked_platform_user_rejected(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """A pre-existing reset token cannot reset a WorkOS-linked platform account."""
+        from app.auth import create_password_reset_token
+
+        user = await create_test_user(user_type="admin")
+        token = await create_password_reset_token(str(user["id"]), expires_in_hours=1)
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+
+        response = await client.post(
+            "/auth/reset-password",
+            json={"token": token, "new_password": "NewSecurePassword123!"},
+        )
+
+        assert response.status_code == 403
+        assert "workos" in response.json()["detail"].lower()
+
 
 class TestVerifyEmail:
     """Tests for GET /auth/verify-email"""
@@ -506,6 +544,25 @@ class TestVerifyEmail:
         response = await client.get("/auth/verify-email")
 
         assert response.status_code == 422  # Missing required query param
+
+    async def test_verify_email_workos_linked_platform_user_rejected(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """Legacy email verification tokens do not activate WorkOS-linked admins."""
+        from app.auth import create_email_verification_token
+
+        user = await create_test_user(user_type="admin")
+        token = await create_email_verification_token(str(user["id"]), expires_in_hours=48)
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+
+        response = await client.get(f"/auth/verify-email?token={token}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["verified"] is False
+        assert data["email"] == user["email"]
 
 
 class TestSuperadminLogin:
@@ -550,6 +607,94 @@ class TestSuperadminLogin:
         assert data.get("requires_totp") is True
         assert data.get("totp_session") is not None
         assert data.get("access_token") is None
+
+    async def test_workos_linked_superadmin_cannot_login_with_local_password(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """WorkOS-linked superadmins cannot mint a legacy password session."""
+        password = "TestPassword123!"
+        user = await create_test_user(password=password, user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+
+        response = await client.post(
+            "/auth/login", json={"email": user["email"], "password": password}
+        )
+
+        assert response.status_code == 403
+        assert "workos" in response.json()["detail"].lower()
+
+    async def test_workos_linked_superadmin_can_login_when_retirement_rollback_disabled(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """Server rollback flag re-enables legacy password login for linked admins."""
+        from app.config import settings
+
+        password = "TestPassword123!"
+        user = await create_test_user(password=password, user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+        monkeypatch.setattr(settings, "LOCAL_AUTH_RETIREMENT_ENABLED", False)
+
+        response = await client.post(
+            "/auth/login", json={"email": user["email"], "password": password}
+        )
+
+        assert response.status_code == 200
+        assert response.json().get("access_token") is not None
+
+    async def test_workos_linked_superadmin_with_totp_does_not_get_challenge(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """Legacy password step is retired before a TOTP challenge can be created."""
+        from app.repositories.totp_repo import TotpRepository
+        from app.totp_utils import encrypt_secret
+
+        password = "TestPassword123!"
+        user = await create_test_user(password=password, user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+        await TotpRepository.upsert_secret(str(user["id"]), encrypt_secret("JBSWY3DPEHPK3PXP"))
+        await TotpRepository.mark_enrolled(str(user["id"]))
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+
+        response = await client.post(
+            "/auth/login", json={"email": user["email"], "password": password}
+        )
+
+        assert response.status_code == 403
+        assert "totp_session" not in response.text
+
+    async def test_workos_linked_superadmin_cannot_complete_totp_session(
+        self, client: AsyncClient, cleanup_database, monkeypatch
+    ):
+        """Old pending TOTP sessions cannot mint local JWTs after retirement."""
+        user = await create_test_user(user_type="creator")
+        await AuthDatabase.execute(
+            "UPDATE users SET is_superadmin = true WHERE id = $1", user["id"]
+        )
+        token = create_totp_session_token(str(user["id"]), user["email"], user["type"])
+        monkeypatch.setattr(
+            UserRepository, "has_workos_identity", AsyncMock(return_value=True)
+        )
+
+        response = await client.post(
+            "/auth/totp/verify", json={"totp_session": token, "code": "123456"}
+        )
+
+        assert response.status_code == 403
+        assert "workos" in response.json()["detail"].lower()
 
 
 class TestTotpSetup:

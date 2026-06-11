@@ -10,7 +10,7 @@ test.describe("vayada-admin smoke", () => {
     await expect(page.getByRole("heading", { name: /vayada admin/i, level: 1 })).toBeVisible();
     await expect(page.getByLabel(/email address/i)).toBeVisible();
     await expect(page.getByRole("button", { name: /continue with workos/i })).toBeVisible();
-    await expect(page.getByRole("link", { name: /use legacy password fallback/i })).toBeVisible();
+    await expect(page.getByRole("link", { name: /use legacy password fallback/i })).toHaveCount(0);
 
     await assertHealthy();
   });
