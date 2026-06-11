@@ -10,7 +10,8 @@ import {
   type PublicBookabilityProfileProjection,
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
-import type { FastifyInstance } from "fastify";
+import { createHash } from "node:crypto";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import {
@@ -155,40 +156,84 @@ export type BookingWebPaymentInstructions = {
   };
 };
 
+export type BookingWebCheckoutCommandContext = {
+  operation: string;
+  requestId: string;
+  correlationId: string;
+  idempotencyKey: string;
+  fingerprint: string;
+  occurredAt: Date;
+};
+
 export type BookingWebCheckoutAdapter = {
-  getCheckoutConfig(slug: string): Promise<unknown>;
-  createBooking(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
-  confirmAuthorization(slug: string, handle: string): Promise<unknown>;
-  getStatus(slug: string, query: BookingWebBookingStatusQuery): Promise<unknown>;
-  lookup(slug: string, request: BookingWebLookupRequest): Promise<unknown>;
+  getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
+  createBooking(
+    slug: string,
+    request: BookingWebCheckoutRequest,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  confirmAuthorization(
+    slug: string,
+    handle: string,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  getStatus(
+    slug: string,
+    query: BookingWebBookingStatusQuery,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  lookup(
+    slug: string,
+    request: BookingWebLookupRequest,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
   withdraw(
     slug: string,
     bookingId: string,
     request: BookingWebGuestActionRequest,
+    context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   cancelPreview(
     slug: string,
     bookingId: string,
     request: BookingWebGuestActionRequest,
+    context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
-  cancel(slug: string, bookingId: string, request: BookingWebGuestActionRequest): Promise<unknown>;
+  cancel(
+    slug: string,
+    bookingId: string,
+    request: BookingWebGuestActionRequest,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
   previewChangeRequest(
     slug: string,
     bookingId: string,
     request: BookingWebChangeRequest,
+    context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   submitChangeRequest(
     slug: string,
     bookingId: string,
     request: BookingWebChangeRequest,
+    context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
   getChangeRequest(
     slug: string,
     bookingId: string,
     query: BookingWebChangeRequestQuery,
+    context?: BookingWebCheckoutCommandContext,
   ): Promise<unknown>;
-  getPaymentInstructions(slug: string, handle: string): Promise<BookingWebPaymentInstructions>;
-  validatePromo(slug: string, request: BookingWebPromoValidationRequest): Promise<unknown>;
+  getPaymentInstructions(
+    slug: string,
+    handle: string,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<BookingWebPaymentInstructions>;
+  validatePromo(
+    slug: string,
+    request: BookingWebPromoValidationRequest,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
+  close?(): Promise<void>;
 };
 
 export type BookingWebAffiliateAdapter = {
@@ -294,6 +339,11 @@ export async function registerBookingWebPublicRoutes(
       await options.calendarRepository?.close?.();
     });
   }
+  if (checkoutAdapter.close) {
+    app.addHook("onClose", async () => {
+      await checkoutAdapter.close?.();
+    });
+  }
 
   app.get<{ Params: BookingWebHostParams }>("/hosts/:host", async (request, reply) => {
     const host = normalizeHost(request.params.host);
@@ -379,7 +429,10 @@ export async function registerBookingWebPublicRoutes(
   app.get<{ Params: BookingWebHotelParams }>(
     "/hotels/:slug/checkout-config",
     async (request, reply) => {
-      const response = await checkoutAdapter.getCheckoutConfig(request.params.slug);
+      const response = await checkoutAdapter.getCheckoutConfig(
+        request.params.slug,
+        checkoutCommandContext(request, "checkout-config", request.params.slug, request.query, now),
+      );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-checkout-config");
       reply.header("X-Robots-Tag", "noindex");
@@ -390,7 +443,12 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
     "/hotels/:slug/bookings",
     async (request, reply) => {
-      const response = await checkoutAdapter.createBooking(request.params.slug, request.body ?? {});
+      const body = request.body ?? {};
+      const response = await checkoutAdapter.createBooking(
+        request.params.slug,
+        body,
+        checkoutCommandContext(request, "booking-create", request.params.slug, body, now),
+      );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
       reply.header("X-Robots-Tag", "noindex");
@@ -404,6 +462,13 @@ export async function registerBookingWebPublicRoutes(
       const response = await checkoutAdapter.confirmAuthorization(
         request.params.slug,
         request.params.handle,
+        checkoutCommandContext(
+          request,
+          "booking-confirm-authorization",
+          `${request.params.slug}:${request.params.handle}`,
+          request.params,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-confirm");
@@ -415,7 +480,11 @@ export async function registerBookingWebPublicRoutes(
   app.get<{ Params: BookingWebHotelParams; Querystring: BookingWebBookingStatusQuery }>(
     "/hotels/:slug/bookings/status",
     async (request, reply) => {
-      const response = await checkoutAdapter.getStatus(request.params.slug, request.query);
+      const response = await checkoutAdapter.getStatus(
+        request.params.slug,
+        request.query,
+        checkoutCommandContext(request, "booking-status", request.params.slug, request.query, now),
+      );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-status");
       reply.header("X-Robots-Tag", "noindex");
@@ -426,7 +495,12 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebLookupRequest }>(
     "/hotels/:slug/bookings/lookup",
     async (request, reply) => {
-      const response = await checkoutAdapter.lookup(request.params.slug, request.body ?? {});
+      const body = request.body ?? {};
+      const response = await checkoutAdapter.lookup(
+        request.params.slug,
+        body,
+        checkoutCommandContext(request, "booking-lookup", request.params.slug, body, now),
+      );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-lookup");
       reply.header("X-Robots-Tag", "noindex");
@@ -437,10 +511,18 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
     "/hotels/:slug/bookings/:bookingId/withdraw",
     async (request, reply) => {
+      const body = normalizeGuestActionRequest(request.body ?? {});
       const response = await checkoutAdapter.withdraw(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-withdraw",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-withdraw");
@@ -452,10 +534,18 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
     "/hotels/:slug/bookings/:bookingId/cancel-preview",
     async (request, reply) => {
+      const body = normalizeGuestActionRequest(request.body ?? {});
       const response = await checkoutAdapter.cancelPreview(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-cancel-preview",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-cancel-preview");
@@ -467,10 +557,18 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
     "/hotels/:slug/bookings/:bookingId/cancel",
     async (request, reply) => {
+      const body = normalizeGuestActionRequest(request.body ?? {});
       const response = await checkoutAdapter.cancel(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-cancel",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-cancel");
@@ -482,10 +580,18 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebChangeRequest }>(
     "/hotels/:slug/bookings/:bookingId/change-request/preview",
     async (request, reply) => {
+      const body = normalizeChangeRequest(request.body ?? {});
       const response = await checkoutAdapter.previewChangeRequest(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-change-preview",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-change-request-preview");
@@ -497,10 +603,18 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebChangeRequest }>(
     "/hotels/:slug/bookings/:bookingId/change-request",
     async (request, reply) => {
+      const body = normalizeChangeRequest(request.body ?? {});
       const response = await checkoutAdapter.submitChangeRequest(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
+        checkoutCommandContext(
+          request,
+          "booking-change-submit",
+          `${request.params.slug}:${request.params.bookingId}`,
+          body,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-change-request-submit");
@@ -516,6 +630,13 @@ export async function registerBookingWebPublicRoutes(
         request.params.slug,
         request.params.bookingId,
         request.query,
+        checkoutCommandContext(
+          request,
+          "booking-change-get",
+          `${request.params.slug}:${request.params.bookingId}`,
+          request.query,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-change-request-get");
@@ -530,6 +651,13 @@ export async function registerBookingWebPublicRoutes(
       const response = await checkoutAdapter.getPaymentInstructions(
         request.params.slug,
         request.params.handle,
+        checkoutCommandContext(
+          request,
+          "booking-payment-instructions",
+          `${request.params.slug}:${request.params.handle}`,
+          request.params,
+          now,
+        ),
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-payment-instructions");
@@ -541,7 +669,12 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebHotelParams; Body: BookingWebPromoValidationRequest }>(
     "/hotels/:slug/promo/validate",
     async (request, reply) => {
-      const response = await checkoutAdapter.validatePromo(request.params.slug, request.body ?? {});
+      const body = request.body ?? {};
+      const response = await checkoutAdapter.validatePromo(
+        request.params.slug,
+        body,
+        checkoutCommandContext(request, "promo-validate", request.params.slug, body, now),
+      );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-promo-validate");
       reply.header("X-Robots-Tag", "noindex");
@@ -963,7 +1096,7 @@ function normalizeGuestActionRequest(request: BookingWebGuestActionRequest): {
   };
 }
 
-function normalizeChangeRequest(request: BookingWebChangeRequest): Record<string, unknown> {
+function normalizeChangeRequest(request: BookingWebChangeRequest): BookingWebChangeRequest {
   return {
     guestEmail: request.guestEmail ?? request.guest_email,
     checkIn: request.checkIn,
@@ -1378,6 +1511,43 @@ function recordBody(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function checkoutCommandContext(
+  request: FastifyRequest,
+  operation: string,
+  resource: string,
+  payload: unknown,
+  now: () => Date,
+): BookingWebCheckoutCommandContext {
+  const fingerprint = sha256Hex(stableJson({ operation, resource, payload }));
+  const headerKey = firstString(request.headers["idempotency-key"]);
+  return {
+    operation,
+    requestId: String(request.id),
+    correlationId: firstString(request.headers["x-correlation-id"]) ?? String(request.id),
+    idempotencyKey: headerKey ?? `booking.checkout:${operation}:${resource}:${fingerprint}`,
+    fingerprint,
+    occurredAt: now(),
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+    .join(",")}}`;
+}
+
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 async function forwardLegacyBookingTelemetry(config: {

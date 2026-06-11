@@ -26,6 +26,10 @@ import {
   registerWorkosWebhookRoutes,
   type WorkosWebhookRoutesOptions,
 } from "./routes/workosWebhooks.js";
+import {
+  registerProviderWebhookRoutes,
+  type ProviderWebhookRoutesOptions,
+} from "./routes/providerWebhooks.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
@@ -51,6 +55,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   workosWebhooks?: WorkosWebhookRoutesOptions;
+  providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   pmsOperationsRepository?: PmsOperationsReadRepository;
   pmsOperationsAllowedOrigins?: string[];
@@ -109,6 +114,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/auth/workos",
       ...options.workosWebhooks,
     });
+  }
+  if (options.providerWebhooks) {
+    app.register(registerProviderWebhookRoutes, options.providerWebhooks);
   }
   app.register(registerRouteGroups, { prefix: "/api" });
   app.register(registerAskRoutes, {

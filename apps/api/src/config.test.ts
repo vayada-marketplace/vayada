@@ -125,6 +125,47 @@ describe("api config", () => {
     ).toBe("postgresql://target-db");
   });
 
+  it("defaults provider webhook intake modes to observe-only shadow intake", () => {
+    expect(loadConfig({}).providerWebhooks).toEqual({
+      stripeSecret: undefined,
+      xenditSecret: undefined,
+      channexSecret: undefined,
+      stripeMode: "observe_only",
+      xenditMode: "observe_only",
+      channexMode: "observe_only",
+    });
+  });
+
+  it("loads provider webhook secrets and per-provider intake modes", () => {
+    expect(
+      loadConfig({
+        STRIPE_WEBHOOK_SECRET: "stripe-secret",
+        XENDIT_WEBHOOK_SECRET: "xendit-secret",
+        CHANNEX_WEBHOOK_SECRET: "channex-secret",
+        STRIPE_WEBHOOK_INTAKE_MODE: "mutating",
+        XENDIT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
+        CHANNEX_WEBHOOK_INTAKE_MODE: "observe_only",
+      }).providerWebhooks,
+    ).toEqual({
+      stripeSecret: "stripe-secret",
+      xenditSecret: "xendit-secret",
+      channexSecret: "channex-secret",
+      stripeMode: "mutating",
+      xenditMode: "ack_only_with_receipt",
+      channexMode: "observe_only",
+    });
+  });
+
+  it("rejects unsupported provider webhook intake modes", () => {
+    expect(() =>
+      loadConfig({
+        STRIPE_WEBHOOK_INTAKE_MODE: "proxy_to_target",
+      }),
+    ).toThrow(
+      "STRIPE_WEBHOOK_INTAKE_MODE must be one of: observe_only, mutating, ack_only_with_receipt",
+    );
+  });
+
   it("keeps booking settings on the legacy source by default", () => {
     expect(loadConfig({}).bookingSettingsSource).toBe("legacy");
   });
