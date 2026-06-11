@@ -136,6 +136,7 @@ const app = buildApp({
     : undefined,
   bookingPublicApiUrl: config.bookingPublicApiUrl,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
+  legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
 });
 
 try {
