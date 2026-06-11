@@ -192,12 +192,36 @@ describe("api config", () => {
     ).toBe("https://api.booking.localhost");
   });
 
-  it("loads optional marketplace discovery database config", () => {
+  it("keeps marketplace discovery disabled by default", () => {
+    expect(loadConfig({}).marketplaceDiscoverySource).toBe("disabled");
+  });
+
+  it("loads target marketplace discovery config without the legacy marketplace DB", () => {
     expect(
       loadConfig({
-        MARKETPLACE_DATABASE_URL: "postgresql://marketplace-db",
-      }).marketplaceDatabaseUrl,
-    ).toBe("postgresql://marketplace-db");
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        MARKETPLACE_DISCOVERY_SOURCE: "target",
+      }),
+    ).toMatchObject({
+      targetDatabaseUrl: "postgresql://target-db",
+      marketplaceDiscoverySource: "target",
+    });
+  });
+
+  it("requires target database config when marketplace discovery uses the target source", () => {
+    expect(() =>
+      loadConfig({
+        MARKETPLACE_DISCOVERY_SOURCE: "target",
+      }),
+    ).toThrow("TARGET_DATABASE_URL is required when MARKETPLACE_DISCOVERY_SOURCE=target");
+  });
+
+  it("rejects unsupported marketplace discovery source config", () => {
+    expect(() =>
+      loadConfig({
+        MARKETPLACE_DISCOVERY_SOURCE: "legacy",
+      }),
+    ).toThrow("MARKETPLACE_DISCOVERY_SOURCE must be one of: disabled, target");
   });
 
   it("loads marketplace discovery allowed origins from comma-separated config", () => {

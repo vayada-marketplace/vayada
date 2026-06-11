@@ -197,7 +197,7 @@ export function createPgMarketplaceDiscoveryReadRepository(config: {
       const [listingResult, countResult] = await Promise.all([
         pool.query<MarketplaceListingRow>(
           `SELECT
-             COALESCE(listing.source_listing_id, read_model.listing_id::text) AS "listingId",
+             listing.source_listing_id AS "listingId",
              read_model.public_id AS "publicId",
              read_model.canonical_slug AS "canonicalSlug",
              read_model.display_name AS "displayName",
@@ -225,14 +225,19 @@ export function createPgMarketplaceDiscoveryReadRepository(config: {
              LIMIT 1
            ) media ON TRUE
            WHERE read_model.visibility_status = 'public'
-           ORDER BY listing.created_at DESC, COALESCE(listing.source_listing_id, read_model.listing_id::text) ASC
+             AND listing.source_listing_id IS NOT NULL
+           ORDER BY listing.created_at DESC, listing.source_listing_id ASC
            LIMIT $1 OFFSET $2`,
           [page.limit, page.offset],
         ),
         pool.query<{ total: string }>(
           `SELECT COUNT(*)::text AS total
-           FROM marketplace.marketplace_listing_read_model
-           WHERE visibility_status = 'public'`,
+           FROM marketplace.marketplace_listing_read_model read_model
+           JOIN marketplace.marketplace_hotel_listings listing
+             ON listing.id = read_model.listing_id
+            AND listing.property_id = read_model.property_id
+           WHERE read_model.visibility_status = 'public'
+             AND listing.source_listing_id IS NOT NULL`,
         ),
       ]);
 
@@ -245,7 +250,7 @@ export function createPgMarketplaceDiscoveryReadRepository(config: {
       const [creatorResult, countResult] = await Promise.all([
         pool.query<MarketplaceCreatorRow>(
           `SELECT
-             COALESCE(creator.source_creator_id, creator.id::text) AS "creatorId",
+             creator.source_creator_id AS "creatorId",
              creator.display_name AS "displayName",
              creator.location_text AS "locationText",
              creator.short_description AS "shortDescription",
@@ -285,7 +290,8 @@ export function createPgMarketplaceDiscoveryReadRepository(config: {
            WHERE creator.profile_complete = TRUE
              AND creator.profile_status = 'active'
              AND creator.display_name IS NOT NULL
-           ORDER BY creator.created_at DESC, COALESCE(creator.source_creator_id, creator.id::text) ASC
+             AND creator.source_creator_id IS NOT NULL
+           ORDER BY creator.created_at DESC, creator.source_creator_id ASC
            LIMIT $1 OFFSET $2`,
           [page.limit, page.offset],
         ),
@@ -294,7 +300,8 @@ export function createPgMarketplaceDiscoveryReadRepository(config: {
            FROM marketplace.creator_profiles creator
            WHERE creator.profile_complete = TRUE
              AND creator.profile_status = 'active'
-             AND creator.display_name IS NOT NULL`,
+             AND creator.display_name IS NOT NULL
+             AND creator.source_creator_id IS NOT NULL`,
         ),
       ]);
 
