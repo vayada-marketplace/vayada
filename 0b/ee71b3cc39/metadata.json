@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "0bee71b3cc39",
+  "strategy": "manual-commit",
+  "branch": "flamurmaliqi2811/vay-763-replace-booking-settings-legacy-repository-with-target",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "apps/api/src/app.test.ts",
+    "apps/api/src/routes/bookingSettings.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0b/ee71b3cc39/0/metadata.json",
+      "transcript": "/0b/ee71b3cc39/0/full.jsonl",
+      "content_hash": "/0b/ee71b3cc39/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 169404,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 3522944,
+    "output_tokens": 13705,
+    "api_call_count": 33
+  }
+}
