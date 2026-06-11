@@ -8,15 +8,18 @@ import {
   type PublicBookabilityDataSourceOwner,
   type PublicBookabilityDeepLink,
   type PublicBookabilityFreshness,
+  type PublicBookabilityFreshnessStatus,
   type PublicBookabilityFreshnessSource,
   type PublicBookabilityHotelProfile,
   type PublicBookabilityOffer,
   type PublicBookabilityQuoteProjection,
   type PublicBookabilityQuoteRequest,
   type PublicBookabilityReasonCode,
+  type PublicBookabilityStatus,
   type PublicBookabilityUnavailableReason,
 } from "@vayada/domain-distribution";
 import type { FastifyInstance } from "fastify";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import type { PublicHotelProfileRepository } from "./aiHotels.js";
 
@@ -40,7 +43,34 @@ export type PublicHotelQuoteRepository = {
   close?(): Promise<void>;
 };
 
+export type PublicHotelQuoteReadPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
+
 type FetchLike = (input: URL, init?: { signal?: AbortSignal }) => Promise<Response>;
+
+type TargetPublicHotelQuoteRow = {
+  quoteSessionId: string;
+  publicQuoteReference: string;
+  quoteHash: string;
+  requestSnapshot: unknown;
+  quoteStatus: string;
+  unavailableReasons: unknown;
+  offers: unknown;
+  totals: unknown;
+  deepLinkUrl: string | null;
+  priceGuarantee: string;
+  currency: string;
+  sourceFreshness: unknown;
+  freshnessStatus: string;
+  dataSources: string[];
+  generatedAt: Date | string | null;
+  expiresAt: Date | string;
+};
 
 type PmsPublicRoomType = {
   id: string;
@@ -137,6 +167,94 @@ export function createCompatibilityPublicHotelQuoteRepository(config: {
   };
 }
 
+export function createTargetPublicHotelQuoteRepository(config: {
+  connectionString: string;
+  profileRepository: PublicHotelProfileRepository;
+  max?: number;
+  pool?: PublicHotelQuoteReadPool;
+  now?: () => Date;
+}): PublicHotelQuoteRepository {
+  const now = config.now ?? (() => new Date());
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max ?? 5,
+    });
+
+  return {
+    async findQuoteBySlug(slug, query) {
+      const profile = await config.profileRepository.findProfileBySlug(slug);
+      if (!profile) return null;
+
+      const requestedAt = now();
+      const parsed = parsePublicHotelQuoteRequest(profile.hotel, query, requestedAt);
+      if (parsed.reasons.length > 0) {
+        return toUnavailablePublicHotelQuoteProjection(profile.hotel, query, requestedAt);
+      }
+
+      const result = await pool.query<TargetPublicHotelQuoteRow>(
+        `SELECT
+           read_model.quote_session_id::text AS "quoteSessionId",
+           read_model.public_quote_reference AS "publicQuoteReference",
+           read_model.quote_hash AS "quoteHash",
+           read_model.request_snapshot AS "requestSnapshot",
+           read_model.quote_status AS "quoteStatus",
+           read_model.unavailable_reasons AS "unavailableReasons",
+           read_model.offers,
+           read_model.totals,
+           read_model.deep_link_url AS "deepLinkUrl",
+           read_model.price_guarantee AS "priceGuarantee",
+           read_model.currency,
+           read_model.source_freshness AS "sourceFreshness",
+           read_model.freshness_status AS "freshnessStatus",
+           read_model.data_sources AS "dataSources",
+           read_model.generated_at AS "generatedAt",
+           read_model.expires_at AS "expiresAt"
+         FROM distribution.public_quote_read_models read_model
+         JOIN distribution.public_hotel_bookability_profiles profile
+           ON profile.property_id = read_model.property_id
+         WHERE profile.canonical_slug = $1
+           AND read_model.request_snapshot ->> 'checkIn' = $2
+           AND read_model.request_snapshot ->> 'checkOut' = $3
+           AND COALESCE((read_model.request_snapshot ->> 'adults')::int, 0) = $4
+           AND COALESCE((read_model.request_snapshot ->> 'children')::int, 0) = $5
+           AND COALESCE((read_model.request_snapshot ->> 'rooms')::int, 0) = $6
+           AND read_model.currency = $7
+           AND COALESCE(read_model.request_snapshot ->> 'locale', $8) = $8
+           AND COALESCE(read_model.request_snapshot ->> 'promoCode', '') = $9
+           AND COALESCE(read_model.request_snapshot ->> 'referralCode', '') = $10
+           AND (read_model.quote_status <> 'bookable' OR read_model.expires_at > $11::timestamptz)
+         ORDER BY read_model.projected_at DESC
+         LIMIT 1`,
+        [
+          profile.hotel.slug,
+          parsed.request.checkIn,
+          parsed.request.checkOut,
+          parsed.request.adults,
+          parsed.request.children,
+          parsed.request.rooms,
+          parsed.request.currency,
+          parsed.request.locale,
+          parsed.request.promoCode ?? "",
+          parsed.request.referralCode ?? "",
+          requestedAt.toISOString(),
+        ],
+      );
+
+      const row = result.rows[0];
+      if (!row) {
+        return toUnavailablePublicHotelQuoteProjection(profile.hotel, query, requestedAt);
+      }
+
+      return toTargetPublicHotelQuoteProjection(profile.hotel, parsed.request, row);
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
 export function toUnavailablePublicHotelQuoteProjection(
   hotel: PublicBookabilityHotelProfile,
   query: PublicHotelQuoteQuery,
@@ -164,6 +282,56 @@ export function toUnavailablePublicHotelQuoteProjection(
     unavailableReasons,
     freshness,
     dataSources: PUBLIC_QUOTE_DATA_SOURCES,
+  };
+
+  assertPublicBookabilityPublicSafe(projection);
+  return projection;
+}
+
+function toTargetPublicHotelQuoteProjection(
+  hotel: PublicBookabilityHotelProfile,
+  request: PublicBookabilityQuoteRequest,
+  row: TargetPublicHotelQuoteRow,
+): PublicBookabilityQuoteProjection {
+  const generatedAt = toIsoDateTime(row.generatedAt) ?? new Date().toISOString();
+  const expiresAt = toIsoDateTime(row.expiresAt) ?? generatedAt;
+  const status = publicBookabilityStatus(row.quoteStatus);
+  const unavailableReasons = unavailableReasonsArray(row.unavailableReasons);
+  const dataSources = dataSourcesArray(row.dataSources);
+  const offers = offersArray(row.offers, row.totals, request, row.deepLinkUrl);
+  const freshness = targetQuoteFreshness(
+    generatedAt,
+    row.sourceFreshness,
+    freshnessStatusValue(row.freshnessStatus),
+    dataSources,
+  );
+  const projection: PublicBookabilityQuoteProjection = {
+    contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
+    generatedAt,
+    publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
+    request,
+    status,
+    unavailableReasons,
+    quote:
+      status === "bookable"
+        ? {
+            quoteId: row.publicQuoteReference || row.quoteSessionId,
+            quoteHash: row.quoteHash,
+            expiresAt,
+            priceGuarantee: row.priceGuarantee === "expires_at" ? "expires_at" : "none",
+            offers,
+          }
+        : undefined,
+    deepLink:
+      status === "bookable" && row.deepLinkUrl
+        ? {
+            url: row.deepLinkUrl,
+            expiresAt,
+            preserves: deepLinkPreserves(request),
+          }
+        : undefined,
+    freshness,
+    dataSources,
   };
 
   assertPublicBookabilityPublicSafe(projection);
@@ -489,6 +657,291 @@ function unavailableQuoteFreshness(
     generatedAt,
     sources,
   };
+}
+
+function publicBookabilityStatus(value: string): PublicBookabilityStatus {
+  if (value === "bookable" || value === "unavailable" || value === "stale" || value === "error") {
+    return value;
+  }
+  return "unavailable";
+}
+
+function unavailableReasonsArray(value: unknown): PublicBookabilityUnavailableReason[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): PublicBookabilityUnavailableReason[] => {
+    const reason = objectValue(entry);
+    const code = reasonCode(stringValue(reason["code"]));
+    if (!code) return [];
+    const detail = stringValue(reason["detail"]) ?? publicDetailValue(reason["publicDetail"]);
+    return [
+      {
+        code,
+        ...(detail ? { detail } : {}),
+      },
+    ];
+  });
+}
+
+function publicDetailValue(value: unknown): string | null {
+  const direct = stringValue(value);
+  if (direct) return direct;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  assertPublicBookabilityPublicSafe(value);
+  return JSON.stringify(value);
+}
+
+function offersArray(
+  value: unknown,
+  totalsValue: unknown,
+  request: PublicBookabilityQuoteRequest,
+  deepLinkUrl: string | null,
+): PublicBookabilityOffer[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry, index) =>
+    targetOfferFromRow(objectValue(entry), objectValue(totalsValue), request, deepLinkUrl, index),
+  );
+}
+
+function targetOfferFromRow(
+  offer: Record<string, unknown>,
+  rowTotals: Record<string, unknown>,
+  request: PublicBookabilityQuoteRequest,
+  deepLinkUrl: string | null,
+  index: number,
+): PublicBookabilityOffer {
+  const offerTotals = objectValue(offer["totals"]);
+  const totals = Object.keys(offerTotals).length > 0 ? offerTotals : rowTotals;
+  const offerId =
+    stringValue(offer["offerId"]) ?? stringValue(offer["publicOfferKey"]) ?? `offer_${index + 1}`;
+  const roomTypeId =
+    stringValue(offer["roomTypeId"]) ?? stringValue(offer["roomTypeName"]) ?? offerId;
+  const ratePlanId = stringValue(offer["ratePlanId"]) ?? stringValue(offer["ratePlanName"]);
+
+  return {
+    offerId,
+    roomTypeId,
+    ratePlanId,
+    name:
+      stringValue(offer["name"]) ??
+      stringValue(offer["roomTypeName"]) ??
+      stringValue(offer["publicOfferKey"]) ??
+      offerId,
+    occupancy: {
+      maxAdults: integerValue(objectValue(offer["occupancy"])["maxAdults"], request.adults),
+      maxChildren: integerValue(objectValue(offer["occupancy"])["maxChildren"], request.children),
+    },
+    availableRooms: integerValue(offer["availableRooms"], request.rooms),
+    refundable:
+      booleanValue(offer["refundable"]) ??
+      booleanValue(objectValue(offer["rateSummary"])["refundable"]) ??
+      true,
+    mealPlan:
+      stringValue(offer["mealPlan"]) ?? stringValue(objectValue(offer["rateSummary"])["mealPlan"]),
+    paymentOptions: paymentOptionsArray(offer["paymentOptions"]),
+    totals: {
+      currency:
+        stringValue(totals["currency"]) ?? stringValue(offer["currency"]) ?? request.currency,
+      roomTotal: moneyValue(totals["roomTotal"]) ?? moneyValue(offer["amount"]) ?? 0,
+      taxesAndFees: moneyValue(totals["taxesAndFees"]) ?? 0,
+      discounts: moneyValue(totals["discounts"]) ?? 0,
+      grandTotal:
+        moneyValue(totals["grandTotal"]) ??
+        moneyValue(totals["total"]) ??
+        moneyValue(offer["amount"]) ??
+        0,
+    },
+    policies: {
+      cancellation:
+        stringValue(objectValue(offer["policies"])["cancellation"]) ??
+        stringValue(objectValue(offer["publicPolicy"])["cancellation"]),
+      deposit:
+        stringValue(objectValue(offer["policies"])["deposit"]) ??
+        stringValue(objectValue(offer["publicPolicy"])["deposit"]),
+    },
+    bookingUrl: stringValue(offer["bookingUrl"]) ?? deepLinkUrl ?? buildFallbackBookingUrl(request),
+  };
+}
+
+function targetQuoteFreshness(
+  generatedAt: string,
+  sourceFreshness: unknown,
+  status: PublicBookabilityFreshnessStatus,
+  owners: PublicBookabilityDataSourceOwner[],
+): PublicBookabilityFreshness {
+  const sourcesByOwner = new Map<
+    PublicBookabilityDataSourceOwner,
+    PublicBookabilityFreshnessSource
+  >();
+  for (const source of parseFreshnessSources(sourceFreshness, generatedAt)) {
+    sourcesByOwner.set(source.owner, source);
+  }
+
+  for (const owner of owners) {
+    if (!sourcesByOwner.has(owner)) {
+      sourcesByOwner.set(owner, {
+        owner,
+        lastUpdatedAt: status === "unavailable" ? undefined : generatedAt,
+        status: owner === "distribution" ? "fresh" : status,
+        reasonCode:
+          status === "unavailable" && owner !== "distribution" ? "source_unavailable" : undefined,
+      });
+    }
+  }
+
+  if (!sourcesByOwner.has("distribution")) {
+    sourcesByOwner.set("distribution", {
+      owner: "distribution",
+      lastUpdatedAt: generatedAt,
+      status: "fresh",
+    });
+  }
+
+  return {
+    status,
+    generatedAt,
+    sources: [...sourcesByOwner.values()],
+  };
+}
+
+function parseFreshnessSources(
+  value: unknown,
+  generatedAt: string,
+): PublicBookabilityFreshnessSource[] {
+  const sourceObject = objectValue(value);
+  const rawSources = Array.isArray(sourceObject["sources"])
+    ? (sourceObject["sources"] as unknown[])
+    : Object.entries(sourceObject).map(([owner, source]) => ({
+        owner,
+        ...objectValue(source),
+      }));
+
+  return rawSources.flatMap((entry): PublicBookabilityFreshnessSource[] => {
+    const source = objectValue(entry);
+    const owner = dataSourceOwner(stringValue(source["owner"]));
+    if (!owner) return [];
+    return [
+      {
+        owner,
+        lastUpdatedAt:
+          stringValue(source["lastUpdatedAt"]) ?? stringValue(source["generatedAt"]) ?? generatedAt,
+        status: freshnessStatusValue(stringValue(source["status"])),
+        reasonCode: freshnessReasonCode(stringValue(source["reasonCode"])),
+      },
+    ];
+  });
+}
+
+function deepLinkPreserves(
+  request: PublicBookabilityQuoteRequest,
+): PublicBookabilityDeepLink["preserves"] {
+  return [
+    "dates",
+    "guests",
+    "rooms",
+    "currency",
+    "locale",
+    ...(request.promoCode ? (["promo_code"] as const) : []),
+    ...(request.referralCode ? (["referral_code"] as const) : []),
+    "quote_id",
+  ];
+}
+
+function dataSourcesArray(value: unknown): PublicBookabilityDataSourceOwner[] {
+  const sources = (Array.isArray(value) ? value : [])
+    .map((source) => dataSourceOwner(stringValue(source)))
+    .filter((source): source is PublicBookabilityDataSourceOwner => Boolean(source));
+  return sources.includes("distribution") ? sources : [...sources, "distribution"];
+}
+
+function paymentOptionsArray(value: unknown): PublicBookabilityOffer["paymentOptions"] {
+  const options = Array.isArray(value)
+    ? value
+        .map(normalizePublicPaymentMethod)
+        .filter((method): method is PublicBookabilityOffer["paymentOptions"][number] =>
+          Boolean(method),
+        )
+    : [];
+  return options.length > 0 ? [...new Set(options)] : ["card"];
+}
+
+function reasonCode(value: string | null): PublicBookabilityReasonCode | null {
+  if (
+    value === "sold_out" ||
+    value === "payment_disabled" ||
+    value === "min_stay_not_met" ||
+    value === "max_stay_exceeded" ||
+    value === "same_day_cutoff_passed" ||
+    value === "unsupported_occupancy" ||
+    value === "unpublished" ||
+    value === "policy_missing" ||
+    value === "stale_data" ||
+    value === "unavailable_data" ||
+    value === "invalid_request" ||
+    value === "currency_not_supported" ||
+    value === "locale_not_supported" ||
+    value === "promo_not_applicable"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function dataSourceOwner(value: string | null): PublicBookabilityDataSourceOwner | null {
+  if (["hotel_catalog", "booking", "pms", "finance", "distribution"].includes(value ?? "")) {
+    return value as PublicBookabilityDataSourceOwner;
+  }
+  return null;
+}
+
+function freshnessStatusValue(value: string | null): PublicBookabilityFreshnessStatus {
+  if (["fresh", "stale", "unavailable", "unknown"].includes(value ?? "")) {
+    return value as PublicBookabilityFreshnessStatus;
+  }
+  return "unknown";
+}
+
+function freshnessReasonCode(
+  value: string | null,
+): PublicBookabilityFreshnessSource["reasonCode"] | undefined {
+  if (value === "source_unavailable" || value === "source_stale" || value === "not_configured") {
+    return value;
+  }
+  return undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    try {
+      return objectValue(JSON.parse(value));
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function integerValue(value: unknown, fallback: number): number {
+  const parsed = numberValue(value);
+  return parsed !== null && Number.isInteger(parsed) ? parsed : fallback;
+}
+
+function moneyValue(value: unknown): number | null {
+  const parsed = typeof value === "string" && value.trim() ? Number(value) : numberValue(value);
+  return typeof parsed === "number" && Number.isFinite(parsed) ? roundMoney(parsed) : null;
+}
+
+function toIsoDateTime(value: Date | string | null): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function buildFallbackBookingUrl(request: PublicBookabilityQuoteRequest): string {
+  const url = new URL(`https://${request.hotelSlug}.booking.localhost/${request.locale}/book`);
+  url.searchParams.set("quote_id", buildPublicQuoteId(request));
+  return url.toString();
 }
 
 function normalizePmsPublicRoom(value: unknown): PmsPublicRoomType | null {

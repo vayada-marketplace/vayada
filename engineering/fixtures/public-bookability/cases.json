@@ -65,6 +65,33 @@
       }
     },
     {
+      "caseId": "invalid-request",
+      "description": "The quote request is malformed and must fail without guessing.",
+      "request": {
+        "hotelSlug": "hotel-alpenrose",
+        "checkIn": "2026-09-15",
+        "checkOut": "2026-09-12",
+        "adults": 2,
+        "children": 0,
+        "rooms": 1,
+        "currency": "EUR",
+        "locale": "en"
+      },
+      "expected": {
+        "status": "unavailable",
+        "unavailableReasons": [
+          {
+            "code": "invalid_request",
+            "publicDetail": {
+              "field": "check_out",
+              "rule": "after_check_in"
+            }
+          }
+        ],
+        "offerCount": 0
+      }
+    },
+    {
       "caseId": "payment-disabled",
       "description": "Hotel has public rooms, but no supported public checkout method.",
       "request": {

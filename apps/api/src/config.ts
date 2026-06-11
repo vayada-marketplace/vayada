@@ -34,6 +34,7 @@ export type ApiAskIntelligenceConfig =
 
 export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
+export type PublicBookabilitySource = "legacy" | "target";
 
 export type ApiConfig = {
   host: string;
@@ -46,6 +47,7 @@ export type ApiConfig = {
   bookingReservationsSource: "legacy" | "target";
   publicHotelProfileSource: PublicHotelProfileSource;
   bookingDomainResolutionSource: BookingDomainResolutionSource;
+  publicBookabilitySource: PublicBookabilitySource;
   bookingSettingsSource: "legacy" | "target";
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
@@ -196,6 +198,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["legacy", "target"],
     "legacy",
   );
+  const publicBookabilitySource = readSourceEnv(
+    env,
+    "PUBLIC_BOOKABILITY_SOURCE",
+    ["legacy", "target"],
+    "legacy",
+  );
   const bookingSettingsSource = readSourceEnv(
     env,
     "BOOKING_SETTINGS_SOURCE",
@@ -213,6 +221,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "BOOKING_DOMAIN_RESOLUTION_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target",
     );
   }
+  if (publicBookabilitySource === "target" && !targetDatabaseUrl) {
+    throw new Error("PUBLIC_BOOKABILITY_SOURCE=target requires TARGET_DATABASE_URL");
+  }
+  if (publicBookabilitySource === "target" && publicHotelProfileSource !== "target") {
+    throw new Error("PUBLIC_BOOKABILITY_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target");
+  }
 
   return {
     ...server,
@@ -229,6 +243,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     publicHotelProfileSource,
     bookingDomainResolutionSource,
+    publicBookabilitySource,
     bookingSettingsSource,
     bookingReservationsReadDatabaseUrl: readOptionalEnv(
       env,

@@ -4,10 +4,14 @@ import {
   PUBLIC_BOOKABILITY_VISIBILITY,
   type PublicBookabilityDataSourceOwner,
   type PublicBookabilityFreshness,
+  type PublicBookabilityFreshnessSource,
+  type PublicBookabilityFreshnessStatus,
+  type PublicBookabilityHotelProfile,
   type PublicBookabilityProfileProjection,
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
 import type { FastifyInstance } from "fastify";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import {
   serializePublicHotelQuoteProjection,
@@ -98,6 +102,16 @@ type BookingWebAffiliateCheckEmailQuery = {
 type BookingWebAffiliateRequest = Record<string, unknown>;
 type BookingWebAffiliateParams = BookingWebHotelParams & {
   affiliateId: string;
+};
+
+type TargetBookingWebCalendarRow = {
+  stayDate: string;
+  hasAvailability: boolean;
+  hasUnavailableState: boolean;
+  sourceFreshnessValues: string[] | null;
+  freshnessStatuses: string[] | null;
+  generatedAt: Date | string | null;
+  dataSources: string[] | null;
 };
 
 export type BookingWebAttributionSink = {
@@ -223,9 +237,26 @@ export type BookingWebCalendarProjection = {
   dataSources: PublicBookabilityDataSourceOwner[];
 };
 
+export type BookingWebCalendarRepository = {
+  findCalendarByHotel(
+    hotel: Pick<PublicBookabilityHotelProfile, "propertyId" | "slug">,
+    query: BookingWebCalendarQuery,
+  ): Promise<BookingWebCalendarProjection>;
+  close?(): Promise<void>;
+};
+
+export type BookingWebCalendarReadPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
+
 export type BookingWebPublicRoutesOptions = {
   profileRepository: PublicHotelProfileRepository;
   quoteRepository?: PublicHotelQuoteRepository;
+  calendarRepository?: BookingWebCalendarRepository;
   bookingPublicApiUrl?: string;
   bookingDomainResolutionSource?: BookingDomainResolutionSource;
   pmsPublicApiUrl?: string;
@@ -257,6 +288,12 @@ export async function registerBookingWebPublicRoutes(
       pmsPublicApiUrl: options.pmsPublicApiUrl,
       fetch: fetchImpl,
     });
+
+  if (options.calendarRepository) {
+    app.addHook("onClose", async () => {
+      await options.calendarRepository?.close?.();
+    });
+  }
 
   app.get<{ Params: BookingWebHostParams }>("/hosts/:host", async (request, reply) => {
     const host = normalizeHost(request.params.host);
@@ -324,8 +361,9 @@ export async function registerBookingWebPublicRoutes(
       }
 
       const response = await fetchCalendarProjection({
-        slug: profile.hotel.slug,
+        hotel: profile.hotel,
         query: request.query,
+        repository: options.calendarRepository,
         pmsPublicApiUrl: options.pmsPublicApiUrl,
         fetch: fetchImpl,
         now: now(),
@@ -609,6 +647,105 @@ export async function registerBookingWebPublicRoutes(
       return response;
     },
   );
+}
+
+export function createTargetBookingWebCalendarRepository(config: {
+  connectionString: string;
+  max?: number;
+  pool?: BookingWebCalendarReadPool;
+}): BookingWebCalendarRepository {
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max ?? 5,
+    });
+
+  return {
+    async findCalendarByHotel(hotel, query) {
+      const generatedAt = new Date().toISOString();
+      const start = normalizeDateOnly(query.start);
+      const end = normalizeDateOnly(query.end);
+      if (!start || !end || start >= end) {
+        return unavailableCalendar(hotel.slug, start, end, generatedAt);
+      }
+
+      const result = await pool.query<TargetBookingWebCalendarRow>(
+        `SELECT
+           offer.stay_date::text AS "stayDate",
+           BOOL_OR(offer.sellable_publicly AND offer.availability_status IN ('available', 'limited') AND offer.available_rooms > 0) AS "hasAvailability",
+           BOOL_OR(offer.availability_status IN ('sold_out', 'closed', 'unavailable')) AS "hasUnavailableState",
+           ARRAY_AGG(DISTINCT offer.source_freshness::text) AS "sourceFreshnessValues",
+           ARRAY_AGG(DISTINCT offer.freshness_status) AS "freshnessStatuses",
+           MAX(offer.generated_at) AS "generatedAt",
+           ARRAY_AGG(DISTINCT source.owner) FILTER (WHERE source.owner IS NOT NULL) AS "dataSources"
+         FROM distribution.public_room_offer_snapshots offer
+         JOIN distribution.public_hotel_bookability_profiles profile
+           ON profile.property_id = offer.property_id
+         LEFT JOIN LATERAL unnest(offer.data_sources) AS source(owner) ON true
+         WHERE (profile.property_id::text = $1 OR profile.canonical_slug = $2)
+           AND offer.stay_date >= $3::date
+           AND offer.stay_date < $4::date
+         GROUP BY offer.stay_date
+         ORDER BY offer.stay_date ASC`,
+        [hotel.propertyId, hotel.slug, start, end],
+      );
+
+      if (result.rows.length === 0) {
+        return {
+          ...unavailableCalendar(hotel.slug, start, end, generatedAt),
+          freshness: targetCalendarFreshness(generatedAt, [], "unavailable"),
+        };
+      }
+
+      const requestedDates = dateRange(start, end);
+      const coveredDates = new Set(result.rows.map((row) => row.stayDate));
+      if (requestedDates.some((date) => !coveredDates.has(date))) {
+        return {
+          ...unavailableCalendar(hotel.slug, start, end, generatedAt),
+          freshness: targetCalendarFreshness(
+            generatedAt,
+            result.rows.flatMap((row) => row.sourceFreshnessValues ?? []),
+            "unavailable",
+          ),
+        };
+      }
+
+      const unavailableDates = result.rows
+        .filter((row) => !row.hasAvailability && row.hasUnavailableState)
+        .map((row) => row.stayDate);
+      const latestGeneratedAt =
+        result.rows
+          .map((row) => toIsoDateTime(row.generatedAt))
+          .filter((value): value is string => Boolean(value))
+          .sort()
+          .at(-1) ?? generatedAt;
+      const dataSources = [
+        ...new Set(result.rows.flatMap((row) => dataSourcesArray(row.dataSources))),
+      ];
+
+      return {
+        contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
+        generatedAt: latestGeneratedAt,
+        publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
+        request: { hotelSlug: hotel.slug, start, end },
+        calendar: {
+          unavailableDates,
+          minStayByArrival: {},
+          maxStayByArrival: {},
+        },
+        freshness: targetCalendarFreshness(
+          latestGeneratedAt,
+          result.rows.flatMap((row) => row.sourceFreshnessValues ?? []),
+          rollupCalendarFreshness(result.rows.flatMap((row) => row.freshnessStatuses ?? [])),
+        ),
+        dataSources: dataSources.length > 0 ? dataSources : ["pms", "distribution"],
+      };
+    },
+    async close() {
+      await pool.end();
+    },
+  };
 }
 
 export function createCompatibilityBookingWebCheckoutAdapter(config: {
@@ -924,8 +1061,9 @@ function serializeHostResolution(
 }
 
 async function fetchCalendarProjection(config: {
-  slug: string;
+  hotel: Pick<PublicBookabilityHotelProfile, "propertyId" | "slug">;
   query: BookingWebCalendarQuery;
+  repository?: BookingWebCalendarRepository;
   pmsPublicApiUrl?: string;
   fetch: FetchLike;
   now: Date;
@@ -933,15 +1071,18 @@ async function fetchCalendarProjection(config: {
   const generatedAt = config.now.toISOString();
   const start = normalizeDateOnly(config.query.start);
   const end = normalizeDateOnly(config.query.end);
+  if (config.repository) {
+    return config.repository.findCalendarByHotel(config.hotel, config.query);
+  }
   if (!start || !end || start >= end || !config.pmsPublicApiUrl?.trim()) {
-    return unavailableCalendar(config.slug, start, end, generatedAt);
+    return unavailableCalendar(config.hotel.slug, start, end, generatedAt);
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3_000);
   try {
     const url = new URL(
-      `/api/hotels/${encodeURIComponent(config.slug)}/unavailable-dates`,
+      `/api/hotels/${encodeURIComponent(config.hotel.slug)}/unavailable-dates`,
       config.pmsPublicApiUrl,
     );
     url.searchParams.set("start", start);
@@ -949,7 +1090,7 @@ async function fetchCalendarProjection(config: {
 
     const response = await config.fetch(url, { signal: controller.signal });
     if (!response.ok) {
-      return unavailableCalendar(config.slug, start, end, generatedAt);
+      return unavailableCalendar(config.hotel.slug, start, end, generatedAt);
     }
 
     const payload = normalizeLegacyCalendarPayload(await response.json());
@@ -957,13 +1098,13 @@ async function fetchCalendarProjection(config: {
       contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
       generatedAt,
       publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
-      request: { hotelSlug: config.slug, start, end },
+      request: { hotelSlug: config.hotel.slug, start, end },
       calendar: payload,
       freshness: freshness(generatedAt, "fresh"),
       dataSources: ["pms", "distribution"],
     };
   } catch {
-    return unavailableCalendar(config.slug, start, end, generatedAt);
+    return unavailableCalendar(config.hotel.slug, start, end, generatedAt);
   } finally {
     clearTimeout(timeout);
   }
@@ -1025,6 +1166,145 @@ function freshness(
       },
     ],
   };
+}
+
+function targetCalendarFreshness(
+  generatedAt: string,
+  sourceFreshnessValues: Array<string | null>,
+  status: PublicBookabilityFreshnessStatus,
+): PublicBookabilityFreshness {
+  const sourcesByOwner = new Map<
+    PublicBookabilityDataSourceOwner,
+    PublicBookabilityFreshnessSource
+  >();
+
+  for (const value of sourceFreshnessValues) {
+    for (const source of parseFreshnessSources(value, generatedAt)) {
+      sourcesByOwner.set(source.owner, source);
+    }
+  }
+
+  if (!sourcesByOwner.has("pms")) {
+    sourcesByOwner.set("pms", {
+      owner: "pms",
+      lastUpdatedAt: status === "unavailable" ? undefined : generatedAt,
+      status,
+      reasonCode: status === "unavailable" ? "source_unavailable" : undefined,
+    });
+  }
+  sourcesByOwner.set("distribution", {
+    owner: "distribution",
+    lastUpdatedAt: generatedAt,
+    status: "fresh",
+  });
+
+  return {
+    status,
+    generatedAt,
+    sources: [...sourcesByOwner.values()],
+  };
+}
+
+function parseFreshnessSources(
+  value: string | null,
+  generatedAt: string,
+): PublicBookabilityFreshnessSource[] {
+  if (!value) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+
+  const rawSources = Array.isArray(objectValue(parsed)["sources"])
+    ? (objectValue(parsed)["sources"] as unknown[])
+    : Object.entries(objectValue(parsed)).map(([owner, source]) => ({
+        owner,
+        ...objectValue(source),
+      }));
+
+  return rawSources.flatMap((entry): PublicBookabilityFreshnessSource[] => {
+    const source = objectValue(entry);
+    const owner = dataSourceOwner(stringValue(source["owner"]));
+    if (!owner) return [];
+    const sourceStatus = freshnessStatusValue(stringValue(source["status"]));
+    return [
+      {
+        owner,
+        lastUpdatedAt:
+          stringValue(source["lastUpdatedAt"]) ?? stringValue(source["generatedAt"]) ?? generatedAt,
+        status: sourceStatus,
+        reasonCode: freshnessReasonCode(stringValue(source["reasonCode"])),
+      },
+    ];
+  });
+}
+
+function rollupCalendarFreshness(values: Array<string | null>): PublicBookabilityFreshnessStatus {
+  const statuses = values.map((value) => freshnessStatusValue(value));
+  if (statuses.includes("unavailable")) return "unavailable";
+  if (statuses.includes("stale")) return "stale";
+  if (statuses.includes("unknown")) return "unknown";
+  return "fresh";
+}
+
+function dataSourcesArray(value: string[] | null): PublicBookabilityDataSourceOwner[] {
+  const sources = (value ?? [])
+    .map((source) => dataSourceOwner(source))
+    .filter((source): source is PublicBookabilityDataSourceOwner => Boolean(source));
+  return sources.includes("distribution") ? sources : [...sources, "distribution"];
+}
+
+function dataSourceOwner(value: string | null): PublicBookabilityDataSourceOwner | null {
+  if (["hotel_catalog", "booking", "pms", "finance", "distribution"].includes(value ?? "")) {
+    return value as PublicBookabilityDataSourceOwner;
+  }
+  return null;
+}
+
+function freshnessStatusValue(value: string | null): PublicBookabilityFreshnessStatus {
+  if (["fresh", "stale", "unavailable", "unknown"].includes(value ?? "")) {
+    return value as PublicBookabilityFreshnessStatus;
+  }
+  return "unknown";
+}
+
+function freshnessReasonCode(
+  value: string | null,
+): PublicBookabilityFreshnessSource["reasonCode"] | undefined {
+  if (value === "source_unavailable" || value === "source_stale" || value === "not_configured") {
+    return value;
+  }
+  return undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toIsoDateTime(value: Date | string | null): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function dateRange(start: string, end: string): string[] {
+  const dates: string[] = [];
+  for (
+    let cursor = Date.parse(`${start}T00:00:00.000Z`), endMs = Date.parse(`${end}T00:00:00.000Z`);
+    cursor < endMs;
+    cursor += 86_400_000
+  ) {
+    dates.push(new Date(cursor).toISOString().slice(0, 10));
+  }
+  return dates;
 }
 
 function normalizeHost(value: string): string {

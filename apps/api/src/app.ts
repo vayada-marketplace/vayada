@@ -34,6 +34,7 @@ import {
 import {
   registerBookingWebPublicRoutes,
   type BookingWebAttributionSink,
+  type BookingWebCalendarRepository,
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
   type BookingDomainResolutionSource,
@@ -66,6 +67,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingPublicApiUrl?: string;
   bookingDomainResolutionSource?: BookingDomainResolutionSource;
   pmsPublicApiUrl?: string;
+  bookingWebCalendarRepository?: BookingWebCalendarRepository;
   legacyCheckoutCommandProxyEnabled?: boolean;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
   bookingWebAttributionSink?: BookingWebAttributionSink;
@@ -135,6 +137,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       bookingPublicApiUrl: options.bookingPublicApiUrl,
       bookingDomainResolutionSource: options.bookingDomainResolutionSource,
       pmsPublicApiUrl: options.pmsPublicApiUrl,
+      calendarRepository: options.bookingWebCalendarRepository,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
       checkoutAdapter: options.bookingWebCheckoutAdapter,
       attributionSink: options.bookingWebAttributionSink,
