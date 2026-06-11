@@ -19,9 +19,12 @@ import {
   type PublicHotelQuoteRepository,
 } from "./routes/aiHotelQuotes.js";
 import { buildApp } from "./app.js";
+import { loadConfig } from "./config.js";
 import {
+  createTargetPublicHotelProfileRepository,
   serializePublicHotelProfileProjection,
   toPublicHotelProfileProjection,
+  type PublicHotelProfileReadPool,
   type PublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
 import {
@@ -266,6 +269,76 @@ const publicHotelProfileRepository: PublicHotelProfileRepository = {
     return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
   },
 };
+
+function targetPublicHotelProfileRow(): QueryResultRow {
+  return {
+    propertyId: "f6893000-0000-0000-0000-000000000001",
+    contractVersion: "public-bookability.v1",
+    publicVisibility: "public_safe",
+    publicId: "prop_distribution_alpenrose",
+    canonicalSlug: "distribution-alpenrose",
+    canonicalUrl: "https://distribution-alpenrose.booking.localhost/en",
+    bookingBaseUrl: "https://distribution-alpenrose.booking.localhost",
+    customDomainUrl: null,
+    timezone: "Europe/Vienna",
+    defaultLocale: "en",
+    supportedLocales: ["en", "de"],
+    defaultCurrency: "EUR",
+    supportedCurrencies: ["EUR", "USD"],
+    profileStatus: "public",
+    publicIdentity: {
+      propertyId: "prop_distribution_alpenrose",
+      slug: "distribution-alpenrose",
+      name: "Distribution Alpenrose",
+      summary: "Independent alpine hotel near the old town.",
+    },
+    location: {
+      country: "AT",
+      city: "Innsbruck",
+      region: "Tyrol",
+      latitude: 47.2692,
+      longitude: 11.4041,
+    },
+    media: [
+      {
+        url: "https://cdn.vayada.example/hotels/distribution-alpenrose/front.jpg",
+        alt: "Distribution Alpenrose exterior",
+      },
+    ],
+    amenities: ["wifi", "breakfast"],
+    policies: {
+      checkInFrom: "15:00",
+      checkOutUntil: "11:00",
+      cancellationSummary: "Free cancellation until 7 days before arrival.",
+      termsUrl: "https://distribution-alpenrose.booking.localhost/en/terms",
+    },
+    capabilities: {
+      instantBook: true,
+      onlinePayment: true,
+      payAtProperty: true,
+      promoCodes: true,
+      referralCodes: true,
+      bookingDeepLinks: true,
+    },
+    supportedQuoteParameters: {
+      minRooms: 1,
+      maxRooms: 4,
+      minAdults: 1,
+      maxAdults: 6,
+      childrenSupported: true,
+      supportedCurrencies: ["EUR", "USD"],
+      supportedLocales: ["en", "de"],
+    },
+    publicSetupCompleteness: { status: "ready", missing: [] },
+    sourceFreshness: {
+      hotel_catalog: { status: "fresh", generatedAt: "2026-06-09T08:50:00.000Z" },
+      distribution: { status: "fresh", generatedAt: "2026-06-09T09:00:00.000Z" },
+    },
+    freshnessStatus: "fresh",
+    dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    generatedAt: "2026-06-09T09:00:00.000Z",
+  };
+}
 
 const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
   async findQuoteBySlug(slug, query) {
@@ -654,6 +727,99 @@ describe("vayada-api", () => {
       redirectUrl: null,
     });
     expect(findForbiddenPublicBookabilityKeys(customDomainResponse.body)).toEqual([]);
+  });
+
+  it("resolves Booking Web custom domains from the target repository without legacy Booking", async () => {
+    let legacyResolveCalled = false;
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: {
+        async findProfileBySlug(slug) {
+          return slug === "hotel-alpenrose" ? seededCustomDomainProfile : null;
+        },
+        async findProfileByCustomDomain(domain) {
+          return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
+        },
+      },
+      publicHotelQuoteRepository,
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      bookingDomainResolutionSource: "target",
+      async bookingWebPublicFetch() {
+        legacyResolveCalled = true;
+        return new Response(null, { status: 500 });
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/book.alpenrose.example",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      host: "book.alpenrose.example",
+      slug: "hotel-alpenrose",
+      canonicalUrl: "https://book.alpenrose.example/en",
+      bookingBaseUrl: "https://book.alpenrose.example",
+      customDomainUrl: "https://book.alpenrose.example",
+      shouldRedirect: false,
+      redirectUrl: null,
+    });
+    expect(legacyResolveCalled).toBe(false);
+    expect(findForbiddenPublicBookabilityKeys(response.body)).toEqual([]);
+  });
+
+  it("mounts public profile and known-host routes in target mode without the legacy booking DB", async () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+      BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+    });
+    expect(config.bookingDatabaseUrl).toBeUndefined();
+
+    const pool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>() {
+        return { rows: [targetPublicHotelProfileRow()] as T[] };
+      },
+      async end() {},
+    };
+    const targetRepository = createTargetPublicHotelProfileRepository({
+      connectionString: config.targetDatabaseUrl!,
+      pool,
+    });
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: targetRepository,
+      bookingDomainResolutionSource: config.bookingDomainResolutionSource,
+    });
+
+    const aiProfile = await injectJson(app, {
+      method: "GET",
+      url: "/api/ai/hotels/distribution-alpenrose",
+    });
+    const bookingWebProfile = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hotels/distribution-alpenrose",
+    });
+    const knownHost = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/distribution-alpenrose.booking.localhost",
+    });
+
+    expect(aiProfile.statusCode).toBe(200);
+    expect(bookingWebProfile.statusCode).toBe(200);
+    expect(knownHost.statusCode).toBe(200);
+    expect(aiProfile.body).toMatchObject({
+      hotel: { slug: "distribution-alpenrose", name: "Distribution Alpenrose" },
+    });
+    expect(bookingWebProfile.body).toMatchObject({
+      hotel: { slug: "distribution-alpenrose", name: "Distribution Alpenrose" },
+    });
+    expect(knownHost.body).toMatchObject({
+      host: "distribution-alpenrose.booking.localhost",
+      slug: "distribution-alpenrose",
+      shouldRedirect: false,
+    });
   });
 
   it("does not fall back to unverified custom-domain rows when legacy verification rejects", async () => {
@@ -2210,6 +2376,85 @@ describe("vayada-api", () => {
   it("rejects empty booking settings repository connection strings", async () => {
     expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
       "Booking settings repository connectionString must not be empty",
+    );
+  });
+
+  it("reads target public hotel profiles from the distribution projection", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [targetPublicHotelProfileRow()] as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelProfileRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const profile = await repository.findProfileBySlug("distribution-alpenrose");
+
+    expect(profile).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-09T09:00:00.000Z",
+      hotel: {
+        propertyId: "prop_distribution_alpenrose",
+        slug: "distribution-alpenrose",
+        name: "Distribution Alpenrose",
+        canonicalUrl: "https://distribution-alpenrose.booking.localhost/en",
+        bookingBaseUrl: "https://distribution-alpenrose.booking.localhost",
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR", "USD"],
+        capabilities: {
+          instantBook: true,
+          onlinePayment: true,
+          payAtProperty: true,
+          bookingDeepLinks: true,
+        },
+        trust: {
+          profileComplete: true,
+          profileVerified: true,
+          bookabilityStatus: "bookable",
+          reasonCodes: [],
+        },
+      },
+      dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    });
+    expect(queries[0]?.text).toContain("distribution.public_hotel_bookability_profiles");
+    expect(queries[0]?.text).toContain("hotel_catalog.property_slugs");
+    expect(queries[0]?.text).toContain("slug_alias.purpose = 'redirect'");
+    expect(queries[0]?.values).toEqual(["distribution-alpenrose"]);
+    expect(findForbiddenPublicBookabilityKeys(profile)).toEqual([]);
+  });
+
+  it("looks up target custom domains through verified property-domain ownership", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return { rows: [] as T[] };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelProfileRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    await repository.findProfileByCustomDomain?.("https://Book.Alpenrose.Example/de");
+
+    expect(queries[0]?.text).toContain("hotel_catalog.property_domains");
+    expect(queries[0]?.text).toContain("verification_status = 'verified'");
+    expect(queries[0]?.text).not.toContain("regexp_replace");
+    expect(queries[0]?.values).toEqual(["book.alpenrose.example"]);
+  });
+
+  it("rejects empty target public hotel profile repository connection strings", async () => {
+    expect(() => createTargetPublicHotelProfileRepository({ connectionString: " " })).toThrow(
+      "Target public hotel profile repository connectionString must not be empty",
     );
   });
 

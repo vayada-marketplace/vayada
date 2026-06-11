@@ -1,13 +1,19 @@
 import {
   assertPublicBookabilityPublicSafe,
   buildPublicBookabilityProfileProjection,
+  PUBLIC_BOOKABILITY_CONTRACT_VERSION,
+  PUBLIC_BOOKABILITY_VISIBILITY,
+  type PublicBookabilityDataSourceOwner,
   type PublicBookabilityFreshness,
+  type PublicBookabilityFreshnessStatus,
   type PublicBookabilityFreshnessSource,
   type PublicBookabilityHotelProfile,
   type PublicBookabilityProfileProjection,
+  type PublicBookabilityReasonCode,
+  type PublicBookabilityStatus,
 } from "@vayada/domain-distribution";
 import type { FastifyInstance } from "fastify";
-import pg from "pg";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 export type PublicHotelProfileRepository = {
   findProfileBySlug(slug: string): Promise<PublicBookabilityProfileProjection | null>;
@@ -42,6 +48,43 @@ export type BookingHotelProfileRow = {
   updated_at: Date | string | null;
 };
 
+export type PublicHotelProfileReadPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
+
+type TargetPublicHotelProfileRow = {
+  propertyId: string;
+  contractVersion: string;
+  publicVisibility: string;
+  publicId: string;
+  canonicalSlug: string;
+  canonicalUrl: string;
+  bookingBaseUrl: string;
+  customDomainUrl: string | null;
+  timezone: string;
+  defaultLocale: string;
+  supportedLocales: string[];
+  defaultCurrency: string;
+  supportedCurrencies: string[];
+  profileStatus: string;
+  publicIdentity: unknown;
+  location: unknown;
+  media: unknown;
+  amenities: unknown;
+  policies: unknown;
+  capabilities: unknown;
+  supportedQuoteParameters: unknown;
+  publicSetupCompleteness: unknown;
+  sourceFreshness: unknown;
+  freshnessStatus: string;
+  dataSources: string[];
+  generatedAt: Date | string;
+};
+
 type PublicHotelProfileParams = {
   slug: string;
 };
@@ -74,15 +117,18 @@ export function createPgPublicHotelProfileRepository(config: {
   connectionString: string;
   max?: number;
   bookingHostBase?: string;
+  pool?: PublicHotelProfileReadPool;
 }): PublicHotelProfileRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Public hotel profile repository connectionString must not be empty");
   }
 
-  const pool = new pg.Pool({
-    connectionString: config.connectionString,
-    max: config.max,
-  });
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max,
+    });
 
   return {
     async findProfileBySlug(slug) {
@@ -124,6 +170,63 @@ export function createPgPublicHotelProfileRepository(config: {
             bookingHostBase: config.bookingHostBase,
           })
         : null;
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
+export function createTargetPublicHotelProfileRepository(config: {
+  connectionString: string;
+  max?: number;
+  pool?: PublicHotelProfileReadPool;
+}): PublicHotelProfileRepository {
+  if (!config.connectionString.trim()) {
+    throw new Error("Target public hotel profile repository connectionString must not be empty");
+  }
+
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max,
+    });
+
+  return {
+    async findProfileBySlug(slug) {
+      const result = await pool.query<TargetPublicHotelProfileRow>(
+        `${TARGET_PUBLIC_PROFILE_SELECT}
+         LEFT JOIN hotel_catalog.property_slugs slug_alias
+           ON slug_alias.property_id = profile.property_id
+          AND slug_alias.slug = lower($1)
+          AND slug_alias.purpose = 'redirect'
+          AND slug_alias.status = 'redirected'
+         WHERE profile.canonical_slug = lower($1)
+            OR slug_alias.property_id IS NOT NULL
+         ORDER BY CASE WHEN profile.canonical_slug = lower($1) THEN 0 ELSE 1 END
+         LIMIT 1`,
+        [slug],
+      );
+
+      return result.rows[0] ? toTargetPublicHotelProfileProjection(result.rows[0]) : null;
+    },
+    async findProfileByCustomDomain(domain) {
+      const normalizedDomain = normalizeDomain(domain);
+      if (!normalizedDomain) return null;
+
+      const result = await pool.query<TargetPublicHotelProfileRow>(
+        `${TARGET_PUBLIC_PROFILE_SELECT}
+         LEFT JOIN hotel_catalog.property_domains verified_domain
+           ON verified_domain.property_id = profile.property_id
+          AND verified_domain.hostname = lower($1)
+          AND verified_domain.verification_status = 'verified'
+         WHERE verified_domain.property_id IS NOT NULL
+         LIMIT 1`,
+        [normalizedDomain],
+      );
+
+      return result.rows[0] ? toTargetPublicHotelProfileProjection(result.rows[0]) : null;
     },
     async close() {
       await pool.end();
@@ -381,4 +484,253 @@ function toIsoDateTime(value: Date | string | null): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
+           profile.property_id::text AS "propertyId",
+           profile.contract_version AS "contractVersion",
+           profile.public_visibility AS "publicVisibility",
+           profile.public_id AS "publicId",
+           profile.canonical_slug AS "canonicalSlug",
+           profile.canonical_url AS "canonicalUrl",
+           profile.booking_base_url AS "bookingBaseUrl",
+           profile.custom_domain_url AS "customDomainUrl",
+           profile.timezone,
+           profile.default_locale AS "defaultLocale",
+           profile.supported_locales AS "supportedLocales",
+           profile.default_currency AS "defaultCurrency",
+           profile.supported_currencies AS "supportedCurrencies",
+           profile.profile_status AS "profileStatus",
+           profile.public_identity AS "publicIdentity",
+           profile.location,
+           profile.media,
+           profile.amenities,
+           profile.policies,
+           profile.capabilities,
+           profile.supported_quote_parameters AS "supportedQuoteParameters",
+           profile.public_setup_completeness AS "publicSetupCompleteness",
+           profile.source_freshness AS "sourceFreshness",
+           profile.freshness_status AS "freshnessStatus",
+           profile.data_sources AS "dataSources",
+           profile.generated_at AS "generatedAt"
+         FROM distribution.public_hotel_bookability_profiles profile`;
+
+function toTargetPublicHotelProfileProjection(
+  row: TargetPublicHotelProfileRow,
+): PublicBookabilityProfileProjection {
+  const identity = objectValue(row.publicIdentity);
+  const location = objectValue(row.location);
+  const capabilities = objectValue(row.capabilities);
+  const policies = objectValue(row.policies);
+  const quoteParameters = objectValue(row.supportedQuoteParameters);
+  const setupCompleteness = objectValue(row.publicSetupCompleteness);
+  const generatedAt = toIsoDateTime(row.generatedAt) ?? new Date().toISOString();
+  const profileStatus = toBookabilityStatus(row.profileStatus);
+
+  const projection: PublicBookabilityProfileProjection = {
+    contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
+    generatedAt,
+    publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
+    hotel: {
+      propertyId: stringValue(identity["propertyId"]) ?? row.publicId,
+      slug: stringValue(identity["slug"]) ?? row.canonicalSlug,
+      name: stringValue(identity["name"]) ?? row.publicId,
+      canonicalUrl: row.canonicalUrl,
+      bookingBaseUrl: row.bookingBaseUrl,
+      customDomainUrl: row.customDomainUrl,
+      timezone: row.timezone,
+      defaultLocale: row.defaultLocale,
+      supportedLocales: stringArray(row.supportedLocales, [row.defaultLocale]),
+      defaultCurrency: row.defaultCurrency,
+      supportedCurrencies: stringArray(row.supportedCurrencies, [row.defaultCurrency]),
+      location: {
+        country: stringValue(location["country"]) ?? "",
+        city: stringValue(location["city"]) ?? "",
+        region: stringValue(location["region"]),
+        latitude: numberValue(location["latitude"]),
+        longitude: numberValue(location["longitude"]),
+      },
+      summary: stringValue(identity["summary"]),
+      images: imageArray(row.media),
+      amenities: amenityArray(row.amenities),
+      policies: {
+        checkInFrom: stringValue(policies["checkInFrom"]),
+        checkOutUntil: stringValue(policies["checkOutUntil"]),
+        cancellationSummary: stringValue(policies["cancellationSummary"]),
+        termsUrl: stringValue(policies["termsUrl"]),
+      },
+      capabilities: {
+        instantBook: booleanValue(capabilities["instantBook"]),
+        onlinePayment: booleanValue(capabilities["onlinePayment"]),
+        payAtProperty: booleanValue(capabilities["payAtProperty"]),
+        promoCodes: booleanValue(capabilities["promoCodes"]),
+        referralCodes: booleanValue(capabilities["referralCodes"]),
+        bookingDeepLinks: booleanValue(capabilities["bookingDeepLinks"]),
+      },
+      supportedQuoteParameters: {
+        minRooms: integerValue(quoteParameters["minRooms"], 1),
+        maxRooms: integerValue(quoteParameters["maxRooms"], 1),
+        minAdults: integerValue(quoteParameters["minAdults"], 1),
+        maxAdults: integerValue(quoteParameters["maxAdults"], 1),
+        childrenSupported: booleanValue(quoteParameters["childrenSupported"]),
+        supportedCurrencies: stringArray(
+          quoteParameters["supportedCurrencies"],
+          stringArray(row.supportedCurrencies, [row.defaultCurrency]),
+        ),
+        supportedLocales: stringArray(
+          quoteParameters["supportedLocales"],
+          stringArray(row.supportedLocales, [row.defaultLocale]),
+        ),
+      },
+      trust: {
+        profileComplete: row.profileStatus === "public",
+        profileVerified: row.profileStatus === "public",
+        domainVerified: Boolean(row.customDomainUrl),
+        bookabilityStatus: profileStatus,
+        reasonCodes: toReasonCodes(row.profileStatus, setupCompleteness),
+      },
+    },
+    freshness: {
+      status: freshnessStatus(row.freshnessStatus),
+      generatedAt,
+      sources: freshnessSources(row.sourceFreshness, row.dataSources, generatedAt),
+    },
+    dataSources: dataSources(row.dataSources),
+  };
+
+  assertPublicBookabilityPublicSafe(projection);
+  return projection;
+}
+
+function normalizeDomain(value: string): string | null {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/^\.+|\.+$/g, "");
+  return normalized || null;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true;
+}
+
+function integerValue(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function stringArray(value: unknown, fallback: string[]): string[] {
+  const values = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+  return values.length > 0 ? values.map((item) => item.trim()) : fallback;
+}
+
+function imageArray(value: unknown): PublicBookabilityHotelProfile["images"] {
+  if (!Array.isArray(value)) return [];
+  const images: PublicBookabilityHotelProfile["images"] = [];
+  for (const entry of value) {
+    if (typeof entry === "string" && entry.trim()) {
+      images.push({ url: entry.trim(), alt: null });
+      continue;
+    }
+    const object = objectValue(entry);
+    const url = stringValue(object["url"]);
+    if (url) {
+      images.push({ url, alt: stringValue(object["alt"]) });
+    }
+  }
+  return images;
+}
+
+function amenityArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => (typeof entry === "string" ? entry : stringValue(objectValue(entry)["key"])))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function dataSources(value: unknown): PublicBookabilityDataSourceOwner[] {
+  const allowed = new Set(["hotel_catalog", "booking", "pms", "finance", "distribution"]);
+  const sources = stringArray(value, ["hotel_catalog", "distribution"]).filter((source) =>
+    allowed.has(source),
+  ) as PublicBookabilityDataSourceOwner[];
+  return sources.includes("distribution") ? sources : [...sources, "distribution"];
+}
+
+function freshnessStatus(value: string): PublicBookabilityFreshnessStatus {
+  if (["fresh", "stale", "unavailable", "unknown"].includes(value)) {
+    return value as PublicBookabilityFreshnessStatus;
+  }
+  return "unknown";
+}
+
+function freshnessSources(
+  value: unknown,
+  owners: string[],
+  generatedAt: string,
+): PublicBookabilityFreshnessSource[] {
+  const sourceObject = objectValue(value);
+  return dataSources(owners).map((owner) => {
+    const entry = objectValue(sourceObject[owner]);
+    return {
+      owner,
+      lastUpdatedAt:
+        stringValue(entry["lastUpdatedAt"]) ?? stringValue(entry["generatedAt"]) ?? generatedAt,
+      status: freshnessStatus(stringValue(entry["status"]) ?? "unknown"),
+      reasonCode: freshnessReasonCode(entry["reasonCode"]),
+    };
+  });
+}
+
+function freshnessReasonCode(
+  value: unknown,
+): PublicBookabilityFreshnessSource["reasonCode"] | undefined {
+  if (value === "source_unavailable" || value === "source_stale" || value === "not_configured") {
+    return value;
+  }
+  return undefined;
+}
+
+function toBookabilityStatus(value: string): PublicBookabilityStatus {
+  if (value === "public") return "bookable";
+  if (value === "stale") return "stale";
+  if (value === "unavailable") return "error";
+  return "unavailable";
+}
+
+function toReasonCodes(
+  profileStatus: string,
+  setupCompleteness: Record<string, unknown>,
+): PublicBookabilityReasonCode[] {
+  if (profileStatus === "public") return [];
+  const missing = stringArray(setupCompleteness["missing"], []);
+  if (profileStatus === "unpublished" || missing.includes("unpublished")) return ["unpublished"];
+  if (profileStatus === "stale") return ["stale_data"];
+  return ["unavailable_data"];
 }

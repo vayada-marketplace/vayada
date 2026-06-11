@@ -32,6 +32,9 @@ export type ApiAskIntelligenceConfig =
       project?: string;
     };
 
+export type PublicHotelProfileSource = "legacy" | "target";
+export type BookingDomainResolutionSource = "legacy" | "target";
+
 export type ApiConfig = {
   host: string;
   port: number;
@@ -39,6 +42,9 @@ export type ApiConfig = {
   authSession?: ApiAuthSessionConfig;
   askIntelligence: ApiAskIntelligenceConfig;
   bookingDatabaseUrl?: string;
+  targetDatabaseUrl?: string;
+  publicHotelProfileSource: PublicHotelProfileSource;
+  bookingDomainResolutionSource: BookingDomainResolutionSource;
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
   marketplaceDatabaseUrl?: string;
@@ -97,6 +103,18 @@ function readBooleanEnv(env: NodeJS.ProcessEnv, key: string, defaultValue = fals
   if (/^(1|true|yes)$/i.test(value)) return true;
   if (/^(0|false|no)$/i.test(value)) return false;
   throw new Error(`${key} must be true or false`);
+}
+
+function readEnumEnv<T extends string>(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  values: readonly T[],
+  defaultValue: T,
+): T {
+  const value = readOptionalEnv(env, key);
+  if (value === undefined) return defaultValue;
+  if ((values as readonly string[]).includes(value)) return value as T;
+  throw new Error(`${key} must be one of ${values.join(", ")}`);
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -164,6 +182,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     host: "0.0.0.0",
     port: 8003,
   });
+  const targetDatabaseUrl = readOptionalEnv(env, "TARGET_DATABASE_URL");
+  const publicHotelProfileSource = readEnumEnv(
+    env,
+    "PUBLIC_HOTEL_PROFILE_SOURCE",
+    ["legacy", "target"],
+    "legacy",
+  );
+  const bookingDomainResolutionSource = readEnumEnv(
+    env,
+    "BOOKING_DOMAIN_RESOLUTION_SOURCE",
+    ["legacy", "target"],
+    "legacy",
+  );
+
+  if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
+    throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
+  }
+  if (bookingDomainResolutionSource === "target" && publicHotelProfileSource !== "target") {
+    throw new Error(
+      "BOOKING_DOMAIN_RESOLUTION_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target",
+    );
+  }
 
   return {
     ...server,
@@ -171,6 +211,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     authSession: loadAuthSessionConfig(env),
     askIntelligence: loadAskIntelligenceConfig(env),
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
+    targetDatabaseUrl,
+    publicHotelProfileSource,
+    bookingDomainResolutionSource,
     bookingReservationsReadDatabaseUrl: readOptionalEnv(
       env,
       "BOOKING_RESERVATIONS_READ_DATABASE_URL",
