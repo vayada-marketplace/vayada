@@ -1,0 +1,48 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "4b78013bd7dc",
+  "session_id": "019eb7bc-bcff-70f0-be06-0e81033961da",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-11T17:33:57.603693Z",
+  "branch": "flamurmaliqi2811/vay-763-replace-booking-settings-legacy-repository-with-target",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "apps/api/src/app.test.ts",
+    "apps/api/src/routes/bookingSettings.ts",
+    "packages/backend-migration/fixtures/cases/booking-checkout/expected-target.json",
+    "packages/backend-migration/migrations/0012_booking_settings.sql",
+    "packages/backend-migration/src/cases/bookingCheckout/parity.ts",
+    "packages/backend-migration/src/parityTypes.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "56e7f0d89c7b",
+  "token_usage": {
+    "input_tokens": 96752,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 887936,
+    "output_tokens": 7679,
+    "api_call_count": 19
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-11T17:33:57.594693Z",
+    "agent_lines": 68,
+    "agent_removed": 25,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 68,
+    "total_lines_changed": 93,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
