@@ -6,6 +6,7 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createOpenAIAskModel } from "./platform/askIntelligence.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
@@ -65,6 +66,11 @@ const bookingGuestFormSettingsSync = config.pmsApiUrl
       pmsApiUrl: config.pmsApiUrl,
     })
   : undefined;
+
+const askModelProvider =
+  config.askIntelligence.provider === "openai"
+    ? await createOpenAIAskModel(config.askIntelligence)
+    : undefined;
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
@@ -136,6 +142,8 @@ const app = buildApp({
     : undefined,
   bookingPublicApiUrl: config.bookingPublicApiUrl,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
+  askModel: askModelProvider?.model,
+  askModelMetadata: askModelProvider?.metadata,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
 });
 
