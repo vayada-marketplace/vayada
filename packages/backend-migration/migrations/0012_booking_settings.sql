@@ -37,7 +37,9 @@ CREATE TABLE booking.booking_settings (
   CONSTRAINT chk_booking_settings_custom_filters_object
     CHECK (jsonb_typeof(custom_filters) = 'object'),
   CONSTRAINT chk_booking_settings_filter_rooms_object
-    CHECK (jsonb_typeof(filter_rooms) = 'object')
+    CHECK (jsonb_typeof(filter_rooms) = 'object'),
+  CONSTRAINT chk_booking_settings_source_freshness_object
+    CHECK (jsonb_typeof(source_freshness) = 'object')
 );
 
 CREATE INDEX idx_booking_settings_updated_at

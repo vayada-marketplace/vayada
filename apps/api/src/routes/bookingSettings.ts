@@ -558,13 +558,7 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     settings.custom_filters,
     settings.filter_rooms
   FROM booking.booking_settings settings
-  JOIN hotel_catalog.property_source_links booking_link
-    ON booking_link.property_id = settings.property_id
-   AND booking_link.source_system = 'booking'
-   AND booking_link.source_table = 'booking_hotels'
-   AND booking_link.source_id = $1
-   AND booking_link.relationship = 'canonical_input'
-   AND booking_link.status = 'active'
+  WHERE settings.property_id = $1
 `;
 
 function toTargetAddonSettings(row: TargetBookingSettingsRow): BookingAddonSettingsReadModel {
@@ -833,10 +827,34 @@ export function createPgTargetBookingSettingsRepository(config: {
     });
 
   async function findSettings(hotelId: string): Promise<TargetBookingSettingsRow | null> {
+    const propertyId = await findTargetPropertyId(hotelId);
+    if (!propertyId) return null;
+
     const result = await pool.query<TargetBookingSettingsRow>(TARGET_BOOKING_SETTINGS_SELECT, [
-      hotelId,
+      propertyId,
     ]);
     return result.rows[0] ?? null;
+  }
+
+  async function findTargetPropertyId(hotelId: string): Promise<string | null> {
+    const result = await pool.query<{ property_id: string }>(
+      `SELECT property_id
+       FROM hotel_catalog.property_source_links
+       WHERE source_system = 'booking'
+         AND source_table = 'booking_hotels'
+         AND source_id = $1
+         AND relationship = 'canonical_input'
+         AND status = 'active'`,
+      [hotelId],
+    );
+
+    if (result.rows.length > 1) {
+      throw new Error(
+        `Duplicate active canonical booking hotel source links found for booking hotel ${hotelId}`,
+      );
+    }
+
+    return result.rows[0]?.property_id ?? null;
   }
 
   async function updateSettings(
@@ -844,23 +862,15 @@ export function createPgTargetBookingSettingsRepository(config: {
     setClause: string,
     values: readonly unknown[],
   ): Promise<TargetBookingSettingsRow | null> {
+    const propertyId = await findTargetPropertyId(hotelId);
+    if (!propertyId) return null;
+
     const result = await pool.query<TargetBookingSettingsRow>(
       `
-        WITH target_property AS (
-          SELECT property_id
-          FROM hotel_catalog.property_source_links
-          WHERE source_system = 'booking'
-            AND source_table = 'booking_hotels'
-            AND source_id = $1
-            AND relationship = 'canonical_input'
-            AND status = 'active'
-          LIMIT 1
-        )
         UPDATE booking.booking_settings settings
         SET ${setClause},
             updated_at = now()
-        FROM target_property
-        WHERE settings.property_id = target_property.property_id
+        WHERE settings.property_id = $1
         RETURNING
           settings.show_addons_step,
           settings.group_addons_by_category,
@@ -876,7 +886,7 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.custom_filters,
           settings.filter_rooms
       `,
-      [hotelId, ...values],
+      [propertyId, ...values],
     );
     return result.rows[0] ?? null;
   }

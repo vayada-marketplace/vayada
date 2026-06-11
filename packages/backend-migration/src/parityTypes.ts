@@ -116,6 +116,7 @@ export type ExpectedTarget = {
       bookingFilters: string[];
       customFilters: Record<string, string>;
       filterRooms: Record<string, string[]>;
+      sourceFreshness: Record<string, unknown>;
     }>;
     forbiddenSummaryKeys?: string[];
   };

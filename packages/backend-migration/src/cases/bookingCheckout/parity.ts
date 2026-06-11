@@ -303,6 +303,7 @@ async function checkBookingSettings(
     booking_filters: unknown;
     custom_filters: unknown;
     filter_rooms: unknown;
+    source_freshness: unknown;
   }>(
     `SELECT
        source.source_id AS booking_hotel_resource_id,
@@ -320,13 +321,16 @@ async function checkBookingSettings(
        settings.supported_languages,
        settings.booking_filters,
        settings.custom_filters,
-       settings.filter_rooms
+       settings.filter_rooms,
+       settings.source_freshness
      FROM booking.booking_settings settings
      LEFT JOIN hotel_catalog.property_source_links source
        ON source.property_id = settings.property_id
       AND source.source_system = 'booking'
       AND source.source_table = 'booking_hotels'
       AND source.source_id = $2
+      AND source.status = 'active'
+      AND source.relationship = 'canonical_input'
      WHERE settings.property_id = $1`,
     [settings.propertyId, settings.bookingHotelResourceId],
   );
@@ -349,7 +353,8 @@ async function checkBookingSettings(
     sameJsonValue(row.supported_languages, settings.supportedLanguages) &&
     sameJsonValue(row.booking_filters, settings.bookingFilters) &&
     sameJsonValue(row.custom_filters, settings.customFilters) &&
-    sameJsonValue(row.filter_rooms, settings.filterRooms);
+    sameJsonValue(row.filter_rooms, settings.filterRooms) &&
+    sameJsonValue(row.source_freshness, settings.sourceFreshness);
 
   if (!matches) {
     findings.push({

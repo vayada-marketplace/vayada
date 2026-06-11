@@ -77,6 +77,12 @@
         "filterRooms": {
           "oceanView": ["room_101"],
           "spa_access": ["room_102"]
+        },
+        "sourceFreshness": {
+          "booking_hotels": {
+            "status": "fresh",
+            "snapshotAt": "2026-06-09T08:00:00Z"
+          }
         }
       }
     ],
