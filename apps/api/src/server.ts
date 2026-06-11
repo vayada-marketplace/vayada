@@ -183,11 +183,12 @@ const app = buildApp({
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,
-  marketplaceDiscoveryRepository: config.marketplaceDatabaseUrl
-    ? createPgMarketplaceDiscoveryReadRepository({
-        connectionString: config.marketplaceDatabaseUrl,
-      })
-    : undefined,
+  marketplaceDiscoveryRepository:
+    config.marketplaceDiscoverySource === "target"
+      ? createPgMarketplaceDiscoveryReadRepository({
+          connectionString: config.targetDatabaseUrl!,
+        })
+      : undefined,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   publicHotelProfileRepository,
   publicHotelQuoteRepository,

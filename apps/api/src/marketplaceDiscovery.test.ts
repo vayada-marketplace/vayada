@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 
 import { buildApp } from "./app.js";
+import { loadConfig } from "./config.js";
 import {
   createPgMarketplaceDiscoveryReadRepository,
   findForbiddenMarketplaceDiscoveryKeys,
@@ -156,6 +157,18 @@ function creatorSeed(overrides: Partial<CreatorSeed>): CreatorSeed {
     profileComplete: true,
     profileStatus: "active",
     ...overrides,
+  };
+}
+
+function createFakePool(results: unknown[][]): MarketplaceDiscoveryReadPool & { sql: string[] } {
+  const sql: string[] = [];
+  return {
+    sql,
+    async query(text) {
+      sql.push(text);
+      return { rows: (results.shift() ?? []) as never[] };
+    },
+    async end() {},
   };
 }
 
@@ -567,21 +580,83 @@ describe("marketplace discovery public-safety guard", () => {
     const response = await app.inject({ method: "GET", url: "/api/marketplace/listings" });
     expect(response.statusCode).toBe(404);
   });
+
+  it("mounts listings and creators in target mode without the legacy marketplace DB", async () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      MARKETPLACE_DISCOVERY_SOURCE: "target",
+    });
+    expect(config.marketplaceDiscoverySource).toBe("target");
+
+    const pool = createFakePool([
+      [
+        {
+          listingId: LEGACY_LISTING_ID_A,
+          publicId: "mlst_alpenrose",
+          canonicalSlug: "hotel-alpenrose",
+          displayName: "Hotel Alpenrose",
+          listingTitle: "Alpine getaway collaboration",
+          listingSummary: "Boutique alpine hotel.",
+          accommodationType: "boutique_hotel",
+          location: { display: "Innsbruck, Austria", countryCode: "AT", city: "Innsbruck" },
+          coverImageUrl: "https://cdn.example.com/cover.jpg",
+          imageUrls: ["https://cdn.example.com/listing.jpg"],
+          offerings: [],
+          creatorRequirements: null,
+          createdAt: new Date("2026-05-01T10:00:00.000Z"),
+          projectedAt: new Date("2026-06-01T10:00:00.000Z"),
+        },
+      ],
+      [{ total: "1" }],
+      [
+        {
+          creatorId: LEGACY_CREATOR_ID_A,
+          displayName: "Anna Alps",
+          locationText: "Vienna, Austria",
+          shortDescription: "Alpine travel storytelling.",
+          portfolioUrl: "https://annaalps.example.com",
+          profilePictureUrl: "https://cdn.example.com/anna.jpg",
+          creatorType: "travel",
+          platforms: [],
+          averageRating: "0",
+          totalReviews: "0",
+          createdAt: "2026-04-15T09:00:00.000Z",
+        },
+      ],
+      [{ total: "1" }],
+    ]);
+    app = buildApp({
+      logger: false,
+      marketplaceDiscoveryRepository: createPgMarketplaceDiscoveryReadRepository({
+        connectionString: config.targetDatabaseUrl!,
+        pool,
+      }),
+    });
+
+    const listings = await injectJson<MarketplaceListingPage>(app, {
+      method: "GET",
+      url: "/api/marketplace/listings",
+    });
+    const creators = await injectJson<MarketplaceCreatorPage>(app, {
+      method: "GET",
+      url: "/api/marketplace/creators",
+    });
+
+    expect(listings.statusCode).toBe(200);
+    expect(listings.body.items[0]?.listingId).toBe(LEGACY_LISTING_ID_A);
+    expect(creators.statusCode).toBe(200);
+    expect(creators.body.items[0]?.creatorId).toBe(LEGACY_CREATOR_ID_A);
+    const sql = pool.sql.join("\n");
+    expect(sql).toContain('listing.source_listing_id AS "listingId"');
+    expect(sql).toContain("listing.source_listing_id IS NOT NULL");
+    expect(sql).toContain('creator.source_creator_id AS "creatorId"');
+    expect(sql).toContain("creator.source_creator_id IS NOT NULL");
+    expect(sql).not.toContain("COALESCE(listing.source_listing_id");
+    expect(sql).not.toContain("COALESCE(creator.source_creator_id");
+  });
 });
 
 describe("pg marketplace discovery repository", () => {
-  function createFakePool(results: unknown[][]): MarketplaceDiscoveryReadPool & { sql: string[] } {
-    const sql: string[] = [];
-    return {
-      sql,
-      async query(text) {
-        sql.push(text);
-        return { rows: (results.shift() ?? []) as never[] };
-      },
-      async end() {},
-    };
-  }
-
   it("maps public listing read-model rows with legacy IDs and total", async () => {
     const pool = createFakePool([
       [
@@ -655,7 +730,8 @@ describe("pg marketplace discovery repository", () => {
       projectedAt: "2026-06-01T10:00:00.000Z",
     });
     expect(pool.sql.join("\n")).toContain("read_model.visibility_status = 'public'");
-    expect(pool.sql.join("\n")).toContain("listing.source_listing_id");
+    expect(pool.sql.join("\n")).toContain('listing.source_listing_id AS "listingId"');
+    expect(pool.sql.join("\n")).toContain("listing.source_listing_id IS NOT NULL");
     expect(pool.sql.join("\n")).toContain("property_public_profile_read_model");
     expect(pool.sql.join("\n")).not.toMatch(/\bauth\b|users/i);
   });
@@ -717,7 +793,9 @@ describe("pg marketplace discovery repository", () => {
     const sql = pool.sql.join("\n");
     expect(sql).toContain("creator.profile_complete = TRUE");
     expect(sql).toContain("creator.profile_status = 'active'");
-    expect(sql).toContain("creator.source_creator_id");
+    expect(sql).toContain('creator.source_creator_id AS "creatorId"');
+    expect(sql).toContain("creator.source_creator_id IS NOT NULL");
+    expect(sql).not.toContain("COALESCE(creator.source_creator_id");
     expect(sql).not.toMatch(/\bauth\b|users/i);
   });
 });
