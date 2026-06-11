@@ -153,6 +153,30 @@ Consequences:
   affiliate resource and emit/audit the event needed by affiliate admin and the
   affiliate dashboard vertical. Stripe Connect should be delegated to finance
   and linked back to the affiliate resource by stable target identifiers.
+- Affiliate provisioning must be retry-safe. The
+  `marketplace.affiliate.provision:collaboration:<id>:v1` command/event is
+  idempotent: if the affiliate/application already exists, the target handler is
+  a no-op for side effects and returns the existing affiliate. Public
+  registration retries for the same collaboration/application must always return
+  the same affiliate `id` and `referralCode` instead of allocating a duplicate
+  identity.
+- `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect` must be
+  idempotent by explicit idempotency key or by stable dedupe on `affiliate_id`.
+  Repeated requests must not create duplicate Stripe accounts. The public
+  response should return the latest valid `onboardingUrl` for the same
+  `stripe_connect_account_id`; if the previous onboarding link has expired,
+  finance may mint a replacement link for the same account, not a new account.
+- Stripe Connect compensation must cover the partial-failure window where the
+  provider account is created but the target `stripe_connect_account_id` write
+  fails. Finance owns a reconciliation job/audit path that either reattaches the
+  provider account to the affiliate record by provider metadata/idempotency key
+  or marks the orphaned Stripe account for cleanup before another account can be
+  created for the same affiliate.
+- Contract tests for the follow-up implementation must simulate registration
+  retries, Stripe Connect retries, and Stripe provider-success/DB-write-failure
+  recovery. They should assert stable affiliate `id`/`referralCode`,
+  deterministic onboarding URL/account behavior, no duplicate provider accounts,
+  and successful reconciliation of the partial failure.
 
 ### PMS admin property and setup
 
