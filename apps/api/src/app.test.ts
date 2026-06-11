@@ -39,6 +39,7 @@ import {
   type BookingReservationReadModel,
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
+import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 
@@ -2201,10 +2202,182 @@ describe("vayada-api", () => {
     expect(poolClosed).toBe(true);
   });
 
+  it("serves booking reservations from the target read model without the legacy PMS URL", async () => {
+    const queries: { text: string; values?: readonly unknown[] }[] = [];
+    let poolClosed = false;
+    const targetReservation: BookingReservationReadModel = {
+      ...reservation,
+      id: "d6000000-0000-0000-0000-000000000682",
+      bookingReference: "B-CHK-682",
+      roomTypeId: "f6855000-0000-0000-0000-000000000001",
+      roomName: "Alpine Suite",
+      roomMaxOccupancy: 3,
+      guestFirstName: "Mira",
+      guestEmail: "mira.guest@example.test",
+      checkIn: "2026-07-01",
+      checkOut: "2026-07-04",
+      children: 1,
+      nightlyRate: "140.00",
+      totalAmount: "420.00",
+      status: "checked_out",
+      roomId: "f6855100-0000-0000-0000-000000000001",
+      roomNumber: "301",
+      assignedRooms: [
+        {
+          roomId: "f6855100-0000-0000-0000-000000000002",
+          roomNumber: "302",
+          position: 1,
+        },
+      ],
+      paymentStatus: "paid",
+      depositRequired: true,
+      depositPercentage: "30.00",
+      depositAmount: "126.00",
+      balanceAmount: "0.00",
+      checkedInAt: "2026-07-01T15:35:00.000Z",
+      checkedOutAt: "2026-07-04T10:15:00.000Z",
+      platformFeeAmount: "12.60",
+      propertyPayoutAmount: "407.40",
+      addonIds: ["addon_breakfast_checkout_682"],
+      addonNames: ["Breakfast basket"],
+      addonTotal: "45.00",
+      addonQuantities: { addon_breakfast_checkout_682: 1 },
+      addonDates: { addon_breakfast_checkout_682: ["2026-07-02"] },
+      guestWithdrawn: true,
+      promoCode: "SUMMER30",
+      promoDiscount: "30.00",
+    };
+    const pool: BookingReservationsReadPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("COUNT(*)")) {
+          return { rows: [{ total: "1" }] as unknown as T[] };
+        }
+
+        return { rows: [targetReservation] as unknown as T[] };
+      },
+      async end() {
+        poolClosed = true;
+      },
+    };
+
+    app = buildAuthenticatedApp({
+      linkedHotelId: "booking_hotel_checkout_alpenrose",
+      reservationsRepository: createTargetBookingReservationsReadRepository({
+        connectionString: "postgresql://target-db",
+        pool,
+      }),
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_checkout_alpenrose/reservations?status=checked_out&search=Mira&limit=25&offset=5",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      bookings: [
+        {
+          id: "d6000000-0000-0000-0000-000000000682",
+          bookingReference: "B-CHK-682",
+          roomTypeId: "f6855000-0000-0000-0000-000000000001",
+          roomName: "Alpine Suite",
+          roomMaxOccupancy: 3,
+          totalRoomCapacity: 6,
+          guestFirstName: "Mira",
+          guestEmail: "mira.guest@example.test",
+          checkIn: "2026-07-01",
+          checkOut: "2026-07-04",
+          nights: 3,
+          numberOfRooms: 2,
+          totalAmount: 420,
+          status: "checked_out",
+          roomId: "f6855100-0000-0000-0000-000000000001",
+          roomNumber: "301",
+          assignedRooms: [
+            {
+              roomId: "f6855100-0000-0000-0000-000000000001",
+              roomNumber: "301",
+              position: 0,
+            },
+            {
+              roomId: "f6855100-0000-0000-0000-000000000002",
+              roomNumber: "302",
+              position: 1,
+            },
+          ],
+          paymentMethod: "card",
+          paymentStatus: "paid",
+          depositRequired: true,
+          depositPercentage: 30,
+          depositAmount: 126,
+          balanceAmount: 0,
+          checkedInAt: "2026-07-01T15:35:00.000Z",
+          checkedOutAt: "2026-07-04T10:15:00.000Z",
+          platformFeeAmount: 12.6,
+          propertyPayoutAmount: 407.4,
+          addonIds: ["addon_breakfast_checkout_682"],
+          addonNames: ["Breakfast basket"],
+          addonTotal: 45,
+          addonQuantities: { addon_breakfast_checkout_682: 1 },
+          addonDates: { addon_breakfast_checkout_682: ["2026-07-02"] },
+          guestWithdrawn: true,
+          promoCode: "SUMMER30",
+          promoDiscount: 30,
+        },
+      ],
+      total: 1,
+      limit: 25,
+      offset: 5,
+    });
+
+    expect(queries).toHaveLength(2);
+    const sql = queries.map((query) => query.text).join("\n");
+    expect(sql).toContain("FROM booking.guest_bookings booking");
+    expect(sql).toContain("hotel_catalog.property_source_links source");
+    expect(sql).toContain("pms.operational_booking_assignments");
+    expect(sql).toContain("booking.booking_addon_selections");
+    expect(sql).toContain("finance.payments");
+    expect(sql).toContain("assignment_status IN ('checked_in', 'in_house', 'checked_out')");
+    expect(sql).toContain("row_number() OVER");
+    expect(sql).toContain("SUM(payment.fee_amount)");
+    expect(sql).toContain("jsonb_object_agg(grouped.addon_key, grouped.quantity)");
+    expect(sql).not.toContain("FROM bookings b");
+    expect(sql).not.toContain("booking_rooms");
+    expect(queries[0]?.values).toEqual([
+      "booking_hotel_checkout_alpenrose",
+      "checked_out",
+      "%Mira%",
+      25,
+      5,
+    ]);
+    expect(queries[1]?.values).toEqual([
+      "booking_hotel_checkout_alpenrose",
+      "checked_out",
+      "%Mira%",
+    ]);
+
+    await app.close();
+    app = null;
+    expect(poolClosed).toBe(true);
+  });
+
   it("rejects empty booking reservations repository connection strings", async () => {
     expect(() =>
       createCompatibilityPmsBookingReservationsReadRepository({ connectionString: " " }),
     ).toThrow("Booking reservations repository connectionString must not be empty");
+  });
+
+  it("rejects empty target booking reservations repository connection strings", async () => {
+    expect(() => createTargetBookingReservationsReadRepository({ connectionString: " " })).toThrow(
+      "Booking reservations repository connectionString must not be empty",
+    );
   });
 
   it("rejects empty booking settings repository connection strings", async () => {

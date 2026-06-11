@@ -83,6 +83,28 @@ describe("api config", () => {
     ).toBe("postgresql://booking-reservations-read");
   });
 
+  it("defaults booking reservations to the legacy source", () => {
+    expect(loadConfig({}).bookingReservationsSource).toBe("legacy");
+  });
+
+  it("loads target booking reservations config", () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      BOOKING_RESERVATIONS_SOURCE: "target",
+    });
+
+    expect(config.targetDatabaseUrl).toBe("postgresql://target-db");
+    expect(config.bookingReservationsSource).toBe("target");
+  });
+
+  it("rejects unsupported booking reservations source config", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_RESERVATIONS_SOURCE: "pms",
+      }),
+    ).toThrow("BOOKING_RESERVATIONS_SOURCE must be one of legacy, target");
+  });
+
   it("loads optional booking public API config", () => {
     expect(
       loadConfig({
