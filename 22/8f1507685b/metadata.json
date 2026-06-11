@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "228f1507685b",
+  "strategy": "manual-commit",
+  "branch": "flamurmaliqi2811/vay-763-replace-booking-settings-legacy-repository-with-target",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "apps/api/src/app.test.ts",
+    "apps/api/src/config.test.ts",
+    "apps/api/src/config.ts",
+    "apps/api/src/routes/bookingSettings.ts",
+    "apps/api/src/server.ts",
+    "engineering/booking-settings-write-contracts.md",
+    "engineering/target-schema-ownership-map.md",
+    "packages/backend-migration/fixtures/cases/booking-checkout/booking.sql",
+    "packages/backend-migration/fixtures/cases/booking-checkout/expected-target.json",
+    "packages/backend-migration/fixtures/cases/booking-checkout/manifest.json",
+    "packages/backend-migration/migrations/0012_booking_settings.sql",
+    "packages/backend-migration/src/cases/bookingCheckout/parity.ts",
+    "packages/backend-migration/src/cases/bookingCheckout/transform.ts",
+    "packages/backend-migration/src/parityTypes.ts",
+    "packages/backend-migration/src/runner.test.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/22/8f1507685b/0/metadata.json",
+      "transcript": "/22/8f1507685b/0/full.jsonl",
+      "content_hash": "/22/8f1507685b/0/content_hash.txt",
+      "prompt": "/22/8f1507685b/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 167238,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 475136,
+    "output_tokens": 7542,
+    "api_call_count": 12
+  }
+}

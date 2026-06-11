@@ -1,0 +1,55 @@
+Implementation tickets (the B-track, in the audits' replacement order):
+- VAY-763 — B1: Booking settings target read/write repository (includes removing the guest-form PMS sync; writes stay on legacy until the cutover write-freeze)
+- VAY-764 — B2: Public hotel profile, host resolution, and custom-domain verification on target read models
+- VAY-767 — B3: Quote/offers/calendar from target distribution read models (blocked by B2 — it needs the canonical profile projection)
+- VAY-771 — B4: Booking Web checkout and guest lifecycle commands on target handlers with PMS reservation handoff — the highest-risk write surface, flagged as rehearsal-gating
+- VAY-765 — Booking reservations read model (replaces the PMS-DB compatibility query)
+- VAY-766 — Marketplace discovery on TARGET_DATABASE_URL (under the Marketplace milestone; VAY-758's fallback removal still waits on cutover)
+- VAY-769 — Retire the booking telemetry forwarding bridge
+- VAY-768 — Affiliate route ownership decision + implement or retire
+
+Planning tickets (next contract-first audits):
+- VAY-770 — PMS operations route contracts (P1/P2 — the 157-route pms-api surface, contracts before implementation)
+- VAY-772 — Channex/webhook cutover plan (external providers retry and replay, so this can't be a config flip; it also owns the legacy scheduler shutdown matrix)
+
+Every implementation ticket carries the audit's activation pattern: merge dark behind a *_SOURCE=target knob, with a startup assertion that the routes mount and pass contract tests with the legacy env vars unset — so cutover day is a sequence of config flips that were each already proven in staging.
+
+What I'd start with: VAY-763 (B1) — it's the smallest, the contracts and tests already exist from the settings cutover, and it proves the dark-merge + activation-knob pattern everything else reuses. VAY-770 and VAY-772 are planning work that can run in parallel any time. Note the staging-rehearsal milestone stays empty until B1–B4, P1–P2, and F1 are far enough along, per the inventory's rehearsal gates — F1 (finance/payouts) and the marketplace V2–V7 verticals are the remaining unticketed implementation chunks.
+what can we parallezie?
+
+---
+
+proceed
+
+---
+
+You are doing an independent adversarial review for Vayada Linear ticket VAY-763 before PR.
+
+Ticket ACs:
+- Implement a target-schema booking settings read/write repository behind existing route contracts, dark behind BOOKING_SETTINGS_SOURCE (legacy default, target activates).
+- Remove guest-form PMS sync from the write path in target-source mode.
+- Keep production writes on legacy until cutover write-freeze.
+- With BOOKING_SETTINGS_SOURCE=target, all /api/booking/hotels/:hotelId/settings/* GET/PUT routes mount and pass contract tests with BOOKING_DATABASE_URL and PMS_API_URL unset.
+- Existing settings contract tests pass against target-schema fixtures.
+- No code path in target mode touches BOOKING_DATABASE_URL or PMS_API_URL.
+- Cutover note documents when writes flip.
+
+Changed files:
+- apps/api/src/config.ts
+- apps/api/src/config.test.ts
+- apps/api/src/server.ts
+- apps/api/src/routes/bookingSettings.ts
+- apps/api/src/app.test.ts
+- packages/backend-migration/migrations/0012_booking_settings.sql
+- packages/backend-migration/src/runner.test.ts
+- engineering/booking-settings-write-contracts.md
+- engineering/target-schema-ownership-map.md
+
+Validation already run and passed:
+- npm --workspace vayada-api run typecheck
+- npm --workspace vayada-api test -- --run src/config.test.ts src/app.test.ts (155 tests passed)
+- npm --workspace vayada-api run build
+- npm --workspace @vayada/backend-migration run typecheck
+- npm --workspace @vayada/backend-migration test (31 passed, 10 skipped because TEST_DATABASE_URL absent)
+
+Please inspect the current working tree diff yourself in /Users/flamurmaliqi/git/vayada and report findings only. Focus on acceptance criteria, target/legacy config separation, migration/schema safety, route behavior, and missing tests. Do not edit files.

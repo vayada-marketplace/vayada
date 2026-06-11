@@ -1,0 +1,75 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "228f1507685b",
+  "session_id": "019eb72e-6d99-7a41-8d11-316ea7b5e1b5",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-11T15:07:40.715891Z",
+  "branch": "flamurmaliqi2811/vay-763-replace-booking-settings-legacy-repository-with-target",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "apps/api/src/app.test.ts",
+    "apps/api/src/config.test.ts",
+    "apps/api/src/config.ts",
+    "apps/api/src/routes/bookingSettings.ts",
+    "apps/api/src/server.ts",
+    "engineering/booking-settings-write-contracts.md",
+    "engineering/target-schema-ownership-map.md",
+    "packages/backend-migration/fixtures/cases/booking-checkout/booking.sql",
+    "packages/backend-migration/fixtures/cases/booking-checkout/expected-target.json",
+    "packages/backend-migration/fixtures/cases/booking-checkout/manifest.json",
+    "packages/backend-migration/migrations/0012_booking_settings.sql",
+    "packages/backend-migration/src/cases/bookingCheckout/parity.ts",
+    "packages/backend-migration/src/cases/bookingCheckout/transform.ts",
+    "packages/backend-migration/src/parityTypes.ts",
+    "packages/backend-migration/src/runner.test.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "d2c18bcad608",
+  "token_usage": {
+    "input_tokens": 167238,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 475136,
+    "output_tokens": 7542,
+    "api_call_count": 12
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-11T15:07:40.702308Z",
+    "agent_lines": 196,
+    "agent_removed": 1,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 23,
+    "total_committed": 196,
+    "total_lines_changed": 220,
+    "agent_percentage": 89.54545454545455,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 570,
+      "user_lines_removed": 23,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "apps/api/src/app.test.ts": 173,
+        "apps/api/src/config.test.ts": 37,
+        "apps/api/src/config.ts": 25,
+        "apps/api/src/routes/bookingSettings.ts": 237,
+        "apps/api/src/server.ts": 17,
+        "engineering/booking-settings-write-contracts.md": 22,
+        "engineering/target-schema-ownership-map.md": 14,
+        "packages/backend-migration/migrations/0012_booking_settings.sql": 44,
+        "packages/backend-migration/src/runner.test.ts": 1
+      },
+      "user_removed_per_file": {
+        "apps/api/src/server.ts": 10,
+        "engineering/target-schema-ownership-map.md": 13
+      }
+    }
+  ]
+}
