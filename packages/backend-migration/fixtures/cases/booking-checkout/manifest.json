@@ -1,6 +1,6 @@
 {
   "caseId": "booking-checkout",
-  "description": "Source-to-target booking checkout fixture covering one converted quote, checkout context, guest booking, addon, promo, public-safe summary, payment, and tenant/resource ownership link. Validates the booking checkout transform and target schema relationships.",
+  "description": "Source-to-target booking checkout fixture covering one converted quote, checkout context, guest booking, settings projection, addon, promo, public-safe summary, payment, and tenant/resource ownership link. Validates the booking checkout transform and target schema relationships.",
   "sourceDatabases": ["booking"],
   "expectedOwners": {
     "identity.users": 1,
@@ -11,6 +11,7 @@
     "hotel_catalog.properties": 1,
     "hotel_catalog.property_source_links": 1,
     "hotel_catalog.property_slugs": 1,
+    "booking.booking_settings": 1,
     "booking.quote_sessions": 1,
     "booking.checkout_contexts": 1,
     "booking.guest_bookings": 1,

@@ -27,6 +27,8 @@ import {
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
+  createPgTargetBookingSettingsRepository,
+  type BookingSettingsPool,
   type BookingGuestFormSettingsSync,
   type BookingSettingsReadRepository,
   type BookingSettingsWriteRepository,
@@ -2211,6 +2213,188 @@ describe("vayada-api", () => {
     expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
       "Booking settings repository connectionString must not be empty",
     );
+  });
+
+  it("rejects empty target booking settings repository connection strings", async () => {
+    expect(() => createPgTargetBookingSettingsRepository({ connectionString: " " })).toThrow(
+      "Target booking settings repository connectionString must not be empty",
+    );
+  });
+
+  it("serves booking settings contracts from the target repository without legacy queries", async () => {
+    const queries: { text: string; values?: readonly unknown[] }[] = [];
+    let poolClosed = false;
+    const state: {
+      show_addons_step: boolean;
+      group_addons_by_category: boolean;
+      special_requests_enabled: boolean;
+      arrival_time_enabled: boolean;
+      guest_count_enabled: boolean;
+      benefits: string[];
+      default_currency: string;
+      default_language: string;
+      supported_currencies: string[];
+      supported_languages: string[];
+      booking_filters: string[];
+      custom_filters: Record<string, string>;
+      filter_rooms: Record<string, string[]>;
+    } = {
+      show_addons_step: false,
+      group_addons_by_category: true,
+      special_requests_enabled: false,
+      arrival_time_enabled: true,
+      guest_count_enabled: true,
+      benefits: ["Free breakfast"],
+      default_currency: "CHF",
+      default_language: "de",
+      supported_currencies: ["EUR"],
+      supported_languages: ["en"],
+      booking_filters: ["oceanView"],
+      custom_filters: { oceanView: "Ocean view" },
+      filter_rooms: { oceanView: ["room_101"] },
+    };
+    const pool: BookingSettingsPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("show_addons_step = $2")) {
+          state.show_addons_step = values?.[1] as boolean;
+          state.group_addons_by_category = values?.[2] as boolean;
+        } else if (text.includes("special_requests_enabled = $2")) {
+          state.special_requests_enabled = values?.[1] as boolean;
+          state.arrival_time_enabled = values?.[2] as boolean;
+          state.guest_count_enabled = values?.[3] as boolean;
+        } else if (text.includes("benefits = $2::jsonb")) {
+          state.benefits = JSON.parse(values?.[1] as string) as string[];
+        } else if (text.includes("default_currency = $2")) {
+          state.default_currency = values?.[1] as string;
+          state.default_language = values?.[2] as string;
+          state.supported_currencies = values?.[3] as string[];
+          state.supported_languages = values?.[4] as string[];
+        } else if (text.includes("booking_filters = $2::jsonb")) {
+          state.booking_filters = JSON.parse(values?.[1] as string) as string[];
+          state.custom_filters = JSON.parse(values?.[2] as string) as Record<string, string>;
+          state.filter_rooms = JSON.parse(values?.[3] as string) as Record<string, string[]>;
+        }
+
+        return {
+          rows: [
+            {
+              source_link_count: 1,
+              settings_property_id: "d3000000-0000-0000-0000-000000000682",
+              ...state,
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {
+        poolClosed = true;
+      },
+    };
+
+    const targetRepository = createPgTargetBookingSettingsRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+    app = buildAuthenticatedApp({
+      settingsRepository: targetRepository,
+      settingsWriteRepository: targetRepository,
+    });
+
+    const cases = [
+      {
+        path: "/addons",
+        update: { showAddonsStep: true, groupAddonsByCategory: false },
+        expected: { showAddonsStep: true, groupAddonsByCategory: false },
+      },
+      {
+        path: "/guest-form",
+        update: {
+          specialRequestsEnabled: true,
+          arrivalTimeEnabled: false,
+          guestCountEnabled: false,
+        },
+        expected: {
+          specialRequestsEnabled: true,
+          arrivalTimeEnabled: false,
+          guestCountEnabled: false,
+        },
+      },
+      {
+        path: "/benefits",
+        update: { benefits: ["Late checkout"] },
+        expected: { benefits: ["Late checkout"] },
+      },
+      {
+        path: "/localization",
+        update: {
+          defaultCurrency: " eur ",
+          defaultLanguage: "en-US",
+          supportedCurrencies: ["CHF", "EUR"],
+          supportedLanguages: ["de", "en-US"],
+        },
+        expected: {
+          defaultCurrency: "EUR",
+          defaultLanguage: "en-US",
+          supportedCurrencies: ["CHF"],
+          supportedLanguages: ["de"],
+        },
+      },
+      {
+        path: "/room-filters",
+        update: {
+          bookingFilters: ["spa_access"],
+          customFilters: { spa_access: "Spa access" },
+          filterRooms: { spa_access: ["room_102"] },
+        },
+        expected: {
+          bookingFilters: ["spa_access"],
+          customFilters: { spa_access: "Spa access" },
+          filterRooms: { spa_access: ["room_102"] },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const url = `/api/booking/hotels/booking_hotel_alpenrose/settings${testCase.path}`;
+      const putResponse = await injectJson(app, {
+        method: "PUT",
+        url,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+        payload: testCase.update,
+      });
+      expect(putResponse.statusCode).toBe(200);
+      expect(putResponse.body).toEqual(testCase.expected);
+
+      const getResponse = await injectJson(app, {
+        method: "GET",
+        url,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+      expect(getResponse.statusCode).toBe(200);
+      expect(getResponse.body).toEqual(testCase.expected);
+    }
+
+    expect(queries.length).toBeGreaterThanOrEqual(10);
+    expect(queries.every((query) => query.values?.[0] === "booking_hotel_alpenrose")).toBe(true);
+    const settingsQueries = queries.filter((query) =>
+      query.text.includes("booking.booking_settings"),
+    );
+    expect(settingsQueries.every((query) => query.text.includes("source_links"))).toBe(true);
+    const sql = queries.map((query) => query.text).join("\n");
+    expect(sql).toContain("relationship = 'canonical_input'");
+    expect(sql).toContain("status = 'active'");
+    expect(sql).not.toMatch(/\b(FROM|UPDATE)\s+booking_hotels\b/i);
+
+    await app.close();
+    app = null;
+    expect(poolClosed).toBe(true);
   });
 
   it("sends guest-form PMS compatibility sync requests with hotel scope and auth", async () => {
