@@ -542,8 +542,33 @@ type TargetBookingSettingsRow = {
   filter_rooms: unknown;
 };
 
+type TargetBookingSettingsQueryRow = TargetBookingSettingsRow & {
+  settings_property_id: string | null;
+  source_link_count: number | string;
+};
+
+const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
+  WITH source_links AS (
+    SELECT property_id
+    FROM hotel_catalog.property_source_links
+    WHERE source_system = 'booking'
+      AND source_table = 'booking_hotels'
+      AND source_id = $1
+      AND relationship = 'canonical_input'
+      AND status = 'active'
+  ),
+  source_link_status AS (
+    SELECT count(*)::int AS source_link_count,
+           min(property_id::text)::uuid AS property_id
+    FROM source_links
+  )
+`;
+
 const TARGET_BOOKING_SETTINGS_SELECT = `
+  ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE}
   SELECT
+    source_link_status.source_link_count,
+    settings.property_id::text AS settings_property_id,
     settings.show_addons_step,
     settings.group_addons_by_category,
     settings.special_requests_enabled,
@@ -557,8 +582,11 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     settings.booking_filters,
     settings.custom_filters,
     settings.filter_rooms
-  FROM booking.booking_settings settings
-  WHERE settings.property_id = $1
+  FROM source_link_status
+  LEFT JOIN booking.booking_settings settings
+    ON source_link_status.source_link_count = 1
+   AND settings.property_id = source_link_status.property_id
+  WHERE source_link_status.source_link_count > 0
 `;
 
 function toTargetAddonSettings(row: TargetBookingSettingsRow): BookingAddonSettingsReadModel {
@@ -826,35 +854,27 @@ export function createPgTargetBookingSettingsRepository(config: {
       max: config.max,
     });
 
-  async function findSettings(hotelId: string): Promise<TargetBookingSettingsRow | null> {
-    const propertyId = await findTargetPropertyId(hotelId);
-    if (!propertyId) return null;
+  function toSingleSettingsRow(
+    result: Pick<QueryResult<TargetBookingSettingsQueryRow>, "rows">,
+    hotelId: string,
+  ): TargetBookingSettingsRow | null {
+    const row = result.rows[0];
+    if (!row) return null;
 
-    const result = await pool.query<TargetBookingSettingsRow>(TARGET_BOOKING_SETTINGS_SELECT, [
-      propertyId,
-    ]);
-    return result.rows[0] ?? null;
-  }
-
-  async function findTargetPropertyId(hotelId: string): Promise<string | null> {
-    const result = await pool.query<{ property_id: string }>(
-      `SELECT property_id
-       FROM hotel_catalog.property_source_links
-       WHERE source_system = 'booking'
-         AND source_table = 'booking_hotels'
-         AND source_id = $1
-         AND relationship = 'canonical_input'
-         AND status = 'active'`,
-      [hotelId],
-    );
-
-    if (result.rows.length > 1) {
+    if (Number(row.source_link_count) > 1) {
       throw new Error(
         `Duplicate active canonical booking hotel source links found for booking hotel ${hotelId}`,
       );
     }
 
-    return result.rows[0]?.property_id ?? null;
+    return row.settings_property_id ? row : null;
+  }
+
+  async function findSettings(hotelId: string): Promise<TargetBookingSettingsRow | null> {
+    const result = await pool.query<TargetBookingSettingsQueryRow>(TARGET_BOOKING_SETTINGS_SELECT, [
+      hotelId,
+    ]);
+    return toSingleSettingsRow(result, hotelId);
   }
 
   async function updateSettings(
@@ -862,16 +882,18 @@ export function createPgTargetBookingSettingsRepository(config: {
     setClause: string,
     values: readonly unknown[],
   ): Promise<TargetBookingSettingsRow | null> {
-    const propertyId = await findTargetPropertyId(hotelId);
-    if (!propertyId) return null;
-
-    const result = await pool.query<TargetBookingSettingsRow>(
+    const result = await pool.query<TargetBookingSettingsQueryRow>(
       `
+        ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE},
+        updated_settings AS (
         UPDATE booking.booking_settings settings
         SET ${setClause},
             updated_at = now()
-        WHERE settings.property_id = $1
+        FROM source_link_status
+        WHERE source_link_status.source_link_count = 1
+          AND settings.property_id = source_link_status.property_id
         RETURNING
+          settings.property_id::text AS settings_property_id,
           settings.show_addons_step,
           settings.group_addons_by_category,
           settings.special_requests_enabled,
@@ -885,10 +907,30 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.booking_filters,
           settings.custom_filters,
           settings.filter_rooms
+        )
+        SELECT
+          source_link_status.source_link_count,
+          updated_settings.settings_property_id,
+          updated_settings.show_addons_step,
+          updated_settings.group_addons_by_category,
+          updated_settings.special_requests_enabled,
+          updated_settings.arrival_time_enabled,
+          updated_settings.guest_count_enabled,
+          updated_settings.benefits,
+          updated_settings.default_currency,
+          updated_settings.default_language,
+          updated_settings.supported_currencies,
+          updated_settings.supported_languages,
+          updated_settings.booking_filters,
+          updated_settings.custom_filters,
+          updated_settings.filter_rooms
+        FROM source_link_status
+        LEFT JOIN updated_settings ON TRUE
+        WHERE source_link_status.source_link_count > 0
       `,
-      [propertyId, ...values],
+      [hotelId, ...values],
     );
-    return result.rows[0] ?? null;
+    return toSingleSettingsRow(result, hotelId);
   }
 
   return {

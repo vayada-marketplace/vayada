@@ -2259,12 +2259,6 @@ describe("vayada-api", () => {
         values?: readonly unknown[],
       ): Promise<Pick<QueryResult<T>, "rows">> {
         queries.push({ text, values });
-        if (text.includes("FROM hotel_catalog.property_source_links")) {
-          return {
-            rows: [{ property_id: "d3000000-0000-0000-0000-000000000682" }] as unknown as T[],
-          };
-        }
-
         if (text.includes("show_addons_step = $2")) {
           state.show_addons_step = values?.[1] as boolean;
           state.group_addons_by_category = values?.[2] as boolean;
@@ -2286,7 +2280,13 @@ describe("vayada-api", () => {
         }
 
         return {
-          rows: [{ ...state }] as unknown as T[],
+          rows: [
+            {
+              source_link_count: 1,
+              settings_property_id: "d3000000-0000-0000-0000-000000000682",
+              ...state,
+            },
+          ] as unknown as T[],
         };
       },
       async end() {
@@ -2382,20 +2382,11 @@ describe("vayada-api", () => {
     }
 
     expect(queries.length).toBeGreaterThanOrEqual(10);
-    const sourceLinkQueries = queries.filter((query) =>
-      query.text.includes("FROM hotel_catalog.property_source_links"),
-    );
-    expect(
-      sourceLinkQueries.every((query) => query.values?.[0] === "booking_hotel_alpenrose"),
-    ).toBe(true);
+    expect(queries.every((query) => query.values?.[0] === "booking_hotel_alpenrose")).toBe(true);
     const settingsQueries = queries.filter((query) =>
       query.text.includes("booking.booking_settings"),
     );
-    expect(
-      settingsQueries.every(
-        (query) => query.values?.[0] === "d3000000-0000-0000-0000-000000000682",
-      ),
-    ).toBe(true);
+    expect(settingsQueries.every((query) => query.text.includes("source_links"))).toBe(true);
     const sql = queries.map((query) => query.text).join("\n");
     expect(sql).toContain("relationship = 'canonical_input'");
     expect(sql).toContain("status = 'active'");
