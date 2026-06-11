@@ -1,0 +1,45 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "5c9f8ba93547",
+  "session_id": "019eb874-d510-74d1-923d-496986fcfbfd",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-11T20:54:56.053599Z",
+  "branch": "codex/pr-252-fixes",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "apps/api/src/app.test.ts",
+    "apps/api/src/routes/aiHotelQuotes.ts",
+    "apps/api/src/routes/bookingWebPublic.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "f3d6437de129",
+  "token_usage": {
+    "input_tokens": 149980,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1131264,
+    "output_tokens": 7866,
+    "api_call_count": 18
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-11T20:54:56.04395Z",
+    "agent_lines": 1487,
+    "agent_removed": 7,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 1487,
+    "total_lines_changed": 1494,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}

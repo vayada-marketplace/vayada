@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "5c9f8ba93547",
+  "strategy": "manual-commit",
+  "branch": "codex/pr-252-fixes",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "apps/api/src/app.test.ts",
+    "apps/api/src/routes/aiHotelQuotes.ts",
+    "apps/api/src/routes/bookingWebPublic.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5c/9f8ba93547/0/metadata.json",
+      "transcript": "/5c/9f8ba93547/0/full.jsonl",
+      "content_hash": "/5c/9f8ba93547/0/content_hash.txt",
+      "prompt": "/5c/9f8ba93547/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 149980,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1131264,
+    "output_tokens": 7866,
+    "api_call_count": 18
+  }
+}
