@@ -1,0 +1,62 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "874f2a38ee04",
+  "session_id": "019eb7bc-bcff-70f0-be06-0e81033961da",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-11T18:15:28.029065Z",
+  "branch": "flamurmaliqi2811/vay-763-replace-booking-settings-legacy-repository-with-target",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/deploy-booking-web.yml",
+    "apps/booking-web/.env.example",
+    "apps/booking-web/Dockerfile",
+    "apps/booking-web/lib/server/publicHotelMetadata.ts",
+    "apps/booking-web/services/api/booking.ts",
+    "apps/booking-web/services/api/bookingWebPublic.ts",
+    "apps/booking-web/services/api/client.ts",
+    "apps/booking-web/services/api/hotel.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.5",
+  "turn_id": "95a09c7a7e75",
+  "checkpoint_transcript_start": 654,
+  "transcript_lines_at_start": 654,
+  "token_usage": {
+    "input_tokens": 242390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 5612544,
+    "output_tokens": 12044,
+    "api_call_count": 44
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-11T18:15:28.000675Z",
+    "agent_lines": 259,
+    "agent_removed": 63,
+    "human_added": 12,
+    "human_modified": 9,
+    "human_removed": 0,
+    "total_committed": 280,
+    "total_lines_changed": 343,
+    "agent_percentage": 93.87755102040816,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 268,
+      "agent_lines_removed": 63
+    }
+  ]
+}

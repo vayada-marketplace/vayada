@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "874f2a38ee04",
+  "strategy": "manual-commit",
+  "branch": "flamurmaliqi2811/vay-763-replace-booking-settings-legacy-repository-with-target",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/deploy-booking-web.yml",
+    "apps/booking-web/.env.example",
+    "apps/booking-web/Dockerfile",
+    "apps/booking-web/lib/server/publicHotelMetadata.ts",
+    "apps/booking-web/services/api/booking.ts",
+    "apps/booking-web/services/api/bookingWebPublic.ts",
+    "apps/booking-web/services/api/client.ts",
+    "apps/booking-web/services/api/hotel.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/87/4f2a38ee04/0/metadata.json",
+      "transcript": "/87/4f2a38ee04/0/full.jsonl",
+      "content_hash": "/87/4f2a38ee04/0/content_hash.txt",
+      "prompt": "/87/4f2a38ee04/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 242390,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 5612544,
+    "output_tokens": 12044,
+    "api_call_count": 44
+  }
+}
