@@ -9,6 +9,23 @@ export {
 } from "./ask.js";
 export { askAnswerSchema, type AskAnswerSchemaOutput } from "./answerSchema.js";
 export {
+  composeAskAnswer,
+  type AskComposeInput,
+  type AskRunFailure,
+  type AskRunIdentity,
+} from "./composer.js";
+export { computeAskConfidence, type AskConfidenceSignals } from "./confidence.js";
+export {
+  askModelBlockSchema,
+  askModelCaveatSchema,
+  askModelOutputSchema,
+  askModelSuggestedActionSchema,
+  type AskModelBlock,
+  type AskModelCaveat,
+  type AskModelOutput,
+  type AskModelSuggestedAction,
+} from "./modelOutput.js";
+export {
   ASK_LOOP_HARD_LIMITS,
   clampAskLoopBudgets,
   DEFAULT_ASK_LOOP_BUDGETS,
