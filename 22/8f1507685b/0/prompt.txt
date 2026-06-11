@@ -23,33 +23,6 @@ proceed
 
 ---
 
-You are doing an independent adversarial review for Vayada Linear ticket VAY-763 before PR.
-
-Ticket ACs:
-- Implement a target-schema booking settings read/write repository behind existing route contracts, dark behind BOOKING_SETTINGS_SOURCE (legacy default, target activates).
-- Remove guest-form PMS sync from the write path in target-source mode.
-- Keep production writes on legacy until cutover write-freeze.
-- With BOOKING_SETTINGS_SOURCE=target, all /api/booking/hotels/:hotelId/settings/* GET/PUT routes mount and pass contract tests with BOOKING_DATABASE_URL and PMS_API_URL unset.
-- Existing settings contract tests pass against target-schema fixtures.
-- No code path in target mode touches BOOKING_DATABASE_URL or PMS_API_URL.
-- Cutover note documents when writes flip.
-
-Changed files:
-- apps/api/src/config.ts
-- apps/api/src/config.test.ts
-- apps/api/src/server.ts
-- apps/api/src/routes/bookingSettings.ts
-- apps/api/src/app.test.ts
-- packages/backend-migration/migrations/0012_booking_settings.sql
-- packages/backend-migration/src/runner.test.ts
-- engineering/booking-settings-write-contracts.md
-- engineering/target-schema-ownership-map.md
-
-Validation already run and passed:
-- npm --workspace vayada-api run typecheck
-- npm --workspace vayada-api test -- --run src/config.test.ts src/app.test.ts (155 tests passed)
-- npm --workspace vayada-api run build
-- npm --workspace @vayada/backend-migration run typecheck
-- npm --workspace @vayada/backend-migration test (31 passed, 10 skipped because TEST_DATABASE_URL absent)
-
-Please inspect the current working tree diff yourself in /Users/flamurmaliqi/git/vayada and report findings only. Focus on acceptance criteria, target/legacy config separation, migration/schema safety, route behavior, and missing tests. Do not edit files.
+<subagent_notification>
+{"agent_path":"019eb734-d993-7da0-8dd6-3edfd165bf43","status":{"completed":"**Findings**\n\n- **P1: Migration is untracked and would be omitted from the PR.**  \n  [packages/backend-migration/migrations/0012_booking_settings.sql](/Users/flamurmaliqi/git/vayada/packages/backend-migration/migrations/0012_booking_settings.sql:1) shows as `??` in `git status --short`. If the PR is created from committed/staged tracked changes, the target table will not ship while code queries `booking.booking_settings`. Add the migration file before committing.\n\n- **P1: Target-schema fixture AC is not satisfied.**  \n  [0012_booking_settings.sql](/Users/flamurmaliqi/git/vayada/packages/backend-migration/migrations/0012_booking_settings.sql:9) only creates an empty table, and [registry.ts](/Users/flamurmaliqi/git/vayada/packages/backend-migration/src/cases/registry.ts:22) has no booking-settings fixture/transform/parity case. The new route test uses an in-memory pool, so it does not prove existing settings contracts against target-schema fixtures. Add a target fixture/backfill path for `booking.booking_settings` and run the settings contracts against it.\n\n- **P2: Target repository ignores inactive source links.**  \n  Reads and writes join `hotel_catalog.property_source_links` without checking `status = 'active'` or `relationship = 'canonical_input'`: [bookingSettings.ts](/Users/flamurmaliqi/git/vayada/apps/api/src/routes/bookingSettings.ts:560), [bookingSettings.ts](/Users/flamurmaliqi/git/vayada/apps/api/src/routes/bookingSettings.ts:847). The schema explicitly supports `active`, `superseded`, and `ignored` links in [0004_property_catalog.sql](/Users/flamurmaliqi/git/vayada/packages/backend-migration/migrations/0004_property_catalog.sql:35). This can let a stale booking hotel ID read/write current target settings. Filter both paths to active canonical links and add a fixture/test for inactive links returning 404.\n\n- **P2: Strict target-mode legacy isolation is not enforced app-wide.**  \n  With `BOOKING_SETTINGS_SOURCE=target`, [server.ts](/Users/flamurmaliqi/git/vayada/apps/api/src/server.ts:53) still instantiates `createPgPublicHotelProfileRepository` whenever `BOOKING_DATABASE_URL` is present. If the AC means no target-mode code path touches `BOOKING_DATABASE_URL`, this violates it. Gate or clarify this scope, and add a server-level config test for target mode with legacy URLs present/unset."}}
+</subagent_notification>
