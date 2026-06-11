@@ -1,4 +1,11 @@
 export {
+  createOpenAIAgentsAskRuntime,
+  type AskAgentRunTelemetry,
+  type AskAgentRuntimeConfig,
+  type AskEvidenceToolExecutor,
+  type AskEvidenceToolExecutors,
+} from "./agentRuntime.js";
+export {
   ASK_CONTRACT_VERSION,
   type AskAnswer,
   type AskAuditRecord,
