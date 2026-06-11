@@ -670,8 +670,9 @@ export function createTargetBookingWebCalendarRepository(config: {
         return unavailableCalendar(hotel.slug, start, end, generatedAt);
       }
 
-      const result = await pool.query<TargetBookingWebCalendarRow>(
-        `SELECT
+      try {
+        const result = await pool.query<TargetBookingWebCalendarRow>(
+          `SELECT
            offer.stay_date::text AS "stayDate",
            BOOL_OR(offer.sellable_publicly AND offer.availability_status IN ('available', 'limited') AND offer.available_rooms > 0) AS "hasAvailability",
            BOOL_OR(offer.availability_status IN ('sold_out', 'closed', 'unavailable')) AS "hasUnavailableState",
@@ -688,59 +689,65 @@ export function createTargetBookingWebCalendarRepository(config: {
            AND offer.stay_date < $4::date
          GROUP BY offer.stay_date
          ORDER BY offer.stay_date ASC`,
-        [hotel.propertyId, hotel.slug, start, end],
-      );
+          [hotel.propertyId, hotel.slug, start, end],
+        );
 
-      if (result.rows.length === 0) {
+        if (result.rows.length === 0) {
+          return {
+            ...unavailableCalendar(hotel.slug, start, end, generatedAt),
+            freshness: targetCalendarFreshness(generatedAt, [], "unavailable"),
+          };
+        }
+
+        const requestedDates = dateRange(start, end);
+        const coveredDates = new Set(result.rows.map((row) => row.stayDate));
+        if (requestedDates.some((date) => !coveredDates.has(date))) {
+          return {
+            ...unavailableCalendar(hotel.slug, start, end, generatedAt),
+            freshness: targetCalendarFreshness(
+              generatedAt,
+              result.rows.flatMap((row) => row.sourceFreshnessValues ?? []),
+              "unavailable",
+            ),
+          };
+        }
+
+        const unavailableDates = result.rows
+          .filter((row) => !row.hasAvailability && row.hasUnavailableState)
+          .map((row) => row.stayDate);
+        const latestGeneratedAt =
+          result.rows
+            .map((row) => toIsoDateTime(row.generatedAt))
+            .filter((value): value is string => Boolean(value))
+            .sort()
+            .at(-1) ?? generatedAt;
+        const dataSources = [
+          ...new Set(result.rows.flatMap((row) => dataSourcesArray(row.dataSources))),
+        ];
+
+        return {
+          contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
+          generatedAt: latestGeneratedAt,
+          publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
+          request: { hotelSlug: hotel.slug, start, end },
+          calendar: {
+            unavailableDates,
+            minStayByArrival: {},
+            maxStayByArrival: {},
+          },
+          freshness: targetCalendarFreshness(
+            latestGeneratedAt,
+            result.rows.flatMap((row) => row.sourceFreshnessValues ?? []),
+            rollupCalendarFreshness(result.rows.flatMap((row) => row.freshnessStatuses ?? [])),
+          ),
+          dataSources: dataSources.length > 0 ? dataSources : ["pms", "distribution"],
+        };
+      } catch {
         return {
           ...unavailableCalendar(hotel.slug, start, end, generatedAt),
           freshness: targetCalendarFreshness(generatedAt, [], "unavailable"),
         };
       }
-
-      const requestedDates = dateRange(start, end);
-      const coveredDates = new Set(result.rows.map((row) => row.stayDate));
-      if (requestedDates.some((date) => !coveredDates.has(date))) {
-        return {
-          ...unavailableCalendar(hotel.slug, start, end, generatedAt),
-          freshness: targetCalendarFreshness(
-            generatedAt,
-            result.rows.flatMap((row) => row.sourceFreshnessValues ?? []),
-            "unavailable",
-          ),
-        };
-      }
-
-      const unavailableDates = result.rows
-        .filter((row) => !row.hasAvailability && row.hasUnavailableState)
-        .map((row) => row.stayDate);
-      const latestGeneratedAt =
-        result.rows
-          .map((row) => toIsoDateTime(row.generatedAt))
-          .filter((value): value is string => Boolean(value))
-          .sort()
-          .at(-1) ?? generatedAt;
-      const dataSources = [
-        ...new Set(result.rows.flatMap((row) => dataSourcesArray(row.dataSources))),
-      ];
-
-      return {
-        contractVersion: PUBLIC_BOOKABILITY_CONTRACT_VERSION,
-        generatedAt: latestGeneratedAt,
-        publicVisibility: PUBLIC_BOOKABILITY_VISIBILITY,
-        request: { hotelSlug: hotel.slug, start, end },
-        calendar: {
-          unavailableDates,
-          minStayByArrival: {},
-          maxStayByArrival: {},
-        },
-        freshness: targetCalendarFreshness(
-          latestGeneratedAt,
-          result.rows.flatMap((row) => row.sourceFreshnessValues ?? []),
-          rollupCalendarFreshness(result.rows.flatMap((row) => row.freshnessStatuses ?? [])),
-        ),
-        dataSources: dataSources.length > 0 ? dataSources : ["pms", "distribution"],
-      };
     },
     async close() {
       await pool.end();

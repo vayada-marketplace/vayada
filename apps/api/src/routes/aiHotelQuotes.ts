@@ -193,8 +193,9 @@ export function createTargetPublicHotelQuoteRepository(config: {
         return toUnavailablePublicHotelQuoteProjection(profile.hotel, query, requestedAt);
       }
 
-      const result = await pool.query<TargetPublicHotelQuoteRow>(
-        `SELECT
+      try {
+        const result = await pool.query<TargetPublicHotelQuoteRow>(
+          `SELECT
            read_model.quote_session_id::text AS "quoteSessionId",
            read_model.public_quote_reference AS "publicQuoteReference",
            read_model.quote_hash AS "quoteHash",
@@ -227,27 +228,30 @@ export function createTargetPublicHotelQuoteRepository(config: {
            AND (read_model.quote_status <> 'bookable' OR read_model.expires_at > $11::timestamptz)
          ORDER BY read_model.projected_at DESC
          LIMIT 1`,
-        [
-          profile.hotel.slug,
-          parsed.request.checkIn,
-          parsed.request.checkOut,
-          parsed.request.adults,
-          parsed.request.children,
-          parsed.request.rooms,
-          parsed.request.currency,
-          parsed.request.locale,
-          parsed.request.promoCode ?? "",
-          parsed.request.referralCode ?? "",
-          requestedAt.toISOString(),
-        ],
-      );
+          [
+            profile.hotel.slug,
+            parsed.request.checkIn,
+            parsed.request.checkOut,
+            parsed.request.adults,
+            parsed.request.children,
+            parsed.request.rooms,
+            parsed.request.currency,
+            parsed.request.locale,
+            parsed.request.promoCode ?? "",
+            parsed.request.referralCode ?? "",
+            requestedAt.toISOString(),
+          ],
+        );
 
-      const row = result.rows[0];
-      if (!row) {
+        const row = result.rows[0];
+        if (!row) {
+          return toUnavailablePublicHotelQuoteProjection(profile.hotel, query, requestedAt);
+        }
+
+        return toTargetPublicHotelQuoteProjection(profile.hotel, parsed.request, row);
+      } catch {
         return toUnavailablePublicHotelQuoteProjection(profile.hotel, query, requestedAt);
       }
-
-      return toTargetPublicHotelQuoteProjection(profile.hotel, parsed.request, row);
     },
     async close() {
       await pool.end();
@@ -298,7 +302,7 @@ function toTargetPublicHotelQuoteProjection(
   const status = publicBookabilityStatus(row.quoteStatus);
   const unavailableReasons = unavailableReasonsArray(row.unavailableReasons);
   const dataSources = dataSourcesArray(row.dataSources);
-  const offers = offersArray(row.offers, row.totals, request, row.deepLinkUrl);
+  const offers = offersArray(hotel, row.offers, row.totals, request, row.deepLinkUrl);
   const freshness = targetQuoteFreshness(
     generatedAt,
     row.sourceFreshness,
@@ -691,6 +695,7 @@ function publicDetailValue(value: unknown): string | null {
 }
 
 function offersArray(
+  hotel: PublicBookabilityHotelProfile,
   value: unknown,
   totalsValue: unknown,
   request: PublicBookabilityQuoteRequest,
@@ -698,11 +703,19 @@ function offersArray(
 ): PublicBookabilityOffer[] {
   if (!Array.isArray(value)) return [];
   return value.map((entry, index) =>
-    targetOfferFromRow(objectValue(entry), objectValue(totalsValue), request, deepLinkUrl, index),
+    targetOfferFromRow(
+      hotel,
+      objectValue(entry),
+      objectValue(totalsValue),
+      request,
+      deepLinkUrl,
+      index,
+    ),
   );
 }
 
 function targetOfferFromRow(
+  hotel: PublicBookabilityHotelProfile,
   offer: Record<string, unknown>,
   rowTotals: Record<string, unknown>,
   request: PublicBookabilityQuoteRequest,
@@ -758,7 +771,8 @@ function targetOfferFromRow(
         stringValue(objectValue(offer["policies"])["deposit"]) ??
         stringValue(objectValue(offer["publicPolicy"])["deposit"]),
     },
-    bookingUrl: stringValue(offer["bookingUrl"]) ?? deepLinkUrl ?? buildFallbackBookingUrl(request),
+    bookingUrl:
+      stringValue(offer["bookingUrl"]) ?? deepLinkUrl ?? buildFallbackBookingUrl(hotel, request),
   };
 }
 
@@ -938,9 +952,21 @@ function toIsoDateTime(value: Date | string | null): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function buildFallbackBookingUrl(request: PublicBookabilityQuoteRequest): string {
-  const url = new URL(`https://${request.hotelSlug}.booking.localhost/${request.locale}/book`);
+function buildFallbackBookingUrl(
+  hotel: PublicBookabilityHotelProfile,
+  request: PublicBookabilityQuoteRequest,
+): string {
+  const url = new URL(`/${request.locale}/book`, hotel.bookingBaseUrl);
+  url.searchParams.set("check_in", request.checkIn);
+  url.searchParams.set("check_out", request.checkOut);
+  url.searchParams.set("adults", String(request.adults));
+  url.searchParams.set("children", String(request.children));
+  url.searchParams.set("rooms", String(request.rooms));
+  url.searchParams.set("currency", request.currency);
+  url.searchParams.set("locale", request.locale);
   url.searchParams.set("quote_id", buildPublicQuoteId(request));
+  if (request.promoCode) url.searchParams.set("promo_code", request.promoCode);
+  if (request.referralCode) url.searchParams.set("referral_code", request.referralCode);
   return url.toString();
 }
 

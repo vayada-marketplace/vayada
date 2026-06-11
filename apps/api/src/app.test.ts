@@ -2832,6 +2832,84 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
   });
 
+  it("builds target offer fallback booking URLs from the hotel booking base URL", async () => {
+    const customDomainProfile = {
+      ...seededPublicProfile,
+      hotel: {
+        ...seededPublicProfile.hotel,
+        bookingBaseUrl: "https://book.alpenrose.example",
+      },
+    };
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000003",
+              publicQuoteReference: "quote_target_fallback_url",
+              quoteHash: "sha256:target-fallback-url",
+              requestSnapshot: {},
+              quoteStatus: "bookable",
+              unavailableReasons: [],
+              offers: [
+                {
+                  offerId: "offer_deluxe_flexible",
+                  roomTypeId: "room_deluxe",
+                  name: "Deluxe Double Room",
+                  availableRooms: 2,
+                  totals: {
+                    currency: "EUR",
+                    roomTotal: 540,
+                    taxesAndFees: 54,
+                    discounts: 0,
+                    grandTotal: 594,
+                  },
+                },
+              ],
+              totals: {},
+              deepLinkUrl: null,
+              priceGuarantee: "expires_at",
+              currency: "EUR",
+              sourceFreshness: { sources: [{ owner: "pms", status: "fresh" }] },
+              freshnessStatus: "fresh",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: {
+        async findProfileBySlug(slug) {
+          return slug === customDomainProfile.hotel.slug ? customDomainProfile : null;
+        },
+      },
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+      referral_code: "creator-anna",
+    });
+
+    const bookingUrl = quote?.quote?.offers[0]?.bookingUrl;
+    expect(bookingUrl).toMatch(/^https:\/\/book\.alpenrose\.example\/en\/book\?/);
+    expect(bookingUrl).toContain("check_in=2026-09-12");
+    expect(bookingUrl).toContain("referral_code=creator-anna");
+    expect(bookingUrl).not.toContain("booking.localhost");
+  });
+
   it("preserves public detail for target unavailable quote reasons", async () => {
     const pool: PublicHotelQuoteReadPool = {
       async query<T extends QueryResultRow>() {
@@ -2900,6 +2978,44 @@ describe("vayada-api", () => {
       },
     });
     expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
+  });
+
+  it("returns unavailable target public quotes when the read model query fails", async () => {
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        throw new Error("target database unavailable");
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [
+        {
+          code: "unavailable_data",
+          detail: "Public quote read model is not ready yet.",
+        },
+      ],
+      freshness: {
+        status: "unavailable",
+      },
+    });
   });
 
   it("reads target Booking Web calendar from distribution offer snapshots", async () => {
@@ -2987,6 +3103,38 @@ describe("vayada-api", () => {
       "2026-09-15",
     ]);
     expect(findForbiddenPublicBookabilityKeys(calendar)).toEqual([]);
+  });
+
+  it("returns unavailable target Booking Web calendar when the read model query fails", async () => {
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>() {
+        throw new Error("target database unavailable");
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-15",
+    });
+
+    expect(calendar).toMatchObject({
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-15",
+      },
+      calendar: {
+        unavailableDates: [],
+      },
+      freshness: {
+        status: "unavailable",
+      },
+    });
   });
 
   it("marks target Booking Web calendar unavailable when snapshot coverage is partial", async () => {
