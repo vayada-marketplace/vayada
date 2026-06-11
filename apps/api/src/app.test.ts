@@ -21,6 +21,7 @@ import {
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import {
+  createPgPublicHotelProfileRepository,
   createTargetPublicHotelProfileRepository,
   serializePublicHotelProfileProjection,
   toPublicHotelProfileProjection,
@@ -2377,6 +2378,42 @@ describe("vayada-api", () => {
     expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
       "Booking settings repository connectionString must not be empty",
     );
+  });
+
+  it("does not close injected public hotel profile pools", async () => {
+    let legacyPoolClosed = false;
+    let targetPoolClosed = false;
+    const legacyPool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>() {
+        return { rows: [] as T[] };
+      },
+      async end() {
+        legacyPoolClosed = true;
+      },
+    };
+    const targetPool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>() {
+        return { rows: [] as T[] };
+      },
+      async end() {
+        targetPoolClosed = true;
+      },
+    };
+
+    const legacyRepository = createPgPublicHotelProfileRepository({
+      connectionString: "postgresql://booking-db",
+      pool: legacyPool,
+    });
+    const targetRepository = createTargetPublicHotelProfileRepository({
+      connectionString: "postgresql://target-db",
+      pool: targetPool,
+    });
+
+    await legacyRepository.close?.();
+    await targetRepository.close?.();
+
+    expect(legacyPoolClosed).toBe(false);
+    expect(targetPoolClosed).toBe(false);
   });
 
   it("reads target public hotel profiles from the distribution projection", async () => {

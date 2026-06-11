@@ -123,6 +123,7 @@ export function createPgPublicHotelProfileRepository(config: {
     throw new Error("Public hotel profile repository connectionString must not be empty");
   }
 
+  const ownsPool = !config.pool;
   const pool =
     config.pool ??
     new pg.Pool({
@@ -172,7 +173,9 @@ export function createPgPublicHotelProfileRepository(config: {
         : null;
     },
     async close() {
-      await pool.end();
+      if (ownsPool) {
+        await pool.end();
+      }
     },
   };
 }
@@ -186,6 +189,7 @@ export function createTargetPublicHotelProfileRepository(config: {
     throw new Error("Target public hotel profile repository connectionString must not be empty");
   }
 
+  const ownsPool = !config.pool;
   const pool =
     config.pool ??
     new pg.Pool({
@@ -229,7 +233,9 @@ export function createTargetPublicHotelProfileRepository(config: {
       return result.rows[0] ? toTargetPublicHotelProfileProjection(result.rows[0]) : null;
     },
     async close() {
-      await pool.end();
+      if (ownsPool) {
+        await pool.end();
+      }
     },
   };
 }
