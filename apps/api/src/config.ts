@@ -10,6 +10,7 @@ export type ApiAuthConfig = {
 export type ApiAuthSessionConfig = {
   workosClientId: string;
   workosApiKey: string;
+  workosWebhookSecret?: string;
   authCookieSecret: string;
   authCallbackUrl: string;
   authLogoutUrl: string;
@@ -99,6 +100,7 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
   return {
     workosClientId: values["WORKOS_CLIENT_ID"]!,
     workosApiKey: values["WORKOS_API_KEY"]!,
+    workosWebhookSecret: readOptionalEnv(env, "WORKOS_WEBHOOK_SECRET"),
     authCookieSecret: values["AUTH_COOKIE_SECRET"]!,
     authCallbackUrl: values["AUTH_CALLBACK_URL"]!,
     authLogoutUrl: values["AUTH_LOGOUT_URL"]!,

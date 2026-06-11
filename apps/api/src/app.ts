@@ -21,6 +21,10 @@ import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAskRoutes } from "./routes/ask.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
 import { registerBookingRoutes } from "./routes/booking.js";
+import {
+  registerWorkosWebhookRoutes,
+  type WorkosWebhookRoutesOptions,
+} from "./routes/workosWebhooks.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
@@ -40,6 +44,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
+  workosWebhooks?: WorkosWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
@@ -78,6 +83,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerAuthSessionRoutes, {
       prefix: "/auth",
       ...options.authSession,
+    });
+  }
+  if (options.workosWebhooks) {
+    app.register(registerWorkosWebhookRoutes, {
+      prefix: "/auth/workos",
+      ...options.workosWebhooks,
     });
   }
   app.register(registerRouteGroups, { prefix: "/api" });

@@ -9,6 +9,10 @@ import { type ApiConfig, loadConfig } from "./config.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
+import {
+  createPgWorkosWebhookStore,
+  createWorkosWebhookVerifier,
+} from "./platform/workosWebhooks.js";
 import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
@@ -92,6 +96,19 @@ const app = buildApp({
           requiredOrganizationKind: "platform",
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
+        }
+      : undefined,
+  workosWebhooks:
+    config.auth && config.authSession?.workosWebhookSecret
+      ? {
+          secret: config.authSession.workosWebhookSecret,
+          verifier: createWorkosWebhookVerifier({
+            apiKey: config.authSession.workosApiKey,
+            secret: config.authSession.workosWebhookSecret,
+          }),
+          store: createPgWorkosWebhookStore({
+            connectionString: config.auth.databaseUrl,
+          }),
         }
       : undefined,
   bookingReservationsRepository: config.bookingReservationsReadDatabaseUrl
