@@ -22,6 +22,7 @@ import { createCompatibilityPmsBookingReservationsReadRepository } from "./route
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
+  createPgTargetBookingSettingsRepository,
 } from "./routes/bookingSettings.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 
@@ -57,17 +58,23 @@ const publicHotelProfileRepository = config.bookingDatabaseUrl
     })
   : undefined;
 
-const bookingSettingsRepository = config.bookingDatabaseUrl
-  ? createPgBookingSettingsReadRepository({
-      connectionString: config.bookingDatabaseUrl,
-    })
-  : undefined;
+const bookingSettingsRepository =
+  config.bookingSettingsSource === "target"
+    ? createPgTargetBookingSettingsRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : config.bookingDatabaseUrl
+      ? createPgBookingSettingsReadRepository({
+          connectionString: config.bookingDatabaseUrl,
+        })
+      : undefined;
 
-const bookingGuestFormSettingsSync = config.pmsApiUrl
-  ? createHttpPmsGuestFormSettingsSync({
-      pmsApiUrl: config.pmsApiUrl,
-    })
-  : undefined;
+const bookingGuestFormSettingsSync =
+  config.pmsApiUrl && config.bookingSettingsSource !== "target"
+    ? createHttpPmsGuestFormSettingsSync({
+        pmsApiUrl: config.pmsApiUrl,
+      })
+    : undefined;
 
 const bookingReservationsRepository =
   config.bookingReservationsSource === "target"
