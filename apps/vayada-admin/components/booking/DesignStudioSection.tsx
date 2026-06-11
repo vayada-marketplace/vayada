@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { PhotoIcon, XMarkIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import { bookingSettingsService } from "@/services/booking";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/booking";
+import { getAuthBearerToken } from "@/services/auth/sessionStore";
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Italiana&display=swap";
@@ -85,7 +86,7 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
     try {
       setUploading(true);
       const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || "https://pms-api.vayada.com";
-      const token = localStorage.getItem("access_token");
+      const token = getAuthBearerToken();
       const formData = new FormData();
       formData.append("files", file);
 

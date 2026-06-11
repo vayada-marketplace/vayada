@@ -1,5 +1,5 @@
 import { Booking } from "@/lib/types";
-import { pms } from "./client";
+import { bookingWebPublic, pms } from "./client";
 
 export interface BookingRequestResponse {
   // For card payments (VAY-388) `booking` is a placeholder preview —
@@ -98,19 +98,24 @@ export const bookingService = {
   },
 
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {
-    await pms.post(`/api/hotels/${slug}/bookings/${bookingId}/withdraw`, {
-      guest_email: guestEmail,
-    });
+    await bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/withdraw`,
+      { guestEmail },
+    );
   },
 
   async cancelPreview(slug: string, bookingId: string, guestEmail: string): Promise<CancelPreview> {
-    return pms.post(`/api/hotels/${slug}/bookings/${bookingId}/cancel-preview`, {
-      guest_email: guestEmail,
-    });
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel-preview`,
+      { guestEmail },
+    );
   },
 
   async cancel(slug: string, bookingId: string, guestEmail: string): Promise<void> {
-    await pms.post(`/api/hotels/${slug}/bookings/${bookingId}/cancel`, { guest_email: guestEmail });
+    await bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel`,
+      { guestEmail },
+    );
   },
 
   async getStatus(slug: string, reference: string, email: string): Promise<BookingStatus> {
@@ -138,7 +143,10 @@ export const bookingService = {
     bookingId: string,
     payload: ChangeRequestPayload,
   ): Promise<ChangeRequestPreview> {
-    return pms.post(`/api/hotels/${slug}/bookings/${bookingId}/change-request/preview`, payload);
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request/preview`,
+      payload,
+    );
   },
 
   async submitChangeRequest(
@@ -146,7 +154,10 @@ export const bookingService = {
     bookingId: string,
     payload: ChangeRequestPayload,
   ): Promise<BookingChangeRequest> {
-    return pms.post(`/api/hotels/${slug}/bookings/${bookingId}/change-request`, payload);
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request`,
+      payload,
+    );
   },
 
   async getChangeRequest(
@@ -155,7 +166,9 @@ export const bookingService = {
     email: string,
   ): Promise<BookingChangeRequest | null> {
     const params = new URLSearchParams({ email });
-    return pms.get(`/api/hotels/${slug}/bookings/${bookingId}/change-request?${params}`);
+    return bookingWebPublic.get(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request?${params}`,
+    );
   },
 };
 

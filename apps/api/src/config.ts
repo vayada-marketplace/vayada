@@ -13,10 +13,12 @@ export type ApiAuthSessionConfig = {
   workosWebhookSecret?: string;
   authCookieSecret: string;
   authCallbackUrl: string;
+  authSuccessUrl?: string;
   authLogoutUrl: string;
   authAllowedOrigins: string[];
   authCookieSecure: boolean;
   authCookieDomain?: string;
+  authLegacyMarketplaceJwtSecret?: string;
 };
 
 export type ApiAskIntelligenceConfig =
@@ -43,6 +45,7 @@ export type ApiConfig = {
   marketplaceDiscoveryAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
+  bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingHostBase?: string;
 };
 
@@ -88,6 +91,14 @@ function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
     : [];
 }
 
+function readBooleanEnv(env: NodeJS.ProcessEnv, key: string, defaultValue = false): boolean {
+  const value = readOptionalEnv(env, key);
+  if (value === undefined) return defaultValue;
+  if (/^(1|true|yes)$/i.test(value)) return true;
+  if (/^(0|false|no)$/i.test(value)) return false;
+  throw new Error(`${key} must be true or false`);
+}
+
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
   const authSessionKeys = [
     "WORKOS_CLIENT_ID",
@@ -115,10 +126,12 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     workosWebhookSecret: readOptionalEnv(env, "WORKOS_WEBHOOK_SECRET"),
     authCookieSecret: values["AUTH_COOKIE_SECRET"]!,
     authCallbackUrl: values["AUTH_CALLBACK_URL"]!,
+    authSuccessUrl: readOptionalEnv(env, "AUTH_SUCCESS_URL"),
     authLogoutUrl: values["AUTH_LOGOUT_URL"]!,
     authAllowedOrigins: readOptionalCsvEnv(env, "AUTH_ALLOWED_ORIGINS"),
     authCookieSecure: readOptionalEnv(env, "AUTH_COOKIE_SECURE") !== "false",
     authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
+    authLegacyMarketplaceJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_MARKETPLACE_JWT_SECRET"),
   };
 }
 
@@ -170,6 +183,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
+    bookingWebLegacyCheckoutCommandProxyEnabled: readBooleanEnv(
+      env,
+      "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
+    ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
   };
 }

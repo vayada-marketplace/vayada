@@ -38,20 +38,24 @@ describe("api config", () => {
         WORKOS_API_KEY: "sk_test",
         AUTH_COOKIE_SECRET: "cookie-secret",
         AUTH_CALLBACK_URL: "https://api.localhost/auth/workos/callback",
+        AUTH_SUCCESS_URL: "https://admin.localhost/dashboard",
         AUTH_LOGOUT_URL: "https://admin.localhost/login",
         AUTH_ALLOWED_ORIGINS: "https://admin.localhost, https://api.localhost",
         AUTH_COOKIE_SECURE: "false",
         AUTH_COOKIE_DOMAIN: "localhost",
+        AUTH_LEGACY_MARKETPLACE_JWT_SECRET: "legacy-secret",
       }).authSession,
     ).toEqual({
       workosClientId: "client",
       workosApiKey: "sk_test",
       authCookieSecret: "cookie-secret",
       authCallbackUrl: "https://api.localhost/auth/workos/callback",
+      authSuccessUrl: "https://admin.localhost/dashboard",
       authLogoutUrl: "https://admin.localhost/login",
       authAllowedOrigins: ["https://admin.localhost", "https://api.localhost"],
       authCookieSecure: false,
       authCookieDomain: "localhost",
+      authLegacyMarketplaceJwtSecret: "legacy-secret",
     });
   });
 
@@ -110,6 +114,26 @@ describe("api config", () => {
         PMS_PUBLIC_API_URL: "https://api.pms.localhost",
       }).pmsPublicApiUrl,
     ).toBe("https://api.pms.localhost");
+  });
+
+  it("keeps Booking Web legacy command proxy disabled by default", () => {
+    expect(loadConfig({}).bookingWebLegacyCheckoutCommandProxyEnabled).toBe(false);
+  });
+
+  it("loads optional Booking Web legacy command proxy config", () => {
+    expect(
+      loadConfig({
+        BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED: "true",
+      }).bookingWebLegacyCheckoutCommandProxyEnabled,
+    ).toBe(true);
+  });
+
+  it("rejects invalid Booking Web legacy command proxy config", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED: "sometimes",
+      }),
+    ).toThrow("BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED must be true or false");
   });
 
   it("loads optional PMS admin API config", () => {

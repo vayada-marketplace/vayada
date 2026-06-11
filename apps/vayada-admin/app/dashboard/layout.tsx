@@ -10,11 +10,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    if (!authService.isLoggedIn() || !authService.isAdmin()) {
-      router.push("/login");
-    } else {
-      setIsAuthorized(true);
-    }
+    let cancelled = false;
+    authService.ensureSession().then((authorized) => {
+      if (cancelled) return;
+      if (authorized) {
+        setIsAuthorized(true);
+      } else {
+        router.push("/login?expired=true");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!isAuthorized) {
