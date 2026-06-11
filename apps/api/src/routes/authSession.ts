@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import type {
   IdentityLifecycleCommandBus,
   IdentityLifecycleCommandResult,
@@ -7,7 +7,7 @@ import type {
   OrganizationKind,
   TokenVerifier,
 } from "@vayada/backend-auth";
-import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 
 export type AuthKitUser = {
   id: string;
@@ -67,11 +67,13 @@ export type AuthSessionRouteOptions = {
   productAuditSink: ProductAuditSink;
   tokenVerifier: TokenVerifier;
   callbackUrl: string;
+  callbackReturnUrl?: string;
   logoutReturnUrl: string;
   allowedOrigins: string[];
   requiredOrganizationKind: OrganizationKind;
   cookieSecure: boolean;
   cookieDomain?: string;
+  legacyMarketplaceJwtSecret?: string;
 };
 
 const SESSION_COOKIE = "vayada_workos_session";
@@ -106,6 +108,20 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       )
       .redirect(authorizationUrl);
   });
+
+  for (const path of [
+    "/session",
+    "/session/refresh",
+    "/logout",
+    "/compat/marketplace-admin-token",
+  ]) {
+    app.options(path, async (request, reply) => {
+      if (!writeCorsHeaders(request, reply, options)) {
+        return reply.code(403).send();
+      }
+      return reply.code(204).send();
+    });
+  }
 
   app.get("/workos/callback", async (request, reply) => {
     const query = request.query as {
@@ -149,31 +165,37 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       occurredAt: new Date().toISOString(),
     });
 
-    reply
-      .headers({
-        "set-cookie": [
-          serializeCookie(STATE_COOKIE, "", {
-            maxAge: 0,
-            secure: options.cookieSecure,
-            domain: options.cookieDomain,
-          }),
-          serializeCookie(SESSION_COOKIE, session.sealedSession, {
-            maxAge: 60 * 60 * 24 * 7,
-            secure: options.cookieSecure,
-            domain: options.cookieDomain,
-          }),
-          serializeCookie(CSRF_COOKIE, randomBytes(24).toString("base64url"), {
-            maxAge: 60 * 60 * 24 * 7,
-            secure: options.cookieSecure,
-            domain: options.cookieDomain,
-            httpOnly: false,
-          }),
-        ],
-      })
-      .send(toSessionResponse(session, resolution.user));
+    const csrfToken = randomBytes(24).toString("base64url");
+    reply.headers({
+      "set-cookie": [
+        serializeCookie(STATE_COOKIE, "", {
+          maxAge: 0,
+          secure: options.cookieSecure,
+          domain: options.cookieDomain,
+        }),
+        serializeCookie(SESSION_COOKIE, session.sealedSession, {
+          maxAge: 60 * 60 * 24 * 7,
+          secure: options.cookieSecure,
+          domain: options.cookieDomain,
+        }),
+        serializeCookie(CSRF_COOKIE, csrfToken, {
+          maxAge: 60 * 60 * 24 * 7,
+          secure: options.cookieSecure,
+          domain: options.cookieDomain,
+          httpOnly: false,
+        }),
+      ],
+    });
+    if (options.callbackReturnUrl) {
+      return reply.redirect(options.callbackReturnUrl);
+    }
+    return reply.send(toSessionResponse(session, resolution.user, csrfToken));
   });
 
   app.get("/session", async (request, reply) => {
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({ error: "origin_rejected" });
+    }
     const sealedSession = readCookie(request, SESSION_COOKIE);
     if (!sealedSession) {
       return reply.code(401).send({ error: "missing_session" });
@@ -188,10 +210,15 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
-    return reply.send(toSessionResponse(session, resolution.user));
+    return reply.send(
+      toSessionResponse(session, resolution.user, readCookie(request, CSRF_COOKIE)),
+    );
   });
 
   app.post("/session/refresh", async (request, reply) => {
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({ error: "origin_rejected" });
+    }
     if (!passesCsrfCheck(request, options)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
@@ -222,10 +249,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           domain: options.cookieDomain,
         }),
       )
-      .send(toSessionResponse(session, resolution.user));
+      .send(toSessionResponse(session, resolution.user, readCookie(request, CSRF_COOKIE)));
   });
 
   app.post("/logout", async (request, reply) => {
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({ error: "origin_rejected" });
+    }
     if (!passesCsrfCheck(request, options)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
@@ -269,6 +299,46 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         ],
       })
       .send({ logoutUrl });
+  });
+
+  app.post("/compat/marketplace-admin-token", async (request, reply) => {
+    if (!writeCorsHeaders(request, reply, options)) {
+      return reply.code(403).send({ error: "origin_rejected" });
+    }
+    if (!options.legacyMarketplaceJwtSecret) {
+      return reply.code(404).send({ error: "legacy_marketplace_bridge_not_configured" });
+    }
+    if (!passesCsrfCheck(request, options)) {
+      return reply.code(403).send({ error: "csrf_rejected" });
+    }
+    const sealedSession = readCookie(request, SESSION_COOKIE);
+    if (!sealedSession) {
+      return reply.code(401).send({ error: "missing_session" });
+    }
+    const session = await options.authKitClient.authenticateSession({ sealedSession });
+    if (!session) {
+      return reply.code(401).send({ error: "invalid_session" });
+    }
+    let resolution: { user: IdentityUser; organizationId?: string };
+    try {
+      resolution = await resolveExistingIdentity(session, options);
+    } catch (error) {
+      return reply.code(403).send(toAuthError(error));
+    }
+    const expiresIn = 15 * 60;
+    return reply.send({
+      accessToken: signLegacyMarketplaceJwt(
+        {
+          sub: resolution.user.userId,
+          email: resolution.user.email,
+          type: "admin",
+        },
+        options.legacyMarketplaceJwtSecret,
+        expiresIn,
+      ),
+      expiresIn,
+      tokenType: "Bearer",
+    });
   });
 };
 
@@ -379,9 +449,10 @@ async function resolveOrganizationAccess(
   return organization.organizationId;
 }
 
-function toSessionResponse(session: AuthKitSession, user: IdentityUser) {
+function toSessionResponse(session: AuthKitSession, user: IdentityUser, csrfToken?: string) {
   return {
     accessToken: session.accessToken,
+    csrfToken,
     organizationId: session.organizationId,
     user: {
       id: user.userId,
@@ -390,6 +461,46 @@ function toSessionResponse(session: AuthKitSession, user: IdentityUser) {
       workosUserId: session.user.id,
     },
   };
+}
+
+function writeCorsHeaders(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  options: AuthSessionRouteOptions,
+): boolean {
+  const origin = request.headers.origin;
+  if (!origin) return true;
+  if (!options.allowedOrigins.includes(origin)) return false;
+  reply
+    .header("Access-Control-Allow-Origin", origin)
+    .header("Access-Control-Allow-Credentials", "true")
+    .header("Access-Control-Allow-Headers", "content-type,x-vayada-csrf")
+    .header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    .header("Vary", "Origin");
+  return true;
+}
+
+function signLegacyMarketplaceJwt(
+  claims: { sub: string; email: string; type: string },
+  secret: string,
+  expiresInSeconds: number,
+): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = {
+    ...claims,
+    iat: now,
+    exp: now + expiresInSeconds,
+  };
+  const encodedHeader = base64Url(JSON.stringify(header));
+  const encodedPayload = base64Url(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signature = createHmac("sha256", secret).update(signingInput).digest("base64url");
+  return `${signingInput}.${signature}`;
+}
+
+function base64Url(value: string): string {
+  return Buffer.from(value).toString("base64url");
 }
 
 function readCookie(request: FastifyRequest, name: string): string | undefined {

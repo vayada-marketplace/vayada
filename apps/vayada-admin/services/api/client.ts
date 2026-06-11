@@ -2,7 +2,9 @@
  * API client configuration
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.vayada.com";
+import { getAuthBearerToken, clearAuthData } from "../auth/sessionStore";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
 export interface ApiError {
   detail:
@@ -28,47 +30,16 @@ export class ApiErrorResponse extends Error {
 
 export class ApiClient {
   private baseURL: string;
-  private TOKEN_KEY = "access_token";
-  private EXPIRES_AT_KEY = "token_expires_at";
 
   constructor(baseURL: string = API_BASE_URL) {
     this.baseURL = baseURL;
   }
 
   /**
-   * Get JWT token from localStorage if not expired
-   */
-  private getToken(): string | null {
-    if (typeof window === "undefined") return null;
-
-    const token = localStorage.getItem(this.TOKEN_KEY);
-    const expiresAt = localStorage.getItem(this.EXPIRES_AT_KEY);
-
-    if (!token || !expiresAt) return null;
-
-    // Check if token is expired
-    if (Date.now() >= parseInt(expiresAt)) {
-      this.clearToken();
-      return null;
-    }
-
-    return token;
-  }
-
-  /**
-   * Clear token from localStorage
-   */
-  private clearToken(): void {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(this.TOKEN_KEY);
-    localStorage.removeItem(this.EXPIRES_AT_KEY);
-  }
-
-  /**
    * Handle 401 errors (token expired/invalid)
    */
   private handleUnauthorized(error: ApiErrorResponse): void {
-    this.clearToken();
+    clearAuthData();
 
     if (typeof window !== "undefined") {
       const errorMessage = (error.data.detail as string) || "";
@@ -95,7 +66,7 @@ export class ApiClient {
     ];
     const normalizedEndpoint = endpoint.split("?")[0].split("#")[0];
     const isPublic = PUBLIC_ENDPOINTS.includes(normalizedEndpoint);
-    const token = isPublic ? null : this.getToken();
+    const token = isPublic ? null : getAuthBearerToken();
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

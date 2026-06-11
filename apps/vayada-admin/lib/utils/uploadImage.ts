@@ -1,12 +1,11 @@
-const getPmsUrl = () => process.env.NEXT_PUBLIC_PMS_URL || "https://pms-api.vayada.com";
+import { getAuthBearerToken } from "@/services/auth/sessionStore";
 
-const getToken = () =>
-  typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+const getPmsUrl = () => process.env.NEXT_PUBLIC_PMS_URL || "https://pms-api.vayada.com";
 
 export async function uploadImages(files: File | File[]): Promise<string[]> {
   const fileList = Array.isArray(files) ? files : [files];
   const pmsUrl = getPmsUrl();
-  const token = getToken();
+  const token = getAuthBearerToken();
   const formData = new FormData();
   fileList.forEach((file) => formData.append("files", file));
 
