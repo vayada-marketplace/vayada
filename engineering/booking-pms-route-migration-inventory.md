@@ -106,11 +106,77 @@ follow-ups replace the runtime dependencies:
 
 ### Public bookability and direct booking
 
-| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Consumers                       | apps/api status                                                                                                                     | Disposition                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `GET /api/hotels/{slug}/rooms`, `GET /api/hotels/{slug}/unavailable-dates`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BW, API quote/calendar adapters | Proxied by `apps/api` quote/offers/calendar                                                                                         | Distribution/bookability read vertical. Replace with target offer/calendar read models; Channex/availability freshness is cutover-window sensitive.                                                                      |
-| `POST /api/hotels/{slug}/bookings`, `POST /api/hotels/{slug}/bookings/{handle}/confirm-authorization`, `POST /api/hotels/{slug}/bookings/{booking_id}/withdraw`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel-preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel`, `POST /api/hotels/{slug}/bookings/lookup`, `GET /api/hotels/{slug}/bookings/status`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request/preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/payment-settings` | BW, API checkout adapter        | Compatibility adapter exists; write commands proxy only when explicitly enabled                                                     | Booking/checkout vertical plus PMS reservation handoff. This is staging-rehearsal gating because guest bookings, cancellation, change requests, and payment state cannot depend on the legacy PMS public API at cutover. |
-| `GET /api/hotels/{slug}/affiliates/check-email`, `POST /api/hotels/{slug}/affiliates`, `POST /api/hotels/{slug}/affiliates/{referral_code}/click`, `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect`, `GET /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/onboarding-link`                                                                                                                                                                                                                                                                                                                               | BW, API affiliate adapter       | `check-email`, `register`, and connect are proxied; click is replaced by API event sink; onboarding-link not exposed by API adapter | Marketplace/affiliate plus finance ownership decision. Either port under affiliate target services or retire from Booking Web. Stripe/Xendit account setup must not live in PMS route code long term.                    |
+| Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Consumers                       | apps/api status                                                                                                                     | Disposition                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/hotels/{slug}/rooms`, `GET /api/hotels/{slug}/unavailable-dates`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | BW, API quote/calendar adapters | Proxied by `apps/api` quote/offers/calendar                                                                                         | Distribution/bookability read vertical. Replace with target offer/calendar read models; Channex/availability freshness is cutover-window sensitive.                                                                              |
+| `POST /api/hotels/{slug}/bookings`, `POST /api/hotels/{slug}/bookings/{handle}/confirm-authorization`, `POST /api/hotels/{slug}/bookings/{booking_id}/withdraw`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel-preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/cancel`, `POST /api/hotels/{slug}/bookings/lookup`, `GET /api/hotels/{slug}/bookings/status`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request/preview`, `POST /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/bookings/{booking_id}/change-request`, `GET /api/hotels/{slug}/payment-settings` | BW, API checkout adapter        | Compatibility adapter exists; write commands proxy only when explicitly enabled                                                     | Booking/checkout vertical plus PMS reservation handoff. This is staging-rehearsal gating because guest bookings, cancellation, change requests, and payment state cannot depend on the legacy PMS public API at cutover.         |
+| `GET /api/hotels/{slug}/affiliates/check-email`, `POST /api/hotels/{slug}/affiliates`, `POST /api/hotels/{slug}/affiliates/{referral_code}/click`, `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect`, `GET /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/onboarding-link`                                                                                                                                                                                                                                                                                                                               | BW, API affiliate adapter       | `check-email`, `register`, and connect are proxied; click is replaced by API event sink; onboarding-link not exposed by API adapter | Marketplace/affiliate plus finance target ownership behind `AFFILIATE_PUBLIC_SOURCE=target`. Booking Web remains a compatibility facade while `ReferModal` is live; retire only after that public UI/product surface is removed. |
+
+#### VAY-768 affiliate route ownership decision
+
+Booking Web should not own affiliate application, referral identity, or payout
+provider onboarding. The public Booking Web affiliate endpoints remain only as a
+temporary compatibility facade for the existing `ReferModal` guest/creator
+registration flow; they must be backed by marketplace/affiliate and finance
+target services before `PMS_PUBLIC_API_URL` is removed.
+
+Accepted ownership:
+
+- Marketplace/affiliate owns public email availability checks, affiliate
+  application/registration state, referral codes, referral links, and approval
+  lifecycle.
+- Finance owns affiliate payout account/provider setup, including Stripe
+  Connect account creation and onboarding-link issuance.
+- Booking Web owns only the public UI entry point and request/response
+  compatibility shape under `/api/booking-web/hotels/:slug/affiliates...`.
+- Affiliate click attribution remains outside this proxy path and continues to
+  use the target event sink.
+
+Consequences:
+
+- Do not retire the public registration route while Booking Web still renders
+  the referral modal. Route retirement is only acceptable if product removes
+  that public affiliate registration surface and the modal/links are updated in
+  the same slice.
+- The follow-up implementation should introduce
+  `AFFILIATE_PUBLIC_SOURCE=target` backed by `TARGET_DATABASE_URL` and target
+  domain services. It must mount `check-email`, `register`, and Stripe Connect
+  link creation without any PMS HTTP proxy or PMS table writes.
+- Contract tests should prove the public routes work with
+  `PMS_PUBLIC_API_URL` unset and preserve the current browser-facing response
+  shape that Booking Web consumes: `check-email` returns `exists`, registration
+  accepts the current `ReferModal` payload (`fullName`, `email`,
+  `socialMedia`, `userType`, `paymentMethod`, PayPal fields, and bank fields)
+  and returns stable affiliate `id` plus `referralCode`, and Stripe Connect
+  link creation returns the exact `onboardingUrl` field.
+- Public registration should create a marketplace/affiliate application or
+  affiliate resource and emit/audit the event needed by affiliate admin and the
+  affiliate dashboard vertical. Stripe Connect should be delegated to finance
+  and linked back to the affiliate resource by stable target identifiers.
+- Affiliate provisioning must be retry-safe. The
+  `marketplace.affiliate.provision:collaboration:<id>:v1` command/event is
+  idempotent: if the affiliate/application already exists, the target handler is
+  a no-op for side effects and returns the existing affiliate. Public
+  registration retries for the same collaboration/application must always return
+  the same affiliate `id` and `referralCode` instead of allocating a duplicate
+  identity.
+- `POST /api/hotels/{slug}/affiliates/{affiliate_id}/stripe/connect` must be
+  idempotent by explicit idempotency key or by stable dedupe on `affiliate_id`.
+  Repeated requests must not create duplicate Stripe accounts. The public
+  response should return the latest valid `onboardingUrl` for the same
+  `stripe_connect_account_id`; if the previous onboarding link has expired,
+  finance may mint a replacement link for the same account, not a new account.
+- Stripe Connect compensation must cover the partial-failure window where the
+  provider account is created but the target `stripe_connect_account_id` write
+  fails. Finance owns a reconciliation job/audit path that either reattaches the
+  provider account to the affiliate record by provider metadata/idempotency key
+  or marks the orphaned Stripe account for cleanup before another account can be
+  created for the same affiliate.
+- Contract tests for the follow-up implementation must simulate registration
+  retries, Stripe Connect retries, and Stripe provider-success/DB-write-failure
+  recovery. They should assert stable affiliate `id`/`referralCode`,
+  deterministic onboarding URL/account behavior, no duplicate provider accounts,
+  and successful reconciliation of the partial failure.
 
 ### PMS admin property and setup
 
