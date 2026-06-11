@@ -1,6 +1,6 @@
 import type { Hotel, RoomType } from "@/lib/types";
 
-import { bookingWebPublic } from "./client";
+import { bookingEngine, bookingWebPublic } from "./client";
 
 const FALLBACK_IMAGE = "/vayada-logo.png";
 
@@ -106,11 +106,39 @@ export type BookingWebPublicHostResponse = {
   };
 };
 
+type LegacyResolveDomainResponse = {
+  slug: string;
+};
+
 export const bookingWebPublicApi = {
   async resolveHost(host: string): Promise<BookingWebPublicHostResponse> {
-    return bookingWebPublic.get<BookingWebPublicHostResponse>(
-      `/api/booking-web/hosts/${encodeURIComponent(host)}`,
-    );
+    try {
+      return await bookingWebPublic.get<BookingWebPublicHostResponse>(
+        `/api/booking-web/hosts/${encodeURIComponent(host)}`,
+      );
+    } catch {
+      const resolved = await bookingEngine.get<LegacyResolveDomainResponse>(
+        `/api/resolve-domain?domain=${encodeURIComponent(host)}`,
+      );
+      const hotel = await bookingEngine.get<Hotel>(
+        `/api/hotels/${encodeURIComponent(resolved.slug)}`,
+      );
+      return {
+        slug: hotel.slug,
+        canonicalUrl: hotel.canonicalUrl,
+        bookingBaseUrl: hotel.bookingBaseUrl,
+        customDomainUrl: hotel.customDomainUrl ?? null,
+        shouldRedirect: false,
+        redirectUrl: null,
+        redirectStatus: null,
+        hotel: {
+          slug: hotel.slug,
+          name: hotel.name,
+          defaultLocale: hotel.defaultLanguage,
+          supportedLocales: hotel.supportedLanguages,
+        },
+      };
+    }
   },
 
   async getHotel(
