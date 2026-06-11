@@ -43,6 +43,7 @@ export type ApiConfig = {
   askIntelligence: ApiAskIntelligenceConfig;
   targetDatabaseUrl?: string;
   bookingDatabaseUrl?: string;
+  bookingReservationsSource: "legacy" | "target";
   publicHotelProfileSource: PublicHotelProfileSource;
   bookingDomainResolutionSource: BookingDomainResolutionSource;
   bookingSettingsSource: "legacy" | "target";
@@ -220,6 +221,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     askIntelligence: loadAskIntelligenceConfig(env),
     targetDatabaseUrl,
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
+    bookingReservationsSource: readSourceEnv(
+      env,
+      "BOOKING_RESERVATIONS_SOURCE",
+      ["legacy", "target"] as const,
+      "legacy",
+    ),
     publicHotelProfileSource,
     bookingDomainResolutionSource,
     bookingSettingsSource,

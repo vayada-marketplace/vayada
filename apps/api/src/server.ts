@@ -10,6 +10,7 @@ import { createOpenAIAskModel } from "./platform/askIntelligence.js";
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
+import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import {
   createPgWorkosWebhookStore,
@@ -83,6 +84,25 @@ const bookingGuestFormSettingsSync =
       })
     : undefined;
 
+const bookingReservationsRepository =
+  config.bookingReservationsSource === "target"
+    ? (() => {
+        if (!config.targetDatabaseUrl) {
+          throw new Error(
+            "TARGET_DATABASE_URL is required when BOOKING_RESERVATIONS_SOURCE=target",
+          );
+        }
+
+        return createTargetBookingReservationsReadRepository({
+          connectionString: config.targetDatabaseUrl,
+        });
+      })()
+    : config.bookingReservationsReadDatabaseUrl
+      ? createCompatibilityPmsBookingReservationsReadRepository({
+          connectionString: config.bookingReservationsReadDatabaseUrl,
+        })
+      : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
@@ -135,11 +155,7 @@ const app = buildApp({
           }),
         }
       : undefined,
-  bookingReservationsRepository: config.bookingReservationsReadDatabaseUrl
-    ? createCompatibilityPmsBookingReservationsReadRepository({
-        connectionString: config.bookingReservationsReadDatabaseUrl,
-      })
-    : undefined,
+  bookingReservationsRepository,
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,

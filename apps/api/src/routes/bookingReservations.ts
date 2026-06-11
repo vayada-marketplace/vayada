@@ -81,7 +81,7 @@ export type BookingReservationReadModel = {
   paymentMethod?: string | null;
   paymentStatus?: string | null;
   depositRequired?: boolean | null;
-  depositPercentage?: number | null;
+  depositPercentage?: number | string | null;
   depositAmount?: number | string | null;
   balanceAmount?: number | string | null;
   checkInPendingFlags?: string[] | string | null;
@@ -620,7 +620,7 @@ export function toReservationResponse(
     paymentMethod: reservation.paymentMethod ?? null,
     paymentStatus: reservation.paymentStatus ?? null,
     depositRequired: reservation.depositRequired ?? false,
-    depositPercentage: reservation.depositPercentage ?? null,
+    depositPercentage: toNullableNumber(reservation.depositPercentage),
     depositAmount: toNumber(reservation.depositAmount ?? 0),
     balanceAmount: toNumber(reservation.balanceAmount ?? reservation.totalAmount),
     checkInPendingFlags: parseJson<string[]>(reservation.checkInPendingFlags, []),
