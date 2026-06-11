@@ -10,6 +10,7 @@ import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import type { AskAuditRepository, AskRoutesOptions } from "./routes/ask.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
+import type { PmsOperationsReadRepository } from "./routes/pmsOperations.js";
 import type { AuthSessionRouteOptions } from "./routes/authSession.js";
 import type {
   BookingGuestFormSettingsSync,
@@ -39,6 +40,7 @@ import {
   type BookingWebPublicRoutesOptions,
   type BookingDomainResolutionSource,
 } from "./routes/bookingWebPublic.js";
+import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -50,6 +52,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   authSession?: AuthSessionRouteOptions;
   workosWebhooks?: WorkosWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
+  pmsOperationsRepository?: PmsOperationsReadRepository;
+  pmsOperationsAllowedOrigins?: string[];
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
@@ -159,6 +163,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     settingsWriteRepository: options.bookingSettingsWriteRepository,
     guestFormSettingsSync: options.bookingGuestFormSettingsSync,
   });
+  if (options.pmsOperationsRepository) {
+    app.register(registerPmsOperationsRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsOperationsRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
 
   return app;
 }
