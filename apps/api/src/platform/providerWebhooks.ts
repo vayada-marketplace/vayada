@@ -185,7 +185,7 @@ async function promoteReceipt(
 
     const promotionStatus = updated.rows[0]
       ? "promoted"
-      : promotionStatusForReceipt(await selectReceiptStatusById(client, input.receiptId));
+      : promotionStatusForReceipt(await requireReceiptStatusById(client, input.receiptId));
 
     await client.query("COMMIT");
     return {
@@ -221,10 +221,7 @@ async function selectExistingReceipt(
   return existing.rows[0] ?? null;
 }
 
-async function selectReceiptStatusById(
-  client: pg.PoolClient,
-  receiptId: string,
-): Promise<string | null> {
+async function requireReceiptStatusById(client: pg.PoolClient, receiptId: string): Promise<string> {
   const existing = await client.query<{ delivery_status: string }>(
     `SELECT delivery_status
      FROM platform.external_webhook_events
@@ -232,14 +229,17 @@ async function selectReceiptStatusById(
      LIMIT 1`,
     [receiptId],
   );
-  return existing.rows[0]?.delivery_status ?? null;
+  const status = existing.rows[0]?.delivery_status;
+  if (!status) {
+    throw new Error(`Provider webhook receipt ${receiptId} not found during promotion`);
+  }
+  return status;
 }
 
-function promotionStatusForReceipt(
-  status: string | null,
-): ProviderWebhookPromotionResult["status"] {
+function promotionStatusForReceipt(status: string): ProviderWebhookPromotionResult["status"] {
   switch (status) {
     case "promoted":
+    case "succeeded":
       return "already_promoted";
     case "normalized":
       return "already_normalized";
@@ -247,6 +247,8 @@ function promotionStatusForReceipt(
       return "failed";
     case "dead_lettered":
       return "dead_lettered";
+    case "ignored":
+      return "incompatible_terminal_state";
     default:
       return "incompatible_terminal_state";
   }
