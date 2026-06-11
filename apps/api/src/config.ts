@@ -34,6 +34,7 @@ export type ApiAskIntelligenceConfig =
 
 export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
+export type MarketplaceDiscoverySource = "disabled" | "target";
 
 export type ApiConfig = {
   host: string;
@@ -49,7 +50,7 @@ export type ApiConfig = {
   bookingSettingsSource: "legacy" | "target";
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
-  marketplaceDatabaseUrl?: string;
+  marketplaceDiscoverySource: MarketplaceDiscoverySource;
   marketplaceDiscoveryAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
@@ -202,8 +203,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["legacy", "target"],
     "legacy",
   );
+  const marketplaceDiscoverySource = readSourceEnv(
+    env,
+    "MARKETPLACE_DISCOVERY_SOURCE",
+    ["disabled", "target"],
+    "disabled",
+  );
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
+  }
+  if (marketplaceDiscoverySource === "target" && !targetDatabaseUrl) {
+    throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_DISCOVERY_SOURCE=target");
   }
   if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
     throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
@@ -235,7 +245,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "BOOKING_RESERVATIONS_READ_DATABASE_URL",
     ),
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
-    marketplaceDatabaseUrl: readOptionalEnv(env, "MARKETPLACE_DATABASE_URL"),
+    marketplaceDiscoverySource,
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
