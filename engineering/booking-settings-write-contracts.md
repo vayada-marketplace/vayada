@@ -39,6 +39,28 @@ All write bodies are strict: unknown fields are rejected, required fields may
 not be omitted, and `null` is invalid unless a future surface explicitly
 documents a nullable field.
 
+## Target Repository Activation
+
+`BOOKING_SETTINGS_SOURCE=legacy` remains the production default until the
+cutover write-freeze because legacy Booking and PMS services still read
+`booking_hotels`. The target repository is merged dark behind
+`BOOKING_SETTINGS_SOURCE=target` and reads/writes `booking.booking_settings`
+through `TARGET_DATABASE_URL`.
+
+The write flip happens during audit activation steps 7-8:
+
+1. Run the final legacy-to-target settings snapshot during the cutover window.
+2. Freeze or queue legacy Booking settings writes.
+3. Start `apps/api` with `BOOKING_SETTINGS_SOURCE=target` and no
+   `BOOKING_DATABASE_URL` or `PMS_API_URL`.
+4. Prove all `/api/booking/hotels/:hotelId/settings/*` GET/PUT contract tests
+   against the target snapshot.
+5. Point PMS/check-in consumers at the target settings projection instead of the
+   legacy PMS admin sync.
+
+In target mode, guest-form settings writes do not call the PMS admin API. PMS
+guest-form/check-in behavior consumes the target projection after the cutover.
+
 ## Authorization
 
 Every route is protected and must use `enforceRoutePolicy` at the route

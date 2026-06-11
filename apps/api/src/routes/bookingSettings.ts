@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import pg from "pg";
+import type { QueryResult, QueryResultRow } from "pg";
 
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -226,6 +227,14 @@ export type BookingGuestFormSettingsSync = {
 
 export type BookingSettingsRepository = BookingSettingsReadRepository &
   BookingSettingsWriteRepository;
+
+export type BookingSettingsPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
 
 export type BookingSettingsWriteErrorCategory =
   | "authentication"
@@ -517,6 +526,91 @@ type BookingRoomFilterSettingsRow = {
   filter_rooms: unknown;
 };
 
+type TargetBookingSettingsRow = {
+  show_addons_step: boolean | null;
+  group_addons_by_category: boolean | null;
+  special_requests_enabled: boolean | null;
+  arrival_time_enabled: boolean | null;
+  guest_count_enabled: boolean | null;
+  benefits: unknown;
+  default_currency: string | null;
+  default_language: string | null;
+  supported_currencies: unknown;
+  supported_languages: unknown;
+  booking_filters: unknown;
+  custom_filters: unknown;
+  filter_rooms: unknown;
+};
+
+const TARGET_BOOKING_SETTINGS_SELECT = `
+  SELECT
+    settings.show_addons_step,
+    settings.group_addons_by_category,
+    settings.special_requests_enabled,
+    settings.arrival_time_enabled,
+    settings.guest_count_enabled,
+    settings.benefits,
+    settings.default_currency,
+    settings.default_language,
+    settings.supported_currencies,
+    settings.supported_languages,
+    settings.booking_filters,
+    settings.custom_filters,
+    settings.filter_rooms
+  FROM booking.booking_settings settings
+  JOIN hotel_catalog.property_source_links booking_link
+    ON booking_link.property_id = settings.property_id
+   AND booking_link.source_system = 'booking'
+   AND booking_link.source_table = 'booking_hotels'
+   AND booking_link.source_id = $1
+   AND booking_link.relationship = 'canonical_input'
+   AND booking_link.status = 'active'
+`;
+
+function toTargetAddonSettings(row: TargetBookingSettingsRow): BookingAddonSettingsReadModel {
+  return {
+    showAddonsStep: row.show_addons_step,
+    groupAddonsByCategory: row.group_addons_by_category,
+  };
+}
+
+function toTargetGuestFormSettings(
+  row: TargetBookingSettingsRow,
+): BookingGuestFormSettingsReadModel {
+  return {
+    specialRequestsEnabled: row.special_requests_enabled,
+    arrivalTimeEnabled: row.arrival_time_enabled,
+    guestCountEnabled: row.guest_count_enabled,
+  };
+}
+
+function toTargetBenefitsSettings(row: TargetBookingSettingsRow): BookingBenefitsSettingsReadModel {
+  return {
+    benefits: row.benefits,
+  };
+}
+
+function toTargetLocalizationSettings(
+  row: TargetBookingSettingsRow,
+): BookingLocalizationSettingsReadModel {
+  return {
+    defaultCurrency: row.default_currency,
+    defaultLanguage: row.default_language,
+    supportedCurrencies: row.supported_currencies,
+    supportedLanguages: row.supported_languages,
+  };
+}
+
+function toTargetRoomFilterSettings(
+  row: TargetBookingSettingsRow,
+): BookingRoomFilterSettingsReadModel {
+  return {
+    bookingFilters: row.booking_filters,
+    customFilters: row.custom_filters,
+    filterRooms: row.filter_rooms,
+  };
+}
+
 export function createPgBookingSettingsReadRepository(config: {
   connectionString: string;
   max?: number;
@@ -715,6 +809,153 @@ export function createPgBookingSettingsReadRepository(config: {
         customFilters: row.custom_filters,
         filterRooms: row.filter_rooms,
       };
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
+export function createPgTargetBookingSettingsRepository(config: {
+  connectionString: string;
+  max?: number;
+  pool?: BookingSettingsPool;
+}): BookingSettingsRepository {
+  if (!config.connectionString.trim()) {
+    throw new Error("Target booking settings repository connectionString must not be empty");
+  }
+
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max,
+    });
+
+  async function findSettings(hotelId: string): Promise<TargetBookingSettingsRow | null> {
+    const result = await pool.query<TargetBookingSettingsRow>(TARGET_BOOKING_SETTINGS_SELECT, [
+      hotelId,
+    ]);
+    return result.rows[0] ?? null;
+  }
+
+  async function updateSettings(
+    hotelId: string,
+    setClause: string,
+    values: readonly unknown[],
+  ): Promise<TargetBookingSettingsRow | null> {
+    const result = await pool.query<TargetBookingSettingsRow>(
+      `
+        WITH target_property AS (
+          SELECT property_id
+          FROM hotel_catalog.property_source_links
+          WHERE source_system = 'booking'
+            AND source_table = 'booking_hotels'
+            AND source_id = $1
+            AND relationship = 'canonical_input'
+            AND status = 'active'
+          LIMIT 1
+        )
+        UPDATE booking.booking_settings settings
+        SET ${setClause},
+            updated_at = now()
+        FROM target_property
+        WHERE settings.property_id = target_property.property_id
+        RETURNING
+          settings.show_addons_step,
+          settings.group_addons_by_category,
+          settings.special_requests_enabled,
+          settings.arrival_time_enabled,
+          settings.guest_count_enabled,
+          settings.benefits,
+          settings.default_currency,
+          settings.default_language,
+          settings.supported_currencies,
+          settings.supported_languages,
+          settings.booking_filters,
+          settings.custom_filters,
+          settings.filter_rooms
+      `,
+      [hotelId, ...values],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  return {
+    async findAddonSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetAddonSettings(row) : null;
+    },
+    async findGuestFormSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetGuestFormSettings(row) : null;
+    },
+    async findBenefitsSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetBenefitsSettings(row) : null;
+    },
+    async findLocalizationSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetLocalizationSettings(row) : null;
+    },
+    async findRoomFilterSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetRoomFilterSettings(row) : null;
+    },
+    async updateAddonSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `show_addons_step = $2,
+         group_addons_by_category = $3`,
+        [settings.showAddonsStep, settings.groupAddonsByCategory],
+      );
+      return row ? toTargetAddonSettings(row) : null;
+    },
+    async updateGuestFormSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `special_requests_enabled = $2,
+         arrival_time_enabled = $3,
+         guest_count_enabled = $4`,
+        [settings.specialRequestsEnabled, settings.arrivalTimeEnabled, settings.guestCountEnabled],
+      );
+      return row ? toTargetGuestFormSettings(row) : null;
+    },
+    async updateBenefitsSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(hotelId, `benefits = $2::jsonb`, [
+        JSON.stringify(settings.benefits),
+      ]);
+      return row ? toTargetBenefitsSettings(row) : null;
+    },
+    async updateLocalizationSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `default_currency = $2,
+         default_language = $3,
+         supported_currencies = $4::text[],
+         supported_languages = $5::text[]`,
+        [
+          settings.defaultCurrency,
+          settings.defaultLanguage,
+          settings.supportedCurrencies,
+          settings.supportedLanguages,
+        ],
+      );
+      return row ? toTargetLocalizationSettings(row) : null;
+    },
+    async updateRoomFilterSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `booking_filters = $2::jsonb,
+         custom_filters = $3::jsonb,
+         filter_rooms = $4::jsonb`,
+        [
+          JSON.stringify(settings.bookingFilters),
+          JSON.stringify(settings.customFilters),
+          JSON.stringify(settings.filterRooms),
+        ],
+      );
+      return row ? toTargetRoomFilterSettings(row) : null;
     },
     async close() {
       await pool.end();

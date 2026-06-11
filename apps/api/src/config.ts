@@ -38,7 +38,9 @@ export type ApiConfig = {
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   askIntelligence: ApiAskIntelligenceConfig;
+  targetDatabaseUrl?: string;
   bookingDatabaseUrl?: string;
+  bookingSettingsSource: "legacy" | "target";
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
   marketplaceDatabaseUrl?: string;
@@ -97,6 +99,17 @@ function readBooleanEnv(env: NodeJS.ProcessEnv, key: string, defaultValue = fals
   if (/^(1|true|yes)$/i.test(value)) return true;
   if (/^(0|false|no)$/i.test(value)) return false;
   throw new Error(`${key} must be true or false`);
+}
+
+function readSourceEnv<T extends string>(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  allowed: readonly T[],
+  defaultValue: T,
+): T {
+  const value = readOptionalEnv(env, key) ?? defaultValue;
+  if ((allowed as readonly string[]).includes(value)) return value as T;
+  throw new Error(`${key} must be one of: ${allowed.join(", ")}`);
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -164,13 +177,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     host: "0.0.0.0",
     port: 8003,
   });
+  const targetDatabaseUrl = readOptionalEnv(env, "TARGET_DATABASE_URL");
+  const bookingSettingsSource = readSourceEnv(
+    env,
+    "BOOKING_SETTINGS_SOURCE",
+    ["legacy", "target"],
+    "legacy",
+  );
+  if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
+    throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
+  }
 
   return {
     ...server,
     auth: loadAuthConfig(env),
     authSession: loadAuthSessionConfig(env),
     askIntelligence: loadAskIntelligenceConfig(env),
+    targetDatabaseUrl,
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
+    bookingSettingsSource,
     bookingReservationsReadDatabaseUrl: readOptionalEnv(
       env,
       "BOOKING_RESERVATIONS_READ_DATABASE_URL",

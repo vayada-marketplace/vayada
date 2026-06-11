@@ -100,6 +100,23 @@ export type ExpectedTarget = {
       promoApplicationCount: number;
       statusEventCount: number;
     }>;
+    settings?: Array<{
+      propertyId: string;
+      bookingHotelResourceId: string;
+      showAddonsStep: boolean;
+      groupAddonsByCategory: boolean;
+      specialRequestsEnabled: boolean;
+      arrivalTimeEnabled: boolean;
+      guestCountEnabled: boolean;
+      benefits: string[];
+      defaultCurrency: string;
+      defaultLanguage: string;
+      supportedCurrencies: string[];
+      supportedLanguages: string[];
+      bookingFilters: string[];
+      customFilters: Record<string, string>;
+      filterRooms: Record<string, string[]>;
+    }>;
     forbiddenSummaryKeys?: string[];
   };
   financeChecks?: {
