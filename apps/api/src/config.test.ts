@@ -114,7 +114,44 @@ describe("api config", () => {
       loadConfig({
         PUBLIC_HOTEL_PROFILE_SOURCE: "booking",
       }),
-    ).toThrow("PUBLIC_HOTEL_PROFILE_SOURCE must be one of legacy, target");
+    ).toThrow("PUBLIC_HOTEL_PROFILE_SOURCE must be one of: legacy, target");
+  });
+
+  it("loads optional target database config", () => {
+    expect(
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+      }).targetDatabaseUrl,
+    ).toBe("postgresql://target-db");
+  });
+
+  it("keeps booking settings on the legacy source by default", () => {
+    expect(loadConfig({}).bookingSettingsSource).toBe("legacy");
+  });
+
+  it("loads optional booking settings source config", () => {
+    expect(
+      loadConfig({
+        BOOKING_SETTINGS_SOURCE: "target",
+        TARGET_DATABASE_URL: "postgresql://target-db",
+      }).bookingSettingsSource,
+    ).toBe("target");
+  });
+
+  it("requires target database config when booking settings use the target source", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_SETTINGS_SOURCE: "target",
+      }),
+    ).toThrow("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
+  });
+
+  it("rejects invalid booking settings source config", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_SETTINGS_SOURCE: "preview",
+      }),
+    ).toThrow("BOOKING_SETTINGS_SOURCE must be one of: legacy, target");
   });
 
   it("loads optional booking reservations read database config", () => {

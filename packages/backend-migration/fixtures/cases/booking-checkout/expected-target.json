@@ -8,6 +8,7 @@
     "hotel_catalog.properties": 1,
     "hotel_catalog.property_source_links": 1,
     "hotel_catalog.property_slugs": 1,
+    "booking.booking_settings": 1,
     "booking.quote_sessions": 1,
     "booking.checkout_contexts": 1,
     "booking.guest_bookings": 1,
@@ -53,6 +54,36 @@
         "addonSelectionCount": 1,
         "promoApplicationCount": 1,
         "statusEventCount": 2
+      }
+    ],
+    "settings": [
+      {
+        "propertyId": "d3000000-0000-0000-0000-000000000682",
+        "bookingHotelResourceId": "booking_hotel_checkout_alpenrose",
+        "showAddonsStep": true,
+        "groupAddonsByCategory": false,
+        "specialRequestsEnabled": true,
+        "arrivalTimeEnabled": true,
+        "guestCountEnabled": false,
+        "benefits": ["Free breakfast", "Late checkout"],
+        "defaultCurrency": "EUR",
+        "defaultLanguage": "en",
+        "supportedCurrencies": ["CHF"],
+        "supportedLanguages": ["de"],
+        "bookingFilters": ["oceanView", "spa_access"],
+        "customFilters": {
+          "spa_access": "Spa access"
+        },
+        "filterRooms": {
+          "oceanView": ["room_101"],
+          "spa_access": ["room_102"]
+        },
+        "sourceFreshness": {
+          "booking_hotels": {
+            "status": "fresh",
+            "snapshotAt": "2026-06-09T08:00:00Z"
+          }
+        }
       }
     ],
     "forbiddenSummaryKeys": ["mira.guest@example.test", "+4312345678", "Gluten-free breakfast"]

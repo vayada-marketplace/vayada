@@ -206,11 +206,15 @@ controls is not enough for staging rehearsal.
 
 5. **P1: PMS operations inventory and reservation reads**
    Port rooms, room types, calendar, room blocks, reservation list/detail, and
-   assignments. Reads first, then writes that affect inventory/ARI.
+   assignments. Reads first, then writes that affect inventory/ARI. Contract
+   artifact:
+   [`PMS operations route contracts`](pms-operations-route-contracts.md).
 
 6. **P2: PMS operational reservation commands**
    Port check-in/out, operational status, notes, additional guests, no-show,
    checklists, inspections, and checkout charges behind PMS-owned contracts.
+   Contract artifact:
+   [`PMS operations route contracts`](pms-operations-route-contracts.md).
 
 7. **F1: Finance/payment/payout surfaces**
    Port payment settings, cancellation policy, invoices, payments, payouts,
@@ -223,7 +227,9 @@ controls is not enough for staging rehearsal.
    webhook summaries, and messaging setup. This needs a coordinated cutover
    window because external providers retry and can replay events. It also owns
    legacy scheduler shutdown for Channex polling, full ARI sync, and rolling
-   calendar auto-open.
+   calendar auto-open. Cutover sequencing, replay/idempotency rules, rollback,
+   and scheduler freeze ownership are defined in
+   [`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md).
 
 9. **A1: Affiliate dashboard and affiliate administration**
    Move public affiliate registration, affiliate dashboard, affiliate admin,
@@ -280,11 +286,13 @@ The staging rehearsal milestone is gated by these verticals:
 
 5. **VAY follow-up: Define PMS operations route contracts for rooms, room
    types, calendar, and operational reservations**
-   - Scope: contract docs and fixtures before implementation tickets.
+   - Scope: contract docs and fixtures before implementation tickets. Accepted
+     as [`PMS operations route contracts`](pms-operations-route-contracts.md).
 
 6. **VAY follow-up: Define Channex/webhook cutover plan**
    - Scope: provider endpoint switch, idempotency keys, replay handling,
      rollback, scheduler disable/freeze controls, and freeze requirements.
+   - Plan: [`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md).
 
 ## References
 
