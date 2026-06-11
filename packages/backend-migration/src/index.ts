@@ -28,3 +28,19 @@ export {
   type ParityFinding,
   type ParityReport,
 } from "./parity.js";
+
+export {
+  createPgWorkosBackfillRepository,
+  runWorkosBackfill,
+  type BackfillCounter,
+  type WorkosBackfillClient,
+  type WorkosBackfillConfig,
+  type WorkosBackfillCohort,
+  type WorkosBackfillMode,
+  type WorkosBackfillMembership,
+  type WorkosBackfillOrganization,
+  type WorkosBackfillRepository,
+  type WorkosBackfillSource,
+  type WorkosBackfillSummary,
+  type WorkosBackfillUser,
+} from "./workosBackfill.js";
