@@ -19,7 +19,7 @@ import {
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
 
-type FetchLike = (input: URL, init?: { signal?: AbortSignal }) => Promise<Response>;
+type FetchLike = (input: URL, init?: RequestInit) => Promise<Response>;
 
 type BookingWebHostParams = {
   host: string;
@@ -32,6 +32,46 @@ type BookingWebHotelParams = {
 type BookingWebCalendarQuery = {
   start?: string;
   end?: string;
+};
+
+type BookingWebBookingHandleParams = BookingWebHotelParams & {
+  handle: string;
+};
+
+type BookingWebBookingStatusQuery = {
+  reference?: string;
+  email?: string;
+};
+
+type BookingWebCheckoutRequest = Record<string, unknown>;
+type BookingWebLookupRequest = {
+  bookingReference?: string;
+  guestEmail?: string;
+};
+type BookingWebPromoValidationRequest = {
+  code?: string;
+};
+
+export type BookingWebPaymentInstructions = {
+  bankTransfer: {
+    enabled: boolean;
+    details: unknown | null;
+  };
+  paypal: {
+    enabled: boolean;
+    email: string | null;
+    paymentWindowHours: number | null;
+  };
+};
+
+export type BookingWebCheckoutAdapter = {
+  getCheckoutConfig(slug: string): Promise<unknown>;
+  createBooking(slug: string, request: BookingWebCheckoutRequest): Promise<unknown>;
+  confirmAuthorization(slug: string, handle: string): Promise<unknown>;
+  getStatus(slug: string, query: BookingWebBookingStatusQuery): Promise<unknown>;
+  lookup(slug: string, request: BookingWebLookupRequest): Promise<unknown>;
+  getPaymentInstructions(slug: string, handle: string): Promise<BookingWebPaymentInstructions>;
+  validatePromo(slug: string, request: BookingWebPromoValidationRequest): Promise<unknown>;
 };
 
 export type BookingWebHostResolution = {
@@ -75,6 +115,8 @@ export type BookingWebPublicRoutesOptions = {
   quoteRepository?: PublicHotelQuoteRepository;
   bookingPublicApiUrl?: string;
   pmsPublicApiUrl?: string;
+  legacyCheckoutCommandProxyEnabled?: boolean;
+  checkoutAdapter?: BookingWebCheckoutAdapter;
   fetch?: FetchLike;
   now?: () => Date;
 };
@@ -85,6 +127,14 @@ export async function registerBookingWebPublicRoutes(
 ): Promise<void> {
   const fetchImpl = options.fetch ?? fetch;
   const now = options.now ?? (() => new Date());
+  const checkoutAdapter =
+    options.checkoutAdapter ??
+    createCompatibilityBookingWebCheckoutAdapter({
+      pmsPublicApiUrl: options.pmsPublicApiUrl,
+      bookingPublicApiUrl: options.bookingPublicApiUrl,
+      legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
+      fetch: fetchImpl,
+    });
 
   app.get<{ Params: BookingWebHostParams }>("/hosts/:host", async (request, reply) => {
     const host = normalizeHost(request.params.host);
@@ -164,6 +214,177 @@ export async function registerBookingWebPublicRoutes(
       return response;
     },
   );
+
+  app.get<{ Params: BookingWebHotelParams }>(
+    "/hotels/:slug/checkout-config",
+    async (request, reply) => {
+      const response = await checkoutAdapter.getCheckoutConfig(request.params.slug);
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-checkout-config");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
+    "/hotels/:slug/bookings",
+    async (request, reply) => {
+      const response = await checkoutAdapter.createBooking(request.params.slug, request.body ?? {});
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-create");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebBookingHandleParams }>(
+    "/hotels/:slug/bookings/:handle/confirm-authorization",
+    async (request, reply) => {
+      const response = await checkoutAdapter.confirmAuthorization(
+        request.params.slug,
+        request.params.handle,
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-confirm");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.get<{ Params: BookingWebHotelParams; Querystring: BookingWebBookingStatusQuery }>(
+    "/hotels/:slug/bookings/status",
+    async (request, reply) => {
+      const response = await checkoutAdapter.getStatus(request.params.slug, request.query);
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-status");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams; Body: BookingWebLookupRequest }>(
+    "/hotels/:slug/bookings/lookup",
+    async (request, reply) => {
+      const response = await checkoutAdapter.lookup(request.params.slug, request.body ?? {});
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-lookup");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.get<{ Params: BookingWebBookingHandleParams }>(
+    "/hotels/:slug/bookings/:handle/payment-instructions",
+    async (request, reply) => {
+      const response = await checkoutAdapter.getPaymentInstructions(
+        request.params.slug,
+        request.params.handle,
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-payment-instructions");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams; Body: BookingWebPromoValidationRequest }>(
+    "/hotels/:slug/promo/validate",
+    async (request, reply) => {
+      const response = await checkoutAdapter.validatePromo(request.params.slug, request.body ?? {});
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-promo-validate");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+}
+
+export function createCompatibilityBookingWebCheckoutAdapter(config: {
+  pmsPublicApiUrl?: string;
+  bookingPublicApiUrl?: string;
+  legacyCheckoutCommandProxyEnabled?: boolean;
+  fetch?: FetchLike;
+}): BookingWebCheckoutAdapter {
+  const fetchImpl = config.fetch ?? fetch;
+  const pmsPublicApiUrl = config.pmsPublicApiUrl?.trim();
+  const bookingPublicApiUrl = config.bookingPublicApiUrl?.trim();
+  // Legacy write proxying is an explicit transitional escape hatch until Booking
+  // owns idempotency, audit visibility, and PMS reservation sink handoff here.
+  const legacyCheckoutCommandProxyEnabled = config.legacyCheckoutCommandProxyEnabled === true;
+
+  return {
+    async getCheckoutConfig(slug) {
+      const settings = await fetchJson<Record<string, unknown>>({
+        baseUrl: pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/payment-settings`,
+        method: "GET",
+        fetch: fetchImpl,
+      });
+      return sanitizeCheckoutConfig(settings);
+    },
+    async createBooking(slug, request) {
+      assertLegacyCheckoutCommandProxyEnabled(legacyCheckoutCommandProxyEnabled);
+      return fetchJson({
+        baseUrl: pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/bookings`,
+        method: "POST",
+        body: request,
+        fetch: fetchImpl,
+      });
+    },
+    async confirmAuthorization(slug, handle) {
+      assertLegacyCheckoutCommandProxyEnabled(legacyCheckoutCommandProxyEnabled);
+      return fetchJson({
+        baseUrl: pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
+        method: "POST",
+        fetch: fetchImpl,
+      });
+    },
+    async getStatus(slug, query) {
+      const params = new URLSearchParams();
+      if (query.reference) params.set("reference", query.reference);
+      if (query.email) params.set("email", query.email);
+      return fetchJson({
+        baseUrl: pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/bookings/status?${params.toString()}`,
+        method: "GET",
+        fetch: fetchImpl,
+      });
+    },
+    async lookup(slug, request) {
+      return fetchJson({
+        baseUrl: pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/bookings/lookup`,
+        method: "POST",
+        body: request,
+        fetch: fetchImpl,
+      });
+    },
+    async getPaymentInstructions() {
+      throw createHttpError(404, "Booking-scoped payment instructions are not configured.");
+    },
+    async validatePromo(slug, request) {
+      const code = typeof request.code === "string" ? request.code.trim() : "";
+      if (!code) {
+        return { valid: false, code, message: "Promo code is required" };
+      }
+      return fetchJson({
+        baseUrl: bookingPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/validate-promo?${new URLSearchParams({
+          code,
+        }).toString()}`,
+        method: "GET",
+        fetch: fetchImpl,
+      });
+    },
+  };
+}
+
+function assertLegacyCheckoutCommandProxyEnabled(enabled: boolean): void {
+  if (!enabled) {
+    throw createHttpError(404, "Booking Web checkout command adapter is not configured.");
+  }
 }
 
 async function findProfileForHost(config: {
@@ -403,10 +624,76 @@ function numberRecord(value: unknown): Record<string, number> {
   );
 }
 
+function sanitizeCheckoutConfig(settings: Record<string, unknown>): Record<string, unknown> {
+  const sanitized = { ...settings };
+  delete sanitized["bankDetails"];
+  delete sanitized["paypalEmail"];
+  return sanitized;
+}
+
+async function fetchJson<T = unknown>(config: {
+  baseUrl?: string;
+  path: string;
+  method: "GET" | "POST";
+  body?: unknown;
+  fetch: FetchLike;
+}): Promise<T> {
+  if (!config.baseUrl?.trim()) {
+    throw createHttpError(404, "Booking Web checkout adapter is not configured.");
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const response = await config.fetch(new URL(config.path, config.baseUrl), {
+      signal: controller.signal,
+      method: config.method,
+      headers: config.method === "POST" ? { "content-type": "application/json" } : undefined,
+      body: config.body === undefined ? undefined : JSON.stringify(config.body),
+    });
+    const payload = await responseJson(response);
+    if (!response.ok) {
+      throw createHttpError(response.status, legacyErrorMessage(payload));
+    }
+    return payload as T;
+  } catch (error) {
+    if (isHttpError(error)) throw error;
+    throw createHttpError(502, "Booking Web checkout adapter request failed.");
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function responseJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function legacyErrorMessage(payload: unknown): string {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return "Booking Web checkout adapter request failed.";
+  }
+  const detail = (payload as Record<string, unknown>)["detail"];
+  return typeof detail === "string" && detail.trim()
+    ? detail
+    : "Booking Web checkout adapter request failed.";
+}
+
 function createHttpError(statusCode: number, message: string): HttpError {
   const error = new Error(message) as HttpError;
   error.statusCode = statusCode;
   return error;
+}
+
+function isHttpError(error: unknown): error is HttpError {
+  return (
+    error instanceof Error &&
+    "statusCode" in error &&
+    typeof (error as { statusCode?: unknown }).statusCode === "number"
+  );
 }
 
 type HttpError = Error & {

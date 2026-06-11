@@ -164,6 +164,31 @@ const legacyUnavailableDates: LegacyUnavailableDatesResponse = {
   max_stay_by_arrival: { "2026-09-15": 7 },
 };
 
+const legacyPaymentSettings = {
+  payAtPropertyEnabled: true,
+  onlineCardPayment: true,
+  bankTransfer: true,
+  paypalEnabled: true,
+  paypalEmail: "payments@alpenrose.example",
+  paypalPaymentWindowHours: 24,
+  bankDetails: {
+    accountHolder: "Hotel Alpenrose",
+    accountType: "iban",
+    iban: "AT611904300234573201",
+    bankName: "Alpine Bank",
+    swift: "ALPEATWW",
+  },
+  freeCancellationDays: 7,
+};
+
+const legacyBooking = {
+  id: "booking_internal_1",
+  bookingReference: "ALP-1001",
+  guestEmail: "guest@example.com",
+  status: "confirmed",
+  paymentStatus: "paid",
+};
+
 describe("Booking Web public bootstrap parity", () => {
   it("preserves hotel page bootstrap fields across the target adapter", async () => {
     const app = buildParityApp({
@@ -291,6 +316,173 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
+  it("routes checkout lifecycle calls through Booking Web target paths", async () => {
+    const legacyCalls: Array<{ method: string; path: string; body: unknown }> = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      legacyCheckoutCommandProxyEnabled: true,
+      async bookingWebPublicFetch(input, init) {
+        legacyCalls.push({
+          method: init?.method ?? "GET",
+          path: `${input.pathname}${input.search}`,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+
+        if (input.origin === "https://api.booking.localhost") {
+          return jsonResponse({
+            valid: true,
+            code: input.searchParams.get("code"),
+            discountType: "percentage",
+            discountValue: 10,
+          });
+        }
+        if (input.pathname.endsWith("/payment-settings")) {
+          return jsonResponse(legacyPaymentSettings);
+        }
+        if (input.pathname.endsWith("/confirm-authorization")) {
+          return jsonResponse({ ...legacyBooking, status: "confirmed" });
+        }
+        if (input.pathname.endsWith("/bookings/status")) {
+          return jsonResponse({
+            status: "confirmed",
+            paymentStatus: "paid",
+            hostResponseDeadline: null,
+          });
+        }
+        if (input.pathname.endsWith("/bookings/lookup")) {
+          return jsonResponse(legacyBooking);
+        }
+        if (input.pathname.endsWith("/bookings")) {
+          return jsonResponse({
+            booking: legacyBooking,
+            clientSecret: null,
+            xenditInvoiceUrl: null,
+            paymentMethod: "pay_at_property",
+            bookingReference: "ALP-1001",
+            paymentInstructions: {
+              bankTransfer: {
+                enabled: true,
+                details: legacyPaymentSettings.bankDetails,
+              },
+            },
+          });
+        }
+        return jsonResponse({ detail: "Not found" }, 404);
+      },
+    });
+
+    const checkoutConfig = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/checkout-config",
+    });
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings",
+      payload: {
+        roomTypeId: "room_deluxe",
+        guestEmail: "guest@example.com",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        paymentMethod: "pay_at_property",
+      },
+    });
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
+    });
+    const status = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/status?reference=ALP-1001&email=guest%40example.com",
+    });
+    const lookup = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup",
+      payload: { bookingReference: "ALP-1001", guestEmail: "guest@example.com" },
+    });
+    const paymentInstructions = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/ALP-1001/payment-instructions",
+    });
+    const promo = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/promo/validate",
+      payload: { code: "SUMMER10" },
+    });
+
+    expect([
+      checkoutConfig.statusCode,
+      create.statusCode,
+      confirm.statusCode,
+      status.statusCode,
+      lookup.statusCode,
+      promo.statusCode,
+    ]).toEqual([200, 200, 200, 200, 200, 200]);
+    expect(checkoutConfig.json()).toMatchObject({
+      payAtPropertyEnabled: true,
+      bankTransfer: true,
+      paypalEnabled: true,
+    });
+    expect(checkoutConfig.json()).not.toHaveProperty("bankDetails");
+    expect(checkoutConfig.json()).not.toHaveProperty("paypalEmail");
+    expect(create.json()).toMatchObject({ bookingReference: "ALP-1001" });
+    expect(confirm.json()).toMatchObject({ bookingReference: "ALP-1001" });
+    expect(status.json()).toMatchObject({ status: "confirmed", paymentStatus: "paid" });
+    expect(lookup.json()).toMatchObject({ bookingReference: "ALP-1001" });
+    expect(create.json()).toMatchObject({
+      paymentInstructions: {
+        bankTransfer: { enabled: true, details: legacyPaymentSettings.bankDetails },
+      },
+    });
+    expect(paymentInstructions.statusCode).toBe(404);
+    expect(promo.json()).toMatchObject({ valid: true, code: "SUMMER10" });
+    expect(legacyCalls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "GET /api/hotels/hotel-alpenrose/payment-settings",
+      "POST /api/hotels/hotel-alpenrose/bookings",
+      "POST /api/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
+      "GET /api/hotels/hotel-alpenrose/bookings/status?reference=ALP-1001&email=guest%40example.com",
+      "POST /api/hotels/hotel-alpenrose/bookings/lookup",
+      "GET /api/hotels/hotel-alpenrose/validate-promo?code=SUMMER10",
+    ]);
+    expect(legacyCalls[1]?.body).toMatchObject({ paymentMethod: "pay_at_property" });
+    expect(legacyCalls[4]?.body).toEqual({
+      bookingReference: "ALP-1001",
+      guestEmail: "guest@example.com",
+    });
+    await app.close();
+  });
+
+  it("does not proxy checkout commands to legacy PMS unless explicitly enabled", async () => {
+    const legacyCalls: string[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      async bookingWebPublicFetch(input) {
+        legacyCalls.push(input.pathname);
+        return jsonResponse({});
+      },
+    });
+
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings",
+      payload: { guestEmail: "guest@example.com" },
+    });
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
+    });
+
+    expect(create.statusCode).toBe(404);
+    expect(confirm.statusCode).toBe(404);
+    expect(legacyCalls).toEqual([]);
+    await app.close();
+  });
+
   it("reports actionable parity mismatches by fixture case and field", () => {
     const mismatches = compareCalendarParity("calendar-unavailable-dates", legacyUnavailableDates, {
       calendar: {
@@ -378,6 +570,13 @@ function buildParityApp(config: {
         headers: { "content-type": "application/json" },
       });
     },
+  });
+}
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
   });
 }
 
