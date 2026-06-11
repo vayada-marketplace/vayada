@@ -1,0 +1,26 @@
+{
+  "cli_version": "0.7.5",
+  "checkpoint_id": "226b85df4ebb",
+  "strategy": "manual-commit",
+  "branch": "codex/pr-254-fixes",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "engineering/apps-api-legacy-runtime-dependency-audit.md",
+    "engineering/booking-pms-route-migration-inventory.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/22/6b85df4ebb/0/metadata.json",
+      "transcript": "/22/6b85df4ebb/0/full.jsonl",
+      "content_hash": "/22/6b85df4ebb/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 25852,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 1265664,
+    "output_tokens": 3328,
+    "api_call_count": 12
+  }
+}
