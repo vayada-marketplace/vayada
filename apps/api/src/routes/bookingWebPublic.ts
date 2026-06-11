@@ -20,6 +20,7 @@ import {
 } from "./aiHotels.js";
 
 type FetchLike = (input: URL, init?: RequestInit) => Promise<Response>;
+export type BookingDomainResolutionSource = "legacy" | "target";
 
 type BookingWebHostParams = {
   host: string;
@@ -226,6 +227,7 @@ export type BookingWebPublicRoutesOptions = {
   profileRepository: PublicHotelProfileRepository;
   quoteRepository?: PublicHotelQuoteRepository;
   bookingPublicApiUrl?: string;
+  bookingDomainResolutionSource?: BookingDomainResolutionSource;
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   checkoutAdapter?: BookingWebCheckoutAdapter;
@@ -262,6 +264,7 @@ export async function registerBookingWebPublicRoutes(
       repository: options.profileRepository,
       host,
       bookingPublicApiUrl: options.bookingPublicApiUrl,
+      source: options.bookingDomainResolutionSource ?? "legacy",
       fetch: fetchImpl,
     });
     if (!profile) {
@@ -839,12 +842,17 @@ async function findProfileForHost(config: {
   repository: PublicHotelProfileRepository;
   host: string;
   bookingPublicApiUrl?: string;
+  source: BookingDomainResolutionSource;
   fetch: FetchLike;
 }): Promise<PublicBookabilityProfileProjection | null> {
   const { repository, host } = config;
   const subdomainSlug = slugFromKnownBookingHost(host);
   if (subdomainSlug) {
     return repository.findProfileBySlug(subdomainSlug);
+  }
+
+  if (config.source === "target") {
+    return repository.findProfileByCustomDomain?.(host) ?? null;
   }
 
   const resolvedSlug = await resolveVerifiedCustomDomainSlug(config);
