@@ -24,6 +24,15 @@ export {
   type AskUnavailableData,
 } from "./evidence.js";
 export {
+  planAskQuestion,
+  type AskClarificationReason,
+  type AskExternalDataTopic,
+  type AskPlan,
+  type AskPlanInput,
+  type AskPlannedToolCall,
+  type AskQuestionIntent,
+} from "./planner.js";
+export {
   ASK_ANSWER_SCHEMA_VERSION,
   ASK_PROMPT_VERSION,
   type AskAgentRuntime,
