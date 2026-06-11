@@ -1,5 +1,5 @@
 import { Hotel, RoomType, Addon } from "@/lib/types";
-import { bookingEngine, bookingWebPublic } from "./client";
+import { bookingEngine, bookingWebPublic, pmsApi } from "./client";
 import {
   bookingWebPublicApi,
   defaultOfferDates,
@@ -11,7 +11,13 @@ import { getBookingWebSessionId } from "./session";
 
 export const hotelService = {
   async getHotel(slug: string, locale: string = "en"): Promise<Hotel> {
-    return toLegacyHotel(await bookingWebPublicApi.getHotel(slug, { locale }));
+    try {
+      return toLegacyHotel(await bookingWebPublicApi.getHotel(slug, { locale }));
+    } catch {
+      return bookingEngine.get<Hotel>(
+        `/api/hotels/${encodeURIComponent(slug)}?lang=${encodeURIComponent(locale)}`,
+      );
+    }
   },
 
   async recordAffiliateClick(slug: string, referralCode: string): Promise<void> {
@@ -44,15 +50,27 @@ export const hotelService = {
     locale?: string,
   ): Promise<RoomType[]> {
     const dates = checkIn && checkOut ? { checkIn, checkOut } : defaultOfferDates();
-    const data = await bookingWebPublicApi.getOffers(slug, {
-      checkIn: dates.checkIn,
-      checkOut: dates.checkOut,
-      adults,
-      children,
-      rooms: 1,
-      locale,
-    });
-    return toLegacyRooms(data);
+    try {
+      const data = await bookingWebPublicApi.getOffers(slug, {
+        checkIn: dates.checkIn,
+        checkOut: dates.checkOut,
+        adults,
+        children,
+        rooms: 1,
+        locale,
+      });
+      return toLegacyRooms(data);
+    } catch {
+      const params = new URLSearchParams({
+        check_in: dates.checkIn,
+        check_out: dates.checkOut,
+      });
+      if (adults !== undefined) params.set("adults", String(adults));
+      if (children !== undefined) params.set("children", String(children));
+      return pmsApi.get<RoomType[]>(
+        `/api/hotels/${encodeURIComponent(slug)}/rooms?${params.toString()}`,
+      );
+    }
   },
 
   async getAddons(slug: string): Promise<Addon[]> {
@@ -71,7 +89,23 @@ export const hotelService = {
     try {
       return toLegacyCalendar(await bookingWebPublicApi.getCalendar(slug, start, end));
     } catch {
-      return { dates: [], minStayByArrival: {}, maxStayByArrival: {} };
+      try {
+        const params = new URLSearchParams({ start, end });
+        const data = await pmsApi.get<{
+          dates?: string[];
+          minStayByArrival?: Record<string, number>;
+          min_stay_by_arrival?: Record<string, number>;
+          maxStayByArrival?: Record<string, number>;
+          max_stay_by_arrival?: Record<string, number>;
+        }>(`/api/hotels/${encodeURIComponent(slug)}/unavailable-dates?${params.toString()}`);
+        return {
+          dates: data.dates || [],
+          minStayByArrival: data.minStayByArrival || data.min_stay_by_arrival || {},
+          maxStayByArrival: data.maxStayByArrival || data.max_stay_by_arrival || {},
+        };
+      } catch {
+        return { dates: [], minStayByArrival: {}, maxStayByArrival: {} };
+      }
     }
   },
 
@@ -85,9 +119,15 @@ export const hotelService = {
     discountValue?: number;
     message: string;
   }> {
-    return bookingWebPublic.post(
-      `/api/booking-web/hotels/${encodeURIComponent(slug)}/promo/validate`,
-      { code },
-    );
+    try {
+      return await bookingWebPublic.post(
+        `/api/booking-web/hotels/${encodeURIComponent(slug)}/promo/validate`,
+        { code },
+      );
+    } catch {
+      return bookingEngine.get(
+        `/api/hotels/${encodeURIComponent(slug)}/validate-promo?code=${encodeURIComponent(code)}`,
+      );
+    }
   },
 };
