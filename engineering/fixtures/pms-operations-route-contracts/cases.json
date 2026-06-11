@@ -66,6 +66,33 @@
       }
     },
     {
+      "caseId": "calendar-range-too-large",
+      "description": "Calendar reads reject ranges that exceed the documented 370-day maximum.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
+        "query": { "from": "2026-01-01", "to": "2027-02-01" }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_date_range",
+        "message": "Calendar date range cannot exceed 370 days."
+      }
+    },
+    {
+      "caseId": "calendar-read-model-unavailable",
+      "description": "Calendar reads fail explicitly when the target read model is unavailable.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
+        "query": { "from": "2026-08-15", "to": "2026-08-17" },
+        "simulate": { "readModelUnavailable": true }
+      },
+      "expected": {
+        "status": 500,
+        "errorCode": "read_model_unavailable",
+        "message": "PMS calendar read model is unavailable."
+      }
+    },
+    {
       "caseId": "reservations-assigned-unassigned",
       "description": "Operational reservations distinguish assigned and unassigned room positions.",
       "request": {
@@ -96,12 +123,32 @@
         "body": {
           "commandId": "cmd-assignment-conflict",
           "idempotencyKey": "pms-assignment-conflict-001",
+          "expectedVersion": "reservation-v7",
           "roomId": "f6855100-0000-0000-0000-000000000099"
         }
       },
       "expected": {
         "status": 409,
         "errorCode": "room_unavailable",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "assignment-command-version-conflict",
+      "description": "Assignment commands reject stale expectedVersion values before mutating assignments.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-version-conflict",
+          "idempotencyKey": "pms-assignment-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "roomId": "f6855100-0000-0000-0000-000000000001"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
         "sideEffects": []
       }
     },
@@ -162,6 +209,7 @@
         "body": {
           "commandId": "cmd-status-001",
           "idempotencyKey": "pms-status-001",
+          "expectedVersion": "reservation-v7",
           "status": "in_house"
         }
       },
@@ -173,6 +221,25 @@
       }
     },
     {
+      "caseId": "operational-status-version-conflict",
+      "description": "Operational status transitions reject stale expectedVersion values without guest-visible events.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/status",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-status-version-conflict",
+          "idempotencyKey": "pms-status-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "status": "in_house"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
+      }
+    },
+    {
       "caseId": "no-show-command",
       "description": "No-show marks the PMS operational assignment without invoking Booking guest cancellation commands.",
       "request": {
@@ -181,6 +248,7 @@
         "body": {
           "commandId": "cmd-no-show-001",
           "idempotencyKey": "pms-no-show-001",
+          "expectedVersion": "reservation-v7",
           "reason": "guest did not arrive"
         }
       },
@@ -189,6 +257,25 @@
         "mustInclude": ["reservation.status", "commandMeta.sideEffects"],
         "sideEffects": ["audit_event"],
         "mustNotCall": ["Booking cancellation command", "payment provider refund"]
+      }
+    },
+    {
+      "caseId": "no-show-version-conflict",
+      "description": "No-show commands reject stale expectedVersion values without audit side effects.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/no-show",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-no-show-version-conflict",
+          "idempotencyKey": "pms-no-show-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "reason": "guest did not arrive"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
       }
     },
     {
@@ -305,6 +392,7 @@
         "body": {
           "commandId": "cmd-checkout-001",
           "idempotencyKey": "pms-checkout-001",
+          "expectedVersion": "reservation-v7",
           "inspectionResults": [{ "stepId": "minibar", "status": "completed" }],
           "chargesSettled": ["f6855700-0000-0000-0000-000000000001"],
           "checkoutNotes": "Guest departed at 10:15."
@@ -319,6 +407,27 @@
           "commandMeta.sideEffects"
         ],
         "financeOwnership": "Payment provider collection, invoice posting, and payouts are out of scope for this command."
+      }
+    },
+    {
+      "caseId": "checkout-version-conflict",
+      "description": "Check-out commands reject stale expectedVersion values before recording checkout state.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkout-version-conflict",
+          "idempotencyKey": "pms-checkout-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "inspectionResults": [{ "stepId": "minibar", "status": "completed" }],
+          "chargesSettled": ["f6855700-0000-0000-0000-000000000001"],
+          "checkoutNotes": "Guest departed at 10:15."
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
       }
     },
     {

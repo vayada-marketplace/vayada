@@ -92,7 +92,7 @@ them.
 Read query rules:
 
 - Calendar requires `from` and `to` date query parameters and rejects ranges
-  over 370 days with `400 invalid_query`.
+  over 370 days with `400 invalid_date_range`.
 - Reservation list supports optional `status`, `arrivalFrom`, `arrivalTo`,
   `search`, `limit`, and `offset`. `limit` defaults to `50` and clamps to
   `[1, 500]`; `offset` defaults to `0`.
