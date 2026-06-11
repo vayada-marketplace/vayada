@@ -1,7 +1,21 @@
 import type { RequestContext } from "@vayada/backend-auth";
+import type {
+  AskAnswer,
+  AskAuditRecord,
+  AskAuditRepository,
+  AskScope,
+} from "@vayada/domain-intelligence";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { enforceRoutePolicy } from "./policy.js";
+
+export type {
+  AskAnswer,
+  AskAuditRecord,
+  AskAuditRepository,
+  AskScope,
+  AskStatus,
+} from "@vayada/domain-intelligence";
 
 export const ASK_API_CONTRACT = {
   method: "POST",
@@ -14,61 +28,6 @@ export const ASK_API_CONTRACT = {
     allowedRelationships: ["owner", "operator"],
   },
 } as const;
-
-export type AskStatus =
-  | "answered"
-  | "partial"
-  | "needs_clarification"
-  | "unavailable"
-  | "external_data_needed"
-  | "not_authorized";
-
-export type AskScope = {
-  organizationId: string;
-  bookingHotelId?: string;
-  pmsHotelId?: string;
-  dateRange?: { from: string; to: string };
-  locale?: string;
-  currency?: string;
-};
-
-export type AskAnswer = {
-  answerId: string;
-  contractVersion: "ask-intelligence-evidence.v1";
-  generatedAt: string;
-  conversationId: string;
-  runId: string;
-  question: string;
-  scope: AskScope;
-  status: AskStatus;
-  summary: string;
-  blocks: Record<string, unknown>[];
-  evidenceReferences: Record<string, unknown>[];
-  unavailableData: Record<string, unknown>[];
-  caveats: Record<string, unknown>[];
-  confidence: { level: "high" | "medium" | "low" | "unknown"; reasons: string[] };
-  suggestedActions: Record<string, unknown>[];
-  followUpQuestions: string[];
-  audit: {
-    requestId: string;
-    actorInternalUserId: string | null;
-    organizationId: string | null;
-    toolCallIds: string[];
-    deniedToolCallIds: string[];
-  };
-};
-
-export type AskAuditRecord = Pick<AskAnswer, "answerId" | "generatedAt" | "question" | "status"> & {
-  requestId: string;
-  actorInternalUserId: string | null;
-  organizationId: string | null;
-  bookingHotelId: string | null;
-};
-
-export type AskAuditRepository = {
-  recordAskRun(record: AskAuditRecord): Promise<void>;
-  close?(): Promise<void>;
-};
 
 export type AskRoutesOptions = {
   auditRepository?: AskAuditRepository;
@@ -194,12 +153,11 @@ function parseAskRequest(
     question: typeof body.question === "string" ? body.question.trim() : "",
     scope: {
       organizationId: typeof scope.organizationId === "string" ? scope.organizationId.trim() : "",
-      bookingHotelId:
-        typeof scope.bookingHotelId === "string" ? scope.bookingHotelId.trim() : undefined,
-      pmsHotelId: typeof scope.pmsHotelId === "string" ? scope.pmsHotelId.trim() : undefined,
+      bookingHotelId: optionalString(scope.bookingHotelId),
+      pmsHotelId: optionalString(scope.pmsHotelId),
       dateRange: dateRange(scope.dateRange),
-      locale: typeof scope.locale === "string" ? scope.locale.trim() : undefined,
-      currency: typeof scope.currency === "string" ? scope.currency.trim() : undefined,
+      locale: optionalString(scope.locale),
+      currency: optionalString(scope.currency),
     },
   };
   if (!parsed.question) return { ok: false, body: parsed, message: "Ask question is required." };
@@ -429,6 +387,12 @@ function evidence(
 
 function unavailable(id: string, reason: string, extra: Record<string, unknown> = {}) {
   return [{ unavailableDataId: id, reason, canRetry: true, canClarify: true, ...extra }];
+}
+
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function dateRange(value: unknown): AskScope["dateRange"] {

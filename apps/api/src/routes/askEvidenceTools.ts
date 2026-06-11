@@ -1,90 +1,24 @@
 import { hasActiveLinkedResource, hasPermission } from "@vayada/backend-authorization";
-import type { PermissionKey, RequestContext, ResourceType } from "@vayada/backend-auth";
+import type { PermissionKey, RequestContext } from "@vayada/backend-auth";
+import type {
+  AskEvidenceEntry,
+  AskEvidenceRepository,
+  AskEvidenceToolId,
+  AskEvidenceToolResult,
+  AskEvidenceToolScope,
+  AskEvidenceToolStatus,
+  AskUnavailableData,
+} from "@vayada/domain-intelligence";
 
-export type AskEvidenceToolId =
-  | "get_booking_performance"
-  | "get_booking_source_mix"
-  | "get_conversion_funnel"
-  | "get_setup_gaps"
-  | "get_hotel_settings_summary";
-
-export type AskEvidenceToolStatus =
-  | "available"
-  | "partial"
-  | "unavailable"
-  | "not_authorized"
-  | "invalid_scope"
-  | "error";
-
-export type AskEvidenceToolScope = {
-  organizationId: string;
-  bookingHotelId?: string;
-  pmsHotelId?: string;
-  dateRange?: { from: string; to: string };
-  locale?: string;
-  currency?: string;
-};
-
-export type AskEvidenceEntry = {
-  evidenceId: string;
-  sourceOwner: string;
-  sourceView: string;
-  product: "booking" | "hotel_catalog" | "intelligence";
-  resourceId: string;
-  resourceType: ResourceType;
-  metricKey: string;
-  filters: Record<string, unknown>;
-  freshness: { status: "fresh" | "stale" | "unknown" | "unavailable"; generatedAt?: string };
-  quality: "complete" | "partial" | "stale" | "estimated" | "hotelier_entered" | "unavailable";
-  sampleSize?: number;
-  aggregateId?: string;
-  valueSummary: Record<string, unknown>;
-};
-
-export type AskUnavailableData = {
-  unavailableDataId: string;
-  reason:
-    | "missing_scope"
-    | "not_linked_resource"
-    | "missing_permission"
-    | "source_unavailable"
-    | "stale_source"
-    | "empty_result";
-  sourceOwner?: string;
-  requestedToolId: AskEvidenceToolId;
-  canRetry: boolean;
-  canClarify: boolean;
-};
-
-export type AskEvidenceToolResult = {
-  toolCallId: string;
-  toolId: AskEvidenceToolId;
-  status: AskEvidenceToolStatus;
-  inputScope: AskEvidenceToolScope;
-  filters: Record<string, unknown>;
-  evidence: AskEvidenceEntry[];
-  unavailableData: AskUnavailableData[];
-  audit: {
-    requestId: string;
-    actorInternalUserId: string;
-    organizationId: string;
-    resourceId?: string;
-    permissionKeys: PermissionKey[];
-  };
-};
-
-export type AskEvidenceRepository = {
-  findMetricEvidence(input: {
-    metricKeys: string[];
-    resourceId: string;
-    dateRange?: AskEvidenceToolScope["dateRange"];
-    filters: Record<string, unknown>;
-  }): Promise<AskEvidenceEntry[]>;
-  findSetupEvidence(input: {
-    resourceId: string;
-    filters: Record<string, unknown>;
-  }): Promise<AskEvidenceEntry[]>;
-};
+export type {
+  AskEvidenceEntry,
+  AskEvidenceRepository,
+  AskEvidenceToolId,
+  AskEvidenceToolResult,
+  AskEvidenceToolScope,
+  AskEvidenceToolStatus,
+  AskUnavailableData,
+} from "@vayada/domain-intelligence";
 
 type ToolDefinition = {
   toolId: AskEvidenceToolId;
