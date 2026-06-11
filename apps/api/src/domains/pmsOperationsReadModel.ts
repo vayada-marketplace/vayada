@@ -377,8 +377,13 @@ function isJsonScalar(value: unknown): value is PmsJsonScalar {
 function toDecimalString(value: string | number | unknown): string {
   if (typeof value === "number") return value.toFixed(2);
   if (typeof value !== "string") return "0.00";
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : value;
+  const trimmed = value.trim();
+  if (!/^[+-]?\d+(?:\.\d+)?$/.test(trimmed)) return "0.00";
+
+  const sign = trimmed.startsWith("-") ? "-" : "";
+  const unsigned = trimmed.replace(/^[+-]/, "");
+  const [whole, fraction = ""] = unsigned.split(".");
+  return `${sign}${whole}.${fraction.padEnd(2, "0").slice(0, 2)}`;
 }
 
 function toInteger(value: string | number): number {

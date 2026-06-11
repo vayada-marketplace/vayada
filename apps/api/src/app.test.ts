@@ -90,6 +90,20 @@ const pmsOperationsContractCases = JSON.parse(
   }>;
 };
 
+function pmsOperationsRequestOptions(request: {
+  path: string;
+  query?: Record<string, string | number>;
+}): { url: string; query?: Record<string, string> } {
+  return {
+    url: request.path,
+    query: request.query
+      ? Object.fromEntries(
+          Object.entries(request.query).map(([key, value]) => [key, String(value)]),
+        )
+      : undefined,
+  };
+}
+
 const pmsRoomTypesReadCase = pmsOperationsContractCases.cases.find(
   (testCase) => testCase.caseId === "rooms-room-types-read",
 )!;
@@ -5057,7 +5071,7 @@ describe("vayada-api", () => {
 
     const response = await injectJson(app, {
       method: "GET",
-      url: pmsRoomTypesReadCase.request.path,
+      ...pmsOperationsRequestOptions(pmsRoomTypesReadCase.request),
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -5090,7 +5104,7 @@ describe("vayada-api", () => {
 
     const response = await injectJson(app, {
       method: "GET",
-      url: pmsRoomsReadCase.request.path,
+      ...pmsOperationsRequestOptions(pmsRoomsReadCase.request),
       headers: {
         authorization: "Bearer valid-token",
       },
@@ -5184,7 +5198,7 @@ describe("vayada-api", () => {
 
     const response = await injectJson(app, {
       method: "GET",
-      url: pmsRoomTypesReadCase.request.path,
+      ...pmsOperationsRequestOptions(pmsRoomTypesReadCase.request),
       headers: {
         authorization: "Bearer invalid-token",
       },
@@ -5200,7 +5214,6 @@ describe("vayada-api", () => {
   });
 
   it("passes the PMS operations authorization denial matrix", async () => {
-    const denialPath = pmsRoomTypesReadCase.request.path;
     type AuthenticatedAppOptions = NonNullable<Parameters<typeof buildAuthenticatedApp>[0]>;
     type PmsAuthorizationRuntimeCase = {
       condition: string;
@@ -5261,7 +5274,7 @@ describe("vayada-api", () => {
       app = buildAuthenticatedApp(runtimeCase!.appOptions);
       const response = await injectJson(app, {
         method: "GET",
-        url: denialPath,
+        ...pmsOperationsRequestOptions(pmsAuthorizationDenialCase.request),
         headers: runtimeCase!.requestHeaders,
       });
       await app.close();
