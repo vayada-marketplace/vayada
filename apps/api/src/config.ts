@@ -36,6 +36,16 @@ export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
+export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
+
+export type ProviderWebhookConfig = {
+  stripeSecret?: string;
+  xenditSecret?: string;
+  channexSecret?: string;
+  stripeMode: ProviderWebhookIntakeMode;
+  xenditMode: ProviderWebhookIntakeMode;
+  channexMode: ProviderWebhookIntakeMode;
+};
 
 export type ApiConfig = {
   host: string;
@@ -58,6 +68,7 @@ export type ApiConfig = {
   pmsPublicApiUrl?: string;
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingHostBase?: string;
+  providerWebhooks: ProviderWebhookConfig;
 };
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -181,6 +192,32 @@ function loadAskIntelligenceConfig(env: NodeJS.ProcessEnv): ApiAskIntelligenceCo
   };
 }
 
+function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfig {
+  return {
+    stripeSecret: readOptionalEnv(env, "STRIPE_WEBHOOK_SECRET"),
+    xenditSecret: readOptionalEnv(env, "XENDIT_WEBHOOK_SECRET"),
+    channexSecret: readOptionalEnv(env, "CHANNEX_WEBHOOK_SECRET"),
+    stripeMode: readSourceEnv(
+      env,
+      "STRIPE_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+    xenditMode: readSourceEnv(
+      env,
+      "XENDIT_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+    channexMode: readSourceEnv(
+      env,
+      "CHANNEX_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+  };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const server = loadServerConfig(env, {
     host: "0.0.0.0",
@@ -272,5 +309,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
+    providerWebhooks: loadProviderWebhookConfig(env),
   };
 }
