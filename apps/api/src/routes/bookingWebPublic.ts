@@ -511,15 +511,16 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
     "/hotels/:slug/bookings/:bookingId/withdraw",
     async (request, reply) => {
+      const body = normalizeGuestActionRequest(request.body ?? {});
       const response = await checkoutAdapter.withdraw(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
         checkoutCommandContext(
           request,
           "booking-withdraw",
           `${request.params.slug}:${request.params.bookingId}`,
-          request.body ?? {},
+          body,
           now,
         ),
       );
@@ -533,15 +534,16 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
     "/hotels/:slug/bookings/:bookingId/cancel-preview",
     async (request, reply) => {
+      const body = normalizeGuestActionRequest(request.body ?? {});
       const response = await checkoutAdapter.cancelPreview(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
         checkoutCommandContext(
           request,
           "booking-cancel-preview",
           `${request.params.slug}:${request.params.bookingId}`,
-          request.body ?? {},
+          body,
           now,
         ),
       );
@@ -555,15 +557,16 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebGuestActionRequest }>(
     "/hotels/:slug/bookings/:bookingId/cancel",
     async (request, reply) => {
+      const body = normalizeGuestActionRequest(request.body ?? {});
       const response = await checkoutAdapter.cancel(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
         checkoutCommandContext(
           request,
           "booking-cancel",
           `${request.params.slug}:${request.params.bookingId}`,
-          request.body ?? {},
+          body,
           now,
         ),
       );
@@ -577,15 +580,16 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebChangeRequest }>(
     "/hotels/:slug/bookings/:bookingId/change-request/preview",
     async (request, reply) => {
+      const body = normalizeChangeRequest(request.body ?? {});
       const response = await checkoutAdapter.previewChangeRequest(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
         checkoutCommandContext(
           request,
           "booking-change-preview",
           `${request.params.slug}:${request.params.bookingId}`,
-          request.body ?? {},
+          body,
           now,
         ),
       );
@@ -599,15 +603,16 @@ export async function registerBookingWebPublicRoutes(
   app.post<{ Params: BookingWebBookingIdParams; Body: BookingWebChangeRequest }>(
     "/hotels/:slug/bookings/:bookingId/change-request",
     async (request, reply) => {
+      const body = normalizeChangeRequest(request.body ?? {});
       const response = await checkoutAdapter.submitChangeRequest(
         request.params.slug,
         request.params.bookingId,
-        request.body ?? {},
+        body,
         checkoutCommandContext(
           request,
           "booking-change-submit",
           `${request.params.slug}:${request.params.bookingId}`,
-          request.body ?? {},
+          body,
           now,
         ),
       );
@@ -1091,7 +1096,7 @@ function normalizeGuestActionRequest(request: BookingWebGuestActionRequest): {
   };
 }
 
-function normalizeChangeRequest(request: BookingWebChangeRequest): Record<string, unknown> {
+function normalizeChangeRequest(request: BookingWebChangeRequest): BookingWebChangeRequest {
   return {
     guestEmail: request.guestEmail ?? request.guest_email,
     checkIn: request.checkIn,

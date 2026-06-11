@@ -952,6 +952,11 @@ describe("Booking Web public bootstrap parity", () => {
       }),
       app.inject({
         method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/withdraw",
+        payload: { guest_email: "guest@example.com" },
+      }),
+      app.inject({
+        method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/cancel-preview",
         payload: { guestEmail: "guest@example.com" },
       }),
@@ -964,6 +969,15 @@ describe("Booking Web public bootstrap parity", () => {
         method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request/preview",
         payload: changeRequestPayload(),
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request/preview",
+        payload: {
+          ...changeRequestPayload(),
+          guestEmail: undefined,
+          guest_email: "guest@example.com",
+        },
       }),
       app.inject({
         method: "POST",
@@ -985,23 +999,25 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(13).fill(200));
-    expect(operations.map((entry) => entry.operation)).toEqual(expect.arrayContaining([
-      "checkout-config",
-      "booking-create",
-      "booking-confirm-authorization",
-      "booking-status",
-      "booking-lookup",
-      "booking-withdraw",
-      "booking-cancel-preview",
-      "booking-cancel",
-      "booking-change-preview",
-      "booking-change-submit",
-      "booking-change-get",
-      "booking-payment-instructions",
-      "promo-validate",
-    ]));
-    expect(operations).toHaveLength(13);
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(15).fill(200));
+    expect(operations.map((entry) => entry.operation)).toEqual(
+      expect.arrayContaining([
+        "checkout-config",
+        "booking-create",
+        "booking-confirm-authorization",
+        "booking-status",
+        "booking-lookup",
+        "booking-withdraw",
+        "booking-cancel-preview",
+        "booking-cancel",
+        "booking-change-preview",
+        "booking-change-submit",
+        "booking-change-get",
+        "booking-payment-instructions",
+        "promo-validate",
+      ]),
+    );
+    expect(operations).toHaveLength(15);
     expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
       "guest-create-1",
     );
@@ -1019,6 +1035,16 @@ describe("Booking Web public bootstrap parity", () => {
       ),
     ).toBe(true);
     expect(operations.every((entry) => entry.idempotencyKey)).toBe(true);
+    const withdrawContexts = operations.filter((entry) => entry.operation === "booking-withdraw");
+    const changePreviewContexts = operations.filter(
+      (entry) => entry.operation === "booking-change-preview",
+    );
+    expect(withdrawContexts).toHaveLength(2);
+    expect(changePreviewContexts).toHaveLength(2);
+    expect(new Set(withdrawContexts.map((entry) => entry.fingerprint))).toHaveLength(1);
+    expect(new Set(withdrawContexts.map((entry) => entry.idempotencyKey))).toHaveLength(1);
+    expect(new Set(changePreviewContexts.map((entry) => entry.fingerprint))).toHaveLength(1);
+    expect(new Set(changePreviewContexts.map((entry) => entry.idempotencyKey))).toHaveLength(1);
     await app.close();
     expect(closed).toBe(1);
   });
