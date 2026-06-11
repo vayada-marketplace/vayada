@@ -223,7 +223,9 @@ controls is not enough for staging rehearsal.
    webhook summaries, and messaging setup. This needs a coordinated cutover
    window because external providers retry and can replay events. It also owns
    legacy scheduler shutdown for Channex polling, full ARI sync, and rolling
-   calendar auto-open.
+   calendar auto-open. Cutover sequencing, replay/idempotency rules, rollback,
+   and scheduler freeze ownership are defined in
+   [`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md).
 
 9. **A1: Affiliate dashboard and affiliate administration**
    Move public affiliate registration, affiliate dashboard, affiliate admin,
@@ -285,6 +287,7 @@ The staging rehearsal milestone is gated by these verticals:
 6. **VAY follow-up: Define Channex/webhook cutover plan**
    - Scope: provider endpoint switch, idempotency keys, replay handling,
      rollback, scheduler disable/freeze controls, and freeze requirements.
+   - Plan: [`channex-webhook-cutover-plan.md`](channex-webhook-cutover-plan.md).
 
 ## References
 
