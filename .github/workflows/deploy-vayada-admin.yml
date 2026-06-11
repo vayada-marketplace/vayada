@@ -55,6 +55,9 @@ jobs:
           push: true
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || 'https://api.vayada.com' }}
+            NEXT_PUBLIC_AUTH_API_URL=${{ secrets.NEXT_PUBLIC_AUTH_API_URL || 'https://api.vayada.com' }}
+            NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=${{ vars.NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED || 'true' }}
+            NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED=${{ vars.NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED || 'false' }}
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
