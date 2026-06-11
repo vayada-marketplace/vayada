@@ -79,6 +79,8 @@ const pmsOperationsContractCases = JSON.parse(
 ) as {
   cases: Array<{
     caseId: string;
+    skip?: boolean;
+    skipReason?: string;
     request: { path: string; query?: Record<string, string | number> };
     expected: {
       status?: number;
@@ -110,9 +112,9 @@ const pmsRoomTypesReadCase = pmsOperationsContractCases.cases.find(
 const pmsRoomsReadCase = pmsOperationsContractCases.cases.find(
   (testCase) => testCase.caseId === "rooms-read-statuses",
 )!;
-const pmsAuthorizationDenialCase = pmsOperationsContractCases.cases.find(
-  (testCase) => testCase.caseId === "authorization-denial-matrix",
-)!;
+const pmsAuthorizationDenialCases = pmsOperationsContractCases.cases.filter((testCase) =>
+  testCase.caseId.startsWith("authorization-denial-matrix-"),
+);
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_hotel_owner",
@@ -5265,25 +5267,30 @@ describe("vayada-api", () => {
       },
     ];
 
-    for (const matrixCase of pmsAuthorizationDenialCase.expected.denials ?? []) {
-      const runtimeCase = pmsAuthorizationCases.find(
-        (candidate) => candidate.condition === matrixCase.condition,
-      );
-      expect(runtimeCase, matrixCase.condition).toBeDefined();
+    expect(pmsAuthorizationDenialCases).toHaveLength(3);
 
-      app = buildAuthenticatedApp(runtimeCase!.appOptions);
-      const response = await injectJson(app, {
-        method: "GET",
-        ...pmsOperationsRequestOptions(pmsAuthorizationDenialCase.request),
-        headers: runtimeCase!.requestHeaders,
-      });
-      await app.close();
-      app = null;
+    for (const denialCase of pmsAuthorizationDenialCases) {
+      for (const matrixCase of denialCase.expected.denials ?? []) {
+        const runtimeCase = pmsAuthorizationCases.find(
+          (candidate) => candidate.condition === matrixCase.condition,
+        );
+        const assertionContext = `${denialCase.caseId}: ${matrixCase.condition}`;
+        expect(runtimeCase, assertionContext).toBeDefined();
 
-      expect(response.statusCode, matrixCase.condition).toBe(matrixCase.status);
-      expect((response.body as { code: string }).code, matrixCase.condition).toBe(
-        matrixCase.errorCode,
-      );
+        app = buildAuthenticatedApp(runtimeCase!.appOptions);
+        const response = await injectJson(app, {
+          method: "GET",
+          ...pmsOperationsRequestOptions(denialCase.request),
+          headers: runtimeCase!.requestHeaders,
+        });
+        await app.close();
+        app = null;
+
+        expect(response.statusCode, assertionContext).toBe(matrixCase.status);
+        expect((response.body as { code: string }).code, assertionContext).toBe(
+          matrixCase.errorCode,
+        );
+      }
     }
   });
 

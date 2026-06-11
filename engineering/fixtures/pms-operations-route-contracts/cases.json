@@ -44,6 +44,8 @@
     {
       "caseId": "calendar-blocks-read",
       "description": "Calendar rows include room-type and room-level blocks with balanced inventory counts.",
+      "skip": true,
+      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
         "query": { "from": "2026-08-15", "to": "2026-08-17" }
@@ -68,6 +70,8 @@
     {
       "caseId": "calendar-range-too-large",
       "description": "Calendar reads reject ranges that exceed the documented 370-day maximum.",
+      "skip": true,
+      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
         "query": { "from": "2026-01-01", "to": "2027-02-01" }
@@ -81,6 +85,8 @@
     {
       "caseId": "calendar-read-model-unavailable",
       "description": "Calendar reads fail explicitly when the target read model is unavailable.",
+      "skip": true,
+      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
         "query": { "from": "2026-08-15", "to": "2026-08-17" },
@@ -431,10 +437,60 @@
       }
     },
     {
-      "caseId": "authorization-denial-matrix",
+      "caseId": "authorization-denial-matrix-room-types",
       "description": "Protected PMS operations routes use RequestContext and deny missing auth, permissions, entitlements, and property links.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-types",
+        "query": {}
+      },
+      "expected": {
+        "denials": [
+          { "condition": "missing auth", "status": 401, "errorCode": "unauthenticated" },
+          { "condition": "missing permission", "status": 403, "errorCode": "missing_permission" },
+          { "condition": "missing entitlement", "status": 403, "errorCode": "missing_entitlement" },
+          {
+            "condition": "inactive entitlement",
+            "status": 403,
+            "errorCode": "inactive_entitlement"
+          },
+          {
+            "condition": "missing linked property",
+            "status": 403,
+            "errorCode": "missing_resource_access"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-rooms",
+      "description": "Protected PMS rooms route uses RequestContext and denies missing auth, permissions, entitlements, and property links.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/rooms",
+        "query": {}
+      },
+      "expected": {
+        "denials": [
+          { "condition": "missing auth", "status": 401, "errorCode": "unauthenticated" },
+          { "condition": "missing permission", "status": 403, "errorCode": "missing_permission" },
+          { "condition": "missing entitlement", "status": 403, "errorCode": "missing_entitlement" },
+          {
+            "condition": "inactive entitlement",
+            "status": 403,
+            "errorCode": "inactive_entitlement"
+          },
+          {
+            "condition": "missing linked property",
+            "status": 403,
+            "errorCode": "missing_resource_access"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-room-type-detail",
+      "description": "Protected PMS room-type detail route uses RequestContext and denies missing auth, permissions, entitlements, and property links.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-types/f6855000-0000-0000-0000-000000000001",
         "query": {}
       },
       "expected": {
