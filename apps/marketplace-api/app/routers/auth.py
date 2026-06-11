@@ -79,6 +79,27 @@ from app.totp_utils import (
 
 logger = logging.getLogger(__name__)
 
+LOCAL_AUTH_RETIRED_DETAIL = (
+    "Local password authentication is retired for this migrated WorkOS account. "
+    "Sign in with WorkOS AuthKit."
+)
+
+
+async def is_workos_migrated_platform_user(user: dict | None) -> bool:
+    if not settings.LOCAL_AUTH_RETIREMENT_ENABLED:
+        return False
+    if not user:
+        return False
+    is_platform_user = bool(user.get("is_superadmin")) or user.get("type") == "admin"
+    if not is_platform_user:
+        return False
+    return await UserRepository.has_workos_identity(str(user["id"]))
+
+
+async def reject_retired_local_auth(user: dict | None) -> None:
+    if await is_workos_migrated_platform_user(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=LOCAL_AUTH_RETIRED_DETAIL)
+
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
 
@@ -288,19 +309,18 @@ async def login(http_request: Request, request: LoginRequest):
     ua = http_request.headers.get("user-agent")
 
     try:
-        lockout = await RateLimitRepository.check_locked(request.email)
-        if lockout:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={
-                    "message": "Too many failed login attempts. Try again later.",
-                    "locked_until": lockout["locked_until"].isoformat(),
-                },
-            )
-
         user = await UserRepository.get_by_email(request.email)
 
         if not user:
+            lockout = await RateLimitRepository.check_locked(request.email)
+            if lockout:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail={
+                        "message": "Too many failed login attempts. Try again later.",
+                        "locked_until": lockout["locked_until"].isoformat(),
+                    },
+                )
             await RateLimitRepository.record_failure(request.email)
             await LoginAuditRepository.log(
                 email=request.email,
@@ -311,6 +331,28 @@ async def login(http_request: Request, request: LoginRequest):
             )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password"
+            )
+
+        if await is_workos_migrated_platform_user(user):
+            await LoginAuditRepository.log(
+                email=request.email,
+                success=False,
+                failure_reason="local_auth_retired",
+                auth_method="password",
+                user_id=str(user["id"]),
+                ip_address=ip,
+                user_agent=ua,
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=LOCAL_AUTH_RETIRED_DETAIL)
+
+        lockout = await RateLimitRepository.check_locked(request.email)
+        if lockout:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "message": "Too many failed login attempts. Try again later.",
+                    "locked_until": lockout["locked_until"].isoformat(),
+                },
             )
 
         password_valid = bcrypt.checkpw(
@@ -425,6 +467,7 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest):
     )
     if not user or user["status"] == "suspended":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+    await reject_retired_local_auth(user)
 
     secret_row = await TotpRepository.get_secret(user_id)
     if not secret_row or not secret_row["enrolled"]:
@@ -489,6 +532,7 @@ async def totp_setup(user_id: str = Depends(get_current_user_id)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin access required"
         )
+    await reject_retired_local_auth(user)
 
     secret = generate_totp_secret()
     await TotpRepository.upsert_secret(user_id, encrypt_secret(secret))
@@ -503,6 +547,9 @@ async def totp_setup(user_id: str = Depends(get_current_user_id)):
 @router.post("/totp/confirm", response_model=TotpConfirmResponse, status_code=status.HTTP_200_OK)
 async def totp_confirm(request: TotpConfirmRequest, user_id: str = Depends(get_current_user_id)):
     """Verify the first TOTP code to complete enrollment and receive recovery codes."""
+    user = await UserRepository.get_by_id(user_id, columns="id, type, is_superadmin")
+    await reject_retired_local_auth(user)
+
     secret_row = await TotpRepository.get_secret(user_id)
     if not secret_row:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Run /totp/setup first")
@@ -532,6 +579,9 @@ async def totp_regenerate_recovery_codes(
     request: TotpRegenerateRequest, user_id: str = Depends(get_current_user_id)
 ):
     """Regenerate recovery codes. Requires a valid TOTP code as confirmation."""
+    user = await UserRepository.get_by_id(user_id, columns="id, type, is_superadmin")
+    await reject_retired_local_auth(user)
+
     secret_row = await TotpRepository.get_secret(user_id)
     if not secret_row or not secret_row["enrolled"]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="2FA not enrolled")
@@ -675,7 +725,11 @@ async def forgot_password(request: ForgotPasswordRequest):
 
         # Always return success message (security best practice - don't reveal if email exists)
         # But only create token if user exists and is not suspended
-        if user and user["status"] != "suspended":
+        if (
+            user
+            and user["status"] != "suspended"
+            and not await is_workos_migrated_platform_user(user)
+        ):
             # Create password reset token (expires in 1 hour)
             token = await create_password_reset_token(str(user["id"]), expires_in_hours=1)
 
@@ -746,6 +800,10 @@ async def reset_password(request: ResetPasswordRequest):
             )
 
         user_id = token_data["user_id"]
+        user = await UserRepository.get_by_id(
+            user_id, columns="id, email, type, status, is_superadmin"
+        )
+        await reject_retired_local_auth(user)
 
         # Hash the new password
         password_hash = hash_password(request.new_password)
@@ -797,6 +855,16 @@ async def verify_email_endpoint(token: str = Query(..., description="Email verif
 
         user_id = token_data["user_id"]
         email = token_data["email"]
+        user = await UserRepository.get_by_id(
+            user_id, columns="id, email, type, status, is_superadmin"
+        )
+        if await is_workos_migrated_platform_user(user):
+            logger.info("Skipped legacy email verification for WorkOS-linked user %s", user_id)
+            return VerifyEmailResponse(
+                message="Email verification is managed by WorkOS AuthKit for this account.",
+                verified=False,
+                email=email,
+            )
 
         # Mark email as verified
         email_verified = await mark_email_as_verified(email)

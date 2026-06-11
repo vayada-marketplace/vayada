@@ -23,7 +23,7 @@ export function isAuthKitLoginEnabled(): boolean {
 }
 
 export function isLegacyPasswordFallbackEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED !== "false";
+  return process.env.NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED === "true";
 }
 
 export function setAuthKitSession(session: AuthKitSessionResponse): void {

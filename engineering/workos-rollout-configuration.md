@@ -271,6 +271,26 @@ session for that migrated surface. Keep legacy password hashes, reset tokens,
 and local TOTP data only for rollback, audit, or not-yet-linked users until a
 separate retirement ticket deletes or archives them.
 
+VAY-751 retirement state:
+
+- `vayada-admin` uses AuthKit login by default. The visible legacy password
+  fallback is now opt-in via `NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED=true`
+  and should only be enabled for rollback or an explicitly identified unlinked
+  admin cohort.
+- The server-side retirement gate defaults on via
+  `LOCAL_AUTH_RETIREMENT_ENABLED=true`. Set it to `false` only during an
+  intentional rollback window when linked admins must temporarily use the local
+  credential path again.
+- WorkOS-linked platform users (`users.type = 'admin'` or
+  `users.is_superadmin = true` with an `identity.external_identities.provider =
+  'workos'` row) cannot mint new local password sessions, complete legacy
+  password reset, consume legacy email verification tokens, or complete local
+  TOTP challenge/setup flows.
+- Unlinked users remain on the legacy credential path while the rollback window
+  and backfill cohort remain open. Local password, reset, email verification,
+  rate-limit, and TOTP tables are retained for those users and for rollback;
+  this ticket does not drop or archive credential material.
+
 Do not delete local credential material at the same time as first WorkOS login
 linking. Deletion belongs to a later cleanup after the cutover surface has been
 stable and rollback no longer depends on local credentials.
