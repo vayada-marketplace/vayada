@@ -3,7 +3,7 @@ Repository for users table (AuthDatabase).
 """
 
 import asyncpg
-from asyncpg.exceptions import UndefinedSchemaError, UndefinedTableError
+from asyncpg.exceptions import InvalidSchemaNameError, UndefinedTableError
 
 from app.database import AuthDatabase
 from app.repositories._sql import safe_columns
@@ -58,7 +58,7 @@ class UserRepository:
                 row = await conn.fetchrow(query, user_id)
             else:
                 row = await AuthDatabase.fetchrow(query, user_id)
-        except (UndefinedSchemaError, UndefinedTableError):
+        except (InvalidSchemaNameError, UndefinedTableError):
             return False
         return row is not None
 
