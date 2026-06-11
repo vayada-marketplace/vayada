@@ -16,7 +16,10 @@ import {
   createWorkosWebhookVerifier,
 } from "./platform/workosWebhooks.js";
 import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
-import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
+import {
+  createPgPublicHotelProfileRepository,
+  createTargetPublicHotelProfileRepository,
+} from "./routes/aiHotels.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import {
   createHttpPmsGuestFormSettingsSync,
@@ -50,12 +53,17 @@ function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   };
 }
 
-const publicHotelProfileRepository = config.bookingDatabaseUrl
-  ? createPgPublicHotelProfileRepository({
-      connectionString: config.bookingDatabaseUrl,
-      bookingHostBase: config.bookingHostBase,
-    })
-  : undefined;
+const publicHotelProfileRepository =
+  config.publicHotelProfileSource === "target"
+    ? createTargetPublicHotelProfileRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : config.bookingDatabaseUrl
+      ? createPgPublicHotelProfileRepository({
+          connectionString: config.bookingDatabaseUrl,
+          bookingHostBase: config.bookingHostBase,
+        })
+      : undefined;
 
 const bookingSettingsRepository =
   config.bookingSettingsSource === "target"
@@ -149,6 +157,7 @@ const app = buildApp({
       })
     : undefined,
   bookingPublicApiUrl: config.bookingPublicApiUrl,
+  bookingDomainResolutionSource: config.bookingDomainResolutionSource,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
