@@ -43,7 +43,10 @@ export type AskUnavailableData = {
     | "missing_permission"
     | "source_unavailable"
     | "stale_source"
-    | "empty_result";
+    | "empty_result"
+    | "source_not_in_catalog"
+    | "external_data_needed"
+    | "pii_restricted";
   sourceOwner?: string;
   requestedToolId: AskEvidenceToolId;
   canRetry: boolean;
