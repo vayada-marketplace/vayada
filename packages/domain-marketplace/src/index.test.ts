@@ -9,7 +9,14 @@ import {
   CREATOR_PROFILE_SELF_SERVICE_PRIVATE_KEYS,
   MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES,
   MARKETPLACE_COLLABORATION_CREATOR_READ_POLICY,
+  MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY,
   MARKETPLACE_COLLABORATION_HOTEL_READ_POLICY,
+  MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY,
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS,
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ENDPOINTS,
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ERROR_CODES,
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS,
   MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
   MARKETPLACE_COLLABORATION_READ_ENDPOINTS,
   MARKETPLACE_COLLABORATION_READ_ERROR_CODES,
@@ -36,6 +43,7 @@ import {
   type CreatorProfileDocument,
   type CreatorProfileStatusResult,
   type CreatorProfileUpdatedEvent,
+  type MarketplaceCollaborationLifecycleSideEffect,
   type MarketplaceCollaborationListResponse,
   type MarketplaceCollaborationMessagesResponse,
   type MarketplaceConversationSummary,
@@ -588,6 +596,153 @@ describe("@vayada/domain-marketplace", () => {
         "forbidden",
       ]),
     );
+  });
+
+  it("exports the collaboration lifecycle write contract, policies, and endpoints", () => {
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION).toBe(
+      "marketplace-collaboration-lifecycle-writes.v1",
+    );
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ENDPOINTS.create).toMatchObject({
+      method: "POST",
+      path: "/api/marketplace/collaborations",
+    });
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ENDPOINTS.respond.path).toContain(
+      "{collaborationId}/respond",
+    );
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ENDPOINTS.approveTerms.path).toContain(
+      "{collaborationId}/approve",
+    );
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS).toEqual(
+      expect.arrayContaining([
+        "create",
+        "respond",
+        "update_terms",
+        "approve_terms",
+        "cancel",
+        "toggle_deliverable",
+        "rate_creator",
+      ]),
+    );
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ERROR_CODES).toContain("idempotency_conflict");
+    expect(MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ERROR_CODES).toContain("invalid_transition");
+    expect(MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY).toMatchObject({
+      permission: "marketplace.collaboration.write",
+      side: "creator",
+      selectedOrganizationKind: "creator_workspace",
+    });
+    expect(MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY.requiredResources).toEqual([
+      expect.objectContaining({ resourceType: "creator_profile", relationship: "owner" }),
+    ]);
+    expect(MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY).toMatchObject({
+      permission: "marketplace.collaboration.write",
+      side: "hotel",
+      selectedOrganizationKind: "hotel_group",
+    });
+    expect(MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY.requiredResources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ resourceType: "hotel_profile", relationship: "owner" }),
+        expect.objectContaining({ resourceType: "hotel_listing", relationship: "operator" }),
+      ]),
+    );
+  });
+
+  it("types collaboration lifecycle side effects without exposing downstream internals", () => {
+    const sideEffects: MarketplaceCollaborationLifecycleSideEffect[] = [
+      { type: "marketplace.collaboration.accepted" },
+      {
+        type: "marketplace.affiliate.provision.command_requested",
+        idempotencyKey: buildAffiliateProvisioningIdempotencyKey({
+          collaborationId: "collab_688",
+        }),
+      },
+    ];
+
+    expect(sideEffects[1]).toMatchObject({
+      type: "marketplace.affiliate.provision.command_requested",
+      idempotencyKey: "marketplace.affiliate.provision:collaboration:collab_688:v1",
+    });
+    const serialized = JSON.stringify(sideEffects);
+    for (const privateKey of MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS) {
+      expect(serialized).not.toContain(privateKey);
+    }
+  });
+
+  it("keeps the V4 collaboration lifecycle write fixtures focused on writes and denials", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../engineering/fixtures/marketplace-collaboration-lifecycle-writes/cases.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ) as {
+      contractVersion: string;
+      readContractVersion: string;
+      authContexts: Record<string, { organizationKind: string }>;
+      cases: Array<{
+        caseId: string;
+        request: {
+          action?: string;
+          side?: string;
+          idempotencyKey?: string;
+          authRef?: string;
+        };
+        expected: {
+          status: number;
+          errorCode?: string;
+          collaborationStatus?: string;
+          affiliateProvisioningIdempotencyKey?: string;
+          mustNotWrite?: string[];
+        };
+      }>;
+    };
+
+    expect(fixture.contractVersion).toBe(
+      MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
+    );
+    expect(fixture.readContractVersion).toBe(MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION);
+    const caseIds = fixture.cases.map((entry) => entry.caseId);
+    expect(caseIds).toContain("creator-create-collaboration-linked-resource");
+    expect(caseIds).toContain("hotel-create-invitation-linked-listing-resource");
+    expect(caseIds).toContain("approve-accepted-emits-affiliate-provisioning-command");
+    expect(caseIds).toContain("approve-deny-invalid-transition");
+    expect(fixture.cases.every((entry) => entry.request.idempotencyKey?.endsWith(":v1"))).toBe(
+      true,
+    );
+    expect(
+      fixture.cases.some(
+        (entry) =>
+          entry.request.side === "creator" &&
+          entry.request.authRef &&
+          fixture.authContexts[entry.request.authRef]?.organizationKind === "creator_workspace" &&
+          entry.expected.status === 201,
+      ),
+    ).toBe(true);
+    expect(
+      fixture.cases.some(
+        (entry) =>
+          entry.request.side === "hotel" &&
+          entry.request.authRef &&
+          fixture.authContexts[entry.request.authRef]?.organizationKind === "hotel_group" &&
+          entry.expected.status === 201,
+      ),
+    ).toBe(true);
+    expect(fixture.cases.map((entry) => entry.expected.errorCode).filter(Boolean)).toEqual(
+      expect.arrayContaining(["forbidden", "missing_hotel_resource_link", "invalid_transition"]),
+    );
+    expect(
+      fixture.cases.find(
+        (entry) => entry.caseId === "approve-accepted-emits-affiliate-provisioning-command",
+      )?.expected.affiliateProvisioningIdempotencyKey,
+    ).toBe("marketplace.affiliate.provision:collaboration:collab_688:v1");
+    expect(
+      fixture.cases
+        .flatMap((entry) => entry.expected.mustNotWrite ?? [])
+        .filter(
+          (target) => target === "pms.*" || target === "finance.*" || target === "affiliate.*",
+        ),
+    ).toEqual(expect.arrayContaining(["pms.*", "finance.*", "affiliate.*"]));
   });
 
   it("exports affiliate provisioning statuses", () => {

@@ -1,0 +1,149 @@
+{
+  "contractVersion": "marketplace-collaboration-lifecycle-writes.v1",
+  "readContractVersion": "marketplace-collaboration-reads.v1",
+  "authContexts": {
+    "creatorLinked": {
+      "organizationKind": "creator_workspace",
+      "organizationId": "org_creator_lina",
+      "permission": "marketplace.collaboration.write",
+      "linkedResources": ["marketplace:creator_profile:creator_profile_lina:owner"]
+    },
+    "hotelLinked": {
+      "organizationKind": "hotel_group",
+      "organizationId": "org_hotel_alpenrose",
+      "permission": "marketplace.collaboration.write",
+      "linkedResources": [
+        "marketplace:hotel_profile:hotel_profile_alpenrose:owner",
+        "marketplace:hotel_listing:hotel_listing_alpenrose_spa:operator"
+      ]
+    },
+    "hotelProfileOnly": {
+      "organizationKind": "hotel_group",
+      "organizationId": "org_hotel_alpenrose",
+      "permission": "marketplace.collaboration.write",
+      "linkedResources": ["marketplace:hotel_profile:hotel_profile_alpenrose:owner"]
+    }
+  },
+  "cases": [
+    {
+      "caseId": "creator-create-collaboration-linked-resource",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations",
+        "action": "create",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.create:legacy_listing_688:nonce_creator:v1",
+        "body": {
+          "listingId": "legacy_listing_688",
+          "creatorId": "legacy_creator_lina",
+          "initiatorSide": "creator"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "authorizationMode": "creator_workspace_resource_link",
+        "collaborationStatus": "pending",
+        "mustInclude": ["collaboration.listingId", "collaboration.creatorId"],
+        "mustNotWrite": ["pms.*", "finance.*", "affiliate.*"]
+      }
+    },
+    {
+      "caseId": "hotel-create-invitation-linked-listing-resource",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations",
+        "action": "create",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.create:legacy_listing_688:nonce_hotel:v1",
+        "body": {
+          "listingId": "legacy_listing_688",
+          "creatorId": "legacy_creator_lina",
+          "initiatorSide": "hotel"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "authorizationMode": "hotel_group_resource_link",
+        "collaborationStatus": "pending"
+      }
+    },
+    {
+      "caseId": "hotel-recipient-respond-accepts-to-negotiating",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/respond",
+        "action": "respond",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.respond:collab_688:nonce_accept:v1",
+        "body": { "status": "accepted" }
+      },
+      "expected": {
+        "status": 200,
+        "collaborationStatus": "negotiating",
+        "sideEffects": ["marketplace.collaboration.system_message_requested"]
+      }
+    },
+    {
+      "caseId": "approve-accepted-emits-affiliate-provisioning-command",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/approve",
+        "action": "approve_terms",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.approve_terms:collab_688:nonce:v1",
+        "body": { "acceptedTermsVersion": "terms_v3" }
+      },
+      "expected": {
+        "status": 200,
+        "collaborationStatus": "accepted",
+        "sideEffects": [
+          "marketplace.collaboration.accepted",
+          "marketplace.affiliate.provision.command_requested"
+        ],
+        "affiliateProvisioningIdempotencyKey": "marketplace.affiliate.provision:collaboration:collab_688:v1",
+        "mustNotWrite": ["pms.*", "finance.*", "affiliate.*"]
+      }
+    },
+    {
+      "caseId": "respond-deny-wrong-side-initiator",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/respond",
+        "action": "respond",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.respond:collab_688:nonce_self:v1",
+        "body": { "status": "accepted" }
+      },
+      "expected": { "status": 403, "errorCode": "forbidden" }
+    },
+    {
+      "caseId": "approve-deny-missing-hotel-listing-link",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/approve",
+        "action": "approve_terms",
+        "side": "hotel",
+        "authRef": "hotelProfileOnly",
+        "idempotencyKey": "marketplace.collaboration.approve_terms:collab_688:nonce_missing:v1"
+      },
+      "expected": { "status": 403, "errorCode": "missing_hotel_resource_link" }
+    },
+    {
+      "caseId": "approve-deny-invalid-transition",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_pending/approve",
+        "action": "approve_terms",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.approve_terms:collab_pending:nonce:v1"
+      },
+      "expected": { "status": 409, "errorCode": "invalid_transition" }
+    }
+  ]
+}
