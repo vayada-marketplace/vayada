@@ -46,7 +46,6 @@ export type BookingWebAffiliateStripeConnectProvider = {
     affiliateId: string;
     email: string;
     idempotencyKey: string;
-    organizationId: string;
     slug: string;
   }): Promise<{
     onboardingUrl: string;
@@ -166,14 +165,17 @@ export function createPgBookingWebAffiliateRepository(
       const result = await pool.query<{ exists: boolean }>(
         `SELECT EXISTS (
            SELECT 1
-           FROM identity.organization_resource_links
-           WHERE product = 'affiliate'
-             AND resource_type = 'affiliate'
-             AND relationship = 'promotes'
-             AND status = 'active'
-             AND resource_id = $1
+           FROM platform.domain_events event
+           WHERE event.source_system = 'marketplace'
+             AND event.event_key = $1
+             AND event.event_type = 'marketplace.affiliate.public_registered'
+             AND event.resource_product = 'marketplace'
+             AND event.resource_type = 'affiliate'
+             AND event.resource_id = $2
+             AND event.payload ->> 'hotelSlug' = lower($3)
+             AND event.payload ->> 'emailHash' = $4
          ) AS exists`,
-        [identity.affiliateId],
+        [registrationEventKey(identity.affiliateId), identity.affiliateId, slug, sha256(email)],
       );
       return { exists: result.rows[0]?.exists === true };
     },
@@ -188,43 +190,6 @@ export function createPgBookingWebAffiliateRepository(
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        await client.query(
-          `INSERT INTO identity.users (id, email, name, status, created_at, updated_at)
-           VALUES ($1, $2, $3, 'pending', $4, $4)
-           ON CONFLICT (id) DO UPDATE
-           SET email = EXCLUDED.email,
-               name = COALESCE(NULLIF(EXCLUDED.name, ''), identity.users.name),
-               updated_at = EXCLUDED.updated_at`,
-          [identity.userId, email, fullName, timestamp],
-        );
-        await client.query(
-          `INSERT INTO identity.organizations (id, kind, name, slug, status, created_at, updated_at)
-           VALUES ($1, 'affiliate_partner', $2, $3, 'active', $4, $4)
-           ON CONFLICT (id) DO UPDATE
-           SET name = EXCLUDED.name,
-               status = 'active',
-               updated_at = EXCLUDED.updated_at`,
-          [identity.organizationId, fullName, identity.organizationSlug, timestamp],
-        );
-        await client.query(
-          `INSERT INTO identity.organization_memberships
-             (id, organization_id, user_id, status, role_key, created_at, updated_at)
-           VALUES ($1, $2, $3, 'pending', 'affiliate_owner', $4, $4)
-           ON CONFLICT (organization_id, user_id) DO UPDATE
-           SET status = EXCLUDED.status,
-               role_key = EXCLUDED.role_key,
-               updated_at = EXCLUDED.updated_at`,
-          [identity.membershipId, identity.organizationId, identity.userId, timestamp],
-        );
-        await client.query(
-          `INSERT INTO identity.organization_resource_links
-             (id, organization_id, product, resource_type, resource_id, relationship, status, created_at, updated_at)
-           VALUES ($1, $2, 'affiliate', 'affiliate', $3, 'promotes', 'active', $4, $4)
-           ON CONFLICT (organization_id, product, resource_type, resource_id, relationship) DO UPDATE
-           SET status = 'active',
-               updated_at = EXCLUDED.updated_at`,
-          [identity.resourceLinkId, identity.organizationId, identity.affiliateId, timestamp],
-        );
         await insertRegistrationEvent(client, {
           identity,
           slug,
@@ -265,13 +230,11 @@ export function createPgBookingWebAffiliateRepository(
           affiliateId,
           email,
           idempotencyKey: affiliateId,
-          organizationId: affiliate.organizationId,
           slug,
         });
         await client.query("BEGIN");
         await insertStripeConnectEvent(client, {
           affiliateId,
-          organizationId: affiliate.organizationId,
           providerAccountId: providerAccount.providerAccountId,
           timestamp,
         });
@@ -338,37 +301,29 @@ async function findAffiliateRegistration(
     affiliateId: string;
     email: string;
   },
-): Promise<{ organizationId: string } | null> {
+): Promise<{ affiliateId: string } | null> {
   const identity = stableAffiliateIdentity(input.slug, input.email);
   if (identity.affiliateId !== input.affiliateId) {
     return null;
   }
 
-  const result = await client.query<{ organizationId: string }>(
-    `SELECT link.organization_id AS "organizationId"
-     FROM identity.organization_resource_links link
-     JOIN identity.organization_memberships membership
-      ON membership.organization_id = link.organization_id
-      AND membership.user_id = $4
-      AND membership.status IN ('pending', 'active')
-      AND membership.role_key = 'affiliate_owner'
-     JOIN identity.users app_user
-       ON app_user.id = membership.user_id
-      AND lower(app_user.email) = $3
-     WHERE link.id = $1
-       AND link.organization_id = $5
-       AND link.product = 'affiliate'
-       AND link.resource_type = 'affiliate'
-       AND link.relationship = 'promotes'
-       AND link.status = 'active'
-       AND link.resource_id = $2
-     LIMIT 1`,
+  const result = await client.query<{ affiliateId: string }>(
+    `SELECT event.resource_id AS "affiliateId"
+	     FROM platform.domain_events event
+	     WHERE event.source_system = 'marketplace'
+	       AND event.event_key = $1
+	       AND event.event_type = 'marketplace.affiliate.public_registered'
+	       AND event.resource_product = 'marketplace'
+	       AND event.resource_type = 'affiliate'
+	       AND event.resource_id = $2
+	       AND event.payload ->> 'hotelSlug' = lower($3)
+	       AND event.payload ->> 'emailHash' = $4
+	     LIMIT 1`,
     [
-      identity.resourceLinkId,
+      registrationEventKey(identity.affiliateId),
       input.affiliateId,
-      input.email,
-      identity.userId,
-      identity.organizationId,
+      input.slug,
+      sha256(input.email),
     ],
   );
   return result.rows[0] ?? null;
@@ -384,7 +339,7 @@ async function insertRegistrationEvent(
     timestamp: string;
   },
 ): Promise<void> {
-  const eventKey = `marketplace.affiliate.public_registered:${input.identity.affiliateId}:v1`;
+  const eventKey = registrationEventKey(input.identity.affiliateId);
   const payload = {
     affiliateId: input.identity.affiliateId,
     referralCode: input.identity.referralCode,
@@ -402,9 +357,9 @@ async function insertRegistrationEvent(
          event_key,
          event_type,
          event_version,
-         occurred_at,
-         tenant_scope,
-         organization_id,
+	         occurred_at,
+	         tenant_scope,
+	         organization_id,
          resource_product,
          resource_type,
          resource_id,
@@ -413,16 +368,15 @@ async function insertRegistrationEvent(
          payload,
          event_metadata,
          privacy_scope
-       )
-     VALUES
-       ('marketplace', $1, 'marketplace.affiliate.public_registered', 1, $2,
-        'organization', $3, 'marketplace', 'affiliate', $4, 'system', $5,
-        $6::jsonb, $7::jsonb, 'confidential')
-     ON CONFLICT (source_system, event_key) DO NOTHING`,
+	       )
+	     VALUES
+	       ('marketplace', $1, 'marketplace.affiliate.public_registered', 1, $2,
+	        'external', NULL, 'marketplace', 'affiliate', $3, 'system', $4,
+	        $5::jsonb, $6::jsonb, 'confidential')
+	     ON CONFLICT (source_system, event_key) DO NOTHING`,
     [
       eventKey,
       input.timestamp,
-      input.identity.organizationId,
       input.identity.affiliateId,
       eventKey,
       JSON.stringify(payload),
@@ -447,17 +401,16 @@ async function insertRegistrationEvent(
          redacted_payload,
          audit_metadata,
          retention_class,
-         privacy_scope
-       )
-     VALUES
-       ($1, 'marketplace', 'marketplace.affiliate.public_registered', $2,
-        'organization', $3, 'system', 'marketplace', 'affiliate', $4, $1,
-        $5::jsonb, $6::jsonb, 'standard', 'confidential')
-     ON CONFLICT (product, audit_key) DO NOTHING`,
+	         privacy_scope
+	       )
+	     VALUES
+	       ($1, 'marketplace', 'marketplace.affiliate.public_registered', $2,
+	        'external', NULL, 'system', 'marketplace', 'affiliate', $3, $1,
+	        $4::jsonb, $5::jsonb, 'standard', 'confidential')
+	     ON CONFLICT (product, audit_key) DO NOTHING`,
     [
       eventKey,
       input.timestamp,
-      input.identity.organizationId,
       input.identity.affiliateId,
       JSON.stringify(payload),
       JSON.stringify({ source: "booking-web-affiliate-target" }),
@@ -469,7 +422,6 @@ async function insertStripeConnectEvent(
   client: pg.PoolClient,
   input: {
     affiliateId: string;
-    organizationId: string;
     providerAccountId: string;
     timestamp: string;
   },
@@ -499,16 +451,15 @@ async function insertStripeConnectEvent(
          payload,
          event_metadata,
          privacy_scope
-       )
-     VALUES
-       ('finance', $1, 'finance.affiliate.stripe_connect_link_requested', 1, $2,
-        'organization', $3, 'finance', 'payment_provider_account', $4, 'system', $1,
-        $5::jsonb, $6::jsonb, 'confidential')
-     ON CONFLICT (source_system, event_key) DO NOTHING`,
+	       )
+	     VALUES
+	       ('finance', $1, 'finance.affiliate.stripe_connect_link_requested', 1, $2,
+	        'external', NULL, 'finance', 'payment_provider_account', $3, 'system', $1,
+	        $4::jsonb, $5::jsonb, 'confidential')
+	     ON CONFLICT (source_system, event_key) DO NOTHING`,
     [
       eventKey,
       input.timestamp,
-      input.organizationId,
       input.providerAccountId,
       JSON.stringify(payload),
       JSON.stringify({ source: "booking-web-affiliate-target" }),
@@ -533,16 +484,15 @@ async function insertStripeConnectEvent(
          audit_metadata,
          retention_class,
          privacy_scope
-       )
-     VALUES
-       ($1, 'finance', 'finance.affiliate.stripe_connect_link_requested', $2,
-        'organization', $3, 'system', 'finance', 'payment_provider_account', $4, $1,
-        $5::jsonb, $6::jsonb, 'financial', 'confidential')
-     ON CONFLICT (product, audit_key) DO NOTHING`,
+	       )
+	     VALUES
+	       ($1, 'finance', 'finance.affiliate.stripe_connect_link_requested', $2,
+	        'external', NULL, 'system', 'finance', 'payment_provider_account', $3, $1,
+	        $4::jsonb, $5::jsonb, 'financial', 'confidential')
+	     ON CONFLICT (product, audit_key) DO NOTHING`,
     [
       eventKey,
       input.timestamp,
-      input.organizationId,
       input.providerAccountId,
       JSON.stringify(payload),
       JSON.stringify({ source: "booking-web-affiliate-target" }),
@@ -553,11 +503,6 @@ async function insertStripeConnectEvent(
 type StableAffiliateIdentity = {
   affiliateId: string;
   referralCode: string;
-  userId: string;
-  organizationId: string;
-  organizationSlug: string;
-  membershipId: string;
-  resourceLinkId: string;
 };
 
 function stableAffiliateIdentity(slug: string, email: string): StableAffiliateIdentity {
@@ -570,12 +515,11 @@ function stableAffiliateIdentity(slug: string, email: string): StableAffiliateId
   return {
     affiliateId: `aff_${affiliateHash.slice(0, 20)}`,
     referralCode: `VA${affiliateHash.slice(0, 8).toUpperCase()}`,
-    userId: uuidFromHash(`affiliate-user:${normalizedEmail}`),
-    organizationId: uuidFromHash(`affiliate-organization:${normalizedEmail}`),
-    organizationSlug: `affiliate-${emailHash.slice(0, 16)}`,
-    membershipId: uuidFromHash(`affiliate-membership:${normalizedEmail}`),
-    resourceLinkId: uuidFromHash(`affiliate-resource-link:${key}`),
   };
+}
+
+function registrationEventKey(affiliateId: string): string {
+  return `marketplace.affiliate.public_registered:${affiliateId}:v1`;
 }
 
 function normalizeEmail(value: unknown): string {
@@ -590,17 +534,6 @@ function normalizeSlug(value: string): string {
 
 function sha256(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function uuidFromHash(value: string): string {
-  const hash = sha256(value).slice(0, 32).split("");
-  hash[12] = "4";
-  hash[16] = ((Number.parseInt(hash[16] ?? "0", 16) & 0x3) | 0x8).toString(16);
-  const hex = hash.join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
-    16,
-    20,
-  )}-${hex.slice(20)}`;
 }
 
 function createHttpError(statusCode: number, message: string): HttpError {
