@@ -632,9 +632,12 @@ export const collaborationService = {
         rating,
         comment,
       });
+      if (response.command.action !== "rate_creator" || !response.command.ratingId) {
+        throw new Error("Lifecycle rate response did not include a ratingId.");
+      }
       return {
         message: "Rating submitted successfully",
-        rating_id: response.command.idempotencyKey,
+        rating_id: response.command.ratingId,
         created_at: response.command.acceptedAt ?? response.collaboration.updatedAt,
       };
     } catch (error) {

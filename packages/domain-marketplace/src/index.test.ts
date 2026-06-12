@@ -692,6 +692,7 @@ describe("@vayada/domain-marketplace", () => {
           status: number;
           errorCode?: string;
           collaborationStatus?: string;
+          ratingId?: string;
           idempotencyBehavior?: "replay" | "conflict";
           replayOf?: string;
           sideEffects?: string[];
@@ -789,6 +790,15 @@ describe("@vayada/domain-marketplace", () => {
         (entry) => entry.caseId === "approve-idempotency-conflict-does-not-provision-affiliate",
       )?.expected.sideEffects,
     ).toEqual([]);
+    expect(
+      fixture.cases.find((entry) => entry.caseId === "rate-creator-success-completed-collaboration")
+        ?.expected.ratingId,
+    ).toBe("rating_collab_completed_001");
+    expect(
+      fixture.cases.find(
+        (entry) => entry.caseId === "rate-creator-idempotency-replay-returns-original-rating",
+      )?.expected.ratingId,
+    ).toBe("rating_collab_completed_001");
     expect(
       fixture.cases
         .flatMap((entry) => entry.expected.mustNotWrite ?? [])

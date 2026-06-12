@@ -540,6 +540,7 @@
       "expected": {
         "status": 200,
         "collaborationStatus": "completed",
+        "ratingId": "rating_collab_completed_001",
         "sideEffects": ["marketplace.collaboration.notification_requested"]
       }
     },
@@ -571,7 +572,8 @@
         "status": 200,
         "idempotencyBehavior": "replay",
         "replayOf": "rate-creator-success-completed-collaboration",
-        "collaborationStatus": "completed"
+        "collaborationStatus": "completed",
+        "ratingId": "rating_collab_completed_001"
       }
     },
     {

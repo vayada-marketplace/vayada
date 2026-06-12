@@ -80,6 +80,10 @@ events, and affiliate provisioning commands. `sideEffects` must not expose
 private email addresses, WorkOS membership IDs, PMS hotel IDs, or raw database
 handles.
 
+`rate_creator` responses must include `command.ratingId`, the persisted rating
+identifier. Idempotency replays for the same rating return the original
+`ratingId`; clients must not derive rating identifiers from idempotency keys.
+
 ## Error Codes
 
 | Code                            | Status | Meaning                                                    |

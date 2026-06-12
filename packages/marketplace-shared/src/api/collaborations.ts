@@ -154,12 +154,21 @@ export type MarketplaceCollaborationLifecycleSideEffect =
       idempotencyKey: string;
     };
 
-export type MarketplaceCollaborationLifecycleWriteCommand = {
+type MarketplaceCollaborationLifecycleWriteCommandBase = {
   action: MarketplaceCollaborationLifecycleWriteAction;
   idempotencyKey: string;
   replayed?: boolean;
   acceptedAt?: string;
 };
+
+export type MarketplaceCollaborationLifecycleWriteCommand =
+  | (MarketplaceCollaborationLifecycleWriteCommandBase & {
+      action: Exclude<MarketplaceCollaborationLifecycleWriteAction, "rate_creator">;
+    })
+  | (MarketplaceCollaborationLifecycleWriteCommandBase & {
+      action: "rate_creator";
+      ratingId: string;
+    });
 
 export type MarketplaceCollaborationLifecycleWriteResponse = {
   contractVersion: MarketplaceCollaborationLifecycleWritesContractVersion;
