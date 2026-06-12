@@ -131,6 +131,50 @@ export async function transformBookingCheckout(client: pg.Client): Promise<void>
   `);
 
   await client.query(`
+    INSERT INTO booking.booking_settings
+      (
+        property_id,
+        show_addons_step,
+        group_addons_by_category,
+        special_requests_enabled,
+        arrival_time_enabled,
+        guest_count_enabled,
+        benefits,
+        default_currency,
+        default_language,
+        supported_currencies,
+        supported_languages,
+        booking_filters,
+        custom_filters,
+        filter_rooms,
+        source_freshness
+      )
+    SELECT
+      property_id,
+      COALESCE((booking_settings ->> 'showAddonsStep')::boolean, TRUE),
+      COALESCE((booking_settings ->> 'groupAddonsByCategory')::boolean, TRUE),
+      COALESCE((booking_settings ->> 'specialRequestsEnabled')::boolean, TRUE),
+      COALESCE((booking_settings ->> 'arrivalTimeEnabled')::boolean, FALSE),
+      COALESCE((booking_settings ->> 'guestCountEnabled')::boolean, FALSE),
+      COALESCE(booking_settings -> 'benefits', '[]'::jsonb),
+      COALESCE(booking_settings ->> 'defaultCurrency', 'EUR'),
+      COALESCE(booking_settings ->> 'defaultLanguage', 'en'),
+      COALESCE(
+        ARRAY(SELECT jsonb_array_elements_text(booking_settings -> 'supportedCurrencies')),
+        ARRAY[]::TEXT[]
+      ),
+      COALESCE(
+        ARRAY(SELECT jsonb_array_elements_text(booking_settings -> 'supportedLanguages')),
+        ARRAY['en']::TEXT[]
+      ),
+      COALESCE(booking_settings -> 'bookingFilters', '[]'::jsonb),
+      COALESCE(booking_settings -> 'customFilters', '{}'::jsonb),
+      COALESCE(booking_settings -> 'filterRooms', '{}'::jsonb),
+      COALESCE(booking_settings -> 'sourceFreshness', '{}'::jsonb)
+    FROM migration_source_booking.checkout_flow_inputs
+  `);
+
+  await client.query(`
     INSERT INTO booking.quote_sessions
       (
         id,

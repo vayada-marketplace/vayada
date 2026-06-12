@@ -1,12 +1,8 @@
 /**
  * One ApiClient class, instantiated once per backend:
- *   - bookingWebPublic: TypeScript public Booking Web read API
- *   - bookingEngine:   legacy booking API for checkout-adjacent calls
- *   - pms:             legacy PMS API for checkout/inventory calls not yet cut over
- *
- * Callers must pick the right namespace until the Booking Web cutover is
- * complete. The PMS_URL falls back to the booking-engine URL for environments
- * where one process serves both.
+ *   - bookingWebPublic: TypeScript public Booking Web API
+ *   - bookingEngine:   legacy booking API for property/domain reads
+ *   - pmsApi:          PMS public API for room availability + guest booking flows
  */
 
 class ApiError extends Error {
@@ -77,11 +73,15 @@ async function parse<T>(res: Response): Promise<T> {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
-const PMS_URL = process.env.NEXT_PUBLIC_PMS_URL || API_URL;
 const BOOKING_WEB_PUBLIC_API_URL =
   process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL || "https://api.localhost";
+const PMS_API_URL =
+  process.env.NEXT_PUBLIC_PMS_API_URL ||
+  (API_URL && !API_URL.includes("localhost")
+    ? "https://pms-api.vayada.com"
+    : "https://api.pms.localhost");
 
 export const bookingWebPublic = new ApiClient(BOOKING_WEB_PUBLIC_API_URL);
 export const bookingEngine = new ApiClient(API_URL);
-export const pms = new ApiClient(PMS_URL);
+export const pmsApi = new ApiClient(PMS_API_URL);
 export { ApiError };

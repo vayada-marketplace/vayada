@@ -1,0 +1,515 @@
+{
+  "contractVersion": "pms-operations.v1",
+  "cases": [
+    {
+      "caseId": "rooms-room-types-read",
+      "description": "Rooms and room types expose target PMS operations fields without legacy table names.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-types",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "mustInclude": [
+          "items[0].roomTypeId",
+          "items[0].name",
+          "items[0].occupancyLimits",
+          "items[0].baseRate.amountDecimal",
+          "items[0].baseRate.currency",
+          "items[0].ratePlans",
+          "items[0].rateRulesSummary",
+          "items[0].roomCount"
+        ],
+        "mustExclude": ["hotel_id", "room_type_id", "source_room_type_id", "legacyPmsTable"],
+        "stableOrdering": "sortOrder ASC, name ASC"
+      }
+    },
+    {
+      "caseId": "rooms-read-statuses",
+      "description": "Physical rooms are sorted and expose operational statuses.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/rooms",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 3,
+        "enums": {
+          "items[].status": ["available", "maintenance", "out_of_order", "retired"]
+        },
+        "stableOrdering": "sortOrder ASC, roomNumber ASC"
+      }
+    },
+    {
+      "caseId": "calendar-blocks-read",
+      "description": "Calendar rows include room-type and room-level blocks with balanced inventory counts.",
+      "skip": true,
+      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
+        "query": { "from": "2026-08-15", "to": "2026-08-17" }
+      },
+      "expected": {
+        "status": 200,
+        "dayCount": 3,
+        "mustInclude": [
+          "days[0].stayDate",
+          "days[0].roomTypeId",
+          "days[0].totalCount",
+          "days[0].assignedCount",
+          "days[0].blockedCount",
+          "days[0].availableCount",
+          "days[0].blocks",
+          "days[0].sourceFreshness"
+        ],
+        "countInvariant": "availableCount + assignedCount + blockedCount equals totalCount",
+        "fixtureNotes": "Seed one room-type block and one room-level maintenance block."
+      }
+    },
+    {
+      "caseId": "calendar-range-too-large",
+      "description": "Calendar reads reject ranges that exceed the documented 370-day maximum.",
+      "skip": true,
+      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
+        "query": { "from": "2026-01-01", "to": "2027-02-01" }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_date_range",
+        "message": "Calendar date range cannot exceed 370 days."
+      }
+    },
+    {
+      "caseId": "calendar-read-model-unavailable",
+      "description": "Calendar reads fail explicitly when the target read model is unavailable.",
+      "skip": true,
+      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
+        "query": { "from": "2026-08-15", "to": "2026-08-17" },
+        "simulate": { "readModelUnavailable": true }
+      },
+      "expected": {
+        "status": 500,
+        "errorCode": "read_model_unavailable",
+        "message": "PMS calendar read model is unavailable."
+      }
+    },
+    {
+      "caseId": "reservations-assigned-unassigned",
+      "description": "Operational reservations distinguish assigned and unassigned room positions.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations",
+        "query": { "limit": 50, "offset": 0 }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "mustInclude": [
+          "items[0].guestBookingId",
+          "items[0].bookingReference",
+          "items[0].assignments",
+          "items[0].checkin.pendingFlags",
+          "items[0].checkout.pendingFlags",
+          "pagination.total"
+        ],
+        "assignmentStates": ["assigned", "pending"],
+        "emptyState": { "items": [], "pagination": { "total": 0 } }
+      }
+    },
+    {
+      "caseId": "assignment-command-conflict",
+      "description": "Assigning an unavailable room returns a conflict without mutating the assignment.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-conflict",
+          "idempotencyKey": "pms-assignment-conflict-001",
+          "expectedVersion": "reservation-v7",
+          "roomId": "f6855100-0000-0000-0000-000000000099"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "room_unavailable",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "assignment-command-version-conflict",
+      "description": "Assignment commands reject stale expectedVersion values before mutating assignments.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-version-conflict",
+          "idempotencyKey": "pms-assignment-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "roomId": "f6855100-0000-0000-0000-000000000001"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "inventory-write-queues-ari",
+      "description": "Room block and rate-relevant room-type writes persist and queue ARI side effects through jobs/events.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-blocks",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-room-block-create",
+          "idempotencyKey": "pms-room-block-create-001",
+          "roomTypeId": "f6855000-0000-0000-0000-000000000001",
+          "startsOn": "2026-08-15",
+          "endsOn": "2026-08-16",
+          "blockedCount": 1,
+          "reason": "maintenance"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["calendar_refresh", "ari_changed", "audit_event"]
+        },
+        "mustNotCall": ["Channex API", "legacy PMS sync helper"]
+      }
+    },
+    {
+      "caseId": "checkin-command",
+      "description": "Check-in records checklist results, pending flags, assignment status, and command metadata.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-in",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkin-001",
+          "idempotencyKey": "pms-checkin-001",
+          "stepResults": [{ "stepId": "passport", "status": "completed" }],
+          "pendingFlags": ["deposit_review"]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "reservation.checkin.completedAt",
+          "reservation.checkin.pendingFlags",
+          "reservation.assignments[0].assignmentStatus",
+          "commandMeta.idempotencyKey"
+        ]
+      }
+    },
+    {
+      "caseId": "operational-status-transition",
+      "description": "Operational status transitions validate allowed PMS states without owning guest-visible Booking lifecycle.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/status",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-status-001",
+          "idempotencyKey": "pms-status-001",
+          "expectedVersion": "reservation-v7",
+          "status": "in_house"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["reservation.status", "reservation.assignments[0].assignmentStatus"],
+        "mustNotWrite": ["booking.guest_bookings.status"],
+        "guestVisibleEvents": "Only emitted through an explicit Booking-owned bridge when the status is guest-visible."
+      }
+    },
+    {
+      "caseId": "operational-status-version-conflict",
+      "description": "Operational status transitions reject stale expectedVersion values without guest-visible events.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/status",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-status-version-conflict",
+          "idempotencyKey": "pms-status-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "status": "in_house"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "no-show-command",
+      "description": "No-show marks the PMS operational assignment without invoking Booking guest cancellation commands.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/no-show",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-no-show-001",
+          "idempotencyKey": "pms-no-show-001",
+          "expectedVersion": "reservation-v7",
+          "reason": "guest did not arrive"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["reservation.status", "commandMeta.sideEffects"],
+        "sideEffects": ["audit_event"],
+        "mustNotCall": ["Booking cancellation command", "payment provider refund"]
+      }
+    },
+    {
+      "caseId": "no-show-version-conflict",
+      "description": "No-show commands reject stale expectedVersion values without audit side effects.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/no-show",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-no-show-version-conflict",
+          "idempotencyKey": "pms-no-show-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "reason": "guest did not arrive"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "private-notes-excluded-from-public",
+      "description": "PMS private notes appear only on authorized PMS detail routes and are excluded from public/guest payloads.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/notes",
+        "method": "GET"
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 1,
+        "mustInclude": ["items[0].noteId", "items[0].body", "items[0].authorDisplayName"],
+        "publicPayloadMustExclude": ["booking_notes_private", "privateNoteCount", "items[].body"]
+      }
+    },
+    {
+      "caseId": "additional-guests-booking-pii-boundary",
+      "description": "PMS additional guest writes call the Booking-owned guest PII port and only project the result back to PMS detail.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/additional-guests",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-additional-guest-001",
+          "idempotencyKey": "pms-additional-guest-001",
+          "guest": {
+            "firstName": "Mira",
+            "lastName": "Example",
+            "email": "mira@example.test"
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustCall": ["BookingGuestPiiCommandPort.createAdditionalGuest"],
+        "mustNotWrite": ["pms.* guest PII table", "booking.booking_guests via PMS SQL"],
+        "mustInclude": ["reservation.additionalGuestCount", "additionalGuest.guestId"],
+        "piiOwnership": "Booking owns validation, retention, and guest-visible audit rules."
+      }
+    },
+    {
+      "caseId": "checklist-template-write",
+      "description": "Check-in checklist template writes persist PMS-owned operational setup steps.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-in-checklist",
+        "method": "PUT",
+        "body": {
+          "commandId": "cmd-checklist-template-001",
+          "idempotencyKey": "pms-checklist-template-001",
+          "steps": [
+            { "stepId": "passport", "label": "Verify passport", "required": true },
+            { "stepId": "deposit", "label": "Review deposit", "required": false }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["template.steps[0].stepId", "template.updatedAt"],
+        "targetOwner": "pms.checkin_checklist_templates"
+      }
+    },
+    {
+      "caseId": "inspection-template-write",
+      "description": "Check-out inspection template writes persist PMS-owned operational setup steps.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-out-inspection",
+        "method": "PUT",
+        "body": {
+          "commandId": "cmd-inspection-template-001",
+          "idempotencyKey": "pms-inspection-template-001",
+          "steps": [
+            { "stepId": "minibar", "label": "Check minibar", "required": false },
+            { "stepId": "damage", "label": "Inspect damage", "required": true }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["template.steps[0].stepId", "template.updatedAt"],
+        "targetOwner": "pms.checkout_inspection_templates"
+      }
+    },
+    {
+      "caseId": "checkout-charge-create-mark-paid-waive",
+      "description": "Checkout charge operations update PMS operational charge state without finance provider side effects.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/checkout-charges",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkout-charge-create-001",
+          "idempotencyKey": "pms-checkout-charge-create-001",
+          "label": "Minibar",
+          "amountDecimal": "12.00",
+          "currency": "EUR"
+        }
+      },
+      "alsoExercises": [
+        "POST /checkout-charges/:chargeId/mark-paid",
+        "POST /checkout-charges/:chargeId/waive"
+      ],
+      "expected": {
+        "status": 200,
+        "mustInclude": ["charge.chargeId", "charge.status", "commandMeta.sideEffects"],
+        "enums": { "charge.status": ["pending", "paid", "waived", "void"] },
+        "mustNotCall": ["payment provider capture", "invoice posting", "payout dispatcher"]
+      }
+    },
+    {
+      "caseId": "checkout-charges-and-checkout",
+      "description": "Checkout charge commands update operational charge state without claiming finance settlement ownership.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkout-001",
+          "idempotencyKey": "pms-checkout-001",
+          "expectedVersion": "reservation-v7",
+          "inspectionResults": [{ "stepId": "minibar", "status": "completed" }],
+          "chargesSettled": ["f6855700-0000-0000-0000-000000000001"],
+          "checkoutNotes": "Guest departed at 10:15."
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "reservation.checkout.completedAt",
+          "reservation.checkout.pendingFlags",
+          "charges[0].status",
+          "commandMeta.sideEffects"
+        ],
+        "financeOwnership": "Payment provider collection, invoice posting, and payouts are out of scope for this command."
+      }
+    },
+    {
+      "caseId": "checkout-version-conflict",
+      "description": "Check-out commands reject stale expectedVersion values before recording checkout state.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkout-version-conflict",
+          "idempotencyKey": "pms-checkout-version-conflict-001",
+          "expectedVersion": "reservation-v6",
+          "inspectionResults": [{ "stepId": "minibar", "status": "completed" }],
+          "chargesSettled": ["f6855700-0000-0000-0000-000000000001"],
+          "checkoutNotes": "Guest departed at 10:15."
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "version_conflict",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-room-types",
+      "description": "Protected PMS operations routes use RequestContext and deny missing auth, permissions, entitlements, and property links.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-types",
+        "query": {}
+      },
+      "expected": {
+        "denials": [
+          { "condition": "missing auth", "status": 401, "errorCode": "unauthenticated" },
+          { "condition": "missing permission", "status": 403, "errorCode": "missing_permission" },
+          { "condition": "missing entitlement", "status": 403, "errorCode": "missing_entitlement" },
+          {
+            "condition": "inactive entitlement",
+            "status": 403,
+            "errorCode": "inactive_entitlement"
+          },
+          {
+            "condition": "missing linked property",
+            "status": 403,
+            "errorCode": "missing_resource_access"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-rooms",
+      "description": "Protected PMS rooms route uses RequestContext and denies missing auth, permissions, entitlements, and property links.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/rooms",
+        "query": {}
+      },
+      "expected": {
+        "denials": [
+          { "condition": "missing auth", "status": 401, "errorCode": "unauthenticated" },
+          { "condition": "missing permission", "status": 403, "errorCode": "missing_permission" },
+          { "condition": "missing entitlement", "status": 403, "errorCode": "missing_entitlement" },
+          {
+            "condition": "inactive entitlement",
+            "status": 403,
+            "errorCode": "inactive_entitlement"
+          },
+          {
+            "condition": "missing linked property",
+            "status": 403,
+            "errorCode": "missing_resource_access"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-room-type-detail",
+      "description": "Protected PMS room-type detail route uses RequestContext and denies missing auth, permissions, entitlements, and property links.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-types/f6855000-0000-0000-0000-000000000001",
+        "query": {}
+      },
+      "expected": {
+        "denials": [
+          { "condition": "missing auth", "status": 401, "errorCode": "unauthenticated" },
+          { "condition": "missing permission", "status": 403, "errorCode": "missing_permission" },
+          { "condition": "missing entitlement", "status": 403, "errorCode": "missing_entitlement" },
+          {
+            "condition": "inactive entitlement",
+            "status": 403,
+            "errorCode": "inactive_entitlement"
+          },
+          {
+            "condition": "missing linked property",
+            "status": 403,
+            "errorCode": "missing_resource_access"
+          }
+        ]
+      }
+    }
+  ]
+}

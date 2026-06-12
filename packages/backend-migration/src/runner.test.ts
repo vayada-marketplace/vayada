@@ -272,6 +272,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "booking_change_requests",
         "booking_guests",
         "booking_notes_public",
+        "booking_settings",
         "booking_status_events",
         "checkout_contexts",
         "direct_booking_summary_read_model",

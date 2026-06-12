@@ -10,6 +10,7 @@ import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import type { AskAuditRepository, AskRoutesOptions } from "./routes/ask.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
+import type { PmsOperationsReadRepository } from "./routes/pmsOperations.js";
 import type { AuthSessionRouteOptions } from "./routes/authSession.js";
 import type {
   BookingGuestFormSettingsSync,
@@ -25,6 +26,10 @@ import {
   registerWorkosWebhookRoutes,
   type WorkosWebhookRoutesOptions,
 } from "./routes/workosWebhooks.js";
+import {
+  registerProviderWebhookRoutes,
+  type ProviderWebhookRoutesOptions,
+} from "./routes/providerWebhooks.js";
 import { registerRouteGroups } from "./routes/groups.js";
 import { registerHealthRoutes } from "./routes/health.js";
 import {
@@ -33,14 +38,18 @@ import {
 } from "./routes/marketplaceDiscovery.js";
 import {
   registerBookingWebPublicRoutes,
+  type BookingWebAttributionSink,
+  type BookingWebCalendarRepository,
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
+  type BookingDomainResolutionSource,
 } from "./routes/bookingWebPublic.js";
 import {
   registerBookingWebAffiliateRoutes,
   type BookingWebAffiliateHotelResolver,
   type BookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
+import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -51,7 +60,10 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
   workosWebhooks?: WorkosWebhookRoutesOptions;
+  providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
+  pmsOperationsRepository?: PmsOperationsReadRepository;
+  pmsOperationsAllowedOrigins?: string[];
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
@@ -67,11 +79,14 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   askNow?: AskRoutesOptions["now"];
   marketplaceDiscoveryAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
+  bookingDomainResolutionSource?: BookingDomainResolutionSource;
   pmsPublicApiUrl?: string;
+  bookingWebCalendarRepository?: BookingWebCalendarRepository;
   legacyCheckoutCommandProxyEnabled?: boolean;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
   bookingWebAffiliateHotelResolver?: BookingWebAffiliateHotelResolver;
   bookingWebAffiliateRepository?: BookingWebAffiliateRepository;
+  bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
 };
@@ -107,6 +122,9 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.workosWebhooks,
     });
   }
+  if (options.providerWebhooks) {
+    app.register(registerProviderWebhookRoutes, options.providerWebhooks);
+  }
   app.register(registerRouteGroups, { prefix: "/api" });
   app.register(registerAskRoutes, {
     prefix: "/api/ai",
@@ -136,12 +154,15 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       profileRepository: options.publicHotelProfileRepository,
       quoteRepository: options.publicHotelQuoteRepository,
       bookingPublicApiUrl: options.bookingPublicApiUrl,
+      bookingDomainResolutionSource: options.bookingDomainResolutionSource,
       pmsPublicApiUrl: options.pmsPublicApiUrl,
+      calendarRepository: options.bookingWebCalendarRepository,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
       checkoutAdapter: options.bookingWebCheckoutAdapter,
       affiliateHotelResolver:
         options.bookingWebAffiliateHotelResolver ?? options.publicHotelProfileRepository,
       affiliateRepository: options.bookingWebAffiliateRepository,
+      attributionSink: options.bookingWebAttributionSink,
       fetch: options.bookingWebPublicFetch,
       now: options.bookingWebPublicNow,
     });
@@ -166,6 +187,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     settingsWriteRepository: options.bookingSettingsWriteRepository,
     guestFormSettingsSync: options.bookingGuestFormSettingsSync,
   });
+  if (options.pmsOperationsRepository) {
+    app.register(registerPmsOperationsRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsOperationsRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
 
   return app;
 }

@@ -3,6 +3,7 @@ Repository for users table (AuthDatabase).
 """
 
 import asyncpg
+from asyncpg.exceptions import InvalidSchemaNameError, UndefinedTableError
 
 from app.database import AuthDatabase
 from app.repositories._sql import safe_columns
@@ -39,6 +40,26 @@ class UserRepository:
             row = await conn.fetchrow(query, email)
         else:
             row = await AuthDatabase.fetchrow(query, email)
+        return row is not None
+
+    @staticmethod
+    async def has_workos_identity(
+        user_id: str, *, conn: asyncpg.Connection | None = None
+    ) -> bool:
+        query = """
+            SELECT 1
+            FROM identity.external_identities
+            WHERE user_id = $1::uuid
+              AND provider = 'workos'
+            LIMIT 1
+        """
+        try:
+            if conn:
+                row = await conn.fetchrow(query, user_id)
+            else:
+                row = await AuthDatabase.fetchrow(query, user_id)
+        except (InvalidSchemaNameError, UndefinedTableError):
+            return False
         return row is not None
 
     @staticmethod

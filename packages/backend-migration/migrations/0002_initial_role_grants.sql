@@ -10,6 +10,8 @@ INSERT INTO identity.role_permission_grants (organization_kind, role_key, permis
   ('platform',          'platform_admin', 'platform.user.suspend'),
   ('hotel_group',       'hotel_owner',    'booking.settings.manage'),
   ('hotel_group',       'hotel_owner',    'booking.reservation.read'),
+  ('hotel_group',       'hotel_owner',    'pms.operations.read'),
+  ('hotel_group',       'hotel_owner',    'pms.operations.manage'),
   ('hotel_group',       'hotel_owner',    'pms.booking.update'),
   ('hotel_group',       'hotel_owner',    'pms.finance.read'),
   ('hotel_group',       'hotel_owner',    'marketplace.collaboration.review'),

@@ -14,6 +14,8 @@ function LoginContent() {
   const [submitError, setSubmitError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [totpSession, setTotpSession] = useState<string | null>(null);
+  const [loginHint, setLoginHint] = useState("");
+  const useLegacyLogin = !authService.isAuthKitEnabled() || searchParams.get("legacy") === "true";
 
   useEffect(() => {
     if (searchParams.get("expired") === "true") {
@@ -66,6 +68,10 @@ function LoginContent() {
     }
   };
 
+  const handleHostedLogin = () => {
+    authService.startHostedLogin(loginHint.trim() || undefined);
+  };
+
   const handleTotpVerify = async (code: string) => {
     setSubmitError("");
     setIsSubmitting(true);
@@ -106,11 +112,56 @@ function LoginContent() {
           </div>
           <h1 className="text-xl font-bold text-gray-900">Vayada Admin</h1>
           <p className="text-[13px] text-gray-500 mt-1">
-            {totpSession ? "Two-factor authentication" : "Sign in to access the admin panel"}
+            {totpSession
+              ? "Two-factor authentication"
+              : useLegacyLogin
+                ? "Sign in with your legacy admin password"
+                : "Sign in with WorkOS AuthKit"}
           </p>
         </div>
 
-        {totpSession ? (
+        {!useLegacyLogin ? (
+          <div className="space-y-5">
+            {sessionExpired && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p className="text-sm text-yellow-800 font-medium">
+                  Your session has expired. Please sign in again.
+                </p>
+              </div>
+            )}
+            <div>
+              <label htmlFor="loginHint" className="block text-sm font-medium text-gray-700 mb-1.5">
+                Email address
+              </label>
+              <input
+                id="loginHint"
+                type="email"
+                value={loginHint}
+                onChange={(event) => setLoginHint(event.target.value)}
+                placeholder="admin@example.com"
+                autoComplete="email"
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleHostedLogin}
+              className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              Continue with WorkOS
+            </button>
+            {authService.isLegacyFallbackEnabled() && (
+              <div className="text-center">
+                <a
+                  href="/login?legacy=true"
+                  className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                >
+                  Use legacy password fallback
+                </a>
+              </div>
+            )}
+          </div>
+        ) : totpSession ? (
           <TotpForm
             onSubmit={handleTotpVerify}
             onCancel={() => {
@@ -129,6 +180,7 @@ function LoginContent() {
             onErrorClear={() => setSubmitError("")}
             sessionExpired={sessionExpired}
             showRegister={false}
+            showForgotPassword={!authService.isAuthKitEnabled()}
           />
         )}
       </div>

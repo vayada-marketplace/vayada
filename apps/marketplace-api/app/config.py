@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
+    # WorkOS cutover controls. Defaults retire local credentials for linked
+    # platform accounts; set false only for an intentional rollback window.
+    LOCAL_AUTH_RETIREMENT_ENABLED: bool = True
+
     # 2FA Configuration
     TOTP_ENCRYPTION_KEY: str = Field(
         "0" * 64,

@@ -21,18 +21,18 @@ async function checkPmsOwnershipLink(
         AND entitlement.entitlement_key = 'pms-core'
         AND entitlement.status = 'active'
         AND entitlement.resource_product = 'pms'
-        AND entitlement.resource_type = 'pms_hotel'
+        AND entitlement.resource_type = 'pms_property'
         AND entitlement.resource_id = link.resource_id
-       JOIN hotel_catalog.property_source_links source
-         ON source.source_system = 'pms'
+      JOIN hotel_catalog.property_source_links source
+        ON source.source_system = 'pms'
         AND source.source_table = 'hotels'
-        AND source.source_id = link.resource_id
+        AND source.source_id = $2
         AND source.relationship = 'operational_input'
         AND source.property_id = $3
-       WHERE link.organization_id = $1
+      WHERE link.organization_id = $1
          AND link.product = 'pms'
-         AND link.resource_type = 'pms_hotel'
-         AND link.resource_id = $2
+         AND link.resource_type = 'pms_property'
+         AND link.resource_id = $3
          AND link.relationship = 'operator'
          AND link.status = 'active'
      ) AS exists`,
@@ -45,7 +45,7 @@ async function checkPmsOwnershipLink(
       code: "PMS_OPERATIONS_OWNERSHIP_LINK_MISMATCH",
       owner: "PMS operations",
       targetObject: "identity.organization_resource_links",
-      message: `Expected PMS hotel ${check.pmsHotelResourceId} to link organization ${check.organizationId} to property ${check.propertyId}`,
+      message: `Expected PMS property ${check.propertyId} to link organization ${check.organizationId} to source hotel ${check.pmsHotelResourceId}`,
       expected:
         "Active PMS operator resource link, active pms-core entitlement, and PMS operational property source link",
       actual: "relationship not found",

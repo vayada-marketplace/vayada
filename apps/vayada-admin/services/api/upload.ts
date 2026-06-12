@@ -2,7 +2,8 @@
  * Upload API service
  */
 
-import { apiClient, ApiErrorResponse } from "./client";
+import { ApiErrorResponse } from "./client";
+import { getAuthBearerToken } from "../auth/sessionStore";
 
 export interface UploadImageResponse {
   url: string;
@@ -35,15 +36,7 @@ export const uploadService = {
 
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
-    // Get token using the same method as apiClient
-    let token: string | null = null;
-    if (typeof window !== "undefined") {
-      const storedToken = localStorage.getItem("access_token");
-      const expiresAt = localStorage.getItem("token_expires_at");
-      if (storedToken && expiresAt && Date.now() < parseInt(expiresAt)) {
-        token = storedToken;
-      }
-    }
+    const token = getAuthBearerToken();
 
     const headers: Record<string, string> = {};
     if (token) {
@@ -100,15 +93,7 @@ export const uploadService = {
 
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
-    // Get token using the same method as apiClient
-    let token: string | null = null;
-    if (typeof window !== "undefined") {
-      const storedToken = localStorage.getItem("access_token");
-      const expiresAt = localStorage.getItem("token_expires_at");
-      if (storedToken && expiresAt && Date.now() < parseInt(expiresAt)) {
-        token = storedToken;
-      }
-    }
+    const token = getAuthBearerToken();
 
     const headers: Record<string, string> = {};
     if (token) {
@@ -165,15 +150,7 @@ export const uploadService = {
 
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
 
-    // Get token using the same method as apiClient
-    let token: string | null = null;
-    if (typeof window !== "undefined") {
-      const storedToken = localStorage.getItem("access_token");
-      const expiresAt = localStorage.getItem("token_expires_at");
-      if (storedToken && expiresAt && Date.now() < parseInt(expiresAt)) {
-        token = storedToken;
-      }
-    }
+    const token = getAuthBearerToken();
 
     const headers: Record<string, string> = {};
     if (token) {

@@ -16,6 +16,7 @@ import type {
   BookingWebAffiliateRepository,
   BookingWebAffiliateStripeConnectRequest,
 } from "./bookingWebAffiliate.js";
+import type { BookingWebCheckoutAdapter } from "./bookingWebPublic.js";
 
 type LegacyHotelResponse = {
   id: string;
@@ -195,6 +196,128 @@ const legacyBooking = {
 };
 
 describe("Booking Web public bootstrap parity", () => {
+  it("records affiliate click attribution through the configured sink", async () => {
+    const events: unknown[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+      bookingWebAttributionSink: {
+        async recordAffiliateClick(event) {
+          events.push(event);
+        },
+        async recordTelemetryEvent() {},
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/attribution/clicks",
+      payload: {
+        referralCode: "REF-123",
+        sessionId: "sid_123",
+        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(events).toMatchObject([
+      {
+        slug: "hotel-alpenrose",
+        referralCode: "REF-123",
+        sessionId: "sid_123",
+        landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
+      },
+    ]);
+    await app.close();
+  });
+
+  it("records booking-web telemetry through the configured sink", async () => {
+    const events: unknown[] = [];
+    const legacyRequests: unknown[] = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+      bookingWebAttributionSink: {
+        async recordAffiliateClick() {},
+        async recordTelemetryEvent(event) {
+          events.push(event);
+        },
+      },
+      async bookingWebPublicFetch(input, init) {
+        legacyRequests.push({
+          url: input.toString(),
+          method: init?.method,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        return jsonResponse({ ok: true });
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/events",
+      payload: {
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        sessionId: "sid_123",
+        metadata: { locale: "de" },
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(events).toMatchObject([
+      {
+        hotelSlug: "hotel-alpenrose",
+        eventType: "page_visit",
+        sessionId: "sid_123",
+        metadata: { locale: "de" },
+      },
+    ]);
+    expect(legacyRequests).toEqual([
+      {
+        url: "https://api.booking.localhost/api/events",
+        method: "POST",
+        body: {
+          hotel_slug: "hotel-alpenrose",
+          event_type: "page_visit",
+          session_id: "sid_123",
+          metadata: { locale: "de" },
+        },
+      },
+    ]);
+    await app.close();
+  });
+
+  it("proxies booking-web public affiliate registration away from browser PMS calls", async () => {
+    const seen: Array<{ pathname: string; method: string }> = [];
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      async bookingWebPublicFetch(input, init) {
+        seen.push({ pathname: input.pathname, method: init?.method ?? "GET" });
+        return jsonResponse({ id: "affiliate_123", referralCode: "REF-123" });
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
+      payload: { email: "guest@example.com", fullName: "Guest Example" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.payload)).toMatchObject({
+      id: "affiliate_123",
+      referralCode: "REF-123",
+    });
+    expect(seen).toEqual([{ pathname: "/api/hotels/hotel-alpenrose/affiliates", method: "POST" }]);
+    await app.close();
+  });
+
   it("preserves hotel page bootstrap fields across the target adapter", async () => {
     const app = buildParityApp({
       hotel: legacyHotel,
@@ -260,6 +383,63 @@ describe("Booking Web public bootstrap parity", () => {
     expect(compareCanonicalRedirectParity("renamed-property-canonical", target)).toEqual([]);
     expect(findForbiddenPublicBookabilityKeys(target)).toEqual([]);
     await app.close();
+  });
+
+  it("passes target-mode host parity for known subdomain, renamed, and custom-domain hotels", async () => {
+    const knownHostApp = buildParityApp({
+      hotel: legacyHotel,
+      rooms: legacyRooms,
+      unavailableDates: legacyUnavailableDates,
+      domainResolutionSource: "target",
+    });
+    const knownHostResponse = await knownHostApp.inject({
+      method: "GET",
+      url: "/api/booking-web/hosts/hotel-alpenrose.booking.localhost",
+    });
+    expect(knownHostResponse.statusCode).toBe(200);
+    expect(
+      compareHostParity("target-known-subdomain", legacyHotel, knownHostResponse.json()),
+    ).toEqual([]);
+    await knownHostApp.close();
+
+    const renamedApp = buildParityApp({
+      hotel: legacyRenamedHotel,
+      rooms: legacyRooms,
+      unavailableDates: legacyUnavailableDates,
+      slugAliases: {
+        "hotel-alpenrose": legacyRenamedHotel,
+      },
+      domainResolutionSource: "target",
+    });
+    const renamedResponse = await renamedApp.inject({
+      method: "GET",
+      url: "/api/booking-web/hosts/hotel-alpenrose.booking.localhost",
+    });
+    expect(renamedResponse.statusCode).toBe(200);
+    expect(
+      compareCanonicalRedirectParity("target-renamed-property", renamedResponse.json()),
+    ).toEqual([]);
+    await renamedApp.close();
+
+    const customDomainApp = buildParityApp({
+      hotel: legacyCustomDomainHotel,
+      rooms: legacyRooms,
+      unavailableDates: legacyUnavailableDates,
+      domainResolutionSource: "target",
+    });
+    const customDomainResponse = await customDomainApp.inject({
+      method: "GET",
+      url: "/api/booking-web/hosts/book.alpenrose.example",
+    });
+    expect(customDomainResponse.statusCode).toBe(200);
+    expect(
+      compareHostParity(
+        "target-custom-domain",
+        legacyCustomDomainHotel,
+        customDomainResponse.json(),
+      ),
+    ).toEqual([]);
+    await customDomainApp.close();
   });
 
   it("maps legacy rooms to target offers for localized currency searches", async () => {
@@ -459,6 +639,158 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
+  it("routes cancel, withdraw, and change-request lifecycle calls through Booking Web target paths", async () => {
+    const decisionToken = "must-not-cross-public-boundary";
+    const legacyCalls: Array<{ method: string; path: string; body: unknown }> = [];
+    const legacyResponses = new Map<string, unknown>([
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_refundable/cancel-preview",
+        { refundAmount: 660, refundPercentage: 100 },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_nonrefundable/cancel-preview",
+        { refundAmount: 0, refundPercentage: 0 },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_deposit/cancel-preview",
+        {
+          refundAmount: 100,
+          refundPercentage: 50,
+          depositAmount: 200,
+          depositRefundAmount: 100,
+          freeCancellationDays: 7,
+          daysUntilCheckIn: 3,
+          currency: "CHF",
+        },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_refundable/cancel",
+        { status: "cancelled" },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_pending/withdraw",
+        { status: "withdrawn" },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_internal_1/change-request/preview",
+        {
+          oldTotal: 660,
+          newTotal: 735,
+          priceDifference: 75,
+          currency: "CHF",
+          blocked: false,
+          blockReason: null,
+          available: true,
+        },
+      ],
+      [
+        "POST /api/hotels/hotel-alpenrose/bookings/booking_internal_1/change-request",
+        { status: "pending", priceDifference: 75, decisionToken },
+      ],
+      [
+        "GET /api/hotels/hotel-alpenrose/bookings/booking_change_approved/change-request?email=guest%40example.com",
+        { status: "approved", decision_token: decisionToken },
+      ],
+      [
+        "GET /api/hotels/hotel-alpenrose/bookings/booking_change_declined/change-request?email=guest%40example.com",
+        {
+          status: "declined",
+          declineReason: "Requested dates are unavailable",
+          decisionToken,
+        },
+      ],
+    ]);
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      pmsPublicApiUrl: "https://api.pms.localhost",
+      legacyCheckoutCommandProxyEnabled: true,
+      async bookingWebPublicFetch(input, init) {
+        legacyCalls.push({
+          method: init?.method ?? "GET",
+          path: `${input.pathname}${input.search}`,
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        return jsonResponse(
+          legacyResponses.get(`${init?.method ?? "GET"} ${input.pathname}${input.search}`) ?? {
+            detail: "Not found",
+          },
+          legacyResponses.has(`${init?.method ?? "GET"} ${input.pathname}${input.search}`)
+            ? 200
+            : 404,
+        );
+      },
+    });
+
+    const requests = [
+      ["booking_refundable/cancel-preview", { guestEmail: "guest@example.com" }],
+      ["booking_nonrefundable/cancel-preview", { guestEmail: "guest@example.com" }],
+      ["booking_deposit/cancel-preview", { guestEmail: "guest@example.com" }],
+      ["booking_refundable/cancel", { guestEmail: "guest@example.com" }],
+      ["booking_pending/withdraw", { guestEmail: "pending@example.com" }],
+      ["booking_internal_1/change-request/preview", changeRequestPayload()],
+      ["booking_internal_1/change-request", changeRequestPayload()],
+    ] as const;
+    const responses = await Promise.all(
+      requests.map(([path, payload]) =>
+        app.inject({
+          method: "POST",
+          url: `/api/booking-web/hotels/hotel-alpenrose/bookings/${path}`,
+          payload,
+        }),
+      ),
+    );
+    responses.push(
+      await app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_change_approved/change-request?email=guest%40example.com",
+      }),
+      await app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_change_declined/change-request?email=guest%40example.com",
+      }),
+    );
+    const bodies = responses.map((response) => response.json());
+
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(9).fill(200));
+    expect(bodies[0]).toMatchObject({ refundAmount: 660, refundPercentage: 100 });
+    expect(bodies[1]).toMatchObject({ refundAmount: 0, refundPercentage: 0 });
+    expect(bodies[2]).toMatchObject({
+      depositAmount: 200,
+      depositRefundAmount: 100,
+      refundAmount: 100,
+    });
+    expect(bodies[3]).toEqual({ status: "cancelled" });
+    expect(bodies[4]).toEqual({ status: "withdrawn" });
+    expect(bodies[5]).toMatchObject({
+      oldTotal: 660,
+      newTotal: 735,
+      blocked: false,
+      available: true,
+    });
+    expect(bodies[6]).toMatchObject({ status: "pending", priceDifference: 75 });
+    expect(bodies[7]).toMatchObject({ status: "approved" });
+    expect(bodies[8]).toMatchObject({
+      status: "declined",
+      declineReason: "Requested dates are unavailable",
+    });
+    expect(bodies[6]).not.toHaveProperty("decisionToken");
+    expect(bodies[7]).not.toHaveProperty("decision_token");
+    expect(bodies[8]).not.toHaveProperty("decisionToken");
+    expect(legacyCalls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      ...legacyResponses.keys(),
+    ]);
+    expect(legacyCalls[0]?.body).toEqual({ guest_email: "guest@example.com" });
+    expect(legacyCalls[4]?.body).toEqual({ guest_email: "pending@example.com" });
+    expect(legacyCalls[5]?.body).toMatchObject({
+      guestEmail: "guest@example.com",
+      checkIn: "2026-09-13",
+      checkOut: "2026-09-16",
+      addonIds: ["addon_breakfast"],
+    });
+    await app.close();
+  });
+
   it("does not proxy checkout commands to legacy PMS unless explicitly enabled", async () => {
     const legacyCalls: string[] = [];
     const app = buildApp({
@@ -481,9 +813,27 @@ describe("Booking Web public bootstrap parity", () => {
       method: "POST",
       url: "/api/booking-web/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
     });
+    const withdraw = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_pending/withdraw",
+      payload: { guestEmail: "guest@example.com" },
+    });
+    const cancelPreview = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_1/cancel-preview",
+      payload: { guestEmail: "guest@example.com" },
+    });
+    const changePreview = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/booking_1/change-request/preview",
+      payload: changeRequestPayload(),
+    });
 
     expect(create.statusCode).toBe(404);
     expect(confirm.statusCode).toBe(404);
+    expect(withdraw.statusCode).toBe(404);
+    expect(cancelPreview.statusCode).toBe(404);
+    expect(changePreview.statusCode).toBe(404);
     expect(legacyCalls).toEqual([]);
     await app.close();
   });
@@ -614,6 +964,222 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
+  it("passes command context through target checkout adapter paths without legacy URLs", async () => {
+    const operations: Array<{
+      operation: string | undefined;
+      requestId: string | undefined;
+      correlationId: string | undefined;
+      idempotencyKey: string | undefined;
+      fingerprint: string | undefined;
+      occurredAt: string | undefined;
+    }> = [];
+    let closed = 0;
+    const record = (context: Parameters<BookingWebCheckoutAdapter["getCheckoutConfig"]>[1]) => {
+      operations.push({
+        operation: context?.operation,
+        requestId: context?.requestId,
+        correlationId: context?.correlationId,
+        idempotencyKey: context?.idempotencyKey,
+        fingerprint: context?.fingerprint,
+        occurredAt: context?.occurredAt.toISOString(),
+      });
+    };
+    const checkoutAdapter: BookingWebCheckoutAdapter = {
+      async getCheckoutConfig(_slug, context) {
+        record(context);
+        return { payAtPropertyEnabled: true, bankTransfer: true, paypalEnabled: false };
+      },
+      async createBooking(_slug, _request, context) {
+        record(context);
+        return {
+          bookingReference: "VAY-TARGET-1",
+          booking: { bookingReference: "VAY-TARGET-1", status: "confirmed" },
+          paymentInstructions: { bankTransfer: { enabled: true, details: null } },
+        };
+      },
+      async confirmAuthorization(_slug, _handle, context) {
+        record(context);
+        return { bookingReference: "VAY-TARGET-1", status: "confirmed" };
+      },
+      async getStatus(_slug, _query, context) {
+        record(context);
+        return { status: "confirmed", paymentStatus: "paid" };
+      },
+      async lookup(_slug, _request, context) {
+        record(context);
+        return { bookingReference: "VAY-TARGET-1" };
+      },
+      async withdraw(_slug, _bookingId, _request, context) {
+        record(context);
+        return { status: "withdrawn" };
+      },
+      async cancelPreview(_slug, _bookingId, _request, context) {
+        record(context);
+        return { refundAmount: 100, refundPercentage: 100, currency: "CHF" };
+      },
+      async cancel(_slug, _bookingId, _request, context) {
+        record(context);
+        return { status: "cancelled" };
+      },
+      async previewChangeRequest(_slug, _bookingId, _request, context) {
+        record(context);
+        return { oldTotal: 100, newTotal: 100, priceDifference: 0, available: true };
+      },
+      async submitChangeRequest(_slug, _bookingId, _request, context) {
+        record(context);
+        return { status: "pending", priceDifference: 0 };
+      },
+      async getChangeRequest(_slug, _bookingId, _query, context) {
+        record(context);
+        return { status: "pending" };
+      },
+      async getPaymentInstructions(_slug, _handle, context) {
+        record(context);
+        return {
+          bankTransfer: { enabled: true, details: null },
+          paypal: { enabled: false, email: null, paymentWindowHours: null },
+        };
+      },
+      async validatePromo(_slug, _request, context) {
+        record(context);
+        return { valid: false, code: "SUMMER10" };
+      },
+      async close() {
+        closed += 1;
+      },
+    };
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebCheckoutAdapter: checkoutAdapter,
+      bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
+    });
+
+    const responses = await Promise.all([
+      app.inject({ method: "GET", url: "/api/booking-web/hotels/hotel-alpenrose/checkout-config" }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings",
+        headers: { "Idempotency-Key": "guest-create-1", "X-Correlation-Id": "corr-create-1" },
+        payload: { guestEmail: "guest@example.com", checkIn: "2026-09-12", checkOut: "2026-09-15" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/confirm-authorization",
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/status?reference=VAY-TARGET-1&email=guest%40example.com",
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/lookup",
+        payload: { bookingReference: "VAY-TARGET-1", guestEmail: "guest@example.com" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/withdraw",
+        payload: { guestEmail: "guest@example.com" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/withdraw",
+        payload: { guest_email: "guest@example.com" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/cancel-preview",
+        payload: { guestEmail: "guest@example.com" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/cancel",
+        payload: { guestEmail: "guest@example.com" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request/preview",
+        payload: changeRequestPayload(),
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request/preview",
+        payload: {
+          ...changeRequestPayload(),
+          guestEmail: undefined,
+          guest_email: "guest@example.com",
+        },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request",
+        payload: changeRequestPayload(),
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/change-request?email=guest%40example.com",
+      }),
+      app.inject({
+        method: "GET",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/payment-instructions",
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/promo/validate",
+        payload: { code: "SUMMER10" },
+      }),
+    ]);
+
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(15).fill(200));
+    expect(operations.map((entry) => entry.operation)).toEqual(
+      expect.arrayContaining([
+        "checkout-config",
+        "booking-create",
+        "booking-confirm-authorization",
+        "booking-status",
+        "booking-lookup",
+        "booking-withdraw",
+        "booking-cancel-preview",
+        "booking-cancel",
+        "booking-change-preview",
+        "booking-change-submit",
+        "booking-change-get",
+        "booking-payment-instructions",
+        "promo-validate",
+      ]),
+    );
+    expect(operations).toHaveLength(15);
+    expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
+      "guest-create-1",
+    );
+    expect(operations.find((entry) => entry.operation === "booking-create")).toMatchObject({
+      correlationId: "corr-create-1",
+      occurredAt: "2026-06-06T11:00:00.000Z",
+    });
+    expect(
+      operations.every(
+        (entry) =>
+          typeof entry.requestId === "string" &&
+          typeof entry.correlationId === "string" &&
+          /^[a-f0-9]{64}$/.test(entry.fingerprint ?? "") &&
+          entry.occurredAt === "2026-06-06T11:00:00.000Z",
+      ),
+    ).toBe(true);
+    expect(operations.every((entry) => entry.idempotencyKey)).toBe(true);
+    const withdrawContexts = operations.filter((entry) => entry.operation === "booking-withdraw");
+    const changePreviewContexts = operations.filter(
+      (entry) => entry.operation === "booking-change-preview",
+    );
+    expect(withdrawContexts).toHaveLength(2);
+    expect(changePreviewContexts).toHaveLength(2);
+    expect(new Set(withdrawContexts.map((entry) => entry.fingerprint))).toHaveLength(1);
+    expect(new Set(withdrawContexts.map((entry) => entry.idempotencyKey))).toHaveLength(1);
+    expect(new Set(changePreviewContexts.map((entry) => entry.fingerprint))).toHaveLength(1);
+    expect(new Set(changePreviewContexts.map((entry) => entry.idempotencyKey))).toHaveLength(1);
+    await app.close();
+    expect(closed).toBe(1);
+  });
+
   it("reports actionable parity mismatches by fixture case and field", () => {
     const mismatches = compareCalendarParity("calendar-unavailable-dates", legacyUnavailableDates, {
       calendar: {
@@ -664,6 +1230,7 @@ function buildParityApp(config: {
   rooms: LegacyRoomResponse[];
   unavailableDates: LegacyUnavailableDatesResponse;
   domainResolutions?: Record<string, { slug: string; status: number }>;
+  domainResolutionSource?: "legacy" | "target";
   slugAliases?: Record<string, LegacyHotelResponse>;
 }): ReturnType<typeof buildApp> {
   const profileRepository = createProfileRepository(config.hotel, config.slugAliases ?? {});
@@ -674,10 +1241,14 @@ function buildParityApp(config: {
     publicHotelProfileRepository: profileRepository,
     publicHotelQuoteRepository: quoteRepository,
     bookingPublicApiUrl: "https://api.booking.localhost",
+    bookingDomainResolutionSource: config.domainResolutionSource,
     pmsPublicApiUrl: "https://api.pms.localhost",
     bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
     async bookingWebPublicFetch(input) {
       if (input.origin === "https://api.booking.localhost") {
+        if (config.domainResolutionSource === "target") {
+          throw new Error("Target domain resolution must not call legacy Booking");
+        }
         const host = input.searchParams.get("domain") ?? "";
         const resolved = config.domainResolutions?.[host];
         return new Response(
@@ -782,6 +1353,17 @@ function jsonResponse(payload: unknown, status = 200): Response {
   });
 }
 
+function changeRequestPayload(): Record<string, unknown> {
+  return {
+    guestEmail: "guest@example.com",
+    checkIn: "2026-09-13",
+    checkOut: "2026-09-16",
+    addonIds: ["addon_breakfast"],
+    addonQuantities: { addon_breakfast: 2 },
+    addonDates: { addon_breakfast: ["2026-09-14"] },
+  };
+}
+
 function createProfileRepository(
   hotel: LegacyHotelResponse,
   slugAliases: Record<string, LegacyHotelResponse>,
@@ -791,6 +1373,14 @@ function createProfileRepository(
       const source = slug === hotel.slug ? hotel : slugAliases[slug];
       return source
         ? toPublicHotelProfileProjection(toProfileRow(source), "2026-06-06T11:00:00.000Z", {
+            bookingHostBase: "booking.localhost",
+          })
+        : null;
+    },
+    async findProfileByCustomDomain(domain) {
+      const customDomain = hotel.customDomainUrl?.replace(/^https:\/\//, "");
+      return customDomain === domain
+        ? toPublicHotelProfileProjection(toProfileRow(hotel), "2026-06-06T11:00:00.000Z", {
             bookingHostBase: "booking.localhost",
           })
         : null;

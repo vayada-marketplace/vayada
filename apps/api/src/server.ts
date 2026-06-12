@@ -6,23 +6,36 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createOpenAIAskModel } from "./platform/askIntelligence.js";
+import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
+import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
+import { createPgProviderWebhookStore } from "./platform/providerWebhooks.js";
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import {
   createPgWorkosWebhookStore,
   createWorkosWebhookVerifier,
 } from "./platform/workosWebhooks.js";
-import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
-import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
+import {
+  createCompatibilityPublicHotelQuoteRepository,
+  createTargetPublicHotelQuoteRepository,
+} from "./routes/aiHotelQuotes.js";
+import {
+  createPgPublicHotelProfileRepository,
+  createTargetPublicHotelProfileRepository,
+} from "./routes/aiHotels.js";
+import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import {
   createPgBookingWebAffiliateHotelResolver,
   createPgBookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
+import { createTargetBookingWebCalendarRepository } from "./routes/bookingWebPublic.js";
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
+  createPgTargetBookingSettingsRepository,
 } from "./routes/bookingSettings.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 
@@ -51,24 +64,93 @@ function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   };
 }
 
-const publicHotelProfileRepository = config.bookingDatabaseUrl
-  ? createPgPublicHotelProfileRepository({
-      connectionString: config.bookingDatabaseUrl,
-      bookingHostBase: config.bookingHostBase,
-    })
-  : undefined;
+const publicHotelProfileRepository =
+  config.publicHotelProfileSource === "target"
+    ? createTargetPublicHotelProfileRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : config.bookingDatabaseUrl
+      ? createPgPublicHotelProfileRepository({
+          connectionString: config.bookingDatabaseUrl,
+          bookingHostBase: config.bookingHostBase,
+        })
+      : undefined;
 
-const bookingSettingsRepository = config.bookingDatabaseUrl
-  ? createPgBookingSettingsReadRepository({
-      connectionString: config.bookingDatabaseUrl,
-    })
-  : undefined;
+const bookingSettingsRepository =
+  config.bookingSettingsSource === "target"
+    ? createPgTargetBookingSettingsRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : config.bookingDatabaseUrl
+      ? createPgBookingSettingsReadRepository({
+          connectionString: config.bookingDatabaseUrl,
+        })
+      : undefined;
 
-const bookingGuestFormSettingsSync = config.pmsApiUrl
-  ? createHttpPmsGuestFormSettingsSync({
-      pmsApiUrl: config.pmsApiUrl,
-    })
-  : undefined;
+const bookingGuestFormSettingsSync =
+  config.pmsApiUrl && config.bookingSettingsSource !== "target"
+    ? createHttpPmsGuestFormSettingsSync({
+        pmsApiUrl: config.pmsApiUrl,
+      })
+    : undefined;
+
+const bookingReservationsRepository =
+  config.bookingReservationsSource === "target"
+    ? (() => {
+        if (!config.targetDatabaseUrl) {
+          throw new Error(
+            "TARGET_DATABASE_URL is required when BOOKING_RESERVATIONS_SOURCE=target",
+          );
+        }
+
+        return createTargetBookingReservationsReadRepository({
+          connectionString: config.targetDatabaseUrl,
+        });
+      })()
+    : config.bookingReservationsReadDatabaseUrl
+      ? createCompatibilityPmsBookingReservationsReadRepository({
+          connectionString: config.bookingReservationsReadDatabaseUrl,
+        })
+      : undefined;
+
+const publicHotelQuoteRepository =
+  publicHotelProfileRepository && config.publicBookabilitySource === "target"
+    ? createTargetPublicHotelQuoteRepository({
+        connectionString: config.targetDatabaseUrl!,
+        profileRepository: publicHotelProfileRepository,
+      })
+    : publicHotelProfileRepository
+      ? createCompatibilityPublicHotelQuoteRepository({
+          profileRepository: publicHotelProfileRepository,
+          pmsPublicApiUrl: config.pmsPublicApiUrl,
+        })
+      : undefined;
+
+const bookingWebCalendarRepository =
+  config.publicBookabilitySource === "target"
+    ? createTargetBookingWebCalendarRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
+const pmsOperationsRepository =
+  config.pmsOperationsSource === "target"
+    ? createTargetPmsOperationsReadRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
+const askModelProvider =
+  config.askIntelligence.provider === "openai"
+    ? await createOpenAIAskModel(config.askIntelligence)
+    : undefined;
+
+const providerWebhookSecrets = {
+  stripe: config.providerWebhooks.stripeSecret,
+  xendit: config.providerWebhooks.xenditSecret,
+  channex: config.providerWebhooks.channexSecret,
+};
+const hasProviderWebhookSecret = Object.values(providerWebhookSecrets).some(Boolean);
 
 const bookingWebAffiliateRepository =
   config.affiliatePublicSource === "target" && config.targetDatabaseUrl
@@ -109,11 +191,13 @@ const app = buildApp({
             audience: config.auth.workosAudience,
           }),
           callbackUrl: config.authSession.authCallbackUrl,
+          callbackReturnUrl: config.authSession.authSuccessUrl,
           logoutReturnUrl: config.authSession.authLogoutUrl,
           allowedOrigins: config.authSession.authAllowedOrigins,
           requiredOrganizationKind: "platform",
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
+          legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,
         }
       : undefined,
   workosWebhooks:
@@ -129,29 +213,47 @@ const app = buildApp({
           }),
         }
       : undefined,
-  bookingReservationsRepository: config.bookingReservationsReadDatabaseUrl
-    ? createCompatibilityPmsBookingReservationsReadRepository({
-        connectionString: config.bookingReservationsReadDatabaseUrl,
-      })
-    : undefined,
+  providerWebhooks:
+    config.targetDatabaseUrl && hasProviderWebhookSecret
+      ? {
+          secrets: providerWebhookSecrets,
+          modes: {
+            stripe: config.providerWebhooks.stripeMode,
+            xendit: config.providerWebhooks.xenditMode,
+            channex: config.providerWebhooks.channexMode,
+          },
+          store: createPgProviderWebhookStore({
+            connectionString: config.targetDatabaseUrl,
+          }),
+        }
+      : undefined,
+  bookingReservationsRepository,
+  pmsOperationsRepository,
+  pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,
-  marketplaceDiscoveryRepository: config.marketplaceDatabaseUrl
-    ? createPgMarketplaceDiscoveryReadRepository({
-        connectionString: config.marketplaceDatabaseUrl,
-      })
-    : undefined,
+  marketplaceDiscoveryRepository:
+    config.marketplaceDiscoverySource === "target"
+      ? createPgMarketplaceDiscoveryReadRepository({
+          connectionString: config.targetDatabaseUrl!,
+        })
+      : undefined,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   publicHotelProfileRepository,
-  publicHotelQuoteRepository: publicHotelProfileRepository
-    ? createCompatibilityPublicHotelQuoteRepository({
-        profileRepository: publicHotelProfileRepository,
-        pmsPublicApiUrl: config.pmsPublicApiUrl,
+  publicHotelQuoteRepository,
+  bookingPublicApiUrl: config.bookingPublicApiUrl,
+  bookingDomainResolutionSource: config.bookingDomainResolutionSource,
+  pmsPublicApiUrl: config.pmsPublicApiUrl,
+  bookingWebCalendarRepository,
+  askModel: askModelProvider?.model,
+  askModelMetadata: askModelProvider?.metadata,
+  legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
+  bookingWebAttributionSink: config.auth
+    ? createPgBookingWebEventSink({
+        connectionString: config.auth.databaseUrl,
       })
     : undefined,
-  bookingPublicApiUrl: config.bookingPublicApiUrl,
-  pmsPublicApiUrl: config.pmsPublicApiUrl,
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
 });

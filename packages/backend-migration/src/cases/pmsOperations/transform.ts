@@ -42,8 +42,8 @@ export async function transformPmsOperations(client: pg.Client): Promise<void> {
       resource_link_id,
       organization_id,
       'pms',
-      'pms_hotel',
-      pms_hotel_resource_id,
+      'pms_property',
+      property_id::text,
       'operator',
       'active'
     FROM migration_source_pms.operations_snapshot_inputs
@@ -70,8 +70,8 @@ export async function transformPmsOperations(client: pg.Client): Promise<void> {
       entitlement_key,
       'active',
       'pms',
-      'pms_hotel',
-      pms_hotel_resource_id,
+      'pms_property',
+      property_id::text,
       entitlement_starts_at,
       entitlement_metadata
     FROM migration_source_pms.operations_snapshot_inputs

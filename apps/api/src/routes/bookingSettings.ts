@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import pg from "pg";
+import type { QueryResult, QueryResultRow } from "pg";
 
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -226,6 +227,14 @@ export type BookingGuestFormSettingsSync = {
 
 export type BookingSettingsRepository = BookingSettingsReadRepository &
   BookingSettingsWriteRepository;
+
+export type BookingSettingsPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
 
 export type BookingSettingsWriteErrorCategory =
   | "authentication"
@@ -517,6 +526,113 @@ type BookingRoomFilterSettingsRow = {
   filter_rooms: unknown;
 };
 
+type TargetBookingSettingsRow = {
+  show_addons_step: boolean | null;
+  group_addons_by_category: boolean | null;
+  special_requests_enabled: boolean | null;
+  arrival_time_enabled: boolean | null;
+  guest_count_enabled: boolean | null;
+  benefits: unknown;
+  default_currency: string | null;
+  default_language: string | null;
+  supported_currencies: unknown;
+  supported_languages: unknown;
+  booking_filters: unknown;
+  custom_filters: unknown;
+  filter_rooms: unknown;
+};
+
+type TargetBookingSettingsQueryRow = TargetBookingSettingsRow & {
+  settings_property_id: string | null;
+  source_link_count: number | string;
+};
+
+const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
+  WITH source_links AS (
+    SELECT property_id
+    FROM hotel_catalog.property_source_links
+    WHERE source_system = 'booking'
+      AND source_table = 'booking_hotels'
+      AND source_id = $1
+      AND relationship = 'canonical_input'
+      AND status = 'active'
+  ),
+  source_link_status AS (
+    SELECT count(*)::int AS source_link_count,
+           min(property_id::text)::uuid AS property_id
+    FROM source_links
+  )
+`;
+
+const TARGET_BOOKING_SETTINGS_SELECT = `
+  ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE}
+  SELECT
+    source_link_status.source_link_count,
+    settings.property_id::text AS settings_property_id,
+    settings.show_addons_step,
+    settings.group_addons_by_category,
+    settings.special_requests_enabled,
+    settings.arrival_time_enabled,
+    settings.guest_count_enabled,
+    settings.benefits,
+    settings.default_currency,
+    settings.default_language,
+    settings.supported_currencies,
+    settings.supported_languages,
+    settings.booking_filters,
+    settings.custom_filters,
+    settings.filter_rooms
+  FROM source_link_status
+  LEFT JOIN booking.booking_settings settings
+    ON source_link_status.source_link_count = 1
+   AND settings.property_id = source_link_status.property_id
+  WHERE source_link_status.source_link_count > 0
+`;
+
+function toTargetAddonSettings(row: TargetBookingSettingsRow): BookingAddonSettingsReadModel {
+  return {
+    showAddonsStep: row.show_addons_step,
+    groupAddonsByCategory: row.group_addons_by_category,
+  };
+}
+
+function toTargetGuestFormSettings(
+  row: TargetBookingSettingsRow,
+): BookingGuestFormSettingsReadModel {
+  return {
+    specialRequestsEnabled: row.special_requests_enabled,
+    arrivalTimeEnabled: row.arrival_time_enabled,
+    guestCountEnabled: row.guest_count_enabled,
+  };
+}
+
+function toTargetBenefitsSettings(row: TargetBookingSettingsRow): BookingBenefitsSettingsReadModel {
+  return {
+    benefits: row.benefits,
+  };
+}
+
+function toTargetLocalizationSettings(
+  row: TargetBookingSettingsRow,
+): BookingLocalizationSettingsReadModel {
+  return {
+    defaultCurrency: row.default_currency,
+    defaultLanguage: row.default_language,
+    supportedCurrencies: row.supported_currencies,
+    supportedLanguages: row.supported_languages,
+  };
+}
+
+function toTargetRoomFilterSettings(
+  row: TargetBookingSettingsRow,
+): BookingRoomFilterSettingsReadModel {
+  return {
+    bookingFilters: row.booking_filters,
+    customFilters: row.custom_filters,
+    filterRooms: row.filter_rooms,
+  };
+}
+
 export function createPgBookingSettingsReadRepository(config: {
   connectionString: string;
   max?: number;
@@ -715,6 +831,183 @@ export function createPgBookingSettingsReadRepository(config: {
         customFilters: row.custom_filters,
         filterRooms: row.filter_rooms,
       };
+    },
+    async close() {
+      await pool.end();
+    },
+  };
+}
+
+export function createPgTargetBookingSettingsRepository(config: {
+  connectionString: string;
+  max?: number;
+  pool?: BookingSettingsPool;
+}): BookingSettingsRepository {
+  if (!config.connectionString.trim()) {
+    throw new Error("Target booking settings repository connectionString must not be empty");
+  }
+
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max,
+    });
+
+  function toSingleSettingsRow(
+    result: Pick<QueryResult<TargetBookingSettingsQueryRow>, "rows">,
+    hotelId: string,
+  ): TargetBookingSettingsRow | null {
+    const row = result.rows[0];
+    if (!row) return null;
+
+    if (Number(row.source_link_count) > 1) {
+      throw new Error(
+        `Duplicate active canonical booking hotel source links found for booking hotel ${hotelId}`,
+      );
+    }
+
+    return row.settings_property_id ? row : null;
+  }
+
+  async function findSettings(hotelId: string): Promise<TargetBookingSettingsRow | null> {
+    const result = await pool.query<TargetBookingSettingsQueryRow>(TARGET_BOOKING_SETTINGS_SELECT, [
+      hotelId,
+    ]);
+    return toSingleSettingsRow(result, hotelId);
+  }
+
+  async function updateSettings(
+    hotelId: string,
+    setClause: string,
+    values: readonly unknown[],
+  ): Promise<TargetBookingSettingsRow | null> {
+    const result = await pool.query<TargetBookingSettingsQueryRow>(
+      `
+        ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE},
+        updated_settings AS (
+        UPDATE booking.booking_settings settings
+        SET ${setClause},
+            updated_at = now()
+        FROM source_link_status
+        WHERE source_link_status.source_link_count = 1
+          AND settings.property_id = source_link_status.property_id
+        RETURNING
+          settings.property_id::text AS settings_property_id,
+          settings.show_addons_step,
+          settings.group_addons_by_category,
+          settings.special_requests_enabled,
+          settings.arrival_time_enabled,
+          settings.guest_count_enabled,
+          settings.benefits,
+          settings.default_currency,
+          settings.default_language,
+          settings.supported_currencies,
+          settings.supported_languages,
+          settings.booking_filters,
+          settings.custom_filters,
+          settings.filter_rooms
+        )
+        SELECT
+          source_link_status.source_link_count,
+          updated_settings.settings_property_id,
+          updated_settings.show_addons_step,
+          updated_settings.group_addons_by_category,
+          updated_settings.special_requests_enabled,
+          updated_settings.arrival_time_enabled,
+          updated_settings.guest_count_enabled,
+          updated_settings.benefits,
+          updated_settings.default_currency,
+          updated_settings.default_language,
+          updated_settings.supported_currencies,
+          updated_settings.supported_languages,
+          updated_settings.booking_filters,
+          updated_settings.custom_filters,
+          updated_settings.filter_rooms
+        FROM source_link_status
+        LEFT JOIN updated_settings ON TRUE
+        WHERE source_link_status.source_link_count > 0
+      `,
+      [hotelId, ...values],
+    );
+    return toSingleSettingsRow(result, hotelId);
+  }
+
+  return {
+    async findAddonSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetAddonSettings(row) : null;
+    },
+    async findGuestFormSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetGuestFormSettings(row) : null;
+    },
+    async findBenefitsSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetBenefitsSettings(row) : null;
+    },
+    async findLocalizationSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetLocalizationSettings(row) : null;
+    },
+    async findRoomFilterSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetRoomFilterSettings(row) : null;
+    },
+    async updateAddonSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `show_addons_step = $2,
+         group_addons_by_category = $3`,
+        [settings.showAddonsStep, settings.groupAddonsByCategory],
+      );
+      return row ? toTargetAddonSettings(row) : null;
+    },
+    async updateGuestFormSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `special_requests_enabled = $2,
+         arrival_time_enabled = $3,
+         guest_count_enabled = $4`,
+        [settings.specialRequestsEnabled, settings.arrivalTimeEnabled, settings.guestCountEnabled],
+      );
+      return row ? toTargetGuestFormSettings(row) : null;
+    },
+    async updateBenefitsSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(hotelId, `benefits = $2::jsonb`, [
+        JSON.stringify(settings.benefits),
+      ]);
+      return row ? toTargetBenefitsSettings(row) : null;
+    },
+    async updateLocalizationSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `default_currency = $2,
+         default_language = $3,
+         supported_currencies = $4::text[],
+         supported_languages = $5::text[]`,
+        [
+          settings.defaultCurrency,
+          settings.defaultLanguage,
+          settings.supportedCurrencies,
+          settings.supportedLanguages,
+        ],
+      );
+      return row ? toTargetLocalizationSettings(row) : null;
+    },
+    async updateRoomFilterSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(
+        hotelId,
+        `booking_filters = $2::jsonb,
+         custom_filters = $3::jsonb,
+         filter_rooms = $4::jsonb`,
+        [
+          JSON.stringify(settings.bookingFilters),
+          JSON.stringify(settings.customFilters),
+          JSON.stringify(settings.filterRooms),
+        ],
+      );
+      return row ? toTargetRoomFilterSettings(row) : null;
     },
     async close() {
       await pool.end();

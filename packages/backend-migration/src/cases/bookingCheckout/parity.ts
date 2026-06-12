@@ -3,6 +3,26 @@ import type pg from "pg";
 import type { ExpectedTarget, ParityFinding, ParityHandlerContext } from "../../parityTypes.js";
 
 type BookingFlowCheck = NonNullable<ExpectedTarget["bookingCheckoutChecks"]>["flows"][number];
+type BookingSettingsCheck = NonNullable<
+  NonNullable<ExpectedTarget["bookingCheckoutChecks"]>["settings"]
+>[number];
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sameJsonValue(actual: unknown, expected: unknown): boolean {
+  return stableJson(actual) === stableJson(expected);
+}
 
 async function checkBookingFlow(
   client: pg.Client,
@@ -261,6 +281,96 @@ async function checkSummaryPublicSafety(
   }
 }
 
+async function checkBookingSettings(
+  client: pg.Client,
+  settings: BookingSettingsCheck,
+  findings: ParityFinding[],
+): Promise<void> {
+  const result = await client.query<{
+    booking_hotel_resource_id: string | null;
+    source_link_status: string | null;
+    source_link_relationship: string | null;
+    show_addons_step: boolean;
+    group_addons_by_category: boolean;
+    special_requests_enabled: boolean;
+    arrival_time_enabled: boolean;
+    guest_count_enabled: boolean;
+    benefits: unknown;
+    default_currency: string;
+    default_language: string;
+    supported_currencies: string[];
+    supported_languages: string[];
+    booking_filters: unknown;
+    custom_filters: unknown;
+    filter_rooms: unknown;
+    source_freshness: unknown;
+  }>(
+    `SELECT
+       source.source_id AS booking_hotel_resource_id,
+       source.status AS source_link_status,
+       source.relationship AS source_link_relationship,
+       settings.show_addons_step,
+       settings.group_addons_by_category,
+       settings.special_requests_enabled,
+       settings.arrival_time_enabled,
+       settings.guest_count_enabled,
+       settings.benefits,
+       settings.default_currency,
+       settings.default_language,
+       settings.supported_currencies,
+       settings.supported_languages,
+       settings.booking_filters,
+       settings.custom_filters,
+       settings.filter_rooms,
+       settings.source_freshness
+     FROM booking.booking_settings settings
+     LEFT JOIN hotel_catalog.property_source_links source
+       ON source.property_id = settings.property_id
+      AND source.source_system = 'booking'
+      AND source.source_table = 'booking_hotels'
+      AND source.source_id = $2
+      AND source.status = 'active'
+      AND source.relationship = 'canonical_input'
+     WHERE settings.property_id = $1`,
+    [settings.propertyId, settings.bookingHotelResourceId],
+  );
+
+  const row = result.rows[0];
+  const matches =
+    row &&
+    row.booking_hotel_resource_id === settings.bookingHotelResourceId &&
+    row.source_link_status === "active" &&
+    row.source_link_relationship === "canonical_input" &&
+    row.show_addons_step === settings.showAddonsStep &&
+    row.group_addons_by_category === settings.groupAddonsByCategory &&
+    row.special_requests_enabled === settings.specialRequestsEnabled &&
+    row.arrival_time_enabled === settings.arrivalTimeEnabled &&
+    row.guest_count_enabled === settings.guestCountEnabled &&
+    sameJsonValue(row.benefits, settings.benefits) &&
+    row.default_currency === settings.defaultCurrency &&
+    row.default_language === settings.defaultLanguage &&
+    sameJsonValue(row.supported_currencies, settings.supportedCurrencies) &&
+    sameJsonValue(row.supported_languages, settings.supportedLanguages) &&
+    sameJsonValue(row.booking_filters, settings.bookingFilters) &&
+    sameJsonValue(row.custom_filters, settings.customFilters) &&
+    sameJsonValue(row.filter_rooms, settings.filterRooms) &&
+    sameJsonValue(row.source_freshness, settings.sourceFreshness);
+
+  if (!matches) {
+    findings.push({
+      severity: "fail",
+      code: "BOOKING_SETTINGS_TARGET_MISMATCH",
+      owner: "Booking checkout",
+      targetObject: "booking.booking_settings",
+      message: `Expected booking settings for property ${settings.propertyId} were not found`,
+      expected: JSON.stringify(settings),
+      actual: row ? JSON.stringify(row) : "row missing",
+      suggestedAction:
+        "Check booking settings fixture transform and active canonical booking hotel source link.",
+    });
+  }
+}
+
 async function checkBookingCheckoutFixtures(
   client: pg.Client,
   expected: ExpectedTarget,
@@ -273,6 +383,9 @@ async function checkBookingCheckoutFixtures(
     await checkBookingFlow(client, flow, findings);
     await checkOwnershipLink(client, flow, findings);
     await checkRelatedCounts(client, flow, findings);
+  }
+  for (const settings of checks.settings ?? []) {
+    await checkBookingSettings(client, settings, findings);
   }
 
   await checkSummaryPublicSafety(client, expected, findings);

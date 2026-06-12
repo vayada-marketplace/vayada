@@ -73,6 +73,7 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       accessToken: "workos-access-token",
+      csrfToken: expect.any(String),
       organizationId: "org_workos_platform",
       user: {
         id: "user_platform_admin",
@@ -93,6 +94,26 @@ describe("AuthKit session routes", () => {
         workosUserId: "user_workos_platform",
       }),
     ]);
+  });
+
+  it("redirects to the configured frontend success URL after callback when enabled", async () => {
+    app = buildAuthSessionApp({
+      callbackReturnUrl: "https://admin.localhost/dashboard",
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://admin.localhost/dashboard");
+    expect(response.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([expect.stringContaining("vayada_workos_session=sealed-session")]),
+    );
   });
 
   it("uses the identity lifecycle command bus for JIT-first user creation", async () => {
@@ -241,9 +262,55 @@ describe("AuthKit session routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().accessToken).toBe("refreshed-workos-access-token");
+    expect(response.json().csrfToken).toBe("csrf-token");
     expect(response.headers["set-cookie"]).toContain(
       "vayada_workos_session=refreshed-sealed-session",
     );
+  });
+
+  it("sets CORS headers for credentialed browser session refreshes", async () => {
+    app = buildAuthSessionApp();
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: "/auth/session/refresh",
+      headers: {
+        origin: "https://admin.localhost",
+        "access-control-request-method": "POST",
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe("https://admin.localhost");
+    expect(preflight.headers["access-control-allow-credentials"]).toBe("true");
+  });
+
+  it("mints a short-lived marketplace admin compatibility token after platform session resolution", async () => {
+    app = buildAuthSessionApp({
+      legacyMarketplaceJwtSecret: "legacy-secret",
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/marketplace-admin-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://admin.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      accessToken: expect.any(String),
+      expiresIn: 900,
+      tokenType: "Bearer",
+    });
+    expect(readJwtPayload(response.json().accessToken)).toMatchObject({
+      sub: "user_platform_admin",
+      email: "admin@example.com",
+      type: "admin",
+    });
   });
 
   it("clears the sealed session and returns the WorkOS logout URL", async () => {
@@ -305,6 +372,8 @@ function buildAuthSessionApp(
     lifecycleCommandBus?: IdentityLifecycleCommandBus;
     productAuditSink?: { record(event: ProductAuditEvent): Promise<void> };
     tokenVerifier?: TokenVerifier;
+    callbackReturnUrl?: string;
+    legacyMarketplaceJwtSecret?: string;
   } = {},
 ) {
   return buildApp({
@@ -318,12 +387,20 @@ function buildAuthSessionApp(
       },
       tokenVerifier: options.tokenVerifier ?? createTokenVerifier(),
       callbackUrl: "https://api.localhost/auth/workos/callback",
+      callbackReturnUrl: options.callbackReturnUrl,
       logoutReturnUrl: "https://admin.localhost/login",
       allowedOrigins: ["https://admin.localhost"],
       requiredOrganizationKind: "platform",
       cookieSecure: false,
+      legacyMarketplaceJwtSecret: options.legacyMarketplaceJwtSecret,
     },
   });
+}
+
+function readJwtPayload(token: string): Record<string, unknown> {
+  const [, payload] = token.split(".");
+  if (!payload) throw new Error("JWT payload segment missing");
+  return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
 }
 
 function createAuthKitClient(overrides: Partial<AuthKitClient> = {}): AuthKitClient {

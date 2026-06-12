@@ -1,4 +1,5 @@
 import { pmsClient } from "../api/pmsClient";
+import { pmsOperationsClient } from "../api/pmsOperationsClient";
 
 export interface MonthlyRate {
   baseRate?: number | null;
@@ -156,6 +157,72 @@ export interface Room {
   updatedAt: string;
 }
 
+export type PmsOperationsContractVersion = "pms-operations.v1";
+
+export interface PmsOperationsMoney {
+  amountDecimal: string;
+  currency: string;
+}
+
+export interface PmsOperationsRatePlan {
+  ratePlanId: string;
+  code: string;
+  name: string;
+  rateType: "flexible" | "non_refundable" | "package" | "manual";
+  mealPlan: string | null;
+  baseRate: PmsOperationsMoney;
+  active: boolean;
+}
+
+export interface PmsOperationsRateRulesSummary {
+  minStayNights: number | null;
+  maxStayNights: number | null;
+  closedToArrival: boolean;
+  closedToDeparture: boolean;
+  activeRuleCount: number;
+}
+
+export interface PmsOperationsRoomType {
+  roomTypeId: string;
+  name: string;
+  description: string;
+  category: string | null;
+  occupancyLimits: Record<string, number>;
+  attributes: Record<string, string | number | boolean | null>;
+  amenities: string[];
+  media: { url: string; altText?: string | null }[];
+  baseRate: PmsOperationsMoney;
+  active: boolean;
+  sortOrder: number;
+  ratePlans: PmsOperationsRatePlan[];
+  rateRulesSummary: PmsOperationsRateRulesSummary;
+  roomCount: number;
+}
+
+export interface PmsOperationsRoom {
+  roomId: string;
+  roomTypeId: string;
+  roomNumber: string;
+  floor: string | null;
+  status: "available" | "maintenance" | "out_of_order" | "retired";
+  sortOrder: number;
+  metadata: Record<string, string | number | boolean | null>;
+}
+
+export interface PmsOperationsListResponse<T> {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  items: T[];
+  sourceFreshness: Record<string, string | number | boolean | null>;
+}
+
+export interface PmsOperationsDetailResponse<T> {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  item: T;
+  sourceFreshness: Record<string, string | number | boolean | null>;
+}
+
 export interface RoomCreate {
   roomTypeId: string;
   roomNumber: string;
@@ -195,4 +262,23 @@ export const roomsService = {
   delete: (id: string) => pmsClient.delete(`/admin/room-types/${id}`),
 
   duplicate: (id: string) => pmsClient.post<RoomType>(`/admin/room-types/${id}/duplicate`),
+};
+
+export const pmsOperationsRoomsReadService = {
+  listRooms: (propertyId: string) =>
+    pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoom>>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/rooms`,
+    ),
+
+  listRoomTypes: (propertyId: string) =>
+    pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types`,
+    ),
+
+  getRoomType: (propertyId: string, roomTypeId: string) =>
+    pmsOperationsClient.get<PmsOperationsDetailResponse<PmsOperationsRoomType>>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(
+        roomTypeId,
+      )}`,
+    ),
 };

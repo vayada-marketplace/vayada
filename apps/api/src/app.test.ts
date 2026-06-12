@@ -9,28 +9,41 @@ import {
 import { injectJson } from "@vayada/backend-test";
 import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
+import { readFileSync } from "node:fs";
 import type { QueryResult, QueryResultRow } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createCompatibilityPublicHotelQuoteRepository,
+  createTargetPublicHotelQuoteRepository,
   serializePublicHotelQuoteProjection,
   toUnavailablePublicHotelQuoteProjection,
+  type PublicHotelQuoteReadPool,
   type PublicHotelQuoteRepository,
 } from "./routes/aiHotelQuotes.js";
 import { buildApp } from "./app.js";
+import { loadConfig } from "./config.js";
 import {
+  createPgPublicHotelProfileRepository,
+  createTargetPublicHotelProfileRepository,
   serializePublicHotelProfileProjection,
   toPublicHotelProfileProjection,
+  type PublicHotelProfileReadPool,
   type PublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
+  createPgTargetBookingSettingsRepository,
+  type BookingSettingsPool,
   type BookingGuestFormSettingsSync,
   type BookingSettingsReadRepository,
   type BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
+import {
+  createTargetBookingWebCalendarRepository,
+  type BookingWebCalendarReadPool,
+} from "./routes/bookingWebPublic.js";
 import {
   createCompatibilityPmsBookingReservationsReadRepository,
   toReservationResponse,
@@ -39,8 +52,69 @@ import {
   type BookingReservationReadModel,
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
+import type { PmsOperationsReadRepository, PmsRoom, PmsRoomType } from "./routes/pmsOperations.js";
+import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
+
+type PmsOperationsTestListResponse<T> = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  items: T[];
+};
+
+type PmsOperationsTestDetailResponse<T> = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  item: T;
+};
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
+const pmsOperationsContractCases = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../engineering/fixtures/pms-operations-route-contracts/cases.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as {
+  cases: Array<{
+    caseId: string;
+    skip?: boolean;
+    skipReason?: string;
+    request: { path: string; query?: Record<string, string | number> };
+    expected: {
+      status?: number;
+      itemCount?: number;
+      mustInclude?: string[];
+      mustExclude?: string[];
+      denials?: Array<{ condition: string; status: number; errorCode: string }>;
+    };
+  }>;
+};
+
+function pmsOperationsRequestOptions(request: {
+  path: string;
+  query?: Record<string, string | number>;
+}): { url: string; query?: Record<string, string> } {
+  return {
+    url: request.path,
+    query: request.query
+      ? Object.fromEntries(
+          Object.entries(request.query).map(([key, value]) => [key, String(value)]),
+        )
+      : undefined,
+  };
+}
+
+const pmsRoomTypesReadCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "rooms-room-types-read",
+)!;
+const pmsRoomsReadCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "rooms-read-statuses",
+)!;
+const pmsAuthorizationDenialCases = pmsOperationsContractCases.cases.filter((testCase) =>
+  testCase.caseId.startsWith("authorization-denial-matrix-"),
+);
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_hotel_owner",
@@ -245,6 +319,110 @@ const bookingReservationsRepository: BookingReservationsReadRepository = {
   },
 };
 
+const pmsPropertyId = "f6853000-0000-0000-0000-000000000001";
+
+const pmsRoomTypes: PmsRoomType[] = [
+  {
+    roomTypeId: "f6855000-0000-0000-0000-000000000001",
+    name: "Alpine Suite",
+    description: "Suite with mountain view.",
+    category: "suite",
+    occupancyLimits: { adults: 2, children: 1, total: 3 },
+    attributes: { view: "mountain", balcony: true },
+    amenities: ["wifi", "breakfast"],
+    media: [{ url: "https://cdn.vayada.example/alpine-suite.jpg", altText: "Alpine Suite" }],
+    baseRate: { amountDecimal: "180.00", currency: "EUR" },
+    active: true,
+    sortOrder: 1,
+    ratePlans: [
+      {
+        ratePlanId: "f6855200-0000-0000-0000-000000000001",
+        code: "FLEX",
+        name: "Flexible",
+        rateType: "flexible",
+        mealPlan: "breakfast",
+        baseRate: { amountDecimal: "180.00", currency: "EUR" },
+        active: true,
+      },
+    ],
+    rateRulesSummary: {
+      minStayNights: 2,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      activeRuleCount: 1,
+    },
+    roomCount: 2,
+  },
+  {
+    roomTypeId: "f6855000-0000-0000-0000-000000000002",
+    name: "Garden Room",
+    description: "Quiet room facing the garden.",
+    category: "double",
+    occupancyLimits: { adults: 2, total: 2 },
+    attributes: { view: "garden" },
+    amenities: ["wifi"],
+    media: [],
+    baseRate: { amountDecimal: "120.00", currency: "EUR" },
+    active: true,
+    sortOrder: 2,
+    ratePlans: [],
+    rateRulesSummary: {
+      minStayNights: null,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      activeRuleCount: 0,
+    },
+    roomCount: 1,
+  },
+];
+
+const pmsRooms: PmsRoom[] = [
+  {
+    roomId: "f6855100-0000-0000-0000-000000000001",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    roomNumber: "101",
+    floor: "1",
+    status: "available",
+    sortOrder: 1,
+    metadata: { wing: "north" },
+  },
+  {
+    roomId: "f6855100-0000-0000-0000-000000000002",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    roomNumber: "102",
+    floor: "1",
+    status: "maintenance",
+    sortOrder: 2,
+    metadata: {},
+  },
+  {
+    roomId: "f6855100-0000-0000-0000-000000000003",
+    roomTypeId: pmsRoomTypes[1].roomTypeId,
+    roomNumber: "201",
+    floor: "2",
+    status: "out_of_order",
+    sortOrder: 3,
+    metadata: {},
+  },
+];
+
+const pmsOperationsRepository: PmsOperationsReadRepository = {
+  async listRoomsByPropertyId(propertyId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return { items: pmsRooms, sourceFreshness: { owner: "pms", status: "fresh" } };
+  },
+  async listRoomTypesByPropertyId(propertyId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return { items: pmsRoomTypes, sourceFreshness: { owner: "pms", status: "fresh" } };
+  },
+  async findRoomTypeById(propertyId, roomTypeId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return pmsRoomTypes.find((roomType) => roomType.roomTypeId === roomTypeId) ?? null;
+  },
+};
+
 const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "bookable",
 )!.profile;
@@ -267,6 +445,76 @@ const publicHotelProfileRepository: PublicHotelProfileRepository = {
   },
 };
 
+function targetPublicHotelProfileRow(): QueryResultRow {
+  return {
+    propertyId: "f6893000-0000-0000-0000-000000000001",
+    contractVersion: "public-bookability.v1",
+    publicVisibility: "public_safe",
+    publicId: "prop_distribution_alpenrose",
+    canonicalSlug: "distribution-alpenrose",
+    canonicalUrl: "https://distribution-alpenrose.booking.localhost/en",
+    bookingBaseUrl: "https://distribution-alpenrose.booking.localhost",
+    customDomainUrl: null,
+    timezone: "Europe/Vienna",
+    defaultLocale: "en",
+    supportedLocales: ["en", "de"],
+    defaultCurrency: "EUR",
+    supportedCurrencies: ["EUR", "USD"],
+    profileStatus: "public",
+    publicIdentity: {
+      propertyId: "prop_distribution_alpenrose",
+      slug: "distribution-alpenrose",
+      name: "Distribution Alpenrose",
+      summary: "Independent alpine hotel near the old town.",
+    },
+    location: {
+      country: "AT",
+      city: "Innsbruck",
+      region: "Tyrol",
+      latitude: 47.2692,
+      longitude: 11.4041,
+    },
+    media: [
+      {
+        url: "https://cdn.vayada.example/hotels/distribution-alpenrose/front.jpg",
+        alt: "Distribution Alpenrose exterior",
+      },
+    ],
+    amenities: ["wifi", "breakfast"],
+    policies: {
+      checkInFrom: "15:00",
+      checkOutUntil: "11:00",
+      cancellationSummary: "Free cancellation until 7 days before arrival.",
+      termsUrl: "https://distribution-alpenrose.booking.localhost/en/terms",
+    },
+    capabilities: {
+      instantBook: true,
+      onlinePayment: true,
+      payAtProperty: true,
+      promoCodes: true,
+      referralCodes: true,
+      bookingDeepLinks: true,
+    },
+    supportedQuoteParameters: {
+      minRooms: 1,
+      maxRooms: 4,
+      minAdults: 1,
+      maxAdults: 6,
+      childrenSupported: true,
+      supportedCurrencies: ["EUR", "USD"],
+      supportedLocales: ["en", "de"],
+    },
+    publicSetupCompleteness: { status: "ready", missing: [] },
+    sourceFreshness: {
+      hotel_catalog: { status: "fresh", generatedAt: "2026-06-09T08:50:00.000Z" },
+      distribution: { status: "fresh", generatedAt: "2026-06-09T09:00:00.000Z" },
+    },
+    freshnessStatus: "fresh",
+    dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    generatedAt: "2026-06-09T09:00:00.000Z",
+  };
+}
+
 const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
   async findQuoteBySlug(slug, query) {
     if (slug !== seededPublicQuote.request.hotelSlug) return null;
@@ -277,7 +525,10 @@ const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
   },
 };
 
-function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): IdentityRepository {
+function identityRepositoryWithResources(
+  hotelId = "booking_hotel_alpenrose",
+  linkedPmsPropertyId = pmsPropertyId,
+): IdentityRepository {
   return {
     ...identityRepository,
     async findLinkedResources() {
@@ -287,6 +538,13 @@ function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): Ident
           resourceType: "booking_hotel",
           resourceId: hotelId,
           relationship: "owner",
+          status: "active",
+        },
+        {
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: linkedPmsPropertyId,
+          relationship: "operator",
           status: "active",
         },
       ];
@@ -303,18 +561,26 @@ function buildAuthenticatedApp(
     settingsRepository?: BookingSettingsReadRepository;
     settingsWriteRepository?: BookingSettingsWriteRepository;
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
+    pmsOperationsRepository?: PmsOperationsReadRepository;
+    pmsOperationsAllowedOrigins?: string[];
+    linkedPmsPropertyId?: string;
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
+    pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
+    pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
     bookingGuestFormSettingsSync: options.guestFormSettingsSync,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
-      repository: identityRepositoryWithHotel(options.linkedHotelId),
+      repository: identityRepositoryWithResources(
+        options.linkedHotelId,
+        options.linkedPmsPropertyId,
+      ),
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["booking.settings.manage", "booking.reservation.read"];
@@ -335,6 +601,19 @@ function buildAuthenticatedApp(
       },
     },
   });
+}
+
+function readContractPath(value: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (current === undefined || current === null) return undefined;
+    const match = /^([^\[]+)(?:\[(\d+)])?$/.exec(segment);
+    if (!match) return undefined;
+    const [, key, index] = match;
+    if (typeof current !== "object" || !(key in current)) return undefined;
+    const next = (current as Record<string, unknown>)[key];
+    if (index === undefined) return next;
+    return Array.isArray(next) ? next[Number(index)] : undefined;
+  }, value);
 }
 
 describe("vayada-api", () => {
@@ -656,6 +935,99 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(customDomainResponse.body)).toEqual([]);
   });
 
+  it("resolves Booking Web custom domains from the target repository without legacy Booking", async () => {
+    let legacyResolveCalled = false;
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: {
+        async findProfileBySlug(slug) {
+          return slug === "hotel-alpenrose" ? seededCustomDomainProfile : null;
+        },
+        async findProfileByCustomDomain(domain) {
+          return domain === "book.alpenrose.example" ? seededCustomDomainProfile : null;
+        },
+      },
+      publicHotelQuoteRepository,
+      bookingPublicApiUrl: "https://api.booking.localhost",
+      bookingDomainResolutionSource: "target",
+      async bookingWebPublicFetch() {
+        legacyResolveCalled = true;
+        return new Response(null, { status: 500 });
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/book.alpenrose.example",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      host: "book.alpenrose.example",
+      slug: "hotel-alpenrose",
+      canonicalUrl: "https://book.alpenrose.example/en",
+      bookingBaseUrl: "https://book.alpenrose.example",
+      customDomainUrl: "https://book.alpenrose.example",
+      shouldRedirect: false,
+      redirectUrl: null,
+    });
+    expect(legacyResolveCalled).toBe(false);
+    expect(findForbiddenPublicBookabilityKeys(response.body)).toEqual([]);
+  });
+
+  it("mounts public profile and known-host routes in target mode without the legacy booking DB", async () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+      BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+    });
+    expect(config.bookingDatabaseUrl).toBeUndefined();
+
+    const pool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>() {
+        return { rows: [targetPublicHotelProfileRow()] as T[] };
+      },
+      async end() {},
+    };
+    const targetRepository = createTargetPublicHotelProfileRepository({
+      connectionString: config.targetDatabaseUrl!,
+      pool,
+    });
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: targetRepository,
+      bookingDomainResolutionSource: config.bookingDomainResolutionSource,
+    });
+
+    const aiProfile = await injectJson(app, {
+      method: "GET",
+      url: "/api/ai/hotels/distribution-alpenrose",
+    });
+    const bookingWebProfile = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hotels/distribution-alpenrose",
+    });
+    const knownHost = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking-web/hosts/distribution-alpenrose.booking.localhost",
+    });
+
+    expect(aiProfile.statusCode).toBe(200);
+    expect(bookingWebProfile.statusCode).toBe(200);
+    expect(knownHost.statusCode).toBe(200);
+    expect(aiProfile.body).toMatchObject({
+      hotel: { slug: "distribution-alpenrose", name: "Distribution Alpenrose" },
+    });
+    expect(bookingWebProfile.body).toMatchObject({
+      hotel: { slug: "distribution-alpenrose", name: "Distribution Alpenrose" },
+    });
+    expect(knownHost.body).toMatchObject({
+      host: "distribution-alpenrose.booking.localhost",
+      slug: "distribution-alpenrose",
+      shouldRedirect: false,
+    });
+  });
+
   it("does not fall back to unverified custom-domain rows when legacy verification rejects", async () => {
     app = buildApp({
       logger: false,
@@ -817,6 +1189,76 @@ describe("vayada-api", () => {
       dataSources: ["pms", "distribution"],
     });
     expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
+  });
+
+  it("serves quote, offers, and calendar routes from target repositories with PMS public API unset", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+      bookingWebCalendarRepository: {
+        async findCalendarByHotel(hotel, query) {
+          return {
+            contractVersion: "public-bookability.v1",
+            generatedAt: "2026-06-09T09:00:00.000Z",
+            publicVisibility: "public_safe",
+            request: {
+              hotelSlug: hotel.slug,
+              start: query.start ?? "",
+              end: query.end ?? "",
+            },
+            calendar: {
+              unavailableDates: ["2026-09-14"],
+              minStayByArrival: {},
+              maxStayByArrival: {},
+            },
+            freshness: {
+              status: "fresh",
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              sources: [
+                {
+                  owner: "pms",
+                  lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  status: "fresh",
+                },
+                {
+                  owner: "distribution",
+                  lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  status: "fresh",
+                },
+              ],
+            },
+            dataSources: ["pms", "distribution"],
+          };
+        },
+      },
+      async bookingWebPublicFetch() {
+        throw new Error("target bookability routes must not call PMS public API");
+      },
+    });
+
+    const quote = await app.inject({
+      method: "GET",
+      url: "/api/ai/hotels/hotel-alpenrose/quote?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
+    });
+    const offers = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/offers?check_in=2026-09-12&check_out=2026-09-15&adults=2&children=0&rooms=1&currency=EUR&locale=en&referral_code=creator-anna",
+    });
+    const calendar = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/calendar?start=2026-09-12&end=2026-09-15",
+    });
+
+    expect(quote.statusCode).toBe(200);
+    expect(quote.json()).toMatchObject({ status: "bookable" });
+    expect(offers.statusCode).toBe(200);
+    expect(offers.json()).toMatchObject({ status: "bookable" });
+    expect(calendar.statusCode).toBe(200);
+    expect(calendar.json()).toMatchObject({
+      calendar: { unavailableDates: ["2026-09-14"] },
+      freshness: { status: "fresh" },
+    });
   });
 
   it("builds bookable public AI quotes from the PMS public room-search adapter", async () => {
@@ -2201,16 +2643,950 @@ describe("vayada-api", () => {
     expect(poolClosed).toBe(true);
   });
 
+  it("serves booking reservations from the target read model without the legacy PMS URL", async () => {
+    const queries: { text: string; values?: readonly unknown[] }[] = [];
+    let poolClosed = false;
+    const targetReservation: BookingReservationReadModel = {
+      ...reservation,
+      id: "d6000000-0000-0000-0000-000000000682",
+      bookingReference: "B-CHK-682",
+      roomTypeId: "f6855000-0000-0000-0000-000000000001",
+      roomName: "Alpine Suite",
+      roomMaxOccupancy: 3,
+      guestFirstName: "Mira",
+      guestEmail: "mira.guest@example.test",
+      checkIn: "2026-07-01",
+      checkOut: "2026-07-04",
+      children: 1,
+      nightlyRate: "140.00",
+      totalAmount: "420.00",
+      status: "checked_out",
+      roomId: "f6855100-0000-0000-0000-000000000001",
+      roomNumber: "301",
+      assignedRooms: [
+        {
+          roomId: "f6855100-0000-0000-0000-000000000002",
+          roomNumber: "302",
+          position: 1,
+        },
+      ],
+      paymentStatus: "paid",
+      depositRequired: true,
+      depositPercentage: "30.00",
+      depositAmount: "126.00",
+      balanceAmount: "0.00",
+      checkedInAt: "2026-07-01T15:35:00.000Z",
+      checkedOutAt: "2026-07-04T10:15:00.000Z",
+      platformFeeAmount: "12.60",
+      propertyPayoutAmount: "407.40",
+      addonIds: ["addon_breakfast_checkout_682"],
+      addonNames: ["Breakfast basket"],
+      addonTotal: "45.00",
+      addonQuantities: { addon_breakfast_checkout_682: 1 },
+      addonDates: { addon_breakfast_checkout_682: ["2026-07-02"] },
+      guestWithdrawn: true,
+      promoCode: "SUMMER30",
+      promoDiscount: "30.00",
+    };
+    const pool: BookingReservationsReadPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("COUNT(*)")) {
+          return { rows: [{ total: "1" }] as unknown as T[] };
+        }
+
+        return { rows: [targetReservation] as unknown as T[] };
+      },
+      async end() {
+        poolClosed = true;
+      },
+    };
+
+    app = buildAuthenticatedApp({
+      linkedHotelId: "booking_hotel_checkout_alpenrose",
+      reservationsRepository: createTargetBookingReservationsReadRepository({
+        connectionString: "postgresql://target-db",
+        pool,
+      }),
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_checkout_alpenrose/reservations?status=checked_out&search=Mira&limit=25&offset=5",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      bookings: [
+        {
+          id: "d6000000-0000-0000-0000-000000000682",
+          bookingReference: "B-CHK-682",
+          roomTypeId: "f6855000-0000-0000-0000-000000000001",
+          roomName: "Alpine Suite",
+          roomMaxOccupancy: 3,
+          totalRoomCapacity: 6,
+          guestFirstName: "Mira",
+          guestEmail: "mira.guest@example.test",
+          checkIn: "2026-07-01",
+          checkOut: "2026-07-04",
+          nights: 3,
+          numberOfRooms: 2,
+          totalAmount: 420,
+          status: "checked_out",
+          roomId: "f6855100-0000-0000-0000-000000000001",
+          roomNumber: "301",
+          assignedRooms: [
+            {
+              roomId: "f6855100-0000-0000-0000-000000000001",
+              roomNumber: "301",
+              position: 0,
+            },
+            {
+              roomId: "f6855100-0000-0000-0000-000000000002",
+              roomNumber: "302",
+              position: 1,
+            },
+          ],
+          paymentMethod: "card",
+          paymentStatus: "paid",
+          depositRequired: true,
+          depositPercentage: 30,
+          depositAmount: 126,
+          balanceAmount: 0,
+          checkedInAt: "2026-07-01T15:35:00.000Z",
+          checkedOutAt: "2026-07-04T10:15:00.000Z",
+          platformFeeAmount: 12.6,
+          propertyPayoutAmount: 407.4,
+          addonIds: ["addon_breakfast_checkout_682"],
+          addonNames: ["Breakfast basket"],
+          addonTotal: 45,
+          addonQuantities: { addon_breakfast_checkout_682: 1 },
+          addonDates: { addon_breakfast_checkout_682: ["2026-07-02"] },
+          guestWithdrawn: true,
+          promoCode: "SUMMER30",
+          promoDiscount: 30,
+        },
+      ],
+      total: 1,
+      limit: 25,
+      offset: 5,
+    });
+
+    expect(queries).toHaveLength(2);
+    const sql = queries.map((query) => query.text).join("\n");
+    expect(sql).toContain("FROM booking.guest_bookings booking");
+    expect(sql).toContain("hotel_catalog.property_source_links source");
+    expect(sql).toContain("pms.operational_booking_assignments");
+    expect(sql).toContain("booking.booking_addon_selections");
+    expect(sql).toContain("finance.payments");
+    expect(sql).toContain("assignment_status IN ('checked_in', 'in_house', 'checked_out')");
+    expect(sql).toContain("row_number() OVER");
+    expect(sql).toContain("SUM(payment.fee_amount)");
+    expect(sql).toContain("jsonb_object_agg(grouped.addon_key, grouped.quantity)");
+    expect(sql).not.toContain("FROM bookings b");
+    expect(sql).not.toContain("booking_rooms");
+    expect(queries[0]?.values).toEqual([
+      "booking_hotel_checkout_alpenrose",
+      "checked_out",
+      "%Mira%",
+      25,
+      5,
+    ]);
+    expect(queries[1]?.values).toEqual([
+      "booking_hotel_checkout_alpenrose",
+      "checked_out",
+      "%Mira%",
+    ]);
+
+    await app.close();
+    app = null;
+    expect(poolClosed).toBe(true);
+  });
+
   it("rejects empty booking reservations repository connection strings", async () => {
     expect(() =>
       createCompatibilityPmsBookingReservationsReadRepository({ connectionString: " " }),
     ).toThrow("Booking reservations repository connectionString must not be empty");
   });
 
+  it("rejects empty target booking reservations repository connection strings", async () => {
+    expect(() => createTargetBookingReservationsReadRepository({ connectionString: " " })).toThrow(
+      "Booking reservations repository connectionString must not be empty",
+    );
+  });
+
   it("rejects empty booking settings repository connection strings", async () => {
     expect(() => createPgBookingSettingsReadRepository({ connectionString: " " })).toThrow(
       "Booking settings repository connectionString must not be empty",
     );
+  });
+
+  it("does not close injected public hotel profile pools", async () => {
+    let legacyPoolClosed = false;
+    let targetPoolClosed = false;
+    const legacyPool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>() {
+        return { rows: [] as T[] };
+      },
+      async end() {
+        legacyPoolClosed = true;
+      },
+    };
+    const targetPool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>() {
+        return { rows: [] as T[] };
+      },
+      async end() {
+        targetPoolClosed = true;
+      },
+    };
+
+    const legacyRepository = createPgPublicHotelProfileRepository({
+      connectionString: "postgresql://booking-db",
+      pool: legacyPool,
+    });
+    const targetRepository = createTargetPublicHotelProfileRepository({
+      connectionString: "postgresql://target-db",
+      pool: targetPool,
+    });
+
+    await legacyRepository.close?.();
+    await targetRepository.close?.();
+
+    expect(legacyPoolClosed).toBe(false);
+    expect(targetPoolClosed).toBe(false);
+  });
+
+  it("reads target public hotel profiles from the distribution projection", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [targetPublicHotelProfileRow()] as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelProfileRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const profile = await repository.findProfileBySlug("distribution-alpenrose");
+
+    expect(profile).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-09T09:00:00.000Z",
+      hotel: {
+        propertyId: "prop_distribution_alpenrose",
+        slug: "distribution-alpenrose",
+        name: "Distribution Alpenrose",
+        canonicalUrl: "https://distribution-alpenrose.booking.localhost/en",
+        bookingBaseUrl: "https://distribution-alpenrose.booking.localhost",
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR", "USD"],
+        capabilities: {
+          instantBook: true,
+          onlinePayment: true,
+          payAtProperty: true,
+          bookingDeepLinks: true,
+        },
+        trust: {
+          profileComplete: true,
+          profileVerified: true,
+          bookabilityStatus: "bookable",
+          reasonCodes: [],
+        },
+      },
+      dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+    });
+    expect(queries[0]?.text).toContain("distribution.public_hotel_bookability_profiles");
+    expect(queries[0]?.text).toContain("hotel_catalog.property_slugs");
+    expect(queries[0]?.text).toContain("slug_alias.purpose = 'redirect'");
+    expect(queries[0]?.values).toEqual(["distribution-alpenrose"]);
+    expect(findForbiddenPublicBookabilityKeys(profile)).toEqual([]);
+  });
+
+  it("reads target public quotes from distribution read models without PMS public API", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000001",
+              publicQuoteReference: "quote_target_alpenrose",
+              quoteHash: "sha256:target-alpenrose",
+              requestSnapshot: {},
+              quoteStatus: "bookable",
+              unavailableReasons: [],
+              offers: [
+                {
+                  offerId: "offer_deluxe_flexible",
+                  roomTypeId: "room_deluxe",
+                  ratePlanId: "rate_flexible",
+                  name: "Deluxe Double Room",
+                  availableRooms: 2,
+                  paymentOptions: ["card", "pay_at_property"],
+                  totals: {
+                    currency: "EUR",
+                    roomTotal: 540,
+                    taxesAndFees: 54,
+                    discounts: 0,
+                    grandTotal: 594,
+                  },
+                  bookingUrl:
+                    "https://hotel-alpenrose.booking.localhost/en/book?quote_id=quote_target_alpenrose",
+                },
+              ],
+              totals: {},
+              deepLinkUrl:
+                "https://hotel-alpenrose.booking.localhost/en/book?quote_id=quote_target_alpenrose",
+              priceGuarantee: "expires_at",
+              currency: "EUR",
+              sourceFreshness: {
+                sources: [
+                  {
+                    owner: "pms",
+                    status: "fresh",
+                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  },
+                  {
+                    owner: "finance",
+                    status: "fresh",
+                    lastUpdatedAt: "2026-06-09T09:00:00.000Z",
+                  },
+                ],
+              },
+              freshnessStatus: "fresh",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-09T09:00:00.000Z",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        adults: 2,
+        children: 0,
+        rooms: 1,
+      },
+      status: "bookable",
+      quote: {
+        quoteId: "quote_target_alpenrose",
+        offers: [
+          {
+            offerId: "offer_deluxe_flexible",
+            roomTypeId: "room_deluxe",
+            paymentOptions: ["card", "pay_at_property"],
+            totals: {
+              grandTotal: 594,
+            },
+          },
+        ],
+      },
+      freshness: {
+        status: "fresh",
+      },
+    });
+    expect(queries[0]?.text).toContain("distribution.public_quote_read_models");
+    expect(queries[0]?.text).toContain("read_model.expires_at > $11::timestamptz");
+    expect(queries[0]?.text).not.toContain("PMS_PUBLIC_API_URL");
+    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
+  });
+
+  it("builds target offer fallback booking URLs from the hotel booking base URL", async () => {
+    const customDomainProfile = {
+      ...seededPublicProfile,
+      hotel: {
+        ...seededPublicProfile.hotel,
+        bookingBaseUrl: "https://book.alpenrose.example",
+      },
+    };
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000003",
+              publicQuoteReference: "quote_target_fallback_url",
+              quoteHash: "sha256:target-fallback-url",
+              requestSnapshot: {},
+              quoteStatus: "bookable",
+              unavailableReasons: [],
+              offers: [
+                {
+                  offerId: "offer_deluxe_flexible",
+                  roomTypeId: "room_deluxe",
+                  name: "Deluxe Double Room",
+                  availableRooms: 2,
+                  totals: {
+                    currency: "EUR",
+                    roomTotal: 540,
+                    taxesAndFees: 54,
+                    discounts: 0,
+                    grandTotal: 594,
+                  },
+                },
+              ],
+              totals: {},
+              deepLinkUrl: null,
+              priceGuarantee: "expires_at",
+              currency: "EUR",
+              sourceFreshness: { sources: [{ owner: "pms", status: "fresh" }] },
+              freshnessStatus: "fresh",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: {
+        async findProfileBySlug(slug) {
+          return slug === customDomainProfile.hotel.slug ? customDomainProfile : null;
+        },
+      },
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+      referral_code: "creator-anna",
+    });
+
+    const bookingUrl = quote?.quote?.offers[0]?.bookingUrl;
+    expect(bookingUrl).toMatch(/^https:\/\/book\.alpenrose\.example\/en\/book\?/);
+    expect(bookingUrl).toContain("check_in=2026-09-12");
+    expect(bookingUrl).toContain("referral_code=creator-anna");
+    expect(bookingUrl).not.toContain("booking.localhost");
+  });
+
+  it("preserves public detail for target unavailable quote reasons", async () => {
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              quoteSessionId: "f6898100-0000-0000-0000-000000000002",
+              publicQuoteReference: "quote_target_unavailable_alpenrose",
+              quoteHash: "sha256:target-unavailable-alpenrose",
+              requestSnapshot: {},
+              quoteStatus: "stale",
+              unavailableReasons: [
+                {
+                  code: "stale_data",
+                  publicDetail: {
+                    sourceOwner: "pms",
+                    maximumAgeSeconds: 300,
+                  },
+                },
+              ],
+              offers: [],
+              totals: {},
+              deepLinkUrl: null,
+              priceGuarantee: "none",
+              currency: "EUR",
+              sourceFreshness: {
+                sources: [{ owner: "pms", status: "stale", reasonCode: "source_stale" }],
+              },
+              freshnessStatus: "stale",
+              dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+              expiresAt: "2026-06-09T09:15:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "stale",
+      unavailableReasons: [
+        {
+          code: "stale_data",
+          detail: '{"sourceOwner":"pms","maximumAgeSeconds":300}',
+        },
+      ],
+      freshness: {
+        status: "stale",
+      },
+    });
+    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
+  });
+
+  it("returns unavailable target public quotes when the read model query fails", async () => {
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>() {
+        throw new Error("target database unavailable");
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "unavailable",
+      unavailableReasons: [
+        {
+          code: "unavailable_data",
+          detail: "Public quote read model is not ready yet.",
+        },
+      ],
+      freshness: {
+        status: "unavailable",
+      },
+    });
+  });
+
+  it("reads target Booking Web calendar from distribution offer snapshots", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              stayDate: "2026-09-12",
+              hasAvailability: true,
+              hasUnavailableState: false,
+              sourceFreshnessValues: [
+                JSON.stringify({
+                  sources: [{ owner: "pms", status: "fresh" }],
+                }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+            {
+              stayDate: "2026-09-13",
+              hasAvailability: true,
+              hasUnavailableState: false,
+              sourceFreshnessValues: [
+                JSON.stringify({
+                  sources: [{ owner: "pms", status: "fresh" }],
+                }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+            {
+              stayDate: "2026-09-14",
+              hasAvailability: false,
+              hasUnavailableState: true,
+              sourceFreshnessValues: [
+                JSON.stringify({
+                  sources: [{ owner: "pms", status: "fresh" }],
+                }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-15",
+    });
+
+    expect(calendar).toMatchObject({
+      contractVersion: "public-bookability.v1",
+      generatedAt: "2026-06-09T09:00:00.000Z",
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-15",
+      },
+      calendar: {
+        unavailableDates: ["2026-09-14"],
+      },
+      freshness: {
+        status: "fresh",
+      },
+      dataSources: ["pms", "distribution"],
+    });
+    expect(queries[0]?.text).toContain("distribution.public_room_offer_snapshots");
+    expect(queries[0]?.values).toEqual([
+      seededPublicProfile.hotel.propertyId,
+      "hotel-alpenrose",
+      "2026-09-12",
+      "2026-09-15",
+    ]);
+    expect(findForbiddenPublicBookabilityKeys(calendar)).toEqual([]);
+  });
+
+  it("returns unavailable target Booking Web calendar when the read model query fails", async () => {
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>() {
+        throw new Error("target database unavailable");
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-15",
+    });
+
+    expect(calendar).toMatchObject({
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-15",
+      },
+      calendar: {
+        unavailableDates: [],
+      },
+      freshness: {
+        status: "unavailable",
+      },
+    });
+  });
+
+  it("marks target Booking Web calendar unavailable when snapshot coverage is partial", async () => {
+    const pool: BookingWebCalendarReadPool = {
+      async query<T extends QueryResultRow>() {
+        return {
+          rows: [
+            {
+              stayDate: "2026-09-12",
+              hasAvailability: true,
+              hasUnavailableState: false,
+              sourceFreshnessValues: [
+                JSON.stringify({ sources: [{ owner: "pms", status: "fresh" }] }),
+              ],
+              freshnessStatuses: ["fresh"],
+              dataSources: ["pms", "distribution"],
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingWebCalendarRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const calendar = await repository.findCalendarByHotel(seededPublicProfile.hotel, {
+      start: "2026-09-12",
+      end: "2026-09-14",
+    });
+
+    expect(calendar).toMatchObject({
+      request: {
+        hotelSlug: "hotel-alpenrose",
+        start: "2026-09-12",
+        end: "2026-09-14",
+      },
+      calendar: {
+        unavailableDates: [],
+      },
+      freshness: {
+        status: "unavailable",
+      },
+    });
+  });
+
+  it("looks up target custom domains through verified property-domain ownership", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelProfileReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        return { rows: [] as T[] };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelProfileRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    await repository.findProfileByCustomDomain?.("https://Book.Alpenrose.Example/de");
+
+    expect(queries[0]?.text).toContain("hotel_catalog.property_domains");
+    expect(queries[0]?.text).toContain("verification_status = 'verified'");
+    expect(queries[0]?.text).not.toContain("regexp_replace");
+    expect(queries[0]?.values).toEqual(["book.alpenrose.example"]);
+  });
+
+  it("rejects empty target public hotel profile repository connection strings", async () => {
+    expect(() => createTargetPublicHotelProfileRepository({ connectionString: " " })).toThrow(
+      "Target public hotel profile repository connectionString must not be empty",
+    );
+  });
+
+  it("rejects empty target booking settings repository connection strings", async () => {
+    expect(() => createPgTargetBookingSettingsRepository({ connectionString: " " })).toThrow(
+      "Target booking settings repository connectionString must not be empty",
+    );
+  });
+
+  it("serves booking settings contracts from the target repository without legacy queries", async () => {
+    const queries: { text: string; values?: readonly unknown[] }[] = [];
+    let poolClosed = false;
+    const state: {
+      show_addons_step: boolean;
+      group_addons_by_category: boolean;
+      special_requests_enabled: boolean;
+      arrival_time_enabled: boolean;
+      guest_count_enabled: boolean;
+      benefits: string[];
+      default_currency: string;
+      default_language: string;
+      supported_currencies: string[];
+      supported_languages: string[];
+      booking_filters: string[];
+      custom_filters: Record<string, string>;
+      filter_rooms: Record<string, string[]>;
+    } = {
+      show_addons_step: false,
+      group_addons_by_category: true,
+      special_requests_enabled: false,
+      arrival_time_enabled: true,
+      guest_count_enabled: true,
+      benefits: ["Free breakfast"],
+      default_currency: "CHF",
+      default_language: "de",
+      supported_currencies: ["EUR"],
+      supported_languages: ["en"],
+      booking_filters: ["oceanView"],
+      custom_filters: { oceanView: "Ocean view" },
+      filter_rooms: { oceanView: ["room_101"] },
+    };
+    const pool: BookingSettingsPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("show_addons_step = $2")) {
+          state.show_addons_step = values?.[1] as boolean;
+          state.group_addons_by_category = values?.[2] as boolean;
+        } else if (text.includes("special_requests_enabled = $2")) {
+          state.special_requests_enabled = values?.[1] as boolean;
+          state.arrival_time_enabled = values?.[2] as boolean;
+          state.guest_count_enabled = values?.[3] as boolean;
+        } else if (text.includes("benefits = $2::jsonb")) {
+          state.benefits = JSON.parse(values?.[1] as string) as string[];
+        } else if (text.includes("default_currency = $2")) {
+          state.default_currency = values?.[1] as string;
+          state.default_language = values?.[2] as string;
+          state.supported_currencies = values?.[3] as string[];
+          state.supported_languages = values?.[4] as string[];
+        } else if (text.includes("booking_filters = $2::jsonb")) {
+          state.booking_filters = JSON.parse(values?.[1] as string) as string[];
+          state.custom_filters = JSON.parse(values?.[2] as string) as Record<string, string>;
+          state.filter_rooms = JSON.parse(values?.[3] as string) as Record<string, string[]>;
+        }
+
+        return {
+          rows: [
+            {
+              source_link_count: 1,
+              settings_property_id: "d3000000-0000-0000-0000-000000000682",
+              ...state,
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {
+        poolClosed = true;
+      },
+    };
+
+    const targetRepository = createPgTargetBookingSettingsRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+    app = buildAuthenticatedApp({
+      settingsRepository: targetRepository,
+      settingsWriteRepository: targetRepository,
+    });
+
+    const cases = [
+      {
+        path: "/addons",
+        update: { showAddonsStep: true, groupAddonsByCategory: false },
+        expected: { showAddonsStep: true, groupAddonsByCategory: false },
+      },
+      {
+        path: "/guest-form",
+        update: {
+          specialRequestsEnabled: true,
+          arrivalTimeEnabled: false,
+          guestCountEnabled: false,
+        },
+        expected: {
+          specialRequestsEnabled: true,
+          arrivalTimeEnabled: false,
+          guestCountEnabled: false,
+        },
+      },
+      {
+        path: "/benefits",
+        update: { benefits: ["Late checkout"] },
+        expected: { benefits: ["Late checkout"] },
+      },
+      {
+        path: "/localization",
+        update: {
+          defaultCurrency: " eur ",
+          defaultLanguage: "en-US",
+          supportedCurrencies: ["CHF", "EUR"],
+          supportedLanguages: ["de", "en-US"],
+        },
+        expected: {
+          defaultCurrency: "EUR",
+          defaultLanguage: "en-US",
+          supportedCurrencies: ["CHF"],
+          supportedLanguages: ["de"],
+        },
+      },
+      {
+        path: "/room-filters",
+        update: {
+          bookingFilters: ["spa_access"],
+          customFilters: { spa_access: "Spa access" },
+          filterRooms: { spa_access: ["room_102"] },
+        },
+        expected: {
+          bookingFilters: ["spa_access"],
+          customFilters: { spa_access: "Spa access" },
+          filterRooms: { spa_access: ["room_102"] },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const url = `/api/booking/hotels/booking_hotel_alpenrose/settings${testCase.path}`;
+      const putResponse = await injectJson(app, {
+        method: "PUT",
+        url,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+        payload: testCase.update,
+      });
+      expect(putResponse.statusCode).toBe(200);
+      expect(putResponse.body).toEqual(testCase.expected);
+
+      const getResponse = await injectJson(app, {
+        method: "GET",
+        url,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+      expect(getResponse.statusCode).toBe(200);
+      expect(getResponse.body).toEqual(testCase.expected);
+    }
+
+    expect(queries.length).toBeGreaterThanOrEqual(10);
+    expect(queries.every((query) => query.values?.[0] === "booking_hotel_alpenrose")).toBe(true);
+    const settingsQueries = queries.filter((query) =>
+      query.text.includes("booking.booking_settings"),
+    );
+    expect(settingsQueries.every((query) => query.text.includes("source_links"))).toBe(true);
+    const sql = queries.map((query) => query.text).join("\n");
+    expect(sql).toContain("relationship = 'canonical_input'");
+    expect(sql).toContain("status = 'active'");
+    expect(sql).not.toMatch(/\b(FROM|UPDATE)\s+booking_hotels\b/i);
+
+    await app.close();
+    app = null;
+    expect(poolClosed).toBe(true);
   });
 
   it("sends guest-form PMS compatibility sync requests with hotel scope and auth", async () => {
@@ -3676,6 +5052,246 @@ describe("vayada-api", () => {
       category: "authorization",
       message: "Missing booking hotel access.",
     });
+  });
+
+  it("returns PMS room-types using the P1a route contract fixture", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomTypesReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestListResponse<PmsRoomType>;
+    expect(response.statusCode).toBe(pmsRoomTypesReadCase.expected.status);
+    expect(body.contractVersion).toBe("pms-operations.v1");
+    expect(body.items).toHaveLength(pmsRoomTypesReadCase.expected.itemCount!);
+    for (const path of pmsRoomTypesReadCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    for (const key of pmsRoomTypesReadCase.expected.mustExclude ?? []) {
+      expect(JSON.stringify(body)).not.toContain(key);
+    }
+    expect(body.items.map((item) => item.name)).toEqual(["Alpine Suite", "Garden Room"]);
+  });
+
+  it("returns PMS rooms using the P1a route contract fixture", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomsReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestListResponse<PmsRoom>;
+    expect(response.statusCode).toBe(pmsRoomsReadCase.expected.status);
+    expect(body.contractVersion).toBe("pms-operations.v1");
+    expect(body.items).toHaveLength(pmsRoomsReadCase.expected.itemCount!);
+    expect(body.items.map((item) => item.status)).toEqual([
+      "available",
+      "maintenance",
+      "out_of_order",
+    ]);
+    expect(body.items.map((item) => item.roomNumber)).toEqual(["101", "102", "201"]);
+  });
+
+  it("allows PMS Web browser preflight and read requests from configured origins", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: pmsRoomsReadCase.request.path,
+      headers: {
+        origin: "https://pms.localhost",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "authorization,content-type,x-hotel-id",
+      },
+    });
+    const read = await app.inject({
+      method: "GET",
+      url: pmsRoomsReadCase.request.path,
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    expect(preflight.headers["access-control-allow-headers"]).toBe(
+      "authorization,content-type,x-hotel-id",
+    );
+    expect(read.statusCode).toBe(200);
+    expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+  });
+
+  it("returns PMS room-type detail through the P1a route contract", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body as PmsOperationsTestDetailResponse<PmsRoomType>).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      propertyId: pmsPropertyId,
+      item: {
+        roomTypeId: pmsRoomTypes[0].roomTypeId,
+        name: "Alpine Suite",
+      },
+    });
+  });
+
+  it("rejects PMS operations reads with an invalid token", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomTypesReadCase.request),
+      headers: {
+        authorization: "Bearer invalid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("passes the PMS operations authorization denial matrix", async () => {
+    type AuthenticatedAppOptions = NonNullable<Parameters<typeof buildAuthenticatedApp>[0]>;
+    type PmsAuthorizationRuntimeCase = {
+      condition: string;
+      appOptions: AuthenticatedAppOptions;
+      requestHeaders?: { authorization: string };
+    };
+    const pmsEntitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: pmsPropertyId,
+      },
+    };
+    const pmsAuthorizationCases: PmsAuthorizationRuntimeCase[] = [
+      {
+        condition: "missing auth",
+        appOptions: {},
+        requestHeaders: undefined,
+      },
+      {
+        condition: "missing permission",
+        appOptions: { permissions: [] },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+      {
+        condition: "missing entitlement",
+        appOptions: { permissions: ["pms.operations.read"], entitlements: [] },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+      {
+        condition: "inactive entitlement",
+        appOptions: {
+          permissions: ["pms.operations.read"],
+          entitlements: [{ ...pmsEntitlement, status: "suspended" as const }],
+        },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+      {
+        condition: "missing linked property",
+        appOptions: {
+          permissions: ["pms.operations.read"],
+          entitlements: [pmsEntitlement],
+          linkedPmsPropertyId: "f6853000-0000-0000-0000-000000000099",
+        },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+    ];
+
+    expect(pmsAuthorizationDenialCases).toHaveLength(3);
+
+    for (const denialCase of pmsAuthorizationDenialCases) {
+      for (const matrixCase of denialCase.expected.denials ?? []) {
+        const runtimeCase = pmsAuthorizationCases.find(
+          (candidate) => candidate.condition === matrixCase.condition,
+        );
+        const assertionContext = `${denialCase.caseId}: ${matrixCase.condition}`;
+        expect(runtimeCase, assertionContext).toBeDefined();
+
+        app = buildAuthenticatedApp(runtimeCase!.appOptions);
+        const response = await injectJson(app, {
+          method: "GET",
+          ...pmsOperationsRequestOptions(denialCase.request),
+          headers: runtimeCase!.requestHeaders,
+        });
+        await app.close();
+        app = null;
+
+        expect(response.statusCode, assertionContext).toBe(matrixCase.status);
+        expect((response.body as { code: string }).code, assertionContext).toBe(
+          matrixCase.errorCode,
+        );
+      }
+    }
   });
 
   it("returns 404 when the authorized booking hotel has no settings record", async () => {
