@@ -109,12 +109,14 @@ CREATE TABLE identity.organization_resource_links (
                     CHECK (product IN ('platform', 'marketplace', 'booking', 'pms', 'affiliate')),
   resource_type   TEXT        NOT NULL
                     CHECK (resource_type IN (
-                      'platform', 'booking_hotel', 'pms_hotel', 'hotel_profile',
+                      'platform', 'booking_hotel', 'pms_hotel', 'pms_property', 'hotel_profile',
                       'hotel_listing', 'creator_profile', 'affiliate', 'payout_account'
                     )),
   resource_id     TEXT        NOT NULL,
   relationship    TEXT        NOT NULL
-                    CHECK (relationship IN ('owner', 'operator', 'promotes', 'billing_account')),
+                    CHECK (relationship IN (
+                      'owner', 'operator', 'front_desk', 'promotes', 'billing_account'
+                    )),
   status          TEXT        NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active', 'suspended', 'archived')),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -145,6 +147,8 @@ INSERT INTO identity.permission_catalog (key, product, description) VALUES
   ('platform.user.suspend',            'platform',    'Suspend or reinstate a Vayada user account'),
   ('booking.settings.manage',          'booking',     'Manage booking engine settings for a hotel'),
   ('booking.reservation.read',         'booking',     'Read booking reservations for a hotel'),
+  ('pms.operations.read',              'pms',         'Read PMS operational rooms, room types, inventory, and reservations for a property'),
+  ('pms.operations.manage',            'pms',         'Manage PMS operational rooms, room types, inventory, assignments, and reservation actions for a property'),
   ('pms.booking.update',               'pms',         'Update PMS bookings for a hotel'),
   ('pms.finance.read',                 'pms',         'Read financial data in the PMS for a hotel'),
   ('marketplace.collaboration.review', 'marketplace', 'Review and manage marketplace collaborations'),

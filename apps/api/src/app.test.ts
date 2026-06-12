@@ -9,6 +9,7 @@ import {
 import { injectJson } from "@vayada/backend-test";
 import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
+import { readFileSync } from "node:fs";
 import type { QueryResult, QueryResultRow } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -51,9 +52,69 @@ import {
   type BookingReservationReadModel,
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
+import type { PmsOperationsReadRepository, PmsRoom, PmsRoomType } from "./routes/pmsOperations.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 
+type PmsOperationsTestListResponse<T> = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  items: T[];
+};
+
+type PmsOperationsTestDetailResponse<T> = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  item: T;
+};
+
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
+const pmsOperationsContractCases = JSON.parse(
+  readFileSync(
+    new URL(
+      "../../../engineering/fixtures/pms-operations-route-contracts/cases.json",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+) as {
+  cases: Array<{
+    caseId: string;
+    skip?: boolean;
+    skipReason?: string;
+    request: { path: string; query?: Record<string, string | number> };
+    expected: {
+      status?: number;
+      itemCount?: number;
+      mustInclude?: string[];
+      mustExclude?: string[];
+      denials?: Array<{ condition: string; status: number; errorCode: string }>;
+    };
+  }>;
+};
+
+function pmsOperationsRequestOptions(request: {
+  path: string;
+  query?: Record<string, string | number>;
+}): { url: string; query?: Record<string, string> } {
+  return {
+    url: request.path,
+    query: request.query
+      ? Object.fromEntries(
+          Object.entries(request.query).map(([key, value]) => [key, String(value)]),
+        )
+      : undefined,
+  };
+}
+
+const pmsRoomTypesReadCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "rooms-room-types-read",
+)!;
+const pmsRoomsReadCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "rooms-read-statuses",
+)!;
+const pmsAuthorizationDenialCases = pmsOperationsContractCases.cases.filter((testCase) =>
+  testCase.caseId.startsWith("authorization-denial-matrix-"),
+);
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_hotel_owner",
@@ -258,6 +319,110 @@ const bookingReservationsRepository: BookingReservationsReadRepository = {
   },
 };
 
+const pmsPropertyId = "f6853000-0000-0000-0000-000000000001";
+
+const pmsRoomTypes: PmsRoomType[] = [
+  {
+    roomTypeId: "f6855000-0000-0000-0000-000000000001",
+    name: "Alpine Suite",
+    description: "Suite with mountain view.",
+    category: "suite",
+    occupancyLimits: { adults: 2, children: 1, total: 3 },
+    attributes: { view: "mountain", balcony: true },
+    amenities: ["wifi", "breakfast"],
+    media: [{ url: "https://cdn.vayada.example/alpine-suite.jpg", altText: "Alpine Suite" }],
+    baseRate: { amountDecimal: "180.00", currency: "EUR" },
+    active: true,
+    sortOrder: 1,
+    ratePlans: [
+      {
+        ratePlanId: "f6855200-0000-0000-0000-000000000001",
+        code: "FLEX",
+        name: "Flexible",
+        rateType: "flexible",
+        mealPlan: "breakfast",
+        baseRate: { amountDecimal: "180.00", currency: "EUR" },
+        active: true,
+      },
+    ],
+    rateRulesSummary: {
+      minStayNights: 2,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      activeRuleCount: 1,
+    },
+    roomCount: 2,
+  },
+  {
+    roomTypeId: "f6855000-0000-0000-0000-000000000002",
+    name: "Garden Room",
+    description: "Quiet room facing the garden.",
+    category: "double",
+    occupancyLimits: { adults: 2, total: 2 },
+    attributes: { view: "garden" },
+    amenities: ["wifi"],
+    media: [],
+    baseRate: { amountDecimal: "120.00", currency: "EUR" },
+    active: true,
+    sortOrder: 2,
+    ratePlans: [],
+    rateRulesSummary: {
+      minStayNights: null,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      activeRuleCount: 0,
+    },
+    roomCount: 1,
+  },
+];
+
+const pmsRooms: PmsRoom[] = [
+  {
+    roomId: "f6855100-0000-0000-0000-000000000001",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    roomNumber: "101",
+    floor: "1",
+    status: "available",
+    sortOrder: 1,
+    metadata: { wing: "north" },
+  },
+  {
+    roomId: "f6855100-0000-0000-0000-000000000002",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    roomNumber: "102",
+    floor: "1",
+    status: "maintenance",
+    sortOrder: 2,
+    metadata: {},
+  },
+  {
+    roomId: "f6855100-0000-0000-0000-000000000003",
+    roomTypeId: pmsRoomTypes[1].roomTypeId,
+    roomNumber: "201",
+    floor: "2",
+    status: "out_of_order",
+    sortOrder: 3,
+    metadata: {},
+  },
+];
+
+const pmsOperationsRepository: PmsOperationsReadRepository = {
+  async listRoomsByPropertyId(propertyId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return { items: pmsRooms, sourceFreshness: { owner: "pms", status: "fresh" } };
+  },
+  async listRoomTypesByPropertyId(propertyId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return { items: pmsRoomTypes, sourceFreshness: { owner: "pms", status: "fresh" } };
+  },
+  async findRoomTypeById(propertyId, roomTypeId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return pmsRoomTypes.find((roomType) => roomType.roomTypeId === roomTypeId) ?? null;
+  },
+};
+
 const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "bookable",
 )!.profile;
@@ -360,7 +525,10 @@ const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
   },
 };
 
-function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): IdentityRepository {
+function identityRepositoryWithResources(
+  hotelId = "booking_hotel_alpenrose",
+  linkedPmsPropertyId = pmsPropertyId,
+): IdentityRepository {
   return {
     ...identityRepository,
     async findLinkedResources() {
@@ -370,6 +538,13 @@ function identityRepositoryWithHotel(hotelId = "booking_hotel_alpenrose"): Ident
           resourceType: "booking_hotel",
           resourceId: hotelId,
           relationship: "owner",
+          status: "active",
+        },
+        {
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: linkedPmsPropertyId,
+          relationship: "operator",
           status: "active",
         },
       ];
@@ -386,18 +561,26 @@ function buildAuthenticatedApp(
     settingsRepository?: BookingSettingsReadRepository;
     settingsWriteRepository?: BookingSettingsWriteRepository;
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
+    pmsOperationsRepository?: PmsOperationsReadRepository;
+    pmsOperationsAllowedOrigins?: string[];
+    linkedPmsPropertyId?: string;
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
+    pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
+    pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
     bookingGuestFormSettingsSync: options.guestFormSettingsSync,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
-      repository: identityRepositoryWithHotel(options.linkedHotelId),
+      repository: identityRepositoryWithResources(
+        options.linkedHotelId,
+        options.linkedPmsPropertyId,
+      ),
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["booking.settings.manage", "booking.reservation.read"];
@@ -418,6 +601,19 @@ function buildAuthenticatedApp(
       },
     },
   });
+}
+
+function readContractPath(value: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((current, segment) => {
+    if (current === undefined || current === null) return undefined;
+    const match = /^([^\[]+)(?:\[(\d+)])?$/.exec(segment);
+    if (!match) return undefined;
+    const [, key, index] = match;
+    if (typeof current !== "object" || !(key in current)) return undefined;
+    const next = (current as Record<string, unknown>)[key];
+    if (index === undefined) return next;
+    return Array.isArray(next) ? next[Number(index)] : undefined;
+  }, value);
 }
 
 describe("vayada-api", () => {
@@ -4856,6 +5052,246 @@ describe("vayada-api", () => {
       category: "authorization",
       message: "Missing booking hotel access.",
     });
+  });
+
+  it("returns PMS room-types using the P1a route contract fixture", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomTypesReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestListResponse<PmsRoomType>;
+    expect(response.statusCode).toBe(pmsRoomTypesReadCase.expected.status);
+    expect(body.contractVersion).toBe("pms-operations.v1");
+    expect(body.items).toHaveLength(pmsRoomTypesReadCase.expected.itemCount!);
+    for (const path of pmsRoomTypesReadCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    for (const key of pmsRoomTypesReadCase.expected.mustExclude ?? []) {
+      expect(JSON.stringify(body)).not.toContain(key);
+    }
+    expect(body.items.map((item) => item.name)).toEqual(["Alpine Suite", "Garden Room"]);
+  });
+
+  it("returns PMS rooms using the P1a route contract fixture", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomsReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestListResponse<PmsRoom>;
+    expect(response.statusCode).toBe(pmsRoomsReadCase.expected.status);
+    expect(body.contractVersion).toBe("pms-operations.v1");
+    expect(body.items).toHaveLength(pmsRoomsReadCase.expected.itemCount!);
+    expect(body.items.map((item) => item.status)).toEqual([
+      "available",
+      "maintenance",
+      "out_of_order",
+    ]);
+    expect(body.items.map((item) => item.roomNumber)).toEqual(["101", "102", "201"]);
+  });
+
+  it("allows PMS Web browser preflight and read requests from configured origins", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: pmsRoomsReadCase.request.path,
+      headers: {
+        origin: "https://pms.localhost",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "authorization,content-type,x-hotel-id",
+      },
+    });
+    const read = await app.inject({
+      method: "GET",
+      url: pmsRoomsReadCase.request.path,
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    expect(preflight.headers["access-control-allow-headers"]).toBe(
+      "authorization,content-type,x-hotel-id",
+    );
+    expect(read.statusCode).toBe(200);
+    expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+  });
+
+  it("returns PMS room-type detail through the P1a route contract", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body as PmsOperationsTestDetailResponse<PmsRoomType>).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      propertyId: pmsPropertyId,
+      item: {
+        roomTypeId: pmsRoomTypes[0].roomTypeId,
+        name: "Alpine Suite",
+      },
+    });
+  });
+
+  it("rejects PMS operations reads with an invalid token", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomTypesReadCase.request),
+      headers: {
+        authorization: "Bearer invalid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("passes the PMS operations authorization denial matrix", async () => {
+    type AuthenticatedAppOptions = NonNullable<Parameters<typeof buildAuthenticatedApp>[0]>;
+    type PmsAuthorizationRuntimeCase = {
+      condition: string;
+      appOptions: AuthenticatedAppOptions;
+      requestHeaders?: { authorization: string };
+    };
+    const pmsEntitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: pmsPropertyId,
+      },
+    };
+    const pmsAuthorizationCases: PmsAuthorizationRuntimeCase[] = [
+      {
+        condition: "missing auth",
+        appOptions: {},
+        requestHeaders: undefined,
+      },
+      {
+        condition: "missing permission",
+        appOptions: { permissions: [] },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+      {
+        condition: "missing entitlement",
+        appOptions: { permissions: ["pms.operations.read"], entitlements: [] },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+      {
+        condition: "inactive entitlement",
+        appOptions: {
+          permissions: ["pms.operations.read"],
+          entitlements: [{ ...pmsEntitlement, status: "suspended" as const }],
+        },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+      {
+        condition: "missing linked property",
+        appOptions: {
+          permissions: ["pms.operations.read"],
+          entitlements: [pmsEntitlement],
+          linkedPmsPropertyId: "f6853000-0000-0000-0000-000000000099",
+        },
+        requestHeaders: { authorization: "Bearer valid-token" },
+      },
+    ];
+
+    expect(pmsAuthorizationDenialCases).toHaveLength(3);
+
+    for (const denialCase of pmsAuthorizationDenialCases) {
+      for (const matrixCase of denialCase.expected.denials ?? []) {
+        const runtimeCase = pmsAuthorizationCases.find(
+          (candidate) => candidate.condition === matrixCase.condition,
+        );
+        const assertionContext = `${denialCase.caseId}: ${matrixCase.condition}`;
+        expect(runtimeCase, assertionContext).toBeDefined();
+
+        app = buildAuthenticatedApp(runtimeCase!.appOptions);
+        const response = await injectJson(app, {
+          method: "GET",
+          ...pmsOperationsRequestOptions(denialCase.request),
+          headers: runtimeCase!.requestHeaders,
+        });
+        await app.close();
+        app = null;
+
+        expect(response.statusCode, assertionContext).toBe(matrixCase.status);
+        expect((response.body as { code: string }).code, assertionContext).toBe(
+          matrixCase.errorCode,
+        );
+      }
+    }
   });
 
   it("returns 404 when the authorized booking hotel has no settings record", async () => {

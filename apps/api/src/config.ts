@@ -36,6 +36,7 @@ export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
+export type PmsOperationsSource = "disabled" | "target";
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 
 export type ProviderWebhookConfig = {
@@ -63,7 +64,9 @@ export type ApiConfig = {
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
   marketplaceDiscoverySource: MarketplaceDiscoverySource;
+  pmsOperationsSource: PmsOperationsSource;
   marketplaceDiscoveryAllowedOrigins: string[];
+  pmsOperationsAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
@@ -103,14 +106,18 @@ function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
   };
 }
 
-function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+function readOptionalCsvEnv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  defaultValue: string[] = [],
+): string[] {
   const value = readOptionalEnv(env, key);
   return value
     ? value
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean)
-    : [];
+    : defaultValue;
 }
 
 function readBooleanEnv(env: NodeJS.ProcessEnv, key: string, defaultValue = false): boolean {
@@ -254,11 +261,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const pmsOperationsSource = readSourceEnv(
+    env,
+    "PMS_OPERATIONS_SOURCE",
+    ["disabled", "target"],
+    "disabled",
+  );
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
   }
   if (marketplaceDiscoverySource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_DISCOVERY_SOURCE=target");
+  }
+  if (pmsOperationsSource === "target" && !targetDatabaseUrl) {
+    throw new Error("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
   }
   if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
     throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
@@ -298,10 +314,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
     marketplaceDiscoverySource,
+    pmsOperationsSource,
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
+    pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
+      "https://pms.localhost",
+    ]),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
     bookingWebLegacyCheckoutCommandProxyEnabled: readBooleanEnv(

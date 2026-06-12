@@ -265,6 +265,44 @@ describe("api config", () => {
     ).toThrow("MARKETPLACE_DISCOVERY_SOURCE must be one of: disabled, target");
   });
 
+  it("keeps PMS operations routes disabled by default", () => {
+    expect(loadConfig({}).pmsOperationsSource).toBe("disabled");
+  });
+
+  it("loads target PMS operations config", () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PMS_OPERATIONS_SOURCE: "target",
+    });
+
+    expect(config.pmsOperationsSource).toBe("target");
+    expect(config.pmsOperationsAllowedOrigins).toEqual(["https://pms.localhost"]);
+  });
+
+  it("loads PMS operations allowed origins from comma-separated config", () => {
+    expect(
+      loadConfig({
+        PMS_OPERATIONS_ALLOWED_ORIGINS: "https://pms.localhost, https://pms.vayada.com,",
+      }).pmsOperationsAllowedOrigins,
+    ).toEqual(["https://pms.localhost", "https://pms.vayada.com"]);
+  });
+
+  it("requires target database config when PMS operations use the target source", () => {
+    expect(() =>
+      loadConfig({
+        PMS_OPERATIONS_SOURCE: "target",
+      }),
+    ).toThrow("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
+  });
+
+  it("rejects unsupported PMS operations source config", () => {
+    expect(() =>
+      loadConfig({
+        PMS_OPERATIONS_SOURCE: "legacy",
+      }),
+    ).toThrow("PMS_OPERATIONS_SOURCE must be one of: disabled, target");
+  });
+
   it("loads marketplace discovery allowed origins from comma-separated config", () => {
     expect(
       loadConfig({
