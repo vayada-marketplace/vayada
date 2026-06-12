@@ -29,7 +29,12 @@ const hotelOwnerContext: RequestContext = {
     roleKey: "hotel_owner",
     workosMembershipId: "om_hotel_owner",
     workosRoleSlugs: ["hotel_owner"],
-    permissions: ["booking.settings.manage", "booking.reservation.read", "pms.booking.update"],
+    permissions: [
+      "booking.settings.manage",
+      "booking.reservation.read",
+      "pms.booking.update",
+      "marketplace.collaboration.read",
+    ],
   },
   linkedResources: [
     {
@@ -43,6 +48,13 @@ const hotelOwnerContext: RequestContext = {
       product: "pms",
       resourceType: "pms_hotel",
       resourceId: "pms_hotel_alpenrose",
+      relationship: "operator",
+      status: "active",
+    },
+    {
+      product: "marketplace",
+      resourceType: "hotel_listing",
+      resourceId: "hotel_listing_alpenrose",
       relationship: "operator",
       status: "active",
     },
@@ -91,7 +103,7 @@ const creatorContext: RequestContext = {
     roleKey: "creator_owner",
     workosMembershipId: "om_creator",
     workosRoleSlugs: ["creator_owner"],
-    permissions: ["marketplace.profile.manage"],
+    permissions: ["marketplace.profile.manage", "marketplace.collaboration.read"],
   },
   linkedResources: [
     {
@@ -248,6 +260,40 @@ export const requestContextFixtureCases: RequestContextFixtureCase[] = [
     },
     expected: "allowed",
     reason: "active creator workspace owns the requested creator profile",
+  },
+  {
+    name: "creator can read collaborations for own marketplace profile",
+    scope: "creator",
+    context: creatorContext,
+    requirement: {
+      permission: "marketplace.collaboration.read",
+      resource: {
+        product: "marketplace",
+        resourceType: "creator_profile",
+        resourceId: "creator_profile_lina",
+        allowedRelationships: ["owner"],
+      },
+    },
+    expected: "allowed",
+    reason:
+      "active creator workspace has marketplace collaboration read permission and owns the creator profile",
+  },
+  {
+    name: "hotel owner can read collaborations for linked marketplace listing",
+    scope: "hotel",
+    context: hotelOwnerContext,
+    requirement: {
+      permission: "marketplace.collaboration.read",
+      resource: {
+        product: "marketplace",
+        resourceType: "hotel_listing",
+        resourceId: "hotel_listing_alpenrose",
+        allowedRelationships: ["owner", "operator"],
+      },
+    },
+    expected: "allowed",
+    reason:
+      "active hotel-group membership has marketplace collaboration read permission and an operator link to the listing",
   },
   {
     name: "creator cannot review hotel collaborations without permission",

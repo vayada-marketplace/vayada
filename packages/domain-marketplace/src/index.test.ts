@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   AFFILIATE_PROVISIONING_ERROR_CODES,
@@ -6,6 +7,13 @@ import {
   COLLABORATION_STATUSES,
   CREATOR_PROFILE_RESOURCE_POLICY,
   CREATOR_PROFILE_SELF_SERVICE_PRIVATE_KEYS,
+  MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES,
+  MARKETPLACE_COLLABORATION_CREATOR_READ_POLICY,
+  MARKETPLACE_COLLABORATION_HOTEL_READ_POLICY,
+  MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+  MARKETPLACE_COLLABORATION_READ_ENDPOINTS,
+  MARKETPLACE_COLLABORATION_READ_ERROR_CODES,
+  MARKETPLACE_COLLABORATION_READ_PRIVATE_KEYS,
   MARKETPLACE_ACCOMMODATION_TYPES,
   MARKETPLACE_AFFILIATE_CONTRACT_VERSION,
   MARKETPLACE_COLLABORATION_TYPES,
@@ -28,6 +36,9 @@ import {
   type CreatorProfileDocument,
   type CreatorProfileStatusResult,
   type CreatorProfileUpdatedEvent,
+  type MarketplaceCollaborationListResponse,
+  type MarketplaceCollaborationMessagesResponse,
+  type MarketplaceConversationSummary,
   type MarketplaceHotelListingAuthorizationTarget,
   type MarketplaceHotelProfileResponse,
   type MarketplaceHotelProfileStatusResponse,
@@ -366,7 +377,217 @@ describe("@vayada/domain-marketplace", () => {
   it("exports collaboration statuses including accepted", () => {
     expect(COLLABORATION_STATUSES).toContain("accepted");
     expect(COLLABORATION_STATUSES).toContain("pending");
+    expect(COLLABORATION_STATUSES).toContain("negotiating");
+    expect(COLLABORATION_STATUSES).toContain("declined");
     expect(COLLABORATION_STATUSES).toContain("completed");
+  });
+
+  it("exports the collaboration reads contract and endpoint paths", () => {
+    expect(MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION).toBe(
+      "marketplace-collaboration-reads.v1",
+    );
+    expect(MARKETPLACE_COLLABORATION_READ_ENDPOINTS.myCollaborations).toMatchObject({
+      method: "GET",
+      path: "/api/marketplace/collaborations/me",
+    });
+    expect(MARKETPLACE_COLLABORATION_READ_ENDPOINTS.conversations).toMatchObject({
+      method: "GET",
+      path: "/api/marketplace/collaborations/conversations",
+    });
+    expect(MARKETPLACE_COLLABORATION_READ_ENDPOINTS.messages.path).toContain("{collaborationId}");
+    expect(MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES).toEqual(["creator", "hotel"]);
+    expect(MARKETPLACE_COLLABORATION_READ_ERROR_CODES).toContain("missing_creator_resource_link");
+    expect(MARKETPLACE_COLLABORATION_READ_ERROR_CODES).toContain("missing_hotel_resource_link");
+  });
+
+  it("documents both-side collaboration read authorization through resource links", () => {
+    expect(MARKETPLACE_COLLABORATION_CREATOR_READ_POLICY).toEqual({
+      permission: "marketplace.collaboration.read",
+      side: "creator",
+      selectedOrganizationKind: "creator_workspace",
+      requiredResources: [
+        {
+          product: "marketplace",
+          resourceType: "creator_profile",
+          relationship: "owner",
+        },
+      ],
+    });
+    expect(MARKETPLACE_COLLABORATION_HOTEL_READ_POLICY).toEqual({
+      permission: "marketplace.collaboration.read",
+      side: "hotel",
+      selectedOrganizationKind: "hotel_group",
+      requiredResources: [
+        {
+          product: "marketplace",
+          resourceType: "hotel_profile",
+          relationship: "owner",
+        },
+        {
+          product: "marketplace",
+          resourceType: "hotel_listing",
+          relationship: "operator",
+        },
+      ],
+    });
+  });
+
+  it("types collaboration reads and chat without leaking identity or PMS internals", () => {
+    const list: MarketplaceCollaborationListResponse = {
+      contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+      authorizationMode: "creator_workspace_resource_link",
+      items: [
+        {
+          contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+          authorizationMode: "creator_workspace_resource_link",
+          collaborationId: "collab_688",
+          listingId: "legacy_listing_688",
+          creatorId: "legacy_creator_lina",
+          hotelProfileId: "hotel_profile_alpenrose",
+          side: "creator",
+          initiatorSide: "creator",
+          isInitiator: true,
+          status: "accepted",
+          collaborationType: "affiliate",
+          listingName: "Alpine creator stay",
+          listingLocation: "Innsbruck, Austria",
+          creator: {
+            side: "creator",
+            organizationId: "org_creator_lina",
+            profileId: "creator_profile_lina",
+            displayName: "Lina Travels",
+            avatarUrl: "https://cdn.example.com/lina.jpg",
+          },
+          hotel: {
+            side: "hotel",
+            organizationId: "org_hotel_alpenrose",
+            profileId: "hotel_profile_alpenrose",
+            displayName: "Hotel Alpenrose",
+            avatarUrl: null,
+          },
+          terms: {
+            freeStayMinNights: null,
+            freeStayMaxNights: null,
+            paidAmount: null,
+            currency: "EUR",
+            discountPercentage: null,
+            creatorFee: null,
+            travelDateFrom: "2026-09-10",
+            travelDateTo: "2026-09-12",
+            preferredDateFrom: null,
+            preferredDateTo: null,
+            preferredMonths: ["2026-09"],
+          },
+          deliverables: [
+            {
+              deliverableId: "deliverable_reel",
+              platform: "instagram",
+              type: "reel",
+              quantity: 1,
+              status: "pending",
+              completedAt: null,
+            },
+          ],
+          lastMessageAt: "2026-06-12T09:15:00.000Z",
+          createdAt: "2026-06-12T09:00:00.000Z",
+          updatedAt: "2026-06-12T09:10:00.000Z",
+        },
+      ],
+    };
+    const conversations: MarketplaceConversationSummary[] = [
+      {
+        contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+        collaborationId: "collab_688",
+        side: "creator",
+        partnerName: "Hotel Alpenrose",
+        partnerAvatarUrl: null,
+        listingName: "Alpine creator stay",
+        collaborationStatus: "accepted",
+        lastMessageContent: "We confirmed the September dates.",
+        lastMessageAt: "2026-06-12T09:15:00.000Z",
+        unreadCount: 0,
+      },
+    ];
+    const messages: MarketplaceCollaborationMessagesResponse = {
+      contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+      collaborationId: "collab_688",
+      authorizationMode: "creator_workspace_resource_link",
+      items: [
+        {
+          contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+          messageId: "msg_001",
+          collaborationId: "collab_688",
+          senderUserId: null,
+          senderName: "Hotel Alpenrose",
+          senderAvatarUrl: null,
+          content: "We confirmed the September dates.",
+          contentType: "text",
+          metadata: null,
+          createdAt: "2026-06-12T09:15:00.000Z",
+        },
+      ],
+    };
+
+    expect(list.items[0].listingId).toBe("legacy_listing_688");
+    expect(conversations[0].partnerName).toBe("Hotel Alpenrose");
+    expect(messages.items[0].contentType).toBe("text");
+    const serialized = JSON.stringify({ list, conversations, messages });
+    for (const privateKey of MARKETPLACE_COLLABORATION_READ_PRIVATE_KEYS) {
+      expect(serialized).not.toContain(privateKey);
+    }
+  });
+
+  it("keeps the V4 collaboration read fixtures focused on both-side authorization", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../engineering/fixtures/marketplace-collaboration-reads/cases.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ) as {
+      contractVersion: string;
+      cases: Array<{
+        caseId: string;
+        request: { side?: string; auth?: { organizationKind?: string } };
+        expected: { status: number; errorCode?: string; authorizationMode?: string };
+      }>;
+    };
+
+    expect(fixture.contractVersion).toBe(MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION);
+    expect(fixture.cases.map((entry) => entry.caseId)).toEqual(
+      expect.arrayContaining([
+        "creator-collaborations-linked-resource",
+        "hotel-conversations-linked-resources",
+        "messages-deny-missing-creator-link",
+        "messages-deny-missing-hotel-listing-link",
+        "collaboration-deny-wrong-side-org",
+      ]),
+    );
+    expect(
+      fixture.cases.some(
+        (entry) =>
+          entry.request.side === "creator" &&
+          entry.request.auth?.organizationKind === "creator_workspace" &&
+          entry.expected.status === 200,
+      ),
+    ).toBe(true);
+    expect(
+      fixture.cases.some(
+        (entry) =>
+          entry.request.side === "hotel" &&
+          entry.request.auth?.organizationKind === "hotel_group" &&
+          entry.expected.status === 200,
+      ),
+    ).toBe(true);
+    expect(fixture.cases.map((entry) => entry.expected.errorCode).filter(Boolean)).toEqual(
+      expect.arrayContaining([
+        "missing_creator_resource_link",
+        "missing_hotel_resource_link",
+        "forbidden",
+      ]),
+    );
   });
 
   it("exports affiliate provisioning statuses", () => {
