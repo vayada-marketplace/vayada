@@ -587,9 +587,9 @@ function previewChannexEvent(
       domainEventKey: `channex.message.ingest:${classification.propertyId}:${threadId}:${classification.sourceMessageId}:v1`,
       domainEventType: "channex.message.ingest",
       resourceProduct: "pms",
-      resourceType: "channex_message",
+      resourceType: "channel_message",
       resourceId: classification.sourceMessageId,
-      jobKey: `channex.ingest-message:message:${classification.sourceMessageId}:property-${classification.propertyId}:v1`,
+      jobKey: `channex.ingest-message:channel_message:${classification.propertyId}:${classification.sourceMessageId}:v1`,
       queueName: "pms.channex.webhooks",
       jobType: "channex.ingest-message",
       payload: {
@@ -609,7 +609,7 @@ function previewChannexEvent(
       resourceProduct: "pms",
       resourceType: "channel_booking",
       resourceId: classification.channelBookingId,
-      jobKey: `channex.ingest-booking:channel_booking:${classification.channelBookingId}:revision-${revision}:v1`,
+      jobKey: `channex.ingest-booking:channel_booking:${classification.propertyId}:${classification.channelBookingId}:revision-${revision}:v1`,
       queueName: "pms.channex.webhooks",
       jobType: "channex.ingest-booking",
       payload: {

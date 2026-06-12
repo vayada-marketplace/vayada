@@ -175,6 +175,128 @@ describe("target provider webhook routes", () => {
     expect(store.domainEvents[0]?.domainEventKey).toBe(
       "channex.message.ingest:prop_channex_123:thread_actual_789:msg_actual_456:v1",
     );
+    expect(store.jobs[0]).toMatchObject({
+      jobKey: "channex.ingest-message:channel_message:prop_channex_123:msg_actual_456:v1",
+    });
+    await app.close();
+  });
+
+  it("normalizes Channex message receipts into PMS channel events and dedupes by property/message", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { channex: "channex-secret" },
+        modes: { channex: "mutating" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+    const propertyOnePayload = channexMessagePayload({
+      propertyId: "prop_alpenrose",
+      sourceMessageId: "msg_shared_456",
+      threadId: "thread_alpenrose_1",
+    });
+    const propertyTwoPayload = channexMessagePayload({
+      propertyId: "prop_riviera",
+      sourceMessageId: "msg_shared_456",
+      threadId: "thread_riviera_1",
+    });
+
+    const first = await postChannexPayload(app, propertyOnePayload);
+    const replay = await postChannexPayload(app, propertyOnePayload);
+    const sameMessageOtherProperty = await postChannexPayload(app, propertyTwoPayload);
+
+    expect(first.json()).toMatchObject({ status: "promoted" });
+    expect(replay.json()).toMatchObject({
+      status: "duplicate",
+      receiptKey: "webhook:channex:message:prop_alpenrose:msg_shared_456",
+    });
+    expect(sameMessageOtherProperty.json()).toMatchObject({ status: "promoted" });
+    expect(store.receipts.map((receipt) => receipt.receiptKey)).toEqual([
+      "webhook:channex:message:prop_alpenrose:msg_shared_456",
+      "webhook:channex:message:prop_riviera:msg_shared_456",
+    ]);
+    expect(store.domainEvents.map((event) => event.domainEventKey)).toEqual([
+      "channex.message.ingest:prop_alpenrose:thread_alpenrose_1:msg_shared_456:v1",
+      "channex.message.ingest:prop_riviera:thread_riviera_1:msg_shared_456:v1",
+    ]);
+    expect(store.jobs.map((job) => job.jobKey)).toEqual([
+      "channex.ingest-message:channel_message:prop_alpenrose:msg_shared_456:v1",
+      "channex.ingest-message:channel_message:prop_riviera:msg_shared_456:v1",
+    ]);
+    expect(store.receipts[0]?.normalizedPreview).toMatchObject({
+      domainEventType: "channex.message.ingest",
+      resourceProduct: "pms",
+      resourceType: "channel_message",
+      queueName: "pms.channex.webhooks",
+      jobType: "channex.ingest-message",
+      payload: {
+        provider: "channex",
+        propertyId: "prop_alpenrose",
+        sourceMessageId: "msg_shared_456",
+      },
+    });
+    await app.close();
+  });
+
+  it("normalizes Channex booking receipts into PMS channel events and dedupes by property/booking revision", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { channex: "channex-secret" },
+        modes: { channex: "mutating" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+    const propertyOnePayload = channexBookingRevisionPayload({
+      propertyId: "prop_alpenrose",
+      bookingRevisionId: "rev_shared_7",
+      channelBookingId: "chx_booking_123",
+      revision: "7",
+    });
+    const propertyTwoPayload = channexBookingRevisionPayload({
+      propertyId: "prop_riviera",
+      bookingRevisionId: "rev_shared_7",
+      channelBookingId: "chx_booking_123",
+      revision: "7",
+    });
+
+    const first = await postChannexPayload(app, propertyOnePayload);
+    const replay = await postChannexPayload(app, propertyOnePayload);
+    const sameRevisionOtherProperty = await postChannexPayload(app, propertyTwoPayload);
+
+    expect(first.json()).toMatchObject({ status: "promoted" });
+    expect(replay.json()).toMatchObject({
+      status: "duplicate",
+      receiptKey: "webhook:channex:booking:prop_alpenrose:rev_shared_7:7",
+    });
+    expect(sameRevisionOtherProperty.json()).toMatchObject({ status: "promoted" });
+    expect(store.receipts.map((receipt) => receipt.receiptKey)).toEqual([
+      "webhook:channex:booking:prop_alpenrose:rev_shared_7:7",
+      "webhook:channex:booking:prop_riviera:rev_shared_7:7",
+    ]);
+    expect(store.domainEvents.map((event) => event.domainEventKey)).toEqual([
+      "channex.booking.ingest:prop_alpenrose:chx_booking_123:7:v1",
+      "channex.booking.ingest:prop_riviera:chx_booking_123:7:v1",
+    ]);
+    expect(store.jobs.map((job) => job.jobKey)).toEqual([
+      "channex.ingest-booking:channel_booking:prop_alpenrose:chx_booking_123:revision-7:v1",
+      "channex.ingest-booking:channel_booking:prop_riviera:chx_booking_123:revision-7:v1",
+    ]);
+    expect(store.receipts[0]?.normalizedPreview).toMatchObject({
+      domainEventType: "channex.booking.ingest",
+      resourceProduct: "pms",
+      resourceType: "channel_booking",
+      queueName: "pms.channex.webhooks",
+      jobType: "channex.ingest-booking",
+      payload: {
+        provider: "channex",
+        propertyId: "prop_alpenrose",
+        channelBookingId: "chx_booking_123",
+        revision: "7",
+      },
+    });
     await app.close();
   });
 
@@ -410,6 +532,55 @@ async function postProviderFixture(
     headers: fixtureHeaders(provider, fixture.payload, options.invalidAuth),
     payload: JSON.stringify(fixture.payload),
   });
+}
+
+async function postChannexPayload(
+  app: ReturnType<typeof buildApp>,
+  payload: Record<string, unknown>,
+) {
+  return app.inject({
+    method: "POST",
+    url: "/webhooks/channex",
+    headers: fixtureHeaders("channex", payload),
+    payload: JSON.stringify(payload),
+  });
+}
+
+function channexMessagePayload(input: {
+  propertyId: string;
+  sourceMessageId: string;
+  threadId: string;
+}): Record<string, unknown> {
+  return {
+    event: "message",
+    payload: {
+      property_id: input.propertyId,
+      id: input.sourceMessageId,
+      message_thread_id: input.threadId,
+      body: "Inbound guest message",
+    },
+  };
+}
+
+function channexBookingRevisionPayload(input: {
+  propertyId: string;
+  bookingRevisionId: string;
+  channelBookingId: string;
+  revision: string;
+}): Record<string, unknown> {
+  return {
+    event: "booking.modified",
+    payload: {
+      property_id: input.propertyId,
+      booking_revision_id: input.bookingRevisionId,
+      channel_booking_id: input.channelBookingId,
+      revision: input.revision,
+      booking: {
+        id: input.channelBookingId,
+        revision_id: input.bookingRevisionId,
+      },
+    },
+  };
 }
 
 function providerFixture(provider: "stripe" | "xendit" | "channex"): {
