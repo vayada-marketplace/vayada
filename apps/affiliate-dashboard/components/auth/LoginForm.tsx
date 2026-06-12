@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import PasswordInput from "@/components/auth/PasswordInput";
 
 interface LoginFormProps {
-  onSubmit: (email: string, password: string) => Promise<void>;
+  onSubmit: (email: string) => void;
   isSubmitting: boolean;
   submitError: string;
   onErrorClear: () => void;
@@ -19,7 +18,6 @@ export default function LoginForm({
   sessionExpired = false,
 }: LoginFormProps) {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [emailError, setEmailError] = useState("");
 
   const validateEmail = (value: string): boolean => {
@@ -36,7 +34,7 @@ export default function LoginForm({
       return;
     }
 
-    await onSubmit(email, password);
+    onSubmit(email);
   };
 
   return (
@@ -73,22 +71,6 @@ export default function LoginForm({
         {emailError && <p className="mt-1 text-sm text-red-600">{emailError}</p>}
       </div>
 
-      {/* Password Field */}
-      <div>
-        <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1.5">
-          Password
-        </label>
-        <PasswordInput
-          id="password"
-          name="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          placeholder="Enter your password"
-          autoComplete="current-password"
-        />
-      </div>
-
       {/* Error Message */}
       {submitError && (
         <div className="bg-red-50 border-2 border-red-300 rounded-lg p-4">
@@ -102,7 +84,7 @@ export default function LoginForm({
         disabled={isSubmitting}
         className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {isSubmitting ? "Signing In..." : "Sign In"}
+        {isSubmitting ? "Redirecting..." : "Continue with WorkOS"}
       </button>
     </form>
   );
