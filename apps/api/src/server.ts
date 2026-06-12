@@ -15,6 +15,10 @@ import {
 } from "./platform/workosWebhooks.js";
 import { createCompatibilityPublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import { createPgPublicHotelProfileRepository } from "./routes/aiHotels.js";
+import {
+  createPgBookingWebAffiliateHotelResolver,
+  createPgBookingWebAffiliateRepository,
+} from "./routes/bookingWebAffiliate.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import {
   createHttpPmsGuestFormSettingsSync,
@@ -65,6 +69,20 @@ const bookingGuestFormSettingsSync = config.pmsApiUrl
       pmsApiUrl: config.pmsApiUrl,
     })
   : undefined;
+
+const bookingWebAffiliateRepository =
+  config.affiliatePublicSource === "target" && config.targetDatabaseUrl
+    ? createPgBookingWebAffiliateRepository({
+        connectionString: config.targetDatabaseUrl,
+      })
+    : undefined;
+
+const bookingWebAffiliateHotelResolver =
+  config.affiliatePublicSource === "target" && config.targetDatabaseUrl
+    ? createPgBookingWebAffiliateHotelResolver({
+        connectionString: config.targetDatabaseUrl,
+      })
+    : undefined;
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
@@ -134,6 +152,8 @@ const app = buildApp({
     : undefined,
   bookingPublicApiUrl: config.bookingPublicApiUrl,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
+  bookingWebAffiliateHotelResolver,
+  bookingWebAffiliateRepository,
 });
 
 try {

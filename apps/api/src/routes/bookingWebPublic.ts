@@ -18,6 +18,11 @@ import {
   serializePublicHotelProfileProjection,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
+import {
+  registerBookingWebAffiliateRoutes,
+  type BookingWebAffiliateHotelResolver,
+  type BookingWebAffiliateRepository,
+} from "./bookingWebAffiliate.js";
 
 type FetchLike = (input: URL, init?: RequestInit) => Promise<Response>;
 
@@ -117,6 +122,8 @@ export type BookingWebPublicRoutesOptions = {
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   checkoutAdapter?: BookingWebCheckoutAdapter;
+  affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
+  affiliateRepository?: BookingWebAffiliateRepository;
   fetch?: FetchLike;
   now?: () => Date;
 };
@@ -297,6 +304,15 @@ export async function registerBookingWebPublicRoutes(
       return response;
     },
   );
+
+  if (options.affiliateRepository) {
+    await registerBookingWebAffiliateRoutes(app, {
+      hotelResolver: options.affiliateHotelResolver ?? {
+        findProfileBySlug: (slug) => options.profileRepository.findProfileBySlug(slug),
+      },
+      repository: options.affiliateRepository,
+    });
+  }
 }
 
 export function createCompatibilityBookingWebCheckoutAdapter(config: {

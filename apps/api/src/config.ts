@@ -29,6 +29,8 @@ export type ApiConfig = {
   bookingPublicApiUrl?: string;
   marketplaceDatabaseUrl?: string;
   marketplaceDiscoveryAllowedOrigins: string[];
+  targetDatabaseUrl?: string;
+  affiliatePublicSource?: "target";
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
   bookingHostBase?: string;
@@ -74,6 +76,20 @@ function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
         .map((entry) => entry.trim())
         .filter(Boolean)
     : [];
+}
+
+function loadAffiliatePublicSource(env: NodeJS.ProcessEnv): "target" | undefined {
+  const value = readOptionalEnv(env, "AFFILIATE_PUBLIC_SOURCE");
+  if (!value) {
+    return undefined;
+  }
+  if (value !== "target") {
+    throw new Error("Unsupported AFFILIATE_PUBLIC_SOURCE; expected target");
+  }
+  if (!readOptionalEnv(env, "TARGET_DATABASE_URL")) {
+    throw new Error("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
+  }
+  return "target";
 }
 
 function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | undefined {
@@ -131,6 +147,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
+    targetDatabaseUrl: readOptionalEnv(env, "TARGET_DATABASE_URL"),
+    affiliatePublicSource: loadAffiliatePublicSource(env),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),

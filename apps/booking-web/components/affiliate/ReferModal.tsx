@@ -2,24 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { pms } from "@/services/api/client";
-
-const PMS_URL = pms.baseURL;
-
-function formatApiError(err: any, fallback: string): string {
-  const detail = err?.detail;
-  if (typeof detail === "string") return detail;
-  if (Array.isArray(detail)) {
-    return detail
-      .map((d: any) => {
-        const field = Array.isArray(d?.loc) ? d.loc[d.loc.length - 1] : "";
-        const msg = d?.msg || "Invalid value";
-        return field ? `${field}: ${msg}` : msg;
-      })
-      .join(", ");
-  }
-  return fallback;
-}
+import { bookingWebAffiliateApi } from "@/services/api/bookingWebPublic";
 
 export default function ReferModal({
   open,
@@ -46,9 +29,7 @@ export default function ReferModal({
   const [bankCountry, setBankCountry] = useState("");
   const [copied, setCopied] = useState(false);
   const [referralCode, setReferralCode] = useState("");
-  const [affiliateId, setAffiliateId] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [stripeConnected, setStripeConnected] = useState(false);
   const [apiError, setApiError] = useState("");
 
   const referralDomain = `${hotelSlug}.booking.vayada.com`;
@@ -62,15 +43,10 @@ export default function ReferModal({
     setSubmitting(true);
     setApiError("");
     try {
-      const res = await fetch(
-        `${PMS_URL}/api/hotels/${hotelSlug}/affiliates/check-email?email=${encodeURIComponent(email.trim())}`,
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.exists) {
-          setApiError("An affiliate with this email already exists for this hotel");
-          return;
-        }
+      const data = await bookingWebAffiliateApi.checkEmail(hotelSlug, email.trim());
+      if (data.exists) {
+        setApiError("An affiliate with this email already exists for this hotel");
+        return;
       }
       setStep(2);
     } catch {
@@ -113,52 +89,35 @@ export default function ReferModal({
     setSubmitting(true);
     setApiError("");
     try {
-      const res = await fetch(`${PMS_URL}/api/hotels/${hotelSlug}/affiliates`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName,
-          email,
-          socialMedia: social,
-          userType,
-          paymentMethod,
-          paypalEmail: paymentMethod === "paypal" ? paypalEmail : "",
-          bankIban: paymentMethod === "bank" ? bankIban : "",
-          bankAccountHolder: paymentMethod === "bank" ? bankAccountHolder : "",
-          bankSwiftBic: paymentMethod === "bank" ? bankSwiftBic : "",
-          bankName: paymentMethod === "bank" ? bankName : "",
-          bankCountry: paymentMethod === "bank" ? bankCountry : "",
-        }),
+      const data = await bookingWebAffiliateApi.register(hotelSlug, {
+        fullName,
+        email,
+        socialMedia: social,
+        userType,
+        paymentMethod,
+        paypalEmail: paymentMethod === "paypal" ? paypalEmail : "",
+        bankIban: paymentMethod === "bank" ? bankIban : "",
+        bankAccountHolder: paymentMethod === "bank" ? bankAccountHolder : "",
+        bankSwiftBic: paymentMethod === "bank" ? bankSwiftBic : "",
+        bankName: paymentMethod === "bank" ? bankName : "",
+        bankCountry: paymentMethod === "bank" ? bankCountry : "",
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: "Registration failed" }));
-        throw new Error(formatApiError(err, "Registration failed"));
-      }
-      const data = await res.json();
       setReferralCode(data.referralCode);
-      setAffiliateId(data.id);
 
       if (paymentMethod === "stripe") {
         try {
-          const stripeRes = await fetch(
-            `${PMS_URL}/api/hotels/${hotelSlug}/affiliates/${data.id}/stripe/connect`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email }),
-            },
+          const stripeData = await bookingWebAffiliateApi.createStripeConnectLink(
+            hotelSlug,
+            data.id,
+            { email },
           );
-          if (stripeRes.ok) {
-            const stripeData = await stripeRes.json();
-            setStripeConnected(true);
-            window.open(stripeData.onboardingUrl, "_blank");
-          }
+          window.open(stripeData.onboardingUrl, "_blank");
         } catch {}
       }
 
       setStep(3);
-    } catch (err: any) {
-      setApiError(err.message || "Failed to register");
+    } catch (err: unknown) {
+      setApiError(err instanceof Error ? err.message : "Failed to register");
     } finally {
       setSubmitting(false);
     }
@@ -185,8 +144,6 @@ export default function ReferModal({
     setBankCountry("");
     setCopied(false);
     setReferralCode("");
-    setAffiliateId("");
-    setStripeConnected(false);
     setApiError("");
   };
 

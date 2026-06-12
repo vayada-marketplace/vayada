@@ -36,6 +36,11 @@ import {
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
 } from "./routes/bookingWebPublic.js";
+import {
+  registerBookingWebAffiliateRoutes,
+  type BookingWebAffiliateHotelResolver,
+  type BookingWebAffiliateRepository,
+} from "./routes/bookingWebAffiliate.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -65,6 +70,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
+  bookingWebAffiliateHotelResolver?: BookingWebAffiliateHotelResolver;
+  bookingWebAffiliateRepository?: BookingWebAffiliateRepository;
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
 };
@@ -132,8 +139,17 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       pmsPublicApiUrl: options.pmsPublicApiUrl,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
       checkoutAdapter: options.bookingWebCheckoutAdapter,
+      affiliateHotelResolver:
+        options.bookingWebAffiliateHotelResolver ?? options.publicHotelProfileRepository,
+      affiliateRepository: options.bookingWebAffiliateRepository,
       fetch: options.bookingWebPublicFetch,
       now: options.bookingWebPublicNow,
+    });
+  } else if (options.bookingWebAffiliateRepository && options.bookingWebAffiliateHotelResolver) {
+    app.register(registerBookingWebAffiliateRoutes, {
+      prefix: "/api/booking-web",
+      hotelResolver: options.bookingWebAffiliateHotelResolver,
+      repository: options.bookingWebAffiliateRepository,
     });
   }
   if (options.marketplaceDiscoveryRepository) {
