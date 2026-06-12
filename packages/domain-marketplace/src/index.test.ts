@@ -4,6 +4,10 @@ import {
   AFFILIATE_PROVISIONING_ERROR_CODES,
   AFFILIATE_PROVISIONING_STATUSES,
   COLLABORATION_STATUSES,
+  CREATOR_PROFILE_RESOURCE_POLICY,
+  CREATOR_PROFILE_SELF_SERVICE_PRIVATE_KEYS,
+  MARKETPLACE_CREATOR_SELF_SERVICE_CONTRACT_VERSION,
+  MARKETPLACE_CREATOR_SELF_SERVICE_ENDPOINTS,
   MARKETPLACE_AFFILIATE_CONTRACT_VERSION,
   buildAffiliateProvisioningCommandId,
   buildAffiliateProvisioningIdempotencyKey,
@@ -11,10 +15,158 @@ import {
   type AffiliateProvisioningResult,
   type CollaborationAcceptedEvent,
   type CollaborationAffiliatePort,
+  type CreatorProfileDocument,
+  type CreatorProfileStatusResult,
+  type CreatorProfileUpdatedEvent,
   type ProvisionCollaborationAffiliateCommand,
+  type UpdateCreatorProfileRequest,
 } from "./index.js";
 
 describe("@vayada/domain-marketplace", () => {
+  it("exports the creator self-service contract version and endpoint paths", () => {
+    expect(MARKETPLACE_CREATOR_SELF_SERVICE_CONTRACT_VERSION).toBe(
+      "marketplace-creator-self-service.v1",
+    );
+    expect(MARKETPLACE_CREATOR_SELF_SERVICE_ENDPOINTS.profileStatus).toMatchObject({
+      method: "GET",
+      path: "/api/marketplace/creators/me/profile-status",
+    });
+    expect(MARKETPLACE_CREATOR_SELF_SERVICE_ENDPOINTS.profile).toMatchObject({
+      method: "GET",
+      path: "/api/marketplace/creators/me",
+    });
+    expect(MARKETPLACE_CREATOR_SELF_SERVICE_ENDPOINTS.updateProfile).toMatchObject({
+      method: "PUT",
+      path: "/api/marketplace/creators/me",
+    });
+  });
+
+  it("documents creator self-service authorization through creator workspace resource links", () => {
+    expect(CREATOR_PROFILE_RESOURCE_POLICY).toEqual({
+      permission: "marketplace.profile.manage",
+      selectedOrganizationKind: "creator_workspace",
+      resolution: "resolve_active_selected_org_resource_link_then_enforce",
+      resource: {
+        product: "marketplace",
+        resourceType: "creator_profile",
+        relationship: "owner",
+        resourceIdSource: "identity.organization_resource_links.resource_id",
+      },
+    });
+  });
+
+  it("keeps creator self-service profile status read-before-write and discovery eligibility explicit", () => {
+    const status: CreatorProfileStatusResult = {
+      creatorProfileId: "creator_profile_lina",
+      organizationId: "org_creator_workspace",
+      profileComplete: false,
+      profileStatus: "pending",
+      missingFields: ["displayName", "locationText", "shortDescription", "platforms"],
+      missingPlatforms: true,
+      completionSteps: [
+        "add_display_name",
+        "set_location",
+        "add_short_description",
+        "add_platform",
+      ],
+      canPublishToDiscovery: false,
+      updatedAt: "2026-06-12T08:00:00.000Z",
+    };
+
+    expect(status.profileComplete).toBe(false);
+    expect(status.canPublishToDiscovery).toBe(false);
+    expect(status.missingFields).toContain("platforms");
+  });
+
+  it("types the creator self-service document without auth ownership fields", () => {
+    const profile: CreatorProfileDocument = {
+      creatorProfileId: "creator_profile_lina",
+      organizationId: "org_creator_workspace",
+      sourceCreatorId: "legacy_creator_lina",
+      displayName: "Lina Travels",
+      creatorType: "travel",
+      locationText: "Vienna, Austria",
+      shortDescription: "Independent hotel and slow-travel creator.",
+      portfolioUrl: "https://lina.example.com",
+      phone: "+431234567",
+      profilePictureUrl: "https://cdn.example.com/creators/lina.jpg",
+      profileComplete: true,
+      profileCompletedAt: "2026-06-12T08:00:00.000Z",
+      profileStatus: "active",
+      platforms: [
+        {
+          platformId: "creator_platform_instagram",
+          platform: "instagram",
+          handle: "@linatravels",
+          profileUrl: "https://instagram.com/linatravels",
+          followerCount: 24000,
+          engagementRate: 4.25,
+          audienceCountries: [{ country: "AT", percentage: 35 }],
+          audienceAgeGroups: [{ ageRange: "25-34", percentage: 48 }],
+          audienceGenderSplit: { male: 31, female: 67, other: 2 },
+          verificationStatus: "verified",
+        },
+      ],
+      audienceSize: 24000,
+      rating: { averageRating: 4.5, totalReviews: 2 },
+      createdAt: "2026-05-01T08:00:00.000Z",
+      updatedAt: "2026-06-12T08:00:00.000Z",
+    };
+
+    expect(profile.platforms[0].platform).toBe("instagram");
+    expect(profile.audienceSize).toBe(24000);
+    for (const privateKey of CREATOR_PROFILE_SELF_SERVICE_PRIVATE_KEYS) {
+      expect(profile).not.toHaveProperty(privateKey);
+    }
+  });
+
+  it("types creator profile writes as marketplace-only patches", () => {
+    const patch: UpdateCreatorProfileRequest = {
+      displayName: "Lina Travels",
+      creatorType: "travel",
+      locationText: "Vienna, Austria",
+      shortDescription: "Independent hotel and slow-travel creator.",
+      portfolioUrl: "https://lina.example.com",
+      phone: "+431234567",
+      profilePictureUrl: "https://cdn.example.com/creators/lina.jpg",
+      platforms: [
+        {
+          platform: "instagram",
+          handle: "@linatravels",
+          profileUrl: "https://instagram.com/linatravels",
+          followerCount: 24000,
+          engagementRate: 4.25,
+          audienceCountries: [{ country: "AT", percentage: 35 }],
+          audienceAgeGroups: [{ ageRange: "25-34", percentage: 48 }],
+          audienceGenderSplit: { male: 31, female: 67, other: 2 },
+        },
+      ],
+    };
+
+    expect(patch.platforms?.[0].platform).toBe("instagram");
+    expect(patch).not.toHaveProperty("email");
+    expect(patch).not.toHaveProperty("ownerUserId");
+    expect(patch).not.toHaveProperty("audienceSize");
+  });
+
+  it("captures creator profile discovery coherence after writes", () => {
+    const updated: CreatorProfileUpdatedEvent = {
+      eventType: "marketplace.creator_profile.updated",
+      eventId: "evt_creator_profile_updated_001",
+      creatorProfileId: "creator_profile_lina",
+      organizationId: "org_creator_workspace",
+      actorUserId: "user_lina",
+      occurredAt: "2026-06-12T08:00:00.000Z",
+      discoveryCoherence: {
+        mode: "base_tables",
+        eligibleForDiscovery: true,
+      },
+    };
+
+    expect(updated.discoveryCoherence.mode).toBe("base_tables");
+    expect(updated.discoveryCoherence.eligibleForDiscovery).toBe(true);
+  });
+
   it("exports the affiliate contract version", () => {
     expect(MARKETPLACE_AFFILIATE_CONTRACT_VERSION).toBe("marketplace-affiliate.v1");
   });
