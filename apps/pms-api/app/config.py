@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     # X-Vayada-Webhook-Token on incoming requests.
     CHANNEX_WEBHOOK_SECRET: str = ""
 
+    # Legacy scheduler cutover controls
+    PMS_SCHEDULER_ENABLED: bool = True
+    PMS_SCHEDULER_JOB_ALLOWLIST: str = ""
+    PMS_SCHEDULER_JOB_BLOCKLIST: str = ""
+
     # Listing Import (Claude AI + Firecrawl)
     ANTHROPIC_API_KEY: str = ""
     FIRECRAWL_API_KEY: str = ""

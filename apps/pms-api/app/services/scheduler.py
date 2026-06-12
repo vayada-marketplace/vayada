@@ -1,5 +1,8 @@
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -31,6 +34,20 @@ from app.services.xendit_service import XenditError
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+SchedulerStatus = dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SchedulerJobDefinition:
+    id: str
+    func: Callable
+    trigger_factory: Callable[[], object]
+    cadence: str
+    effect: str
+    target_owner: str
+
+
+_scheduler_status: SchedulerStatus | None = None
 
 
 async def expire_pending_bookings():
@@ -346,74 +363,229 @@ async def poll_channex_messages():
         logger.error("Channex message sweep failed: %s", e)
 
 
-def setup_scheduler():
-    """Configure and return the scheduler with all jobs."""
-    scheduler.add_job(
-        expire_pending_bookings,
-        trigger=IntervalTrigger(minutes=1),
+LEGACY_SCHEDULER_JOBS: tuple[SchedulerJobDefinition, ...] = (
+    SchedulerJobDefinition(
         id="expire_pending_bookings",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        cancel_stale_unpaid_bookings,
-        trigger=IntervalTrigger(minutes=10),
+        func=expire_pending_bookings,
+        trigger_factory=lambda: IntervalTrigger(minutes=1),
+        cadence="every minute",
+        effect="Expires host-response-deadline bookings",
+        target_owner="Booking/checkout",
+    ),
+    SchedulerJobDefinition(
         id="cancel_stale_unpaid_bookings",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        cleanup_expired_drafts,
-        trigger=IntervalTrigger(minutes=10),
+        func=cancel_stale_unpaid_bookings,
+        trigger_factory=lambda: IntervalTrigger(minutes=10),
+        cadence="every 10 minutes",
+        effect="Cancels pending unpaid card bookings older than 30 minutes",
+        target_owner="Booking/checkout",
+    ),
+    SchedulerJobDefinition(
         id="cleanup_expired_drafts",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        process_property_payouts,
-        trigger=IntervalTrigger(hours=1),
+        func=cleanup_expired_drafts,
+        trigger_factory=lambda: IntervalTrigger(minutes=10),
+        cadence="every 10 minutes",
+        effect="Deletes expired booking drafts",
+        target_owner="Booking/checkout",
+    ),
+    SchedulerJobDefinition(
         id="process_property_payouts",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        process_affiliate_payouts,
-        trigger=CronTrigger(day=1, hour=2, minute=0),
+        func=process_property_payouts,
+        trigger_factory=lambda: IntervalTrigger(hours=1),
+        cadence="hourly",
+        effect="Dispatches hotel Stripe/Xendit payouts",
+        target_owner="Finance",
+    ),
+    SchedulerJobDefinition(
         id="process_affiliate_payouts",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        poll_xendit_processing_payouts,
-        trigger=IntervalTrigger(minutes=30),
+        func=process_affiliate_payouts,
+        trigger_factory=lambda: CronTrigger(day=1, hour=2, minute=0),
+        cadence="monthly day 1 at 02:00",
+        effect="Dispatches affiliate payouts and notifications",
+        target_owner="Finance/marketplace affiliate",
+    ),
+    SchedulerJobDefinition(
         id="poll_xendit_processing_payouts",
-        replace_existing=True,
-    )
-
-    # ── Channex jobs ─────────────────────────────────────────────────
-    scheduler.add_job(
-        poll_channex_bookings,
-        trigger=IntervalTrigger(minutes=app_settings.CHANNEX_POLL_INTERVAL_MINUTES),
+        func=poll_xendit_processing_payouts,
+        trigger_factory=lambda: IntervalTrigger(minutes=30),
+        cadence="every 30 minutes",
+        effect="Polls Xendit for processing payouts if webhook failed",
+        target_owner="Finance",
+    ),
+    SchedulerJobDefinition(
         id="poll_channex_bookings",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        full_channex_ari_sync,
-        trigger=CronTrigger(hour=app_settings.CHANNEX_FULL_SYNC_HOUR, minute=0),
+        func=poll_channex_bookings,
+        trigger_factory=lambda: IntervalTrigger(minutes=app_settings.CHANNEX_POLL_INTERVAL_MINUTES),
+        cadence="interval from CHANNEX_POLL_INTERVAL_MINUTES",
+        effect="Ingests Channex booking feed",
+        target_owner="PMS channel-connectivity",
+    ),
+    SchedulerJobDefinition(
         id="full_channex_ari_sync",
-        replace_existing=True,
+        func=full_channex_ari_sync,
+        trigger_factory=lambda: CronTrigger(hour=app_settings.CHANNEX_FULL_SYNC_HOUR, minute=0),
+        cadence="daily at CHANNEX_FULL_SYNC_HOUR",
+        effect="Pushes full ARI to Channex",
+        target_owner="PMS channel-connectivity",
+    ),
+    SchedulerJobDefinition(
+        id="advance_calendar_auto_open_windows",
+        func=advance_calendar_auto_open_windows,
+        trigger_factory=lambda: CronTrigger(hour=1, minute=15),
+        cadence="daily at 01:15",
+        effect="Opens rolling inventory/calendar windows",
+        target_owner="PMS operations",
+    ),
+)
+
+
+def _parse_job_id_list(raw_value: str) -> list[str]:
+    return [job_id.strip() for job_id in raw_value.split(",") if job_id.strip()]
+
+
+def build_scheduler_status(
+    *,
+    scheduler_enabled: bool,
+    allowlist_raw: str,
+    blocklist_raw: str,
+    scheduler_running: bool = False,
+) -> SchedulerStatus:
+    job_ids = {job.id for job in LEGACY_SCHEDULER_JOBS}
+    allowlist = _parse_job_id_list(allowlist_raw)
+    blocklist = _parse_job_id_list(blocklist_raw)
+    known_allowlist = [job_id for job_id in allowlist if job_id in job_ids]
+    known_blocklist = [job_id for job_id in blocklist if job_id in job_ids]
+    unknown_allowlist = [job_id for job_id in allowlist if job_id not in job_ids]
+    unknown_blocklist = [job_id for job_id in blocklist if job_id not in job_ids]
+    invalid_job_config = bool(unknown_allowlist or unknown_blocklist)
+
+    jobs = []
+    active_jobs = []
+    frozen_jobs = []
+    allowlist_filter_enabled = bool(allowlist)
+    known_allowlist_set = set(known_allowlist)
+    known_blocklist_set = set(known_blocklist)
+
+    for job in LEGACY_SCHEDULER_JOBS:
+        freeze_reason = None
+        if invalid_job_config:
+            freeze_reason = "invalid_job_id"
+        elif not scheduler_enabled:
+            freeze_reason = "scheduler_disabled"
+        elif allowlist_filter_enabled and job.id not in known_allowlist_set:
+            freeze_reason = "not_in_allowlist"
+        elif job.id in known_blocklist_set:
+            freeze_reason = "blocklisted"
+
+        status = "frozen" if freeze_reason else "active"
+        job_status = {
+            "id": job.id,
+            "status": status,
+            "freeze_reason": freeze_reason,
+            "cadence": job.cadence,
+            "effect": job.effect,
+            "target_owner": job.target_owner,
+        }
+        jobs.append(job_status)
+        if status == "active":
+            active_jobs.append(job.id)
+        else:
+            frozen_jobs.append({"id": job.id, "reason": freeze_reason})
+
+    return {
+        "enabled": scheduler_enabled,
+        "running": scheduler_running,
+        "allowlist": known_allowlist,
+        "blocklist": known_blocklist,
+        "unknown_allowlist": unknown_allowlist,
+        "unknown_blocklist": unknown_blocklist,
+        "configuration_valid": not invalid_job_config,
+        "active_jobs": active_jobs,
+        "frozen_jobs": frozen_jobs,
+        "jobs": jobs,
+    }
+
+
+def _status_from_settings(target_scheduler: AsyncIOScheduler) -> SchedulerStatus:
+    return build_scheduler_status(
+        scheduler_enabled=app_settings.PMS_SCHEDULER_ENABLED,
+        allowlist_raw=app_settings.PMS_SCHEDULER_JOB_ALLOWLIST,
+        blocklist_raw=app_settings.PMS_SCHEDULER_JOB_BLOCKLIST,
+        scheduler_running=target_scheduler.running,
     )
 
-    scheduler.add_job(
-        advance_calendar_auto_open_windows,
-        trigger=CronTrigger(hour=1, minute=15),
-        id="advance_calendar_auto_open_windows",
-        replace_existing=True,
+
+def _log_scheduler_status(status: SchedulerStatus) -> None:
+    if status["unknown_allowlist"] or status["unknown_blocklist"]:
+        logger.error(
+            "Refusing to start legacy PMS scheduler jobs because unknown job ids were configured: "
+            "allowlist=%s blocklist=%s",
+            status["unknown_allowlist"],
+            status["unknown_blocklist"],
+        )
+
+    logger.info(
+        "Legacy PMS scheduler freeze status: enabled=%s active_jobs=%s frozen_jobs=%s",
+        status["enabled"],
+        status["active_jobs"],
+        [job["id"] for job in status["frozen_jobs"]],
     )
+
+    for job in status["jobs"]:
+        if job["status"] == "active":
+            logger.info("Legacy PMS scheduler job active: %s", job["id"])
+        else:
+            logger.info(
+                "Legacy PMS scheduler job frozen: %s reason=%s",
+                job["id"],
+                job["freeze_reason"],
+            )
+
+
+def setup_scheduler(target_scheduler: AsyncIOScheduler | None = None):
+    """Configure and return the scheduler with active legacy jobs."""
+    global _scheduler_status
+
+    target_scheduler = target_scheduler or scheduler
+    target_scheduler.remove_all_jobs()
+    status = _status_from_settings(target_scheduler)
+    active_job_ids = set(status["active_jobs"])
+
+    for job in LEGACY_SCHEDULER_JOBS:
+        if job.id not in active_job_ids:
+            continue
+        target_scheduler.add_job(
+            job.func,
+            trigger=job.trigger_factory(),
+            id=job.id,
+            replace_existing=True,
+        )
 
     # Channex message polling is disabled — Channex flagged the volume; we now
     # rely on the `message` webhook (handled in routers/webhooks.py). The
     # `poll_channex_messages` function is kept for manual recovery.
 
-    return scheduler
+    _scheduler_status = status
+    _log_scheduler_status(status)
+    return target_scheduler
+
+
+def get_scheduler_status() -> SchedulerStatus:
+    if _scheduler_status is None:
+        return _status_from_settings(scheduler)
+    return {
+        **_scheduler_status,
+        "running": scheduler.running,
+    }
+
+
+def get_scheduler_health_status() -> SchedulerStatus:
+    status = get_scheduler_status()
+    return {
+        "enabled": status["enabled"],
+        "running": status["running"],
+        "configuration_valid": status["configuration_valid"],
+        "active_job_count": len(status["active_jobs"]),
+        "frozen_job_count": len(status["frozen_jobs"]),
+        "unknown_job_count": len(status["unknown_allowlist"]) + len(status["unknown_blocklist"]),
+    }

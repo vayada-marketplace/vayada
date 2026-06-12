@@ -9,8 +9,14 @@ from app.models.platform_admin import (
     UpdatePlatformPropertyStatusRequest,
 )
 from app.repositories.platform_admin_repo import PlatformAdminRepository
+from app.services.scheduler import get_scheduler_status
 
 router = APIRouter(prefix="/platform-admin", tags=["platform-admin"])
+
+
+@router.get("/scheduler")
+async def get_scheduler_freeze_status(user_id: str = Depends(require_super_admin)):
+    return get_scheduler_status()
 
 
 @router.get("/growth", response_model=GrowthDashboardResponse)

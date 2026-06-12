@@ -30,7 +30,7 @@ from app.routers.super_admin_bookings import router as super_admin_bookings_rout
 from app.routers.super_admin_payouts import router as super_admin_payouts_router
 from app.routers.upload import router as upload_router
 from app.routers.webhooks import router as webhooks_router
-from app.services.scheduler import setup_scheduler
+from app.services.scheduler import get_scheduler_health_status, get_scheduler_status, setup_scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,7 +59,11 @@ async def run_migrations():
             if f.name in executed:
                 continue
             sql = f.read_text()
-            lines = [l for l in sql.split("\n") if l.strip() and not l.strip().startswith("--")]
+            lines = [
+                line
+                for line in sql.split("\n")
+                if line.strip() and not line.strip().startswith("--")
+            ]
             if not "\n".join(lines).strip():
                 await conn.execute(
                     "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING",
@@ -78,11 +82,23 @@ async def lifespan(app: FastAPI):
     logger.info("Starting vayada PMS...")
     await run_migrations()
     logger.info("Migrations complete")
-    scheduler.start()
-    logger.info("Scheduler started")
+    scheduler_status = get_scheduler_status()
+    if scheduler_status["active_jobs"]:
+        scheduler.start()
+        logger.info(
+            "Scheduler started with active_jobs=%s frozen_jobs=%s",
+            scheduler_status["active_jobs"],
+            [job["id"] for job in scheduler_status["frozen_jobs"]],
+        )
+    else:
+        logger.warning(
+            "Scheduler not started because all legacy PMS jobs are frozen: frozen_jobs=%s",
+            [job["id"] for job in scheduler_status["frozen_jobs"]],
+        )
     yield
     logger.info("Shutting down vayada PMS...")
-    scheduler.shutdown()
+    if scheduler.running:
+        scheduler.shutdown()
     await Database.close_pool()
     await AuthDatabase.close_pool()
     await BookingEngineDatabase.close_pool()
@@ -140,7 +156,11 @@ app.include_router(platform_admin_router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "pms"}
+    return {
+        "status": "ok",
+        "service": "pms",
+        "scheduler": get_scheduler_health_status(),
+    }
 
 
 if __name__ == "__main__":
