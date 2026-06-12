@@ -105,6 +105,20 @@ class Settings(BaseSettings):
     # header — Channex does not natively sign webhooks). Compared against
     # X-Vayada-Webhook-Token on incoming requests.
     CHANNEX_WEBHOOK_SECRET: str = ""
+    # Legacy Channex admin cutover guards. Supported modes are:
+    # legacy-owned, read-only, disabled, proxy-to-target, target-owned.
+    CHANNEX_ADMIN_DEFAULT_MODE: str = "legacy-owned"
+    CHANNEX_ADMIN_TARGET_BASE_URL: str = ""
+    CHANNEX_ADMIN_TARGET_TIMEOUT_SECONDS: float = 10.0
+    CHANNEX_ADMIN_READ_MODEL_MODE: str = ""
+    CHANNEX_ADMIN_ENABLE_DISABLE_MODE: str = ""
+    CHANNEX_ADMIN_PROVISIONING_MODE: str = ""
+    CHANNEX_ADMIN_MARKUPS_MODE: str = ""
+    CHANNEX_ADMIN_MANUAL_ARI_SYNC_MODE: str = ""
+    CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: str = ""
+    CHANNEX_ADMIN_MESSAGING_MODE: str = ""
+    CHANNEX_ADMIN_IFRAME_URL_MODE: str = ""
+    CHANNEX_ADMIN_WEBHOOK_SETUP_MODE: str = ""
 
     # Legacy provider webhook cutover controls. Provider-specific values
     # override PMS_LEGACY_WEBHOOK_MODE; proxy URLs can be set globally by base
