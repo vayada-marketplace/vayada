@@ -717,6 +717,145 @@ export type MarketplaceCollaborationReadError = {
   message: string;
 };
 
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION =
+  "marketplace-collaboration-lifecycle-writes.v1" as const;
+
+export type MarketplaceCollaborationLifecycleWritesContractVersion =
+  typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION;
+
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ENDPOINTS = {
+  create: {
+    method: "POST",
+    path: "/api/marketplace/collaborations",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+  respond: {
+    method: "POST",
+    path: "/api/marketplace/collaborations/{collaborationId}/respond",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+  updateTerms: {
+    method: "PUT",
+    path: "/api/marketplace/collaborations/{collaborationId}/terms",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+  approveTerms: {
+    method: "POST",
+    path: "/api/marketplace/collaborations/{collaborationId}/approve",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+  cancel: {
+    method: "POST",
+    path: "/api/marketplace/collaborations/{collaborationId}/cancel",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+  toggleDeliverable: {
+    method: "POST",
+    path: "/api/marketplace/collaborations/{collaborationId}/deliverables/{deliverableId}/toggle",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+  rateCreator: {
+    method: "POST",
+    path: "/api/marketplace/collaborations/{collaborationId}/rate",
+    doc: "engineering/marketplace-collaboration-lifecycle-writes-contract.md",
+  },
+} as const;
+
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS = [
+  "create",
+  "respond",
+  "update_terms",
+  "approve_terms",
+  "cancel",
+  "toggle_deliverable",
+  "rate_creator",
+] as const;
+
+export type MarketplaceCollaborationLifecycleWriteAction =
+  (typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS)[number];
+
+export type MarketplaceCollaborationWritePolicy = {
+  permission: "marketplace.collaboration.write";
+  side: MarketplaceCollaborationAuthorizationSide;
+  selectedOrganizationKind: "creator_workspace" | "hotel_group";
+  requiredResources: readonly {
+    product: "marketplace";
+    resourceType: "creator_profile" | "hotel_profile" | "hotel_listing";
+    relationship: "owner" | "operator";
+  }[];
+};
+
+export const MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY: MarketplaceCollaborationWritePolicy = {
+  permission: "marketplace.collaboration.write",
+  side: "creator",
+  selectedOrganizationKind: "creator_workspace",
+  requiredResources: [
+    {
+      product: "marketplace",
+      resourceType: "creator_profile",
+      relationship: "owner",
+    },
+  ],
+};
+
+export const MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY: MarketplaceCollaborationWritePolicy = {
+  permission: "marketplace.collaboration.write",
+  side: "hotel",
+  selectedOrganizationKind: "hotel_group",
+  requiredResources: [
+    {
+      product: "marketplace",
+      resourceType: "hotel_profile",
+      relationship: "owner",
+    },
+    {
+      product: "marketplace",
+      resourceType: "hotel_listing",
+      relationship: "operator",
+    },
+  ],
+};
+
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ERROR_CODES = [
+  "invalid_request",
+  "unauthorized",
+  "forbidden",
+  "missing_creator_resource_link",
+  "missing_hotel_resource_link",
+  "collaboration_not_found",
+  "invalid_transition",
+  "idempotency_conflict",
+  "validation_failed",
+  "internal_error",
+] as const;
+
+export type MarketplaceCollaborationLifecycleWriteErrorCode =
+  (typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ERROR_CODES)[number];
+
+export type MarketplaceCollaborationLifecycleSideEffect =
+  | {
+      type:
+        | "marketplace.collaboration.accepted"
+        | "marketplace.collaboration.system_message_requested"
+        | "marketplace.collaboration.notification_requested";
+      idempotencyKey?: string;
+    }
+  | {
+      type: "marketplace.affiliate.provision.command_requested";
+      idempotencyKey: string;
+    };
+
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS = [
+  ...MARKETPLACE_COLLABORATION_READ_PRIVATE_KEYS,
+  "stripeAccountId",
+  "stripe_connect_account_id",
+  "financeAccountId",
+  "pmsDatabase",
+] as const;
+
+export type MarketplaceCollaborationLifecycleWritePrivateKey =
+  (typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS)[number];
+
 // ---------------------------------------------------------------------------
 // Affiliate / referral contract
 // ---------------------------------------------------------------------------
