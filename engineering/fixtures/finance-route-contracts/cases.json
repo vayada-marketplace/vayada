@@ -246,6 +246,105 @@
       }
     },
     {
+      "caseId": "financial-summary-read",
+      "description": "Financial summary reads from the Finance visibility read model and reports source freshness without legacy financials coupling.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/summary",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "summary.currency",
+          "summary.grossPaymentAmount",
+          "summary.netPaymentAmount",
+          "summary.outstandingBalanceAmount",
+          "summary.invoiceCounts.partial",
+          "summary.paymentCounts.paid",
+          "sourceFreshness.finance.status"
+        ],
+        "mustExclude": [
+          "legacyPmsTable",
+          "providerPayloadRaw",
+          "processorFeeBreakdown",
+          "guestBirthDate"
+        ]
+      }
+    },
+    {
+      "caseId": "invoice-export-disposition",
+      "description": "Invoice CSV export returns target export disposition rather than executing a legacy PMS synchronous export.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/export.csv",
+        "query": {}
+      },
+      "expected": {
+        "status": 202,
+        "mustInclude": [
+          "export.status",
+          "export.disposition",
+          "export.filename",
+          "export.contentType",
+          "sourceFreshness"
+        ],
+        "mustNotCall": ["legacy PMS financials export", "legacy BookingEngineDatabase"]
+      }
+    },
+    {
+      "caseId": "invoice-empty-state",
+      "description": "Invoice reads return a successful empty state for a property with finance access but no invoice read model rows.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices",
+        "query": {
+          "status": "paid",
+          "limit": 25,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 0,
+        "mustInclude": ["invoices", "total", "counts.paid", "limit", "offset", "sourceFreshness"]
+      }
+    },
+    {
+      "caseId": "invoice-search-sort-pagination",
+      "description": "Invoice search, sort, and pagination use stable target read-model semantics.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices",
+        "query": {
+          "search": "ledger",
+          "sort": "guest",
+          "limit": 1,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 1,
+        "stableOrdering": "guest ASC, issuedAt DESC, invoiceNumber ASC",
+        "mustInclude": ["invoices[0].invoiceId", "invoices[0].guest.displayName", "total"]
+      }
+    },
+    {
+      "caseId": "payment-ledger-empty-state",
+      "description": "Payment ledger reads return a successful empty state for a property with finance access but no payment rows.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/payments",
+        "query": {
+          "status": "paid",
+          "provider": "manual",
+          "limit": 25,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 0,
+        "mustInclude": ["payments", "total", "counts.paid", "limit", "offset", "sourceFreshness"]
+      }
+    },
+    {
       "caseId": "payout-list-read",
       "description": "Property payout reads expose lifecycle and retry state without destination account secrets.",
       "request": {

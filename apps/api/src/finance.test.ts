@@ -8,8 +8,16 @@ import {
 import { injectJson } from "@vayada/backend-test";
 import type {
   CancellationPolicy,
+  FinanceFinancialSummary,
+  FinanceInvoiceDetail,
+  FinanceInvoiceListItem,
+  FinanceInvoiceListQuery,
+  FinanceInvoicePayment,
+  FinanceInvoiceStatusCounts,
+  FinancePaymentLedgerItem,
+  FinancePaymentLedgerQuery,
   FinancePaymentSettingsReadModel,
-  FinancePropertySettingsReadRepository,
+  FinancePropertyReadRepository,
 } from "@vayada/domain-finance";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
 import { readFileSync } from "node:fs";
@@ -34,9 +42,11 @@ const financeContractCases = JSON.parse(
 ) as {
   cases: Array<{
     caseId: string;
-    request: { path: string; method?: string };
+    request: { path: string; method?: string; query?: Record<string, string | number> };
     expected: {
       status: number;
+      itemCount?: number;
+      stableOrdering?: string;
       mustInclude?: string[];
       mustExclude?: string[];
       errorCode?: string;
@@ -96,6 +106,161 @@ const cancellationPolicy: CancellationPolicy = {
   updatedAt: "2026-06-12T10:00:00.000Z",
 };
 
+const sourceFreshness = {
+  finance: {
+    status: "fresh",
+    projectedAt: "2026-06-12T10:00:00.000Z",
+  },
+};
+
+const invoicePayments: FinanceInvoicePayment[] = [
+  {
+    paymentId: "pay_manual_002",
+    method: "cash",
+    methodLabel: "Cash",
+    amount: "100.00",
+    currency: "EUR",
+    reference: "front desk receipt 8814",
+    status: "paid",
+    recordedAt: "2026-06-12T10:08:00.000Z",
+  },
+  {
+    paymentId: "pay_manual_001",
+    method: "cash",
+    methodLabel: "Cash",
+    amount: "250.00",
+    currency: "EUR",
+    reference: "front desk receipt 8812",
+    status: "paid",
+    recordedAt: "2026-06-12T10:05:00.000Z",
+  },
+];
+
+const invoiceListItems: FinanceInvoiceListItem[] = [
+  {
+    invoiceId: "inv_2026_abcd",
+    invoiceNumber: "INV-2026-0002",
+    guestBookingId: "f6000000-0000-0000-0000-000000000686",
+    bookingReference: "B-FIN-686",
+    guest: { displayName: "Fi Guest", email: "finance.guest@example.test" },
+    stay: {
+      checkIn: "2026-08-01",
+      checkOut: "2026-08-05",
+      roomName: "Alpine Suite",
+      roomNumber: "201",
+    },
+    currency: "EUR",
+    totalAmount: "1200.00",
+    amountPaid: "350.00",
+    balanceDue: "850.00",
+    status: "partial",
+    issuedAt: "2026-06-12T10:00:00.000Z",
+  },
+  {
+    invoiceId: "inv_2026_wxyz",
+    invoiceNumber: "INV-2026-0001",
+    guestBookingId: "f6000000-0000-0000-0000-000000000687",
+    bookingReference: "B-FIN-687",
+    guest: { displayName: "Ana Ledger", email: "ledger@example.test" },
+    stay: {
+      checkIn: "2026-08-10",
+      checkOut: "2026-08-12",
+      roomName: "Garden Room",
+      roomNumber: "102",
+    },
+    currency: "EUR",
+    totalAmount: "500.00",
+    amountPaid: "200.00",
+    balanceDue: "300.00",
+    status: "partial",
+    issuedAt: "2026-06-12T09:00:00.000Z",
+  },
+];
+
+const invoiceDetails: FinanceInvoiceDetail[] = [
+  {
+    ...invoiceListItems[0]!,
+    guest: {
+      ...invoiceListItems[0]!.guest,
+      phone: "+15555550123",
+    },
+    nights: 4,
+    charges: [{ description: "Stay", detail: "4 nights in Alpine Suite", amount: "1200.00" }],
+    payments: invoicePayments,
+    subtotal: "1200.00",
+  },
+  {
+    ...invoiceListItems[1]!,
+    guest: {
+      ...invoiceListItems[1]!.guest,
+      phone: null,
+    },
+    nights: 2,
+    charges: [{ description: "Stay", detail: "2 nights in Garden Room", amount: "500.00" }],
+    payments: [invoicePayments[1]!],
+    subtotal: "500.00",
+  },
+];
+
+const paymentLedgerItems: FinancePaymentLedgerItem[] = [
+  {
+    ...invoicePayments[0]!,
+    invoiceId: "inv_2026_abcd",
+    invoiceNumber: "INV-2026-0002",
+    guestBookingId: "f6000000-0000-0000-0000-000000000686",
+    bookingReference: "B-FIN-686",
+    checkoutChargeId: "charge_checkout_002",
+    provider: "manual",
+    providerStatus: "paid",
+    reconciliationStatus: "matched",
+  },
+  {
+    ...invoicePayments[1]!,
+    invoiceId: "inv_2026_abcd",
+    invoiceNumber: "INV-2026-0002",
+    guestBookingId: "f6000000-0000-0000-0000-000000000686",
+    bookingReference: "B-FIN-686",
+    checkoutChargeId: "charge_checkout_001",
+    provider: "manual",
+    providerStatus: "paid",
+    reconciliationStatus: "matched",
+  },
+];
+
+const financialSummary: FinanceFinancialSummary = {
+  currency: "EUR",
+  periodStart: "2026-06-01",
+  periodEnd: "2026-06-30",
+  grossPaymentAmount: "1700.00",
+  netPaymentAmount: "1650.00",
+  payoutAmount: "1400.00",
+  commissionAmount: "50.00",
+  outstandingBalanceAmount: "1150.00",
+  paymentCount: 2,
+  payoutCount: 1,
+  failedPaymentCount: 0,
+  invoiceCounts: {
+    draft: 0,
+    sent: 0,
+    paid: 0,
+    partial: 2,
+    overdue: 0,
+    voided: 0,
+  },
+  paymentCounts: {
+    requires_action: 0,
+    authorized: 0,
+    pending: 0,
+    paid: 2,
+    partially_refunded: 0,
+    refunded: 0,
+    failed: 0,
+    canceled: 0,
+    disputed: 0,
+  },
+  projectedAt: "2026-06-12T10:00:00.000Z",
+};
+
 let app: ReturnType<typeof buildApp> | null = null;
 
 afterEach(async () => {
@@ -124,6 +289,129 @@ describe("finance route contracts", () => {
       assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
       assertEnums(response.body, contractCase!.expected.enums ?? {}, caseId);
     }
+  });
+
+  it("passes F1c invoice and payment ledger fixture cases in target mode", async () => {
+    app = buildFinanceApp();
+
+    for (const caseId of ["invoice-list-read", "invoice-detail-read", "payment-ledger-read"]) {
+      const contractCase = financeContractCases.cases.find(
+        (candidate) => candidate.caseId === caseId,
+      );
+      expect(contractCase, caseId).toBeDefined();
+
+      const response = await injectJson<Record<string, unknown>>(app, {
+        method: "GET",
+        url: contractCase!.request.path,
+        query: queryStrings(contractCase!.request.query),
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
+      if (contractCase!.expected.itemCount !== undefined) {
+        const list =
+          caseId === "payment-ledger-read" ? response.body.payments : response.body.invoices;
+        expect(list, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
+      assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
+      expect(JSON.stringify(response.body), caseId).not.toMatch(
+        /providerPayloadRaw|providerPaymentIntentSecret|cardFingerprint|processorFeeBreakdown|guestBirthDate|privatePmsNotes|providerPaymentIntentId|booking_guests/,
+      );
+    }
+  });
+
+  it("returns financial summary with source freshness from the Finance read model", async () => {
+    app = buildFinanceApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/finance/properties/${propertyId}/summary`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      contractVersion: "finance-route-contracts.v1",
+      propertyId,
+      summary: {
+        currency: "EUR",
+        grossPaymentAmount: "1700.00",
+        outstandingBalanceAmount: "1150.00",
+        invoiceCounts: { partial: 2 },
+        paymentCounts: { paid: 2 },
+      },
+      sourceFreshness,
+    });
+  });
+
+  it("returns a CSV export disposition instead of streaming a legacy export", async () => {
+    app = buildFinanceApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/finance/properties/${propertyId}/invoices/export.csv`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(202);
+    expect(response.body).toMatchObject({
+      contractVersion: "finance-route-contracts.v1",
+      propertyId,
+      export: {
+        status: "queued",
+        disposition: "durable_export_job",
+        filename: `finance-invoices-${propertyId}.csv`,
+        contentType: "text/csv",
+      },
+    });
+  });
+
+  it("supports invoice search, sort, and pagination over the target read model", async () => {
+    app = buildFinanceApp();
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "GET",
+      url: `/api/finance/properties/${propertyId}/invoices`,
+      query: { search: "ledger", sort: "guest", limit: "1", offset: "0" },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      total: 1,
+      limit: 1,
+      offset: 0,
+      invoices: [{ invoiceId: "inv_2026_wxyz", guest: { displayName: "Ana Ledger" } }],
+    });
+  });
+
+  it("returns empty states for finance ledger reads without treating setup as an error", async () => {
+    app = buildFinanceApp({ repository: emptyFinanceRepository });
+
+    const [summary, invoices, payments] = await Promise.all([
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/summary`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/invoices`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/payments`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+    ]);
+
+    expect(summary.body).toMatchObject({
+      summary: { grossPaymentAmount: "0.00", invoiceCounts: { partial: 0 } },
+    });
+    expect(invoices.body).toMatchObject({ invoices: [], total: 0, counts: { partial: 0 } });
+    expect(payments.body).toMatchObject({ payments: [], total: 0, counts: { paid: 0 } });
   });
 
   it("returns cancellation policy reads from the Finance repository", async () => {
@@ -480,7 +768,7 @@ function buildFinanceApp(
     entitlements?: ProductEntitlement[];
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
-    repository?: FinancePropertySettingsReadRepository;
+    repository?: FinancePropertyReadRepository;
     publicHotelProfileRepository?: PublicHotelProfileRepository | null;
     financePublicHotelProfileRepository?: PublicHotelProfileRepository;
     financePublicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
@@ -524,14 +812,145 @@ const publicHotelProfileRepository: PublicHotelProfileRepository = {
   },
 };
 
-const financeRepository: FinancePropertySettingsReadRepository = {
+const financeRepository: FinancePropertyReadRepository = {
   async getPaymentSettings(requestedPropertyId) {
     return requestedPropertyId === propertyId ? paymentSettings : null;
   },
   async getCancellationPolicy(requestedPropertyId) {
     return requestedPropertyId === propertyId ? cancellationPolicy : null;
   },
+  async getFinancialSummary(requestedPropertyId) {
+    if (requestedPropertyId !== propertyId) return null;
+    return {
+      summary: financialSummary,
+      sourceFreshness,
+    };
+  },
+  async listInvoices(requestedPropertyId, query) {
+    const filtered = requestedPropertyId === propertyId ? filterInvoices(query) : [];
+    return {
+      invoices: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      counts: invoiceCounts(invoiceListItems),
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness,
+    };
+  },
+  async getInvoice(requestedPropertyId, invoiceId) {
+    if (requestedPropertyId !== propertyId) return null;
+    const invoice = invoiceDetails.find((candidate) => candidate.invoiceId === invoiceId);
+    return invoice ? { invoice, sourceFreshness } : null;
+  },
+  async listPayments(requestedPropertyId, query) {
+    const filtered = requestedPropertyId === propertyId ? filterPayments(query) : [];
+    return {
+      payments: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      counts: {
+        requires_action: 0,
+        authorized: 0,
+        pending: 0,
+        paid: paymentLedgerItems.filter((item) => item.status === "paid").length,
+        partially_refunded: 0,
+        refunded: 0,
+        failed: 0,
+        canceled: 0,
+        disputed: 0,
+      },
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness,
+    };
+  },
+  async getInvoiceCsvExportDisposition(requestedPropertyId) {
+    return {
+      export: {
+        status: "queued",
+        disposition: "durable_export_job",
+        filename: `finance-invoices-${requestedPropertyId}.csv`,
+        contentType: "text/csv",
+        downloadUrl: null,
+        jobId: "job_finance_invoice_export_686",
+        message: "Invoice CSV export runs through the Finance read-model export job.",
+      },
+      sourceFreshness,
+    };
+  },
 };
+
+const emptyFinanceRepository: FinancePropertyReadRepository = {
+  async getPaymentSettings() {
+    return null;
+  },
+  async getCancellationPolicy() {
+    return null;
+  },
+};
+
+function filterInvoices(query: FinanceInvoiceListQuery): FinanceInvoiceListItem[] {
+  const search = query.search?.toLowerCase();
+  const filtered = invoiceListItems.filter((invoice) => {
+    if (query.status && invoice.status !== query.status) return false;
+    if (!search) return true;
+    return [
+      invoice.invoiceId,
+      invoice.invoiceNumber,
+      invoice.bookingReference,
+      invoice.guest.displayName,
+      invoice.guest.email ?? "",
+    ].some((value) => value.toLowerCase().includes(search));
+  });
+  return filtered.toSorted((left, right) => {
+    if (query.sort === "guest") {
+      return left.guest.displayName.localeCompare(right.guest.displayName);
+    }
+    if (query.sort === "amount") {
+      return Number(right.totalAmount) - Number(left.totalAmount);
+    }
+    return (
+      right.issuedAt.localeCompare(left.issuedAt) ||
+      left.invoiceNumber.localeCompare(right.invoiceNumber)
+    );
+  });
+}
+
+function filterPayments(query: FinancePaymentLedgerQuery): FinancePaymentLedgerItem[] {
+  const search = query.search?.toLowerCase();
+  return paymentLedgerItems.filter((payment) => {
+    if (query.status && payment.status !== query.status) return false;
+    if (query.provider && payment.provider !== query.provider) return false;
+    if (query.method && payment.method !== query.method) return false;
+    if (query.from && payment.recordedAt < query.from) return false;
+    if (query.to && payment.recordedAt > query.to) return false;
+    if (!search) return true;
+    return [
+      payment.paymentId,
+      payment.invoiceId ?? "",
+      payment.invoiceNumber ?? "",
+      payment.bookingReference ?? "",
+      payment.reference ?? "",
+    ].some((value) => value.toLowerCase().includes(search));
+  });
+}
+
+function invoiceCounts(invoices: FinanceInvoiceListItem[]): FinanceInvoiceStatusCounts {
+  return {
+    draft: invoices.filter((invoice) => invoice.status === "draft").length,
+    sent: invoices.filter((invoice) => invoice.status === "sent").length,
+    paid: invoices.filter((invoice) => invoice.status === "paid").length,
+    partial: invoices.filter((invoice) => invoice.status === "partial").length,
+    overdue: invoices.filter((invoice) => invoice.status === "overdue").length,
+    voided: invoices.filter((invoice) => invoice.status === "voided").length,
+  };
+}
+
+function queryStrings(query: unknown): Record<string, string> | undefined {
+  if (!query || typeof query !== "object") return undefined;
+  return Object.fromEntries(
+    Object.entries(query as Record<string, unknown>).map(([key, value]) => [key, String(value)]),
+  );
+}
 
 function pmsFinanceEntitlement(
   resourceType: "pms_property" | "property" = "pms_property",
