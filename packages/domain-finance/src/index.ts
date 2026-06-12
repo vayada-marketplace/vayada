@@ -29,9 +29,13 @@
 export type FinancePropertyId = string;
 export type FinanceUtcDateTime = string;
 export type FinanceCurrencyCode = string;
+export type FinanceContractVersion = "finance-route-contracts.v1";
 
 /** Decimal representation of a monetary amount, e.g. "150.00". */
 export type FinanceDecimalAmount = string;
+
+export const FINANCE_ROUTE_CONTRACT_VERSION =
+  "finance-route-contracts.v1" as const satisfies FinanceContractVersion;
 
 // ---------------------------------------------------------------------------
 // Billing plan
@@ -59,6 +63,50 @@ export const FINANCE_PAYMENT_METHODS = [
 
 export type FinancePaymentMethod = (typeof FINANCE_PAYMENT_METHODS)[number];
 
+export const FINANCE_ROUTE_PAYMENT_PROVIDERS = [
+  "stripe",
+  "xendit",
+  "vayada",
+  "manual",
+  "bank_transfer",
+] as const;
+
+export type FinanceRoutePaymentProvider = (typeof FINANCE_ROUTE_PAYMENT_PROVIDERS)[number];
+
+export const FINANCE_ROUTE_PAYMENT_METHODS = [
+  "card",
+  "pay_at_property",
+  "xendit",
+  "cash",
+  "bank_transfer",
+  "manual_card",
+  "wallet",
+  "other",
+] as const;
+
+export type FinanceRoutePaymentMethod = (typeof FINANCE_ROUTE_PAYMENT_METHODS)[number];
+
+export const FINANCE_PROVIDER_ACCOUNT_STATUSES = [
+  "setup_incomplete",
+  "pending",
+  "active",
+  "restricted",
+  "suspended",
+  "disabled",
+] as const;
+
+export type FinanceProviderAccountStatus = (typeof FINANCE_PROVIDER_ACCOUNT_STATUSES)[number];
+
+export const FINANCE_PROVIDER_ONBOARDING_STATUSES = [
+  "not_started",
+  "invited",
+  "in_review",
+  "completed",
+  "requires_action",
+] as const;
+
+export type FinanceProviderOnboardingStatus = (typeof FINANCE_PROVIDER_ONBOARDING_STATUSES)[number];
+
 // ---------------------------------------------------------------------------
 // Payment settings read model
 //
@@ -79,6 +127,63 @@ export type PaymentSettingsReadModel = {
   /** All currencies the property accepts (includes defaultCurrency). */
   supportedCurrencies: FinanceCurrencyCode[];
   updatedAt: FinanceUtcDateTime;
+};
+
+export type FinanceJsonPolicy = Record<string, string | number | boolean | null>;
+
+export type FinanceProviderAccountReadModel = {
+  providerAccountId: string | null;
+  provider: FinanceRoutePaymentProvider | null;
+  status: FinanceProviderAccountStatus;
+  onboardingStatus: FinanceProviderOnboardingStatus;
+  chargesEnabled: boolean;
+  payoutsEnabled: boolean;
+  capabilities: string[];
+};
+
+export type FinancePaymentSettingsReadModel = {
+  propertyId: FinancePropertyId;
+  paymentsEnabled: boolean;
+  paymentProvider: FinanceRoutePaymentProvider;
+  acceptedMethods: FinanceRoutePaymentMethod[];
+  defaultCurrency: FinanceCurrencyCode;
+  supportedCurrencies: FinanceCurrencyCode[];
+  depositPolicy: FinanceJsonPolicy;
+  refundPolicy: FinanceJsonPolicy;
+  taxPolicy: FinanceJsonPolicy;
+  statementDescriptor: string | null;
+  requiresManualReview: boolean;
+  providerAccount: FinanceProviderAccountReadModel;
+  sourceFreshness: FinanceJsonPolicy;
+  updatedAt: FinanceUtcDateTime;
+};
+
+export type FinancePaymentSettingsResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  paymentSettings: Omit<FinancePaymentSettingsReadModel, "propertyId" | "updatedAt">;
+};
+
+export type CancellationPolicy = {
+  freeCancellationDays: number;
+  partialRefundPercent: number;
+  refundMethod: "original_payment" | "manual_review" | "property_discretion";
+  appliesTo: "direct_booking" | "all_guest_bookings";
+  updatedAt: FinanceUtcDateTime;
+};
+
+export type FinanceCancellationPolicyResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  policy: CancellationPolicy;
+};
+
+export type PublicPaymentCapabilityProjection = {
+  paymentMethods: FinanceRoutePaymentMethod[];
+  defaultCurrency: FinanceCurrencyCode;
+  supportedCurrencies: FinanceCurrencyCode[];
+  depositPolicy: FinanceJsonPolicy;
+  cancellationPolicy: Omit<CancellationPolicy, "updatedAt">;
 };
 
 // ---------------------------------------------------------------------------
@@ -234,6 +339,167 @@ export type AddOnPricingReadPort = {
    */
   listAddOnPricing(propertyId: FinancePropertyId): Promise<AddOnPricingReadModel[]>;
 };
+
+export type FinancePropertySettingsReadRepository = {
+  /**
+   * Fetch target Finance payment settings for a property.
+   * Returns null when the property has no finance configuration yet.
+   */
+  getPaymentSettings(
+    propertyId: FinancePropertyId,
+  ): Promise<FinancePaymentSettingsReadModel | null>;
+
+  /**
+   * Fetch the cancellation policy derived from Finance-owned policy fields.
+   * Returns null when the property has no finance configuration yet.
+   */
+  getCancellationPolicy(propertyId: FinancePropertyId): Promise<CancellationPolicy | null>;
+
+  close?(): Promise<void>;
+};
+
+export function toFinancePaymentSettingsResponse(
+  settings: FinancePaymentSettingsReadModel,
+): FinancePaymentSettingsResponse {
+  const { propertyId, updatedAt: _updatedAt, ...paymentSettings } = settings;
+  return {
+    contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+    propertyId,
+    paymentSettings,
+  };
+}
+
+export function setupIncompletePaymentSettings(
+  propertyId: FinancePropertyId,
+  updatedAt: FinanceUtcDateTime,
+  defaultCurrency: FinanceCurrencyCode = "EUR",
+): FinancePaymentSettingsReadModel {
+  return {
+    propertyId,
+    paymentsEnabled: false,
+    paymentProvider: "manual",
+    acceptedMethods: [],
+    defaultCurrency,
+    supportedCurrencies: [defaultCurrency],
+    depositPolicy: {},
+    refundPolicy: {},
+    taxPolicy: {},
+    statementDescriptor: null,
+    requiresManualReview: true,
+    providerAccount: {
+      providerAccountId: null,
+      provider: null,
+      status: "setup_incomplete",
+      onboardingStatus: "not_started",
+      chargesEnabled: false,
+      payoutsEnabled: false,
+      capabilities: [],
+    },
+    sourceFreshness: {
+      status: "setup_incomplete",
+    },
+    updatedAt,
+  };
+}
+
+export function toFinanceCancellationPolicyResponse(
+  propertyId: FinancePropertyId,
+  policy: CancellationPolicy,
+): FinanceCancellationPolicyResponse {
+  return {
+    contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+    propertyId,
+    policy,
+  };
+}
+
+export function cancellationPolicyFromRefundPolicy(
+  refundPolicy: FinanceJsonPolicy,
+  updatedAt: FinanceUtcDateTime,
+): CancellationPolicy {
+  return {
+    freeCancellationDays: nonNegativeInteger(refundPolicy["freeCancellationDays"], 0),
+    partialRefundPercent: boundedPercent(refundPolicy["partialRefundPercent"], 0),
+    refundMethod: refundMethod(refundPolicy["refundMethod"]),
+    appliesTo: cancellationAppliesTo(refundPolicy["appliesTo"]),
+    updatedAt,
+  };
+}
+
+export function toPublicPaymentCapabilityProjection(
+  settings: FinancePaymentSettingsReadModel,
+  cancellationPolicy: CancellationPolicy,
+): PublicPaymentCapabilityProjection {
+  return {
+    paymentMethods: settings.paymentsEnabled ? settings.acceptedMethods : [],
+    defaultCurrency: settings.defaultCurrency,
+    supportedCurrencies: settings.supportedCurrencies,
+    depositPolicy: publicDepositPolicy(settings.depositPolicy),
+    cancellationPolicy: {
+      freeCancellationDays: cancellationPolicy.freeCancellationDays,
+      partialRefundPercent: cancellationPolicy.partialRefundPercent,
+      refundMethod: cancellationPolicy.refundMethod,
+      appliesTo: cancellationPolicy.appliesTo,
+    },
+  };
+}
+
+function publicDepositPolicy(policy: FinanceJsonPolicy): FinanceJsonPolicy {
+  return copyPublicPolicyFields(policy, [
+    "depositPercent",
+    "depositAmount",
+    "depositDue",
+    "currency",
+    "summary",
+  ]);
+}
+
+function copyPublicPolicyFields(
+  policy: FinanceJsonPolicy,
+  fields: readonly string[],
+): FinanceJsonPolicy {
+  return Object.fromEntries(
+    fields.flatMap((field) => {
+      const value = policy[field];
+      return value === undefined ? [] : [[field, value]];
+    }),
+  );
+}
+
+function nonNegativeInteger(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return fallback;
+}
+
+function boundedPercent(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 100) return parsed;
+  }
+  return fallback;
+}
+
+function refundMethod(value: unknown): CancellationPolicy["refundMethod"] {
+  if (
+    value === "original_payment" ||
+    value === "manual_review" ||
+    value === "property_discretion"
+  ) {
+    return value;
+  }
+  return "manual_review";
+}
+
+function cancellationAppliesTo(value: unknown): CancellationPolicy["appliesTo"] {
+  if (value === "direct_booking" || value === "all_guest_bookings") {
+    return value;
+  }
+  return "direct_booking";
+}
 
 // ---------------------------------------------------------------------------
 // Finance command types

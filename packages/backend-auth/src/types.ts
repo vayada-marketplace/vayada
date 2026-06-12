@@ -21,6 +21,7 @@ export type Product = "platform" | "marketplace" | "booking" | "pms" | "affiliat
 
 export type ResourceType =
   | "platform"
+  | "property"
   | "booking_hotel"
   | "pms_hotel"
   | "pms_property"
@@ -34,6 +35,7 @@ export type ResourceRelationship =
   | "owner"
   | "operator"
   | "front_desk"
+  | "finance_manager"
   | "promotes"
   | "billing_account";
 

@@ -62,6 +62,11 @@ import {
   type BookingWebAffiliateHotelResolver,
   type BookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
+import {
+  registerFinanceRoutes,
+  type FinancePublicHotelPropertyResolver,
+  type FinanceRoutesOptions,
+} from "./routes/finance.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
@@ -112,6 +117,9 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
+  financeRepository?: FinanceRoutesOptions["repository"];
+  financePublicHotelProfileRepository?: PublicHotelProfileRepository;
+  financePublicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -232,6 +240,19 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.financeRepository) {
+    const financePublicHotelProfileRepository =
+      options.financePublicHotelProfileRepository ?? options.publicHotelProfileRepository;
+    app.register(registerFinanceRoutes, {
+      prefix: "/api",
+      repository: options.financeRepository,
+      publicHotelPropertyResolver: options.financePublicHotelPropertyResolver,
+      publicHotelProfileRepository: financePublicHotelProfileRepository,
+      closePublicHotelProfileRepository:
+        Boolean(options.financePublicHotelProfileRepository) &&
+        options.financePublicHotelProfileRepository !== options.publicHotelProfileRepository,
     });
   }
 

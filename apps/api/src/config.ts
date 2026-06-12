@@ -44,6 +44,7 @@ export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
 export type BookingCheckoutCommandSource = "legacy_proxy" | "target";
 export type PmsOperationsSource = "disabled" | "target";
+export type FinanceSource = "legacy" | "target";
 export type BookingWebEventSink = "disabled" | "target";
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 
@@ -73,6 +74,7 @@ export type ApiConfig = {
   bookingPublicApiUrl?: string;
   marketplaceDiscoverySource: MarketplaceDiscoverySource;
   pmsOperationsSource: PmsOperationsSource;
+  financeSource: FinanceSource;
   marketplaceDiscoveryAllowedOrigins: string[];
   affiliatePublicSource?: "target";
   pmsOperationsAllowedOrigins: string[];
@@ -304,6 +306,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const financeSource = readSourceEnv(env, "FINANCE_SOURCE", ["legacy", "target"], "legacy");
   const bookingWebEventSink = readSourceEnv(
     env,
     "BOOKING_WEB_EVENT_SINK",
@@ -320,6 +323,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (pmsOperationsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
+  }
+  if (financeSource === "target" && !targetDatabaseUrl) {
+    throw new Error("FINANCE_SOURCE=target requires TARGET_DATABASE_URL");
   }
   if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
     throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
@@ -366,6 +372,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
     marketplaceDiscoverySource,
     pmsOperationsSource,
+    financeSource,
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",

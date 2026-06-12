@@ -41,6 +41,10 @@ import {
   createPgBookingSettingsReadRepository,
   createPgTargetBookingSettingsRepository,
 } from "./routes/bookingSettings.js";
+import {
+  createTargetFinancePropertySettingsRepository,
+  createTargetFinancePublicHotelPropertyResolver,
+} from "./routes/finance.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
@@ -161,6 +165,28 @@ const pmsOperationsCommandRepository =
       })
     : undefined;
 
+const financeRepository =
+  config.financeSource === "target"
+    ? createTargetFinancePropertySettingsRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
+const financePublicHotelProfileRepository =
+  publicHotelProfileRepository ??
+  (config.financeSource === "target"
+    ? createTargetPublicHotelProfileRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined);
+
+const financePublicHotelPropertyResolver =
+  config.financeSource === "target"
+    ? createTargetFinancePublicHotelPropertyResolver({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
@@ -277,6 +303,9 @@ const app = buildApp({
   bookingReservationsRepository,
   pmsOperationsRepository,
   pmsOperationsCommandRepository,
+  financeRepository,
+  financePublicHotelProfileRepository,
+  financePublicHotelPropertyResolver,
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
