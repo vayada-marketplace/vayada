@@ -23,6 +23,11 @@ import {
   serializePublicHotelProfileProjection,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
+import {
+  registerBookingWebAffiliateRoutes,
+  type BookingWebAffiliateHotelResolver,
+  type BookingWebAffiliateRepository,
+} from "./bookingWebAffiliate.js";
 
 type FetchLike = (input: URL, init?: RequestInit) => Promise<Response>;
 export type BookingDomainResolutionSource = "legacy" | "target";
@@ -312,6 +317,8 @@ export type BookingWebPublicRoutesOptions = {
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
   checkoutAdapter?: BookingWebCheckoutAdapter;
+  affiliateHotelResolver?: BookingWebAffiliateHotelResolver;
+  affiliateRepository?: BookingWebAffiliateRepository;
   affiliateAdapter?: BookingWebAffiliateAdapter;
   attributionSink?: BookingWebAttributionSink;
   fetch?: FetchLike;
@@ -743,46 +750,55 @@ export async function registerBookingWebPublicRoutes(
     return reply.status(204).send();
   });
 
-  app.get<{ Params: BookingWebHotelParams; Querystring: BookingWebAffiliateCheckEmailQuery }>(
-    "/hotels/:slug/affiliates/check-email",
-    async (request, reply) => {
-      const email = firstString(request.query.email);
-      if (!email) {
-        throw createHttpError(400, "Email is required.");
-      }
-      const response = await affiliateAdapter.checkEmail(request.params.slug, email);
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-check-email");
-      reply.header("X-Robots-Tag", "noindex");
-      return response;
-    },
-  );
+  if (options.affiliateRepository) {
+    await registerBookingWebAffiliateRoutes(app, {
+      hotelResolver: options.affiliateHotelResolver ?? {
+        findProfileBySlug: (slug) => options.profileRepository.findProfileBySlug(slug),
+      },
+      repository: options.affiliateRepository,
+    });
+  } else {
+    app.get<{ Params: BookingWebHotelParams; Querystring: BookingWebAffiliateCheckEmailQuery }>(
+      "/hotels/:slug/affiliates/check-email",
+      async (request, reply) => {
+        const email = firstString(request.query.email);
+        if (!email) {
+          throw createHttpError(400, "Email is required.");
+        }
+        const response = await affiliateAdapter.checkEmail(request.params.slug, email);
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-check-email");
+        reply.header("X-Robots-Tag", "noindex");
+        return response;
+      },
+    );
 
-  app.post<{ Params: BookingWebHotelParams; Body: BookingWebAffiliateRequest }>(
-    "/hotels/:slug/affiliates",
-    async (request, reply) => {
-      const response = await affiliateAdapter.register(request.params.slug, request.body ?? {});
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-register");
-      reply.header("X-Robots-Tag", "noindex");
-      return response;
-    },
-  );
+    app.post<{ Params: BookingWebHotelParams; Body: BookingWebAffiliateRequest }>(
+      "/hotels/:slug/affiliates",
+      async (request, reply) => {
+        const response = await affiliateAdapter.register(request.params.slug, request.body ?? {});
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-register");
+        reply.header("X-Robots-Tag", "noindex");
+        return response;
+      },
+    );
 
-  app.post<{ Params: BookingWebAffiliateParams; Body: BookingWebAffiliateRequest }>(
-    "/hotels/:slug/affiliates/:affiliateId/stripe/connect",
-    async (request, reply) => {
-      const response = await affiliateAdapter.createStripeConnectLink(
-        request.params.slug,
-        request.params.affiliateId,
-        request.body ?? {},
-      );
-      reply.header("Cache-Control", "no-store");
-      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-stripe-connect");
-      reply.header("X-Robots-Tag", "noindex");
-      return response;
-    },
-  );
+    app.post<{ Params: BookingWebAffiliateParams; Body: BookingWebAffiliateRequest }>(
+      "/hotels/:slug/affiliates/:affiliateId/stripe/connect",
+      async (request, reply) => {
+        const response = await affiliateAdapter.createStripeConnectLink(
+          request.params.slug,
+          request.params.affiliateId,
+          request.body ?? {},
+        );
+        reply.header("Cache-Control", "no-store");
+        reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-affiliate-stripe-connect");
+        reply.header("X-Robots-Tag", "noindex");
+        return response;
+      },
+    );
+  }
 }
 
 export function createTargetBookingWebCalendarRepository(config: {

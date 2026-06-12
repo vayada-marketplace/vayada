@@ -26,6 +26,10 @@ import {
   createTargetPublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
+import {
+  createPgBookingWebAffiliateHotelResolver,
+  createPgBookingWebAffiliateRepository,
+} from "./routes/bookingWebAffiliate.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import {
   createTargetBookingWebCalendarRepository,
@@ -158,6 +162,20 @@ const providerWebhookSecrets = {
 };
 const hasProviderWebhookSecret = Object.values(providerWebhookSecrets).some(Boolean);
 
+const bookingWebAffiliateRepository =
+  config.affiliatePublicSource === "target" && config.targetDatabaseUrl
+    ? createPgBookingWebAffiliateRepository({
+        connectionString: config.targetDatabaseUrl,
+      })
+    : undefined;
+
+const bookingWebAffiliateHotelResolver =
+  config.affiliatePublicSource === "target" && config.targetDatabaseUrl
+    ? createPgBookingWebAffiliateHotelResolver({
+        connectionString: config.targetDatabaseUrl,
+      })
+    : undefined;
+
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
   authSession:
@@ -248,6 +266,8 @@ const app = buildApp({
           connectionString: config.auth.databaseUrl,
         })
       : undefined,
+  bookingWebAffiliateHotelResolver,
+  bookingWebAffiliateRepository,
 });
 
 try {

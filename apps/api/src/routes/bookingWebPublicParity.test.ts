@@ -11,6 +11,11 @@ import {
   type BookingHotelProfileRow,
   type PublicHotelProfileRepository,
 } from "./aiHotels.js";
+import type {
+  BookingWebAffiliateRegistrationRequest,
+  BookingWebAffiliateRepository,
+  BookingWebAffiliateStripeConnectRequest,
+} from "./bookingWebAffiliate.js";
 import type { BookingWebCheckoutAdapter } from "./bookingWebPublic.js";
 
 type LegacyHotelResponse = {
@@ -831,6 +836,132 @@ describe("Booking Web public bootstrap parity", () => {
     await app.close();
   });
 
+  it("serves target-owned affiliate routes without PMS public API config", async () => {
+    const affiliateRepository = new InMemoryAffiliateRepository();
+    const app = buildApp({
+      logger: false,
+      publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingWebAffiliateRepository: affiliateRepository,
+      async bookingWebPublicFetch(input) {
+        throw new Error(`Unexpected legacy fetch: ${input.toString()}`);
+      },
+    });
+
+    const before = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator%40example.com",
+    });
+    const firstRegister = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
+      payload: {
+        fullName: "Creator Example",
+        email: "Creator@Example.com",
+        socialMedia: "@creator",
+        userType: "creator",
+        paymentMethod: "stripe",
+      },
+    });
+    const secondRegister = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
+      payload: {
+        fullName: "Creator Example",
+        email: "creator@example.com",
+        socialMedia: "@creator",
+        userType: "creator",
+        paymentMethod: "stripe",
+      },
+    });
+    const after = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator%40example.com",
+    });
+
+    const affiliate = firstRegister.json() as { id: string; referralCode: string };
+    const firstConnect = await app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
+      payload: { email: "creator@example.com" },
+    });
+    const wrongEmailConnect = await app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
+      payload: { email: "other@example.com" },
+    });
+    const wrongSlugConnect = await app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/legacy-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
+      payload: { email: "creator@example.com" },
+    });
+    const secondConnect = await app.inject({
+      method: "POST",
+      url: `/api/booking-web/hotels/hotel-alpenrose/affiliates/${affiliate.id}/stripe/connect`,
+      payload: { email: "creator@example.com" },
+    });
+
+    expect(before.statusCode).toBe(200);
+    expect(before.json()).toEqual({ exists: false });
+    expect([firstRegister.statusCode, secondRegister.statusCode, after.statusCode]).toEqual([
+      200, 200, 200,
+    ]);
+    expect(secondRegister.json()).toEqual(firstRegister.json());
+    expect(after.json()).toEqual({ exists: true });
+    expect(affiliate).toEqual({
+      id: expect.stringMatching(/^aff_/),
+      referralCode: expect.stringMatching(/^VA[A-F0-9]{8}$/),
+    });
+    expect(wrongEmailConnect.statusCode).toBe(404);
+    expect(wrongSlugConnect.statusCode).toBe(404);
+    expect(firstConnect.statusCode).toBe(503);
+    expect(secondConnect.statusCode).toBe(503);
+    expect(firstConnect.json()).toEqual(secondConnect.json());
+    expect(firstConnect.json()).toEqual({
+      error: "Service Unavailable",
+      message: "Stripe Connect onboarding is not configured.",
+      statusCode: 503,
+    });
+    expect(affiliateRepository.identityCount).toBe(1);
+    expect(affiliateRepository.stripeAccountCount).toBe(0);
+    await app.close();
+  });
+
+  it("mounts target-owned affiliate routes with an explicit target hotel resolver", async () => {
+    const app = buildApp({
+      logger: false,
+      bookingWebAffiliateRepository: new InMemoryAffiliateRepository(),
+      bookingWebAffiliateHotelResolver: createProfileRepository(legacyHotel, {}),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates/check-email?email=creator%40example.com",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ exists: false });
+    await app.close();
+  });
+
+  it("fails closed for target-owned affiliate routes without a hotel resolver", async () => {
+    const app = buildApp({
+      logger: false,
+      bookingWebAffiliateRepository: new InMemoryAffiliateRepository(),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/affiliates",
+      payload: {
+        fullName: "Creator Example",
+        email: "creator@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
   it("passes command context through target checkout adapter paths without legacy URLs", async () => {
     const operations: Array<{
       operation: string | undefined;
@@ -1140,6 +1271,77 @@ function buildParityApp(config: {
       });
     },
   });
+}
+
+class InMemoryAffiliateRepository implements BookingWebAffiliateRepository {
+  private readonly affiliates = new Map<
+    string,
+    {
+      id: string;
+      referralCode: string;
+      email: string;
+      slug: string;
+      stripeAccountId?: string;
+      onboardingUrl?: string;
+    }
+  >();
+
+  get identityCount(): number {
+    return this.affiliates.size;
+  }
+
+  get stripeAccountCount(): number {
+    return Array.from(this.affiliates.values()).filter((affiliate) => affiliate.stripeAccountId)
+      .length;
+  }
+
+  async checkEmail(slug: string, email: string): Promise<{ exists: boolean }> {
+    return { exists: this.affiliates.has(this.key(slug, email)) };
+  }
+
+  async register(
+    slug: string,
+    request: BookingWebAffiliateRegistrationRequest,
+  ): Promise<{ id: string; referralCode: string }> {
+    const key = this.key(slug, request.email ?? "");
+    const existing = this.affiliates.get(key);
+    if (existing) {
+      return { id: existing.id, referralCode: existing.referralCode };
+    }
+
+    const id = `aff_${Buffer.from(key).toString("hex").slice(0, 20)}`;
+    const referralCode = `VA${Buffer.from(key).toString("hex").slice(0, 8).toUpperCase()}`;
+    this.affiliates.set(key, {
+      id,
+      referralCode,
+      email: request.email?.toLowerCase() ?? "",
+      slug: slug.toLowerCase(),
+    });
+    return { id, referralCode };
+  }
+
+  async createStripeConnectLink(
+    slug: string,
+    affiliateId: string,
+    request: BookingWebAffiliateStripeConnectRequest,
+  ): Promise<{ onboardingUrl: string }> {
+    const email = request.email?.toLowerCase() ?? "";
+    const affiliate = Array.from(this.affiliates.values()).find(
+      (item) => item.id === affiliateId && item.email === email && item.slug === slug.toLowerCase(),
+    );
+    if (!affiliate || !email) {
+      throw Object.assign(new Error("Affiliate not found for this hotel and email."), {
+        statusCode: 404,
+      });
+    }
+    throw Object.assign(new Error("Stripe Connect onboarding is not configured."), {
+      statusCode: 503,
+    });
+  }
+
+  private key(slug: string, email: string): string {
+    return `${slug.toLowerCase()}:${email.toLowerCase()}`;
+  }
 }
 
 function jsonResponse(payload: unknown, status = 200): Response {

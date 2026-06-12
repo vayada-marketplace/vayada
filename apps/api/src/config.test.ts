@@ -343,6 +343,35 @@ describe("api config", () => {
     ).toThrow("PMS_OPERATIONS_SOURCE must be one of: disabled, target");
   });
 
+  it("loads target-owned affiliate public route config", () => {
+    expect(
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        AFFILIATE_PUBLIC_SOURCE: "target",
+      }),
+    ).toMatchObject({
+      targetDatabaseUrl: "postgresql://target-db",
+      affiliatePublicSource: "target",
+    });
+  });
+
+  it("requires a target database for target-owned affiliate public routes", () => {
+    expect(() =>
+      loadConfig({
+        AFFILIATE_PUBLIC_SOURCE: "target",
+      }),
+    ).toThrow("AFFILIATE_PUBLIC_SOURCE=target requires TARGET_DATABASE_URL");
+  });
+
+  it("rejects unsupported affiliate public route sources", () => {
+    expect(() =>
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        AFFILIATE_PUBLIC_SOURCE: "pms",
+      }),
+    ).toThrow("Unsupported AFFILIATE_PUBLIC_SOURCE");
+  });
+
   it("loads marketplace discovery allowed origins from comma-separated config", () => {
     expect(
       loadConfig({
