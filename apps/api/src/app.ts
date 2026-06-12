@@ -1,4 +1,5 @@
 import { backendAuthPlugin, type BackendAuthPluginOptions } from "@vayada/backend-auth";
+import type { IdentityLifecycleCommandBus } from "@vayada/backend-auth";
 import {
   createAuthorizationResolver,
   type EntitlementRepository,
@@ -32,6 +33,15 @@ import {
   type MarketplaceDiscoveryReadRepository,
 } from "./routes/marketplaceDiscovery.js";
 import {
+  registerIdentityAdminUserRoutes,
+  type IdentityAdminUsersReadRepository,
+  type IdentityAdminUserRoutesOptions,
+} from "./routes/identityAdminUsers.js";
+import {
+  registerIdentityPrivacyRoutes,
+  type IdentityPrivacyRepository,
+} from "./routes/identityPrivacy.js";
+import {
   registerBookingWebPublicRoutes,
   type BookingWebCheckoutAdapter,
   type BookingWebPublicRoutesOptions,
@@ -53,6 +63,13 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
+  identityPrivacyRepository?: IdentityPrivacyRepository;
+  identityLifecycleCommandBus?: IdentityLifecycleCommandBus;
+  identityAdminUsersReadRepository?: IdentityAdminUsersReadRepository;
+  identityAdminUsers?: Omit<
+    IdentityAdminUserRoutesOptions,
+    "lifecycleCommandBus" | "readRepository"
+  >;
   askAuditRepository?: AskAuditRepository;
   askRuntime?: AskRoutesOptions["runtime"];
   askEvidenceRepository?: AskRoutesOptions["evidenceRepository"];
@@ -61,6 +78,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   askBudgets?: AskRoutesOptions["budgets"];
   askNow?: AskRoutesOptions["now"];
   marketplaceDiscoveryAllowedOrigins?: string[];
+  identityPrivacyAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
   pmsPublicApiUrl?: string;
   legacyCheckoutCommandProxyEnabled?: boolean;
@@ -141,6 +159,21 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/marketplace",
       repository: options.marketplaceDiscoveryRepository,
       allowedOrigins: options.marketplaceDiscoveryAllowedOrigins,
+    });
+  }
+  if (options.identityPrivacyRepository) {
+    app.register(registerIdentityPrivacyRoutes, {
+      prefix: "/api/identity",
+      repository: options.identityPrivacyRepository,
+      allowedOrigins: options.identityPrivacyAllowedOrigins,
+    });
+  }
+  if (options.identityLifecycleCommandBus) {
+    app.register(registerIdentityAdminUserRoutes, {
+      prefix: "/api/identity/admin",
+      lifecycleCommandBus: options.identityLifecycleCommandBus,
+      readRepository: options.identityAdminUsersReadRepository,
+      ...options.identityAdminUsers,
     });
   }
   app.register(registerBookingRoutes, {

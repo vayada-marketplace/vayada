@@ -21,6 +21,8 @@ import {
   createPgBookingSettingsReadRepository,
 } from "./routes/bookingSettings.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
+import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
+import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 
 const config = loadConfig();
 
@@ -125,6 +127,22 @@ const app = buildApp({
       })
     : undefined,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
+  identityPrivacyRepository: config.auth
+    ? createPgIdentityPrivacyRepository({
+        connectionString: config.auth.databaseUrl,
+      })
+    : undefined,
+  identityLifecycleCommandBus: config.auth
+    ? createPgIdentityLifecycleCommandBus({
+        connectionString: config.auth.databaseUrl,
+      })
+    : undefined,
+  identityAdminUsersReadRepository: config.auth
+    ? createPgIdentityAdminUsersReadRepository({
+        connectionString: config.auth.databaseUrl,
+      })
+    : undefined,
+  identityPrivacyAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   publicHotelProfileRepository,
   publicHotelQuoteRepository: publicHotelProfileRepository
     ? createCompatibilityPublicHotelQuoteRepository({

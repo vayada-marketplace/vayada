@@ -365,6 +365,11 @@ async def update_hotel_profile(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for hotels",
             )
+        if email is not None and email != user["email"]:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="Email is identity-owned. Use the identity user lifecycle route to update account email.",
+            )
 
         # Get current hotel profile with completion status
         hotel = await HotelRepository.get_profile_by_user_id(
@@ -462,10 +467,6 @@ async def update_hotel_profile(
             phone=phone,
             picture=final_picture_url,
         )
-
-        # Update email in users table if provided
-        if email is not None:
-            await UserRepository.update_email(user_id, email)
 
         # Fetch updated profile and user data separately (different databases)
         updated_hotel = await HotelRepository.get_profile_by_id(
