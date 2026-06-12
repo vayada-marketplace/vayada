@@ -18,6 +18,242 @@ export type MarketplaceDecimalAmount = string;
 export type MarketplaceCurrencyCode = string;
 
 // ---------------------------------------------------------------------------
+// Hotel profile/listings self-service (V2)
+// ---------------------------------------------------------------------------
+
+export const MARKETPLACE_HOTEL_SELF_SERVICE_CONTRACT_VERSION =
+  "marketplace-hotel-self-service.v1" as const;
+
+export type MarketplaceHotelSelfServiceContractVersion =
+  typeof MARKETPLACE_HOTEL_SELF_SERVICE_CONTRACT_VERSION;
+
+export const MARKETPLACE_HOTEL_AUTHORIZATION_MODES = [
+  "organization_resource_link",
+  "legacy_user_id_fallback",
+] as const;
+
+export type MarketplaceHotelAuthorizationMode =
+  (typeof MARKETPLACE_HOTEL_AUTHORIZATION_MODES)[number];
+
+export const MARKETPLACE_PLATFORM_NAMES = [
+  "instagram",
+  "tiktok",
+  "youtube",
+  "facebook",
+  "blog",
+  "x",
+  "other",
+] as const;
+
+export type MarketplacePlatformName = (typeof MARKETPLACE_PLATFORM_NAMES)[number];
+
+export const MARKETPLACE_HOTEL_PROFILE_STATUSES = [
+  "pending",
+  "verified",
+  "rejected",
+  "suspended",
+  "archived",
+] as const;
+
+export type MarketplaceHotelProfileStatus = (typeof MARKETPLACE_HOTEL_PROFILE_STATUSES)[number];
+
+export const MARKETPLACE_HOTEL_LISTING_STATUSES = [
+  "draft",
+  "pending",
+  "verified",
+  "rejected",
+  "suspended",
+  "archived",
+] as const;
+
+export type MarketplaceHotelListingStatus = (typeof MARKETPLACE_HOTEL_LISTING_STATUSES)[number];
+
+export const MARKETPLACE_ACCOMMODATION_TYPES = [
+  "hotel",
+  "resort",
+  "boutique_hotel",
+  "lodge",
+  "apartment",
+  "villa",
+  "other",
+] as const;
+
+export type MarketplaceAccommodationType = (typeof MARKETPLACE_ACCOMMODATION_TYPES)[number];
+
+export const MARKETPLACE_COLLABORATION_TYPES = [
+  "free_stay",
+  "paid",
+  "discount",
+  "affiliate",
+] as const;
+
+export type MarketplaceCollaborationType = (typeof MARKETPLACE_COLLABORATION_TYPES)[number];
+
+export const MARKETPLACE_CREATOR_TYPES = ["lifestyle", "travel", "other"] as const;
+
+export type MarketplaceCreatorType = (typeof MARKETPLACE_CREATOR_TYPES)[number];
+
+export const MARKETPLACE_HOTEL_MISSING_FIELDS = [
+  "displayName",
+  "location",
+  "hostSummary",
+  "website",
+  "coverImage",
+  "listing",
+] as const;
+
+export type MarketplaceHotelMissingField = (typeof MARKETPLACE_HOTEL_MISSING_FIELDS)[number];
+
+export type MarketplaceHotelPropertyFacts = {
+  propertyId: string;
+  publicId: string;
+  displayName: string;
+  canonicalSlug: string;
+  profileStatus: "complete" | "incomplete" | "disabled" | "private";
+  location: {
+    displayText: string;
+    countryCode?: string;
+    region?: string;
+    city?: string;
+  };
+  websiteUrl: string | null;
+  publicPhone: string | null;
+  publicEmail: string | null;
+  coverImageUrl: string | null;
+  projectedAt: MarketplaceUtcDateTime;
+};
+
+export type MarketplaceHotelProfile = {
+  propertyId: string;
+  organizationId: string;
+  marketplaceProfileStatus: MarketplaceHotelProfileStatus;
+  profileComplete: boolean;
+  profileCompletedAt: MarketplaceUtcDateTime | null;
+  hostSummary: string | null;
+  collaborationGuidelines: string | null;
+  createdAt: MarketplaceUtcDateTime;
+  updatedAt: MarketplaceUtcDateTime;
+};
+
+export type MarketplaceHotelListingOffering = {
+  offeringId: string;
+  collaborationType: MarketplaceCollaborationType;
+  availabilityMonths: string[];
+  platforms: MarketplacePlatformName[];
+  freeStayMinNights: number | null;
+  freeStayMaxNights: number | null;
+  paidMaxAmount: MarketplaceDecimalAmount | null;
+  discountPercentage: number | null;
+  commissionPercentage: number | null;
+  minFollowers: number | null;
+  currency: MarketplaceCurrencyCode | null;
+  termsSummary: string | null;
+};
+
+export type MarketplaceHotelListingCreatorRequirements = {
+  platforms: MarketplacePlatformName[];
+  targetCountries: string[];
+  targetAgeMin: number | null;
+  targetAgeMax: number | null;
+  targetAgeGroups: string[];
+  creatorTypes: MarketplaceCreatorType[];
+};
+
+export type MarketplaceHotelListing = {
+  listingId: string;
+  propertyId: string;
+  listingStatus: MarketplaceHotelListingStatus;
+  title: string;
+  listingSummary: string | null;
+  accommodationType: MarketplaceAccommodationType | null;
+  rawLocationText: string | null;
+  imageUrls: string[];
+  collaborationOfferings: MarketplaceHotelListingOffering[];
+  creatorRequirements: MarketplaceHotelListingCreatorRequirements | null;
+  createdAt: MarketplaceUtcDateTime;
+  updatedAt: MarketplaceUtcDateTime;
+};
+
+export type MarketplaceHotelListingAuthorizationTarget = {
+  listingId: string;
+  listingResourceId: string;
+  propertyId: string;
+  organizationId: string;
+};
+
+export type MarketplaceHotelProfileStatusResponse = {
+  contractVersion: MarketplaceHotelSelfServiceContractVersion;
+  authorizationMode: MarketplaceHotelAuthorizationMode;
+  propertyId: string;
+  profileComplete: boolean;
+  missingFields: MarketplaceHotelMissingField[];
+  hasDefaults: { location: boolean };
+  missingListings: boolean;
+  completionSteps: string[];
+};
+
+export type MarketplaceHotelProfileResponse = {
+  contractVersion: MarketplaceHotelSelfServiceContractVersion;
+  authorizationMode: MarketplaceHotelAuthorizationMode;
+  property: MarketplaceHotelPropertyFacts;
+  marketplaceProfile: MarketplaceHotelProfile;
+  listings: MarketplaceHotelListing[];
+};
+
+export type UpdateMarketplaceHotelProfileRequest = {
+  hostSummary?: string | null;
+  collaborationGuidelines?: string | null;
+};
+
+export type MarketplaceHotelListingOfferingWrite = Omit<
+  MarketplaceHotelListingOffering,
+  "offeringId"
+>;
+
+export type MarketplaceHotelListingCreatorRequirementsWrite =
+  MarketplaceHotelListingCreatorRequirements;
+
+export type CreateMarketplaceHotelListingRequest = {
+  title: string;
+  listingSummary?: string | null;
+  accommodationType?: MarketplaceAccommodationType | null;
+  rawLocationText?: string | null;
+  imageUrls?: string[];
+  collaborationOfferings: MarketplaceHotelListingOfferingWrite[];
+  creatorRequirements: MarketplaceHotelListingCreatorRequirementsWrite;
+};
+
+export type UpdateMarketplaceHotelListingRequest = Partial<
+  Omit<CreateMarketplaceHotelListingRequest, "collaborationOfferings" | "creatorRequirements">
+> & {
+  collaborationOfferings?: MarketplaceHotelListingOfferingWrite[];
+  creatorRequirements?: MarketplaceHotelListingCreatorRequirementsWrite | null;
+};
+
+export const MARKETPLACE_HOTEL_SELF_SERVICE_ERROR_CODES = [
+  "invalid_request",
+  "canonical_property_read_only",
+  "unauthorized",
+  "forbidden",
+  "missing_resource_link",
+  "not_found",
+  "ambiguous_legacy_profile",
+  "id_continuity_violation",
+  "validation_failed",
+  "internal_error",
+] as const;
+
+export type MarketplaceHotelSelfServiceErrorCode =
+  (typeof MARKETPLACE_HOTEL_SELF_SERVICE_ERROR_CODES)[number];
+
+export type MarketplaceHotelSelfServiceError = {
+  statusCode: 400 | 401 | 403 | 404 | 409 | 422 | 500;
+  code: MarketplaceHotelSelfServiceErrorCode;
+  category: "validation" | "auth" | "conflict" | "internal";
+  message: string;
+};
+
+// ---------------------------------------------------------------------------
 // Collaboration lifecycle
 // ---------------------------------------------------------------------------
 
