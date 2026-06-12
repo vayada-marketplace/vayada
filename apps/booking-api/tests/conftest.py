@@ -14,7 +14,10 @@ os.environ.setdefault(
     "postgresql://vayada_auth_user:vayada_auth_password@localhost:5435/vayada_auth_db",
 )
 os.environ.setdefault("MARKETPLACE_DATABASE_URL", "")
-os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000,http://localhost:3003")
+os.environ.setdefault(
+    "CORS_ORIGINS",
+    "http://localhost:3002,http://localhost:3003,https://booking.tigalombok.com",
+)
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -23,7 +26,6 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, Optional
 from unittest.mock import patch
 
 import bcrypt
@@ -91,12 +93,8 @@ async def cleanup_database(init_database):
                 await conn.execute("DELETE FROM password_reset_tokens WHERE user_id = $1", uid)
                 await conn.execute("DELETE FROM email_change_tokens WHERE user_id = $1", uid)
             await conn.execute("DELETE FROM users WHERE email LIKE $1", TEST_EMAIL_PATTERN)
-            await conn.execute(
-                "DELETE FROM login_rate_limit WHERE email LIKE '%@example.com'"
-            )
-            await conn.execute(
-                "DELETE FROM login_audit_log WHERE email LIKE '%@example.com'"
-            )
+            await conn.execute("DELETE FROM login_rate_limit WHERE email LIKE '%@example.com'")
+            await conn.execute("DELETE FROM login_audit_log WHERE email LIKE '%@example.com'")
 
 
 @pytest.fixture(autouse=True)
