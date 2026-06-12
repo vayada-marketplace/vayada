@@ -1,0 +1,49 @@
+{
+  "counts": {
+    "platform.media_objects": 3,
+    "platform.media_variants": 5,
+    "platform.media_upload_sessions": 1
+  },
+  "idStability": {
+    "platform.media_objects": [
+      "f8194000-0000-0000-0000-000000000001",
+      "f8194000-0000-0000-0000-000000000002",
+      "f8194000-0000-0000-0000-000000000003"
+    ],
+    "platform.media_variants": [
+      "f8194100-0000-0000-0000-000000000001",
+      "f8194100-0000-0000-0000-000000000002",
+      "f8194100-0000-0000-0000-000000000003",
+      "f8194100-0000-0000-0000-000000000004",
+      "f8194100-0000-0000-0000-000000000005"
+    ],
+    "platform.media_upload_sessions": ["f8194200-0000-0000-0000-000000000001"]
+  },
+  "platformMediaChecks": {
+    "legacyUrlInventory": {
+      "sourceUrlCount": 3,
+      "copiedObjectCount": 2,
+      "externalReferenceCount": 1,
+      "unresolvedExternalUrlCount": 1,
+      "publicObjectCount": 1,
+      "privateObjectCount": 2
+    },
+    "requiredPurposes": [
+      "property.hero_image",
+      "property.gallery_image",
+      "property.logo",
+      "marketplace.listing.gallery",
+      "marketplace.creator.profile_image",
+      "marketplace.collaboration_chat.attachment",
+      "pms.room_type.media",
+      "pms.messaging.attachment",
+      "pms.import.source_image"
+    ],
+    "requiredPublicVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+    "forbiddenPublicValues": [
+      "private/pms/properties/f8193000-0000-0000-0000-000000000001/messages/thread-1",
+      "https://legacy-private-bucket.s3.amazonaws.com",
+      "guest-platform-media@example.test"
+    ]
+  }
+}

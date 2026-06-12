@@ -1,0 +1,252 @@
+INSERT INTO identity.users (id, email, name, status)
+VALUES (
+  'f8191000-0000-0000-0000-000000000001',
+  'platform-media-owner@example.test',
+  'Platform Media Owner',
+  'active'
+);
+
+INSERT INTO identity.organizations (id, kind, name, slug)
+VALUES (
+  'f8192000-0000-0000-0000-000000000001',
+  'hotel_group',
+  'Platform Media Hotel Group',
+  'platform-media-hotel-group'
+);
+
+INSERT INTO hotel_catalog.properties (id, public_id, display_name, profile_status)
+VALUES (
+  'f8193000-0000-0000-0000-000000000001',
+  'platform-media-property',
+  'Platform Media Property',
+  'complete'
+);
+
+INSERT INTO platform.media_objects (
+  id,
+  bucket,
+  storage_key,
+  storage_kind,
+  visibility,
+  purpose,
+  owner_organization_id,
+  property_id,
+  resource_product,
+  resource_type,
+  resource_id,
+  lifecycle_status,
+  content_type,
+  size_bytes,
+  checksum_sha256,
+  width_px,
+  height_px,
+  original_filename,
+  source_url,
+  source_system,
+  source_table,
+  source_row_id,
+  public_approved,
+  created_by_user_id
+)
+VALUES
+  (
+    'f8194000-0000-0000-0000-000000000001',
+    'vayada-media-local',
+    'public/properties/f8193000-0000-0000-0000-000000000001/f8194000-0000-0000-0000-000000000001/original_safe.webp',
+    'vayada_managed',
+    'public',
+    'property.hero_image',
+    'f8192000-0000-0000-0000-000000000001',
+    'f8193000-0000-0000-0000-000000000001',
+    'hotel_catalog',
+    'property_media',
+    'hero',
+    'active',
+    'image/webp',
+    256000,
+    'sha256:public-hero',
+    1920,
+    1080,
+    'hero.jpg',
+    'https://legacy-public-bucket.s3.amazonaws.com/properties/platform-media/hero.jpg',
+    'booking',
+    'booking_hotels',
+    'booking-hero-image',
+    TRUE,
+    'f8191000-0000-0000-0000-000000000001'
+  ),
+  (
+    'f8194000-0000-0000-0000-000000000002',
+    'vayada-media-local',
+    'private/pms/properties/f8193000-0000-0000-0000-000000000001/messages/thread-1/f8194000-0000-0000-0000-000000000002/invoice.pdf',
+    'vayada_managed',
+    'private',
+    'pms.messaging.attachment',
+    'f8192000-0000-0000-0000-000000000001',
+    'f8193000-0000-0000-0000-000000000001',
+    'pms',
+    'message_attachment',
+    'attachment-1',
+    'active',
+    'application/pdf',
+    128000,
+    'sha256:private-message-attachment',
+    NULL,
+    NULL,
+    'invoice.pdf',
+    'https://legacy-private-bucket.s3.amazonaws.com/messages/thread-1/invoice.pdf',
+    'pms',
+    'message_attachments',
+    'attachment-1',
+    FALSE,
+    'f8191000-0000-0000-0000-000000000001'
+  ),
+  (
+    'f8194000-0000-0000-0000-000000000003',
+    NULL,
+    NULL,
+    'external_reference',
+    'private',
+    'marketplace.creator.profile_image',
+    'f8192000-0000-0000-0000-000000000001',
+    NULL,
+    'marketplace',
+    'creator_profile',
+    'creator-1',
+    'external_reference',
+    'image/jpeg',
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    'creator.jpg',
+    'https://external-cdn.example.test/creator/profile.jpg',
+    'marketplace',
+    'creators',
+    'creator-1',
+    FALSE,
+    'f8191000-0000-0000-0000-000000000001'
+  );
+
+INSERT INTO platform.media_variants (
+  id,
+  media_object_id,
+  variant_name,
+  visibility,
+  storage_key,
+  content_type,
+  width_px,
+  height_px,
+  size_bytes,
+  checksum_sha256,
+  public_cdn_url
+)
+VALUES
+  (
+    'f8194100-0000-0000-0000-000000000001',
+    'f8194000-0000-0000-0000-000000000001',
+    'original_safe',
+    'public',
+    'public/properties/f8193000-0000-0000-0000-000000000001/f8194000-0000-0000-0000-000000000001/original_safe.webp',
+    'image/webp',
+    1920,
+    1080,
+    256000,
+    'sha256:public-hero-original-safe',
+    'https://media.localhost/public/properties/platform-media/hero/original_safe.webp'
+  ),
+  (
+    'f8194100-0000-0000-0000-000000000002',
+    'f8194000-0000-0000-0000-000000000001',
+    'large',
+    'public',
+    'public/properties/f8193000-0000-0000-0000-000000000001/f8194000-0000-0000-0000-000000000001/large.webp',
+    'image/webp',
+    1280,
+    720,
+    144000,
+    'sha256:public-hero-large',
+    'https://media.localhost/public/properties/platform-media/hero/large.webp'
+  ),
+  (
+    'f8194100-0000-0000-0000-000000000003',
+    'f8194000-0000-0000-0000-000000000001',
+    'thumbnail',
+    'public',
+    'public/properties/f8193000-0000-0000-0000-000000000001/f8194000-0000-0000-0000-000000000001/thumbnail.webp',
+    'image/webp',
+    320,
+    180,
+    32000,
+    'sha256:public-hero-thumbnail',
+    'https://media.localhost/public/properties/platform-media/hero/thumbnail.webp'
+  ),
+  (
+    'f8194100-0000-0000-0000-000000000004',
+    'f8194000-0000-0000-0000-000000000001',
+    'blur_preview',
+    'public',
+    'public/properties/f8193000-0000-0000-0000-000000000001/f8194000-0000-0000-0000-000000000001/blur_preview.webp',
+    'image/webp',
+    32,
+    18,
+    2048,
+    'sha256:public-hero-blur',
+    'https://media.localhost/public/properties/platform-media/hero/blur_preview.webp'
+  ),
+  (
+    'f8194100-0000-0000-0000-000000000005',
+    'f8194000-0000-0000-0000-000000000002',
+    'provider_original',
+    'private',
+    'private/pms/properties/f8193000-0000-0000-0000-000000000001/messages/thread-1/f8194000-0000-0000-0000-000000000002/invoice.pdf',
+    'application/pdf',
+    NULL,
+    NULL,
+    128000,
+    'sha256:private-message-attachment',
+    NULL
+  );
+
+INSERT INTO platform.media_upload_sessions (
+  id,
+  upload_session_key,
+  requested_purpose,
+  requested_visibility,
+  actor_user_id,
+  owner_organization_id,
+  property_id,
+  resource_product,
+  resource_type,
+  resource_id,
+  expected_content_type,
+  expected_size_bytes,
+  expected_file_count,
+  staging_prefix,
+  expires_at,
+  session_status,
+  completed_media_object_id,
+  completion_metadata,
+  completed_at
+)
+VALUES (
+  'f8194200-0000-0000-0000-000000000001',
+  'upload-session-platform-media-819',
+  'property.hero_image',
+  'public',
+  'f8191000-0000-0000-0000-000000000001',
+  'f8192000-0000-0000-0000-000000000001',
+  'f8193000-0000-0000-0000-000000000001',
+  'hotel_catalog',
+  'property_media',
+  'hero',
+  'image/jpeg',
+  256000,
+  1,
+  'staging/upload-session-platform-media-819/0/hero.jpg',
+  now() + INTERVAL '1 hour',
+  'completed',
+  'f8194000-0000-0000-0000-000000000001',
+  '{"variantCount":4,"promoted":true}'::jsonb,
+  now()
+);

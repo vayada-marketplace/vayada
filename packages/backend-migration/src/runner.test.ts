@@ -2405,6 +2405,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "idempotency_keys",
         "job_attempts",
         "jobs",
+        "media_objects",
+        "media_upload_sessions",
+        "media_variants",
         "outbox_events",
         "product_audit_events",
         "schema_migrations",
@@ -2511,6 +2514,15 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'chk_platform_jobs_scope',
              'chk_platform_jobs_source_pair',
              'chk_platform_jobs_terminal_time',
+             'chk_platform_media_objects_delete_state',
+             'chk_platform_media_objects_public_active',
+             'chk_platform_media_objects_purpose_visibility',
+             'chk_platform_media_objects_source_pair',
+             'chk_platform_media_objects_storage_reference',
+             'chk_platform_media_upload_sessions_purpose_visibility',
+             'chk_platform_media_upload_sessions_staging_prefix',
+             'chk_platform_media_upload_sessions_terminal_time',
+             'chk_platform_media_variants_public_url',
              'chk_platform_outbox_events_attempts',
              'chk_platform_outbox_events_lease_state',
              'chk_platform_outbox_events_private',
@@ -2549,6 +2561,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'fk_platform_jobs_outbox_event',
              'fk_platform_jobs_outbox_event_scope',
              'fk_platform_jobs_property',
+             'fk_platform_media_objects_actor',
+             'fk_platform_media_objects_owner_organization',
+             'fk_platform_media_objects_property',
+             'fk_platform_media_upload_sessions_actor',
+             'fk_platform_media_upload_sessions_media_object',
+             'fk_platform_media_upload_sessions_owner_organization',
+             'fk_platform_media_upload_sessions_property',
+             'fk_platform_media_variants_object_visibility',
              'fk_platform_outbox_events_domain_event',
              'fk_platform_outbox_events_domain_event_scope',
              'fk_platform_outbox_events_organization',
@@ -2574,6 +2594,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'uq_platform_job_attempts_job_number',
              'uq_platform_jobs_id_scope',
              'uq_platform_jobs_key',
+             'uq_platform_media_objects_id_visibility',
+             'uq_platform_media_objects_source',
+             'uq_platform_media_variants_object_name',
              'uq_platform_outbox_events_id_domain_event',
              'uq_platform_outbox_events_id_scope',
              'uq_platform_outbox_events_key',
@@ -2609,6 +2632,15 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "chk_platform_jobs_scope",
         "chk_platform_jobs_source_pair",
         "chk_platform_jobs_terminal_time",
+        "chk_platform_media_objects_delete_state",
+        "chk_platform_media_objects_public_active",
+        "chk_platform_media_objects_purpose_visibility",
+        "chk_platform_media_objects_source_pair",
+        "chk_platform_media_objects_storage_reference",
+        "chk_platform_media_upload_sessions_purpose_visibility",
+        "chk_platform_media_upload_sessions_staging_prefix",
+        "chk_platform_media_upload_sessions_terminal_time",
+        "chk_platform_media_variants_public_url",
         "chk_platform_outbox_events_attempts",
         "chk_platform_outbox_events_lease_state",
         "chk_platform_outbox_events_private",
@@ -2647,6 +2679,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "fk_platform_jobs_outbox_event",
         "fk_platform_jobs_outbox_event_scope",
         "fk_platform_jobs_property",
+        "fk_platform_media_objects_actor",
+        "fk_platform_media_objects_owner_organization",
+        "fk_platform_media_objects_property",
+        "fk_platform_media_upload_sessions_actor",
+        "fk_platform_media_upload_sessions_media_object",
+        "fk_platform_media_upload_sessions_owner_organization",
+        "fk_platform_media_upload_sessions_property",
+        "fk_platform_media_variants_object_visibility",
         "fk_platform_outbox_events_domain_event",
         "fk_platform_outbox_events_domain_event_scope",
         "fk_platform_outbox_events_organization",
@@ -2672,6 +2712,9 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "uq_platform_job_attempts_job_number",
         "uq_platform_jobs_id_scope",
         "uq_platform_jobs_key",
+        "uq_platform_media_objects_id_visibility",
+        "uq_platform_media_objects_source",
+        "uq_platform_media_variants_object_name",
         "uq_platform_outbox_events_id_domain_event",
         "uq_platform_outbox_events_id_scope",
         "uq_platform_outbox_events_key",
@@ -2726,6 +2769,14 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              'fk_platform_jobs_domain_event_scope',
              'fk_platform_jobs_outbox_domain_event',
              'fk_platform_jobs_outbox_event_scope',
+             'fk_platform_media_objects_actor',
+             'fk_platform_media_objects_owner_organization',
+             'fk_platform_media_objects_property',
+             'fk_platform_media_upload_sessions_actor',
+             'fk_platform_media_upload_sessions_media_object',
+             'fk_platform_media_upload_sessions_owner_organization',
+             'fk_platform_media_upload_sessions_property',
+             'fk_platform_media_variants_object_visibility',
              'fk_platform_outbox_events_domain_event_scope',
              'fk_platform_product_audit_events_domain_event_scope',
              'fk_platform_product_audit_events_idempotency_key',
@@ -2825,6 +2876,70 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           referenced_schema: "platform",
           referenced_table: "outbox_events",
           table_name: "jobs",
+        },
+        {
+          columns: "created_by_user_id",
+          constraint_name: "fk_platform_media_objects_actor",
+          referenced_columns: "id",
+          referenced_schema: "identity",
+          referenced_table: "users",
+          table_name: "media_objects",
+        },
+        {
+          columns: "owner_organization_id",
+          constraint_name: "fk_platform_media_objects_owner_organization",
+          referenced_columns: "id",
+          referenced_schema: "identity",
+          referenced_table: "organizations",
+          table_name: "media_objects",
+        },
+        {
+          columns: "property_id",
+          constraint_name: "fk_platform_media_objects_property",
+          referenced_columns: "id",
+          referenced_schema: "hotel_catalog",
+          referenced_table: "properties",
+          table_name: "media_objects",
+        },
+        {
+          columns: "actor_user_id",
+          constraint_name: "fk_platform_media_upload_sessions_actor",
+          referenced_columns: "id",
+          referenced_schema: "identity",
+          referenced_table: "users",
+          table_name: "media_upload_sessions",
+        },
+        {
+          columns: "completed_media_object_id",
+          constraint_name: "fk_platform_media_upload_sessions_media_object",
+          referenced_columns: "id",
+          referenced_schema: "platform",
+          referenced_table: "media_objects",
+          table_name: "media_upload_sessions",
+        },
+        {
+          columns: "owner_organization_id",
+          constraint_name: "fk_platform_media_upload_sessions_owner_organization",
+          referenced_columns: "id",
+          referenced_schema: "identity",
+          referenced_table: "organizations",
+          table_name: "media_upload_sessions",
+        },
+        {
+          columns: "property_id",
+          constraint_name: "fk_platform_media_upload_sessions_property",
+          referenced_columns: "id",
+          referenced_schema: "hotel_catalog",
+          referenced_table: "properties",
+          table_name: "media_upload_sessions",
+        },
+        {
+          columns: "media_object_id,visibility",
+          constraint_name: "fk_platform_media_variants_object_visibility",
+          referenced_columns: "id,visibility",
+          referenced_schema: "platform",
+          referenced_table: "media_objects",
+          table_name: "media_variants",
         },
         {
           columns: "domain_event_id,scope_key",
@@ -3703,6 +3818,164 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
              AND audit_key = 'booking-confirmed-platform-test'`,
         ),
       ).rejects.toMatchObject({ code: "55000" });
+
+      const platformMediaObjectId = "bbbbbbbb-8888-4888-8888-bbbbbbbbbbb1";
+      const platformPrivateMediaObjectId = "bbbbbbbb-8888-4888-8888-bbbbbbbbbbb2";
+      const platformUploadSessionId = "bbbbbbbb-9999-4999-8999-bbbbbbbbbbb1";
+
+      await verifyClient.query(
+        `INSERT INTO platform.media_objects
+           (
+             id, bucket, storage_key, visibility, purpose,
+             owner_organization_id, property_id, resource_product,
+             resource_type, resource_id, lifecycle_status,
+             content_type, size_bytes, checksum_sha256,
+             width_px, height_px, original_filename,
+             source_url, source_system, source_table, source_row_id,
+             public_approved, created_by_user_id
+           )
+         VALUES (
+             $1, 'vayada-media-local',
+             'public/properties/platform-media-test/original_safe.webp',
+             'public', 'property.hero_image', $2, $3,
+             'hotel_catalog', 'property_media', 'hero',
+             'active', 'image/webp', 1024,
+             'sha256:platform-media-public', 1200, 800,
+             'hero.jpg',
+             'https://legacy-public-bucket.s3.amazonaws.com/property/hero.jpg',
+             'booking', 'booking_hotels', 'hero-image',
+             TRUE, $4
+           )`,
+        [platformMediaObjectId, hotelOrganizationId, distributionPropertyId, hotelUserId],
+      );
+      await verifyClient.query(
+        `INSERT INTO platform.media_variants
+           (
+             media_object_id, variant_name, visibility, storage_key,
+             content_type, width_px, height_px, size_bytes, public_cdn_url
+           )
+         VALUES (
+             $1, 'original_safe', 'public',
+             'public/properties/platform-media-test/original_safe.webp',
+             'image/webp', 1200, 800, 1024,
+             'https://media.localhost/public/properties/platform-media-test/original_safe.webp'
+           )`,
+        [platformMediaObjectId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.media_objects
+             (
+               bucket, storage_key, visibility, purpose,
+               resource_product, resource_type, lifecycle_status,
+               content_type, public_approved
+             )
+           VALUES (
+               'vayada-media-local',
+               'private/marketplace/collaborations/collab-1/image.gif',
+               'public', 'marketplace.collaboration_chat.attachment',
+               'marketplace', 'collaboration_chat', 'active',
+               'image/gif', TRUE
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.media_objects
+             (
+               storage_kind, visibility, purpose, resource_product,
+               resource_type, lifecycle_status, public_approved
+             )
+           VALUES (
+               'external_reference', 'private', 'marketplace.creator.profile_image',
+               'marketplace', 'creator_profile', 'external_reference', FALSE
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+
+      await verifyClient.query(
+        `INSERT INTO platform.media_objects
+           (
+             id, bucket, storage_key, visibility, purpose,
+             owner_organization_id, property_id, resource_product,
+             resource_type, resource_id, lifecycle_status,
+             content_type, size_bytes, checksum_sha256,
+             original_filename, source_url, source_system,
+             source_table, source_row_id, public_approved,
+             created_by_user_id
+           )
+         VALUES (
+             $1, 'vayada-media-local',
+             'private/pms/properties/platform-media-test/messages/thread-1/invoice.pdf',
+             'private', 'pms.messaging.attachment', $2, $3,
+             'pms', 'message_attachment', 'attachment-1',
+             'active', 'application/pdf', 2048,
+             'sha256:platform-media-private', 'invoice.pdf',
+             'https://legacy-private-bucket.s3.amazonaws.com/messages/thread-1/invoice.pdf',
+             'pms', 'message_attachments', 'attachment-1',
+             FALSE, $4
+           )`,
+        [platformPrivateMediaObjectId, hotelOrganizationId, distributionPropertyId, hotelUserId],
+      );
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.media_variants
+             (
+               media_object_id, variant_name, visibility, storage_key,
+               content_type, size_bytes, public_cdn_url
+             )
+           VALUES (
+               $1, 'provider_original', 'private',
+               'private/pms/properties/platform-media-test/messages/thread-1/invoice.pdf',
+               'application/pdf', 2048,
+               'https://media.localhost/private/should-not-be-public.pdf'
+           )`,
+          [platformPrivateMediaObjectId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await expect(
+        verifyClient.query(
+          `INSERT INTO platform.media_upload_sessions
+             (
+               upload_session_key, requested_purpose, requested_visibility,
+               resource_product, resource_type, staging_prefix,
+               expires_at, session_status, completed_at
+             )
+           VALUES (
+               'completed-without-object-platform-media-test',
+               'property.hero_image', 'public', 'hotel_catalog',
+               'property_media', 'staging/platform-media-test/0/hero.jpg',
+               now() + INTERVAL '1 hour', 'completed', now()
+           )`,
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await verifyClient.query(
+        `INSERT INTO platform.media_upload_sessions
+           (
+             id, upload_session_key, requested_purpose, requested_visibility,
+             actor_user_id, owner_organization_id, property_id,
+             resource_product, resource_type, resource_id,
+             expected_content_type, expected_size_bytes, expected_file_count,
+             staging_prefix, expires_at, session_status,
+             completed_media_object_id, completed_at
+           )
+         VALUES (
+             $1, 'upload-session-platform-media-test',
+             'property.hero_image', 'public', $2, $3, $4,
+             'hotel_catalog', 'property_media', 'hero',
+             'image/jpeg', 1024, 1,
+             'staging/platform-media-test/0/hero.jpg',
+             now() + INTERVAL '1 hour', 'completed',
+             $5, now()
+           )`,
+        [
+          platformUploadSessionId,
+          hotelUserId,
+          hotelOrganizationId,
+          distributionPropertyId,
+          platformMediaObjectId,
+        ],
+      );
 
       const { rows: intelligenceTableRows } = await verifyClient.query<{ table_name: string }>(
         `SELECT table_name

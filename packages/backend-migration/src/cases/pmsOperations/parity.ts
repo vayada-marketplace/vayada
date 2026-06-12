@@ -32,7 +32,7 @@ async function checkPmsOwnershipLink(
       WHERE link.organization_id = $1
          AND link.product = 'pms'
          AND link.resource_type = 'pms_property'
-         AND link.resource_id = $3
+         AND link.resource_id = $3::text
          AND link.relationship = 'operator'
          AND link.status = 'active'
      ) AS exists`,

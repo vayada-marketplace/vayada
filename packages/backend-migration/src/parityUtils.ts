@@ -15,6 +15,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "marketplaceChecks",
   "distributionBookabilityChecks",
   "intelligenceChecks",
+  "platformMediaChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -29,7 +30,7 @@ const CATALOG_PUBLIC_PROFILE_CHECK_KEYS = new Set([
   "customDomainProperties",
   "forbiddenPublicProfileKeys",
 ]);
-const BOOKING_CHECKOUT_CHECK_KEYS = new Set(["flows", "forbiddenSummaryKeys"]);
+const BOOKING_CHECKOUT_CHECK_KEYS = new Set(["flows", "settings", "forbiddenSummaryKeys"]);
 const FINANCE_CHECK_KEYS = new Set([
   "propertyFlows",
   "affiliatePayouts",
@@ -97,6 +98,20 @@ const MARKETPLACE_SLICE_INTEGER_FIELDS = [
 ];
 const DISTRIBUTION_BOOKABILITY_CHECK_KEYS = new Set(["properties", "forbiddenPublicOutputValues"]);
 const INTELLIGENCE_CHECK_KEYS = new Set(["properties", "forbiddenPrivateBoundaryValues"]);
+const PLATFORM_MEDIA_CHECK_KEYS = new Set([
+  "legacyUrlInventory",
+  "requiredPurposes",
+  "requiredPublicVariants",
+  "forbiddenPublicValues",
+]);
+const PLATFORM_MEDIA_INVENTORY_KEYS = new Set([
+  "sourceUrlCount",
+  "copiedObjectCount",
+  "externalReferenceCount",
+  "unresolvedExternalUrlCount",
+  "publicObjectCount",
+  "privateObjectCount",
+]);
 const INTELLIGENCE_PROPERTY_STRING_FIELDS = [
   "propertyId",
   "organizationId",
@@ -200,6 +215,39 @@ function validateStringArray(
     "string[]",
     describeActual(value),
   );
+}
+
+function validateNonNegativeIntegerObject(
+  value: unknown,
+  targetObject: string,
+  allowedKeys: Set<string>,
+  findings: ParityFinding[],
+): void {
+  if (!isRecord(value)) {
+    addInvalidFixtureConfigFinding(
+      findings,
+      targetObject,
+      `${targetObject} must be an object`,
+      "Record<string, non-negative integer>",
+      describeActual(value),
+    );
+    return;
+  }
+
+  validateKnownKeys(value, allowedKeys, targetObject, findings);
+
+  for (const key of allowedKeys) {
+    const item = value[key];
+    if (typeof item === "number" && Number.isInteger(item) && item >= 0) continue;
+
+    addInvalidFixtureConfigFinding(
+      findings,
+      `${targetObject}.${key}`,
+      `${targetObject}.${key} must be a non-negative integer`,
+      "non-negative integer",
+      describeActual(item),
+    );
+  }
 }
 
 function validateObjectArray(
@@ -387,6 +435,7 @@ export function validateExpectedTargetConfig(
     "marketplaceChecks",
     "distributionBookabilityChecks",
     "intelligenceChecks",
+    "platformMediaChecks",
   ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
@@ -519,6 +568,14 @@ export function validateExpectedTargetConfig(
       [],
       ["guestCount", "addonSelectionCount", "promoApplicationCount", "statusEventCount"],
     );
+    if (bookingCheckoutChecks["settings"] !== undefined) {
+      validateObjectArray(
+        bookingCheckoutChecks["settings"],
+        "expected-target.json.bookingCheckoutChecks.settings",
+        ["propertyId", "bookingHotelResourceId", "defaultCurrency", "defaultLanguage"],
+        findings,
+      );
+    }
     if (bookingCheckoutChecks["forbiddenSummaryKeys"] !== undefined) {
       validateStringArray(
         bookingCheckoutChecks["forbiddenSummaryKeys"],
@@ -793,6 +850,39 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         intelligenceChecks["forbiddenPrivateBoundaryValues"],
         "expected-target.json.intelligenceChecks.forbiddenPrivateBoundaryValues",
+        findings,
+      );
+    }
+  }
+
+  const platformMediaChecks = expected["platformMediaChecks"];
+  if (isRecord(platformMediaChecks)) {
+    validateKnownKeys(
+      platformMediaChecks,
+      PLATFORM_MEDIA_CHECK_KEYS,
+      "expected-target.json.platformMediaChecks",
+      findings,
+    );
+    validateNonNegativeIntegerObject(
+      platformMediaChecks["legacyUrlInventory"],
+      "expected-target.json.platformMediaChecks.legacyUrlInventory",
+      PLATFORM_MEDIA_INVENTORY_KEYS,
+      findings,
+    );
+    validateStringArray(
+      platformMediaChecks["requiredPurposes"],
+      "expected-target.json.platformMediaChecks.requiredPurposes",
+      findings,
+    );
+    validateStringArray(
+      platformMediaChecks["requiredPublicVariants"],
+      "expected-target.json.platformMediaChecks.requiredPublicVariants",
+      findings,
+    );
+    if (platformMediaChecks["forbiddenPublicValues"] !== undefined) {
+      validateStringArray(
+        platformMediaChecks["forbiddenPublicValues"],
+        "expected-target.json.platformMediaChecks.forbiddenPublicValues",
         findings,
       );
     }

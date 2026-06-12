@@ -26,3 +26,22 @@ when you need to debug a single fixture case.
 The unit tests compare fixture manifests, registry entries, and the smoke case
 list. Adding a fixture manifest without registering it, or changing the smoke
 path so it omits a registered case, fails `npm test`.
+
+## Platform Media Parity
+
+`platform-media` is a target-only fixture that pins the registry contract before
+source-backed media transforms are implemented. Media migration parity must
+track:
+
+- source URL inventory count;
+- copied Vayada-managed object count;
+- external-reference object count;
+- unresolved external URL count;
+- public/private object classification count;
+- required public image variants: `original_safe`, `large`, `thumbnail`, and
+  `blur_preview`;
+- forbidden private values in public media objects, variant CDN URLs, or future
+  public read models.
+
+Product fixtures that later migrate Booking, Marketplace, or PMS media URLs
+should reuse `platformMediaChecks` instead of creating ad hoc media assertions.

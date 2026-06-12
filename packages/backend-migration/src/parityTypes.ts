@@ -367,6 +367,19 @@ export type ExpectedTarget = {
     }>;
     forbiddenPrivateBoundaryValues?: string[];
   };
+  platformMediaChecks?: {
+    legacyUrlInventory: {
+      sourceUrlCount: number;
+      copiedObjectCount: number;
+      externalReferenceCount: number;
+      unresolvedExternalUrlCount: number;
+      publicObjectCount: number;
+      privateObjectCount: number;
+    };
+    requiredPurposes: string[];
+    requiredPublicVariants: string[];
+    forbiddenPublicValues?: string[];
+  };
 };
 
 export type ParityHandlerContext = {
