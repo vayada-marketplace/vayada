@@ -1,5 +1,8 @@
 import { pmsClient } from "../api/pmsClient";
-import { pmsOperationsClient } from "../api/pmsOperationsClient";
+import {
+  assertPmsOperationsReadModelEnabled,
+  pmsOperationsClient,
+} from "../api/pmsOperationsClient";
 
 export interface MonthlyRate {
   baseRate?: number | null;
@@ -265,20 +268,26 @@ export const roomsService = {
 };
 
 export const pmsOperationsRoomsReadService = {
-  listRooms: (propertyId: string) =>
-    pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoom>>(
+  listRooms: (propertyId: string) => {
+    assertPmsOperationsReadModelEnabled();
+    return pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoom>>(
       `/api/pms/properties/${encodeURIComponent(propertyId)}/rooms`,
-    ),
+    );
+  },
 
-  listRoomTypes: (propertyId: string) =>
-    pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
+  listRoomTypes: (propertyId: string) => {
+    assertPmsOperationsReadModelEnabled();
+    return pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
       `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types`,
-    ),
+    );
+  },
 
-  getRoomType: (propertyId: string, roomTypeId: string) =>
-    pmsOperationsClient.get<PmsOperationsDetailResponse<PmsOperationsRoomType>>(
+  getRoomType: (propertyId: string, roomTypeId: string) => {
+    assertPmsOperationsReadModelEnabled();
+    return pmsOperationsClient.get<PmsOperationsDetailResponse<PmsOperationsRoomType>>(
       `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(
         roomTypeId,
       )}`,
-    ),
+    );
+  },
 };
