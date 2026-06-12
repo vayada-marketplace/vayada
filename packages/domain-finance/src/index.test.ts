@@ -104,8 +104,8 @@ describe("manual payment record command", () => {
     expect(command.payload.paymentMethod).toBe("cash");
     expect(
       buildManualPaymentProjectionJobIdempotencyKey({
-        jobType: "booking.projection-refresh",
         propertyId: command.propertyId,
+        jobType: "booking.projection-refresh",
         guestBookingId: "guest_booking_001",
         paymentIdempotencyKey: command.idempotencyKey,
       }),
@@ -114,8 +114,8 @@ describe("manual payment record command", () => {
     );
     expect(
       buildManualPaymentProjectionJobIdempotencyKey({
-        jobType: "pms.projection-refresh",
         propertyId: command.propertyId,
+        jobType: "pms.projection-refresh",
         guestBookingId: "guest_booking_001",
         paymentIdempotencyKey: command.idempotencyKey,
       }),

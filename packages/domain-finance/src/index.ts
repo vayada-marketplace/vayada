@@ -1025,8 +1025,8 @@ export function buildCheckoutChargeSettlementIdempotencyKey(input: {
 }
 
 export function buildManualPaymentProjectionJobIdempotencyKey(input: {
-  jobType: FinanceProjectionRefreshJob["jobType"];
   propertyId: FinancePropertyId;
+  jobType: FinanceProjectionRefreshJob["jobType"];
   guestBookingId: string;
   paymentIdempotencyKey: string;
 }): string {

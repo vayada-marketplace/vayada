@@ -22,9 +22,8 @@ import type {
   FinancePaymentSettingsReadModel,
   FinancePropertyReadRepository,
 } from "@vayada/domain-finance";
-import { buildManualPaymentProjectionJobIdempotencyKey } from "@vayada/domain-finance";
-import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
 import { createHash } from "node:crypto";
+import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
 import { readFileSync } from "node:fs";
 import type { QueryResultRow } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
@@ -405,8 +404,8 @@ describe("finance route contracts", () => {
     expect(repository.outboxEnqueueCount).toBe(2);
   });
 
-  it("passes the contracted F1d manual payment validation error cases", async () => {
-    const repository = manualPaymentValidationRepository();
+  it("passes the F1d manual payment validation rejection fixtures", async () => {
+    const repository = manualPaymentRepository();
     app = buildFinanceApp({
       repository,
       permissions: financeManagePermissions(),
@@ -437,151 +436,167 @@ describe("finance route contracts", () => {
     }
 
     expect(repository.writeCount).toBe(0);
-    expect(repository.recordAttempts).toBe(5);
+    expect(repository.outboxEnqueueCount).toBe(0);
   });
 
-  it("validates target manual payment invoices before reserving or inserting rows", async () => {
+  it("rejects invalid target manual payment commands before insert side effects", async () => {
     const cases: Array<{
       name: string;
-      command?: Partial<FinanceManualPaymentRecordCommand["payload"]>;
-      invoice?: Partial<TargetFinanceInvoiceRow>;
-      message: string;
+      command: Partial<FinanceManualPaymentRecordCommand["payload"]>;
+      invoice: Partial<FinanceInvoiceRowFixture>;
+      expectedMessage: string;
     }> = [
       {
         name: "currency mismatch",
         command: { currency: "USD" },
-        message: "currency must match",
+        invoice: { currency: "EUR" },
+        expectedMessage: "currency must match",
       },
       {
         name: "overpayment",
-        command: { amount: "900.00" },
-        message: "cannot exceed invoice balance",
+        command: { amount: "851.00" },
+        invoice: { balanceDue: "850.00" },
+        expectedMessage: "exceeds the invoice balance",
       },
       {
         name: "no balance",
-        invoice: { balanceDue: "0.00" },
-        message: "no balance due",
+        command: { amount: "1.00" },
+        invoice: { status: "sent", balanceDue: "0.00" },
+        expectedMessage: "no outstanding balance",
       },
       {
         name: "paid invoice",
+        command: { amount: "1.00" },
         invoice: { status: "paid", balanceDue: "0.00" },
-        message: "paid or voided",
+        expectedMessage: "Paid invoices",
       },
       {
         name: "voided invoice",
-        invoice: { status: "voided" },
-        message: "paid or voided",
+        command: { amount: "1.00" },
+        invoice: { status: "voided", balanceDue: "850.00" },
+        expectedMessage: "Voided invoices",
       },
       {
-        name: "out-of-range amount",
+        name: "numeric out of range",
         command: { amount: "10000000000000.00" },
-        message: "NUMERIC(15,2)",
+        invoice: { balanceDue: "850.00" },
+        expectedMessage: "outside the supported range",
       },
     ];
 
     for (const validationCase of cases) {
-      const { pool, queries } = targetManualPaymentPool({
-        invoice: targetInvoiceRow(validationCase.invoice),
-      });
+      const target = targetManualPaymentPool({ invoice: validationCase.invoice });
       const repository = createTargetFinancePropertySettingsRepository({
         connectionString: "postgresql://finance-target",
-        pool,
+        pool: target.pool,
       });
 
       const result = await repository.recordManualPayment!(
-        manualPaymentCommand({ payload: validationCase.command }),
+        manualPaymentTargetCommand({
+          payload: validationCase.command,
+        }),
       );
 
       expect(result.ok, validationCase.name).toBe(false);
-      if (!result.ok) {
-        expect(result.statusCode, validationCase.name).toBe(400);
-        expect(result.code, validationCase.name).toBe("invalid_command");
-        expect(result.message, validationCase.name).toContain(validationCase.message);
-      }
-      const dataQueries = queries.filter(
-        (query) => !["BEGIN", "COMMIT", "ROLLBACK"].includes(query.text),
+      if (result.ok) throw new Error(`${validationCase.name} unexpectedly succeeded`);
+      expect(result, validationCase.name).toMatchObject({
+        statusCode: 400,
+        code: "invalid_command",
+      });
+      expect(result.message, validationCase.name).toContain(validationCase.expectedMessage);
+      expect(target.calls.some((call) => call.text.includes("INSERT INTO finance.payments"))).toBe(
+        false,
       );
-      expect(dataQueries, validationCase.name).toHaveLength(2);
       expect(
-        queries.some((query) => query.text.includes("INSERT INTO")),
-        validationCase.name,
+        target.calls.some((call) => call.text.includes("INSERT INTO platform.idempotency_keys")),
       ).toBe(false);
-      expect(
-        queries.some((query) => query.text.includes("INSERT INTO platform.idempotency_keys")),
-        validationCase.name,
-      ).toBe(false);
+      expect(target.calls.some((call) => call.text.includes("INSERT INTO platform.outbox_events"))).toBe(
+        false,
+      );
     }
   });
 
-  it("persists tenant-safe manual payment keys and schema-valid property platform rows", async () => {
-    const clientIdempotencyKey = "shared-front-desk-key";
-    const first = await recordTargetManualPayment({
-      propertyId,
-      idempotencyKey: clientIdempotencyKey,
+  it("persists manual payment dedupe and platform side-effect keys by property scope", async () => {
+    const target = targetManualPaymentPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
     });
-    const second = await recordTargetManualPayment({
-      propertyId: "f3000000-0000-0000-0000-000000000999",
-      idempotencyKey: clientIdempotencyKey,
+    const command = manualPaymentTargetCommand({
+      idempotencyKey: "client-reused-key",
     });
+    const keyHash = sha256(command.idempotencyKey);
 
-    expect(first.result.ok).toBe(true);
-    expect(second.result.ok).toBe(true);
+    const result = await repository.recordManualPayment!(command);
 
-    const firstKeys = successfulManualPaymentKeys(first.queries);
-    const secondKeys = successfulManualPaymentKeys(second.queries);
-
-    expect(firstKeys.paymentKey).not.toBe(secondKeys.paymentKey);
-    expect(firstKeys.paymentKey).toContain(`property:${propertyId}:payment:`);
-    expect(secondKeys.paymentKey).toContain(
-      "property:f3000000-0000-0000-0000-000000000999:payment:",
-    );
-
-    for (const key of Object.values(firstKeys)) {
-      expect(String(key)).not.toContain(clientIdempotencyKey);
-      expect(String(key)).toContain(`property:${propertyId}`);
-    }
-
-    expect(first.result.ok && first.result.commandMeta.idempotencyKey).toBe(clientIdempotencyKey);
-    expect(first.result.ok && first.result.commandMeta.outboxEvents).toEqual([
-      firstKeys.bookingOutboxKey,
-      firstKeys.pmsOutboxKey,
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.commandMeta.outboxEvents : []).toEqual([
+      `finance.manual-payment.booking-projection.property.${propertyId}.key.${keyHash}.v1`,
+      `finance.manual-payment.pms-projection.property.${propertyId}.key.${keyHash}.v1`,
     ]);
+    expect(JSON.stringify(result)).not.toContain("client-reused-key:booking");
 
-    const idempotencyInsert = findQuery(first.queries, "INSERT INTO platform.idempotency_keys");
-    const domainEventInsert = findQuery(first.queries, "INSERT INTO platform.domain_events");
-    const outboxInsert = findQuery(first.queries, "INSERT INTO platform.outbox_events");
-    const jobsInsert = findQuery(first.queries, "INSERT INTO platform.jobs");
-    const auditInsert = findQuery(first.queries, "INSERT INTO platform.product_audit_events");
-    const paymentInsert = findQuery(first.queries, "INSERT INTO finance.payments");
-    const idempotencyUpdate = findQuery(first.queries, "UPDATE platform.idempotency_keys");
-    const idempotencyReplayLookup = findQuery(
-      first.queries,
-      "FROM platform.idempotency_keys idempotency",
+    const paymentInsert = target.requiredCall("INSERT INTO finance.payments");
+    expect(paymentInsert.values?.[3]).toBe(
+      `finance.manual-payment.payment.property.${propertyId}.key.${keyHash}.v1`,
+    );
+    expect(paymentInsert.values?.[3]).not.toBe(command.idempotencyKey);
+
+    const idempotencyInsert = target.requiredCall("INSERT INTO platform.idempotency_keys");
+    expect(idempotencyInsert.text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+    expect(idempotencyInsert.values?.[2]).toBe(propertyId);
+
+    const domainEventInsert = target.requiredCall("INSERT INTO platform.domain_events");
+    expect(domainEventInsert.text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+    expect(domainEventInsert.text).toContain("AND property_id = $3::uuid");
+    expect(domainEventInsert.values?.[0]).toBe(
+      `finance.manual-payment.domain-event.property.${propertyId}.key.${keyHash}.v1`,
     );
 
-    expect(idempotencyInsert.values[2]).toBeNull();
-    expect(domainEventInsert.values[2]).toBeNull();
-    expect(outboxInsert.values[2]).toBeNull();
-    expect(jobsInsert.values[3]).toBeNull();
-    expect(auditInsert.values[2]).toBeNull();
+    const outboxInsert = target.requiredCall("INSERT INTO platform.outbox_events");
+    expect(outboxInsert.text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+    expect(outboxInsert.text).toContain("AND property_id = $3::uuid");
+    expect(outboxInsert.values?.[1]).toBe(
+      `finance.manual-payment.booking-projection.property.${propertyId}.key.${keyHash}.v1`,
+    );
+    expect(outboxInsert.values?.[8]).toBe(
+      `finance.manual-payment.pms-projection.property.${propertyId}.key.${keyHash}.v1`,
+    );
 
-    for (const query of [
-      idempotencyInsert,
-      domainEventInsert,
-      outboxInsert,
-      jobsInsert,
-      auditInsert,
-    ]) {
-      expect(query.text).toContain("'property'");
-    }
+    const jobsInsert = target.requiredCall("INSERT INTO platform.jobs");
+    expect(jobsInsert.text).toMatch(/'property',\s+NULL,\s+\$4::uuid/);
+    expect(jobsInsert.values?.[0]).toBe(
+      `booking.projection-refresh:property:${propertyId}:booking:${invoiceDetails[0]!.guestBookingId}:finance-payment:${keyHash}:v1`,
+    );
+    expect(jobsInsert.values?.[9]).toBe(
+      `pms.projection-refresh:property:${propertyId}:booking:${invoiceDetails[0]!.guestBookingId}:finance-payment:${keyHash}:v1`,
+    );
 
-    expect(paymentInsert.text).toContain("WHERE property_id = $1::uuid");
-    expect(paymentInsert.text).toContain("AND idempotency_key = $4");
-    expect(idempotencyReplayLookup.text).toContain("AND payment.idempotency_key = $3");
-    expect(idempotencyReplayLookup.text).toContain("AND idempotency.tenant_scope = 'property'");
-    expect(idempotencyReplayLookup.text).toContain("AND idempotency.property_id = $2::uuid");
-    expect(idempotencyUpdate.text).toContain("AND tenant_scope = 'property'");
-    expect(idempotencyUpdate.text).toContain("AND property_id = $7::uuid");
+    const auditInsert = target.requiredCall("INSERT INTO platform.product_audit_events");
+    expect(auditInsert.text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+    expect(auditInsert.values?.[0]).toBe(
+      `finance.manual-payment.audit.property.${propertyId}.key.${keyHash}.v1`,
+    );
+
+    const otherPropertyId = "f3000000-0000-0000-0000-000000000687";
+    const otherTarget = targetManualPaymentPool({ propertyId: otherPropertyId });
+    const otherRepository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: otherTarget.pool,
+    });
+    await otherRepository.recordManualPayment!(
+      manualPaymentTargetCommand({
+        propertyId: otherPropertyId,
+        idempotencyKey: command.idempotencyKey,
+      }),
+    );
+
+    expect(otherTarget.requiredCall("INSERT INTO finance.payments").values?.[3]).toBe(
+      `finance.manual-payment.payment.property.${otherPropertyId}.key.${keyHash}.v1`,
+    );
+    expect(otherTarget.requiredCall("INSERT INTO finance.payments").values?.[3]).not.toBe(
+      paymentInsert.values?.[3],
+    );
   });
 
   it("returns financial summary with source freshness from the Finance read model", async () => {
@@ -1025,6 +1040,216 @@ describe("finance route contracts", () => {
   });
 });
 
+type QueryCall = {
+  text: string;
+  values?: readonly unknown[];
+};
+
+type FinanceInvoiceRowFixture = {
+  invoiceId: string;
+  invoiceNumber: string;
+  guestBookingId: string;
+  bookingReference: string;
+  guestDisplayName: string | null;
+  guestEmail: string | null;
+  guestPhone: string | null;
+  checkIn: string;
+  checkOut: string;
+  roomName: string | null;
+  roomNumber: string | null;
+  currency: string;
+  totalAmount: string;
+  amountPaid: string;
+  balanceDue: string;
+  status: string;
+  issuedAt: string;
+  total: number;
+  counts: unknown;
+  sourceFreshness: unknown;
+};
+
+function targetManualPaymentPool(
+  options: {
+    propertyId?: string;
+    invoice?: Partial<FinanceInvoiceRowFixture>;
+  } = {},
+): {
+  calls: QueryCall[];
+  pool: {
+    connect(): Promise<{
+      query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rows: T[]; rowCount: number }>;
+      release(): void;
+    }>;
+    query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: readonly unknown[],
+    ): Promise<{ rows: T[]; rowCount: number }>;
+    end(): Promise<void>;
+  };
+  requiredCall(fragment: string): QueryCall;
+} {
+  const calls: QueryCall[] = [];
+  const activePropertyId = options.propertyId ?? propertyId;
+  const invoice = financeInvoiceRowFixture({
+    ...options.invoice,
+    guestBookingId:
+      activePropertyId === propertyId
+        ? invoiceDetails[0]!.guestBookingId
+        : "f6000000-0000-0000-0000-000000000688",
+  });
+
+  const query = async <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[]; rowCount: number }> => {
+    calls.push({ text, values });
+    const rows = targetManualPaymentRows<T>(text, values, invoice);
+    return { rows, rowCount: rows.length };
+  };
+
+  const client = {
+    query,
+    release() {},
+  };
+  const pool = {
+    async connect() {
+      return client;
+    },
+    query,
+    async end() {},
+  };
+
+  return {
+    calls,
+    pool,
+    requiredCall(fragment: string) {
+      const call = calls.find((candidate) => candidate.text.includes(fragment));
+      expect(call, fragment).toBeDefined();
+      return call!;
+    },
+  };
+}
+
+function targetManualPaymentRows<T extends QueryResultRow>(
+  text: string,
+  values: readonly unknown[] | undefined,
+  invoice: FinanceInvoiceRowFixture,
+): T[] {
+  if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") return [];
+  if (text.includes("WITH invoice_base AS")) return [invoice as unknown as T];
+  if (text.includes("INSERT INTO finance.payments")) {
+    return [{ paymentId: "f9000000-0000-0000-0000-000000000686", replay: false } as unknown as T];
+  }
+  if (text.includes('SELECT id::text AS "paymentId", true AS replay')) return [];
+  if (text.includes("SELECT") && text.includes("FROM platform.idempotency_keys")) return [];
+  if (text.includes("INSERT INTO platform.idempotency_keys")) {
+    return [
+      {
+        status: "in_progress",
+        requestFingerprintHash: String(values?.[1]),
+      } as unknown as T,
+    ];
+  }
+  if (text.includes("INSERT INTO platform.domain_events")) {
+    return [{ eventId: "fa000000-0000-0000-0000-000000000686" } as unknown as T];
+  }
+  if (text.includes("INSERT INTO platform.outbox_events")) {
+    return [
+      {
+        destination: "booking.projection-refresh",
+        outboxEventId: "fb000000-0000-0000-0000-000000000686",
+      },
+      {
+        destination: "pms.projection-refresh",
+        outboxEventId: "fc000000-0000-0000-0000-000000000686",
+      },
+    ] as unknown as T[];
+  }
+  if (text.includes("INSERT INTO platform.jobs")) return [];
+  if (text.includes("INSERT INTO platform.product_audit_events")) return [];
+  if (text.includes("UPDATE platform.idempotency_keys")) return [];
+  if (text.includes("FROM finance.payments payment")) {
+    return [
+      {
+        paymentId: "f9000000-0000-0000-0000-000000000686",
+        method: "cash",
+        amount: "250.00",
+        currency: "EUR",
+        reference: "front desk receipt 8812",
+        status: "paid",
+        recordedAt: "2026-06-12T12:00:00.000Z",
+      } as unknown as T,
+    ];
+  }
+  return [];
+}
+
+function financeInvoiceRowFixture(
+  overrides: Partial<FinanceInvoiceRowFixture> = {},
+): FinanceInvoiceRowFixture {
+  return {
+    invoiceId: "inv_2026_abcd",
+    invoiceNumber: "INV-2026-0002",
+    guestBookingId: invoiceDetails[0]!.guestBookingId,
+    bookingReference: "B-FIN-686",
+    guestDisplayName: "Fi Guest",
+    guestEmail: "finance.guest@example.test",
+    guestPhone: "+15555550123",
+    checkIn: "2026-08-01",
+    checkOut: "2026-08-05",
+    roomName: "Alpine Suite",
+    roomNumber: "201",
+    currency: "EUR",
+    totalAmount: "1200.00",
+    amountPaid: "350.00",
+    balanceDue: "850.00",
+    status: "partial",
+    issuedAt: "2026-06-12T10:00:00.000Z",
+    total: 1,
+    counts: { partial: 1 },
+    sourceFreshness: {},
+    ...overrides,
+  };
+}
+
+function manualPaymentTargetCommand(
+  options: {
+    propertyId?: string;
+    idempotencyKey?: string;
+    payload?: Partial<FinanceManualPaymentRecordCommand["payload"]>;
+  } = {},
+): FinanceManualPaymentRecordCommand {
+  const commandPropertyId = options.propertyId ?? propertyId;
+  return {
+    commandType: "finance.manual_payment.record",
+    commandId: "cmd-manual-payment-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-manual-payment-inv-2026-abcd-001",
+    propertyId: commandPropertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "f2000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_manual_payment_target",
+      correlationId: "corr_manual_payment_target",
+      reason: "Manual payment target test",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+    },
+    payload: {
+      invoiceId: "inv_2026_abcd",
+      amount: "250.00",
+      currency: "EUR",
+      paymentMethod: "cash",
+      reference: "front desk receipt 8812",
+      ...options.payload,
+    },
+  };
+}
+
 function buildFinanceApp(
   options: {
     permissions?: PermissionKey[];
@@ -1155,6 +1380,9 @@ function manualPaymentRepository(): FinancePropertyReadRepository & {
     writeCount: 0,
     outboxEnqueueCount: 0,
     async recordManualPayment(command) {
+      const validationError = manualPaymentValidationError(command);
+      if (validationError) return validationError;
+
       if (command.propertyId !== propertyId || command.payload.invoiceId !== "inv_2026_abcd") {
         return {
           ok: false,
@@ -1195,69 +1423,30 @@ function manualPaymentRepository(): FinancePropertyReadRepository & {
   return repository;
 }
 
-function manualPaymentValidationRepository(): FinancePropertyReadRepository & {
-  writeCount: number;
-  recordAttempts: number;
-} {
-  const repository: FinancePropertyReadRepository & {
-    writeCount: number;
-    recordAttempts: number;
-  } = {
-    ...financeRepository,
-    writeCount: 0,
-    recordAttempts: 0,
-    async recordManualPayment(command) {
-      repository.recordAttempts += 1;
-      const invoice = validationInvoice(command.payload.invoiceId);
-      if (!invoice) {
-        return {
-          ok: false,
-          statusCode: 404,
-          code: "invoice_not_found",
-          message: "Finance invoice was not found.",
-        };
-      }
-      if (command.payload.currency !== invoice.currency) {
-        return invalidManualPaymentResult("Manual payment currency must match invoice currency.");
-      }
-      if (invoice.status === "paid" || invoice.status === "voided") {
-        return invalidManualPaymentResult(
-          "Manual payment cannot be recorded for paid or voided invoices.",
-        );
-      }
-      if (Number(invoice.balanceDue) === 0) {
-        return invalidManualPaymentResult(
-          "Manual payment cannot be recorded when the invoice has no balance due.",
-        );
-      }
-      if (Number(command.payload.amount) > Number(invoice.balanceDue)) {
-        return invalidManualPaymentResult("Manual payment amount cannot exceed invoice balance.");
-      }
-      return invalidManualPaymentResult("Validation fixture unexpectedly reached write path.");
-    },
-  };
-  return repository;
-}
-
-function validationInvoice(
-  invoiceId: string,
-): { currency: string; balanceDue: string; status: "partial" | "paid" | "voided" } | null {
-  if (invoiceId === "inv_2026_abcd") {
-    return { currency: "EUR", balanceDue: "850.00", status: "partial" };
+function manualPaymentValidationError(
+  command: FinanceManualPaymentRecordCommand,
+): Extract<FinanceManualPaymentRecordResult, { ok: false }> | null {
+  if (command.payload.invoiceId === "inv_2026_paid") {
+    return manualPaymentInvalidCommand("Paid invoices cannot accept manual payments.");
   }
-  if (invoiceId === "inv_2026_no_balance") {
-    return { currency: "EUR", balanceDue: "0.00", status: "partial" };
+  if (command.payload.invoiceId === "inv_2026_voided") {
+    return manualPaymentInvalidCommand("Voided invoices cannot accept manual payments.");
   }
-  if (invoiceId === "inv_2026_paid") {
-    return { currency: "EUR", balanceDue: "0.00", status: "paid" };
+  if (command.payload.invoiceId === "inv_2026_paid_zero") {
+    return manualPaymentInvalidCommand("Finance invoice has no outstanding balance.");
   }
-  if (invoiceId === "inv_2026_voided") {
-    return { currency: "EUR", balanceDue: "850.00", status: "voided" };
+  if (command.payload.currency !== "EUR") {
+    return manualPaymentInvalidCommand("Manual payment currency must match the invoice currency.");
+  }
+  if (Number(command.payload.amount) > 850) {
+    return manualPaymentInvalidCommand("Manual payment amount exceeds the invoice balance.");
   }
   return null;
 }
 
-function invalidManualPaymentResult(message: string): FinanceManualPaymentRecordResult {
+function manualPaymentInvalidCommand(
+  message: string,
+): Extract<FinanceManualPaymentRecordResult, { ok: false }> {
   return {
     ok: false,
     statusCode: 400,
@@ -1266,269 +1455,32 @@ function invalidManualPaymentResult(message: string): FinanceManualPaymentRecord
   };
 }
 
-type RecordedFinanceQuery = {
-  text: string;
-  values: unknown[];
-};
-
-type TargetFinanceInvoiceRow = {
-  invoiceId: string;
-  invoiceNumber: string;
-  guestBookingId: string;
-  bookingReference: string;
-  guestDisplayName: string;
-  guestEmail: string;
-  guestPhone: string | null;
-  checkIn: string;
-  checkOut: string;
-  roomName: string;
-  roomNumber: string;
-  currency: string;
-  totalAmount: string;
-  amountPaid: string;
-  balanceDue: string;
-  status: string;
-  issuedAt: string;
-  total: string;
-  counts: Record<string, number>;
-  sourceFreshness: typeof sourceFreshness;
-};
-
-function targetInvoiceRow(
-  overrides: Partial<TargetFinanceInvoiceRow> = {},
-): TargetFinanceInvoiceRow {
-  return {
-    invoiceId: "inv_2026_abcd",
-    invoiceNumber: "INV-2026-0002",
-    guestBookingId: "f6000000-0000-0000-0000-000000000686",
-    bookingReference: "B-FIN-686",
-    guestDisplayName: "Fi Guest",
-    guestEmail: "finance.guest@example.test",
-    guestPhone: "+15555550123",
-    checkIn: "2026-08-01",
-    checkOut: "2026-08-05",
-    roomName: "Alpine Suite",
-    roomNumber: "201",
-    currency: "EUR",
-    totalAmount: "1200.00",
-    amountPaid: "350.00",
-    balanceDue: "850.00",
-    status: "partial",
-    issuedAt: "2026-06-12T10:00:00.000Z",
-    total: "1",
-    counts: { partial: 1 },
-    sourceFreshness,
-    ...overrides,
-  };
-}
-
-function manualPaymentCommand(
-  options: {
-    propertyId?: string;
-    idempotencyKey?: string;
-    payload?: Partial<FinanceManualPaymentRecordCommand["payload"]>;
-  } = {},
-): FinanceManualPaymentRecordCommand {
-  return {
-    commandType: "finance.manual_payment.record",
-    commandId: "cmd-manual-payment-target-test",
-    idempotencyKey: options.idempotencyKey ?? "finance-manual-payment-target-test",
-    propertyId: options.propertyId ?? propertyId,
-    audit: {
-      actor: {
-        kind: "user",
-        userId: "f1000000-0000-0000-0000-000000000686",
-        organizationId: "f2000000-0000-0000-0000-000000000686",
-      },
-      requestId: "req_manual_payment_target_test",
-      correlationId: "corr_manual_payment_target_test",
-      reason: "Manual payment recorded by property finance user",
-      requestedAt: "2026-06-12T12:00:00.000Z",
-    },
-    payload: {
-      invoiceId: "inv_2026_abcd",
-      amount: "250.00",
-      currency: "EUR",
-      paymentMethod: "cash",
-      reference: "front desk receipt target test",
-      ...options.payload,
-    },
-  };
-}
-
-function targetManualPaymentPool(input: { invoice: TargetFinanceInvoiceRow }): {
-  pool: {
-    query<T extends QueryResultRow = QueryResultRow>(
-      text: string,
-      values?: readonly unknown[],
-    ): Promise<{ rows: T[] }>;
-    end(): Promise<void>;
-  };
-  queries: RecordedFinanceQuery[];
-} {
-  const queries: RecordedFinanceQuery[] = [];
-  return {
-    queries,
-    pool: {
-      async query<T extends QueryResultRow = QueryResultRow>(
-        text: string,
-        values: readonly unknown[] = [],
-      ) {
-        queries.push({ text, values: Array.from(values) });
-        if (text.includes("WITH invoice_base AS")) {
-          return { rows: [input.invoice as unknown as T] };
-        }
-        if (text.includes("INSERT INTO platform.idempotency_keys")) {
-          return {
-            rows: [
-              {
-                status: "in_progress",
-                requestFingerprintHash: values[1],
-              } as unknown as T,
-            ],
-          };
-        }
-        if (text.includes("INSERT INTO finance.payments")) {
-          return { rows: [{ paymentId: "pay_target_manual_001", replay: false } as unknown as T] };
-        }
-        if (text.includes("INSERT INTO platform.domain_events")) {
-          return { rows: [{ eventId: "evt_target_manual_001" } as unknown as T] };
-        }
-        if (text.includes("INSERT INTO platform.outbox_events")) {
-          return {
-            rows: [
-              {
-                destination: "booking.projection-refresh",
-                outboxEventId: "outbox_target_booking_001",
-              } as unknown as T,
-              {
-                destination: "pms.projection-refresh",
-                outboxEventId: "outbox_target_pms_001",
-              } as unknown as T,
-            ],
-          };
-        }
-        if (text.includes("FROM platform.idempotency_keys idempotency")) {
-          return { rows: [] as T[] };
-        }
-        if (text.includes("FROM finance.payments payment")) {
-          return {
-            rows: [
-              {
-                paymentId: "pay_target_manual_001",
-                method: "cash",
-                amount: "250.00",
-                currency: "EUR",
-                reference: "front desk receipt target test",
-                status: "paid",
-                recordedAt: "2026-06-12T12:00:00.000Z",
-              } as unknown as T,
-            ],
-          };
-        }
-        return { rows: [] };
-      },
-      async end() {},
-    },
-  };
-}
-
-async function recordTargetManualPayment(input: {
-  propertyId: string;
-  idempotencyKey: string;
-}): Promise<{
-  result: FinanceManualPaymentRecordResult;
-  queries: RecordedFinanceQuery[];
-}> {
-  const { pool, queries } = targetManualPaymentPool({ invoice: targetInvoiceRow() });
-  const repository = createTargetFinancePropertySettingsRepository({
-    connectionString: "postgresql://finance-target",
-    pool,
-  });
-  const result = await repository.recordManualPayment!(
-    manualPaymentCommand({
-      propertyId: input.propertyId,
-      idempotencyKey: input.idempotencyKey,
-    }),
-  );
-  return { result, queries };
-}
-
-function successfulManualPaymentKeys(queries: RecordedFinanceQuery[]): {
-  paymentKey: string;
-  domainEventKey: string;
-  bookingOutboxKey: string;
-  pmsOutboxKey: string;
-  bookingJobKey: string;
-  pmsJobKey: string;
-  auditKey: string;
-} {
-  const paymentInsert = findQuery(queries, "INSERT INTO finance.payments");
-  const domainEventInsert = findQuery(queries, "INSERT INTO platform.domain_events");
-  const outboxInsert = findQuery(queries, "INSERT INTO platform.outbox_events");
-  const jobsInsert = findQuery(queries, "INSERT INTO platform.jobs");
-  const auditInsert = findQuery(queries, "INSERT INTO platform.product_audit_events");
-  return {
-    paymentKey: String(paymentInsert.values[3]),
-    domainEventKey: String(domainEventInsert.values[0]),
-    bookingOutboxKey: String(outboxInsert.values[1]),
-    pmsOutboxKey: String(outboxInsert.values[9]),
-    bookingJobKey: String(jobsInsert.values[0]),
-    pmsJobKey: String(jobsInsert.values[10]),
-    auditKey: String(auditInsert.values[0]),
-  };
-}
-
-function findQuery(queries: RecordedFinanceQuery[], fragment: string): RecordedFinanceQuery {
-  const query = queries.find((candidate) => candidate.text.includes(fragment));
-  expect(query, fragment).toBeDefined();
-  return query!;
-}
-
 function manualPaymentCommandMeta(
   command: FinanceManualPaymentRecordCommand,
   jobStatus: "queued" | "idempotent_replay",
 ): FinanceCommandMeta {
+  const keyHash = sha256(command.idempotencyKey);
   return {
     commandId: command.commandId,
     idempotencyKey: command.idempotencyKey,
     sideEffects: ["audit_event", "booking_projection_refresh", "pms_projection_refresh"],
     outboxEvents: [
-      manualPaymentScopedKey(command, "booking-outbox"),
-      manualPaymentScopedKey(command, "pms-outbox"),
+      `finance.manual-payment.booking-projection.property.${command.propertyId}.key.${keyHash}.v1`,
+      `finance.manual-payment.pms-projection.property.${command.propertyId}.key.${keyHash}.v1`,
     ],
     jobs: [
       {
         jobType: "booking.projection-refresh",
-        idempotencyKey: buildManualPaymentProjectionJobIdempotencyKey({
-          jobType: "booking.projection-refresh",
-          propertyId: command.propertyId,
-          guestBookingId: invoiceDetails[0]!.guestBookingId,
-          paymentIdempotencyKey: command.idempotencyKey,
-        }),
+        idempotencyKey: `booking.projection-refresh:property:${command.propertyId}:booking:${invoiceDetails[0]!.guestBookingId}:finance-payment:${keyHash}:v1`,
         status: jobStatus,
       },
       {
         jobType: "pms.projection-refresh",
-        idempotencyKey: buildManualPaymentProjectionJobIdempotencyKey({
-          jobType: "pms.projection-refresh",
-          propertyId: command.propertyId,
-          guestBookingId: invoiceDetails[0]!.guestBookingId,
-          paymentIdempotencyKey: command.idempotencyKey,
-        }),
+        idempotencyKey: `pms.projection-refresh:property:${command.propertyId}:booking:${invoiceDetails[0]!.guestBookingId}:finance-payment:${keyHash}:v1`,
         status: jobStatus,
       },
     ],
   };
-}
-
-function manualPaymentScopedKey(
-  command: FinanceManualPaymentRecordCommand,
-  kind: "booking-outbox" | "pms-outbox",
-): string {
-  return `finance.manual-payment:property:${command.propertyId}:${kind}:${sha256(
-    command.idempotencyKey,
-  )}:v1`;
 }
 
 function sha256(value: string): string {
