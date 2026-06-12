@@ -25,8 +25,8 @@ import {
   createPgPublicHotelProfileRepository,
   createTargetPublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
+import { createTargetPmsOperationsCommandRepository } from "./domains/pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
-import { createTargetPmsOperationsCommandRepository } from "./routes/pmsOperations.js";
 import {
   createPgBookingWebAffiliateHotelResolver,
   createPgBookingWebAffiliateRepository,
