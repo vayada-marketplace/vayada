@@ -1,0 +1,797 @@
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
+
+export const PROVIDER_WEBHOOK_MODES = [
+  "observe_only",
+  "mutating",
+  "ack_only_with_receipt",
+] as const;
+
+export type ProviderWebhookMode = (typeof PROVIDER_WEBHOOK_MODES)[number];
+export type ProviderWebhookProvider = "stripe" | "xendit" | "channex";
+
+export type ProviderWebhookSecrets = {
+  stripe?: string;
+  xendit?: string;
+  channex?: string;
+};
+
+export type ProviderWebhookModeConfig = Partial<
+  Record<ProviderWebhookProvider, ProviderWebhookMode>
+>;
+
+export type ProviderWebhookReceiptInput = {
+  provider: ProviderWebhookProvider;
+  receiptKey: string;
+  receiptKeyHash: string;
+  providerEventId: string;
+  eventType: string;
+  payloadHash: string;
+  rawHeaders: Record<string, string>;
+  rawPayload: Record<string, unknown>;
+  mode: ProviderWebhookMode;
+  normalizedPreview: ProviderWebhookNormalizedPreview;
+};
+
+export type ProviderWebhookReceiptResult = {
+  status: "inserted" | "duplicate" | "conflict";
+  receiptId: string;
+  lifecycleStatus: ProviderWebhookReceiptLifecycleStatus;
+};
+
+export type ProviderWebhookReceiptLifecycleStatus =
+  | "observed"
+  | "promoted"
+  | "succeeded"
+  | "failed"
+  | "dead_lettered"
+  | "ignored"
+  | "received"
+  | "validated"
+  | "normalized";
+
+export type ProviderWebhookPromotionInput = {
+  provider: ProviderWebhookProvider;
+  receiptId: string;
+  receiptKey: string;
+  receiptKeyHash: string;
+  payloadHash: string;
+  rawPayload: Record<string, unknown>;
+  normalizedPreview: ProviderWebhookNormalizedPreview;
+};
+
+export type ProviderWebhookPromotionResult = {
+  status:
+    | "promoted"
+    | "already_promoted"
+    | "already_normalized"
+    | "failed"
+    | "dead_lettered"
+    | "incompatible_terminal_state";
+  receiptId: string;
+  domainEventId?: string;
+  jobIds: string[];
+};
+
+export type ProviderWebhookStore = {
+  recordReceipt(input: ProviderWebhookReceiptInput): Promise<ProviderWebhookReceiptResult>;
+  promoteReceipt(input: ProviderWebhookPromotionInput): Promise<ProviderWebhookPromotionResult>;
+  close?(): Promise<void>;
+};
+
+export type ProviderWebhookRoutesOptions = {
+  secrets: ProviderWebhookSecrets;
+  modes?: ProviderWebhookModeConfig;
+  store: ProviderWebhookStore;
+  stripeTimestampToleranceSeconds?: number;
+  now?: () => Date;
+};
+
+export type ProviderWebhookNormalizedPreview = {
+  domainEventKey: string;
+  domainEventType: string;
+  resourceProduct: "booking" | "finance" | "pms" | "platform";
+  resourceType: string;
+  resourceId: string;
+  jobKey: string;
+  queueName: string;
+  jobType: string;
+  payload: Record<string, unknown>;
+};
+
+export const registerProviderWebhookRoutes: FastifyPluginAsync<
+  ProviderWebhookRoutesOptions
+> = async (app: FastifyInstance, options: ProviderWebhookRoutesOptions) => {
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
+    done(null, typeof body === "string" ? body : body.toString());
+  });
+
+  app.post<{ Body: string }>("/webhooks/stripe", async (request, reply) => {
+    const secret = options.secrets.stripe;
+    if (!secret) return reply.code(503).send({ error: "stripe_webhook_not_configured" });
+
+    const signature = request.headers["stripe-signature"];
+    if (typeof signature !== "string" || !signature.trim()) {
+      return reply.code(400).send({ error: "missing_stripe_signature" });
+    }
+    if (
+      !verifyStripeSignature({
+        payload: request.body,
+        signatureHeader: signature,
+        secret,
+        toleranceSeconds: options.stripeTimestampToleranceSeconds,
+        now: options.now,
+      })
+    ) {
+      return reply.code(400).send({ error: "invalid_stripe_signature" });
+    }
+
+    const payload = parseJsonPayload(request.body);
+    if (!payload.ok) return reply.code(400).send({ error: "invalid_stripe_payload" });
+
+    const eventId = requiredString(payload.value, "id", "Stripe event");
+    const eventType = requiredString(payload.value, "type", "Stripe event");
+    const receiptKey = `webhook:stripe:${eventId}`;
+    return handleAuthenticatedProviderWebhook({
+      provider: "stripe",
+      eventType,
+      mode: modeFor(options, "stripe"),
+      receiptKey,
+      reply,
+      request,
+      rawPayload: payload.value,
+      store: options.store,
+      normalizedPreview: previewStripeEvent(payload.value, receiptKey),
+    });
+  });
+
+  app.post<{ Body: string }>("/webhooks/xendit", async (request, reply) => {
+    const secret = options.secrets.xendit;
+    if (!secret) return reply.code(503).send({ error: "xendit_webhook_not_configured" });
+
+    const token = request.headers["x-callback-token"];
+    if (typeof token !== "string" || !token.trim()) {
+      return reply.code(400).send({ error: "missing_xendit_callback_token" });
+    }
+    if (!secureCompare(token, secret)) {
+      return reply.code(400).send({ error: "invalid_xendit_callback_token" });
+    }
+
+    const payload = parseJsonPayload(request.body);
+    if (!payload.ok) return reply.code(400).send({ error: "invalid_xendit_payload" });
+
+    const classification = classifyXenditPayload(payload.value);
+    return handleAuthenticatedProviderWebhook({
+      provider: "xendit",
+      eventType: classification.eventType,
+      mode: modeFor(options, "xendit"),
+      receiptKey: classification.receiptKey,
+      reply,
+      request,
+      rawPayload: payload.value,
+      store: options.store,
+      normalizedPreview: previewXenditEvent(payload.value, classification),
+    });
+  });
+
+  app.post<{ Body: string }>("/webhooks/channex", async (request, reply) => {
+    const secret = options.secrets.channex;
+    if (!secret) return reply.code(503).send({ error: "channex_webhook_not_configured" });
+
+    const token = request.headers["x-vayada-webhook-token"];
+    if (typeof token !== "string" || !token.trim()) {
+      return reply.code(401).send({ error: "missing_channex_webhook_token" });
+    }
+    if (!secureCompare(token, secret)) {
+      return reply.code(401).send({ error: "invalid_channex_webhook_token" });
+    }
+
+    const payload = parseJsonPayload(request.body);
+    if (!payload.ok) return reply.code(400).send({ error: "invalid_channex_payload" });
+
+    const classification = classifyChannexPayload(payload.value);
+    return handleAuthenticatedProviderWebhook({
+      provider: "channex",
+      eventType: classification.eventType,
+      mode: modeFor(options, "channex"),
+      receiptKey: classification.receiptKey,
+      reply,
+      request,
+      rawPayload: payload.value,
+      store: options.store,
+      normalizedPreview: previewChannexEvent(payload.value, classification),
+    });
+  });
+};
+
+async function handleAuthenticatedProviderWebhook(input: {
+  provider: ProviderWebhookProvider;
+  eventType: string;
+  mode: ProviderWebhookMode;
+  receiptKey: string;
+  reply: FastifyReply;
+  request: FastifyRequest<{ Body: string }>;
+  rawPayload: Record<string, unknown>;
+  store: ProviderWebhookStore;
+  normalizedPreview: ProviderWebhookNormalizedPreview;
+}) {
+  const receiptKeyHash = sha256(input.receiptKey);
+  const receipt = await input.store.recordReceipt({
+    provider: input.provider,
+    receiptKey: input.receiptKey,
+    receiptKeyHash,
+    providerEventId: input.receiptKey,
+    eventType: input.eventType,
+    payloadHash: sha256(stableStringify(canonicalPayload(input.rawPayload))),
+    rawHeaders: redactedHeaders(input.request),
+    rawPayload: input.rawPayload,
+    mode: input.mode,
+    normalizedPreview: input.normalizedPreview,
+  });
+
+  if (receipt.status === "conflict") {
+    return input.reply.code(409).send({
+      error: "provider_webhook_receipt_conflict",
+      mode: input.mode,
+      provider: input.provider,
+      receiptId: receipt.receiptId,
+      receiptKey: input.receiptKey,
+      lifecycleStatus: receipt.lifecycleStatus,
+    });
+  }
+
+  if (input.mode === "observe_only") {
+    return input.reply.code(200).send({
+      status: receipt.status === "duplicate" ? "duplicate_observed" : "observed",
+      mode: input.mode,
+      provider: input.provider,
+      receiptId: receipt.receiptId,
+      receiptKey: input.receiptKey,
+    });
+  }
+
+  if (input.mode === "ack_only_with_receipt") {
+    return input.reply.code(200).send({
+      status: receipt.status === "duplicate" ? "duplicate_acknowledged" : "acknowledged",
+      mode: input.mode,
+      provider: input.provider,
+      receiptId: receipt.receiptId,
+      receiptKey: input.receiptKey,
+      replayRequired: true,
+    });
+  }
+
+  if (
+    receipt.status === "duplicate" &&
+    receipt.lifecycleStatus !== "observed" &&
+    receipt.lifecycleStatus !== "received" &&
+    receipt.lifecycleStatus !== "validated" &&
+    receipt.lifecycleStatus !== "normalized"
+  ) {
+    return input.reply.code(200).send({
+      status: "duplicate",
+      mode: input.mode,
+      provider: input.provider,
+      receiptId: receipt.receiptId,
+      receiptKey: input.receiptKey,
+      lifecycleStatus: receipt.lifecycleStatus,
+    });
+  }
+
+  const promotion = await input.store.promoteReceipt({
+    provider: input.provider,
+    receiptId: receipt.receiptId,
+    receiptKey: input.receiptKey,
+    receiptKeyHash,
+    payloadHash: sha256(stableStringify(canonicalPayload(input.rawPayload))),
+    rawPayload: input.rawPayload,
+    normalizedPreview: input.normalizedPreview,
+  });
+
+  return input.reply.code(200).send({
+    status: promotion.status,
+    mode: input.mode,
+    provider: input.provider,
+    receiptId: receipt.receiptId,
+    receiptKey: input.receiptKey,
+    domainEventId: promotion.domainEventId,
+    jobIds: promotion.jobIds,
+  });
+}
+
+function modeFor(options: ProviderWebhookRoutesOptions, provider: ProviderWebhookProvider) {
+  return options.modes?.[provider] ?? "observe_only";
+}
+
+function verifyStripeSignature(input: {
+  payload: string;
+  signatureHeader: string;
+  secret: string;
+  toleranceSeconds?: number;
+  now?: () => Date;
+}): boolean {
+  const fields = new Map<string, string[]>();
+  for (const part of input.signatureHeader.split(",")) {
+    const [key, value] = part.split("=", 2);
+    if (!key || !value) continue;
+    fields.set(key, [...(fields.get(key) ?? []), value]);
+  }
+
+  const timestamp = fields.get("t")?.[0];
+  const signatures = fields.get("v1") ?? [];
+  if (!timestamp || signatures.length === 0) return false;
+
+  const timestampSeconds = Number.parseInt(timestamp, 10);
+  if (!Number.isFinite(timestampSeconds)) return false;
+
+  const tolerance = input.toleranceSeconds ?? 300;
+  const nowSeconds = Math.floor((input.now?.() ?? new Date()).getTime() / 1000);
+  if (Math.abs(nowSeconds - timestampSeconds) > tolerance) return false;
+
+  const expected = createHmac("sha256", input.secret)
+    .update(`${timestamp}.${input.payload}`)
+    .digest("hex");
+  return signatures.some((signature) => secureCompare(signature, expected));
+}
+
+function classifyXenditPayload(payload: Record<string, unknown>): {
+  eventType: string;
+  receiptKey: string;
+  kind: "invoice" | "payout";
+  providerObjectId: string;
+  status: string;
+} {
+  const event = optionalString(payload, "event");
+  const data = optionalRecord(payload, "data");
+  const invoiceId = optionalString(payload, "id");
+  const externalId = optionalString(payload, "external_id");
+  const invoiceStatus = optionalString(payload, "status");
+
+  if (invoiceId && externalId && invoiceStatus && !event) {
+    const callbackId = optionalString(payload, "callback_id") ?? invoiceId;
+    return {
+      eventType: "invoice.callback",
+      receiptKey: `webhook:xendit:invoice:${callbackId}:${invoiceStatus}`,
+      kind: "invoice",
+      providerObjectId: invoiceId,
+      status: invoiceStatus,
+    };
+  }
+
+  const payoutId = optionalString(data, "id") ?? optionalString(payload, "id");
+  const payoutStatus = optionalString(data, "status") ?? invoiceStatus ?? event ?? "unknown";
+  if (!payoutId) {
+    const fallbackKey = sha256(stableStringify(canonicalPayload(payload)));
+    return {
+      eventType: event ?? "unknown",
+      receiptKey: `webhook:xendit:payout:unknown:${fallbackKey}`,
+      kind: "payout",
+      providerObjectId: "unknown",
+      status: payoutStatus,
+    };
+  }
+  return {
+    eventType: event ?? "payout.callback",
+    receiptKey: `webhook:xendit:payout:${payoutId}:${payoutStatus}`,
+    kind: "payout",
+    providerObjectId: payoutId,
+    status: payoutStatus,
+  };
+}
+
+function classifyChannexPayload(payload: Record<string, unknown>): {
+  eventType: string;
+  receiptKey: string;
+  propertyId: string;
+  sourceMessageId?: string;
+  channelBookingId?: string;
+  revision?: string;
+} {
+  const nestedPayload = optionalRecord(payload, "payload") ?? {};
+  const eventType =
+    optionalString(payload, "event") ??
+    optionalString(payload, "event_type") ??
+    optionalString(payload, "type") ??
+    "unknown";
+  const propertyId =
+    optionalString(payload, "property_id") ??
+    optionalString(nestedPayload, "property_id") ??
+    optionalNestedString(nestedPayload, ["property", "id"]) ??
+    "unknown";
+
+  if (eventType === "message") {
+    const message =
+      optionalRecord(nestedPayload, "message") ?? optionalRecord(payload, "message") ?? {};
+    const messageId =
+      optionalString(nestedPayload, "message_id") ??
+      optionalString(nestedPayload, "source_message_id") ??
+      optionalString(nestedPayload, "id") ??
+      optionalString(message, "id") ??
+      optionalString(message, "source_message_id");
+    if (messageId) {
+      return {
+        eventType,
+        propertyId,
+        sourceMessageId: messageId,
+        receiptKey: `webhook:channex:message:${propertyId}:${messageId}`,
+      };
+    }
+  }
+
+  const booking =
+    optionalRecord(nestedPayload, "booking") ??
+    optionalRecord(nestedPayload, "revision") ??
+    optionalRecord(payload, "booking") ??
+    {};
+  const revisionId =
+    optionalString(nestedPayload, "booking_revision_id") ??
+    optionalString(nestedPayload, "revision_id") ??
+    optionalString(booking, "booking_revision_id") ??
+    optionalString(booking, "revision_id");
+  const channelBookingId =
+    optionalString(nestedPayload, "channel_booking_id") ??
+    optionalString(nestedPayload, "booking_id") ??
+    optionalString(booking, "channel_booking_id") ??
+    optionalString(booking, "id");
+  const revision =
+    optionalString(nestedPayload, "revision") ??
+    optionalString(nestedPayload, "revision_number") ??
+    optionalString(booking, "revision") ??
+    optionalString(booking, "revision_number") ??
+    revisionId ??
+    "unknown";
+
+  if (revisionId || channelBookingId) {
+    return {
+      eventType,
+      propertyId,
+      channelBookingId: channelBookingId ?? revisionId,
+      revision,
+      receiptKey: `webhook:channex:booking:${propertyId}:${revisionId ?? channelBookingId}:${revision}`,
+    };
+  }
+
+  return {
+    eventType,
+    propertyId,
+    receiptKey: `webhook:channex:${eventType}:${propertyId}:${sha256(
+      stableStringify(canonicalPayload(payload)),
+    )}`,
+  };
+}
+
+function previewStripeEvent(
+  payload: Record<string, unknown>,
+  receiptKey: string,
+): ProviderWebhookNormalizedPreview {
+  const eventType = requiredString(payload, "type", "Stripe event");
+  const dataObject = optionalRecord(optionalRecord(payload, "data"), "object") ?? {};
+  const objectId = optionalString(dataObject, "id") ?? receiptKey;
+  const amount =
+    optionalNumber(dataObject, "amount_received") ?? optionalNumber(dataObject, "amount") ?? 0;
+
+  if (eventType === "payment_intent.amount_capturable_updated") {
+    return paymentPreview({
+      provider: "stripe",
+      domainEventType: "payment.authorized",
+      semanticAction: `stripe-event-${requiredString(payload, "id", "Stripe event")}`,
+      paymentId: objectId,
+      amount,
+      domainEventKey: `payment.authorized:stripe:${objectId}:${amount}:v1`,
+      rawPayload: payload,
+    });
+  }
+  if (eventType === "payment_intent.succeeded") {
+    return paymentPreview({
+      provider: "stripe",
+      domainEventType: "payment.captured",
+      semanticAction: `stripe-event-${requiredString(payload, "id", "Stripe event")}`,
+      paymentId: objectId,
+      amount,
+      domainEventKey: `payment.captured:stripe:${objectId}:${amount}:v1`,
+      rawPayload: payload,
+    });
+  }
+  if (eventType === "payment_intent.canceled" || eventType === "payment_intent.payment_failed") {
+    const status = optionalString(dataObject, "status") ?? eventType;
+    return paymentPreview({
+      provider: "stripe",
+      domainEventType: "payment.terminal",
+      semanticAction: `stripe-event-${requiredString(payload, "id", "Stripe event")}`,
+      paymentId: objectId,
+      amount,
+      domainEventKey: `payment.terminal:stripe:${objectId}:${status}:v1`,
+      rawPayload: payload,
+    });
+  }
+  if (eventType === "account.updated") {
+    const chargesEnabled = optionalBoolean(dataObject, "charges_enabled") ?? false;
+    return {
+      domainEventKey: `finance.provider-account.updated:stripe:${objectId}:${chargesEnabled}:v1`,
+      domainEventType: "finance.provider-account.updated",
+      resourceProduct: "finance",
+      resourceType: "provider_account",
+      resourceId: objectId,
+      jobKey: `finance.reconcile-provider-account:provider_account:${objectId}:stripe-account-updated:v1`,
+      queueName: "finance.webhooks",
+      jobType: "finance.reconcile-provider-account",
+      payload: {
+        provider: "stripe",
+        providerAccountId: objectId,
+        chargesEnabled,
+        rawEventId: requiredString(payload, "id", "Stripe event"),
+      },
+    };
+  }
+  return fallbackPreview("stripe", receiptKey, eventType, payload);
+}
+
+function previewXenditEvent(
+  payload: Record<string, unknown>,
+  classification: ReturnType<typeof classifyXenditPayload>,
+): ProviderWebhookNormalizedPreview {
+  if (classification.kind === "invoice") {
+    const amount = optionalNumber(payload, "paid_amount") ?? optionalNumber(payload, "amount") ?? 0;
+    if (classification.status === "PAID" || classification.status === "SETTLED") {
+      return paymentPreview({
+        provider: "xendit",
+        domainEventType: "payment.captured",
+        semanticAction: `xendit-invoice-${classification.providerObjectId}`,
+        paymentId: classification.providerObjectId,
+        amount,
+        domainEventKey: `payment.captured:xendit:${classification.providerObjectId}:${amount}:v1`,
+        rawPayload: payload,
+      });
+    }
+    return paymentPreview({
+      provider: "xendit",
+      domainEventType: "payment.terminal",
+      semanticAction: `xendit-invoice-${classification.providerObjectId}`,
+      paymentId: classification.providerObjectId,
+      amount,
+      domainEventKey: `payment.terminal:xendit:${classification.providerObjectId}:${classification.status}:v1`,
+      rawPayload: payload,
+    });
+  }
+
+  return {
+    domainEventKey: `payout.status:xendit:${classification.providerObjectId}:${classification.status}:v1`,
+    domainEventType: "payout.status",
+    resourceProduct: "finance",
+    resourceType: "payout",
+    resourceId: classification.providerObjectId,
+    jobKey: `finance.reconcile-payout:payout:${classification.providerObjectId}:xendit-status-${classification.status}:v1`,
+    queueName: "finance.webhooks",
+    jobType: "finance.reconcile-payout",
+    payload: {
+      provider: "xendit",
+      payoutId: classification.providerObjectId,
+      status: classification.status,
+      rawPayload: payload,
+    },
+  };
+}
+
+function previewChannexEvent(
+  payload: Record<string, unknown>,
+  classification: ReturnType<typeof classifyChannexPayload>,
+): ProviderWebhookNormalizedPreview {
+  if (classification.sourceMessageId) {
+    const threadId =
+      optionalString(optionalRecord(payload, "payload"), "thread_id") ??
+      optionalString(optionalRecord(payload, "payload"), "message_thread_id") ??
+      optionalNestedString(optionalRecord(payload, "payload"), ["thread", "id"]) ??
+      "unknown";
+    return {
+      domainEventKey: `channex.message.ingest:${classification.propertyId}:${threadId}:${classification.sourceMessageId}:v1`,
+      domainEventType: "channex.message.ingest",
+      resourceProduct: "pms",
+      resourceType: "channex_message",
+      resourceId: classification.sourceMessageId,
+      jobKey: `channex.ingest-message:message:${classification.sourceMessageId}:property-${classification.propertyId}:v1`,
+      queueName: "pms.channex.webhooks",
+      jobType: "channex.ingest-message",
+      payload: {
+        provider: "channex",
+        propertyId: classification.propertyId,
+        threadId,
+        sourceMessageId: classification.sourceMessageId,
+        rawPayload: payload,
+      },
+    };
+  }
+  if (classification.channelBookingId) {
+    const revision = classification.revision ?? "unknown";
+    return {
+      domainEventKey: `channex.booking.ingest:${classification.propertyId}:${classification.channelBookingId}:${revision}:v1`,
+      domainEventType: "channex.booking.ingest",
+      resourceProduct: "pms",
+      resourceType: "channel_booking",
+      resourceId: classification.channelBookingId,
+      jobKey: `channex.ingest-booking:channel_booking:${classification.channelBookingId}:revision-${revision}:v1`,
+      queueName: "pms.channex.webhooks",
+      jobType: "channex.ingest-booking",
+      payload: {
+        provider: "channex",
+        propertyId: classification.propertyId,
+        channelBookingId: classification.channelBookingId,
+        revision,
+        rawPayload: payload,
+      },
+    };
+  }
+  return fallbackPreview("channex", classification.receiptKey, classification.eventType, payload);
+}
+
+function paymentPreview(input: {
+  provider: "stripe" | "xendit";
+  domainEventType: "payment.authorized" | "payment.captured" | "payment.terminal";
+  semanticAction: string;
+  paymentId: string;
+  amount: number;
+  domainEventKey: string;
+  rawPayload: Record<string, unknown>;
+}): ProviderWebhookNormalizedPreview {
+  return {
+    domainEventKey: input.domainEventKey,
+    domainEventType: input.domainEventType,
+    resourceProduct: "finance",
+    resourceType: "payment",
+    resourceId: input.paymentId,
+    jobKey: `payment.reconcile-status:payment:${input.paymentId}:${input.semanticAction}:v1`,
+    queueName: "finance.webhooks",
+    jobType: "payment.reconcile-status",
+    payload: {
+      provider: input.provider,
+      paymentId: input.paymentId,
+      amount: input.amount,
+      rawPayload: input.rawPayload,
+    },
+  };
+}
+
+function fallbackPreview(
+  provider: ProviderWebhookProvider,
+  receiptKey: string,
+  eventType: string,
+  rawPayload: Record<string, unknown>,
+): ProviderWebhookNormalizedPreview {
+  const eventHash = sha256(receiptKey);
+  return {
+    domainEventKey: `provider.webhook.received:${provider}:${eventHash}:v1`,
+    domainEventType: `${provider}.webhook.received`,
+    resourceProduct: "platform",
+    resourceType: "external_webhook",
+    resourceId: eventHash,
+    jobKey: `provider.webhook-review:external_webhook:${eventHash}:${eventType}:v1`,
+    queueName: "platform.webhooks",
+    jobType: "provider.webhook-review",
+    payload: {
+      provider,
+      eventType,
+      rawPayload,
+    },
+  };
+}
+
+function parseJsonPayload(
+  payload: string,
+): { ok: true; value: Record<string, unknown> } | { ok: false } {
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { ok: false };
+    }
+    return { ok: true, value: parsed as Record<string, unknown> };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function redactedHeaders(request: FastifyRequest): Record<string, string> {
+  const sensitive = new Set(["stripe-signature", "x-callback-token", "x-vayada-webhook-token"]);
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(request.headers)) {
+    if (sensitive.has(key.toLowerCase())) {
+      headers[key] = "redacted";
+    } else if (typeof value === "string") {
+      headers[key] = value;
+    }
+  }
+  return headers;
+}
+
+function secureCompare(received: string, expected: string): boolean {
+  const receivedBuffer = Buffer.from(received);
+  const expectedBuffer = Buffer.from(expected);
+  return (
+    receivedBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(receivedBuffer, expectedBuffer)
+  );
+}
+
+function requiredString(data: Record<string, unknown>, key: string, label: string): string {
+  const value = optionalString(data, key);
+  if (!value) throw new Error(`${label} is missing ${key}`);
+  return value;
+}
+
+function optionalString(
+  data: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  const value = data?.[key];
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalNumber(
+  data: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  const value = data?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalBoolean(
+  data: Record<string, unknown> | undefined,
+  key: string,
+): boolean | undefined {
+  const value = data?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function optionalRecord(
+  data: Record<string, unknown> | undefined,
+  key: string,
+): Record<string, unknown> | undefined {
+  const value = data?.[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function optionalNestedString(
+  data: Record<string, unknown> | undefined,
+  path: readonly string[],
+): string | undefined {
+  let current: unknown = data;
+  for (const segment of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return typeof current === "string" && current.trim() ? current.trim() : undefined;
+}
+
+function canonicalPayload(payload: unknown): unknown {
+  if (Array.isArray(payload)) return payload.map(canonicalPayload);
+  if (!payload || typeof payload !== "object") return payload;
+  const transportOnlyKeys = new Set([
+    "delivery_id",
+    "delivered_at",
+    "request_id",
+    "sent_at",
+    "webhook_id",
+  ]);
+  return Object.fromEntries(
+    Object.entries(payload as Record<string, unknown>)
+      .filter(([key]) => !transportOnlyKeys.has(key))
+      .map(([key, value]) => [key, canonicalPayload(value)]),
+  );
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableStringify(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function sha256(value: string): string {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
+}

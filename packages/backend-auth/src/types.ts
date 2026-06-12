@@ -23,13 +23,19 @@ export type ResourceType =
   | "platform"
   | "booking_hotel"
   | "pms_hotel"
+  | "pms_property"
   | "hotel_profile"
   | "hotel_listing"
   | "creator_profile"
   | "affiliate"
   | "payout_account";
 
-export type ResourceRelationship = "owner" | "operator" | "promotes" | "billing_account";
+export type ResourceRelationship =
+  | "owner"
+  | "operator"
+  | "front_desk"
+  | "promotes"
+  | "billing_account";
 
 export type PermissionKey =
   | "platform.user.suspend"
@@ -39,6 +45,8 @@ export type PermissionKey =
   | "booking.analytics.read"
   | "booking.reservation.read"
   | "pms.read"
+  | "pms.operations.read"
+  | "pms.operations.manage"
   | "pms.booking.update"
   | "pms.finance.read"
   | "marketplace.collaboration.review"

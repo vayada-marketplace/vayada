@@ -11,6 +11,7 @@ import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
+import { createPgProviderWebhookStore } from "./platform/providerWebhooks.js";
 import { createWorkOSAuthKitClient } from "./platform/workosAuthKit.js";
 import {
   createPgWorkosWebhookStore,
@@ -24,6 +25,7 @@ import {
   createPgPublicHotelProfileRepository,
   createTargetPublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
+import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import {
   createTargetBookingWebCalendarRepository,
@@ -137,10 +139,24 @@ const bookingWebCheckoutAdapter =
       })
     : undefined;
 
+const pmsOperationsRepository =
+  config.pmsOperationsSource === "target"
+    ? createTargetPmsOperationsReadRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
     : undefined;
+
+const providerWebhookSecrets = {
+  stripe: config.providerWebhooks.stripeSecret,
+  xendit: config.providerWebhooks.xenditSecret,
+  channex: config.providerWebhooks.channexSecret,
+};
+const hasProviderWebhookSecret = Object.values(providerWebhookSecrets).some(Boolean);
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
@@ -189,7 +205,23 @@ const app = buildApp({
           }),
         }
       : undefined,
+  providerWebhooks:
+    config.targetDatabaseUrl && hasProviderWebhookSecret
+      ? {
+          secrets: providerWebhookSecrets,
+          modes: {
+            stripe: config.providerWebhooks.stripeMode,
+            xendit: config.providerWebhooks.xenditMode,
+            channex: config.providerWebhooks.channexMode,
+          },
+          store: createPgProviderWebhookStore({
+            connectionString: config.targetDatabaseUrl,
+          }),
+        }
+      : undefined,
   bookingReservationsRepository,
+  pmsOperationsRepository,
+  pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,

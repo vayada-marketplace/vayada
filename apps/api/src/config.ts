@@ -37,6 +37,17 @@ export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
 export type BookingCheckoutCommandSource = "legacy_proxy" | "target";
+export type PmsOperationsSource = "disabled" | "target";
+export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
+
+export type ProviderWebhookConfig = {
+  stripeSecret?: string;
+  xenditSecret?: string;
+  channexSecret?: string;
+  stripeMode: ProviderWebhookIntakeMode;
+  xenditMode: ProviderWebhookIntakeMode;
+  channexMode: ProviderWebhookIntakeMode;
+};
 
 export type ApiConfig = {
   host: string;
@@ -54,12 +65,15 @@ export type ApiConfig = {
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
   marketplaceDiscoverySource: MarketplaceDiscoverySource;
+  pmsOperationsSource: PmsOperationsSource;
   marketplaceDiscoveryAllowedOrigins: string[];
+  pmsOperationsAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
   bookingCheckoutCommandSource: BookingCheckoutCommandSource;
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingHostBase?: string;
+  providerWebhooks: ProviderWebhookConfig;
 };
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -94,14 +108,18 @@ function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
   };
 }
 
-function readOptionalCsvEnv(env: NodeJS.ProcessEnv, key: string): string[] {
+function readOptionalCsvEnv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  defaultValue: string[] = [],
+): string[] {
   const value = readOptionalEnv(env, key);
   return value
     ? value
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean)
-    : [];
+    : defaultValue;
 }
 
 function readBooleanEnv(env: NodeJS.ProcessEnv, key: string, defaultValue = false): boolean {
@@ -183,6 +201,32 @@ function loadAskIntelligenceConfig(env: NodeJS.ProcessEnv): ApiAskIntelligenceCo
   };
 }
 
+function loadProviderWebhookConfig(env: NodeJS.ProcessEnv): ProviderWebhookConfig {
+  return {
+    stripeSecret: readOptionalEnv(env, "STRIPE_WEBHOOK_SECRET"),
+    xenditSecret: readOptionalEnv(env, "XENDIT_WEBHOOK_SECRET"),
+    channexSecret: readOptionalEnv(env, "CHANNEX_WEBHOOK_SECRET"),
+    stripeMode: readSourceEnv(
+      env,
+      "STRIPE_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+    xenditMode: readSourceEnv(
+      env,
+      "XENDIT_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+    channexMode: readSourceEnv(
+      env,
+      "CHANNEX_WEBHOOK_INTAKE_MODE",
+      ["observe_only", "mutating", "ack_only_with_receipt"],
+      "observe_only",
+    ),
+  };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const server = loadServerConfig(env, {
     host: "0.0.0.0",
@@ -225,11 +269,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["legacy_proxy", "target"],
     "legacy_proxy",
   );
+  const pmsOperationsSource = readSourceEnv(
+    env,
+    "PMS_OPERATIONS_SOURCE",
+    ["disabled", "target"],
+    "disabled",
+  );
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
   }
   if (marketplaceDiscoverySource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_DISCOVERY_SOURCE=target");
+  }
+  if (pmsOperationsSource === "target" && !targetDatabaseUrl) {
+    throw new Error("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
   }
   if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
     throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
@@ -272,10 +325,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
     marketplaceDiscoverySource,
+    pmsOperationsSource,
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(
       env,
       "MARKETPLACE_DISCOVERY_ALLOWED_ORIGINS",
     ),
+    pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
+      "https://pms.localhost",
+    ]),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
     bookingCheckoutCommandSource,
@@ -284,5 +341,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
     ),
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
+    providerWebhooks: loadProviderWebhookConfig(env),
   };
 }

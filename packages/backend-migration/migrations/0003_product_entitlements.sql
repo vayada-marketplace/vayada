@@ -23,7 +23,7 @@ CREATE TABLE identity.product_entitlements (
                       CHECK (resource_product IS NULL OR resource_product IN ('platform', 'marketplace', 'booking', 'pms', 'affiliate')),
   resource_type     TEXT
                       CHECK (resource_type IS NULL OR resource_type IN (
-                        'platform', 'booking_hotel', 'pms_hotel', 'hotel_profile',
+                        'platform', 'booking_hotel', 'pms_hotel', 'pms_property', 'hotel_profile',
                         'hotel_listing', 'creator_profile', 'affiliate', 'payout_account'
                       )),
   resource_id       TEXT,
