@@ -93,6 +93,10 @@ type BookingWebTelemetryEventRequest = {
   hotel_slug?: string;
   eventType?: string;
   event_type?: string;
+  eventId?: string;
+  event_id?: string;
+  idempotencyKey?: string;
+  idempotency_key?: string;
   sessionId?: string;
   session_id?: string;
   metadata?: Record<string, unknown>;
@@ -136,6 +140,7 @@ export type BookingWebAffiliateClickEvent = {
 export type BookingWebTelemetryEvent = {
   hotelSlug: string;
   eventType: string;
+  eventId?: string;
   sessionId?: string;
   requestId: string;
   occurredAt: Date;
@@ -719,6 +724,12 @@ export async function registerBookingWebPublicRoutes(
       await options.attributionSink.recordTelemetryEvent({
         hotelSlug,
         eventType,
+        eventId: firstString(
+          request.body?.eventId,
+          request.body?.event_id,
+          request.body?.idempotencyKey,
+          request.body?.idempotency_key,
+        ),
         sessionId: firstString(request.body?.sessionId, request.body?.session_id),
         requestId: String(request.id),
         occurredAt: now(),
@@ -727,14 +738,6 @@ export async function registerBookingWebPublicRoutes(
         metadata: recordBody(request.body?.metadata),
       });
     }
-    await forwardLegacyBookingTelemetry({
-      bookingPublicApiUrl: options.bookingPublicApiUrl,
-      fetch: fetchImpl,
-      hotelSlug,
-      eventType,
-      sessionId: firstString(request.body?.sessionId, request.body?.session_id),
-      metadata: recordBody(request.body?.metadata),
-    });
     reply.header("Cache-Control", "no-store");
     reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-telemetry");
     return reply.status(204).send();
@@ -1548,38 +1551,6 @@ function stableJson(value: unknown): string {
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-async function forwardLegacyBookingTelemetry(config: {
-  bookingPublicApiUrl?: string;
-  fetch: FetchLike;
-  hotelSlug: string;
-  eventType: string;
-  sessionId?: string;
-  metadata: Record<string, unknown>;
-}): Promise<void> {
-  if (!config.bookingPublicApiUrl?.trim()) return;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2_000);
-  try {
-    await config.fetch(new URL("/api/events", config.bookingPublicApiUrl), {
-      signal: controller.signal,
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        hotel_slug: config.hotelSlug,
-        event_type: config.eventType,
-        session_id: config.sessionId,
-        metadata: config.metadata,
-      }),
-    });
-  } catch {
-    // Telemetry is best-effort. Platform events remain the durable target;
-    // legacy forwarding keeps current booking dashboards populated during cutover.
-  } finally {
-    clearTimeout(timeout);
-  }
 }
 
 function sanitizeCheckoutConfig(settings: Record<string, unknown>): Record<string, unknown> {

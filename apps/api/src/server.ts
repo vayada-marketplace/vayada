@@ -231,11 +231,12 @@ const app = buildApp({
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
-  bookingWebAttributionSink: config.auth
-    ? createPgBookingWebEventSink({
-        connectionString: config.auth.databaseUrl,
-      })
-    : undefined,
+  bookingWebAttributionSink:
+    config.bookingWebEventSink === "target" && config.auth
+      ? createPgBookingWebEventSink({
+          connectionString: config.auth.databaseUrl,
+        })
+      : undefined,
 });
 
 try {

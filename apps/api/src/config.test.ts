@@ -233,6 +233,46 @@ describe("api config", () => {
     ).toBe("https://api.booking.localhost");
   });
 
+  it("defaults Booking Web event sink to disabled until target auth config is explicit", () => {
+    expect(loadConfig({}).bookingWebEventSink).toBe("disabled");
+  });
+
+  it("can disable the Booking Web event sink for local no-op intake", () => {
+    expect(
+      loadConfig({
+        BOOKING_WEB_EVENT_SINK: "disabled",
+      }).bookingWebEventSink,
+    ).toBe("disabled");
+  });
+
+  it("loads target Booking Web event sink config", () => {
+    expect(
+      loadConfig({
+        AUTH_DATABASE_URL: "postgresql://auth-db",
+        WORKOS_JWKS_URL: "https://api.workos.com/sso/jwks/client",
+        WORKOS_ISSUER: "https://api.workos.com",
+        WORKOS_AUDIENCE: "client",
+        BOOKING_WEB_EVENT_SINK: "target",
+      }).bookingWebEventSink,
+    ).toBe("target");
+  });
+
+  it("requires auth config for the target Booking Web event sink", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_WEB_EVENT_SINK: "target",
+      }),
+    ).toThrow("BOOKING_WEB_EVENT_SINK=target requires complete auth config");
+  });
+
+  it("rejects unsupported Booking Web event sink config", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_WEB_EVENT_SINK: "legacy",
+      }),
+    ).toThrow("BOOKING_WEB_EVENT_SINK must be one of: disabled, target");
+  });
+
   it("keeps marketplace discovery disabled by default", () => {
     expect(loadConfig({}).marketplaceDiscoverySource).toBe("disabled");
   });
