@@ -7,6 +7,8 @@ import AddonsPageClient from "./AddonsPageClient";
  * whether the client component renders a meta tag.
  */
 export const metadata: Metadata = {
+  title: "Add-ons | Book Your Stay",
+  description: "Choose optional extras for your stay.",
   robots: {
     index: false,
     follow: false,

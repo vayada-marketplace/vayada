@@ -7,6 +7,8 @@ import PaymentPageClient from "./PaymentPageClient";
  * whether the client component renders a meta tag.
  */
 export const metadata: Metadata = {
+  title: "Payment | Book Your Stay",
+  description: "Complete payment for your stay.",
   robots: {
     index: false,
     follow: false,

@@ -245,11 +245,12 @@ test.describe("booking-web robots / indexability GEO contract", () => {
 test.describe("booking-web sitemap GEO contract", () => {
   test("sitemap.xml is served and does not include private booking paths", async ({ page }) => {
     await mockBookingApis(page);
-    const response = await page.request.get("/sitemap.xml");
+    const response = await page.goto("/sitemap.xml");
+    const status = response?.status() ?? 0;
 
     // Sitemap may not exist yet (returns 404) — that is a known gap.
     // When it does exist it must not include private paths.
-    if (response.status() === 200) {
+    if (status === 200) {
       const xml = await response.text();
       const locMatches = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => ({
         loc: m[1],
@@ -261,7 +262,7 @@ test.describe("booking-web sitemap GEO contract", () => {
       // 404 is acceptable during development; log for awareness.
       // This test will fail once the sitemap is implemented if private
       // paths are mistakenly included.
-      expect([200, 404]).toContain(response.status());
+      expect([200, 404]).toContain(status);
     }
   });
 
