@@ -2,8 +2,11 @@ import pg from "pg";
 
 export type PmsDecimalAmount = string;
 export type PmsCurrencyCode = string;
+export type PmsDate = string;
+export type PmsUtcDateTime = string;
 export type PmsJsonScalar = string | number | boolean | null;
-export type PmsJsonRecord = Record<string, PmsJsonScalar>;
+export type PmsJsonValue = PmsJsonScalar | PmsJsonValue[] | { [key: string]: PmsJsonValue };
+export type PmsJsonRecord = Record<string, PmsJsonValue>;
 
 export type PmsMoney = {
   amountDecimal: PmsDecimalAmount;
@@ -62,17 +65,111 @@ export type PmsRoomType = {
   roomCount: number;
 };
 
-export type PmsSourceFreshness = Record<string, PmsJsonScalar>;
+export type PmsSourceFreshness = PmsJsonRecord;
+
+export type PmsRoomBlockStatus = "active" | "released" | "expired";
+
+export type PmsRoomBlockSummary = {
+  blockId: string;
+  roomTypeId: string;
+  roomId: string | null;
+  startsOn: PmsDate;
+  endsOn: PmsDate;
+  blockedCount: number;
+  reason: string;
+  status: PmsRoomBlockStatus;
+};
+
+export type PmsCalendarStatus = "open" | "closed" | "limited";
+
+export type PmsCalendarDay = {
+  stayDate: PmsDate;
+  roomTypeId: string;
+  totalCount: number;
+  assignedCount: number;
+  blockedCount: number;
+  availableCount: number;
+  status: PmsCalendarStatus;
+  blocks: PmsRoomBlockSummary[];
+  assignmentRefs: string[];
+  sourceFreshness: PmsSourceFreshness;
+};
+
+export type PmsReservationSource = "direct_booking" | "channel" | "manual" | "migration";
+
+export type PmsOperationalAssignmentStatus =
+  | "pending"
+  | "assigned"
+  | "checked_in"
+  | "in_house"
+  | "checked_out"
+  | "canceled"
+  | "released";
+
+export type PmsOperationalAssignment = {
+  assignmentId: string;
+  roomTypeId: string;
+  ratePlanId: string | null;
+  roomId: string | null;
+  roomNumber: string | null;
+  position: number;
+  assignmentStatus: PmsOperationalAssignmentStatus;
+  channel: string;
+  assignedAt: PmsUtcDateTime | null;
+};
+
+export type PmsOperationalReservation = {
+  guestBookingId: string;
+  bookingReference: string;
+  status: string;
+  source: PmsReservationSource;
+  stay: { checkIn: PmsDate; checkOut: PmsDate; adults: number; children: number };
+  primaryGuest: { displayName: string; email: string | null; phone: string | null };
+  assignments: PmsOperationalAssignment[];
+  checkin: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
+  checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
+  privateNoteCount: number;
+  additionalGuestCount: number;
+};
+
+export type PmsReservationListFilters = {
+  status?: string;
+  arrivalFrom?: PmsDate;
+  arrivalTo?: PmsDate;
+  search?: string;
+  limit: number;
+  offset: number;
+};
 
 export type PmsOperationsReadResult<T> = {
   items: T[];
   sourceFreshness?: PmsSourceFreshness;
 };
 
+export type PmsOperationsPaginatedReadResult<T> = PmsOperationsReadResult<T> & {
+  total: number;
+};
+
 export type PmsOperationsReadRepository = {
   listRoomsByPropertyId(propertyId: string): Promise<PmsOperationsReadResult<PmsRoom>>;
   listRoomTypesByPropertyId(propertyId: string): Promise<PmsOperationsReadResult<PmsRoomType>>;
   findRoomTypeById(propertyId: string, roomTypeId: string): Promise<PmsRoomType | null>;
+  listCalendarDaysByPropertyId(
+    propertyId: string,
+    range: { from: PmsDate; to: PmsDate },
+  ): Promise<PmsOperationsReadResult<PmsCalendarDay>>;
+  listRoomBlocksByPropertyId(
+    propertyId: string,
+    range?: { from?: PmsDate; to?: PmsDate },
+  ): Promise<PmsOperationsReadResult<PmsRoomBlockSummary>>;
+  listReservationsByPropertyId(
+    propertyId: string,
+    filters: PmsReservationListFilters,
+  ): Promise<PmsOperationsPaginatedReadResult<PmsOperationalReservation>>;
+  findReservationByGuestBookingId(
+    propertyId: string,
+    guestBookingId: string,
+  ): Promise<PmsOperationalReservation | null>;
   close?(): Promise<void>;
 };
 
@@ -135,6 +232,158 @@ export function createTargetPmsOperationsReadRepository(config: {
       return result.items[0] ?? null;
     },
 
+    async listCalendarDaysByPropertyId(propertyId, range) {
+      const result = await pool.query<TargetPmsCalendarDayRow>(
+        `SELECT
+           inventory.stay_date AS "stayDate",
+           inventory.room_type_id::text AS "roomTypeId",
+           inventory.total_count AS "totalCount",
+           inventory.assigned_count AS "assignedCount",
+           inventory.blocked_count AS "blockedCount",
+           inventory.available_count AS "availableCount",
+           inventory.status,
+           inventory.source_freshness AS "sourceFreshness",
+           COALESCE(blocks.items, '[]'::jsonb) AS "blocks",
+           COALESCE(assignments.refs, '[]'::jsonb) AS "assignmentRefs"
+         FROM pms.inventory_days inventory
+         JOIN pms.room_types room_type
+           ON room_type.id = inventory.room_type_id
+          AND room_type.property_id = inventory.property_id
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(
+                    jsonb_build_object(
+                      'blockId', block.id::text,
+                      'roomTypeId', block.room_type_id::text,
+                      'roomId', block.room_id::text,
+                      'startsOn', block.starts_on::text,
+                      'endsOn', block.ends_on::text,
+                      'blockedCount', block.blocked_count,
+                      'reason', block.reason,
+                      'status', block.status
+                    )
+                    ORDER BY block.starts_on ASC, block.id ASC
+                  ) AS items
+           FROM pms.room_blocks block
+           WHERE block.property_id = inventory.property_id
+             AND block.room_type_id = inventory.room_type_id
+             AND block.status = 'active'
+             AND block.starts_on <= inventory.stay_date
+             AND block.ends_on >= inventory.stay_date
+         ) blocks ON TRUE
+         LEFT JOIN LATERAL (
+           SELECT jsonb_agg(assignment.id::text ORDER BY assignment.position, assignment.id) AS refs
+           FROM pms.operational_booking_assignments assignment
+           JOIN booking.guest_bookings booking
+             ON booking.id = assignment.guest_booking_id
+            AND booking.property_id = assignment.property_id
+           WHERE assignment.property_id = inventory.property_id
+             AND assignment.room_type_id = inventory.room_type_id
+             AND assignment.assignment_status NOT IN ('canceled', 'released')
+             AND booking.check_in <= inventory.stay_date
+             AND booking.check_out > inventory.stay_date
+         ) assignments ON TRUE
+         WHERE inventory.property_id = $1
+           AND inventory.stay_date >= $2::date
+           AND inventory.stay_date <= $3::date
+         ORDER BY inventory.stay_date ASC, room_type.sort_order ASC`,
+        [propertyId, range.from, range.to],
+      );
+
+      return {
+        items: result.rows.map(toPmsCalendarDay),
+        sourceFreshness: {},
+      };
+    },
+
+    async listRoomBlocksByPropertyId(propertyId, range) {
+      const { whereSql, params } = toRoomBlockWhere(propertyId, range);
+      const result = await pool.query<TargetPmsRoomBlockRow>(
+        `SELECT
+           block.id::text AS "blockId",
+           block.room_type_id::text AS "roomTypeId",
+           block.room_id::text AS "roomId",
+           block.starts_on AS "startsOn",
+           block.ends_on AS "endsOn",
+           block.blocked_count AS "blockedCount",
+           block.reason,
+           block.status
+         FROM pms.room_blocks block
+         JOIN pms.room_types room_type
+           ON room_type.id = block.room_type_id
+          AND room_type.property_id = block.property_id
+         WHERE ${whereSql}
+         ORDER BY block.starts_on ASC, room_type.sort_order ASC, block.id ASC`,
+        params,
+      );
+
+      return {
+        items: result.rows.map(toPmsRoomBlockSummary),
+        sourceFreshness: {},
+      };
+    },
+
+    async listReservationsByPropertyId(propertyId, filters) {
+      const { whereSql, params } = toReservationWhere(propertyId, filters);
+      const listParams = [...params, filters.limit, filters.offset];
+      const limitParam = params.length + 1;
+      const offsetParam = params.length + 2;
+
+      const [reservationResult, countResult] = await Promise.all([
+        pool.query<TargetPmsOperationalReservationRow>(
+          `${PMS_OPERATIONAL_RESERVATION_SELECT_SQL}
+           WHERE ${whereSql}
+           ORDER BY booking.check_in ASC, booking.public_reference ASC
+           LIMIT $${limitParam} OFFSET $${offsetParam}`,
+          listParams,
+        ),
+        pool.query<{ total: string }>(
+          `SELECT COUNT(*)::text AS total
+           FROM booking.guest_bookings booking
+           LEFT JOIN LATERAL (
+             SELECT assignment.assignment_status
+             FROM pms.operational_booking_assignments assignment
+             WHERE assignment.guest_booking_id = booking.id
+               AND assignment.property_id = booking.property_id
+             ORDER BY assignment.position, assignment.created_at, assignment.id
+             LIMIT 1
+           ) primary_assignment ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT guest.first_name, guest.last_name, guest.email, guest.phone
+             FROM booking.booking_guests guest
+             WHERE guest.guest_booking_id = booking.id
+             ORDER BY
+               CASE guest.guest_role
+                 WHEN 'booker' THEN 0
+                 WHEN 'primary_guest' THEN 1
+                 ELSE 2
+               END,
+               guest.created_at,
+               guest.id
+             LIMIT 1
+           ) primary_guest ON TRUE
+           WHERE ${whereSql}`,
+          params,
+        ),
+      ]);
+
+      return {
+        items: reservationResult.rows.map(toPmsOperationalReservation),
+        total: toInteger(countResult.rows[0]?.total ?? 0),
+        sourceFreshness: {},
+      };
+    },
+
+    async findReservationByGuestBookingId(propertyId, guestBookingId) {
+      const result = await pool.query<TargetPmsOperationalReservationRow>(
+        `${PMS_OPERATIONAL_RESERVATION_SELECT_SQL}
+         WHERE booking.property_id = $1
+           AND booking.id = $2`,
+        [propertyId, guestBookingId],
+      );
+
+      return result.rows[0] ? toPmsOperationalReservation(result.rows[0]) : null;
+    },
+
     async close() {
       await pool.end?.();
     },
@@ -172,6 +421,168 @@ type TargetPmsRoomTypeRow = {
   activeRuleCount: string | number;
   roomCount: string | number;
 };
+
+type TargetPmsRoomBlockRow = {
+  blockId: string;
+  roomTypeId: string;
+  roomId: string | null;
+  startsOn: Date | string;
+  endsOn: Date | string;
+  blockedCount: number;
+  reason: string;
+  status: PmsRoomBlockStatus;
+};
+
+type TargetPmsCalendarDayRow = {
+  stayDate: Date | string;
+  roomTypeId: string;
+  totalCount: number;
+  assignedCount: number;
+  blockedCount: number;
+  availableCount: number;
+  status: PmsCalendarStatus;
+  blocks: unknown;
+  assignmentRefs: unknown;
+  sourceFreshness: unknown;
+};
+
+type TargetPmsOperationalReservationRow = {
+  guestBookingId: string;
+  bookingReference: string;
+  status: string;
+  source: PmsReservationSource;
+  checkIn: Date | string;
+  checkOut: Date | string;
+  adults: number;
+  children: number;
+  primaryGuestDisplayName: string | null;
+  primaryGuestEmail: string | null;
+  primaryGuestPhone: string | null;
+  assignments: unknown;
+  checkinCompletedAt: Date | string | null;
+  checkinPendingFlags: unknown;
+  checkoutCompletedAt: Date | string | null;
+  checkoutPendingFlags: unknown;
+  privateNoteCount: string | number;
+  additionalGuestCount: string | number;
+};
+
+const PMS_OPERATIONAL_RESERVATION_STATUS_SQL = `CASE
+  WHEN primary_assignment.assignment_status IN ('checked_in', 'in_house', 'checked_out')
+    THEN primary_assignment.assignment_status
+  ELSE booking.lifecycle_status
+END`;
+
+const PMS_OPERATIONAL_RESERVATION_SOURCE_SQL = `COALESCE(
+  primary_assignment.source,
+  CASE
+    WHEN booking.source_system = 'migration' THEN 'migration'
+    WHEN booking.source_system = 'pms' THEN 'migration'
+    ELSE 'direct_booking'
+  END
+)`;
+
+const PMS_OPERATIONAL_RESERVATION_SELECT_SQL = `SELECT
+  booking.id::text AS "guestBookingId",
+  booking.public_reference AS "bookingReference",
+  ${PMS_OPERATIONAL_RESERVATION_STATUS_SQL} AS "status",
+  ${PMS_OPERATIONAL_RESERVATION_SOURCE_SQL} AS "source",
+  booking.check_in AS "checkIn",
+  booking.check_out AS "checkOut",
+  booking.adults,
+  booking.children,
+  NULLIF(
+    trim(
+      concat_ws(
+        ' ',
+        NULLIF(primary_guest.first_name, ''),
+        NULLIF(primary_guest.last_name, '')
+      )
+    ),
+    ''
+  ) AS "primaryGuestDisplayName",
+  primary_guest.email AS "primaryGuestEmail",
+  primary_guest.phone AS "primaryGuestPhone",
+  COALESCE(assignments.items, '[]'::jsonb) AS "assignments",
+  checkin.completed_at AS "checkinCompletedAt",
+  COALESCE(checkin.pending_flags, '[]'::jsonb) AS "checkinPendingFlags",
+  checkout.completed_at AS "checkoutCompletedAt",
+  COALESCE(checkout.pending_flags, '[]'::jsonb) AS "checkoutPendingFlags",
+  COALESCE(private_notes.note_count, 0) AS "privateNoteCount",
+  COALESCE(additional_guests.guest_count, 0) AS "additionalGuestCount"
+FROM booking.guest_bookings booking
+LEFT JOIN LATERAL (
+  SELECT assignment.*
+  FROM pms.operational_booking_assignments assignment
+  WHERE assignment.guest_booking_id = booking.id
+    AND assignment.property_id = booking.property_id
+  ORDER BY assignment.position, assignment.created_at, assignment.id
+  LIMIT 1
+) primary_assignment ON TRUE
+LEFT JOIN LATERAL (
+  SELECT guest.first_name, guest.last_name, guest.email, guest.phone
+  FROM booking.booking_guests guest
+  WHERE guest.guest_booking_id = booking.id
+  ORDER BY
+    CASE guest.guest_role
+      WHEN 'booker' THEN 0
+      WHEN 'primary_guest' THEN 1
+      ELSE 2
+    END,
+    guest.created_at,
+    guest.id
+  LIMIT 1
+) primary_guest ON TRUE
+LEFT JOIN LATERAL (
+  SELECT jsonb_agg(
+           jsonb_build_object(
+             'assignmentId', assignment.id::text,
+             'roomTypeId', assignment.room_type_id::text,
+             'ratePlanId', assignment.rate_plan_id::text,
+             'roomId', assignment.room_id::text,
+             'roomNumber', room.room_number,
+             'position', assignment.position,
+             'assignmentStatus', assignment.assignment_status,
+             'channel', assignment.channel,
+             'assignedAt', to_jsonb(assignment.assigned_at)
+           )
+           ORDER BY assignment.position, assignment.created_at, assignment.id
+         ) AS items
+  FROM pms.operational_booking_assignments assignment
+  LEFT JOIN pms.rooms room
+    ON room.id = assignment.room_id
+   AND room.property_id = assignment.property_id
+  WHERE assignment.guest_booking_id = booking.id
+    AND assignment.property_id = booking.property_id
+) assignments ON TRUE
+LEFT JOIN LATERAL (
+  SELECT record.completed_at, record.pending_flags
+  FROM pms.booking_checkin_records record
+  WHERE record.guest_booking_id = booking.id
+    AND record.property_id = booking.property_id
+  ORDER BY record.completed_at DESC, record.id DESC
+  LIMIT 1
+) checkin ON TRUE
+LEFT JOIN LATERAL (
+  SELECT record.completed_at, record.pending_flags
+  FROM pms.booking_checkout_records record
+  WHERE record.guest_booking_id = booking.id
+    AND record.property_id = booking.property_id
+  ORDER BY record.completed_at DESC, record.id DESC
+  LIMIT 1
+) checkout ON TRUE
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS note_count
+  FROM pms.booking_notes_private note
+  WHERE note.guest_booking_id = booking.id
+    AND note.property_id = booking.property_id
+) private_notes ON TRUE
+LEFT JOIN LATERAL (
+  SELECT COUNT(*) AS guest_count
+  FROM booking.booking_guests guest
+  WHERE guest.guest_booking_id = booking.id
+    AND guest.guest_role = 'additional_guest'
+) additional_guests ON TRUE`;
 
 async function listRoomTypes(
   pool: PmsOperationsReadPool,
@@ -296,13 +707,211 @@ function toPmsRoomType(row: TargetPmsRoomTypeRow): PmsRoomType {
   };
 }
 
+function toPmsRoomBlockSummary(row: TargetPmsRoomBlockRow): PmsRoomBlockSummary {
+  return {
+    blockId: row.blockId,
+    roomTypeId: row.roomTypeId,
+    roomId: row.roomId,
+    startsOn: toDateOnly(row.startsOn),
+    endsOn: toDateOnly(row.endsOn),
+    blockedCount: toInteger(row.blockedCount),
+    reason: row.reason,
+    status: row.status,
+  };
+}
+
+function toPmsCalendarDay(row: TargetPmsCalendarDayRow): PmsCalendarDay {
+  return {
+    stayDate: toDateOnly(row.stayDate),
+    roomTypeId: row.roomTypeId,
+    totalCount: toInteger(row.totalCount),
+    assignedCount: toInteger(row.assignedCount),
+    blockedCount: toInteger(row.blockedCount),
+    availableCount: toInteger(row.availableCount),
+    status: row.status,
+    blocks: toRoomBlockSummaries(row.blocks),
+    assignmentRefs: toStringArray(row.assignmentRefs),
+    sourceFreshness: toJsonRecord(row.sourceFreshness),
+  };
+}
+
+function toPmsOperationalReservation(
+  row: TargetPmsOperationalReservationRow,
+): PmsOperationalReservation {
+  return {
+    guestBookingId: row.guestBookingId,
+    bookingReference: row.bookingReference,
+    status: row.status,
+    source: row.source,
+    stay: {
+      checkIn: toDateOnly(row.checkIn),
+      checkOut: toDateOnly(row.checkOut),
+      adults: row.adults,
+      children: row.children,
+    },
+    primaryGuest: {
+      displayName: row.primaryGuestDisplayName ?? "",
+      email: row.primaryGuestEmail,
+      phone: row.primaryGuestPhone,
+    },
+    assignments: toOperationalAssignments(row.assignments),
+    checkin: {
+      completedAt: toIsoDateTimeOrNull(row.checkinCompletedAt),
+      pendingFlags: toStringArray(row.checkinPendingFlags),
+    },
+    checkout: {
+      completedAt: toIsoDateTimeOrNull(row.checkoutCompletedAt),
+      pendingFlags: toStringArray(row.checkoutPendingFlags),
+    },
+    privateNoteCount: toInteger(row.privateNoteCount),
+    additionalGuestCount: toInteger(row.additionalGuestCount),
+  };
+}
+
+function toRoomBlockSummaries(value: unknown): PmsRoomBlockSummary[] {
+  return toRecordArray(value)
+    .map((item) => ({
+      blockId: String(item.blockId ?? ""),
+      roomTypeId: String(item.roomTypeId ?? ""),
+      roomId: typeof item.roomId === "string" ? item.roomId : null,
+      startsOn: toDateOnly(String(item.startsOn ?? "")),
+      endsOn: toDateOnly(String(item.endsOn ?? "")),
+      blockedCount: toInteger(Number(item.blockedCount ?? 0)),
+      reason: String(item.reason ?? ""),
+      status: toRoomBlockStatus(item.status),
+    }))
+    .filter((item) => item.blockId.length > 0 && item.roomTypeId.length > 0);
+}
+
+function toOperationalAssignments(value: unknown): PmsOperationalAssignment[] {
+  return toRecordArray(value)
+    .map((item) => ({
+      assignmentId: String(item.assignmentId ?? ""),
+      roomTypeId: String(item.roomTypeId ?? ""),
+      ratePlanId: typeof item.ratePlanId === "string" ? item.ratePlanId : null,
+      roomId: typeof item.roomId === "string" ? item.roomId : null,
+      roomNumber: typeof item.roomNumber === "string" ? item.roomNumber : null,
+      position: toInteger(Number(item.position ?? 0)),
+      assignmentStatus: toAssignmentStatus(item.assignmentStatus),
+      channel: String(item.channel ?? "direct"),
+      assignedAt: toIsoDateTimeOrNull(
+        typeof item.assignedAt === "string" || item.assignedAt instanceof Date
+          ? item.assignedAt
+          : null,
+      ),
+    }))
+    .filter((item) => item.assignmentId.length > 0 && item.roomTypeId.length > 0);
+}
+
+function toRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+  );
+}
+
+function toRoomBlockStatus(value: unknown): PmsRoomBlockStatus {
+  return value === "released" || value === "expired" ? value : "active";
+}
+
+function toAssignmentStatus(value: unknown): PmsOperationalAssignmentStatus {
+  return value === "assigned" ||
+    value === "checked_in" ||
+    value === "in_house" ||
+    value === "checked_out" ||
+    value === "canceled" ||
+    value === "released"
+    ? value
+    : "pending";
+}
+
+function toRoomBlockWhere(
+  propertyId: string,
+  range?: { from?: PmsDate; to?: PmsDate },
+): { whereSql: string; params: unknown[] } {
+  const params: unknown[] = [propertyId];
+  const conditions = ["block.property_id = $1"];
+
+  if (range?.from) {
+    params.push(range.from);
+    conditions.push(`block.ends_on >= $${params.length}::date`);
+  }
+
+  if (range?.to) {
+    params.push(range.to);
+    conditions.push(`block.starts_on <= $${params.length}::date`);
+  }
+
+  return { whereSql: conditions.join(" AND "), params };
+}
+
+function toReservationWhere(
+  propertyId: string,
+  filters: PmsReservationListFilters,
+): { whereSql: string; params: unknown[] } {
+  const params: unknown[] = [propertyId];
+  const conditions = ["booking.property_id = $1"];
+
+  if (filters.status) {
+    params.push(filters.status);
+    conditions.push(`${PMS_OPERATIONAL_RESERVATION_STATUS_SQL} = $${params.length}`);
+  }
+
+  if (filters.arrivalFrom) {
+    params.push(filters.arrivalFrom);
+    conditions.push(`booking.check_in >= $${params.length}::date`);
+  }
+
+  if (filters.arrivalTo) {
+    params.push(filters.arrivalTo);
+    conditions.push(`booking.check_in <= $${params.length}::date`);
+  }
+
+  if (filters.search) {
+    params.push(`%${filters.search}%`);
+    conditions.push(
+      `(booking.public_reference ILIKE $${params.length}
+        OR primary_guest.first_name ILIKE $${params.length}
+        OR primary_guest.last_name ILIKE $${params.length}
+        OR CONCAT(primary_guest.first_name, ' ', primary_guest.last_name) ILIKE $${params.length}
+        OR primary_guest.email ILIKE $${params.length}
+        OR primary_guest.phone ILIKE $${params.length}
+        OR EXISTS (
+          SELECT 1
+          FROM pms.operational_booking_assignments assignment_search
+          WHERE assignment_search.guest_booking_id = booking.id
+            AND assignment_search.property_id = booking.property_id
+            AND (
+              assignment_search.pms_reservation_ref ILIKE $${params.length}
+              OR assignment_search.external_reservation_id ILIKE $${params.length}
+            )
+        ))`,
+    );
+  }
+
+  return { whereSql: conditions.join(" AND "), params };
+}
+
 function toJsonRecord(value: unknown): PmsJsonRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return Object.fromEntries(
-    Object.entries(value).filter((entry): entry is [string, PmsJsonScalar] =>
-      isJsonScalar(entry[1]),
-    ),
+    Object.entries(value)
+      .map(([key, raw]) => [key, toJsonValue(raw)] as const)
+      .filter((entry): entry is [string, PmsJsonValue] => entry[1] !== undefined),
   );
+}
+
+function toJsonValue(value: unknown): PmsJsonValue | undefined {
+  if (isJsonScalar(value)) return value;
+  if (Array.isArray(value)) {
+    return value
+      .map(toJsonValue)
+      .filter((item): item is PmsJsonValue => item !== undefined);
+  }
+  if (value && typeof value === "object") {
+    return toJsonRecord(value);
+  }
+  return undefined;
 }
 
 function toNumberRecord(value: unknown): Record<string, number> {
@@ -389,4 +998,19 @@ function toDecimalString(value: string | number | unknown): string {
 function toInteger(value: string | number): number {
   const parsed = typeof value === "number" ? value : Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toDateOnly(value: Date | string): string {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString().slice(0, 10) : "";
+  }
+
+  return value.slice(0, 10);
+}
+
+function toIsoDateTimeOrNull(value: Date | string | null): string | null {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toISOString();
 }
