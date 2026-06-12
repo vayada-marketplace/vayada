@@ -6,8 +6,8 @@
     "identity.organization_memberships": 1,
     "identity.organization_resource_links": 2,
     "identity.product_entitlements": 2,
-    "identity.permission_catalog": 18,
-    "identity.role_permission_grants": 8
+    "identity.permission_catalog": 19,
+    "identity.role_permission_grants": 10
   },
   "idStability": {
     "identity.users": ["a1b2c3d4-0000-0000-0000-000000000001"],
@@ -93,6 +93,11 @@
       {
         "organizationKind": "hotel_group",
         "roleKey": "hotel_owner",
+        "permissionKey": "marketplace.collaboration.read"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
         "permissionKey": "marketplace.collaboration.review"
       }
     ],
@@ -101,6 +106,7 @@
       "booking.reservation.read",
       "pms.booking.update",
       "pms.finance.read",
+      "marketplace.collaboration.read",
       "marketplace.collaboration.review",
       "booking.analytics.read",
       "intelligence.ask.read"

@@ -485,16 +485,237 @@ export type MarketplaceHotelSelfServiceError = {
 // Collaboration lifecycle
 // ---------------------------------------------------------------------------
 
+export const MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION =
+  "marketplace-collaboration-reads.v1" as const;
+
+export type MarketplaceCollaborationReadsContractVersion =
+  typeof MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION;
+
+export const MARKETPLACE_COLLABORATION_READ_ENDPOINTS = {
+  myCollaborations: {
+    method: "GET",
+    path: "/api/marketplace/collaborations/me",
+    doc: "engineering/marketplace-collaboration-reads-contract.md",
+  },
+  collaboration: {
+    method: "GET",
+    path: "/api/marketplace/collaborations/{collaborationId}",
+    doc: "engineering/marketplace-collaboration-reads-contract.md",
+  },
+  conversations: {
+    method: "GET",
+    path: "/api/marketplace/collaborations/conversations",
+    doc: "engineering/marketplace-collaboration-reads-contract.md",
+  },
+  messages: {
+    method: "GET",
+    path: "/api/marketplace/collaborations/{collaborationId}/messages",
+    doc: "engineering/marketplace-collaboration-reads-contract.md",
+  },
+} as const;
+
 export const COLLABORATION_STATUSES = [
   "pending",
+  "negotiating",
   "accepted",
   "active",
   "completed",
   "cancelled",
   "rejected",
+  "declined",
 ] as const;
 
 export type CollaborationStatus = (typeof COLLABORATION_STATUSES)[number];
+
+export const MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES = ["creator", "hotel"] as const;
+
+export type MarketplaceCollaborationAuthorizationSide =
+  (typeof MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES)[number];
+
+export type MarketplaceCollaborationAuthorizationMode =
+  | "creator_workspace_resource_link"
+  | "hotel_group_resource_link";
+
+export type MarketplaceCollaborationReadPolicy = {
+  permission: "marketplace.collaboration.read";
+  side: MarketplaceCollaborationAuthorizationSide;
+  selectedOrganizationKind: "creator_workspace" | "hotel_group";
+  requiredResources: readonly {
+    product: "marketplace";
+    resourceType: "creator_profile" | "hotel_profile" | "hotel_listing";
+    relationship: "owner" | "operator";
+  }[];
+};
+
+export const MARKETPLACE_COLLABORATION_CREATOR_READ_POLICY: MarketplaceCollaborationReadPolicy = {
+  permission: "marketplace.collaboration.read",
+  side: "creator",
+  selectedOrganizationKind: "creator_workspace",
+  requiredResources: [
+    {
+      product: "marketplace",
+      resourceType: "creator_profile",
+      relationship: "owner",
+    },
+  ],
+};
+
+export const MARKETPLACE_COLLABORATION_HOTEL_READ_POLICY: MarketplaceCollaborationReadPolicy = {
+  permission: "marketplace.collaboration.read",
+  side: "hotel",
+  selectedOrganizationKind: "hotel_group",
+  requiredResources: [
+    {
+      product: "marketplace",
+      resourceType: "hotel_profile",
+      relationship: "owner",
+    },
+    {
+      product: "marketplace",
+      resourceType: "hotel_listing",
+      relationship: "operator",
+    },
+  ],
+};
+
+export type MarketplaceCollaborationParticipant = {
+  side: MarketplaceCollaborationAuthorizationSide;
+  organizationId: string;
+  profileId: string;
+  displayName: string;
+  avatarUrl: string | null;
+};
+
+export type MarketplaceCollaborationDeliverable = {
+  deliverableId: string;
+  platform: string;
+  type: string;
+  quantity: number;
+  status: "pending" | "completed";
+  completedAt: MarketplaceUtcDateTime | null;
+};
+
+export type MarketplaceCollaborationRead = {
+  contractVersion: MarketplaceCollaborationReadsContractVersion;
+  authorizationMode: MarketplaceCollaborationAuthorizationMode;
+  collaborationId: string;
+  listingId: string;
+  creatorId: string;
+  hotelProfileId: string;
+  side: MarketplaceCollaborationAuthorizationSide;
+  initiatorSide: MarketplaceCollaborationAuthorizationSide;
+  isInitiator: boolean;
+  status: CollaborationStatus;
+  collaborationType: MarketplaceCollaborationType | null;
+  listingName: string;
+  listingLocation: string | null;
+  creator: MarketplaceCollaborationParticipant;
+  hotel: MarketplaceCollaborationParticipant;
+  terms: {
+    freeStayMinNights: number | null;
+    freeStayMaxNights: number | null;
+    paidAmount: MarketplaceDecimalAmount | null;
+    currency: MarketplaceCurrencyCode | null;
+    discountPercentage: number | null;
+    creatorFee: MarketplaceDecimalAmount | null;
+    travelDateFrom: string | null;
+    travelDateTo: string | null;
+    preferredDateFrom: string | null;
+    preferredDateTo: string | null;
+    preferredMonths: string[];
+  };
+  deliverables: MarketplaceCollaborationDeliverable[];
+  lastMessageAt: MarketplaceUtcDateTime | null;
+  createdAt: MarketplaceUtcDateTime;
+  updatedAt: MarketplaceUtcDateTime;
+};
+
+export type MarketplaceCollaborationListRequest = {
+  side: MarketplaceCollaborationAuthorizationSide;
+  status?: CollaborationStatus;
+  initiatedBy?: MarketplaceCollaborationAuthorizationSide;
+  listingId?: string;
+};
+
+export type MarketplaceCollaborationListResponse = {
+  contractVersion: MarketplaceCollaborationReadsContractVersion;
+  authorizationMode: MarketplaceCollaborationAuthorizationMode;
+  items: MarketplaceCollaborationRead[];
+};
+
+export type MarketplaceConversationSummary = {
+  contractVersion: MarketplaceCollaborationReadsContractVersion;
+  collaborationId: string;
+  side: MarketplaceCollaborationAuthorizationSide;
+  partnerName: string;
+  partnerAvatarUrl: string | null;
+  listingName: string | null;
+  collaborationStatus: CollaborationStatus;
+  lastMessageContent: string | null;
+  lastMessageAt: MarketplaceUtcDateTime | null;
+  unreadCount: number;
+};
+
+export type MarketplaceMessageContentType = "text" | "image" | "system";
+
+export type MarketplaceCollaborationMessage = {
+  contractVersion: MarketplaceCollaborationReadsContractVersion;
+  messageId: string;
+  collaborationId: string;
+  senderUserId: string | null;
+  senderName: string | null;
+  senderAvatarUrl: string | null;
+  content: string;
+  contentType: MarketplaceMessageContentType;
+  metadata: Record<string, unknown> | null;
+  createdAt: MarketplaceUtcDateTime;
+};
+
+export type MarketplaceCollaborationMessagesResponse = {
+  contractVersion: MarketplaceCollaborationReadsContractVersion;
+  collaborationId: string;
+  authorizationMode: MarketplaceCollaborationAuthorizationMode;
+  items: MarketplaceCollaborationMessage[];
+};
+
+export const MARKETPLACE_COLLABORATION_READ_PRIVATE_KEYS = [
+  "user_id",
+  "userId",
+  "owner_user_id",
+  "ownerUserId",
+  "workosOrgId",
+  "membershipId",
+  "creator_email",
+  "creatorEmail",
+  "hotel_owner_email",
+  "hotelOwnerEmail",
+  "legacyJwtClaims",
+  "pmsHotelId",
+  "pms_database_url",
+] as const;
+
+export type MarketplaceCollaborationReadPrivateKey =
+  (typeof MARKETPLACE_COLLABORATION_READ_PRIVATE_KEYS)[number];
+
+export const MARKETPLACE_COLLABORATION_READ_ERROR_CODES = [
+  "invalid_query",
+  "unauthorized",
+  "forbidden",
+  "missing_creator_resource_link",
+  "missing_hotel_resource_link",
+  "collaboration_not_found",
+  "internal_error",
+] as const;
+
+export type MarketplaceCollaborationReadErrorCode =
+  (typeof MARKETPLACE_COLLABORATION_READ_ERROR_CODES)[number];
+
+export type MarketplaceCollaborationReadError = {
+  statusCode: 400 | 401 | 403 | 404 | 500;
+  code: MarketplaceCollaborationReadErrorCode;
+  category: "validation" | "auth" | "not_found" | "internal";
+  message: string;
+};
 
 // ---------------------------------------------------------------------------
 // Affiliate / referral contract
