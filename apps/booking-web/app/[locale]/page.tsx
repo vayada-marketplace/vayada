@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense, useCallback, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import Image from "next/image";
@@ -20,12 +20,20 @@ import { useCurrency } from "@/contexts/CurrencyContext";
 import { trackEvent } from "@/services/api/tracking";
 import { hotelService } from "@/services/api/hotel";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
-import { getFlexibleNightlyRates } from "@/lib/constants/booking";
+import { getFlexibleNightlyRates, isFlexibleCancellationExpired } from "@/lib/constants/booking";
+import type { RoomType } from "@/lib/types";
 
 interface AppliedPromo {
   code: string;
   discountType: string;
   discountValue: number;
+}
+
+type RateType = "flexible" | "nonrefundable";
+
+interface PendingRateSelection {
+  roomId: string;
+  rateType: RateType;
 }
 
 function PromoPopover({
@@ -178,6 +186,10 @@ function HomePageContent() {
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
   const [mobileResultView, setMobileResultView] = useState<"list" | "map">("list");
+  const [pendingRateSelection, setPendingRateSelection] = useState<PendingRateSelection | null>(
+    null,
+  );
+  const [isRateNavigationPending, startRateNavigation] = useTransition();
   const roomsSectionRef = useRef<HTMLDivElement>(null);
   const roomRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -259,6 +271,87 @@ function HomePageContent() {
   })();
 
   const { steps: STEPS, hasAddons } = useBookingSteps("rooms");
+  const isSelectingRate = pendingRateSelection !== null || isRateNavigationPending;
+
+  const buildRateTarget = useCallback(
+    (roomId: string, requiredRooms: number, rateType: RateType) => {
+      const params = new URLSearchParams({
+        room: roomId,
+        checkIn: committedCheckIn,
+        checkOut: committedCheckOut,
+        adults: String(committedAdults),
+        children: String(committedChildren),
+        rooms: String(requiredRooms),
+        rateType,
+      });
+      if (appliedPromo) params.set("promoCode", appliedPromo.code);
+      return `${hasAddons ? "/addons" : "/book"}?${params.toString()}`;
+    },
+    [
+      appliedPromo,
+      committedAdults,
+      committedCheckIn,
+      committedCheckOut,
+      committedChildren,
+      hasAddons,
+    ],
+  );
+
+  const getSelectedAvailableRate = useCallback(
+    (room: RoomType): RateType | null => {
+      const selectedRate = selectedRates[room.id] as RateType | null | undefined;
+      const flexibleExpired = isFlexibleCancellationExpired(committedCheckIn, room, hotel.timezone);
+      const showFlexibleRate =
+        room.flexibleRateEnabled !== false && (!flexibleExpired || room.nonRefundableRate == null);
+      const hasNonRefundable = room.nonRefundableRate != null;
+
+      if (selectedRate === "flexible" && showFlexibleRate) return "flexible";
+      if (selectedRate === "nonrefundable" && hasNonRefundable) return "nonrefundable";
+      if (hasNonRefundable) return "nonrefundable";
+      if (showFlexibleRate) return "flexible";
+      return null;
+    },
+    [committedCheckIn, hotel.timezone, selectedRates],
+  );
+
+  useEffect(() => {
+    if (rooms.length === 0) return;
+    const totalGuests = committedAdults + committedChildren;
+    const targets = new Set<string>();
+    for (const room of rooms.slice(0, 8)) {
+      const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy);
+      if (room.remainingRooms < requiredRooms) continue;
+      const rateType = getSelectedAvailableRate(room);
+      if (!rateType) continue;
+      targets.add(buildRateTarget(room.id, requiredRooms, rateType));
+    }
+    targets.forEach((target) => {
+      router.prefetch(target);
+    });
+  }, [
+    buildRateTarget,
+    committedAdults,
+    committedChildren,
+    getSelectedAvailableRate,
+    rooms,
+    router,
+  ]);
+
+  const handleSelectRate = (room: RoomType, rateType: RateType, requiredRooms: number) => {
+    if (pendingRateSelection || isRateNavigationPending) return;
+    const target = buildRateTarget(room.id, requiredRooms, rateType);
+
+    setPendingRateSelection({ roomId: room.id, rateType });
+
+    startRateNavigation(() => {
+      try {
+        router.push(target);
+      } catch (error) {
+        setPendingRateSelection(null);
+        throw error;
+      }
+    });
+  };
 
   const toggleFilter = (filter: string) => {
     setActiveFilters((prev) =>
@@ -687,9 +780,10 @@ function HomePageContent() {
                         setDetailModalIndex(roomIndex);
                       }}
                       onSelectRate={(rateType, requiredRooms) => {
-                        const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
-                        router.push(hasAddons ? `/addons?${params}` : `/book?${params}`);
+                        handleSelectRate(room, rateType, requiredRooms);
                       }}
+                      selectRateDisabled={isSelectingRate}
+                      selectRatePending={pendingRateSelection?.roomId === room.id}
                     />
                   </div>
                 ))}
@@ -749,9 +843,10 @@ function HomePageContent() {
               pointsOfInterest={hotel.pointsOfInterest || []}
               onSelectRate={(rateType) => {
                 if (modalSoldOut) return;
-                const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
-                router.push(hasAddons ? `/addons?${params}` : `/book?${params}`);
+                handleSelectRate(modalRoom, rateType, modalRequiredRooms);
               }}
+              selectRateDisabled={isSelectingRate}
+              selectRatePending={pendingRateSelection?.roomId === modalRoom.id}
             />
           );
         })()}

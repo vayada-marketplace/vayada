@@ -28,6 +28,8 @@ interface RoomCardProps {
   highlighted?: boolean;
   onHover?: (hovered: boolean) => void;
   onSelectCard?: () => void;
+  selectRateDisabled?: boolean;
+  selectRatePending?: boolean;
 }
 
 export default function RoomCard({
@@ -46,6 +48,8 @@ export default function RoomCard({
   highlighted = false,
   onHover,
   onSelectCard,
+  selectRateDisabled = false,
+  selectRatePending = false,
 }: RoomCardProps) {
   const t = useTranslations("home");
   const tc = useTranslations("common");
@@ -346,6 +350,7 @@ export default function RoomCard({
                   nightlyLabel={nonRefundableNightlyLabel}
                   discountPercent={discount}
                   soldOut={soldOut}
+                  disabled={selectRateDisabled}
                 />
               )}
               {showFlexibleRate && (
@@ -359,18 +364,36 @@ export default function RoomCard({
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
                   nightlyLabel={flexibleNightlyLabel}
                   soldOut={soldOut}
+                  disabled={selectRateDisabled}
                 />
               )}
             </div>
             <button
+              data-testid={`select-rate-${room.id}`}
               onClick={() => {
-                if (soldOut || !effectiveSelectedRate) return;
+                if (soldOut || !effectiveSelectedRate || selectRateDisabled) return;
                 onSelectRate(effectiveSelectedRate, requiredRooms);
               }}
-              disabled={soldOut || !effectiveSelectedRate}
+              disabled={soldOut || !effectiveSelectedRate || selectRateDisabled}
+              aria-busy={selectRatePending}
+              aria-live={selectRatePending ? "polite" : undefined}
               className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
             >
-              {soldOut ? t("soldOut") : t("selectThisRate")}
+              <span className="inline-flex items-center justify-center gap-2">
+                {selectRatePending && (
+                  <span
+                    className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin"
+                    aria-hidden="true"
+                  />
+                )}
+                <span>
+                  {soldOut
+                    ? t("soldOut")
+                    : selectRatePending
+                      ? t("selectingRate")
+                      : t("selectThisRate")}
+                </span>
+              </span>
             </button>
             {!soldOut && room.remainingRooms <= 3 && (
               <p
