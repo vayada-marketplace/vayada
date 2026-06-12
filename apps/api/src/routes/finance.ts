@@ -11,6 +11,7 @@ import {
   toFinancePaymentSettingsResponse,
   toPublicPaymentCapabilityProjection,
   type CancellationPolicy,
+  type FinanceCommandMeta,
   type FinanceFinancialSummaryResponse,
   type FinanceInvoiceCsvExportResponse,
   type FinanceInvoiceDetail,
@@ -23,6 +24,9 @@ import {
   type FinanceInvoiceStatusCounts,
   type FinanceJsonObject,
   type FinanceJsonPolicy,
+  type FinanceManualPaymentRecordCommand,
+  type FinanceManualPaymentRecordResponse,
+  type FinanceManualPaymentRecordResult,
   type FinancePaymentLedgerItem,
   type FinancePaymentLedgerQuery,
   type FinancePaymentLedgerResponse,
@@ -36,17 +40,36 @@ import {
   type FinanceRoutePaymentProvider,
 } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import type { PublicHotelProfileRepository } from "./aiHotels.js";
 import { enforceRoutePolicy, type RouteAuthorizationPolicy } from "./policy.js";
 
-export type FinancePropertySettingsReadPool = {
+const MANUAL_PAYMENT_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "audit_event",
+  "booking_projection_refresh",
+  "pms_projection_refresh",
+];
+
+type FinanceQueryExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: readonly unknown[],
   ): Promise<Pick<QueryResult<T>, "rows">>;
+};
+
+export type FinancePropertySettingsReadPool = FinanceQueryExecutor & {
+  connect?(): Promise<FinancePropertySettingsWriteClient>;
   end(): Promise<void>;
+};
+
+type FinancePropertySettingsWriteClient = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows" | "rowCount">>;
+  release?(): void;
 };
 
 export type FinanceRoutesOptions = {
@@ -169,6 +192,16 @@ type FinancePaymentLedgerRow = {
   sourceFreshness: unknown;
 };
 
+type FinanceManualPaymentWriteRow = {
+  paymentId: string;
+  replay: boolean;
+};
+
+type FinanceManualPaymentIdempotencyRow = {
+  status: string;
+  requestFingerprintHash: string;
+};
+
 type FinanceAccessError = {
   statusCode: 401 | 403;
   code:
@@ -183,9 +216,30 @@ type FinanceAccessError = {
 
 type FinanceValidationError = {
   statusCode: 400;
-  code: "invalid_query" | "invalid_provider" | "invalid_payment_method" | "invalid_date_range";
+  code:
+    | "invalid_query"
+    | "invalid_provider"
+    | "invalid_payment_method"
+    | "invalid_date_range"
+    | "invalid_body";
   category: "validation";
   message: string;
+};
+
+type FinanceCommandError = {
+  statusCode: 400 | 404 | 409 | 500 | 501;
+  code: "invalid_command" | "invoice_not_found" | "idempotency_conflict" | "write_unavailable";
+  category: "validation" | "not_found" | "conflict" | "write_model";
+  message: string;
+};
+
+type ManualPaymentBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  paymentMethod?: unknown;
+  reference?: unknown;
 };
 
 export async function registerFinanceRoutes(
@@ -311,6 +365,45 @@ export async function registerFinanceRoutes(
     },
   );
 
+  app.post<{ Params: FinanceInvoiceParams; Body: ManualPaymentBody }>(
+    "/finance/properties/:propertyId/invoices/:invoiceId/payments",
+    async (request, reply) => {
+      const { propertyId, invoiceId } = request.params;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+
+      if (!options.repository.recordManualPayment) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance manual payment writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toManualPaymentCommand(request, propertyId, invoiceId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.recordManualPayment(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      reply.code(result.status === "created" ? 201 : 200);
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        invoice: result.invoice,
+        commandMeta: result.commandMeta,
+      } satisfies FinanceManualPaymentRecordResponse;
+    },
+  );
+
   app.get<{ Params: FinancePropertyParams }>(
     "/finance/properties/:propertyId/payments",
     async (request, reply) => {
@@ -390,7 +483,7 @@ export function createTargetFinancePublicHotelPropertyResolver(config: {
   max?: number;
   pool?: FinancePropertySettingsReadPool;
 }): FinancePublicHotelPropertyResolver {
-  const pool =
+  const pool: FinancePropertySettingsReadPool =
     config.pool ??
     new pg.Pool({
       connectionString: config.connectionString,
@@ -426,7 +519,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
   max?: number;
   pool?: FinancePropertySettingsReadPool;
 }): FinancePropertyReadRepository {
-  const pool =
+  const pool: FinancePropertySettingsReadPool =
     config.pool ??
     new pg.Pool({
       connectionString: config.connectionString,
@@ -510,14 +603,902 @@ export function createTargetFinancePropertySettingsRepository(config: {
         },
       };
     },
+    async recordManualPayment(command) {
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        if (ownsTransaction) await client.query("BEGIN");
+        const result = await recordManualPaymentInClient(client, command);
+        if (ownsTransaction) await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        if (ownsTransaction) await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
     async close() {
       await pool.end();
     },
   };
 }
 
-async function loadPaymentSettingsRow(
+async function checkoutFinanceWriteClient(
   pool: FinancePropertySettingsReadPool,
+): Promise<FinancePropertySettingsWriteClient> {
+  if (pool.connect) return pool.connect();
+  return {
+    async query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: readonly unknown[],
+    ) {
+      const result = await pool.query<T>(text, values);
+      return { ...result, rowCount: result.rows.length };
+    },
+  };
+}
+
+async function recordManualPaymentInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+): Promise<FinanceManualPaymentRecordResult> {
+  const invoiceRows = await loadInvoiceRows(client, command.propertyId, {
+    sort: "issuedAt",
+    limit: 500,
+    offset: 0,
+    search: command.payload.invoiceId,
+  });
+  const invoiceRow = invoiceRows.find((row) => row.invoiceId === command.payload.invoiceId);
+  if (!invoiceRow) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "invoice_not_found",
+      message: "Finance invoice was not found.",
+    };
+  }
+
+  const recordedAt = command.audit.requestedAt;
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(stableJson(command.payload));
+  const scopedPaymentIdempotencyKey = manualPaymentScopedPersistenceKey(
+    command.propertyId,
+    keyHash,
+    "payment",
+  );
+  const existingIdempotency = await loadManualPaymentIdempotency(client, command, keyHash);
+  if (existingIdempotency && existingIdempotency.requestFingerprintHash !== fingerprint) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message: "Idempotency key was already used with a different manual payment payload.",
+    };
+  }
+
+  const existingPayment = await loadManualPaymentByIdempotencyKey(
+    client,
+    command.propertyId,
+    scopedPaymentIdempotencyKey,
+  );
+  if (!existingPayment) {
+    const validationError = validateManualPaymentInvoice(command, invoiceRow);
+    if (validationError) return validationError;
+  }
+
+  const idempotencyError = await reserveManualPaymentIdempotency(
+    client,
+    command,
+    keyHash,
+    fingerprint,
+    recordedAt,
+  );
+  if (idempotencyError) return idempotencyError;
+  const payment =
+    existingPayment ??
+    (await insertManualPayment(
+      client,
+      command,
+      invoiceRow.guestBookingId,
+      scopedPaymentIdempotencyKey,
+      recordedAt,
+    ));
+  const commandMeta = buildManualPaymentCommandMeta(
+    command,
+    invoiceRow.guestBookingId,
+    keyHash,
+    payment.replay,
+  );
+  const domainEventId = await recordManualPaymentDomainEvent(
+    client,
+    command,
+    invoiceRow.guestBookingId,
+    payment.paymentId,
+    keyHash,
+    recordedAt,
+  );
+  const outboxEventIds = await enqueueManualPaymentOutboxEvents(
+    client,
+    command,
+    invoiceRow.guestBookingId,
+    payment.paymentId,
+    domainEventId,
+    keyHash,
+  );
+  await enqueueManualPaymentJobs(
+    client,
+    command,
+    invoiceRow.guestBookingId,
+    payment.paymentId,
+    domainEventId,
+    outboxEventIds,
+    keyHash,
+  );
+  await recordManualPaymentAuditEvent(
+    client,
+    command,
+    invoiceRow.guestBookingId,
+    payment.paymentId,
+    domainEventId,
+    keyHash,
+    recordedAt,
+  );
+  await completeManualPaymentIdempotency(
+    client,
+    command,
+    keyHash,
+    fingerprint,
+    payment.paymentId,
+    commandMeta,
+    recordedAt,
+  );
+
+  const updatedInvoice = await loadFinanceInvoiceDetail(
+    client,
+    command.propertyId,
+    command.payload.invoiceId,
+  );
+  if (!updatedInvoice) {
+    return {
+      ok: false,
+      statusCode: 500,
+      code: "write_unavailable",
+      message: "Finance invoice read model was unavailable after recording payment.",
+    };
+  }
+
+  return {
+    ok: true,
+    status: payment.replay ? "idempotent_replay" : "created",
+    invoice: updatedInvoice,
+    commandMeta,
+  };
+}
+
+async function reserveManualPaymentIdempotency(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  keyHash: string,
+  fingerprint: string,
+  recordedAt: string,
+): Promise<Extract<FinanceManualPaymentRecordResult, { ok: false }> | null> {
+  const result = await client.query<{
+    status: string;
+    requestFingerprintHash: string;
+  }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       organization_id,
+       property_id,
+       correlation_id,
+       first_seen_at,
+       last_seen_at,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'finance',
+       'manual_payment_record',
+       $1,
+       $2,
+       'in_progress',
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::timestamptz,
+       $5::timestamptz,
+       $5::timestamptz + interval '24 hours',
+       $6::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key)
+     DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+     RETURNING
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash"`,
+    [
+      keyHash,
+      fingerprint,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      recordedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        actorOrganizationId:
+          command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      }),
+    ],
+  );
+  const row = result.rows[0];
+  if (row && row.requestFingerprintHash !== fingerprint) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message: "Idempotency key was already used with a different manual payment payload.",
+    };
+  }
+  return null;
+}
+
+async function loadManualPaymentIdempotency(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  keyHash: string,
+): Promise<FinanceManualPaymentIdempotencyRow | null> {
+  const result = await client.query<FinanceManualPaymentIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'finance'
+       AND operation = 'manual_payment_record'
+       AND key_hash = $1
+       AND tenant_scope = 'property'
+       AND property_id = $2::uuid
+     LIMIT 1`,
+    [keyHash, command.propertyId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function loadManualPaymentByIdempotencyKey(
+  client: FinancePropertySettingsWriteClient,
+  propertyId: string,
+  idempotencyKey: string,
+): Promise<FinanceManualPaymentWriteRow | null> {
+  const result = await client.query<FinanceManualPaymentWriteRow>(
+    `SELECT id::text AS "paymentId", true AS replay
+     FROM finance.payments
+     WHERE property_id = $1::uuid
+       AND idempotency_key = $2
+     LIMIT 1`,
+    [propertyId, idempotencyKey],
+  );
+  return result.rows[0] ?? null;
+}
+
+function validateManualPaymentInvoice(
+  command: FinanceManualPaymentRecordCommand,
+  invoice: FinanceInvoiceRow,
+): Extract<FinanceManualPaymentRecordResult, { ok: false }> | null {
+  const status = invoiceStatus(invoice.status);
+  if (status === "paid") {
+    return invalidManualPaymentCommand("Paid invoices cannot accept manual payments.");
+  }
+  if (status === "voided") {
+    return invalidManualPaymentCommand("Voided invoices cannot accept manual payments.");
+  }
+
+  const invoiceCurrency = currencyCode(invoice.currency);
+  if (command.payload.currency !== invoiceCurrency) {
+    return invalidManualPaymentCommand("Manual payment currency must match the invoice currency.");
+  }
+
+  const amountCents = numeric15Scale2Cents(command.payload.amount);
+  const balanceCents = numeric15Scale2Cents(invoice.balanceDue, { allowZero: true });
+  if (amountCents === null) {
+    return invalidManualPaymentCommand("Manual payment amount is outside the supported range.");
+  }
+  if (balanceCents === null) {
+    return invalidManualPaymentCommand("Finance invoice balance is unavailable.");
+  }
+  if (balanceCents <= 0n) {
+    return invalidManualPaymentCommand("Finance invoice has no outstanding balance.");
+  }
+  if (amountCents > balanceCents) {
+    return invalidManualPaymentCommand("Manual payment amount exceeds the invoice balance.");
+  }
+
+  return null;
+}
+
+function invalidManualPaymentCommand(
+  message: string,
+): Extract<FinanceManualPaymentRecordResult, { ok: false }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_command",
+    message,
+  };
+}
+
+async function insertManualPayment(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  guestBookingId: string,
+  scopedPaymentIdempotencyKey: string,
+  recordedAt: string,
+): Promise<FinanceManualPaymentWriteRow> {
+  const result = await client.query<FinanceManualPaymentWriteRow>(
+    `WITH inserted AS (
+       INSERT INTO finance.payments (
+         property_id,
+         organization_id,
+         guest_booking_id,
+         source_system,
+         idempotency_key,
+         payment_kind,
+         payment_method,
+         status,
+         amount,
+         fee_amount,
+         net_amount,
+         refunded_amount,
+         currency,
+         payment_metadata,
+         visibility_class,
+         paid_at,
+         created_at,
+         updated_at
+       )
+       VALUES (
+         $1::uuid,
+         $2::uuid,
+         $3::uuid,
+         'finance',
+         $4,
+         'manual',
+         $5,
+         'paid',
+         $6::numeric,
+         0,
+         $6::numeric,
+         0,
+         $7,
+         $8::jsonb,
+         'pms_finance',
+         $9::timestamptz,
+         $9::timestamptz,
+         $9::timestamptz
+       )
+       ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+       RETURNING id::text AS "paymentId", false AS replay
+     )
+     SELECT "paymentId", replay FROM inserted
+     UNION ALL
+     SELECT id::text AS "paymentId", true AS replay
+     FROM finance.payments
+     WHERE property_id = $1::uuid
+       AND idempotency_key = $4
+     LIMIT 1`,
+    [
+      command.propertyId,
+      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      guestBookingId,
+      scopedPaymentIdempotencyKey,
+      command.payload.paymentMethod,
+      command.payload.amount,
+      command.payload.currency,
+      JSON.stringify({
+        invoiceId: command.payload.invoiceId,
+        reference: command.payload.reference ?? null,
+        commandId: command.commandId,
+        reconciliationStatus: "matched",
+        providerStatus: "paid",
+      }),
+      recordedAt,
+    ],
+  );
+  return result.rows[0]!;
+}
+
+function buildManualPaymentCommandMeta(
+  command: FinanceManualPaymentRecordCommand,
+  guestBookingId: string,
+  keyHash: string,
+  replay: boolean,
+): FinanceCommandMeta {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: [...MANUAL_PAYMENT_SIDE_EFFECTS],
+    outboxEvents: [
+      manualPaymentScopedPersistenceKey(command.propertyId, keyHash, "booking-projection"),
+      manualPaymentScopedPersistenceKey(command.propertyId, keyHash, "pms-projection"),
+    ],
+    jobs: (["booking.projection-refresh", "pms.projection-refresh"] as const).map((jobType) => ({
+      jobType,
+      idempotencyKey: buildManualPaymentProjectionJobIdempotencyKey({
+        propertyId: command.propertyId,
+        jobType,
+        guestBookingId,
+        paymentIdempotencyKeyHash: keyHash,
+      }),
+      status: replay ? "idempotent_replay" : "queued",
+    })),
+  };
+}
+
+function manualPaymentScopedPersistenceKey(
+  propertyId: string,
+  keyHash: string,
+  purpose: "payment" | "domain-event" | "booking-projection" | "pms-projection" | "audit",
+): string {
+  return `finance.manual-payment.${purpose}.property.${propertyId}.key.${keyHash}.v1`;
+}
+
+function buildManualPaymentProjectionJobIdempotencyKey(input: {
+  propertyId: string;
+  jobType: "booking.projection-refresh" | "pms.projection-refresh";
+  guestBookingId: string;
+  paymentIdempotencyKeyHash: string;
+}): string {
+  return `${input.jobType}:property:${input.propertyId}:booking:${input.guestBookingId}:finance-payment:${input.paymentIdempotencyKeyHash}:v1`;
+}
+
+async function recordManualPaymentDomainEvent(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  guestBookingId: string,
+  paymentId: string,
+  keyHash: string,
+  recordedAt: string,
+): Promise<string> {
+  const result = await client.query<{ eventId: string }>(
+    `WITH inserted AS (
+       INSERT INTO platform.domain_events (
+         source_system,
+         event_key,
+         event_type,
+         event_version,
+         occurred_at,
+         tenant_scope,
+         organization_id,
+         property_id,
+         resource_product,
+         resource_type,
+         resource_id,
+         actor_type,
+         actor_user_id,
+         correlation_id,
+         causation_id,
+         idempotency_key_hash,
+         payload,
+         event_metadata,
+         privacy_scope
+       )
+       VALUES (
+         'finance',
+         $1,
+         'finance.manual_payment.recorded',
+         1,
+         $2::timestamptz,
+         'property',
+         NULL,
+         $3::uuid,
+         'finance',
+         'payment',
+         $4,
+         $5,
+         $6::uuid,
+         $7,
+         $8,
+         $9,
+         $10::jsonb,
+         $11::jsonb,
+         'confidential'
+       )
+       ON CONFLICT (source_system, event_key) DO NOTHING
+       RETURNING id::text AS "eventId"
+     )
+     SELECT "eventId" FROM inserted
+     UNION ALL
+     SELECT id::text AS "eventId"
+     FROM platform.domain_events
+     WHERE source_system = 'finance'
+       AND event_key = $1
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     LIMIT 1`,
+    [
+      manualPaymentScopedPersistenceKey(command.propertyId, keyHash, "domain-event"),
+      recordedAt,
+      command.propertyId,
+      paymentId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      keyHash,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        invoiceId: command.payload.invoiceId,
+        guestBookingId,
+        paymentId,
+        amount: command.payload.amount,
+        currency: command.payload.currency,
+        paymentMethod: command.payload.paymentMethod,
+      }),
+      JSON.stringify({ contractVersion: FINANCE_ROUTE_CONTRACT_VERSION }),
+    ],
+  );
+  return result.rows[0]!.eventId;
+}
+
+async function enqueueManualPaymentOutboxEvents(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  guestBookingId: string,
+  paymentId: string,
+  domainEventId: string,
+  keyHash: string,
+): Promise<{ booking: string; pms: string }> {
+  const result = await client.query<{ destination: string; outboxEventId: string }>(
+    `WITH outbox AS (
+       INSERT INTO platform.outbox_events (
+         domain_event_id,
+         outbox_key,
+         destination,
+         event_type,
+         tenant_scope,
+         organization_id,
+         property_id,
+         resource_product,
+         resource_type,
+         resource_id,
+         correlation_id,
+         idempotency_key_hash,
+         payload,
+         outbox_metadata
+       )
+       VALUES
+         (
+           $1::uuid,
+           $2,
+           'booking.projection-refresh',
+           'booking.finance_payment_projection.refresh_requested',
+           'property',
+           NULL,
+           $3::uuid,
+           'booking',
+           'guest_booking',
+           $4,
+           $5,
+           $6,
+           $7::jsonb,
+           $8::jsonb
+         ),
+         (
+           $1::uuid,
+           $9,
+           'pms.projection-refresh',
+           'pms.finance_payment_projection.refresh_requested',
+           'property',
+           NULL,
+           $3::uuid,
+           'pms',
+           'operational_booking',
+           $4,
+           $5,
+           $6,
+           $7::jsonb,
+           $8::jsonb
+         )
+       ON CONFLICT (destination, outbox_key) DO NOTHING
+       RETURNING destination, id::text AS "outboxEventId"
+     )
+     SELECT destination, "outboxEventId" FROM outbox
+     UNION ALL
+     SELECT destination, id::text AS "outboxEventId"
+     FROM platform.outbox_events
+     WHERE (destination, outbox_key) IN (
+       ('booking.projection-refresh', $2),
+       ('pms.projection-refresh', $9)
+     )
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid`,
+    [
+      domainEventId,
+      manualPaymentScopedPersistenceKey(command.propertyId, keyHash, "booking-projection"),
+      command.propertyId,
+      guestBookingId,
+      command.audit.correlationId ?? command.audit.requestId,
+      keyHash,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        guestBookingId,
+        invoiceId: command.payload.invoiceId,
+        paymentId,
+      }),
+      JSON.stringify({ commandId: command.commandId }),
+      manualPaymentScopedPersistenceKey(command.propertyId, keyHash, "pms-projection"),
+    ],
+  );
+  return {
+    booking: result.rows.find((row) => row.destination === "booking.projection-refresh")!
+      .outboxEventId,
+    pms: result.rows.find((row) => row.destination === "pms.projection-refresh")!.outboxEventId,
+  };
+}
+
+async function enqueueManualPaymentJobs(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  guestBookingId: string,
+  paymentId: string,
+  domainEventId: string,
+  outboxEventIds: { booking: string; pms: string },
+  keyHash: string,
+): Promise<void> {
+  const bookingJobKey = buildManualPaymentProjectionJobIdempotencyKey({
+    propertyId: command.propertyId,
+    jobType: "booking.projection-refresh",
+    guestBookingId,
+    paymentIdempotencyKeyHash: keyHash,
+  });
+  const pmsJobKey = buildManualPaymentProjectionJobIdempotencyKey({
+    propertyId: command.propertyId,
+    jobType: "pms.projection-refresh",
+    guestBookingId,
+    paymentIdempotencyKeyHash: keyHash,
+  });
+  await client.query(
+    `INSERT INTO platform.jobs (
+       job_key,
+       queue_name,
+       job_type,
+       source_domain_event_id,
+       source_outbox_event_id,
+       tenant_scope,
+       organization_id,
+       property_id,
+       resource_product,
+       resource_type,
+       resource_id,
+       correlation_id,
+       idempotency_key_hash,
+       payload,
+       job_metadata
+     )
+     VALUES
+       (
+         $1,
+         'booking-projections',
+         'booking.projection-refresh',
+         $2::uuid,
+         $3::uuid,
+         'property',
+         NULL,
+         $4::uuid,
+         'booking',
+         'guest_booking',
+         $5,
+         $6,
+         $7,
+         $8::jsonb,
+         $9::jsonb
+       ),
+       (
+         $10,
+         'pms-projections',
+         'pms.projection-refresh',
+         $2::uuid,
+         $11::uuid,
+         'property',
+         NULL,
+         $4::uuid,
+         'pms',
+         'operational_booking',
+         $5,
+         $6,
+         $7,
+         $8::jsonb,
+         $9::jsonb
+       )
+     ON CONFLICT (queue_name, job_key) DO NOTHING`,
+    [
+      bookingJobKey,
+      domainEventId,
+      outboxEventIds.booking,
+      command.propertyId,
+      guestBookingId,
+      command.audit.correlationId ?? command.audit.requestId,
+      keyHash,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        guestBookingId,
+        invoiceId: command.payload.invoiceId,
+        paymentId,
+      }),
+      JSON.stringify({ commandId: command.commandId }),
+      pmsJobKey,
+      outboxEventIds.pms,
+    ],
+  );
+}
+
+async function recordManualPaymentAuditEvent(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  guestBookingId: string,
+  paymentId: string,
+  domainEventId: string,
+  keyHash: string,
+  recordedAt: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       secondary_resource_product,
+       secondary_resource_type,
+       secondary_resource_id,
+       domain_event_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'finance',
+       'manual_payment.recorded',
+       1,
+       $2::timestamptz,
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::uuid,
+       'finance',
+       'payment',
+       $6,
+       'booking',
+       'guest_booking',
+       $7,
+       $8::uuid,
+       $9,
+       $10,
+       $11::jsonb,
+       $12::jsonb,
+       $13::jsonb,
+       'financial',
+       'confidential'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      manualPaymentScopedPersistenceKey(command.propertyId, keyHash, "audit"),
+      recordedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      paymentId,
+      guestBookingId,
+      domainEventId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        amount: command.payload.amount,
+        currency: command.payload.currency,
+        paymentMethod: command.payload.paymentMethod,
+        invoiceId: command.payload.invoiceId,
+      }),
+      JSON.stringify({ reference: command.payload.reference ?? null }),
+      JSON.stringify({
+        requestId: command.audit.requestId,
+        idempotencyKeyHash: keyHash,
+      }),
+    ],
+  );
+}
+
+async function completeManualPaymentIdempotency(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  keyHash: string,
+  fingerprint: string,
+  paymentId: string,
+  commandMeta: ReturnType<typeof buildManualPaymentCommandMeta>,
+  recordedAt: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         request_fingerprint_hash = $1,
+         response_status_code = 201,
+         response_resource_product = 'finance',
+         response_resource_type = 'payment',
+         response_resource_id = $2,
+         response_body_hash = $3,
+         completed_at = $4::timestamptz,
+         last_seen_at = $4::timestamptz,
+         idempotency_metadata = $5::jsonb
+     WHERE operation_scope = 'finance'
+       AND operation = 'manual_payment_record'
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      fingerprint,
+      paymentId,
+      sha256(stableJson(commandMeta)),
+      recordedAt,
+      JSON.stringify({ commandMeta, commandId: command.commandId }),
+      keyHash,
+      command.propertyId,
+    ],
+  );
+}
+
+async function loadFinanceInvoiceDetail(
+  pool: FinanceQueryExecutor,
+  propertyId: string,
+  invoiceId: string,
+): Promise<FinanceInvoiceDetail | null> {
+  const rows = await loadInvoiceRows(pool, propertyId, {
+    sort: "issuedAt",
+    limit: 500,
+    offset: 0,
+    search: invoiceId,
+  });
+  const invoice = rows.find((row) => row.invoiceId === invoiceId);
+  if (!invoice) return null;
+  const payments = await loadInvoicePaymentRows(pool, propertyId, invoice.guestBookingId);
+  return {
+    ...toInvoiceListItem(invoice),
+    guest: {
+      displayName: invoice.guestDisplayName ?? "Guest",
+      email: invoice.guestEmail,
+      phone: invoice.guestPhone,
+    },
+    nights: nightsBetween(invoice.checkIn, invoice.checkOut),
+    charges: [
+      {
+        description: "Stay",
+        detail: `${dateOnly(invoice.checkIn)} to ${dateOnly(invoice.checkOut)}`,
+        amount: decimalString(invoice.totalAmount),
+      },
+    ],
+    payments: payments.map(toInvoicePayment),
+    subtotal: decimalString(invoice.totalAmount),
+  };
+}
+
+async function loadPaymentSettingsRow(
+  pool: FinanceQueryExecutor,
   propertyId: string,
 ): Promise<FinancePaymentSettingsRow | null> {
   const result = await pool.query<FinancePaymentSettingsRow>(
@@ -552,7 +1533,7 @@ async function loadPaymentSettingsRow(
 }
 
 async function loadFinancialSummaryRow(
-  pool: FinancePropertySettingsReadPool,
+  pool: FinanceQueryExecutor,
   propertyId: string,
 ): Promise<FinanceVisibilitySummaryRow | null> {
   const result = await pool.query<FinanceVisibilitySummaryRow>(
@@ -584,7 +1565,7 @@ async function loadFinancialSummaryRow(
 }
 
 async function loadInvoiceRows(
-  pool: FinancePropertySettingsReadPool,
+  pool: FinanceQueryExecutor,
   propertyId: string,
   query: FinanceInvoiceListQuery,
 ): Promise<FinanceInvoiceRow[]> {
@@ -695,7 +1676,7 @@ async function loadInvoiceRows(
 }
 
 async function loadInvoicePaymentRows(
-  pool: FinancePropertySettingsReadPool,
+  pool: FinanceQueryExecutor,
   propertyId: string,
   guestBookingId: string,
 ): Promise<FinanceInvoicePaymentRow[]> {
@@ -720,7 +1701,7 @@ async function loadInvoicePaymentRows(
 }
 
 async function loadPaymentLedgerRows(
-  pool: FinancePropertySettingsReadPool,
+  pool: FinanceQueryExecutor,
   propertyId: string,
   query: FinancePaymentLedgerQuery,
 ): Promise<FinancePaymentLedgerRow[]> {
@@ -1088,12 +2069,141 @@ function parsePaymentLedgerQuery(
   };
 }
 
+function toManualPaymentCommand(
+  request: FastifyRequest<{ Body: ManualPaymentBody }>,
+  propertyId: string,
+  invoiceId: string,
+): FinanceManualPaymentRecordCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const amount = decimalBodyString(body.amount);
+  const currency = currencyBodyString(body.currency);
+  const paymentMethod = optionalEnum(body.paymentMethod, FINANCE_ROUTE_PAYMENT_METHODS);
+  const reference = nullableTrimmedString(body.reference);
+
+  if (!commandId || !idempotencyKey || !currency) {
+    return invalidQuery(
+      "invalid_body",
+      "Manual payment command requires commandId, idempotencyKey, amount, currency, and paymentMethod.",
+    );
+  }
+
+  if (!amount) {
+    return invalidQuery(
+      "invalid_body",
+      "Manual payment amount must be a positive NUMERIC(15,2) value.",
+    );
+  }
+
+  if (!paymentMethod || paymentMethod === "wallet" || paymentMethod === "xendit") {
+    return invalidQuery("invalid_payment_method", "Invalid manual payment method.");
+  }
+
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    commandType: "finance.manual_payment.record",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: {
+      actor: authContext
+        ? {
+            kind: "user",
+            userId: authContext.actor.internalUserId,
+            organizationId: authContext.selectedOrganization.organizationId,
+          }
+        : { kind: "system", service: "apps/api" },
+      requestId: authContext?.audit.requestId ?? commandId,
+      correlationId: authContext?.audit.correlationId,
+      reason: "Manual property-side invoice payment recorded",
+      requestedAt: authContext?.audit.receivedAt ?? now,
+    },
+    payload: {
+      invoiceId,
+      amount,
+      currency,
+      paymentMethod,
+      reference,
+    },
+  };
+}
+
+function decimalBodyString(value: unknown): string | undefined {
+  if (typeof value !== "string" && typeof value !== "number") return undefined;
+  const text = String(value).trim();
+  if (numeric15Scale2Cents(text) === null) return undefined;
+  return text;
+}
+
+function numeric15Scale2Cents(value: string, options: { allowZero?: boolean } = {}): bigint | null {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) return null;
+
+  const integerDigits = (match[1] ?? "").replace(/^0+/, "") || "0";
+  if (integerDigits.length > 13) return null;
+
+  const fractionalDigits = (match[2] ?? "").padEnd(2, "0");
+  const cents = BigInt(integerDigits) * 100n + BigInt(fractionalDigits);
+  const maxNumeric15Scale2Cents = 999_999_999_999_999n;
+  if (cents > maxNumeric15Scale2Cents) return null;
+  if (!options.allowZero && cents <= 0n) return null;
+  return cents;
+}
+
+function currencyBodyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const currency = value.trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : undefined;
+}
+
+function nullableTrimmedString(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toFinanceCommandError(result: Extract<FinanceManualPaymentRecordResult, { ok: false }>) {
+  return {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 404
+        ? "not_found"
+        : result.statusCode === 409
+          ? "conflict"
+          : result.statusCode === 400
+            ? "validation"
+            : "write_model",
+    message: result.message,
+  } satisfies FinanceCommandError;
+}
+
 function enforceFinancePropertyReadPolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   propertyId: string,
 ): boolean {
   const policies = financePropertyReadPolicies(propertyId);
+  try {
+    enforceAnyFinancePropertyReadPolicy(request, policies);
+    return true;
+  } catch (error) {
+    const accessError = toFinanceAccessError(error, request, propertyId);
+    if (!accessError) throw error;
+    reply.code(accessError.statusCode).send(accessError);
+    return false;
+  }
+}
+
+function enforceFinancePropertyWritePolicy(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  propertyId: string,
+): boolean {
+  const policies = financePropertyWritePolicies(propertyId);
   try {
     enforceAnyFinancePropertyReadPolicy(request, policies);
     return true;
@@ -1142,6 +2252,48 @@ function financePropertyReadPolicies(propertyId: string): RouteAuthorizationPoli
         resourceType,
         resourceId: propertyId,
         allowedRelationships: ["owner", "operator", "finance_manager"],
+      },
+    },
+  ]);
+}
+
+function financePropertyWritePolicies(propertyId: string): RouteAuthorizationPolicy[] {
+  const resourceTypes = ["pms_property", "property"] as const;
+  return resourceTypes.flatMap((resourceType) => [
+    {
+      permission: "pms.finance.manage" as RouteAuthorizationPolicy["permission"],
+      entitlement: {
+        product: "pms",
+        key: "property-management",
+        resource: {
+          product: "pms",
+          resourceType,
+          resourceId: propertyId,
+        },
+      },
+      resource: {
+        product: "pms",
+        resourceType,
+        resourceId: propertyId,
+        allowedRelationships: ["owner", "finance_manager"],
+      },
+    },
+    {
+      permission: "pms.finance.manage" as RouteAuthorizationPolicy["permission"],
+      entitlement: {
+        product: "booking",
+        key: "direct-booking-finance",
+        resource: {
+          product: "pms",
+          resourceType,
+          resourceId: propertyId,
+        },
+      },
+      resource: {
+        product: "pms",
+        resourceType,
+        resourceId: propertyId,
+        allowedRelationships: ["owner", "finance_manager"],
       },
     },
   ]);
@@ -1450,6 +2602,24 @@ function decimalString(value: unknown): string {
   return "0.00";
 }
 
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, sortJson(entry)]),
+  );
+}
+
 function invoiceStatus(value: unknown): FinanceInvoiceStatus {
   return optionalEnum(value, FINANCE_INVOICE_STATUSES) ?? "sent";
 }
@@ -1545,6 +2715,10 @@ function optionalEnum<const T extends readonly string[]>(
 
 function cleanSearch(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function likeSearch(value: string | undefined): string | null {
