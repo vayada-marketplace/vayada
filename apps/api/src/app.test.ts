@@ -123,6 +123,55 @@ const pmsOperationsContractCases = JSON.parse(
   }>;
 };
 
+const financeRouteContractCases = JSON.parse(
+  readFileSync(
+    new URL("../../../engineering/fixtures/finance-route-contracts/cases.json", import.meta.url),
+    "utf8",
+  ),
+) as {
+  cases: Array<{
+    caseId: string;
+    input?: {
+      eventType: string;
+      payload: {
+        propertyId: string;
+        guestBookingId: string;
+        checkoutChargeId: string;
+        amount: string;
+        currency: string;
+        paymentMethod: string;
+        reference?: string;
+        pmsCommandId: string;
+      };
+    };
+    request?: {
+      path: string;
+      method: string;
+      body: {
+        commandId: string;
+        idempotencyKey: string;
+        amount: string;
+        currency: string;
+        paymentMethod: string;
+      };
+      simulate?: {
+        financeBridgeEnabled?: boolean;
+        rehearsalFreeze?: boolean;
+      };
+    };
+    expected: {
+      status?: number;
+      errorCode?: string;
+      financeCommandType?: string;
+      financePaymentStatus?: string;
+      idempotencyKey?: string;
+      sideEffects?: string[];
+      mustNotWrite?: string[];
+      mustNotCall?: string[];
+    };
+  }>;
+};
+
 function pmsOperationsRequestOptions(request: {
   path: string;
   query?: Record<string, string | number>;
@@ -160,6 +209,9 @@ const pmsRoomBlocksReadCase = pmsOperationsContractCases.cases.find(
 )!;
 const pmsReservationsAssignedUnassignedCase = pmsOperationsContractCases.cases.find(
   (testCase) => testCase.caseId === "reservations-assigned-unassigned",
+)!;
+const checkoutChargeMarkPaidFreezeCase = financeRouteContractCases.cases.find(
+  (testCase) => testCase.caseId === "checkout-charge-mark-paid-freeze",
 )!;
 
 const session: VerifiedSession = {
@@ -759,6 +811,7 @@ function buildAuthenticatedApp(
     settingsWriteRepository?: BookingSettingsWriteRepository;
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
     pmsOperationsRepository?: PmsOperationsReadRepository;
+    pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
     pmsOperationsAllowedOrigins?: string[];
     linkedPmsPropertyId?: string;
   } = {},
@@ -767,6 +820,7 @@ function buildAuthenticatedApp(
     logger: false,
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
     pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
+    pmsCheckoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
     pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
@@ -5419,9 +5473,11 @@ describe("vayada-api", () => {
     for (const path of pmsCalendarBlocksReadCase.expected.mustInclude ?? []) {
       expect(readContractPath(body, path), path).not.toBeUndefined();
     }
-    expect(body.days.every((day) => day.availableCount + day.assignedCount + day.blockedCount === day.totalCount)).toBe(
-      true,
-    );
+    expect(
+      body.days.every(
+        (day) => day.availableCount + day.assignedCount + day.blockedCount === day.totalCount,
+      ),
+    ).toBe(true);
     expect(body.days.flatMap((day) => day.blocks)).toEqual(
       expect.arrayContaining([pmsRoomBlocks[0], pmsRoomBlocks[1]]),
     );
@@ -5626,10 +5682,11 @@ describe("vayada-api", () => {
       expect(readContractPath(body, path), path).not.toBeUndefined();
     }
     expect(body.pagination).toEqual({ total: 2, limit: 50, offset: 0 });
-    expect(body.items.flatMap((item) => item.assignments.map((assignment) => assignment.assignmentStatus))).toEqual([
-      "assigned",
-      "pending",
-    ]);
+    expect(
+      body.items.flatMap((item) =>
+        item.assignments.map((assignment) => assignment.assignmentStatus),
+      ),
+    ).toEqual(["assigned", "pending"]);
     expect(body.items[1].assignments[0].roomId).toBeNull();
   });
 
@@ -5713,18 +5770,51 @@ describe("vayada-api", () => {
     });
 
     expect(detail.statusCode).toBe(200);
-    expect(detail.body as PmsOperationsTestDetailResponse<PmsOperationalReservation>).toMatchObject({
-      contractVersion: "pms-operations.v1",
-      propertyId: pmsPropertyId,
-      item: {
-        guestBookingId: pmsReservations[0].guestBookingId,
-        assignments: [{ assignmentStatus: "assigned", roomNumber: "101" }],
+    expect(detail.body as PmsOperationsTestDetailResponse<PmsOperationalReservation>).toMatchObject(
+      {
+        contractVersion: "pms-operations.v1",
+        propertyId: pmsPropertyId,
+        item: {
+          guestBookingId: pmsReservations[0].guestBookingId,
+          assignments: [{ assignmentStatus: "assigned", roomNumber: "101" }],
+        },
       },
-    });
+    );
     expect(missing.statusCode).toBe(404);
     expect(missing.body).toMatchObject({
       code: "reservation_not_found",
       category: "not_found",
+    });
+  });
+
+  it("freezes PMS checkout-charge mark-paid when the F1a finance bridge is disabled", async () => {
+    const freezeRequest = checkoutChargeMarkPaidFreezeCase.request!;
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      linkedPmsPropertyId: "f3000000-0000-0000-0000-000000000686",
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsCheckoutChargeMarkPaidFreezeEnabled: freezeRequest.simulate?.rehearsalFreeze ?? true,
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: freezeRequest.path,
+      body: freezeRequest.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(checkoutChargeMarkPaidFreezeCase.expected.status);
+    expect(response.body).toMatchObject({
+      code: checkoutChargeMarkPaidFreezeCase.expected.errorCode,
+      category: "conflict",
     });
   });
 

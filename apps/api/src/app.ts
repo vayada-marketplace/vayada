@@ -73,6 +73,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   pmsOperationsRepository?: PmsOperationsReadRepository;
+  pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsAllowedOrigins?: string[];
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
@@ -224,6 +225,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerPmsOperationsRoutes, {
       prefix: "/api/pms",
       repository: options.pmsOperationsRepository,
+      checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }

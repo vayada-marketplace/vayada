@@ -129,6 +129,31 @@ export type AddOnPricingReadModel = {
 };
 
 // ---------------------------------------------------------------------------
+// PMS checkout-charge settlement bridge
+// ---------------------------------------------------------------------------
+
+export type ManualCheckoutChargePaymentMethod =
+  | "cash"
+  | "card"
+  | "pay_at_property"
+  | "bank_transfer"
+  | "manual_card"
+  | "xendit"
+  | "other";
+
+export type SettleManualCheckoutChargePayload = {
+  guestBookingId: string;
+  checkoutChargeId: string;
+  amount: FinanceDecimalAmount;
+  currency: FinanceCurrencyCode;
+  paymentMethod: ManualCheckoutChargePaymentMethod;
+  reference?: string | null;
+  markedPaidAt: FinanceUtcDateTime;
+  operatorUserId: string;
+  pmsCommandId: string;
+};
+
+// ---------------------------------------------------------------------------
 // Payout split result
 //
 // Pure value type for the output of the billing split calculation.
@@ -309,12 +334,18 @@ export type UpdateAddOnPriceCommand = FinanceCommandBase<
   UpdateAddOnPricePayload
 >;
 
+export type SettleManualCheckoutChargeCommand = FinanceCommandBase<
+  "finance.checkout_charge.settle_manual",
+  SettleManualCheckoutChargePayload
+>;
+
 export type FinanceCommand =
   | UpdatePaymentMethodsCommand
   | UpdateInstantBookCommand
   | UpdatePropertyCurrencyCommand
   | UpdateBillingPlanCommand
-  | UpdateAddOnPriceCommand;
+  | UpdateAddOnPriceCommand
+  | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
   "finance.payment.methods.update",
@@ -322,6 +353,7 @@ export const financeCommandTypes = [
   "finance.currency.update",
   "finance.billing.plan.update",
   "finance.add_on.price.update",
+  "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 
 export type FinanceCommandType = (typeof financeCommandTypes)[number];
@@ -431,6 +463,13 @@ export function buildUpdateAddOnPriceIdempotencyKey(
   addOnId: string,
 ): string {
   return `finance.add_on.price.update:property:${propertyId}:add_on:${addOnId}`;
+}
+
+export function buildCheckoutChargeSettlementIdempotencyKey(input: {
+  checkoutChargeId: string;
+  pmsCommandId: string;
+}): string {
+  return `finance.checkout-charge-settlement:checkout_charge:${input.checkoutChargeId}:mark-paid:${input.pmsCommandId}:v1`;
 }
 
 // ---------------------------------------------------------------------------
