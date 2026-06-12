@@ -98,6 +98,27 @@ test.describe("booking-web tenant smoke", () => {
 
     await assertHealthy();
   });
+
+  test("requests card-sized room and add-on images", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    await page.goto("/");
+    await expect(page.getByText("Alpine Suite")).toBeVisible();
+
+    const roomImageWidths = await optimizedImageWidths(page, 'img[alt="Alpine Suite"]');
+    expect(Math.max(...roomImageWidths)).toBeLessThanOrEqual(640);
+
+    await page.goto(
+      "/addons?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
+    );
+    await expect(page.getByText("Airport Transfer")).toBeVisible();
+
+    const addonImageWidths = await optimizedImageWidths(page, 'img[alt="Airport Transfer"]');
+    expect(Math.max(...addonImageWidths)).toBeLessThanOrEqual(640);
+
+    await assertHealthy();
+  });
 });
 
 type JsonLdNode = {
@@ -124,4 +145,21 @@ async function publicStructuredDataGraph(page: Page) {
   const structuredData = JSON.parse(rawStructuredData ?? "{}") as { "@graph"?: JsonLdNode[] };
   expect(structuredData["@graph"]).toBeTruthy();
   return structuredData["@graph"] ?? [];
+}
+
+async function optimizedImageWidths(page: Page, selector: string): Promise<number[]> {
+  const srcs = await page
+    .locator(selector)
+    .evaluateAll((images) =>
+      images
+        .map((image) => (image as HTMLImageElement).currentSrc || (image as HTMLImageElement).src)
+        .filter(Boolean),
+    );
+  const widths = srcs
+    .map((src) => new URL(src, page.url()).searchParams.get("w"))
+    .filter((width): width is string => Boolean(width))
+    .map(Number);
+
+  expect(widths.length).toBeGreaterThan(0);
+  return widths;
 }

@@ -9,6 +9,7 @@ import BookingFooter from "@/components/layout/BookingFooter";
 import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
 import CountryDialCodePicker from "@/components/booking/CountryDialCodePicker";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
 import { bookingService } from "@/services/api/booking";
 import { formatDate, ensureMinOneNight } from "@/lib/utils";
@@ -306,7 +307,13 @@ function BookPageContent() {
               {/* Room row */}
               <div className="flex items-start gap-4 pb-5 border-b border-gray-100">
                 <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                  <Image src={room.images[0]} alt={room.name} fill className="object-cover" />
+                  <Image
+                    src={room.images[0]}
+                    alt={room.name}
+                    fill
+                    className="object-cover"
+                    sizes={bookingImageSizes.checkoutRoomThumb}
+                  />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-gray-900">

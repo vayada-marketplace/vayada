@@ -166,6 +166,26 @@ const rooms = [
   },
 ];
 
+const addons = [
+  {
+    id: "airport-transfer",
+    name: "Airport Transfer",
+    description: "Private arrival transfer to the hotel.",
+    price: 45,
+    currency: "EUR",
+    category: "transport",
+    image: "/vayada-logo.png",
+    images: ["/vayada-logo.png"],
+    duration: "45 minutes",
+    perPerson: false,
+    perNight: false,
+    location: "Luggage claim",
+    maxGuests: "4",
+    highlights: ["Private pickup", "Flight tracking"],
+    includedItems: ["Driver", "Luggage assistance"],
+  },
+];
+
 const publicOffers = {
   contractVersion: "public-bookability.v1",
   generatedAt: "2026-06-06T11:00:00.000Z",
@@ -330,7 +350,7 @@ export async function mockBookingApis(page: Page) {
   });
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/addons`, async (route) => {
-    await route.fulfill({ json: [] });
+    await route.fulfill({ json: addons });
   });
 
   await page.route("**/api/exchange-rates**", async (route) => {

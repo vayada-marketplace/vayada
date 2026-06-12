@@ -12,6 +12,7 @@ import StepIndicator from "@/components/booking/StepIndicator";
 import StripeProvider from "@/components/StripeProvider";
 import StripeConfirmStep from "@/components/payment/StripeConfirmStep";
 import PolicyModal from "@/components/payment/PolicyModal";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
 import { formatDate } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -1006,7 +1007,13 @@ function PaymentPageContent() {
               {/* Room info */}
               <div className="flex items-center gap-3 pb-5 border-b border-gray-100">
                 <div className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0">
-                  <Image src={room.images[0]} alt={room.name} fill className="object-cover" />
+                  <Image
+                    src={room.images[0]}
+                    alt={room.name}
+                    fill
+                    className="object-cover"
+                    sizes={bookingImageSizes.orderRoomThumb}
+                  />
                 </div>
                 <div>
                   <p className="text-sm font-bold text-gray-900">

@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Addon } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { useHotel } from "@/contexts/HotelContext";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 
 interface AddonDetailModalProps {
   addon: Addon;
@@ -50,7 +51,13 @@ export default function AddonDetailModal({
       >
         {/* Hero Image */}
         <div className="relative h-64 sm:h-72 flex-shrink-0">
-          <Image src={images[imgIndex]} alt={addon.name} fill className="object-cover" />
+          <Image
+            src={images[imgIndex]}
+            alt={addon.name}
+            fill
+            className="object-cover"
+            sizes={bookingImageSizes.addonModal}
+          />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
 
           {/* Navigation + Close */}
@@ -116,7 +123,14 @@ export default function AddonDetailModal({
                   onClick={() => setImgIndex(i)}
                   className={`relative w-12 h-9 rounded-lg overflow-hidden border-2 transition-colors ${i === imgIndex ? "border-white" : "border-white/40"}`}
                 >
-                  <Image src={img} alt="" fill className="object-cover" />
+                  <Image
+                    src={img}
+                    alt=""
+                    fill
+                    className="object-cover"
+                    sizes={bookingImageSizes.addonThumb}
+                    loading="lazy"
+                  />
                 </button>
               ))}
             </div>

@@ -9,6 +9,7 @@ import BookingFooter from "@/components/layout/BookingFooter";
 import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
 import AddonDetailModal from "@/components/booking/AddonDetailModal";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { ADDON_CATEGORIES } from "@/lib/constants/addons";
 import { useHotel, useAddons } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -183,7 +184,14 @@ export default function AddonsPageClient() {
                 onClick={() => setDetailIndex(idx)}
               >
                 <div className="relative h-48">
-                  <Image src={addon.image} alt={addon.name} fill className="object-cover" />
+                  <Image
+                    src={addon.image}
+                    alt={addon.name}
+                    fill
+                    className="object-cover"
+                    sizes={bookingImageSizes.addonCard}
+                    loading="lazy"
+                  />
                 </div>
                 <div className="p-4">
                   <h3 className="text-base font-bold text-gray-900 mb-1">{addon.name}</h3>
@@ -367,7 +375,14 @@ export default function AddonsPageClient() {
                     >
                       <div className="flex items-center gap-3">
                         <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0">
-                          <Image src={addon.image} alt={addon.name} fill className="object-cover" />
+                          <Image
+                            src={addon.image}
+                            alt={addon.name}
+                            fill
+                            className="object-cover"
+                            sizes={bookingImageSizes.addonThumb}
+                            loading="lazy"
+                          />
                         </div>
                         <div>
                           <p className="text-sm font-semibold text-gray-900">{addon.name}</p>

@@ -10,6 +10,7 @@ import {
   getNonRefundableNightlyRates,
   hasVariableNightlyRates,
 } from "@/lib/constants/booking";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 import RateOption from "./RateOption";
 
 interface RoomCardProps {
@@ -154,7 +155,13 @@ export default function RoomCard({
           className="relative w-full h-64 md:w-[420px] md:min-h-[320px] md:h-auto flex-shrink-0 cursor-pointer overflow-hidden"
           onClick={onView}
         >
-          <Image src={room.images[imageIndex]} alt={room.name} fill className="object-cover" />
+          <Image
+            src={room.images[imageIndex]}
+            alt={room.name}
+            fill
+            className="object-cover"
+            sizes={bookingImageSizes.roomCard}
+          />
           {soldOut && (
             <div className="absolute inset-0 bg-black/30 z-20 flex items-center justify-center">
               <span className="bg-white text-gray-900 text-sm font-bold px-5 py-2 rounded-full shadow">
@@ -216,7 +223,14 @@ export default function RoomCard({
                     }}
                     className={`relative h-12 w-16 rounded-md overflow-hidden border-2 transition-colors flex-shrink-0 ${i === imageIndex ? "border-white" : "border-transparent opacity-70 hover:opacity-100"}`}
                   >
-                    <Image src={img} alt="" fill className="object-cover" />
+                    <Image
+                      src={img}
+                      alt=""
+                      fill
+                      className="object-cover"
+                      sizes={bookingImageSizes.roomThumb}
+                      loading="lazy"
+                    />
                   </button>
                 ))}
               </div>
