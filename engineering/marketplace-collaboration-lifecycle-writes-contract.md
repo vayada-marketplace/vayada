@@ -100,4 +100,7 @@ handles.
 Executable fixture cases live in
 [`fixtures/marketplace-collaboration-lifecycle-writes/cases.json`](fixtures/marketplace-collaboration-lifecycle-writes/cases.json).
 They cover both-side create authorization, recipient-only response, approval
-side effects, resource-link denial, and invalid transition handling.
+side effects, resource-link denial, invalid transition handling, and
+idempotency replay/conflict behavior for every lifecycle write action. Approval
+fixtures also pin affiliate provisioning side-effect metadata so retries cannot
+emit duplicate downstream commands.

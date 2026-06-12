@@ -122,6 +122,122 @@ export type MarketplaceCollaborationMessagesResponse = {
   items: MarketplaceCollaborationMessage[];
 };
 
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION =
+  "marketplace-collaboration-lifecycle-writes.v1" as const;
+
+export type MarketplaceCollaborationLifecycleWritesContractVersion =
+  typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION;
+
+export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS = [
+  "create",
+  "respond",
+  "update_terms",
+  "approve_terms",
+  "cancel",
+  "toggle_deliverable",
+  "rate_creator",
+] as const;
+
+export type MarketplaceCollaborationLifecycleWriteAction =
+  (typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS)[number];
+
+export type MarketplaceCollaborationLifecycleSideEffect =
+  | {
+      type:
+        | "marketplace.collaboration.accepted"
+        | "marketplace.collaboration.system_message_requested"
+        | "marketplace.collaboration.notification_requested";
+      idempotencyKey?: string;
+    }
+  | {
+      type: "marketplace.affiliate.provision.command_requested";
+      idempotencyKey: string;
+    };
+
+export type MarketplaceCollaborationLifecycleWriteCommand = {
+  action: MarketplaceCollaborationLifecycleWriteAction;
+  idempotencyKey: string;
+  replayed?: boolean;
+  acceptedAt?: string;
+};
+
+export type MarketplaceCollaborationLifecycleWriteResponse = {
+  contractVersion: MarketplaceCollaborationLifecycleWritesContractVersion;
+  command: MarketplaceCollaborationLifecycleWriteCommand;
+  collaboration: MarketplaceCollaborationRead;
+  sideEffects: MarketplaceCollaborationLifecycleSideEffect[];
+};
+
+export type MarketplaceCollaborationLifecycleWriteBaseRequest = {
+  idempotencyKey: string;
+  side?: MarketplaceCollaborationSide;
+};
+
+export type MarketplaceCollaborationTermsInput = {
+  collaborationType?: MarketplaceCollaborationType | null;
+  freeStayMinNights?: number | null;
+  freeStayMaxNights?: number | null;
+  paidAmount?: string | null;
+  currency?: string | null;
+  discountPercentage?: number | null;
+  creatorFee?: string | null;
+  travelDateFrom?: string | null;
+  travelDateTo?: string | null;
+  preferredDateFrom?: string | null;
+  preferredDateTo?: string | null;
+  preferredMonths?: string[];
+};
+
+export type MarketplaceCollaborationDeliverableInput = {
+  deliverableId?: string;
+  platform: string;
+  type: string;
+  quantity: number;
+};
+
+export type CreateMarketplaceCollaborationLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest & {
+    listingId: string;
+    creatorId?: string;
+    initiatorSide: MarketplaceCollaborationSide;
+    whyGreatFit?: string;
+    consent?: true;
+    message?: string;
+    terms?: MarketplaceCollaborationTermsInput;
+    deliverables?: MarketplaceCollaborationDeliverableInput[];
+  };
+
+export type RespondToMarketplaceCollaborationLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest & {
+    status: "accepted" | "declined";
+    responseMessage?: string;
+  };
+
+export type UpdateMarketplaceCollaborationTermsLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest & {
+    terms: MarketplaceCollaborationTermsInput;
+    deliverables?: MarketplaceCollaborationDeliverableInput[];
+  };
+
+export type ApproveMarketplaceCollaborationTermsLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest & {
+    acceptedTermsVersion?: string;
+  };
+
+export type CancelMarketplaceCollaborationLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest & {
+    reason?: string;
+  };
+
+export type ToggleMarketplaceCollaborationDeliverableLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest;
+
+export type RateMarketplaceCollaborationCreatorLifecycleWriteRequest =
+  MarketplaceCollaborationLifecycleWriteBaseRequest & {
+    rating: number;
+    comment?: string;
+  };
+
 export const marketplaceCollaborationEndpoints = {
   myCollaborations: (input: MarketplaceCollaborationListInput) =>
     `/api/marketplace/collaborations/me${toCollaborationQuery(input)}`,
@@ -134,6 +250,21 @@ export const marketplaceCollaborationEndpoints = {
     input: { side?: MarketplaceCollaborationSide; before?: string },
   ) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/messages${toMessageQuery(input)}`,
+  create: () => "/api/marketplace/collaborations",
+  respond: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/respond`,
+  updateTerms: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/terms`,
+  approveTerms: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/approve`,
+  cancel: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/cancel`,
+  toggleDeliverable: (collaborationId: string, deliverableId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(
+      collaborationId,
+    )}/deliverables/${encodeURIComponent(deliverableId)}/toggle`,
+  rateCreator: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/rate`,
 } as const;
 
 export async function getMyMarketplaceCollaborations(
@@ -170,6 +301,93 @@ export async function getMarketplaceMessages(
   );
 }
 
+export async function createMarketplaceCollaboration(
+  request: CreateMarketplaceCollaborationLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.post<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.create(),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function respondToMarketplaceCollaboration(
+  collaborationId: string,
+  request: RespondToMarketplaceCollaborationLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.post<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.respond(collaborationId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function updateMarketplaceCollaborationTerms(
+  collaborationId: string,
+  request: UpdateMarketplaceCollaborationTermsLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.put<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.updateTerms(collaborationId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function approveMarketplaceCollaborationTerms(
+  collaborationId: string,
+  request: ApproveMarketplaceCollaborationTermsLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.post<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.approveTerms(collaborationId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function cancelMarketplaceCollaboration(
+  collaborationId: string,
+  request: CancelMarketplaceCollaborationLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.post<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.cancel(collaborationId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function toggleMarketplaceCollaborationDeliverable(
+  collaborationId: string,
+  deliverableId: string,
+  request: ToggleMarketplaceCollaborationDeliverableLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.post<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.toggleDeliverable(collaborationId, deliverableId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export async function rateMarketplaceCollaborationCreator(
+  collaborationId: string,
+  request: RateMarketplaceCollaborationCreatorLifecycleWriteRequest,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  return apiClient.post<MarketplaceCollaborationLifecycleWriteResponse>(
+    marketplaceCollaborationEndpoints.rateCreator(collaborationId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
+  );
+}
+
+export function buildMarketplaceCollaborationLifecycleIdempotencyKey(input: {
+  action: MarketplaceCollaborationLifecycleWriteAction;
+  resourceId: string;
+  nonce: string;
+}): string {
+  return `marketplace.collaboration.${input.action}:${sanitizeIdempotencySegment(
+    input.resourceId,
+  )}:${sanitizeIdempotencySegment(input.nonce)}:v1`;
+}
+
 function toCollaborationQuery(input: MarketplaceCollaborationListInput): string {
   const params = new URLSearchParams({ side: input.side });
   if (input.status) params.set("status", input.status);
@@ -184,4 +402,17 @@ function toMessageQuery(input: { side?: MarketplaceCollaborationSide; before?: s
   if (input.before) params.set("before", input.before);
   const query = params.toString();
   return query ? `?${query}` : "";
+}
+
+function toIdempotencyOptions(idempotencyKey: string): RequestInit {
+  return { headers: { "Idempotency-Key": idempotencyKey } };
+}
+
+function sanitizeIdempotencySegment(value: string): string {
+  return (
+    value
+      .trim()
+      .replace(/[^A-Za-z0-9._-]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "unknown"
+  );
 }

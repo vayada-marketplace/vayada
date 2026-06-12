@@ -692,7 +692,20 @@ describe("@vayada/domain-marketplace", () => {
           status: number;
           errorCode?: string;
           collaborationStatus?: string;
+          idempotencyBehavior?: "replay" | "conflict";
+          replayOf?: string;
+          sideEffects?: string[];
           affiliateProvisioningIdempotencyKey?: string;
+          sideEffectMetadata?: {
+            affiliateProvisioning?: {
+              idempotencyKey?: string;
+              commandId?: string;
+              emitted?: boolean;
+              emittedOncePerLifecycleKey?: boolean;
+              replayedFromLifecycleKey?: string;
+              blockedBy?: string;
+            };
+          };
           mustNotWrite?: string[];
         };
       }>;
@@ -703,6 +716,21 @@ describe("@vayada/domain-marketplace", () => {
     );
     expect(fixture.readContractVersion).toBe(MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION);
     const caseIds = fixture.cases.map((entry) => entry.caseId);
+    const fixtureActions = [...new Set(fixture.cases.map((entry) => entry.request.action))].sort();
+    expect(fixtureActions).toEqual([...MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS].sort());
+    for (const action of MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ACTIONS) {
+      const actionCases = fixture.cases.filter((entry) => entry.request.action === action);
+      expect(
+        actionCases.some((entry) => entry.expected.status >= 200 && entry.expected.status < 300),
+      ).toBe(true);
+      expect(actionCases.some((entry) => entry.expected.status >= 400)).toBe(true);
+      expect(actionCases.some((entry) => entry.expected.idempotencyBehavior === "replay")).toBe(
+        true,
+      );
+      expect(actionCases.some((entry) => entry.expected.idempotencyBehavior === "conflict")).toBe(
+        true,
+      );
+    }
     expect(caseIds).toContain("creator-create-collaboration-linked-resource");
     expect(caseIds).toContain("hotel-create-invitation-linked-listing-resource");
     expect(caseIds).toContain("approve-accepted-emits-affiliate-provisioning-command");
@@ -736,6 +764,31 @@ describe("@vayada/domain-marketplace", () => {
         (entry) => entry.caseId === "approve-accepted-emits-affiliate-provisioning-command",
       )?.expected.affiliateProvisioningIdempotencyKey,
     ).toBe("marketplace.affiliate.provision:collaboration:collab_688:v1");
+    expect(
+      fixture.cases.find(
+        (entry) =>
+          entry.caseId === "approve-idempotency-replay-preserves-affiliate-provisioning-command",
+      )?.expected.sideEffectMetadata?.affiliateProvisioning,
+    ).toMatchObject({
+      idempotencyKey: "marketplace.affiliate.provision:collaboration:collab_688:v1",
+      commandId: "cmd:marketplace.affiliate.provision:collaboration:collab_688:v1",
+      emitted: true,
+      emittedOncePerLifecycleKey: true,
+      replayedFromLifecycleKey: "marketplace.collaboration.approve_terms:collab_688:nonce:v1",
+    });
+    expect(
+      fixture.cases.find(
+        (entry) => entry.caseId === "approve-idempotency-conflict-does-not-provision-affiliate",
+      )?.expected.sideEffectMetadata?.affiliateProvisioning,
+    ).toMatchObject({
+      emitted: false,
+      blockedBy: "idempotency_conflict",
+    });
+    expect(
+      fixture.cases.find(
+        (entry) => entry.caseId === "approve-idempotency-conflict-does-not-provision-affiliate",
+      )?.expected.sideEffects,
+    ).toEqual([]);
     expect(
       fixture.cases
         .flatMap((entry) => entry.expected.mustNotWrite ?? [])

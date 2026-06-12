@@ -8,6 +8,12 @@
       "permission": "marketplace.collaboration.write",
       "linkedResources": ["marketplace:creator_profile:creator_profile_lina:owner"]
     },
+    "creatorUnlinked": {
+      "organizationKind": "creator_workspace",
+      "organizationId": "org_creator_unlinked",
+      "permission": "marketplace.collaboration.write",
+      "linkedResources": []
+    },
     "hotelLinked": {
       "organizationKind": "hotel_group",
       "organizationId": "org_hotel_alpenrose",
@@ -70,6 +76,66 @@
       }
     },
     {
+      "caseId": "create-deny-missing-creator-resource-link",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations",
+        "action": "create",
+        "side": "creator",
+        "authRef": "creatorUnlinked",
+        "idempotencyKey": "marketplace.collaboration.create:legacy_listing_688:nonce_creator_missing_link:v1",
+        "body": {
+          "listingId": "legacy_listing_688",
+          "creatorId": "legacy_creator_lina",
+          "initiatorSide": "creator"
+        }
+      },
+      "expected": { "status": 403, "errorCode": "missing_creator_resource_link" }
+    },
+    {
+      "caseId": "create-idempotency-replay-returns-original-collaboration",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations",
+        "action": "create",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.create:legacy_listing_688:nonce_creator:v1",
+        "body": {
+          "listingId": "legacy_listing_688",
+          "creatorId": "legacy_creator_lina",
+          "initiatorSide": "creator"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "idempotencyBehavior": "replay",
+        "replayOf": "creator-create-collaboration-linked-resource",
+        "collaborationStatus": "pending"
+      }
+    },
+    {
+      "caseId": "create-idempotency-conflict-different-payload",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations",
+        "action": "create",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.create:legacy_listing_688:nonce_creator:v1",
+        "body": {
+          "listingId": "legacy_listing_999",
+          "creatorId": "legacy_creator_lina",
+          "initiatorSide": "creator"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict"
+      }
+    },
+    {
       "caseId": "hotel-recipient-respond-accepts-to-negotiating",
       "request": {
         "method": "POST",
@@ -84,6 +150,140 @@
         "status": 200,
         "collaborationStatus": "negotiating",
         "sideEffects": ["marketplace.collaboration.system_message_requested"]
+      }
+    },
+    {
+      "caseId": "respond-deny-wrong-side-initiator",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/respond",
+        "action": "respond",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.respond:collab_688:nonce_self:v1",
+        "body": { "status": "accepted" }
+      },
+      "expected": { "status": 403, "errorCode": "forbidden" }
+    },
+    {
+      "caseId": "respond-idempotency-replay-returns-original-response",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/respond",
+        "action": "respond",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.respond:collab_688:nonce_accept:v1",
+        "body": { "status": "accepted" }
+      },
+      "expected": {
+        "status": 200,
+        "idempotencyBehavior": "replay",
+        "replayOf": "hotel-recipient-respond-accepts-to-negotiating",
+        "collaborationStatus": "negotiating",
+        "sideEffects": ["marketplace.collaboration.system_message_requested"]
+      }
+    },
+    {
+      "caseId": "respond-idempotency-conflict-different-payload",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/respond",
+        "action": "respond",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.respond:collab_688:nonce_accept:v1",
+        "body": { "status": "declined" }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict"
+      }
+    },
+    {
+      "caseId": "update-terms-success-creator-suggests-new-dates",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/collaborations/collab_688/terms",
+        "action": "update_terms",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.update_terms:collab_688:nonce_terms:v1",
+        "body": {
+          "terms": {
+            "travelDateFrom": "2026-09-01",
+            "travelDateTo": "2026-09-03"
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "collaborationStatus": "negotiating",
+        "sideEffects": ["marketplace.collaboration.system_message_requested"]
+      }
+    },
+    {
+      "caseId": "update-terms-deny-missing-creator-resource-link",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/collaborations/collab_688/terms",
+        "action": "update_terms",
+        "side": "creator",
+        "authRef": "creatorUnlinked",
+        "idempotencyKey": "marketplace.collaboration.update_terms:collab_688:nonce_terms_missing_link:v1",
+        "body": {
+          "terms": {
+            "travelDateFrom": "2026-09-01",
+            "travelDateTo": "2026-09-03"
+          }
+        }
+      },
+      "expected": { "status": 403, "errorCode": "missing_creator_resource_link" }
+    },
+    {
+      "caseId": "update-terms-idempotency-replay-returns-original-terms",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/collaborations/collab_688/terms",
+        "action": "update_terms",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.update_terms:collab_688:nonce_terms:v1",
+        "body": {
+          "terms": {
+            "travelDateFrom": "2026-09-01",
+            "travelDateTo": "2026-09-03"
+          }
+        }
+      },
+      "expected": {
+        "status": 200,
+        "idempotencyBehavior": "replay",
+        "replayOf": "update-terms-success-creator-suggests-new-dates",
+        "collaborationStatus": "negotiating"
+      }
+    },
+    {
+      "caseId": "update-terms-idempotency-conflict-different-payload",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/collaborations/collab_688/terms",
+        "action": "update_terms",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.update_terms:collab_688:nonce_terms:v1",
+        "body": {
+          "terms": {
+            "travelDateFrom": "2026-10-01",
+            "travelDateTo": "2026-10-03"
+          }
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict"
       }
     },
     {
@@ -105,21 +305,16 @@
           "marketplace.affiliate.provision.command_requested"
         ],
         "affiliateProvisioningIdempotencyKey": "marketplace.affiliate.provision:collaboration:collab_688:v1",
+        "sideEffectMetadata": {
+          "affiliateProvisioning": {
+            "idempotencyKey": "marketplace.affiliate.provision:collaboration:collab_688:v1",
+            "commandId": "cmd:marketplace.affiliate.provision:collaboration:collab_688:v1",
+            "emitted": true,
+            "emittedOncePerLifecycleKey": true
+          }
+        },
         "mustNotWrite": ["pms.*", "finance.*", "affiliate.*"]
       }
-    },
-    {
-      "caseId": "respond-deny-wrong-side-initiator",
-      "request": {
-        "method": "POST",
-        "path": "/api/marketplace/collaborations/collab_688/respond",
-        "action": "respond",
-        "side": "creator",
-        "authRef": "creatorLinked",
-        "idempotencyKey": "marketplace.collaboration.respond:collab_688:nonce_self:v1",
-        "body": { "status": "accepted" }
-      },
-      "expected": { "status": 403, "errorCode": "forbidden" }
     },
     {
       "caseId": "approve-deny-missing-hotel-listing-link",
@@ -144,6 +339,257 @@
         "idempotencyKey": "marketplace.collaboration.approve_terms:collab_pending:nonce:v1"
       },
       "expected": { "status": 409, "errorCode": "invalid_transition" }
+    },
+    {
+      "caseId": "approve-idempotency-replay-preserves-affiliate-provisioning-command",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/approve",
+        "action": "approve_terms",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.approve_terms:collab_688:nonce:v1",
+        "body": { "acceptedTermsVersion": "terms_v3" }
+      },
+      "expected": {
+        "status": 200,
+        "idempotencyBehavior": "replay",
+        "replayOf": "approve-accepted-emits-affiliate-provisioning-command",
+        "collaborationStatus": "accepted",
+        "sideEffects": [
+          "marketplace.collaboration.accepted",
+          "marketplace.affiliate.provision.command_requested"
+        ],
+        "affiliateProvisioningIdempotencyKey": "marketplace.affiliate.provision:collaboration:collab_688:v1",
+        "sideEffectMetadata": {
+          "affiliateProvisioning": {
+            "idempotencyKey": "marketplace.affiliate.provision:collaboration:collab_688:v1",
+            "commandId": "cmd:marketplace.affiliate.provision:collaboration:collab_688:v1",
+            "emitted": true,
+            "emittedOncePerLifecycleKey": true,
+            "replayedFromLifecycleKey": "marketplace.collaboration.approve_terms:collab_688:nonce:v1"
+          }
+        }
+      }
+    },
+    {
+      "caseId": "approve-idempotency-conflict-does-not-provision-affiliate",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/approve",
+        "action": "approve_terms",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.approve_terms:collab_688:nonce:v1",
+        "body": { "acceptedTermsVersion": "terms_v4" }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict",
+        "sideEffects": [],
+        "sideEffectMetadata": {
+          "affiliateProvisioning": {
+            "emitted": false,
+            "blockedBy": "idempotency_conflict"
+          }
+        }
+      }
+    },
+    {
+      "caseId": "cancel-success-creator-withdraws",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/cancel",
+        "action": "cancel",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.cancel:collab_688:nonce_cancel:v1",
+        "body": { "reason": "Travel window changed." }
+      },
+      "expected": {
+        "status": 200,
+        "collaborationStatus": "cancelled",
+        "sideEffects": [
+          "marketplace.collaboration.system_message_requested",
+          "marketplace.collaboration.notification_requested"
+        ]
+      }
+    },
+    {
+      "caseId": "cancel-deny-invalid-transition-completed",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_completed/cancel",
+        "action": "cancel",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.cancel:collab_completed:nonce_cancel:v1",
+        "body": { "reason": "Too late." }
+      },
+      "expected": { "status": 409, "errorCode": "invalid_transition" }
+    },
+    {
+      "caseId": "cancel-idempotency-replay-returns-original-cancel",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/cancel",
+        "action": "cancel",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.cancel:collab_688:nonce_cancel:v1",
+        "body": { "reason": "Travel window changed." }
+      },
+      "expected": {
+        "status": 200,
+        "idempotencyBehavior": "replay",
+        "replayOf": "cancel-success-creator-withdraws",
+        "collaborationStatus": "cancelled"
+      }
+    },
+    {
+      "caseId": "cancel-idempotency-conflict-different-payload",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/cancel",
+        "action": "cancel",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.cancel:collab_688:nonce_cancel:v1",
+        "body": { "reason": "Different cancellation reason." }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict"
+      }
+    },
+    {
+      "caseId": "toggle-deliverable-success-completes-reel",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/deliverables/deliverable_reel/toggle",
+        "action": "toggle_deliverable",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.toggle_deliverable:collab_688_deliverable_reel:nonce_toggle:v1"
+      },
+      "expected": {
+        "status": 200,
+        "collaborationStatus": "accepted",
+        "deliverableStatus": "completed",
+        "sideEffects": ["marketplace.collaboration.system_message_requested"]
+      }
+    },
+    {
+      "caseId": "toggle-deliverable-deny-missing-collaboration",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_missing/deliverables/deliverable_reel/toggle",
+        "action": "toggle_deliverable",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.toggle_deliverable:collab_missing_deliverable_reel:nonce_toggle:v1"
+      },
+      "expected": { "status": 404, "errorCode": "collaboration_not_found" }
+    },
+    {
+      "caseId": "toggle-deliverable-idempotency-replay-returns-original-toggle",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/deliverables/deliverable_reel/toggle",
+        "action": "toggle_deliverable",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.toggle_deliverable:collab_688_deliverable_reel:nonce_toggle:v1"
+      },
+      "expected": {
+        "status": 200,
+        "idempotencyBehavior": "replay",
+        "replayOf": "toggle-deliverable-success-completes-reel",
+        "deliverableStatus": "completed"
+      }
+    },
+    {
+      "caseId": "toggle-deliverable-idempotency-conflict-different-deliverable",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/deliverables/deliverable_story/toggle",
+        "action": "toggle_deliverable",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.toggle_deliverable:collab_688_deliverable_reel:nonce_toggle:v1"
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict"
+      }
+    },
+    {
+      "caseId": "rate-creator-success-completed-collaboration",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_completed/rate",
+        "action": "rate_creator",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.rate_creator:collab_completed:nonce_rate:v1",
+        "body": { "rating": 5, "comment": "Reliable, thoughtful creator." }
+      },
+      "expected": {
+        "status": 200,
+        "collaborationStatus": "completed",
+        "sideEffects": ["marketplace.collaboration.notification_requested"]
+      }
+    },
+    {
+      "caseId": "rate-creator-deny-not-completed",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/rate",
+        "action": "rate_creator",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.rate_creator:collab_688:nonce_rate_pending:v1",
+        "body": { "rating": 5 }
+      },
+      "expected": { "status": 409, "errorCode": "invalid_transition" }
+    },
+    {
+      "caseId": "rate-creator-idempotency-replay-returns-original-rating",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_completed/rate",
+        "action": "rate_creator",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.rate_creator:collab_completed:nonce_rate:v1",
+        "body": { "rating": 5, "comment": "Reliable, thoughtful creator." }
+      },
+      "expected": {
+        "status": 200,
+        "idempotencyBehavior": "replay",
+        "replayOf": "rate-creator-success-completed-collaboration",
+        "collaborationStatus": "completed"
+      }
+    },
+    {
+      "caseId": "rate-creator-idempotency-conflict-different-rating",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_completed/rate",
+        "action": "rate_creator",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.rate_creator:collab_completed:nonce_rate:v1",
+        "body": { "rating": 4, "comment": "Reliable, thoughtful creator." }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "idempotency_conflict",
+        "idempotencyBehavior": "conflict"
+      }
     }
   ]
 }

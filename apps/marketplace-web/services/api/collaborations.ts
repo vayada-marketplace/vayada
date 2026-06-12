@@ -7,14 +7,24 @@ import type { Collaboration, PaginatedResponse } from "@/lib/types";
 import type { Hotel, Creator } from "@/lib/types";
 import { buildQueryString } from "@/lib/utils";
 import {
+  approveMarketplaceCollaborationTerms,
+  buildMarketplaceCollaborationLifecycleIdempotencyKey,
+  cancelMarketplaceCollaboration,
+  createMarketplaceCollaboration,
   getMarketplaceCollaboration,
   getMarketplaceConversations,
   getMarketplaceMessages,
   getMyMarketplaceCollaborations,
+  rateMarketplaceCollaborationCreator,
+  respondToMarketplaceCollaboration,
+  toggleMarketplaceCollaborationDeliverable,
+  updateMarketplaceCollaborationTerms,
   type MarketplaceCollaborationMessage,
+  type MarketplaceCollaborationLifecycleWriteAction,
   type MarketplaceCollaborationRead,
   type MarketplaceCollaborationSide,
   type MarketplaceCollaborationStatus,
+  type MarketplaceCollaborationTermsInput,
   type MarketplaceCollaborationType,
   type MarketplaceConversationSummary,
 } from "@vayada/marketplace-shared/api/collaborations";
@@ -404,7 +414,20 @@ export const collaborationService = {
    * Create collaboration request (creator application or hotel invitation)
    */
   create: async (data: CreateCollaborationRequest): Promise<Collaboration> => {
-    return apiClient.post<Collaboration>("/collaborations", data);
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey("create", data.listing_id);
+    try {
+      const response = await createMarketplaceCollaboration(
+        toTargetCreateCollaborationRequest(data, idempotencyKey),
+      );
+      return transformCollaborationResponse(toLegacyCollaborationResponse(response.collaboration));
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post<Collaboration>(
+        "/collaborations",
+        withIdempotencyKey(data, idempotencyKey),
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
@@ -477,16 +500,45 @@ export const collaborationService = {
     collaborationId: string,
     deliverableId: string,
   ): Promise<CollaborationResponse> => {
-    return apiClient.post<CollaborationResponse>(
-      `/collaborations/${collaborationId}/deliverables/${deliverableId}/toggle`,
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey(
+      "toggle_deliverable",
+      `${collaborationId}:${deliverableId}`,
     );
+    try {
+      const response = await toggleMarketplaceCollaborationDeliverable(
+        collaborationId,
+        deliverableId,
+        { idempotencyKey },
+      );
+      return toLegacyCollaborationResponse(response.collaboration);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post<CollaborationResponse>(
+        `/collaborations/${collaborationId}/deliverables/${deliverableId}/toggle`,
+        { idempotencyKey },
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
    * Approve terms (Double Confirmation)
    */
   approveCollaboration: async (collaborationId: string): Promise<CollaborationResponse> => {
-    return apiClient.post<CollaborationResponse>(`/collaborations/${collaborationId}/approve`);
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey("approve_terms", collaborationId);
+    try {
+      const response = await approveMarketplaceCollaborationTerms(collaborationId, {
+        idempotencyKey,
+      });
+      return toLegacyCollaborationResponse(response.collaboration);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post<CollaborationResponse>(
+        `/collaborations/${collaborationId}/approve`,
+        { idempotencyKey },
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
@@ -496,7 +548,21 @@ export const collaborationService = {
     collaborationId: string,
     data: UpdateCollaborationTermsRequest,
   ): Promise<CollaborationResponse> => {
-    return apiClient.put<CollaborationResponse>(`/collaborations/${collaborationId}/terms`, data);
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey("update_terms", collaborationId);
+    try {
+      const response = await updateMarketplaceCollaborationTerms(
+        collaborationId,
+        toTargetUpdateTermsRequest(data, idempotencyKey),
+      );
+      return toLegacyCollaborationResponse(response.collaboration);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.put<CollaborationResponse>(
+        `/collaborations/${collaborationId}/terms`,
+        withIdempotencyKey(data, idempotencyKey),
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
@@ -509,10 +575,22 @@ export const collaborationService = {
     collaborationId: string,
     data: CollaborationResponseRequest,
   ): Promise<CollaborationResponse> => {
-    return apiClient.post<CollaborationResponse>(
-      `/collaborations/${collaborationId}/respond`,
-      data,
-    );
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey("respond", collaborationId);
+    try {
+      const response = await respondToMarketplaceCollaboration(collaborationId, {
+        idempotencyKey,
+        status: data.status,
+        responseMessage: data.response_message,
+      });
+      return toLegacyCollaborationResponse(response.collaboration);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post<CollaborationResponse>(
+        `/collaborations/${collaborationId}/respond`,
+        withIdempotencyKey(data, idempotencyKey),
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
@@ -522,9 +600,21 @@ export const collaborationService = {
     collaborationId: string,
     reason?: string,
   ): Promise<CollaborationResponse> => {
-    return apiClient.post<CollaborationResponse>(`/collaborations/${collaborationId}/cancel`, {
-      reason,
-    });
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey("cancel", collaborationId);
+    try {
+      const response = await cancelMarketplaceCollaboration(collaborationId, {
+        idempotencyKey,
+        reason,
+      });
+      return toLegacyCollaborationResponse(response.collaboration);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post<CollaborationResponse>(
+        `/collaborations/${collaborationId}/cancel`,
+        { reason, idempotencyKey },
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
@@ -535,10 +625,26 @@ export const collaborationService = {
     rating: number,
     comment?: string,
   ): Promise<{ message: string; rating_id: string; created_at: string }> => {
-    return apiClient.post(`/collaborations/${collaborationId}/rate`, {
-      rating,
-      comment,
-    });
+    const idempotencyKey = buildLifecycleWriteIdempotencyKey("rate_creator", collaborationId);
+    try {
+      const response = await rateMarketplaceCollaborationCreator(collaborationId, {
+        idempotencyKey,
+        rating,
+        comment,
+      });
+      return {
+        message: "Rating submitted successfully",
+        rating_id: response.command.idempotencyKey,
+        created_at: response.command.acceptedAt ?? response.collaboration.updatedAt,
+      };
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post(
+        `/collaborations/${collaborationId}/rate`,
+        { rating, comment, idempotencyKey },
+        toLegacyIdempotencyOptions(idempotencyKey),
+      );
+    }
   },
 
   /**
@@ -550,6 +656,141 @@ export const collaborationService = {
     return apiClient.upload<{ url: string }>("/upload/image/chat", formData);
   },
 };
+
+type LegacyCollaborationTermsSource = {
+  collaboration_type?: string | null;
+  free_stay_min_nights?: number | null;
+  free_stay_max_nights?: number | null;
+  paid_amount?: number | null;
+  currency?: string | null;
+  discount_percentage?: number | null;
+  creator_fee?: number | null;
+  travel_date_from?: string;
+  travel_date_to?: string;
+  preferred_date_from?: string;
+  preferred_date_to?: string;
+  preferred_months?: string[];
+};
+
+type LegacyDeliverablesItem = {
+  platform: string;
+  deliverables: Array<{
+    id?: string;
+    type: string;
+    quantity: number;
+  }>;
+};
+
+function buildLifecycleWriteIdempotencyKey(
+  action: MarketplaceCollaborationLifecycleWriteAction,
+  resourceId: string,
+): string {
+  return buildMarketplaceCollaborationLifecycleIdempotencyKey({
+    action,
+    resourceId,
+    nonce: createClientNonce(),
+  });
+}
+
+function createClientNonce(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function toLegacyIdempotencyOptions(idempotencyKey: string): RequestInit {
+  // Legacy Python collaboration routes ignore this today; keep the fallback only until V4 routes land.
+  return { headers: { "Idempotency-Key": idempotencyKey } };
+}
+
+function withIdempotencyKey<T extends object>(
+  data: T,
+  idempotencyKey: string,
+): T & { idempotencyKey: string } {
+  return { ...data, idempotencyKey };
+}
+
+function toTargetCreateCollaborationRequest(
+  data: CreateCollaborationRequest,
+  idempotencyKey: string,
+) {
+  return {
+    idempotencyKey,
+    listingId: data.listing_id,
+    creatorId: data.creator_id ?? undefined,
+    initiatorSide: data.initiator_type,
+    whyGreatFit: data.initiator_type === "creator" ? data.why_great_fit : undefined,
+    consent: data.initiator_type === "creator" ? data.consent : undefined,
+    message: data.initiator_type === "hotel" ? data.message : undefined,
+    terms: toTargetTerms(data),
+    deliverables: toTargetDeliverables(data.platform_deliverables),
+  };
+}
+
+function toTargetUpdateTermsRequest(data: UpdateCollaborationTermsRequest, idempotencyKey: string) {
+  return {
+    idempotencyKey,
+    terms: toTargetTerms(data),
+    deliverables: toTargetDeliverables(data.platform_deliverables),
+  };
+}
+
+function toTargetTerms(source: LegacyCollaborationTermsSource): MarketplaceCollaborationTermsInput {
+  return {
+    collaborationType: toTargetCollaborationType(source.collaboration_type),
+    freeStayMinNights: source.free_stay_min_nights,
+    freeStayMaxNights: source.free_stay_max_nights,
+    paidAmount: toDecimalString(source.paid_amount),
+    currency: source.currency,
+    discountPercentage: source.discount_percentage,
+    creatorFee: toDecimalString(source.creator_fee),
+    travelDateFrom: source.travel_date_from,
+    travelDateTo: source.travel_date_to,
+    preferredDateFrom: source.preferred_date_from,
+    preferredDateTo: source.preferred_date_to,
+    preferredMonths: source.preferred_months,
+  };
+}
+
+function toTargetDeliverables(items?: LegacyDeliverablesItem[]) {
+  const deliverables = items?.flatMap((item) =>
+    item.deliverables.map((deliverable) => ({
+      deliverableId: deliverable.id,
+      platform: item.platform,
+      type: deliverable.type,
+      quantity: deliverable.quantity,
+    })),
+  );
+  return deliverables?.length ? deliverables : undefined;
+}
+
+function toTargetCollaborationType(
+  value?: string | null,
+): MarketplaceCollaborationType | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  switch (value) {
+    case "Free Stay":
+    case "free_stay":
+      return "free_stay";
+    case "Paid":
+    case "paid":
+      return "paid";
+    case "Discount":
+    case "discount":
+      return "discount";
+    case "Affiliate":
+    case "affiliate":
+      return "affiliate";
+    default:
+      return null;
+  }
+}
+
+function toDecimalString(value?: number | null): string | null | undefined {
+  return value === undefined ? undefined : value === null ? null : String(value);
+}
 
 /**
  * Transforms a backend collaboration response into a Frontend-friendly Collaboration object with simplified structure
@@ -678,11 +919,22 @@ export function transformCollaborationResponse(
 }
 
 function isMissingMarketplaceCollaborationRoute(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("status" in error)) return false;
+  if ((error as { status: unknown }).status !== 404) return false;
+
+  const data = (error as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return false;
+  if ("code" in data) return false;
+
+  const detail = (data as { detail?: unknown }).detail;
+  if (detail === "Not Found") return true;
+
+  const fastifyError = data as { error?: unknown; message?: unknown };
   return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    (error as { status: unknown }).status === 404
+    fastifyError.error === "Not Found" &&
+    typeof fastifyError.message === "string" &&
+    fastifyError.message.startsWith("Route ") &&
+    fastifyError.message.includes("/api/marketplace/collaborations")
   );
 }
 
