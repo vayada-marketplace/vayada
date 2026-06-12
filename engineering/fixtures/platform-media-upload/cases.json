@@ -1,0 +1,201 @@
+{
+  "contractVersion": "platform-media-upload.v1",
+  "cases": [
+    {
+      "caseId": "property-gallery-upload-session",
+      "description": "Hotel owner requests public property gallery media; upload stays private until domain approval.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "property.gallery_image",
+          "visibility": "public",
+          "resource": {
+            "product": "booking",
+            "resourceType": "booking_hotel",
+            "resourceId": "booking_hotel_alpenrose",
+            "propertyId": "property_alpenrose"
+          },
+          "files": [
+            {
+              "clientFileId": "hero",
+              "filename": "alpine suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/jpeg",
+            "sizeBytes": 2048,
+            "checksumSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "widthPx": 1800,
+            "heightPx": 1200
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 1,
+        "mediaObject": {
+          "purpose": "property.gallery_image",
+          "resourceProduct": "hotel_catalog",
+          "resourceType": "property",
+          "resourceId": "property_alpenrose",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
+      "caseId": "property-gallery-batch-upload-session",
+      "description": "Gallery upload sessions sign and finalize one media object per file.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "property.gallery_image",
+          "visibility": "public",
+          "resource": {
+            "product": "booking",
+            "resourceType": "booking_hotel",
+            "resourceId": "booking_hotel_alpenrose",
+            "propertyId": "property_alpenrose"
+          },
+          "files": [
+            {
+              "clientFileId": "hero",
+              "filename": "alpine suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            },
+            {
+              "clientFileId": "patio",
+              "filename": "patio.png",
+              "contentType": "image/png",
+              "sizeBytes": 4096
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/jpeg",
+            "sizeBytes": 2048,
+            "widthPx": 1800,
+            "heightPx": 1200
+          },
+          {
+            "contentType": "image/png",
+            "sizeBytes": 4096,
+            "widthPx": 1600,
+            "heightPx": 1000
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 2,
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
+      "caseId": "property-gallery-deny-unresolved-property-target",
+      "description": "Property media cannot claim an arbitrary catalog property ID from a booking hotel link.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "property.gallery_image",
+          "visibility": "public",
+          "resource": {
+            "product": "booking",
+            "resourceType": "booking_hotel",
+            "resourceId": "booking_hotel_alpenrose",
+            "propertyId": "property_elsewhere"
+          },
+          "files": [
+            {
+              "clientFileId": "hero",
+              "filename": "alpine suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "media_target_forbidden"
+      }
+    },
+    {
+      "caseId": "private-chat-attachment-rejects-public-visibility",
+      "description": "Collaboration chat attachments are private only.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "marketplace.collaboration_chat.attachment",
+          "visibility": "public",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "creator_profile",
+            "resourceId": "creator_profile_lina"
+          },
+          "files": [
+            {
+              "filename": "chat.gif",
+              "contentType": "image/gif",
+              "sizeBytes": 1024
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_media_visibility"
+      }
+    },
+    {
+      "caseId": "property-hero-rejects-pdf",
+      "description": "Public property image purposes reject non-image files before signing.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "property.hero_image",
+          "resource": {
+            "product": "booking",
+            "resourceType": "booking_hotel",
+            "resourceId": "booking_hotel_alpenrose"
+          },
+          "files": [
+            {
+              "filename": "contract.pdf",
+              "contentType": "application/pdf",
+              "sizeBytes": 1024
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "unsupported_media_type"
+      }
+    }
+  ]
+}

@@ -1,0 +1,1232 @@
+import type {
+  LinkedResource,
+  PermissionKey,
+  Product,
+  RequestContext,
+  ResourceRelationship,
+  ResourceType,
+} from "@vayada/backend-auth";
+import type { FastifyInstance, FastifyReply } from "fastify";
+import { randomUUID } from "node:crypto";
+
+import { enforceRoutePolicy } from "./policy.js";
+
+export const PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION = "platform-media-upload.v1" as const;
+
+export type PlatformMediaPurpose =
+  | "property.hero_image"
+  | "property.gallery_image"
+  | "property.logo"
+  | "marketplace.listing.gallery"
+  | "marketplace.creator.profile_image"
+  | "marketplace.collaboration_chat.attachment"
+  | "pms.room_type.media"
+  | "pms.messaging.attachment"
+  | "pms.import.source_image";
+
+export type PlatformMediaVisibility = "public" | "private";
+
+export type PlatformMediaVariantName =
+  | "original_safe"
+  | "large"
+  | "thumbnail"
+  | "blur_preview"
+  | "provider_original";
+
+export type PlatformMediaResourceProduct =
+  | "hotel_catalog"
+  | "booking"
+  | "pms"
+  | "marketplace"
+  | "distribution"
+  | "platform"
+  | "migration";
+
+export type PlatformMediaResourceScope = {
+  product: Product;
+  resourceType: ResourceType;
+  resourceId: string;
+  propertyId?: string;
+  targetResourceId?: string;
+};
+
+export type PlatformMediaUploadFileRequest = {
+  clientFileId?: string;
+  filename: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
+export type PlatformMediaUploadSessionRequest = {
+  purpose: PlatformMediaPurpose;
+  visibility?: PlatformMediaVisibility;
+  resource: PlatformMediaResourceScope;
+  files: PlatformMediaUploadFileRequest[];
+};
+
+export type PlatformMediaFinalizeFileRequest = {
+  uploadTargetId: string;
+  contentType?: string;
+  sizeBytes?: number;
+  checksumSha256?: string;
+  widthPx?: number;
+  heightPx?: number;
+};
+
+export type PlatformMediaFinalizeRequest = {
+  files: PlatformMediaFinalizeFileRequest[];
+};
+
+export type PlatformMediaUploadTarget = {
+  uploadTargetId: string;
+  clientFileId: string;
+  method: "PUT";
+  uploadUrl: string;
+  headers: Record<string, string>;
+  stagingKey: string;
+  expiresAt: string;
+};
+
+export type PlatformMediaResolvedTarget = {
+  resourceProduct: PlatformMediaResourceProduct;
+  resourceType: string;
+  resourceId: string;
+  propertyId?: string;
+};
+
+export type PlatformMediaSessionRecord = {
+  sessionId: string;
+  uploadSessionKey: string;
+  purpose: PlatformMediaPurpose;
+  requestedVisibility: PlatformMediaVisibility;
+  effectiveVisibility: PlatformMediaVisibility;
+  actorUserId: string;
+  ownerOrganizationId: string;
+  resource: PlatformMediaResourceScope;
+  target: PlatformMediaResolvedTarget;
+  files: Array<PlatformMediaUploadFileRequest & { clientFileId: string; uploadTargetId: string }>;
+  uploadTargets: PlatformMediaUploadTarget[];
+  stagingPrefix: string;
+  status: "signed" | "completed" | "failed";
+  expiresAt: string;
+  createdAt: string;
+  completedAt?: string;
+  completedMediaObject?: PlatformMediaObjectRecord;
+  completedMediaObjects?: PlatformMediaObjectRecord[];
+};
+
+export type PlatformMediaVariantRecord = {
+  variantName: PlatformMediaVariantName;
+  visibility: PlatformMediaVisibility;
+  storageKey: string;
+  contentType: string;
+  widthPx?: number;
+  heightPx?: number;
+  sizeBytes: number;
+  publicCdnUrl: string | null;
+};
+
+export type PlatformMediaObjectRecord = {
+  mediaId: string;
+  purpose: PlatformMediaPurpose;
+  visibility: PlatformMediaVisibility;
+  requestedVisibility: PlatformMediaVisibility;
+  approvalStatus: "pending_domain_approval" | "private";
+  lifecycleStatus: "staged";
+  bucket: string;
+  storageKey: string;
+  ownerOrganizationId: string;
+  actorUserId: string;
+  resourceProduct: PlatformMediaResourceProduct;
+  resourceType: string;
+  resourceId: string;
+  propertyId?: string;
+  contentType: string;
+  sizeBytes: number;
+  checksumSha256?: string;
+  widthPx?: number;
+  heightPx?: number;
+  originalFilename: string;
+  variants: PlatformMediaVariantRecord[];
+  createdAt: string;
+};
+
+export type PlatformMediaAuditEvent = {
+  action: "platform_media.upload_session.created" | "platform_media.upload_session.finalized";
+  auditKey: string;
+  actorUserId: string;
+  organizationId: string;
+  targetType: "media_upload_session" | "media_object";
+  targetId: string;
+  requestId: string;
+  metadata: Record<string, unknown>;
+};
+
+export type PlatformMediaFinalizedFileInspection = {
+  contentType: string;
+  sizeBytes: number;
+  checksumSha256?: string;
+  widthPx?: number;
+  heightPx?: number;
+};
+
+export type PlatformMediaFinalizedFileRecord = {
+  sessionFile: PlatformMediaSessionRecord["files"][number];
+  uploadTarget: PlatformMediaUploadTarget;
+  inspection: PlatformMediaFinalizedFileInspection;
+};
+
+export type PlatformMediaCompleteUploadSessionResult = {
+  uploadSession: PlatformMediaSessionRecord;
+  mediaObjects: PlatformMediaObjectRecord[];
+};
+
+export type PlatformMediaRepository = {
+  createUploadSession(input: {
+    sessionId: string;
+    uploadSessionKey: string;
+    stagingPrefix: string;
+    context: RequestContext;
+    request: PlatformMediaUploadSessionRequest;
+    policy: PlatformMediaPurposePolicy;
+    target: PlatformMediaResolvedTarget;
+    uploadTargets: PlatformMediaUploadTarget[];
+    now: string;
+    expiresAt: string;
+  }): Promise<PlatformMediaSessionRecord>;
+  findUploadSession(sessionId: string): Promise<PlatformMediaSessionRecord | null>;
+  completeUploadSession(input: {
+    session: PlatformMediaSessionRecord;
+    files: PlatformMediaFinalizedFileRecord[];
+    variantSets: PlatformMediaVariantRecord[][];
+    bucketName: string;
+    now: string;
+  }): Promise<PlatformMediaCompleteUploadSessionResult>;
+  recordAudit(event: PlatformMediaAuditEvent): Promise<void>;
+  close?(): Promise<void>;
+};
+
+export type PlatformMediaUploadSigner = {
+  signUploadTarget(input: {
+    sessionId: string;
+    uploadTargetId: string;
+    stagingKey: string;
+    contentType: string;
+    sizeBytes: number;
+    expiresAt: string;
+  }): Promise<Omit<PlatformMediaUploadTarget, "clientFileId" | "stagingKey">>;
+};
+
+export type PlatformMediaTargetResolver = {
+  resolveTarget(input: {
+    context: RequestContext;
+    request: PlatformMediaUploadSessionRequest;
+    policy: PlatformMediaPurposePolicy;
+  }): Promise<
+    | { ok: true; target: PlatformMediaResolvedTarget }
+    | { ok: false; statusCode: 400 | 403 | 404; code: string; message: string }
+  >;
+};
+
+export type PlatformMediaUploadFinalizer = {
+  inspectUploadedFile(input: {
+    session: PlatformMediaSessionRecord;
+    sessionFile: PlatformMediaSessionRecord["files"][number];
+    uploadTarget: PlatformMediaUploadTarget;
+    clientFile: PlatformMediaFinalizeFileRequest;
+    policy: PlatformMediaPurposePolicy;
+  }): Promise<
+    | { ok: true; inspection: PlatformMediaFinalizedFileInspection }
+    | { ok: false; code: string; message: string }
+  >;
+  generateVariants(input: {
+    session: PlatformMediaSessionRecord;
+    file: PlatformMediaFinalizedFileRecord;
+    fileIndex: number;
+    policy: PlatformMediaPurposePolicy;
+  }): Promise<PlatformMediaVariantRecord[]>;
+};
+
+export type PlatformMediaRoutesOptions = {
+  repository: PlatformMediaRepository;
+  signer: PlatformMediaUploadSigner;
+  targetResolver: PlatformMediaTargetResolver;
+  finalizer: PlatformMediaUploadFinalizer;
+  bucketName?: string;
+  now?: () => Date;
+};
+
+export type PlatformMediaPurposePolicy = {
+  purpose: PlatformMediaPurpose;
+  permission: PermissionKey;
+  allowedRelationships: readonly ResourceRelationship[];
+  allowedResources: ReadonlyArray<Pick<LinkedResource, "product" | "resourceType">>;
+  allowedContentTypes: readonly string[];
+  allowedExtensions: readonly string[];
+  maxFileSizeBytes: number;
+  maxFileCount: number;
+  maxImagePixels?: number;
+  privateOnly: boolean;
+  targetResourceProduct: PlatformMediaResourceProduct;
+  targetResourceType: string;
+  requiredVariants: readonly PlatformMediaVariantName[];
+};
+
+const imageContentTypes = ["image/jpeg", "image/png", "image/webp"] as const;
+const imageExtensions = [".jpg", ".jpeg", ".png", ".webp"] as const;
+const publicImageVariants = ["original_safe", "large", "thumbnail", "blur_preview"] as const;
+const providerOriginalVariant = ["provider_original"] as const;
+const defaultMaxImagePixels = 60_000_000;
+
+const purposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePolicy> = {
+  "property.hero_image": {
+    purpose: "property.hero_image",
+    permission: "booking.settings.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [{ product: "booking", resourceType: "booking_hotel" }],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 1,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: false,
+    targetResourceProduct: "hotel_catalog",
+    targetResourceType: "property",
+    requiredVariants: publicImageVariants,
+  },
+  "property.gallery_image": {
+    purpose: "property.gallery_image",
+    permission: "booking.settings.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [{ product: "booking", resourceType: "booking_hotel" }],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 25,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: false,
+    targetResourceProduct: "hotel_catalog",
+    targetResourceType: "property",
+    requiredVariants: publicImageVariants,
+  },
+  "property.logo": {
+    purpose: "property.logo",
+    permission: "booking.settings.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [{ product: "booking", resourceType: "booking_hotel" }],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 1,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: false,
+    targetResourceProduct: "hotel_catalog",
+    targetResourceType: "property",
+    requiredVariants: publicImageVariants,
+  },
+  "marketplace.listing.gallery": {
+    purpose: "marketplace.listing.gallery",
+    permission: "marketplace.profile.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [{ product: "marketplace", resourceType: "hotel_listing" }],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 12,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: false,
+    targetResourceProduct: "marketplace",
+    targetResourceType: "hotel_listing",
+    requiredVariants: publicImageVariants,
+  },
+  "marketplace.creator.profile_image": {
+    purpose: "marketplace.creator.profile_image",
+    permission: "marketplace.profile.manage",
+    allowedRelationships: ["owner"],
+    allowedResources: [{ product: "marketplace", resourceType: "creator_profile" }],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 5 * 1024 * 1024,
+    maxFileCount: 1,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: false,
+    targetResourceProduct: "marketplace",
+    targetResourceType: "creator_profile",
+    requiredVariants: publicImageVariants,
+  },
+  "marketplace.collaboration_chat.attachment": {
+    purpose: "marketplace.collaboration_chat.attachment",
+    permission: "marketplace.collaboration.review",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [
+      { product: "marketplace", resourceType: "hotel_listing" },
+      { product: "marketplace", resourceType: "creator_profile" },
+    ],
+    allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+    allowedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif"],
+    maxFileSizeBytes: 20 * 1024 * 1024,
+    maxFileCount: 1,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: true,
+    targetResourceProduct: "marketplace",
+    targetResourceType: "collaboration",
+    requiredVariants: providerOriginalVariant,
+  },
+  "pms.room_type.media": {
+    purpose: "pms.room_type.media",
+    permission: "pms.operations.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [
+      { product: "pms", resourceType: "pms_property" },
+      { product: "pms", resourceType: "pms_hotel" },
+    ],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 20,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: false,
+    targetResourceProduct: "pms",
+    targetResourceType: "room_type",
+    requiredVariants: publicImageVariants,
+  },
+  "pms.messaging.attachment": {
+    purpose: "pms.messaging.attachment",
+    permission: "pms.operations.manage",
+    allowedRelationships: ["owner", "operator", "front_desk"],
+    allowedResources: [
+      { product: "pms", resourceType: "pms_property" },
+      { product: "pms", resourceType: "pms_hotel" },
+    ],
+    allowedContentTypes: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "image/heic",
+      "image/heif",
+      "application/pdf",
+    ],
+    allowedExtensions: [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".pdf"],
+    maxFileSizeBytes: 25 * 1024 * 1024,
+    maxFileCount: 1,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: true,
+    targetResourceProduct: "pms",
+    targetResourceType: "message_thread",
+    requiredVariants: providerOriginalVariant,
+  },
+  "pms.import.source_image": {
+    purpose: "pms.import.source_image",
+    permission: "pms.operations.manage",
+    allowedRelationships: ["owner", "operator"],
+    allowedResources: [
+      { product: "pms", resourceType: "pms_property" },
+      { product: "pms", resourceType: "pms_hotel" },
+    ],
+    allowedContentTypes: imageContentTypes,
+    allowedExtensions: imageExtensions,
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFileCount: 20,
+    maxImagePixels: defaultMaxImagePixels,
+    privateOnly: true,
+    targetResourceProduct: "pms",
+    targetResourceType: "import_job",
+    requiredVariants: providerOriginalVariant,
+  },
+};
+
+export async function registerPlatformMediaRoutes(
+  app: FastifyInstance,
+  options: PlatformMediaRoutesOptions,
+): Promise<void> {
+  const bucketName = options.bucketName ?? "vayada-media-local";
+  const now = options.now ?? (() => new Date());
+
+  app.addHook("onClose", async () => {
+    await options.repository.close?.();
+  });
+
+  app.post<{ Body: PlatformMediaUploadSessionRequest }>(
+    "/upload-sessions",
+    async (request, reply) => {
+      const validation = validateUploadSessionRequest(request.body);
+      if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
+
+      const policy = purposePolicies[request.body.purpose];
+      const resourceError = validateResourceScope(request.body.resource, policy);
+      if (resourceError) {
+        return sendMediaError(reply, 400, resourceError.code, resourceError.message);
+      }
+
+      const context = enforceRoutePolicy(request, {
+        permission: policy.permission,
+        resource: {
+          product: request.body.resource.product,
+          resourceType: request.body.resource.resourceType,
+          resourceId: request.body.resource.resourceId,
+          allowedRelationships: policy.allowedRelationships,
+        },
+      });
+
+      const requestedVisibility = request.body.visibility ?? "private";
+      if (policy.privateOnly && requestedVisibility !== "private") {
+        return sendMediaError(
+          reply,
+          400,
+          "invalid_media_visibility",
+          `${request.body.purpose} uploads must stay private.`,
+        );
+      }
+
+      const filePolicyError = validateFiles(request.body.files, policy);
+      if (filePolicyError) {
+        return sendMediaError(reply, 400, filePolicyError.code, filePolicyError.message);
+      }
+
+      const resolvedTarget = await options.targetResolver.resolveTarget({
+        context,
+        request: request.body,
+        policy,
+      });
+      if (!resolvedTarget.ok) {
+        return sendMediaError(
+          reply,
+          resolvedTarget.statusCode,
+          resolvedTarget.code,
+          resolvedTarget.message,
+        );
+      }
+
+      const createdAt = now().toISOString();
+      const expiresAt = new Date(now().getTime() + 15 * 60 * 1000).toISOString();
+      const sessionId = randomUUID();
+      const uploadSessionKey = `media.upload_session:${sessionId}`;
+      const stagingPrefix = `staging/${sessionId}`;
+      const files = request.body.files.map((file, index) => ({
+        ...file,
+        filename: normalizeFilename(file.filename),
+        contentType: normalizeContentType(file.contentType),
+        clientFileId: file.clientFileId?.trim() || `file_${index + 1}`,
+        uploadTargetId: randomUUID(),
+      }));
+      const uploadTargets = await Promise.all(
+        files.map(async (file, index) => {
+          const stagingKey = `${stagingPrefix}/${index + 1}/${file.filename}`;
+          const signed = await options.signer.signUploadTarget({
+            sessionId,
+            uploadTargetId: file.uploadTargetId,
+            stagingKey,
+            contentType: file.contentType,
+            sizeBytes: file.sizeBytes,
+            expiresAt,
+          });
+          return {
+            ...signed,
+            clientFileId: file.clientFileId,
+            stagingKey,
+          };
+        }),
+      );
+
+      const session = await options.repository.createUploadSession({
+        context,
+        sessionId,
+        uploadSessionKey,
+        stagingPrefix,
+        request: {
+          ...request.body,
+          visibility: requestedVisibility,
+          files,
+        },
+        policy,
+        target: resolvedTarget.target,
+        uploadTargets,
+        now: createdAt,
+        expiresAt,
+      });
+
+      await options.repository.recordAudit({
+        action: "platform_media.upload_session.created",
+        auditKey: uploadSessionKey,
+        actorUserId: context.actor.internalUserId,
+        organizationId: context.selectedOrganization.organizationId,
+        targetType: "media_upload_session",
+        targetId: session.sessionId,
+        requestId: context.audit.requestId,
+        metadata: {
+          purpose: session.purpose,
+          requestedVisibility: session.requestedVisibility,
+          resource: session.resource,
+          target: session.target,
+          fileCount: session.files.length,
+        },
+      });
+
+      return reply.code(201).send({
+        contractVersion: PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION,
+        uploadSession: serializeSession(session),
+        uploadTargets: session.uploadTargets,
+        audit: serializeAudit(context),
+      });
+    },
+  );
+
+  app.post<{ Body: PlatformMediaFinalizeRequest; Params: { sessionId: string } }>(
+    "/upload-sessions/:sessionId/finalize",
+    async (request, reply) => {
+      const session = await options.repository.findUploadSession(request.params.sessionId);
+      if (!session) {
+        return sendMediaError(reply, 404, "upload_session_not_found", "Upload session not found.");
+      }
+      const policy = purposePolicies[session.purpose];
+      const context = enforceRoutePolicy(request, {
+        permission: policy.permission,
+        resource: {
+          product: session.resource.product,
+          resourceType: session.resource.resourceType,
+          resourceId: session.resource.resourceId,
+          allowedRelationships: policy.allowedRelationships,
+        },
+      });
+      if (
+        context.actor.internalUserId !== session.actorUserId ||
+        context.selectedOrganization.organizationId !== session.ownerOrganizationId
+      ) {
+        return sendMediaError(
+          reply,
+          403,
+          "upload_session_actor_mismatch",
+          "Upload session belongs to a different actor or organization.",
+        );
+      }
+      if (session.status === "completed" && session.completedMediaObject) {
+        return reply.code(200).send({
+          contractVersion: PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION,
+          uploadSession: serializeSession(session),
+          mediaObject: session.completedMediaObject,
+          mediaObjects: session.completedMediaObjects ?? [session.completedMediaObject],
+          sideEffects: ["idempotency_replay"],
+        });
+      }
+      if (new Date(session.expiresAt).getTime() <= now().getTime()) {
+        return sendMediaError(reply, 409, "upload_session_expired", "Upload session expired.");
+      }
+      const validation = validateFinalizeRequest(request.body, session);
+      if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
+
+      const finalizedFiles = await inspectFinalizedFiles({
+        request: request.body,
+        session,
+        policy,
+        finalizer: options.finalizer,
+      });
+      if (!finalizedFiles.ok) {
+        return sendMediaError(reply, 400, finalizedFiles.code, finalizedFiles.message);
+      }
+
+      const variantSets = await Promise.all(
+        finalizedFiles.files.map((file, index) =>
+          options.finalizer.generateVariants({
+            session,
+            file,
+            fileIndex: index,
+            policy,
+          }),
+        ),
+      );
+      const completedAt = now().toISOString();
+      const completed = await options.repository.completeUploadSession({
+        session,
+        files: finalizedFiles.files,
+        variantSets,
+        bucketName,
+        now: completedAt,
+      });
+      const completedSession = completed.uploadSession;
+      const mediaObjects = completed.mediaObjects;
+      const primaryMediaObject = mediaObjects[0]!;
+
+      await options.repository.recordAudit({
+        action: "platform_media.upload_session.finalized",
+        auditKey: `media.finalize:${completedSession.sessionId}`,
+        actorUserId: completedSession.actorUserId,
+        organizationId: completedSession.ownerOrganizationId,
+        targetType: "media_object",
+        targetId: primaryMediaObject.mediaId,
+        requestId: context.audit.requestId,
+        metadata: {
+          purpose: primaryMediaObject.purpose,
+          requestedVisibility: primaryMediaObject.requestedVisibility,
+          effectiveVisibility: primaryMediaObject.visibility,
+          target: completedSession.target,
+          mediaIds: mediaObjects.map((mediaObject) => mediaObject.mediaId),
+          variantNames: primaryMediaObject.variants.map((variant) => variant.variantName),
+        },
+      });
+
+      return reply.code(200).send({
+        contractVersion: PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION,
+        uploadSession: serializeSession(completedSession),
+        mediaObject: primaryMediaObject,
+        mediaObjects,
+        sideEffects: ["variant_generation", "audit_event"],
+      });
+    },
+  );
+}
+
+export function createDeterministicPlatformMediaUploadSigner(
+  baseUrl = "https://uploads.vayada.localhost",
+): PlatformMediaUploadSigner {
+  return {
+    async signUploadTarget(input) {
+      return {
+        uploadTargetId: input.uploadTargetId,
+        method: "PUT",
+        uploadUrl: `${baseUrl}/${encodeURIComponent(input.stagingKey)}`,
+        headers: {
+          "content-type": input.contentType,
+          "x-vayada-upload-target-id": input.uploadTargetId,
+        },
+        expiresAt: input.expiresAt,
+      };
+    },
+  };
+}
+
+export function createDeterministicPlatformMediaFinalizer(
+  overrides: Partial<PlatformMediaFinalizedFileInspection> = {},
+): PlatformMediaUploadFinalizer {
+  return {
+    async inspectUploadedFile(input) {
+      return {
+        ok: true,
+        inspection: {
+          contentType: input.sessionFile.contentType,
+          sizeBytes: input.sessionFile.sizeBytes,
+          checksumSha256:
+            input.clientFile.checksumSha256 ??
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          widthPx: isImageContentType(input.sessionFile.contentType)
+            ? (input.clientFile.widthPx ?? 1800)
+            : undefined,
+          heightPx: isImageContentType(input.sessionFile.contentType)
+            ? (input.clientFile.heightPx ?? 1200)
+            : undefined,
+          ...overrides,
+        },
+      };
+    },
+    async generateVariants(input) {
+      return input.policy.requiredVariants.map((variantName) => ({
+        variantName,
+        visibility: input.session.effectiveVisibility,
+        storageKey: `${input.session.stagingPrefix}/${input.fileIndex + 1}/variants/${variantName}`,
+        contentType: normalizeContentType(input.file.inspection.contentType),
+        widthPx: input.file.inspection.widthPx,
+        heightPx: input.file.inspection.heightPx,
+        sizeBytes: input.file.inspection.sizeBytes,
+        publicCdnUrl: null,
+      }));
+    },
+  };
+}
+
+export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository & {
+  sessions: Map<string, PlatformMediaSessionRecord>;
+  auditEvents: PlatformMediaAuditEvent[];
+} {
+  const sessions = new Map<string, PlatformMediaSessionRecord>();
+  const auditEvents: PlatformMediaAuditEvent[] = [];
+
+  return {
+    sessions,
+    auditEvents,
+    async createUploadSession(input) {
+      const session: PlatformMediaSessionRecord = {
+        sessionId: input.sessionId,
+        uploadSessionKey: input.uploadSessionKey,
+        purpose: input.request.purpose,
+        requestedVisibility: input.request.visibility ?? "private",
+        effectiveVisibility: "private",
+        actorUserId: input.context.actor.internalUserId,
+        ownerOrganizationId: input.context.selectedOrganization.organizationId,
+        resource: input.request.resource,
+        target: input.target,
+        files: input.request.files.map((file, index) => ({
+          ...file,
+          clientFileId: file.clientFileId?.trim() || `file_${index + 1}`,
+          uploadTargetId: input.uploadTargets[index]!.uploadTargetId,
+        })),
+        uploadTargets: input.uploadTargets,
+        stagingPrefix: input.stagingPrefix,
+        status: "signed",
+        expiresAt: input.expiresAt,
+        createdAt: input.now,
+      };
+      sessions.set(session.sessionId, session);
+      return session;
+    },
+    async findUploadSession(sessionId) {
+      return sessions.get(sessionId) ?? null;
+    },
+    async completeUploadSession(input) {
+      const mediaObjects = input.files.map((finalized, index) => {
+        const sessionFile = finalized.sessionFile;
+        return {
+          mediaId: randomUUID(),
+          purpose: input.session.purpose,
+          visibility: input.session.effectiveVisibility,
+          requestedVisibility: input.session.requestedVisibility,
+          approvalStatus:
+            input.session.requestedVisibility === "public" ? "pending_domain_approval" : "private",
+          lifecycleStatus: "staged",
+          bucket: input.bucketName,
+          storageKey: `${input.session.stagingPrefix}/${index + 1}/active/${sessionFile.filename}`,
+          ownerOrganizationId: input.session.ownerOrganizationId,
+          actorUserId: input.session.actorUserId,
+          resourceProduct: input.session.target.resourceProduct,
+          resourceType: input.session.target.resourceType,
+          resourceId: input.session.target.resourceId,
+          propertyId: input.session.target.propertyId,
+          contentType: normalizeContentType(finalized.inspection.contentType),
+          sizeBytes: finalized.inspection.sizeBytes,
+          checksumSha256: finalized.inspection.checksumSha256,
+          widthPx: finalized.inspection.widthPx,
+          heightPx: finalized.inspection.heightPx,
+          originalFilename: sessionFile.filename,
+          variants: input.variantSets[index]!,
+          createdAt: input.now,
+        } satisfies PlatformMediaObjectRecord;
+      });
+      const uploadSession: PlatformMediaSessionRecord = {
+        ...input.session,
+        status: "completed",
+        completedAt: input.now,
+        completedMediaObjects: mediaObjects,
+        completedMediaObject: mediaObjects[0],
+      };
+      sessions.set(uploadSession.sessionId, uploadSession);
+      return { uploadSession, mediaObjects };
+    },
+    async recordAudit(event) {
+      auditEvents.push(event);
+    },
+  };
+}
+
+function validateUploadSessionRequest(
+  body: PlatformMediaUploadSessionRequest | undefined,
+): { ok: true } | { ok: false; code: string; message: string } {
+  if (!body || typeof body !== "object") {
+    return { ok: false, code: "invalid_upload_request", message: "Request body is required." };
+  }
+  if (!isMediaPurpose(body.purpose)) {
+    return { ok: false, code: "invalid_media_purpose", message: "Unsupported media purpose." };
+  }
+  if (
+    body.visibility !== undefined &&
+    body.visibility !== "public" &&
+    body.visibility !== "private"
+  ) {
+    return { ok: false, code: "invalid_media_visibility", message: "Unsupported visibility." };
+  }
+  if (!body.resource || typeof body.resource !== "object") {
+    return { ok: false, code: "invalid_resource_scope", message: "Resource scope is required." };
+  }
+  if (!Array.isArray(body.files) || body.files.length === 0) {
+    return { ok: false, code: "invalid_upload_files", message: "At least one file is required." };
+  }
+  return { ok: true };
+}
+
+function validateResourceScope(
+  resource: PlatformMediaResourceScope,
+  policy: PlatformMediaPurposePolicy,
+): { code: string; message: string } | null {
+  if (typeof resource.product !== "string" || typeof resource.resourceType !== "string") {
+    return {
+      code: "invalid_resource_scope",
+      message: "resource.product and resource.resourceType are required.",
+    };
+  }
+  if (typeof resource.resourceId !== "string" || !resource.resourceId.trim()) {
+    return { code: "invalid_resource_scope", message: "resource.resourceId is required." };
+  }
+  if (resource.propertyId !== undefined && typeof resource.propertyId !== "string") {
+    return { code: "invalid_resource_scope", message: "resource.propertyId must be a string." };
+  }
+  if (resource.targetResourceId !== undefined && typeof resource.targetResourceId !== "string") {
+    return {
+      code: "invalid_resource_scope",
+      message: "resource.targetResourceId must be a string.",
+    };
+  }
+  const allowed = policy.allowedResources.some(
+    (candidate) =>
+      candidate.product === resource.product && candidate.resourceType === resource.resourceType,
+  );
+  if (!allowed) {
+    return {
+      code: "invalid_resource_scope",
+      message: `${policy.purpose} cannot be uploaded for ${resource.product}:${resource.resourceType}.`,
+    };
+  }
+  return null;
+}
+
+function validateFiles(
+  files: PlatformMediaUploadFileRequest[],
+  policy: PlatformMediaPurposePolicy,
+): { code: string; message: string } | null {
+  if (files.length > policy.maxFileCount) {
+    return {
+      code: "media_file_count_exceeded",
+      message: `${policy.purpose} accepts at most ${policy.maxFileCount} file(s).`,
+    };
+  }
+  for (const file of files) {
+    if (!file || typeof file !== "object") {
+      return { code: "invalid_upload_files", message: "Each file must be an object." };
+    }
+    if (file.clientFileId !== undefined && typeof file.clientFileId !== "string") {
+      return { code: "invalid_upload_files", message: "clientFileId must be a string." };
+    }
+    if (typeof file.filename !== "string" || !file.filename.trim()) {
+      return { code: "invalid_media_filename", message: "filename is required." };
+    }
+    if (typeof file.contentType !== "string" || !file.contentType.trim()) {
+      return { code: "unsupported_media_type", message: "contentType is required." };
+    }
+    if (!Number.isInteger(file.sizeBytes) || file.sizeBytes <= 0) {
+      return { code: "invalid_media_size", message: "sizeBytes must be greater than zero." };
+    }
+    if (file.sizeBytes > policy.maxFileSizeBytes) {
+      return {
+        code: "media_file_too_large",
+        message: `${policy.purpose} files must be ${policy.maxFileSizeBytes} bytes or smaller.`,
+      };
+    }
+    const normalizedContentType = normalizeContentType(file.contentType);
+    if (!policy.allowedContentTypes.includes(normalizedContentType)) {
+      return { code: "unsupported_media_type", message: `${file.contentType} is not allowed.` };
+    }
+    const extension = filenameExtension(file.filename);
+    if (!extension || !policy.allowedExtensions.includes(extension)) {
+      return { code: "unsupported_media_extension", message: `${file.filename} is not allowed.` };
+    }
+    if (!contentTypeAllowsExtension(normalizedContentType, extension)) {
+      return {
+        code: "media_type_mismatch",
+        message: "File extension must match the requested content type.",
+      };
+    }
+  }
+  return null;
+}
+
+function validateFinalizeRequest(
+  body: PlatformMediaFinalizeRequest | undefined,
+  session: PlatformMediaSessionRecord,
+): { ok: true } | { ok: false; code: string; message: string } {
+  if (!body || !Array.isArray(body.files)) {
+    return { ok: false, code: "invalid_finalize_request", message: "files are required." };
+  }
+  if (body.files.length !== session.files.length) {
+    return {
+      ok: false,
+      code: "media_file_count_mismatch",
+      message: "Finalize file count must match the upload session.",
+    };
+  }
+  const knownTargets = new Set(session.files.map((file) => file.uploadTargetId));
+  const seenTargets = new Set<string>();
+  for (const file of body.files) {
+    if (!file || typeof file !== "object") {
+      return {
+        ok: false,
+        code: "invalid_finalize_request",
+        message: "Each file must be an object.",
+      };
+    }
+    if (typeof file.uploadTargetId !== "string" || !file.uploadTargetId.trim()) {
+      return { ok: false, code: "unknown_upload_target", message: "uploadTargetId is required." };
+    }
+    if (!knownTargets.has(file.uploadTargetId)) {
+      return { ok: false, code: "unknown_upload_target", message: "Unknown upload target." };
+    }
+    if (seenTargets.has(file.uploadTargetId)) {
+      return {
+        ok: false,
+        code: "duplicate_upload_target",
+        message: "Each upload target may be finalized once.",
+      };
+    }
+    seenTargets.add(file.uploadTargetId);
+    if (file.contentType !== undefined && typeof file.contentType !== "string") {
+      return {
+        ok: false,
+        code: "unsupported_media_type",
+        message: "Finalized contentType must be a string.",
+      };
+    }
+    if (
+      file.sizeBytes !== undefined &&
+      (!Number.isInteger(file.sizeBytes) || file.sizeBytes <= 0)
+    ) {
+      return {
+        ok: false,
+        code: "invalid_media_size",
+        message: "Finalized sizeBytes must be greater than zero.",
+      };
+    }
+    if (file.checksumSha256 !== undefined && !isSha256Hex(file.checksumSha256)) {
+      return {
+        ok: false,
+        code: "invalid_media_checksum",
+        message: "checksumSha256 must be a lowercase SHA-256 hex string.",
+      };
+    }
+    if (
+      (file.widthPx !== undefined && (!Number.isInteger(file.widthPx) || file.widthPx <= 0)) ||
+      (file.heightPx !== undefined && (!Number.isInteger(file.heightPx) || file.heightPx <= 0))
+    ) {
+      return {
+        ok: false,
+        code: "invalid_media_dimensions",
+        message: "Image dimensions must be positive integers when supplied.",
+      };
+    }
+  }
+  return { ok: true };
+}
+
+async function inspectFinalizedFiles(input: {
+  request: PlatformMediaFinalizeRequest;
+  session: PlatformMediaSessionRecord;
+  policy: PlatformMediaPurposePolicy;
+  finalizer: PlatformMediaUploadFinalizer;
+}): Promise<
+  | { ok: true; files: PlatformMediaFinalizedFileRecord[] }
+  | { ok: false; code: string; message: string }
+> {
+  const files: PlatformMediaFinalizedFileRecord[] = [];
+  for (const sessionFile of input.session.files) {
+    const clientFile = input.request.files.find(
+      (file) => file.uploadTargetId === sessionFile.uploadTargetId,
+    )!;
+    const uploadTarget = input.session.uploadTargets.find(
+      (target) => target.uploadTargetId === sessionFile.uploadTargetId,
+    )!;
+    const inspected = await input.finalizer.inspectUploadedFile({
+      session: input.session,
+      sessionFile,
+      uploadTarget,
+      clientFile,
+      policy: input.policy,
+    });
+    if (!inspected.ok) return inspected;
+    const validation = validateFinalizedInspection(
+      clientFile,
+      sessionFile,
+      inspected.inspection,
+      input.policy,
+    );
+    if (validation) return validation;
+    files.push({
+      sessionFile,
+      uploadTarget,
+      inspection: {
+        ...inspected.inspection,
+        contentType: normalizeContentType(inspected.inspection.contentType),
+      },
+    });
+  }
+  return { ok: true, files };
+}
+
+function validateFinalizedInspection(
+  clientFile: PlatformMediaFinalizeFileRequest,
+  sessionFile: PlatformMediaSessionRecord["files"][number],
+  inspection: PlatformMediaFinalizedFileInspection,
+  policy: PlatformMediaPurposePolicy,
+): { ok: false; code: string; message: string } | null {
+  if (!Number.isInteger(inspection.sizeBytes) || inspection.sizeBytes <= 0) {
+    return {
+      ok: false,
+      code: "invalid_media_size",
+      message: "Inspected upload size must be greater than zero.",
+    };
+  }
+  if (
+    inspection.sizeBytes > sessionFile.sizeBytes ||
+    inspection.sizeBytes > policy.maxFileSizeBytes
+  ) {
+    return {
+      ok: false,
+      code: "media_file_too_large",
+      message: "Inspected upload cannot exceed the signed upload size.",
+    };
+  }
+  const inspectedContentType = normalizeContentType(inspection.contentType);
+  if (!policy.allowedContentTypes.includes(inspectedContentType)) {
+    return {
+      ok: false,
+      code: "unsupported_media_type",
+      message: "Inspected content type is not allowed.",
+    };
+  }
+  if (inspectedContentType !== normalizeContentType(sessionFile.contentType)) {
+    return {
+      ok: false,
+      code: "media_type_mismatch",
+      message: "Inspected content type must match the signed upload target.",
+    };
+  }
+  if (
+    clientFile.contentType !== undefined &&
+    normalizeContentType(clientFile.contentType) !== inspectedContentType
+  ) {
+    return {
+      ok: false,
+      code: "media_type_mismatch",
+      message: "Finalized content type must match the inspected upload.",
+    };
+  }
+  if (clientFile.sizeBytes !== undefined && clientFile.sizeBytes !== inspection.sizeBytes) {
+    return {
+      ok: false,
+      code: "media_size_mismatch",
+      message: "Finalized size must match the inspected upload.",
+    };
+  }
+  if (clientFile.checksumSha256 !== undefined) {
+    if (inspection.checksumSha256 === undefined) {
+      return {
+        ok: false,
+        code: "finalizer_missing_inspected_checksum",
+        message: "Inspected upload must include checksum when finalize checksum is supplied.",
+      };
+    }
+    if (!isSha256Hex(inspection.checksumSha256)) {
+      return {
+        ok: false,
+        code: "invalid_media_checksum",
+        message: "Inspected checksum must be a lowercase SHA-256 hex string.",
+      };
+    }
+    if (clientFile.checksumSha256 !== inspection.checksumSha256) {
+      return {
+        ok: false,
+        code: "media_checksum_mismatch",
+        message: "Finalized checksum must match the inspected upload.",
+      };
+    }
+  }
+  if (inspection.checksumSha256 !== undefined && !isSha256Hex(inspection.checksumSha256)) {
+    return {
+      ok: false,
+      code: "invalid_media_checksum",
+      message: "Inspected checksum must be a lowercase SHA-256 hex string.",
+    };
+  }
+  if (
+    (inspection.widthPx !== undefined &&
+      (!Number.isInteger(inspection.widthPx) || inspection.widthPx <= 0)) ||
+    (inspection.heightPx !== undefined &&
+      (!Number.isInteger(inspection.heightPx) || inspection.heightPx <= 0))
+  ) {
+    return {
+      ok: false,
+      code: "invalid_media_dimensions",
+      message: "Inspected image dimensions must be positive integers.",
+    };
+  }
+  if (
+    inspection.widthPx !== undefined &&
+    inspection.heightPx !== undefined &&
+    policy.maxImagePixels &&
+    inspection.widthPx * inspection.heightPx > policy.maxImagePixels
+  ) {
+    return {
+      ok: false,
+      code: "invalid_media_dimensions",
+      message: "Inspected image dimensions exceed the platform media limit.",
+    };
+  }
+  return null;
+}
+
+function serializeSession(session: PlatformMediaSessionRecord): Record<string, unknown> {
+  return {
+    sessionId: session.sessionId,
+    purpose: session.purpose,
+    requestedVisibility: session.requestedVisibility,
+    effectiveVisibility: session.effectiveVisibility,
+    status: session.status,
+    expiresAt: session.expiresAt,
+    resource: session.resource,
+    target: session.target,
+    fileCount: session.files.length,
+  };
+}
+
+function serializeAudit(context: RequestContext): Record<string, string> {
+  return {
+    requestId: context.audit.requestId,
+    actorInternalUserId: context.actor.internalUserId,
+    organizationId: context.selectedOrganization.organizationId,
+  };
+}
+
+function sendMediaError(reply: FastifyReply, statusCode: number, code: string, message: string) {
+  return reply.code(statusCode).send({ code, message });
+}
+
+function isMediaPurpose(value: unknown): value is PlatformMediaPurpose {
+  return typeof value === "string" && Object.hasOwn(purposePolicies, value);
+}
+
+function normalizeContentType(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeFilename(value: string): string {
+  return value.trim().replaceAll("/", "_").replaceAll("\\", "_");
+}
+
+function filenameExtension(value: string): string | null {
+  const filename = value.trim().toLowerCase();
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex > -1 ? filename.slice(dotIndex) : null;
+}
+
+function contentTypeAllowsExtension(contentType: string, extension: string): boolean {
+  switch (contentType) {
+    case "image/jpeg":
+      return extension === ".jpg" || extension === ".jpeg";
+    case "image/png":
+      return extension === ".png";
+    case "image/webp":
+      return extension === ".webp";
+    case "image/gif":
+      return extension === ".gif";
+    case "image/heic":
+      return extension === ".heic";
+    case "image/heif":
+      return extension === ".heif";
+    case "application/pdf":
+      return extension === ".pdf";
+    default:
+      return false;
+  }
+}
+
+function isImageContentType(contentType: string): boolean {
+  return normalizeContentType(contentType).startsWith("image/");
+}
+
+function isSha256Hex(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}

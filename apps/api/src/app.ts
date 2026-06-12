@@ -67,6 +67,10 @@ import {
   type FinancePublicHotelPropertyResolver,
   type FinanceRoutesOptions,
 } from "./routes/finance.js";
+import {
+  registerPlatformMediaRoutes,
+  type PlatformMediaRoutesOptions,
+} from "./routes/platformMedia.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
@@ -120,6 +124,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   financeRepository?: FinanceRoutesOptions["repository"];
   financePublicHotelProfileRepository?: PublicHotelProfileRepository;
   financePublicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
+  platformMedia?: PlatformMediaRoutesOptions;
 };
 
 export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
@@ -253,6 +258,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       closePublicHotelProfileRepository:
         Boolean(options.financePublicHotelProfileRepository) &&
         options.financePublicHotelProfileRepository !== options.publicHotelProfileRepository,
+    });
+  }
+  if (options.platformMedia) {
+    app.register(registerPlatformMediaRoutes, {
+      prefix: "/api/media",
+      ...options.platformMedia,
     });
   }
 
