@@ -210,6 +210,8 @@ describe("platform media upload routes", () => {
       url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
       headers: { authorization: "Bearer valid-token" },
       payload: {
+        // Reverse createBody.uploadTargets against propertyGalleryBatchCase.finalize.files to
+        // prove finalization matches by uploadTargetId rather than submission order.
         files: [
           {
             uploadTargetId: createBody.uploadTargets[1]!.uploadTargetId,
@@ -386,6 +388,40 @@ describe("platform media upload routes", () => {
 
     expect(response.statusCode).toBe(400);
     expect((response.body as ErrorResponse).code).toBe("invalid_media_checksum");
+    expect(repository.auditEvents).toHaveLength(1);
+  });
+
+  it("requires inspected checksum metadata when finalize supplies a checksum", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const app = buildMediaApp({
+      repository,
+      finalizer: createDeterministicPlatformMediaFinalizer({
+        checksumSha256: undefined,
+      }),
+    });
+
+    const create = await injectJson(app, {
+      method: "POST",
+      url: propertyGalleryCase.request.path,
+      headers: { authorization: "Bearer valid-token" },
+      payload: propertyGalleryCase.request.body,
+    });
+    const createBody = create.body as MediaCreateResponse;
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        files: propertyGalleryCase.finalize!.files.map((file) => ({
+          ...file,
+          uploadTargetId: createBody.uploadTargets[0]!.uploadTargetId,
+        })),
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.body as ErrorResponse).code).toBe("finalizer_missing_inspected_checksum");
     expect(repository.auditEvents).toHaveLength(1);
   });
 

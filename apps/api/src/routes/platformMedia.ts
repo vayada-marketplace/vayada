@@ -176,6 +176,11 @@ export type PlatformMediaFinalizedFileRecord = {
   inspection: PlatformMediaFinalizedFileInspection;
 };
 
+export type PlatformMediaCompleteUploadSessionResult = {
+  uploadSession: PlatformMediaSessionRecord;
+  mediaObjects: PlatformMediaObjectRecord[];
+};
+
 export type PlatformMediaRepository = {
   createUploadSession(input: {
     sessionId: string;
@@ -196,7 +201,7 @@ export type PlatformMediaRepository = {
     variantSets: PlatformMediaVariantRecord[][];
     bucketName: string;
     now: string;
-  }): Promise<PlatformMediaObjectRecord[]>;
+  }): Promise<PlatformMediaCompleteUploadSessionResult>;
   recordAudit(event: PlatformMediaAuditEvent): Promise<void>;
   close?(): Promise<void>;
 };
@@ -631,20 +636,22 @@ export async function registerPlatformMediaRoutes(
         ),
       );
       const completedAt = now().toISOString();
-      const mediaObjects = await options.repository.completeUploadSession({
+      const completed = await options.repository.completeUploadSession({
         session,
         files: finalizedFiles.files,
         variantSets,
         bucketName,
         now: completedAt,
       });
+      const completedSession = completed.uploadSession;
+      const mediaObjects = completed.mediaObjects;
       const primaryMediaObject = mediaObjects[0]!;
 
       await options.repository.recordAudit({
         action: "platform_media.upload_session.finalized",
-        auditKey: `media.finalize:${session.sessionId}`,
-        actorUserId: session.actorUserId,
-        organizationId: session.ownerOrganizationId,
+        auditKey: `media.finalize:${completedSession.sessionId}`,
+        actorUserId: completedSession.actorUserId,
+        organizationId: completedSession.ownerOrganizationId,
         targetType: "media_object",
         targetId: primaryMediaObject.mediaId,
         requestId: context.audit.requestId,
@@ -652,7 +659,7 @@ export async function registerPlatformMediaRoutes(
           purpose: primaryMediaObject.purpose,
           requestedVisibility: primaryMediaObject.requestedVisibility,
           effectiveVisibility: primaryMediaObject.visibility,
-          target: session.target,
+          target: completedSession.target,
           mediaIds: mediaObjects.map((mediaObject) => mediaObject.mediaId),
           variantNames: primaryMediaObject.variants.map((variant) => variant.variantName),
         },
@@ -660,7 +667,7 @@ export async function registerPlatformMediaRoutes(
 
       return reply.code(200).send({
         contractVersion: PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION,
-        uploadSession: serializeSession(session),
+        uploadSession: serializeSession(completedSession),
         mediaObject: primaryMediaObject,
         mediaObjects,
         sideEffects: ["variant_generation", "audit_event"],
@@ -793,12 +800,15 @@ export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository
           createdAt: input.now,
         } satisfies PlatformMediaObjectRecord;
       });
-      input.session.status = "completed";
-      input.session.completedAt = input.now;
-      input.session.completedMediaObjects = mediaObjects;
-      input.session.completedMediaObject = mediaObjects[0];
-      sessions.set(input.session.sessionId, input.session);
-      return mediaObjects;
+      const uploadSession: PlatformMediaSessionRecord = {
+        ...input.session,
+        status: "completed",
+        completedAt: input.now,
+        completedMediaObjects: mediaObjects,
+        completedMediaObject: mediaObjects[0],
+      };
+      sessions.set(uploadSession.sessionId, uploadSession);
+      return { uploadSession, mediaObjects };
     },
     async recordAudit(event) {
       auditEvents.push(event);
@@ -1091,16 +1101,28 @@ function validateFinalizedInspection(
       message: "Finalized size must match the inspected upload.",
     };
   }
-  if (
-    clientFile.checksumSha256 &&
-    inspection.checksumSha256 &&
-    clientFile.checksumSha256 !== inspection.checksumSha256
-  ) {
-    return {
-      ok: false,
-      code: "media_checksum_mismatch",
-      message: "Finalized checksum must match the inspected upload.",
-    };
+  if (clientFile.checksumSha256 !== undefined) {
+    if (inspection.checksumSha256 === undefined) {
+      return {
+        ok: false,
+        code: "finalizer_missing_inspected_checksum",
+        message: "Inspected upload must include checksum when finalize checksum is supplied.",
+      };
+    }
+    if (!isSha256Hex(inspection.checksumSha256)) {
+      return {
+        ok: false,
+        code: "invalid_media_checksum",
+        message: "Inspected checksum must be a lowercase SHA-256 hex string.",
+      };
+    }
+    if (clientFile.checksumSha256 !== inspection.checksumSha256) {
+      return {
+        ok: false,
+        code: "media_checksum_mismatch",
+        message: "Finalized checksum must match the inspected upload.",
+      };
+    }
   }
   if (inspection.checksumSha256 !== undefined && !isSha256Hex(inspection.checksumSha256)) {
     return {
