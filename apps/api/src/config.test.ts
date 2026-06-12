@@ -404,6 +404,36 @@ describe("api config", () => {
     expect(loadConfig({}).bookingWebLegacyCheckoutCommandProxyEnabled).toBe(false);
   });
 
+  it("keeps Booking Web checkout commands on the legacy proxy source by default", () => {
+    expect(loadConfig({}).bookingCheckoutCommandSource).toBe("legacy_proxy");
+  });
+
+  it("loads target Booking Web checkout command source config", () => {
+    const config = loadConfig({
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      BOOKING_CHECKOUT_COMMAND_SOURCE: "target",
+    });
+
+    expect(config.bookingCheckoutCommandSource).toBe("target");
+    expect(config.targetDatabaseUrl).toBe("postgresql://target-db");
+  });
+
+  it("requires target database config for target Booking Web checkout commands", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_CHECKOUT_COMMAND_SOURCE: "target",
+      }),
+    ).toThrow("BOOKING_CHECKOUT_COMMAND_SOURCE=target requires TARGET_DATABASE_URL");
+  });
+
+  it("rejects unsupported Booking Web checkout command source config", () => {
+    expect(() =>
+      loadConfig({
+        BOOKING_CHECKOUT_COMMAND_SOURCE: "preview",
+      }),
+    ).toThrow("BOOKING_CHECKOUT_COMMAND_SOURCE must be one of: legacy_proxy, target");
+  });
+
   it("loads optional Booking Web legacy command proxy config", () => {
     expect(
       loadConfig({

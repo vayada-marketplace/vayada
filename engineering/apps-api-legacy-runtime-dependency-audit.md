@@ -141,6 +141,43 @@ before production:
     URLs configured. The app must still mount all accepted replacement
     contracts needed for frontend and public traffic.
 
+### Checkout command flip notes
+
+`BOOKING_CHECKOUT_COMMAND_SOURCE=target` is a cutover-window switch, not a
+normal canary. Turn it on only after the final booking/finance/PMS target
+snapshot has passed parity and the legacy write-freeze is active for guest
+booking creation, guest lifecycle changes, promo application changes, payment
+state writes, and PMS reservation handoff writes.
+
+Forward cutover:
+
+1. Confirm `TARGET_DATABASE_URL` points at the migrated target database and
+   `PMS_PUBLIC_API_URL`, `BOOKING_PUBLIC_API_URL`, and
+   `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED` are absent from the
+   rehearsal environment.
+2. Set `BOOKING_CHECKOUT_COMMAND_SOURCE=target`.
+3. Smoke the Booking Web public checkout command matrix: config, create,
+   confirm authorization, status, lookup, withdraw, cancel preview, cancel,
+   change preview, change submit/get, payment instructions, and promo validate.
+4. Verify `platform.idempotency_keys`, `platform.product_audit_events`, and
+   `platform.jobs` contain property-scoped rows for the exercised command
+   paths. Create/cancel/change commands must enqueue PMS reservation handoff
+   work rather than calling legacy PMS public routes.
+
+Rollback:
+
+1. Stop new guest checkout writes briefly or keep the write-freeze active while
+   switching the source.
+2. Set `BOOKING_CHECKOUT_COMMAND_SOURCE=legacy_proxy`, restore
+   `PMS_PUBLIC_API_URL` and `BOOKING_PUBLIC_API_URL`, and explicitly set
+   `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED=true`.
+3. Replay only target commands whose idempotency/audit rows show no completed
+   PMS handoff job. Never replay a command that has a completed target
+   idempotency row and a completed PMS handoff job without a manual duplicate
+   booking review.
+4. Leave target audit/idempotency rows intact for reconciliation; do not delete
+   them during rollback.
+
 ## Follow-up implementation tickets
 
 These scopes are ready to create once this decision record is accepted:

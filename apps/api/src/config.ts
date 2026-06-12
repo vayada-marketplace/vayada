@@ -36,6 +36,7 @@ export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
+export type BookingCheckoutCommandSource = "legacy_proxy" | "target";
 export type PmsOperationsSource = "disabled" | "target";
 export type BookingWebEventSink = "disabled" | "target";
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
@@ -70,6 +71,7 @@ export type ApiConfig = {
   pmsOperationsAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
+  bookingCheckoutCommandSource: BookingCheckoutCommandSource;
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingWebEventSink: BookingWebEventSink;
   bookingHostBase?: string;
@@ -263,13 +265,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const bookingCheckoutCommandSource = readSourceEnv(
+    env,
+    "BOOKING_CHECKOUT_COMMAND_SOURCE",
+    ["legacy_proxy", "target"],
+    "legacy_proxy",
+  );
   const pmsOperationsSource = readSourceEnv(
     env,
     "PMS_OPERATIONS_SOURCE",
     ["disabled", "target"],
     "disabled",
   );
-  const configuredBookingWebEventSink = readOptionalEnv(env, "BOOKING_WEB_EVENT_SINK");
   const bookingWebEventSink = readSourceEnv(
     env,
     "BOOKING_WEB_EVENT_SINK",
@@ -303,6 +310,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (bookingWebEventSink === "target" && !auth) {
     throw new Error("BOOKING_WEB_EVENT_SINK=target requires complete auth config");
+  }
+  if (bookingCheckoutCommandSource === "target" && !targetDatabaseUrl) {
+    throw new Error("BOOKING_CHECKOUT_COMMAND_SOURCE=target requires TARGET_DATABASE_URL");
   }
 
   return {
@@ -338,6 +348,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ]),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
+    bookingCheckoutCommandSource,
     bookingWebLegacyCheckoutCommandProxyEnabled: readBooleanEnv(
       env,
       "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
