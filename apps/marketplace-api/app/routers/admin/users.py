@@ -869,7 +869,16 @@ async def update_user(
 @router.delete("/users/{user_id}", status_code=http_status.HTTP_200_OK)
 async def delete_user(user_id: str, admin_id: str = Depends(get_admin_user)):
     """Legacy user deletion is blocked; account lifecycle is identity-owned."""
-    _ = (user_id, admin_id)
+    if user_id == admin_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account",
+        )
+
+    user = await UserRepository.get_by_id(user_id, columns="id")
+    if not user:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found")
+
     raise HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,
         detail="User deletion is identity-owned. Use /api/identity/admin/users/{user_id}.",
@@ -881,7 +890,11 @@ async def set_superadmin(
     user_id: str, request: SetSuperadminRequest, admin_id: str = Depends(get_admin_user)
 ):
     """Legacy superadmin writes are blocked; platform access is identity-owned."""
-    _ = (user_id, request, admin_id)
+    _ = (request, admin_id)
+    user = await UserRepository.get_by_id(user_id, columns="id")
+    if not user:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="User not found")
+
     raise HTTPException(
         status_code=http_status.HTTP_409_CONFLICT,
         detail=(

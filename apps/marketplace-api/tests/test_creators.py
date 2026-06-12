@@ -147,7 +147,6 @@ class TestUpdateCreatorProfile:
         response = await client.put(
             "/creators/me",
             json={
-                "name": "Updated Name",
                 "location": "Los Angeles, USA",
                 "shortDescription": "Updated description",
             },
@@ -156,7 +155,7 @@ class TestUpdateCreatorProfile:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "Updated Name"
+        assert data["name"] == test_creator["user"]["name"]
         assert data["location"] == "Los Angeles, USA"
         assert data["short_description"] == "Updated description"
 
@@ -245,19 +244,14 @@ class TestUpdateCreatorProfile:
         assert response.status_code == 200
 
     async def test_update_profile_partial(self, client: AsyncClient, test_creator):
-        """Test partial profile update."""
-        # Update only name
+        """Identity-owned name changes are blocked on the marketplace profile route."""
         response = await client.put(
             "/creators/me",
             json={"name": "Only Name Updated"},
             headers=get_auth_headers(test_creator["token"]),
         )
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["name"] == "Only Name Updated"
-        # Other fields should remain
-        assert data["location"] == test_creator["creator"]["location"]
+        assert response.status_code == 409
 
     async def test_update_profile_picture(self, client: AsyncClient, test_creator):
         """Test updating profile picture URL."""

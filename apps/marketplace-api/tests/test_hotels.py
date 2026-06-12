@@ -187,7 +187,7 @@ class TestUpdateHotelProfile:
         assert data["name"] == test_hotel["hotel"]["name"]
 
     async def test_update_email(self, client: AsyncClient, test_hotel):
-        """Test updating email."""
+        """Identity-owned email changes are blocked on the marketplace hotel route."""
         from tests.conftest import generate_test_email
 
         new_email = generate_test_email("newemail")
@@ -196,9 +196,7 @@ class TestUpdateHotelProfile:
             "/hotels/me", json={"email": new_email}, headers=get_auth_headers(test_hotel["token"])
         )
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["email"] == new_email
+        assert response.status_code == 409
 
 
 class TestCreateHotelListing:
