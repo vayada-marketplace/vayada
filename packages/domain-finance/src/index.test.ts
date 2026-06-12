@@ -107,7 +107,7 @@ describe("manual payment record command", () => {
         propertyId: command.propertyId,
         jobType: "booking.projection-refresh",
         guestBookingId: "guest_booking_001",
-        paymentIdempotencyKey: command.idempotencyKey,
+        rawPaymentIdempotencyKey: command.idempotencyKey,
       }),
     ).toBe(
       "booking.projection-refresh:property:property_001:booking:guest_booking_001:finance-payment:ff7cd8009765f0465a06be7e32957ecbd1e6dc9a27402f1584372e94f7acb1f4:v1",
@@ -117,7 +117,7 @@ describe("manual payment record command", () => {
         propertyId: command.propertyId,
         jobType: "pms.projection-refresh",
         guestBookingId: "guest_booking_001",
-        paymentIdempotencyKey: command.idempotencyKey,
+        rawPaymentIdempotencyKey: command.idempotencyKey,
       }),
     ).toBe(
       "pms.projection-refresh:property:property_001:booking:guest_booking_001:finance-payment:ff7cd8009765f0465a06be7e32957ecbd1e6dc9a27402f1584372e94f7acb1f4:v1",

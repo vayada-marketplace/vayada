@@ -69,7 +69,7 @@ type FinancePropertySettingsWriteClient = {
     text: string,
     values?: readonly unknown[],
   ): Promise<Pick<QueryResult<T>, "rows" | "rowCount">>;
-  release(): void;
+  release?(): void;
 };
 
 export type FinanceRoutesOptions = {
@@ -605,7 +605,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
     },
     async recordManualPayment(command) {
       const client = await checkoutFinanceWriteClient(pool);
-      const ownsTransaction = "release" in client;
+      const ownsTransaction = typeof client.release === "function";
       try {
         if (ownsTransaction) await client.query("BEGIN");
         const result = await recordManualPaymentInClient(client, command);
@@ -615,7 +615,7 @@ export function createTargetFinancePropertySettingsRepository(config: {
         if (ownsTransaction) await client.query("ROLLBACK");
         throw error;
       } finally {
-        if (ownsTransaction) client.release();
+        if (ownsTransaction) client.release?.();
       }
     },
     async close() {
@@ -636,7 +636,6 @@ async function checkoutFinanceWriteClient(
       const result = await pool.query<T>(text, values);
       return { ...result, rowCount: result.rows.length };
     },
-    release() {},
   };
 }
 
@@ -1032,7 +1031,7 @@ function buildManualPaymentCommandMeta(
         propertyId: command.propertyId,
         jobType,
         guestBookingId,
-        paymentIdempotencyKey: keyHash,
+        paymentIdempotencyKeyHash: keyHash,
       }),
       status: replay ? "idempotent_replay" : "queued",
     })),
@@ -1051,9 +1050,9 @@ function buildManualPaymentProjectionJobIdempotencyKey(input: {
   propertyId: string;
   jobType: "booking.projection-refresh" | "pms.projection-refresh";
   guestBookingId: string;
-  paymentIdempotencyKey: string;
+  paymentIdempotencyKeyHash: string;
 }): string {
-  return `${input.jobType}:property:${input.propertyId}:booking:${input.guestBookingId}:finance-payment:${input.paymentIdempotencyKey}:v1`;
+  return `${input.jobType}:property:${input.propertyId}:booking:${input.guestBookingId}:finance-payment:${input.paymentIdempotencyKeyHash}:v1`;
 }
 
 async function recordManualPaymentDomainEvent(
@@ -1254,13 +1253,13 @@ async function enqueueManualPaymentJobs(
     propertyId: command.propertyId,
     jobType: "booking.projection-refresh",
     guestBookingId,
-    paymentIdempotencyKey: keyHash,
+    paymentIdempotencyKeyHash: keyHash,
   });
   const pmsJobKey = buildManualPaymentProjectionJobIdempotencyKey({
     propertyId: command.propertyId,
     jobType: "pms.projection-refresh",
     guestBookingId,
-    paymentIdempotencyKey: keyHash,
+    paymentIdempotencyKeyHash: keyHash,
   });
   await client.query(
     `INSERT INTO platform.jobs (
@@ -2138,10 +2137,7 @@ function decimalBodyString(value: unknown): string | undefined {
   return text;
 }
 
-function numeric15Scale2Cents(
-  value: string,
-  options: { allowZero?: boolean } = {},
-): bigint | null {
+function numeric15Scale2Cents(value: string, options: { allowZero?: boolean } = {}): bigint | null {
   const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
   if (!match) return null;
 

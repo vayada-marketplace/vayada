@@ -1028,9 +1028,10 @@ export function buildManualPaymentProjectionJobIdempotencyKey(input: {
   propertyId: FinancePropertyId;
   jobType: FinanceProjectionRefreshJob["jobType"];
   guestBookingId: string;
-  paymentIdempotencyKey: string;
+  /** Raw client idempotency key; callers must not pass a precomputed hash. */
+  rawPaymentIdempotencyKey: string;
 }): string {
-  return `${input.jobType}:property:${input.propertyId}:booking:${input.guestBookingId}:finance-payment:${financeSha256(input.paymentIdempotencyKey)}:v1`;
+  return `${input.jobType}:property:${input.propertyId}:booking:${input.guestBookingId}:finance-payment:${financeSha256(input.rawPaymentIdempotencyKey)}:v1`;
 }
 
 // ---------------------------------------------------------------------------
