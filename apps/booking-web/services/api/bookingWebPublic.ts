@@ -1,8 +1,9 @@
 import type { Hotel, RoomType } from "@/lib/types";
 
-import { bookingEngine, bookingWebPublic } from "./client";
+import { bookingEngine, bookingWebPublic, type ApiRequestInit } from "./client";
 
 const FALLBACK_IMAGE = "/vayada-logo.png";
+export const PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS = 60;
 
 export type BookingWebPublicHotelResponse = {
   hotel: {
@@ -134,17 +135,20 @@ type LegacyResolveDomainResponse = {
 };
 
 export const bookingWebPublicApi = {
-  async resolveHost(host: string): Promise<BookingWebPublicHostResponse> {
+  async resolveHost(host: string, init?: ApiRequestInit): Promise<BookingWebPublicHostResponse> {
     try {
       return await bookingWebPublic.get<BookingWebPublicHostResponse>(
         `/api/booking-web/hosts/${encodeURIComponent(host)}`,
+        init,
       );
     } catch {
       const resolved = await bookingEngine.get<LegacyResolveDomainResponse>(
         `/api/resolve-domain?domain=${encodeURIComponent(host)}`,
+        init,
       );
       const hotel = await bookingEngine.get<Hotel>(
         `/api/hotels/${encodeURIComponent(resolved.slug)}`,
+        init,
       );
       return {
         slug: hotel.slug,

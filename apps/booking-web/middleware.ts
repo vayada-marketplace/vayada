@@ -8,6 +8,7 @@ import {
 } from "./lib/server/publicUrls";
 import {
   bookingWebPublicApi,
+  PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS,
   type BookingWebPublicHostResponse,
 } from "./services/api/bookingWebPublic";
 
@@ -83,7 +84,9 @@ export default async function middleware(request: NextRequest) {
 
 async function fetchHostResolution(hostname: string): Promise<BookingWebPublicHostResponse | null> {
   try {
-    return await bookingWebPublicApi.resolveHost(hostname);
+    return await bookingWebPublicApi.resolveHost(hostname, {
+      next: { revalidate: PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS },
+    });
   } catch {
     return null;
   }
