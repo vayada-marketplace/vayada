@@ -14,6 +14,7 @@ import {
   hasVariableNightlyRates,
   isFlexibleCancellationExpired,
 } from "@/lib/constants/booking";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 
 interface RoomDetailModalProps {
   room: RoomType;
@@ -338,7 +339,13 @@ export default function RoomDetailModal({
               onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
-              <Image src={room.images[imgIndex]} alt={room.name} fill className="object-cover" />
+              <Image
+                src={room.images[imgIndex]}
+                alt={room.name}
+                fill
+                className="object-cover"
+                sizes={bookingImageSizes.roomModal}
+              />
               <div className="absolute bottom-3 left-3 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
                 {room.name}
               </div>
@@ -391,7 +398,14 @@ export default function RoomDetailModal({
                     onClick={() => setImgIndex(i)}
                     className={`relative w-16 h-12 flex-shrink-0 rounded-lg overflow-hidden border-2 transition-colors ${i === imgIndex ? "border-primary-500" : "border-transparent"}`}
                   >
-                    <Image src={img} alt="" fill className="object-cover" />
+                    <Image
+                      src={img}
+                      alt=""
+                      fill
+                      className="object-cover"
+                      sizes={bookingImageSizes.roomThumb}
+                      loading="lazy"
+                    />
                   </button>
                 ))}
               </div>

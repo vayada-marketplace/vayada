@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { getFlexibleNightlyRates } from "@/lib/constants/booking";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 
 interface RoomMapPanelProps {
   rooms: RoomType[];
@@ -136,7 +137,14 @@ export default function RoomMapPanel({
                 <div className="flex gap-3">
                   <div className="relative h-14 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100">
                     {room.images?.[0] && (
-                      <Image src={room.images[0]} alt="" fill className="object-cover" />
+                      <Image
+                        src={room.images[0]}
+                        alt=""
+                        fill
+                        className="object-cover"
+                        sizes={bookingImageSizes.mapPopupThumb}
+                        loading="lazy"
+                      />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">

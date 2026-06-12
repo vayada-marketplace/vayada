@@ -7,6 +7,7 @@ import { Link } from "@/i18n/navigation";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import PublicStructuredData from "@/components/booking/PublicStructuredData";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useRooms, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { trackEvent } from "@/services/api/tracking";
@@ -30,7 +31,14 @@ export default function RoomsPage() {
 
       {/* Mini Hero */}
       <div className="relative h-64 w-full">
-        <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
+        <Image
+          src={hotel.heroImage}
+          alt={hotel.name}
+          fill
+          className="object-cover"
+          priority
+          sizes={bookingImageSizes.hero}
+        />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
@@ -55,6 +63,7 @@ export default function RoomsPage() {
                   alt={room.name}
                   fill
                   className="object-cover group-hover:scale-105 transition-transform duration-500"
+                  sizes={bookingImageSizes.roomGridCard}
                 />
                 {room.remainingRooms <= 3 && (
                   <div className="absolute top-3 left-3 bg-red-500 text-white text-xs font-bold px-2.5 py-1 rounded-full">

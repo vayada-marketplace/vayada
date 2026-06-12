@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import BookingNavigation from "@/components/layout/BookingNavigation";
 import BookingFooter from "@/components/layout/BookingFooter";
+import { bookingImageSizes } from "@/components/booking/imageSizes";
 import { useHotel, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { bookingService, CancelPreview } from "@/services/api/booking";
@@ -132,7 +133,14 @@ export default function MyBookingPageClient() {
     <div className="min-h-screen bg-surface flex flex-col">
       {/* Mini Hero */}
       <div className="relative h-48 w-full">
-        <Image src={hotel.heroImage} alt={hotel.name} fill className="object-cover" priority />
+        <Image
+          src={hotel.heroImage}
+          alt={hotel.name}
+          fill
+          className="object-cover"
+          priority
+          sizes={bookingImageSizes.hero}
+        />
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-black/60" />
         <BookingNavigation />
         <div className="absolute inset-0 flex items-center justify-center">
