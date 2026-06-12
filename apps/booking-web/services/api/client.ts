@@ -15,6 +15,13 @@ class ApiError extends Error {
   }
 }
 
+export type ApiRequestInit = RequestInit & {
+  next?: {
+    revalidate?: number | false;
+    tags?: string[];
+  };
+};
+
 class ApiClient {
   constructor(private baseUrl: string) {}
 
@@ -22,8 +29,8 @@ class ApiClient {
     return this.baseUrl;
   }
 
-  async get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`);
+  async get<T>(path: string, init?: ApiRequestInit): Promise<T> {
+    const res = await fetch(`${this.baseUrl}${path}`, init);
     return parse<T>(res);
   }
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cache } from "react";
 
 import { routing } from "@/i18n/routing";
 import {
@@ -74,7 +75,14 @@ export const fallbackHotelMetadata: Metadata = {
   icons: { icon: [{ url: "/vayada-logo.png" }] },
 };
 
-export async function fetchPublicHotel(
+export const PUBLIC_HOTEL_METADATA_REVALIDATE_SECONDS = 60;
+
+export const fetchPublicHotel = cache(
+  async (slug: string, locale: string): Promise<PublicHotelMetadata | null> =>
+    fetchPublicHotelUncached(slug, locale),
+);
+
+async function fetchPublicHotelUncached(
   slug: string,
   locale: string,
 ): Promise<PublicHotelMetadata | null> {
@@ -87,7 +95,7 @@ export async function fetchPublicHotel(
     const res = await fetch(
       `${apiUrl}/api/booking-web/hotels/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`,
       {
-        cache: "no-store",
+        next: { revalidate: PUBLIC_HOTEL_METADATA_REVALIDATE_SECONDS },
       },
     );
     if (!res.ok) throw new Error(`Booking Web API returned ${res.status}`);
@@ -103,7 +111,7 @@ export async function fetchPublicHotel(
     const res = await fetch(
       `${bookingApiUrl}/api/hotels/${encodeURIComponent(slug)}${legacyQs ? `?${legacyQs}` : ""}`,
       {
-        cache: "no-store",
+        next: { revalidate: PUBLIC_HOTEL_METADATA_REVALIDATE_SECONDS },
       },
     );
     if (!res.ok) return null;

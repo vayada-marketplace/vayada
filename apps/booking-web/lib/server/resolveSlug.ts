@@ -1,4 +1,7 @@
+import { cache } from "react";
+
 import { bookingWebPublicApi } from "@/services/api/bookingWebPublic";
+import { PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS } from "@/services/api/bookingWebPublic";
 
 /**
  * Server-side hostname → hotel-slug resolver. Mirrors the client-edge
@@ -24,7 +27,12 @@ function normalizeHost(hostname: string): string {
   return normalized.replace(/:\d+$/, "");
 }
 
-export async function resolveSlugFromHost(hostname: string): Promise<string | null | undefined> {
+export const resolveSlugFromHost = cache(
+  async (hostname: string): Promise<string | null | undefined> =>
+    resolveSlugFromHostUncached(hostname),
+);
+
+async function resolveSlugFromHostUncached(hostname: string): Promise<string | null | undefined> {
   const host = normalizeHost(hostname);
 
   if (host.endsWith(".booking.localhost")) {
@@ -51,7 +59,9 @@ export async function resolveSlugFromHost(hostname: string): Promise<string | nu
   }
 
   try {
-    const data = await bookingWebPublicApi.resolveHost(host);
+    const data = await bookingWebPublicApi.resolveHost(host, {
+      next: { revalidate: PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS },
+    });
     if (data?.slug) return data.slug;
   } catch {
     // fall through
