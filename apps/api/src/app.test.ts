@@ -57,6 +57,10 @@ import {
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
 import type {
+  PmsAssignmentCommand,
+  PmsAssignmentCommandResponse,
+  PmsAssignmentCommandResult,
+  PmsOperationsCommandRepository,
   PmsCalendarDay,
   PmsOperationalReservation,
   PmsOperationsReadRepository,
@@ -109,7 +113,12 @@ const pmsOperationsContractCases = JSON.parse(
     caseId: string;
     skip?: boolean;
     skipReason?: string;
-    request: { path: string; query?: Record<string, string | number> };
+    request: {
+      path: string;
+      method?: "GET" | "PATCH" | "POST" | "DELETE";
+      query?: Record<string, string | number>;
+      body?: Record<string, unknown>;
+    };
     expected: {
       status?: number;
       itemCount?: number;
@@ -119,6 +128,12 @@ const pmsOperationsContractCases = JSON.parse(
       denials?: Array<{ condition: string; status: number; errorCode: string }>;
       errorCode?: string;
       message?: string;
+      sideEffects?: string[];
+      commandMeta?: {
+        contractVersion?: string;
+        sideEffects?: string[];
+        replayed?: boolean;
+      };
     };
   }>;
 };
@@ -213,6 +228,21 @@ const pmsReservationsAssignedUnassignedCase = pmsOperationsContractCases.cases.f
 const checkoutChargeMarkPaidFreezeCase = financeRouteContractCases.cases.find(
   (testCase) => testCase.caseId === "checkout-charge-mark-paid-freeze",
 )!;
+const pmsAssignmentCommandCases = Object.fromEntries(
+  [
+    "assignment-command-assign",
+    "assignment-command-move",
+    "assignment-command-unassign",
+    "assignment-command-swap",
+    "assignment-command-conflict",
+    "assignment-command-version-conflict",
+    "assignment-command-assignment-conflict",
+    "assignment-command-idempotency-replay",
+  ].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_hotel_owner",
@@ -672,6 +702,119 @@ const pmsOperationsRepository: PmsOperationsReadRepository = {
   },
 };
 
+function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository & {
+  commands: PmsAssignmentCommand[];
+  outboxEnqueues: string[];
+} {
+  const commands: PmsAssignmentCommand[] = [];
+  const outboxEnqueues: string[] = [];
+  const replayResponses = new Map<string, PmsAssignmentCommandResult>();
+
+  return {
+    commands,
+    outboxEnqueues,
+    async executeAssignmentCommand(command) {
+      commands.push(command);
+
+      const replay = replayResponses.get(command.idempotencyKey);
+      if (replay) return replay;
+
+      const conflict = assignmentCommandConflict(command);
+      if (conflict) return conflict;
+
+      const reservation = reservationForAssignmentCommand(command);
+      const result: PmsAssignmentCommandResult = {
+        ok: true,
+        reservation,
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T16:00:00.000Z",
+          sideEffects: ["calendar_refresh", "audit_event"],
+        },
+      };
+      replayResponses.set(command.idempotencyKey, result);
+      outboxEnqueues.push(`calendar_refresh:${command.guestBookingId}`);
+      return result;
+    },
+  };
+}
+
+function assignmentCommandConflict(
+  command: PmsAssignmentCommand,
+): Exclude<PmsAssignmentCommandResult, { ok: true }> | undefined {
+  if (command.expectedVersion === "reservation-v6") {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "version_conflict",
+      message: "Reservation assignment version is stale.",
+    };
+  }
+  if (command.roomId === "f6855100-0000-0000-0000-000000000099") {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "room_unavailable",
+      message: "Requested room is unavailable for this stay.",
+    };
+  }
+  if (command.targetAssignmentId === "f6855500-0000-0000-0000-000000009999") {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "assignment_conflict",
+      message: "Target assignment does not belong to this reservation.",
+    };
+  }
+  return undefined;
+}
+
+function reservationForAssignmentCommand(command: PmsAssignmentCommand): PmsOperationalReservation {
+  const base =
+    pmsReservations.find((reservation) => reservation.guestBookingId === command.guestBookingId) ??
+    pmsReservations[0];
+  const reservation = structuredClone(base);
+  const assignment = reservation.assignments[0]!;
+
+  if (command.action === "unassign") {
+    assignment.roomId = null;
+    assignment.roomNumber = null;
+    assignment.assignmentStatus = "pending";
+    assignment.assignedAt = null;
+    return reservation;
+  }
+
+  if (command.action === "swap") {
+    reservation.assignments = [
+      {
+        ...assignment,
+        assignmentId: command.assignmentId ?? assignment.assignmentId,
+        roomId: "f6855100-0000-0000-0000-000000000002",
+        roomNumber: "102",
+        assignmentStatus: "assigned",
+      },
+      {
+        ...assignment,
+        assignmentId: command.targetAssignmentId ?? "f6855500-0000-0000-0000-000000000003",
+        roomId: "f6855100-0000-0000-0000-000000000001",
+        roomNumber: "101",
+        position: 2,
+        assignmentStatus: "assigned",
+      },
+    ];
+    return reservation;
+  }
+
+  assignment.assignmentId = command.assignmentId ?? assignment.assignmentId;
+  assignment.roomId = command.roomId ?? null;
+  assignment.roomNumber = command.roomId === pmsRooms[2].roomId ? "201" : "102";
+  assignment.assignmentStatus = "assigned";
+  assignment.assignedAt = "2026-08-14T16:00:00.000Z";
+  return reservation;
+}
+
 const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
   (fixture) => fixture.caseId === "bookable",
 )!.profile;
@@ -812,6 +955,7 @@ function buildAuthenticatedApp(
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
     pmsOperationsRepository?: PmsOperationsReadRepository;
     pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
+    pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
     pmsOperationsAllowedOrigins?: string[];
     linkedPmsPropertyId?: string;
   } = {},
@@ -821,6 +965,7 @@ function buildAuthenticatedApp(
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
     pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
     pmsCheckoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
+    pmsOperationsCommandRepository: options.pmsOperationsCommandRepository,
     pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
@@ -5411,6 +5556,7 @@ describe("vayada-api", () => {
     expect(preflight.headers["access-control-allow-headers"]).toBe(
       "authorization,content-type,x-hotel-id",
     );
+    expect(preflight.headers["access-control-allow-methods"]).toBe("GET,POST,PATCH,OPTIONS");
     expect(read.statusCode).toBe(200);
     expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
   });
@@ -5816,6 +5962,138 @@ describe("vayada-api", () => {
       code: checkoutChargeMarkPaidFreezeCase.expected.errorCode,
       category: "conflict",
     });
+  });
+
+  it("executes PMS assignment assign/move/unassign/swap commands through the P1c contract", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    for (const caseId of [
+      "assignment-command-assign",
+      "assignment-command-move",
+      "assignment-command-unassign",
+      "assignment-command-swap",
+    ]) {
+      const commandCase = pmsAssignmentCommandCases[caseId]!;
+      const response = await injectJson(app, {
+        method: commandCase.request.method ?? "PATCH",
+        url: commandCase.request.path,
+        payload: commandCase.request.body,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+      const body = response.body as PmsAssignmentCommandResponse;
+
+      expect(response.statusCode, caseId).toBe(commandCase.expected.status);
+      expect(body.contractVersion, caseId).toBe("pms-operations.v1");
+      expect(body.commandMeta).toMatchObject({
+        contractVersion: "pms-operations.v1",
+        idempotencyKey: commandCase.request.body?.idempotencyKey,
+        sideEffects: commandCase.expected.commandMeta?.sideEffects,
+      });
+      expect(body.commandMeta.sideEffects, caseId).not.toContain("ari_changed");
+      expect(body.reservation.guestBookingId, caseId).toBe(
+        commandCase.request.path.split("/reservations/")[1]!.split("/")[0],
+      );
+    }
+
+    expect(commandRepository.commands.map((command) => command.action)).toEqual([
+      "assign",
+      "move",
+      "unassign",
+      "swap",
+    ]);
+    expect(commandRepository.outboxEnqueues).toHaveLength(4);
+  });
+
+  it("maps PMS assignment command conflicts without queueing side effects", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    for (const caseId of [
+      "assignment-command-conflict",
+      "assignment-command-version-conflict",
+      "assignment-command-assignment-conflict",
+    ]) {
+      const commandCase = pmsAssignmentCommandCases[caseId]!;
+      const response = await injectJson(app, {
+        method: commandCase.request.method ?? "PATCH",
+        url: commandCase.request.path,
+        payload: commandCase.request.body,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+
+      expect(response.statusCode, caseId).toBe(commandCase.expected.status);
+      expect(response.body, caseId).toMatchObject({
+        statusCode: 409,
+        code: commandCase.expected.errorCode,
+        category: "conflict",
+      });
+    }
+
+    expect(commandRepository.outboxEnqueues).toEqual([]);
+  });
+
+  it("replays PMS assignment idempotency without duplicate calendar refresh outbox work", async () => {
+    const commandCase = pmsAssignmentCommandCases["assignment-command-idempotency-replay"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const first = await injectJson(app, {
+      method: commandCase.request.method ?? "PATCH",
+      url: commandCase.request.path,
+      payload: commandCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const replay = await injectJson(app, {
+      method: commandCase.request.method ?? "PATCH",
+      url: commandCase.request.path,
+      payload: commandCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(first.statusCode).toBe(commandCase.expected.status);
+    expect(replay.statusCode).toBe(commandCase.expected.status);
+    expect(replay.body).toEqual(first.body);
+    expect(commandRepository.commands).toHaveLength(2);
+    expect(commandRepository.outboxEnqueues).toHaveLength(1);
   });
 
   it("rejects PMS operations reads with an invalid token", async () => {

@@ -11,7 +11,10 @@ import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import type { PublicHotelQuoteRepository } from "./routes/aiHotelQuotes.js";
 import type { AskAuditRepository, AskRoutesOptions } from "./routes/ask.js";
 import type { BookingReservationsReadRepository } from "./routes/bookingReservations.js";
-import type { PmsOperationsReadRepository } from "./routes/pmsOperations.js";
+import type {
+  PmsOperationsCommandRepository,
+  PmsOperationsReadRepository,
+} from "./routes/pmsOperations.js";
 import type { AuthSessionRouteOptions } from "./routes/authSession.js";
 import type {
   BookingGuestFormSettingsSync,
@@ -74,6 +77,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingReservationsRepository?: BookingReservationsReadRepository;
   pmsOperationsRepository?: PmsOperationsReadRepository;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
+  pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
   pmsOperationsAllowedOrigins?: string[];
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
@@ -226,6 +230,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/pms",
       repository: options.pmsOperationsRepository,
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
+      commandRepository: options.pmsOperationsCommandRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
