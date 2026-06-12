@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   FINANCE_BILLING_PLANS,
   FINANCE_PAYMENT_METHODS,
+  buildCheckoutChargeSettlementIdempotencyKey,
   buildUpdateAddOnPriceIdempotencyKey,
   calculatePayoutSplit,
   financeCommandIdempotencyKey,
@@ -12,6 +13,7 @@ import {
   type BillingConfigReadPort,
   type FinanceCommandBus,
   type FinanceCommandResult,
+  type SettleManualCheckoutChargeCommand,
   type PaymentSettingsReadModel,
   type PaymentSettingsReadPort,
   type UpdateAddOnPriceCommand,
@@ -63,6 +65,54 @@ describe("@vayada/domain-finance constants", () => {
     expect(financeCommandTypes).toContain("finance.currency.update");
     expect(financeCommandTypes).toContain("finance.billing.plan.update");
     expect(financeCommandTypes).toContain("finance.add_on.price.update");
+    expect(financeCommandTypes).toContain("finance.checkout_charge.settle_manual");
+  });
+});
+
+describe("checkout-charge settlement bridge", () => {
+  it("builds the F1a settlement idempotency key from the PMS command id", () => {
+    expect(
+      buildCheckoutChargeSettlementIdempotencyKey({
+        checkoutChargeId: "charge_checkout_001",
+        pmsCommandId: "cmd-pms-charge-mark-paid-001",
+      }),
+    ).toBe(
+      "finance.checkout-charge-settlement:checkout_charge:charge_checkout_001:mark-paid:cmd-pms-charge-mark-paid-001:v1",
+    );
+  });
+
+  it("models PMS mark-paid as a finance manual settlement command", () => {
+    const command: SettleManualCheckoutChargeCommand = {
+      commandType: "finance.checkout_charge.settle_manual",
+      commandId: "cmd-finance-settle-charge-checkout-001",
+      idempotencyKey: buildCheckoutChargeSettlementIdempotencyKey({
+        checkoutChargeId: "charge_checkout_001",
+        pmsCommandId: "cmd-pms-charge-mark-paid-001",
+      }),
+      propertyId: "property_001",
+      audit: {
+        actor: { kind: "user", userId: "user_front_desk", organizationId: "org_hotel" },
+        requestId: "req_001",
+        correlationId: "corr_001",
+        reason: "PMS checkout charge marked paid",
+        requestedAt: "2026-06-12T12:00:00.000Z",
+      },
+      payload: {
+        guestBookingId: "guest_booking_001",
+        checkoutChargeId: "charge_checkout_001",
+        amount: "75.00",
+        currency: "EUR",
+        paymentMethod: "cash",
+        reference: "front desk receipt 8813",
+        markedPaidAt: "2026-06-12T12:00:00.000Z",
+        operatorUserId: "user_front_desk",
+        pmsCommandId: "cmd-pms-charge-mark-paid-001",
+      },
+    };
+
+    expect(command.commandType).toBe("finance.checkout_charge.settle_manual");
+    expect(command.payload.paymentMethod).toBe("cash");
+    expect(command.idempotencyKey).toContain(command.payload.checkoutChargeId);
   });
 });
 

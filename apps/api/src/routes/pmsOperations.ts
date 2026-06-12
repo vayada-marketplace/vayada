@@ -86,6 +86,7 @@ export type PmsReservationDetailResponse = {
 
 export type PmsOperationsRoutesOptions = {
   repository: PmsOperationsReadRepository;
+  checkoutChargeMarkPaidFreezeEnabled?: boolean;
   allowedOrigins?: string[];
 };
 
@@ -99,6 +100,10 @@ type PmsRoomTypeParams = PmsPropertyParams & {
 
 type PmsReservationParams = PmsPropertyParams & {
   guestBookingId: string;
+};
+
+type PmsCheckoutChargeParams = PmsReservationParams & {
+  chargeId: string;
 };
 
 type PmsCalendarQuery = {
@@ -120,10 +125,16 @@ type PmsReservationListQuery = {
   offset?: string;
 };
 
+type PmsCheckoutChargeMarkPaidBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+};
+
 type PmsOperationsErrorCategory =
   | "authentication"
   | "authorization"
   | "validation"
+  | "conflict"
   | "read_model"
   | "not_found";
 
@@ -135,17 +146,32 @@ type PmsOperationsErrorCode =
   | "inactive_entitlement"
   | "missing_resource_access"
   | "invalid_query"
+  | "invalid_body"
   | "invalid_date_range"
+  | "finance_bridge_required"
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found";
 
 type PmsOperationsError = {
-  statusCode: 400 | 401 | 403 | 404 | 500;
+  statusCode: 400 | 401 | 403 | 404 | 409 | 500;
   code: PmsOperationsErrorCode;
   category: PmsOperationsErrorCategory;
   message: string;
 };
+
+type PmsOperationsAuthorizationErrorCode = Exclude<
+  PmsOperationsErrorCode,
+  | "unauthenticated"
+  | "invalid_token"
+  | "invalid_query"
+  | "invalid_body"
+  | "invalid_date_range"
+  | "finance_bridge_required"
+  | "read_model_unavailable"
+  | "room_type_not_found"
+  | "reservation_not_found"
+>;
 
 export async function registerPmsOperationsRoutes(
   app: FastifyInstance,
@@ -165,6 +191,7 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/room-blocks",
     "/properties/:propertyId/reservations",
     "/properties/:propertyId/reservations/:guestBookingId",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
   ]) {
     app.options(path, async (request, reply) => {
       if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
@@ -434,6 +461,43 @@ export async function registerPmsOperationsRoutes(
       }
     },
   );
+
+  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
+    async (request, reply) => {
+      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 403,
+          code: "missing_permission",
+          category: "authorization",
+          message: "PMS operations origin is not allowed.",
+        });
+      }
+      const { propertyId } = request.params;
+      if (!enforcePmsOperationsWritePolicy(request, reply, propertyId)) return reply;
+
+      const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
+      if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
+
+      const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
+      if (freezeEnabled) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 409,
+          code: "finance_bridge_required",
+          category: "conflict",
+          message: "Finance settlement bridge is required before marking checkout charges paid.",
+        });
+      }
+
+      return sendPmsOperationsError(reply, {
+        statusCode: 500,
+        code: "read_model_unavailable",
+        category: "read_model",
+        message:
+          "PMS checkout charge mark-paid must be wired to a durable command service before the freeze can be disabled.",
+      });
+    },
+  );
 }
 
 function enforcePmsOperationsReadPolicy(
@@ -469,6 +533,38 @@ function enforcePmsOperationsReadPolicy(
   }
 }
 
+function enforcePmsOperationsWritePolicy(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  propertyId: string,
+): ReturnType<typeof enforceRoutePolicy> | null {
+  try {
+    return enforceRoutePolicy(request, {
+      permission: "pms.operations.manage",
+      entitlement: {
+        product: "pms",
+        key: "property-management",
+        resource: {
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: propertyId,
+        },
+      },
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: propertyId,
+        allowedRelationships: ["owner", "operator", "front_desk"],
+      },
+    });
+  } catch (error) {
+    const contractError = toPmsOperationsAccessError(error, request, propertyId);
+    if (!contractError) throw error;
+    sendPmsOperationsError(reply, contractError);
+    return null;
+  }
+}
+
 function sendPmsOperationsError(reply: FastifyReply, error: PmsOperationsError): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }
@@ -484,9 +580,44 @@ function writePmsOperationsCorsHeaders(
   reply
     .header("Access-Control-Allow-Origin", origin)
     .header("Access-Control-Allow-Headers", "authorization,content-type,x-hotel-id")
-    .header("Access-Control-Allow-Methods", "GET,OPTIONS")
+    .header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     .header("Vary", "Origin");
   return true;
+}
+
+function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaidBody):
+  | {
+      value: {
+        commandId: string;
+        idempotencyKey: string;
+      };
+    }
+  | { error: PmsOperationsError } {
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody("Checkout charge mark-paid requires command metadata.") };
+  }
+
+  return {
+    value: {
+      commandId,
+      idempotencyKey,
+    },
+  };
+}
+
+function invalidBody(message: string): PmsOperationsError {
+  return {
+    statusCode: 400,
+    code: "invalid_body",
+    category: "validation",
+    message,
+  };
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function readModelUnavailable(message: string): PmsOperationsError {
@@ -500,9 +631,7 @@ function readModelUnavailable(message: string): PmsOperationsError {
 
 function toCalendarRange(
   query: PmsCalendarQuery,
-):
-  | { value: { from: string; to: string } }
-  | { error: PmsOperationsError } {
+): { value: { from: string; to: string } } | { error: PmsOperationsError } {
   if (!query.from || !query.to) {
     return {
       error: {
@@ -534,9 +663,7 @@ function toCalendarRange(
 
 function toOptionalDateRange(
   query: PmsRoomBlocksQuery,
-):
-  | { value: { from?: string; to?: string } | undefined }
-  | { error: PmsOperationsError } {
+): { value: { from?: string; to?: string } | undefined } | { error: PmsOperationsError } {
   const from = query.from?.trim() || undefined;
   const to = query.to?.trim() || undefined;
   if (!from && !to) return { value: undefined };
@@ -557,9 +684,7 @@ function toOptionalDateRange(
 function toRequiredDateRange(
   rawFrom: string,
   rawTo: string,
-):
-  | { value: { from: string; to: string } }
-  | { error: PmsOperationsError } {
+): { value: { from: string; to: string } } | { error: PmsOperationsError } {
   const from = rawFrom.trim();
   const to = rawTo.trim();
   if (!isDateOnly(from) || !isDateOnly(to) || daysInclusive(from, to) < 1) {
@@ -685,16 +810,7 @@ function toPmsOperationsAuthorizationCode(
   message: string,
   request: FastifyRequest,
   propertyId: string,
-): Exclude<
-  PmsOperationsErrorCode,
-  | "unauthenticated"
-  | "invalid_token"
-  | "invalid_query"
-  | "invalid_date_range"
-  | "read_model_unavailable"
-  | "room_type_not_found"
-  | "reservation_not_found"
-> {
+): PmsOperationsAuthorizationErrorCode {
   const normalized = message.toLowerCase();
   if (normalized.includes("permission")) return "missing_permission";
   if (normalized.includes("entitlement")) {
@@ -705,18 +821,7 @@ function toPmsOperationsAuthorizationCode(
   return "missing_resource_access";
 }
 
-function toPmsOperationsAuthorizationMessage(
-  code: Exclude<
-    PmsOperationsErrorCode,
-    | "unauthenticated"
-    | "invalid_token"
-    | "invalid_query"
-    | "invalid_date_range"
-    | "read_model_unavailable"
-    | "room_type_not_found"
-    | "reservation_not_found"
-  >,
-): string {
+function toPmsOperationsAuthorizationMessage(code: PmsOperationsAuthorizationErrorCode): string {
   switch (code) {
     case "missing_permission":
       return "Missing required PMS operations permission.";
