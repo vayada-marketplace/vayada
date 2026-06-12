@@ -236,6 +236,126 @@
       }
     },
     {
+      "caseId": "manual-payment-record-command-currency-mismatch",
+      "description": "Manual payment commands reject a currency that does not match the invoice currency before writing payment facts.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_abcd/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-currency-mismatch",
+          "idempotencyKey": "finance-manual-payment-currency-mismatch",
+          "amount": "25.00",
+          "currency": "USD",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt currency mismatch"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_command"
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command-overpayment",
+      "description": "Manual payment commands reject amounts above the invoice balance before writing payment facts.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_abcd/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-overpayment",
+          "idempotencyKey": "finance-manual-payment-overpayment",
+          "amount": "900.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt overpayment"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_command"
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command-no-balance",
+      "description": "Manual payment commands reject invoices with no remaining balance before writing payment facts.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_no_balance/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-no-balance",
+          "idempotencyKey": "finance-manual-payment-no-balance",
+          "amount": "1.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt no balance"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_command"
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command-paid-invoice",
+      "description": "Manual payment commands reject already-paid invoices before writing payment facts.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_paid/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-paid",
+          "idempotencyKey": "finance-manual-payment-paid",
+          "amount": "1.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt paid"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_command"
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command-voided-invoice",
+      "description": "Manual payment commands reject voided invoices before writing payment facts.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_voided/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-voided",
+          "idempotencyKey": "finance-manual-payment-voided",
+          "amount": "1.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt voided"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_command"
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command-amount-out-of-range",
+      "description": "Manual payment commands reject amounts outside NUMERIC(15,2) before reaching the write repository.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_abcd/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-out-of-range",
+          "idempotencyKey": "finance-manual-payment-out-of-range",
+          "amount": "10000000000000.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt out of range"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_body"
+      }
+    },
+    {
       "caseId": "payment-ledger-read",
       "description": "The property payment ledger is a stable paginated finance read model and does not collapse into invoice-detail rows.",
       "request": {

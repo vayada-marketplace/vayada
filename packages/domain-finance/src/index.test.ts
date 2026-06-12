@@ -105,20 +105,22 @@ describe("manual payment record command", () => {
     expect(
       buildManualPaymentProjectionJobIdempotencyKey({
         jobType: "booking.projection-refresh",
+        propertyId: command.propertyId,
         guestBookingId: "guest_booking_001",
         paymentIdempotencyKey: command.idempotencyKey,
       }),
     ).toBe(
-      "booking.projection-refresh:booking:guest_booking_001:finance-payment:finance-manual-payment-inv-2026-abcd-001:v1",
+      "booking.projection-refresh:property:property_001:booking:guest_booking_001:finance-payment:ff7cd8009765f0465a06be7e32957ecbd1e6dc9a27402f1584372e94f7acb1f4:v1",
     );
     expect(
       buildManualPaymentProjectionJobIdempotencyKey({
         jobType: "pms.projection-refresh",
+        propertyId: command.propertyId,
         guestBookingId: "guest_booking_001",
         paymentIdempotencyKey: command.idempotencyKey,
       }),
     ).toBe(
-      "pms.projection-refresh:booking:guest_booking_001:finance-payment:finance-manual-payment-inv-2026-abcd-001:v1",
+      "pms.projection-refresh:property:property_001:booking:guest_booking_001:finance-payment:ff7cd8009765f0465a06be7e32957ecbd1e6dc9a27402f1584372e94f7acb1f4:v1",
     );
   });
 });

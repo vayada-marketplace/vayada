@@ -233,6 +233,8 @@ type ManualPaymentBody = {
   reference?: unknown;
 };
 
+const FINANCE_NUMERIC_15_2_MAX_CENTS = 999999999999999n;
+
 export async function registerFinanceRoutes(
   app: FastifyInstance,
   options: FinanceRoutesOptions,
@@ -654,6 +656,39 @@ async function recordManualPaymentInClient(
   const recordedAt = command.audit.requestedAt;
   const keyHash = sha256(command.idempotencyKey);
   const fingerprint = sha256(stableJson(command.payload));
+  const existingIdempotency = await findManualPaymentIdempotencyReplay(
+    client,
+    command,
+    keyHash,
+    fingerprint,
+  );
+  if (existingIdempotency) {
+    if ("ok" in existingIdempotency) return existingIdempotency;
+    const commandMeta = buildManualPaymentCommandMeta(command, invoiceRow.guestBookingId, true);
+    const updatedInvoice = await loadFinanceInvoiceDetail(
+      client,
+      command.propertyId,
+      command.payload.invoiceId,
+    );
+    if (!updatedInvoice) {
+      return {
+        ok: false,
+        statusCode: 500,
+        code: "write_unavailable",
+        message: "Finance invoice read model was unavailable after replaying manual payment.",
+      };
+    }
+    return {
+      ok: true,
+      status: "idempotent_replay",
+      invoice: updatedInvoice,
+      commandMeta,
+    };
+  }
+
+  const validationError = validateManualPaymentForInvoice(command, invoiceRow);
+  if (validationError) return validationError;
+
   const idempotencyError = await reserveManualPaymentIdempotency(
     client,
     command,
@@ -734,6 +769,96 @@ async function recordManualPaymentInClient(
   };
 }
 
+function validateManualPaymentForInvoice(
+  command: FinanceManualPaymentRecordCommand,
+  invoiceRow: FinanceInvoiceRow,
+): Extract<FinanceManualPaymentRecordResult, { ok: false }> | null {
+  const amountCents = positiveFinanceDecimalCents(command.payload.amount);
+  if (amountCents === null) {
+    return invalidManualPaymentCommand(
+      "Manual payment amount must be greater than zero and fit NUMERIC(15,2).",
+    );
+  }
+
+  const invoiceCurrency = currencyCode(invoiceRow.currency);
+  if (command.payload.currency !== invoiceCurrency) {
+    return invalidManualPaymentCommand("Manual payment currency must match invoice currency.");
+  }
+
+  const status = invoiceStatus(invoiceRow.status);
+  if (status === "paid" || status === "voided") {
+    return invalidManualPaymentCommand(
+      "Manual payment cannot be recorded for paid or voided invoices.",
+    );
+  }
+
+  const balanceCents = nonNegativeFinanceDecimalCents(invoiceRow.balanceDue);
+  if (balanceCents === null) {
+    return invalidManualPaymentCommand("Finance invoice balance is unavailable.");
+  }
+  if (balanceCents === 0n) {
+    return invalidManualPaymentCommand(
+      "Manual payment cannot be recorded when the invoice has no balance due.",
+    );
+  }
+  if (amountCents > balanceCents) {
+    return invalidManualPaymentCommand("Manual payment amount cannot exceed invoice balance.");
+  }
+
+  return null;
+}
+
+function invalidManualPaymentCommand(
+  message: string,
+): Extract<FinanceManualPaymentRecordResult, { ok: false }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_command",
+    message,
+  };
+}
+
+async function findManualPaymentIdempotencyReplay(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  keyHash: string,
+  fingerprint: string,
+): Promise<
+  Extract<FinanceManualPaymentRecordResult, { ok: false }> | { paymentId: string } | null
+> {
+  const result = await client.query<{
+    requestFingerprintHash: string;
+    paymentId: string | null;
+  }>(
+    `SELECT
+       idempotency.request_fingerprint_hash AS "requestFingerprintHash",
+       payment.id::text AS "paymentId"
+     FROM platform.idempotency_keys idempotency
+     LEFT JOIN finance.payments payment
+       ON payment.property_id = idempotency.property_id
+      AND payment.idempotency_key = $3
+     WHERE idempotency.operation_scope = 'finance'
+       AND idempotency.operation = 'manual_payment_record'
+       AND idempotency.key_hash = $1
+       AND idempotency.tenant_scope = 'property'
+       AND idempotency.property_id = $2::uuid
+     LIMIT 1`,
+    [keyHash, command.propertyId, manualPaymentScopedKey(command, "payment")],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  if (row.requestFingerprintHash !== fingerprint) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message: "Idempotency key was already used with a different manual payment payload.",
+    };
+  }
+  return row.paymentId ? { paymentId: row.paymentId } : null;
+}
+
 async function reserveManualPaymentIdempotency(
   client: FinancePropertySettingsWriteClient,
   command: FinanceManualPaymentRecordCommand,
@@ -783,11 +908,16 @@ async function reserveManualPaymentIdempotency(
     [
       keyHash,
       fingerprint,
-      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      null,
       command.propertyId,
       command.audit.correlationId ?? command.audit.requestId,
       recordedAt,
-      JSON.stringify({ commandId: command.commandId, idempotencyKey: command.idempotencyKey }),
+      JSON.stringify({
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        organizationId:
+          command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      }),
     ],
   );
   const row = result.rows[0];
@@ -808,6 +938,7 @@ async function insertManualPayment(
   guestBookingId: string,
   recordedAt: string,
 ): Promise<FinanceManualPaymentWriteRow> {
+  const paymentIdempotencyKey = manualPaymentScopedKey(command, "payment");
   const result = await client.query<FinanceManualPaymentWriteRow>(
     `WITH inserted AS (
        INSERT INTO finance.payments (
@@ -864,7 +995,7 @@ async function insertManualPayment(
       command.propertyId,
       command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
       guestBookingId,
-      command.idempotencyKey,
+      paymentIdempotencyKey,
       command.payload.paymentMethod,
       command.payload.amount,
       command.payload.currency,
@@ -872,6 +1003,7 @@ async function insertManualPayment(
         invoiceId: command.payload.invoiceId,
         reference: command.payload.reference ?? null,
         commandId: command.commandId,
+        clientIdempotencyKey: command.idempotencyKey,
         reconciliationStatus: "matched",
         providerStatus: "paid",
       }),
@@ -891,13 +1023,14 @@ function buildManualPaymentCommandMeta(
     idempotencyKey: command.idempotencyKey,
     sideEffects: [...FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS],
     outboxEvents: [
-      `finance.manual-payment.booking-projection.${command.idempotencyKey}.v1`,
-      `finance.manual-payment.pms-projection.${command.idempotencyKey}.v1`,
+      manualPaymentScopedKey(command, "booking-outbox"),
+      manualPaymentScopedKey(command, "pms-outbox"),
     ],
     jobs: (["booking.projection-refresh", "pms.projection-refresh"] as const).map((jobType) => ({
       jobType,
       idempotencyKey: buildManualPaymentProjectionJobIdempotencyKey({
         jobType,
+        propertyId: command.propertyId,
         guestBookingId,
         paymentIdempotencyKey: command.idempotencyKey,
       }),
@@ -969,9 +1102,9 @@ async function recordManualPaymentDomainEvent(
        AND event_key = $1
      LIMIT 1`,
     [
-      `finance.manual-payment.${command.idempotencyKey}.v1`,
+      manualPaymentScopedKey(command, "domain-event"),
       recordedAt,
-      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      null,
       command.propertyId,
       paymentId,
       command.audit.actor.kind,
@@ -1066,8 +1199,8 @@ async function enqueueManualPaymentOutboxEvents(
      )`,
     [
       domainEventId,
-      `finance.manual-payment.booking-projection.${command.idempotencyKey}.v1`,
-      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      manualPaymentScopedKey(command, "booking-outbox"),
+      null,
       command.propertyId,
       guestBookingId,
       command.audit.correlationId ?? command.audit.requestId,
@@ -1079,7 +1212,7 @@ async function enqueueManualPaymentOutboxEvents(
         paymentId,
       }),
       JSON.stringify({ commandId: command.commandId }),
-      `finance.manual-payment.pms-projection.${command.idempotencyKey}.v1`,
+      manualPaymentScopedKey(command, "pms-outbox"),
     ],
   );
   return {
@@ -1100,11 +1233,13 @@ async function enqueueManualPaymentJobs(
 ): Promise<void> {
   const bookingJobKey = buildManualPaymentProjectionJobIdempotencyKey({
     jobType: "booking.projection-refresh",
+    propertyId: command.propertyId,
     guestBookingId,
     paymentIdempotencyKey: command.idempotencyKey,
   });
   const pmsJobKey = buildManualPaymentProjectionJobIdempotencyKey({
     jobType: "pms.projection-refresh",
+    propertyId: command.propertyId,
     guestBookingId,
     paymentIdempotencyKey: command.idempotencyKey,
   });
@@ -1166,7 +1301,7 @@ async function enqueueManualPaymentJobs(
       bookingJobKey,
       domainEventId,
       outboxEventIds.booking,
-      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      null,
       command.propertyId,
       guestBookingId,
       command.audit.correlationId ?? command.audit.requestId,
@@ -1248,9 +1383,9 @@ async function recordManualPaymentAuditEvent(
      )
      ON CONFLICT (product, audit_key) DO NOTHING`,
     [
-      `finance.manual-payment.${command.idempotencyKey}.v1`,
+      manualPaymentScopedKey(command, "audit"),
       recordedAt,
-      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      null,
       command.propertyId,
       command.audit.actor.kind,
       command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
@@ -1975,9 +2110,7 @@ function toManualPaymentCommand(
 function decimalBodyString(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const text = String(value).trim();
-  if (!/^\d+(\.\d{1,2})?$/.test(text)) return undefined;
-  if (Number(text) <= 0) return undefined;
-  return text;
+  return positiveFinanceDecimalCents(text) === null ? undefined : text;
 }
 
 function currencyBodyString(value: unknown): string | undefined {
@@ -1991,6 +2124,29 @@ function nullableTrimmedString(value: unknown): string | null | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function positiveFinanceDecimalCents(value: string): bigint | null {
+  const cents = nonNegativeFinanceDecimalCents(value);
+  return cents !== null && cents > 0n ? cents : null;
+}
+
+function nonNegativeFinanceDecimalCents(value: string): bigint | null {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) return null;
+  const whole = match[1]!.replace(/^0+(?=\d)/, "");
+  const fractional = (match[2] ?? "").padEnd(2, "0");
+  const cents = BigInt(whole) * 100n + BigInt(fractional);
+  return cents <= FINANCE_NUMERIC_15_2_MAX_CENTS ? cents : null;
+}
+
+function manualPaymentScopedKey(
+  command: FinanceManualPaymentRecordCommand,
+  kind: "payment" | "domain-event" | "booking-outbox" | "pms-outbox" | "audit",
+): string {
+  return `finance.manual-payment:property:${command.propertyId}:${kind}:${sha256(
+    command.idempotencyKey,
+  )}:v1`;
 }
 
 function toFinanceCommandError(result: Extract<FinanceManualPaymentRecordResult, { ok: false }>) {

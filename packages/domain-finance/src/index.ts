@@ -22,6 +22,8 @@
  *   through permissioned finance services.
  */
 
+import { createHash } from "node:crypto";
+
 // ---------------------------------------------------------------------------
 // Scalar aliases
 // ---------------------------------------------------------------------------
@@ -1024,10 +1026,11 @@ export function buildCheckoutChargeSettlementIdempotencyKey(input: {
 
 export function buildManualPaymentProjectionJobIdempotencyKey(input: {
   jobType: FinanceProjectionRefreshJob["jobType"];
+  propertyId: FinancePropertyId;
   guestBookingId: string;
   paymentIdempotencyKey: string;
 }): string {
-  return `${input.jobType}:booking:${input.guestBookingId}:finance-payment:${input.paymentIdempotencyKey}:v1`;
+  return `${input.jobType}:property:${input.propertyId}:booking:${input.guestBookingId}:finance-payment:${financeSha256(input.paymentIdempotencyKey)}:v1`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,6 +1049,10 @@ function parseDecimalAmount(value: FinanceDecimalAmount): number {
     throw new Error(`Invalid decimal amount: negative value: ${value}`);
   }
   return parsed;
+}
+
+function financeSha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function round2(value: number): number {
