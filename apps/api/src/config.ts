@@ -38,6 +38,7 @@ export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
 export type BookingCheckoutCommandSource = "legacy_proxy" | "target";
 export type PmsOperationsSource = "disabled" | "target";
+export type BookingWebEventSink = "disabled" | "target";
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
 
 export type ProviderWebhookConfig = {
@@ -72,6 +73,7 @@ export type ApiConfig = {
   pmsPublicApiUrl?: string;
   bookingCheckoutCommandSource: BookingCheckoutCommandSource;
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
+  bookingWebEventSink: BookingWebEventSink;
   bookingHostBase?: string;
   providerWebhooks: ProviderWebhookConfig;
 };
@@ -275,6 +277,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const bookingWebEventSink = readSourceEnv(
+    env,
+    "BOOKING_WEB_EVENT_SINK",
+    ["disabled", "target"],
+    "disabled",
+  );
+  const auth = loadAuthConfig(env);
+  const authSession = loadAuthSessionConfig(env);
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
   }
@@ -298,14 +308,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (publicBookabilitySource === "target" && publicHotelProfileSource !== "target") {
     throw new Error("PUBLIC_BOOKABILITY_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target");
   }
+  if (bookingWebEventSink === "target" && !auth) {
+    throw new Error("BOOKING_WEB_EVENT_SINK=target requires complete auth config");
+  }
   if (bookingCheckoutCommandSource === "target" && !targetDatabaseUrl) {
     throw new Error("BOOKING_CHECKOUT_COMMAND_SOURCE=target requires TARGET_DATABASE_URL");
   }
 
   return {
     ...server,
-    auth: loadAuthConfig(env),
-    authSession: loadAuthSessionConfig(env),
+    auth,
+    authSession,
     askIntelligence: loadAskIntelligenceConfig(env),
     targetDatabaseUrl,
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
@@ -340,6 +353,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       env,
       "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
     ),
+    bookingWebEventSink,
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     providerWebhooks: loadProviderWebhookConfig(env),
   };
