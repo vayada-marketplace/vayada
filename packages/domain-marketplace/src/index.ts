@@ -18,6 +18,34 @@ export type MarketplaceDecimalAmount = string;
 export type MarketplaceCurrencyCode = string;
 
 // ---------------------------------------------------------------------------
+// Creator profile self-service
+// ---------------------------------------------------------------------------
+
+export const MARKETPLACE_CREATOR_SELF_SERVICE_CONTRACT_VERSION =
+  "marketplace-creator-self-service.v1" as const;
+
+export type MarketplaceCreatorSelfServiceContractVersion =
+  typeof MARKETPLACE_CREATOR_SELF_SERVICE_CONTRACT_VERSION;
+
+export const MARKETPLACE_CREATOR_SELF_SERVICE_ENDPOINTS = {
+  profileStatus: {
+    method: "GET",
+    path: "/api/marketplace/creators/me/profile-status",
+    doc: "engineering/marketplace-creator-self-service-contract.md",
+  },
+  profile: {
+    method: "GET",
+    path: "/api/marketplace/creators/me",
+    doc: "engineering/marketplace-creator-self-service-contract.md",
+  },
+  updateProfile: {
+    method: "PUT",
+    path: "/api/marketplace/creators/me",
+    doc: "engineering/marketplace-creator-self-service-contract.md",
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
 // Hotel profile/listings self-service (V2)
 // ---------------------------------------------------------------------------
 
@@ -92,6 +120,206 @@ export type MarketplaceCollaborationType = (typeof MARKETPLACE_COLLABORATION_TYP
 export const MARKETPLACE_CREATOR_TYPES = ["lifestyle", "travel", "other"] as const;
 
 export type MarketplaceCreatorType = (typeof MARKETPLACE_CREATOR_TYPES)[number];
+
+export const CREATOR_PROFILE_STATUSES = [
+  "pending",
+  "active",
+  "rejected",
+  "suspended",
+  "archived",
+] as const;
+
+export type CreatorProfileStatus = (typeof CREATOR_PROFILE_STATUSES)[number];
+
+export const CREATOR_PLATFORM_VERIFICATION_STATUSES = [
+  "unverified",
+  "verified",
+  "rejected",
+  "stale",
+] as const;
+
+export type CreatorPlatformVerificationStatus =
+  (typeof CREATOR_PLATFORM_VERIFICATION_STATUSES)[number];
+
+export const CREATOR_PROFILE_MISSING_FIELDS = [
+  "displayName",
+  "locationText",
+  "shortDescription",
+  "platforms",
+] as const;
+
+export type CreatorProfileMissingField = (typeof CREATOR_PROFILE_MISSING_FIELDS)[number];
+
+export const CREATOR_PROFILE_COMPLETION_STEPS = [
+  "add_display_name",
+  "set_location",
+  "add_short_description",
+  "add_platform",
+] as const;
+
+export type CreatorProfileCompletionStep = (typeof CREATOR_PROFILE_COMPLETION_STEPS)[number];
+
+export type CreatorProfileAudienceCountry = {
+  country: string;
+  percentage: number;
+};
+
+export type CreatorProfileAudienceAgeGroup = {
+  ageRange: string;
+  percentage: number;
+};
+
+export type CreatorProfileAudienceGenderSplit = {
+  male: number;
+  female: number;
+  other?: number;
+};
+
+export type CreatorProfilePlatform = {
+  platformId: string;
+  platform: MarketplacePlatformName;
+  handle: string;
+  profileUrl: string | null;
+  followerCount: number;
+  engagementRate: number;
+  audienceCountries: CreatorProfileAudienceCountry[];
+  audienceAgeGroups: CreatorProfileAudienceAgeGroup[];
+  audienceGenderSplit: CreatorProfileAudienceGenderSplit | null;
+  verificationStatus: CreatorPlatformVerificationStatus;
+};
+
+export type CreatorProfilePlatformInput = {
+  platform: MarketplacePlatformName;
+  handle: string;
+  profileUrl?: string | null;
+  followerCount: number;
+  engagementRate: number;
+  audienceCountries?: CreatorProfileAudienceCountry[];
+  audienceAgeGroups?: CreatorProfileAudienceAgeGroup[];
+  audienceGenderSplit?: CreatorProfileAudienceGenderSplit | null;
+};
+
+export type CreatorProfileRatingSummary = {
+  averageRating: number;
+  totalReviews: number;
+};
+
+export type CreatorProfileStatusResult = {
+  creatorProfileId: string;
+  organizationId: string;
+  profileComplete: boolean;
+  profileStatus: CreatorProfileStatus;
+  missingFields: CreatorProfileMissingField[];
+  missingPlatforms: boolean;
+  completionSteps: CreatorProfileCompletionStep[];
+  canPublishToDiscovery: boolean;
+  updatedAt: MarketplaceUtcDateTime;
+};
+
+export type CreatorProfileDocument = {
+  creatorProfileId: string;
+  organizationId: string;
+  sourceCreatorId: string | null;
+  displayName: string | null;
+  creatorType: MarketplaceCreatorType;
+  locationText: string | null;
+  shortDescription: string | null;
+  portfolioUrl: string | null;
+  phone: string | null;
+  profilePictureUrl: string | null;
+  profileComplete: boolean;
+  profileCompletedAt: MarketplaceUtcDateTime | null;
+  profileStatus: CreatorProfileStatus;
+  platforms: CreatorProfilePlatform[];
+  audienceSize: number;
+  rating: CreatorProfileRatingSummary;
+  createdAt: MarketplaceUtcDateTime;
+  updatedAt: MarketplaceUtcDateTime;
+};
+
+export type UpdateCreatorProfileRequest = {
+  displayName?: string;
+  creatorType?: MarketplaceCreatorType;
+  locationText?: string | null;
+  shortDescription?: string | null;
+  portfolioUrl?: string | null;
+  phone?: string | null;
+  profilePictureUrl?: string | null;
+  platforms?: CreatorProfilePlatformInput[];
+};
+
+export type CreatorProfileSelfServiceErrorCode =
+  | "invalid_body"
+  | "unauthorized"
+  | "forbidden"
+  | "creator_profile_not_found"
+  | "missing_resource_access"
+  | "profile_conflict"
+  | "internal_error";
+
+export type CreatorProfileSelfServiceError = {
+  statusCode: 400 | 401 | 403 | 404 | 409 | 500;
+  code: CreatorProfileSelfServiceErrorCode;
+  category: "validation" | "auth" | "not_found" | "conflict" | "internal";
+  message: string;
+};
+
+export type CreatorProfileResourcePolicy = {
+  permission: "marketplace.profile.manage";
+  selectedOrganizationKind: "creator_workspace";
+  resolution: "resolve_active_selected_org_resource_link_then_enforce";
+  resource: {
+    product: "marketplace";
+    resourceType: "creator_profile";
+    relationship: "owner";
+    resourceIdSource: "identity.organization_resource_links.resource_id";
+  };
+};
+
+export const CREATOR_PROFILE_RESOURCE_POLICY: CreatorProfileResourcePolicy = {
+  permission: "marketplace.profile.manage",
+  selectedOrganizationKind: "creator_workspace",
+  resolution: "resolve_active_selected_org_resource_link_then_enforce",
+  resource: {
+    product: "marketplace",
+    resourceType: "creator_profile",
+    relationship: "owner",
+    resourceIdSource: "identity.organization_resource_links.resource_id",
+  },
+};
+
+export const CREATOR_PROFILE_SELF_SERVICE_PRIVATE_KEYS = [
+  "ownerUserId",
+  "owner_user_id",
+  "userId",
+  "user_id",
+  "email",
+  "workosOrgId",
+  "membershipId",
+  "profileMetadata",
+  "profile_metadata",
+  "piiRetentionUntil",
+  "pii_retention_until",
+] as const;
+
+export type CreatorProfileSelfServicePrivateKey =
+  (typeof CREATOR_PROFILE_SELF_SERVICE_PRIVATE_KEYS)[number];
+
+export type CreatorProfileUpdatedEvent = {
+  readonly eventType: "marketplace.creator_profile.updated";
+  readonly eventId: string;
+  readonly creatorProfileId: string;
+  readonly organizationId: string;
+  readonly actorUserId: string;
+  readonly occurredAt: MarketplaceUtcDateTime;
+  readonly discoveryCoherence:
+    | { readonly mode: "base_tables"; readonly eligibleForDiscovery: boolean }
+    | {
+        readonly mode: "projection_job";
+        readonly jobId: string;
+        readonly eligibleForDiscovery: boolean;
+      };
+};
 
 export const MARKETPLACE_HOTEL_MISSING_FIELDS = [
   "displayName",

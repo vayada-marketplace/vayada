@@ -1,0 +1,321 @@
+{
+  "contractVersion": "marketplace-creator-self-service.v1",
+  "cases": [
+    {
+      "caseId": "profile-status-complete",
+      "description": "An active creator workspace with a complete profile and valid platform can publish to discovery.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/creators/me/profile-status",
+        "authContext": "creator_workspace_owner_with_profile_link"
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "creatorProfileId": "creator_profile_lina",
+          "organizationId": "org_creator_workspace",
+          "profileComplete": true,
+          "profileStatus": "active",
+          "missingFields": [],
+          "missingPlatforms": false,
+          "completionSteps": [],
+          "canPublishToDiscovery": true
+        },
+        "mustExclude": ["ownerUserId", "owner_user_id", "email", "workosOrgId", "membershipId"]
+      }
+    },
+    {
+      "caseId": "profile-status-incomplete",
+      "description": "Missing profile fields and valid platforms are reported before writes are attempted.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/creators/me/profile-status",
+        "authContext": "creator_workspace_owner_with_incomplete_profile"
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "profileComplete": false,
+          "profileStatus": "pending",
+          "missingFields": ["displayName", "locationText", "shortDescription", "platforms"],
+          "missingPlatforms": true,
+          "completionSteps": [
+            "add_display_name",
+            "set_location",
+            "add_short_description",
+            "add_platform"
+          ],
+          "canPublishToDiscovery": false
+        }
+      }
+    },
+    {
+      "caseId": "profile-read-populated",
+      "description": "The self-service read returns creator_profiles plus creator_platforms using target enums and derived audience/rating fields.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_profile_link"
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "creatorProfileId",
+          "organizationId",
+          "displayName",
+          "creatorType",
+          "locationText",
+          "shortDescription",
+          "portfolioUrl",
+          "phone",
+          "profilePictureUrl",
+          "profileComplete",
+          "profileStatus",
+          "platforms[0].platform",
+          "platforms[0].handle",
+          "platforms[0].profileUrl",
+          "platforms[0].followerCount",
+          "platforms[0].engagementRate",
+          "platforms[0].verificationStatus",
+          "audienceSize",
+          "rating.averageRating",
+          "rating.totalReviews",
+          "createdAt",
+          "updatedAt"
+        ],
+        "mustExclude": [
+          "ownerUserId",
+          "owner_user_id",
+          "userId",
+          "user_id",
+          "email",
+          "profileMetadata",
+          "profile_metadata",
+          "piiRetentionUntil",
+          "pii_retention_until"
+        ],
+        "enums": {
+          "creatorType": ["lifestyle", "travel", "other"],
+          "platforms[].platform": [
+            "instagram",
+            "tiktok",
+            "youtube",
+            "facebook",
+            "blog",
+            "x",
+            "other"
+          ],
+          "platforms[].verificationStatus": ["unverified", "verified", "rejected", "stale"]
+        },
+        "derived": {
+          "audienceSize": "sum(platforms[].followerCount)",
+          "creator_type 'migration'": "other"
+        }
+      }
+    },
+    {
+      "caseId": "profile-read-empty-platforms",
+      "description": "A creator profile with no platform rows still reads successfully and is marked incomplete by status.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_no_platforms"
+      },
+      "expected": {
+        "status": 200,
+        "body": {
+          "platforms": [],
+          "audienceSize": 0,
+          "profileComplete": false
+        }
+      }
+    },
+    {
+      "caseId": "authz-allowed-owner-link",
+      "description": "An active creator workspace owner with marketplace.profile.manage and an active creator_profile owner link can access the surface.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_profile_link"
+      },
+      "expected": {
+        "status": 200,
+        "policy": {
+          "permission": "marketplace.profile.manage",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "creator_profile",
+            "relationship": "owner",
+            "status": "active"
+          }
+        }
+      }
+    },
+    {
+      "caseId": "authz-denial-matrix",
+      "description": "Authorization denies every missing RequestContext, permission, and resource-link prerequisite.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/creators/me"
+      },
+      "expectedDenials": [
+        { "authContext": "missing_auth", "status": 401, "errorCode": "unauthorized" },
+        { "authContext": "hotel_group_owner", "status": 403, "errorCode": "forbidden" },
+        { "authContext": "inactive_membership", "status": 403, "errorCode": "forbidden" },
+        {
+          "authContext": "creator_without_profile_manage_permission",
+          "status": 403,
+          "errorCode": "forbidden"
+        },
+        {
+          "authContext": "creator_without_creator_profile_link",
+          "status": 403,
+          "errorCode": "missing_resource_access"
+        },
+        {
+          "authContext": "creator_with_suspended_creator_profile_link",
+          "status": 403,
+          "errorCode": "forbidden"
+        },
+        {
+          "authContext": "creator_link_points_to_missing_profile",
+          "status": 404,
+          "errorCode": "creator_profile_not_found"
+        }
+      ]
+    },
+    {
+      "caseId": "profile-write-profile-fields",
+      "description": "A partial profile patch updates creator_profiles only, leaves omitted fields unchanged, and recalculates completion state.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_profile_link",
+        "body": {
+          "displayName": "Lina Travels",
+          "locationText": "Vienna, Austria",
+          "shortDescription": "Independent hotel and slow-travel creator.",
+          "portfolioUrl": "https://lina.example.com",
+          "phone": "+431234567",
+          "profilePictureUrl": "https://cdn.example.com/creators/lina.jpg",
+          "creatorType": "travel"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "updatedTables": ["marketplace.creator_profiles"],
+        "unchangedTables": ["marketplace.creator_platforms", "identity.users"],
+        "body": {
+          "displayName": "Lina Travels",
+          "creatorType": "travel",
+          "locationText": "Vienna, Austria",
+          "profileComplete": true
+        }
+      }
+    },
+    {
+      "caseId": "profile-write-replaces-platforms",
+      "description": "Providing platforms replaces the full creator_platforms set in the same transaction as the profile patch.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_profile_link",
+        "body": {
+          "platforms": [
+            {
+              "platform": "instagram",
+              "handle": "@linatravels",
+              "profileUrl": "https://instagram.com/linatravels",
+              "followerCount": 24000,
+              "engagementRate": 4.25,
+              "audienceCountries": [{ "country": "AT", "percentage": 35 }],
+              "audienceAgeGroups": [{ "ageRange": "25-34", "percentage": 48 }],
+              "audienceGenderSplit": { "male": 31, "female": 67, "other": 2 }
+            },
+            {
+              "platform": "blog",
+              "handle": "linatravels.example.com",
+              "profileUrl": "https://linatravels.example.com",
+              "followerCount": 8000,
+              "engagementRate": 2.5
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "transactional": true,
+        "replacesAllExistingPlatforms": true,
+        "body": {
+          "platforms.length": 2,
+          "audienceSize": 32000
+        }
+      }
+    },
+    {
+      "caseId": "profile-write-invalid-body",
+      "description": "Invalid platform enums, URLs, handles, follower counts, and audience percentages are rejected before any write.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_profile_link",
+        "body": {
+          "creatorType": "Lifestyle",
+          "portfolioUrl": "http://not-secure.example.com",
+          "platforms": [
+            {
+              "platform": "Instagram",
+              "handle": "   ",
+              "followerCount": -1,
+              "engagementRate": -0.5,
+              "audienceCountries": [{ "country": "AT", "percentage": 150 }]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_body",
+        "noWrites": true
+      }
+    },
+    {
+      "caseId": "profile-write-discovery-coherence",
+      "description": "A successful write keeps GET /api/marketplace/creators coherent with creator_profiles and creator_platforms.",
+      "request": {
+        "method": "PUT",
+        "path": "/api/marketplace/creators/me",
+        "authContext": "creator_workspace_owner_with_profile_link",
+        "body": {
+          "displayName": "Lina Travels",
+          "locationText": "Vienna, Austria",
+          "shortDescription": "Independent hotel and slow-travel creator.",
+          "creatorType": "travel",
+          "platforms": [
+            {
+              "platform": "instagram",
+              "handle": "@linatravels",
+              "followerCount": 24000,
+              "engagementRate": 4.25
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "ifProfileStatus": "active",
+        "publicDiscovery": {
+          "path": "/api/marketplace/creators",
+          "containsCreatorProfileId": true,
+          "displayName": "Lina Travels",
+          "creatorType": "travel",
+          "audienceSize": 24000
+        },
+        "ifProfileStatusNotActive": {
+          "publicDiscoveryContainsCreator": false
+        },
+        "projectionRequirement": "transactional update or durable projection job; no fire-and-forget read-model refresh"
+      }
+    }
+  ]
+}
