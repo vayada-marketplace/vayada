@@ -1,4 +1,5 @@
 import { pmsClient } from "../api/pmsClient";
+import { getAuthBearerToken } from "../auth/sessionStore";
 import { buildQueryString } from "@/lib/utils/queryString";
 
 export type ThreadStatus = "open" | "closed" | "no_reply_needed";
@@ -69,7 +70,7 @@ export const messagingService = {
   uploadAttachment: async (threadId: string, file: File): Promise<{ attachmentId: string }> => {
     const form = new FormData();
     form.append("file", file);
-    const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+    const token = getAuthBearerToken();
     const hotelId = typeof window !== "undefined" ? localStorage.getItem("selectedHotelId") : null;
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;

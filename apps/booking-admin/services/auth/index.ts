@@ -3,9 +3,23 @@
  */
 
 import { apiClient, ApiErrorResponse } from "../api/client";
+import {
+  clearAuthData,
+  getAuthBearerToken,
+  getAuthCsrfToken,
+  getLegacyPasswordToken,
+  hasAuthenticatedSession,
+  hasHotelAccessMarker,
+  isAuthKitLoginEnabled,
+  isLegacyPasswordFallbackEnabled,
+  setAuthKitSession,
+  setLegacyCompatibilityToken,
+  setLegacyPasswordSession,
+  type AuthKitSessionResponse,
+} from "./sessionStore";
 
-const TOKEN_KEY = "access_token";
-const EXPIRES_AT_KEY = "token_expires_at";
+const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
+const AUTH_SURFACE = "booking-admin";
 
 export interface LoginRequest {
   email: string;
@@ -45,90 +59,110 @@ export interface RegisterResponse {
   status: string;
 }
 
-/**
- * Store JWT token and expiration time
- */
-function storeToken(token: string, expiresIn: number): void {
-  if (typeof window === "undefined") return;
+type CompatibilityTokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+  tokenType: "Bearer";
+};
 
-  localStorage.setItem(TOKEN_KEY, token);
-  const expiresAt = Date.now() + expiresIn * 1000;
-  localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString());
-}
+async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string> | undefined),
+    },
+  });
 
-/**
- * Store user data in localStorage
- */
-function storeUserData(data: {
-  id: string;
-  email: string;
-  name: string;
-  type: string;
-  status: string;
-  is_superadmin?: boolean;
-}): void {
-  if (typeof window === "undefined") return;
+  const contentType = response.headers.get("content-type");
+  const body =
+    contentType?.includes("application/json") && response.status !== 204
+      ? await response.json()
+      : null;
 
-  localStorage.setItem("isLoggedIn", "true");
-  localStorage.setItem("userId", data.id);
-  localStorage.setItem("userEmail", data.email);
-  localStorage.setItem("userName", data.name);
-  localStorage.setItem("userType", data.type);
-  localStorage.setItem("userStatus", data.status);
-  localStorage.setItem("isSuperAdmin", data.is_superadmin ? "true" : "false");
-
-  localStorage.setItem(
-    "user",
-    JSON.stringify({
-      id: data.id,
-      email: data.email,
-      name: data.name,
-      type: data.type,
-      status: data.status,
-      is_superadmin: data.is_superadmin || false,
-    }),
-  );
-}
-
-/**
- * Clear all auth data from localStorage
- */
-function clearAuthData(): void {
-  if (typeof window === "undefined") return;
-
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(EXPIRES_AT_KEY);
-  localStorage.removeItem("userId");
-  localStorage.removeItem("userEmail");
-  localStorage.removeItem("userName");
-  localStorage.removeItem("userType");
-  localStorage.removeItem("userStatus");
-  localStorage.removeItem("user");
-  localStorage.removeItem("selectedHotelId");
-  localStorage.removeItem("isSuperAdmin");
-  localStorage.setItem("isLoggedIn", "false");
-}
-
-/**
- * Get token if not expired
- */
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const token = localStorage.getItem(TOKEN_KEY);
-  const expiresAt = localStorage.getItem(EXPIRES_AT_KEY);
-
-  if (!token || !expiresAt) return null;
-
-  if (Date.now() >= parseInt(expiresAt)) {
-    clearAuthData();
-    return null;
+  if (!response.ok) {
+    throw new ApiErrorResponse(response.status, {
+      detail: body?.message ?? body?.error ?? "Authentication request failed",
+    });
   }
 
-  return token;
+  return body as T;
+}
+
+async function attachBookingCompatibilityToken(): Promise<void> {
+  const csrfToken = getAuthCsrfToken();
+  if (!csrfToken) return;
+
+  const response = await authFetch<CompatibilityTokenResponse>("/auth/compat/booking-admin-token", {
+    method: "POST",
+    headers: { "x-vayada-csrf": csrfToken },
+  });
+  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
+}
+
+function storeLegacyLoginResponse(response: LoginResponse): void {
+  setLegacyPasswordSession({
+    token: response.access_token!,
+    expiresIn: response.expires_in!,
+    user: {
+      id: response.id!,
+      email: response.email!,
+      name: response.name!,
+      type: response.type!,
+      status: response.status!,
+      is_superadmin: response.is_superadmin,
+    },
+  });
 }
 
 export const authService = {
+  isAuthKitEnabled: isAuthKitLoginEnabled,
+
+  isLegacyFallbackEnabled: isLegacyPasswordFallbackEnabled,
+
+  startHostedLogin: (loginHint?: string): void => {
+    const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
+    url.searchParams.set("surface", AUTH_SURFACE);
+    if (typeof window !== "undefined") {
+      url.searchParams.set("return_to", `${window.location.origin}/login?auth=callback`);
+    }
+    if (loginHint) url.searchParams.set("login_hint", loginHint);
+    window.location.href = url.toString();
+  },
+
+  refreshSession: async (organizationId?: string): Promise<AuthKitSessionResponse> => {
+    const csrfToken = getAuthCsrfToken();
+    const response =
+      organizationId && csrfToken
+        ? await authFetch<AuthKitSessionResponse>("/auth/session/refresh", {
+            method: "POST",
+            headers: { "x-vayada-csrf": csrfToken },
+            body: JSON.stringify({ organizationId, surface: AUTH_SURFACE }),
+          })
+        : await authFetch<AuthKitSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
+
+    setAuthKitSession(response);
+    await attachBookingCompatibilityToken();
+    return response;
+  },
+
+  ensureSession: async (): Promise<boolean> => {
+    if (!isAuthKitLoginEnabled()) {
+      return Boolean(getLegacyPasswordToken() && hasHotelAccessMarker());
+    }
+    if (hasAuthenticatedSession() && hasHotelAccessMarker()) {
+      return true;
+    }
+    try {
+      await authService.refreshSession();
+      return true;
+    } catch {
+      clearAuthData();
+      return false;
+    }
+  },
+
   /**
    * Register a new hotel admin user
    */
@@ -139,14 +173,16 @@ export const authService = {
       privacy_accepted: true,
     });
 
-    // Store token and user data, then redirect to dashboard
-    storeToken(response.access_token, response.expires_in);
-    storeUserData({
-      id: response.id,
-      email: response.email,
-      name: response.name,
-      type: response.type,
-      status: response.status,
+    setLegacyPasswordSession({
+      token: response.access_token,
+      expiresIn: response.expires_in,
+      user: {
+        id: response.id,
+        email: response.email,
+        name: response.name,
+        type: response.type,
+        status: response.status,
+      },
     });
 
     return response;
@@ -168,15 +204,7 @@ export const authService = {
       throw new Error("Access denied. Hotel admin account required.");
     }
 
-    storeToken(response.access_token!, response.expires_in!);
-    storeUserData({
-      id: response.id!,
-      email: response.email!,
-      name: response.name!,
-      type: response.type!,
-      status: response.status!,
-      is_superadmin: response.is_superadmin,
-    });
+    storeLegacyLoginResponse(response);
 
     return response;
   },
@@ -194,15 +222,7 @@ export const authService = {
       throw new Error("Access denied. Hotel admin account required.");
     }
 
-    storeToken(response.access_token!, response.expires_in!);
-    storeUserData({
-      id: response.id!,
-      email: response.email!,
-      name: response.name!,
-      type: response.type!,
-      status: response.status!,
-      is_superadmin: response.is_superadmin,
-    });
+    storeLegacyLoginResponse(response);
 
     return response;
   },
@@ -210,11 +230,27 @@ export const authService = {
   /**
    * Logout user
    */
-  logout: (): void => {
+  logout: async (): Promise<void> => {
+    const csrfToken = getAuthCsrfToken();
+    let logoutUrl = "/login";
+
+    if (isAuthKitLoginEnabled() && csrfToken) {
+      try {
+        const response = await authFetch<{ logoutUrl: string }>("/auth/logout", {
+          method: "POST",
+          headers: { "x-vayada-csrf": csrfToken },
+          body: JSON.stringify({ surface: AUTH_SURFACE }),
+        });
+        logoutUrl = response.logoutUrl;
+      } catch {
+        logoutUrl = "/login";
+      }
+    }
+
     clearAuthData();
     if (typeof window !== "undefined") {
       localStorage.removeItem("setupComplete");
-      window.location.href = "/login";
+      window.location.href = logoutUrl;
     }
   },
 
@@ -230,16 +266,14 @@ export const authService = {
    * Check if user is logged in (has valid token)
    */
   isLoggedIn: (): boolean => {
-    return getToken() !== null;
+    return hasAuthenticatedSession();
   },
 
   /**
    * Check if current user is hotel admin
    */
   isHotelAdmin: (): boolean => {
-    if (typeof window === "undefined") return false;
-    const userType = localStorage.getItem("userType");
-    return userType === "hotel";
+    return hasHotelAccessMarker();
   },
 
   /**
@@ -254,7 +288,7 @@ export const authService = {
    * Get token if available and not expired
    */
   getToken: (): string | null => {
-    return getToken();
+    return getAuthBearerToken();
   },
 
   /**

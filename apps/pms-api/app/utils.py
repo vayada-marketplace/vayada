@@ -17,12 +17,20 @@ from app.database import AuthDatabase, Database
 _current_hotel_id_override: ContextVar[str | None] = ContextVar(
     "_current_hotel_id_override", default=None
 )
+_current_scoped_hotel_ids: ContextVar[tuple[str, ...] | None] = ContextVar(
+    "_current_scoped_hotel_ids", default=None
+)
 
 
 def set_current_hotel_id_override(hotel_id: str | None) -> None:
     """Set the per-request X-Hotel-Id override. Called by the global
     capture_hotel_header dependency at the start of each admin request."""
     _current_hotel_id_override.set(hotel_id)
+
+
+def set_current_scoped_hotel_ids(hotel_ids: list[str] | None) -> None:
+    """Set the AuthKit compatibility-token hotel scope for this request."""
+    _current_scoped_hotel_ids.set(tuple(hotel_ids) if hotel_ids is not None else None)
 
 
 def parse_jsonb(val):
@@ -45,7 +53,13 @@ async def get_hotel_id(user_id: str) -> str:
          used to work before multi-hotel support landed.
     """
     override = _current_hotel_id_override.get()
+    scoped_hotel_ids = _current_scoped_hotel_ids.get()
     if override:
+        if scoped_hotel_ids is not None and override not in scoped_hotel_ids:
+            raise HTTPException(
+                status_code=403,
+                detail="X-Hotel-Id is outside the selected AuthKit organization scope",
+            )
         user = await AuthDatabase.fetchrow(
             "SELECT is_superadmin FROM users WHERE id = $1",
             user_id,
@@ -64,6 +78,13 @@ async def get_hotel_id(user_id: str) -> str:
                 detail="X-Hotel-Id does not match any hotel owned by this user",
             )
         return str(row["id"])
+
+    if scoped_hotel_ids is not None:
+        for scoped_hotel_id in scoped_hotel_ids:
+            row = await Database.fetchrow("SELECT id FROM hotels WHERE id = $1", scoped_hotel_id)
+            if row:
+                return str(row["id"])
+        raise HTTPException(status_code=404, detail="No hotel found for selected organization")
 
     row = await Database.fetchrow(
         "SELECT id FROM hotels WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1",

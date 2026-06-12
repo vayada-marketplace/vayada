@@ -8,7 +8,12 @@ import type {
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
-import type { AuthKitClient, AuthKitSession, ProductAuditEvent } from "./routes/authSession.js";
+import type {
+  AuthKitClient,
+  AuthKitSession,
+  AuthSurfacePolicy,
+  ProductAuditEvent,
+} from "./routes/authSession.js";
 
 const user: IdentityUser = {
   userId: "user_platform_admin",
@@ -313,6 +318,158 @@ describe("AuthKit session routes", () => {
     });
   });
 
+  it("mints a hotel-scoped booking compatibility token for a hotel-group session", async () => {
+    const auditEvents: ProductAuditEvent[] = [];
+    const hotelSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_group",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.booking.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return hotelSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(hotelSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_hotel",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [
+          {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: "booking_hotel_alpenrose",
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "booking-admin": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://admin.booking.localhost/login",
+          legacyJwtSecret: "legacy-booking-secret",
+          legacyJwtUserType: "hotel",
+          requiredResourceLink: { product: "booking", resourceType: "booking_hotel" },
+        },
+      },
+      productAuditSink: {
+        async record(event) {
+          auditEvents.push(event);
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/booking-admin-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://admin.booking.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(readJwtPayload(response.json().accessToken)).toMatchObject({
+      sub: "user_hotel_admin",
+      email: "hotel@example.com",
+      type: "hotel",
+      org: "org_hotel_group",
+      surface: "booking-admin",
+      resources: {
+        "booking:booking_hotel": ["booking_hotel_alpenrose"],
+      },
+    });
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "auth.compatibility_token.issued",
+        actorUserId: "user_hotel_admin",
+        organizationId: "org_hotel_group",
+        surface: "booking-admin",
+        resourceScope: {
+          "booking:booking_hotel": ["booking_hotel_alpenrose"],
+        },
+      }),
+    );
+  });
+
+  it("rejects hotel-admin compatibility tokens when resource links are missing", async () => {
+    const hotelSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_group",
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.booking.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return hotelSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(hotelSession),
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_hotel",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [],
+      }),
+      surfacePolicies: {
+        "booking-admin": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://admin.booking.localhost/login",
+          legacyJwtSecret: "legacy-booking-secret",
+          legacyJwtUserType: "hotel",
+          requiredResourceLink: { product: "booking", resourceType: "booking_hotel" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/booking-admin-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://admin.booking.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toContain("booking/booking_hotel resource link");
+  });
+
   it("clears the sealed session and returns the WorkOS logout URL", async () => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
@@ -374,6 +531,10 @@ function buildAuthSessionApp(
     tokenVerifier?: TokenVerifier;
     callbackReturnUrl?: string;
     legacyMarketplaceJwtSecret?: string;
+    allowedOrigins?: string[];
+    surfacePolicies?: Partial<
+      Record<"platform-admin" | "booking-admin" | "pms-web", AuthSurfacePolicy>
+    >;
   } = {},
 ) {
   return buildApp({
@@ -389,8 +550,9 @@ function buildAuthSessionApp(
       callbackUrl: "https://api.localhost/auth/workos/callback",
       callbackReturnUrl: options.callbackReturnUrl,
       logoutReturnUrl: "https://admin.localhost/login",
-      allowedOrigins: ["https://admin.localhost"],
+      allowedOrigins: options.allowedOrigins ?? ["https://admin.localhost"],
       requiredOrganizationKind: "platform",
+      surfacePolicies: options.surfacePolicies,
       cookieSecure: false,
       legacyMarketplaceJwtSecret: options.legacyMarketplaceJwtSecret,
     },
@@ -439,6 +601,7 @@ function createIdentityRepository(
     userByProviderUserId?: IdentityRepository["findUserByProviderUserId"];
     organizationByWorkosOrgId?: IdentityRepository["findOrganizationByWorkosOrgId"];
     activeMembership?: IdentityRepository["findActiveMembership"];
+    linkedResources?: IdentityRepository["findLinkedResources"];
   } = {},
 ): IdentityRepository {
   return {
@@ -460,9 +623,7 @@ function createIdentityRepository(
         workosMembershipId: "om_platform",
         workosRoleSlugs: ["platform_admin"],
       })),
-    async findLinkedResources() {
-      return [];
-    },
+    findLinkedResources: overrides.linkedResources ?? (async () => []),
   };
 }
 
@@ -480,11 +641,12 @@ function createLifecycleCommandBus(): IdentityLifecycleCommandBus {
   };
 }
 
-function createTokenVerifier(): TokenVerifier {
+function createTokenVerifier(tokenSession: AuthKitSession = session): TokenVerifier {
   return async (token) => ({
-    workosUserId: session.user.id,
-    workosOrgId: session.organizationId ?? null,
-    sessionId: token === "refreshed-workos-access-token" ? "session_refreshed" : session.sessionId!,
+    workosUserId: tokenSession.user.id,
+    workosOrgId: tokenSession.organizationId ?? null,
+    sessionId:
+      token === "refreshed-workos-access-token" ? "session_refreshed" : tokenSession.sessionId!,
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
   });
 }

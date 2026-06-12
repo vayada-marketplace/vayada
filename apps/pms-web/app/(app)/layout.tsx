@@ -12,11 +12,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
-      router.replace("/login");
-    } else {
-      setIsAuthorized(true);
-    }
+    let cancelled = false;
+    authService.ensureSession().then((authorized) => {
+      if (cancelled) return;
+      if (!authorized || !authService.isHotelAdmin()) {
+        router.replace("/login");
+      } else {
+        setIsAuthorized(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!isAuthorized) {

@@ -2,6 +2,8 @@
  * Image upload service — uploads files to PMS backend via multipart form data.
  */
 
+import { getAuthBearerToken } from "../auth/sessionStore";
+
 const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
 
 export interface UploadedImage {
@@ -19,14 +21,9 @@ export interface MultipleUploadResponse {
   total: number;
 }
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("access_token");
-}
-
 export const uploadService = {
   async uploadImages(files: File[]): Promise<MultipleUploadResponse> {
-    const token = getToken();
+    const token = getAuthBearerToken();
     if (!token) throw new Error("Not authenticated");
 
     const formData = new FormData();

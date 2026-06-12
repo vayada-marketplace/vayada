@@ -8,7 +8,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
 from app.database import AuthDatabase
-from app.utils import set_current_hotel_id_override
+from app.utils import set_current_hotel_id_override, set_current_scoped_hotel_ids
 
 # Must match AUTH_COOKIE_NAME in booking-engine-backend/app/auth.py.
 # When the frontend logs in via /auth/login on the auth backend, that
@@ -70,6 +70,15 @@ async def get_current_user_id(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
         )
+    resources = payload.get("resources")
+    scoped_hotel_ids = None
+    if isinstance(resources, dict) and isinstance(resources.get("pms:pms_hotel"), list):
+        scoped_hotel_ids = [
+            str(resource_id)
+            for resource_id in resources["pms:pms_hotel"]
+            if isinstance(resource_id, str)
+        ]
+    set_current_scoped_hotel_ids(scoped_hotel_ids)
 
     user_id = payload.get("sub")
     if not user_id:

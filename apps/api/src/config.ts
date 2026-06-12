@@ -19,6 +19,12 @@ export type ApiAuthSessionConfig = {
   authCookieSecure: boolean;
   authCookieDomain?: string;
   authLegacyMarketplaceJwtSecret?: string;
+  authBookingAdminSuccessUrl?: string;
+  authBookingAdminLogoutUrl?: string;
+  authLegacyBookingJwtSecret?: string;
+  authPmsWebSuccessUrl?: string;
+  authPmsWebLogoutUrl?: string;
+  authLegacyPmsJwtSecret?: string;
 };
 
 export type ApiAskIntelligenceConfig =
@@ -172,6 +178,12 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authCookieSecure: readOptionalEnv(env, "AUTH_COOKIE_SECURE") !== "false",
     authCookieDomain: readOptionalEnv(env, "AUTH_COOKIE_DOMAIN"),
     authLegacyMarketplaceJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_MARKETPLACE_JWT_SECRET"),
+    authBookingAdminSuccessUrl: readOptionalEnv(env, "AUTH_BOOKING_ADMIN_SUCCESS_URL"),
+    authBookingAdminLogoutUrl: readOptionalEnv(env, "AUTH_BOOKING_ADMIN_LOGOUT_URL"),
+    authLegacyBookingJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_BOOKING_JWT_SECRET"),
+    authPmsWebSuccessUrl: readOptionalEnv(env, "AUTH_PMS_WEB_SUCCESS_URL"),
+    authPmsWebLogoutUrl: readOptionalEnv(env, "AUTH_PMS_WEB_LOGOUT_URL"),
+    authLegacyPmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_PMS_JWT_SECRET"),
   };
 }
 

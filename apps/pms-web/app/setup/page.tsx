@@ -13,7 +13,8 @@ export default function PmsSetupPage() {
 
   useEffect(() => {
     async function init() {
-      if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
+      const authorized = await authService.ensureSession();
+      if (!authorized || !authService.isHotelAdmin()) {
         router.replace("/login");
         return;
       }

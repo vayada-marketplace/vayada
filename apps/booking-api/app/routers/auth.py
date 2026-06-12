@@ -19,6 +19,7 @@ from app.auth import (
     verify_password,
 )
 from app.config import settings
+from app.database import AuthDatabase
 from app.dependencies import get_current_user_id
 from app.email_service import (
     create_email_change_verification_html,
@@ -84,6 +85,34 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 _INVALID_TOKEN = TokenValidationResponse(
     valid=False, expired=False, user_id=None, email=None, type=None
 )
+
+
+async def _is_workos_migrated_user(user_id: str) -> bool:
+    row = await AuthDatabase.fetchrow(
+        """
+        SELECT 1
+        FROM identity.external_identities
+        WHERE user_id = $1
+          AND provider = 'workos'
+          AND provider_user_id IS NOT NULL
+        LIMIT 1
+        """,
+        user_id,
+    )
+    return row is not None
+
+
+async def _reject_password_login_for_migrated_admin(user: dict) -> None:
+    if user["type"] != "hotel" and not user.get("is_superadmin"):
+        return
+    if await _is_workos_migrated_user(str(user["id"])):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "This account now signs in with AuthKit.",
+                "code": "authkit_login_required",
+            },
+        )
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -184,6 +213,8 @@ async def login(http_request: Request, request: LoginRequest, response: Response
         )
         raise HTTPException(status_code=403, detail="Account is suspended")
 
+    await _reject_password_login_for_migrated_admin(user)
+
     await RateLimitRepository.clear(request.email)
 
     is_superadmin = bool(user.get("is_superadmin"))
@@ -260,6 +291,8 @@ async def totp_verify(http_request: Request, request: TotpVerifyRequest, respons
     )
     if not user or user["status"] == "suspended":
         raise HTTPException(status_code=401, detail="Invalid session")
+
+    await _reject_password_login_for_migrated_admin(user)
 
     secret_row = await TotpRepository.get_secret(user_id)
     if not secret_row or not secret_row["enrolled"]:
