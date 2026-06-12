@@ -92,6 +92,104 @@
           "auditEventType": "job.dead_lettered"
         }
       }
+    },
+    {
+      "caseId": "pms-incremental-ari-push-reuses-idempotency-window",
+      "description": "A pms.inventory.ari_changed outbox event enqueues one Channex ARI push for the room/date/inventory-version window; duplicate scheduler claims reuse the same job.",
+      "input": {
+        "eventType": "pms.inventory.ari_changed",
+        "propertyId": "prop_alpenrose",
+        "roomTypeId": "rt_deluxe",
+        "dateRange": {
+          "from": "2026-09-12",
+          "to": "2026-09-15"
+        },
+        "inventoryVersion": "outbox-ari-001",
+        "outboxKey": "pms.inventory.ari_changed:prop_alpenrose:rt_deluxe:2026-09-12_2026-09-15"
+      },
+      "expected": {
+        "domainEventKey": "channex.push-ari:prop_alpenrose:rt_deluxe:2026-09-12_2026-09-15:outbox-ari-001:v1",
+        "job": {
+          "jobType": "channex.push-ari",
+          "queueName": "pms.channex.scheduler",
+          "idempotencyKey": "channex.push-ari:room_type:rt_deluxe:2026-09-12_2026-09-15:outbox-ari-001:v1"
+        },
+        "duplicateClaim": {
+          "createdNewJob": false,
+          "providerAttemptsAdded": 0
+        }
+      }
+    },
+    {
+      "caseId": "pms-full-ari-push-persists-provider-attempt",
+      "description": "The full ARI scheduler writes Channex provider attempt evidence with the provider request id for rehearsal audit.",
+      "job": {
+        "jobType": "channex.push-ari",
+        "idempotencyKey": "channex.push-ari:room_type:rt_suite:2026-09-01_2027-03-01:full-2026-09-01:v1",
+        "propertyId": "prop_alpenrose",
+        "roomTypeId": "rt_suite",
+        "maxAttempts": 5
+      },
+      "providerAttempt": {
+        "provider": "channex",
+        "providerRequestId": "chx_req_full_1",
+        "attemptNumber": 1,
+        "status": "succeeded",
+        "statusCode": 200,
+        "requestPayloadHash": "sha256:<stable-ari-payload>"
+      },
+      "expected": {
+        "jobStatus": "succeeded",
+        "attemptRecordPersisted": true,
+        "auditEvidenceFields": [
+          "providerRequestId",
+          "jobKey",
+          "attemptNumber",
+          "requestPayloadHash"
+        ]
+      }
+    },
+    {
+      "caseId": "pms-ari-provider-retry-dead-letters",
+      "description": "Retryable Channex failures append provider attempts and create a dead-letter record after max attempts.",
+      "job": {
+        "jobType": "channex.push-ari",
+        "idempotencyKey": "channex.push-ari:room_type:rt_deluxe:2026-09-12_2026-09-15:outbox-ari-retry-001:v1",
+        "maxAttempts": 5,
+        "failureCategory": "provider_5xx"
+      },
+      "expected": {
+        "attemptCount": 5,
+        "providerAttemptRecords": 5,
+        "finalStatus": "dead_lettered",
+        "deadLetter": {
+          "reasonCode": "max_attempts_exhausted",
+          "replayEligible": true,
+          "ownerPackage": "backend-events"
+        }
+      }
+    },
+    {
+      "caseId": "pms-rolling-calendar-auto-open-window-idempotency",
+      "description": "The rolling calendar auto-open scheduler opens inventory through one semantic open-through date per property and reuses that key on duplicate runs.",
+      "input": {
+        "propertyId": "prop_alpenrose",
+        "openFrom": "2027-09-01",
+        "openThrough": "2028-03-02",
+        "roomTypeIds": ["rt_deluxe", "rt_suite"]
+      },
+      "expected": {
+        "domainEventKey": "pms.calendar-auto-open:prop_alpenrose:2028-03-02:v1",
+        "job": {
+          "jobType": "pms.calendar-auto-open",
+          "queueName": "pms.channex.scheduler",
+          "idempotencyKey": "pms.calendar-auto-open:property:prop_alpenrose:open-through-2028-03-02:v1"
+        },
+        "duplicateRun": {
+          "createdNewJob": false,
+          "openedInventoryDays": 0
+        }
+      }
     }
   ]
 }
