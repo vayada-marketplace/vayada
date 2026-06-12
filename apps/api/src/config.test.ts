@@ -343,6 +343,35 @@ describe("api config", () => {
     ).toThrow("PMS_OPERATIONS_SOURCE must be one of: disabled, target");
   });
 
+  it("keeps finance reads on the legacy source by default", () => {
+    expect(loadConfig({}).financeSource).toBe("legacy");
+  });
+
+  it("loads target finance reads without legacy product database config", () => {
+    expect(
+      loadConfig({
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        FINANCE_SOURCE: "target",
+      }).financeSource,
+    ).toBe("target");
+  });
+
+  it("requires target database config when finance reads use the target source", () => {
+    expect(() =>
+      loadConfig({
+        FINANCE_SOURCE: "target",
+      }),
+    ).toThrow("FINANCE_SOURCE=target requires TARGET_DATABASE_URL");
+  });
+
+  it("rejects unsupported finance source config", () => {
+    expect(() =>
+      loadConfig({
+        FINANCE_SOURCE: "preview",
+      }),
+    ).toThrow("FINANCE_SOURCE must be one of: legacy, target");
+  });
+
   it("loads target-owned affiliate public route config", () => {
     expect(
       loadConfig({

@@ -3,19 +3,24 @@ import { describe, expect, it } from "vitest";
 import {
   FINANCE_BILLING_PLANS,
   FINANCE_PAYMENT_METHODS,
+  FINANCE_ROUTE_CONTRACT_VERSION,
   buildCheckoutChargeSettlementIdempotencyKey,
   buildUpdateAddOnPriceIdempotencyKey,
   calculatePayoutSplit,
+  cancellationPolicyFromRefundPolicy,
   financeCommandIdempotencyKey,
   financeCommandTypes,
+  toFinancePaymentSettingsResponse,
+  toPublicPaymentCapabilityProjection,
   type AddOnPricingReadPort,
   type BillingConfigReadModel,
   type BillingConfigReadPort,
   type FinanceCommandBus,
   type FinanceCommandResult,
-  type SettleManualCheckoutChargeCommand,
+  type FinancePaymentSettingsReadModel,
   type PaymentSettingsReadModel,
   type PaymentSettingsReadPort,
+  type SettleManualCheckoutChargeCommand,
   type UpdateAddOnPriceCommand,
   type UpdatePaymentMethodsCommand,
 } from "./index.js";
@@ -386,6 +391,83 @@ describe("PaymentSettingsReadPort", () => {
 
     const missing = await fakePort.getPaymentSettings("prop_missing");
     expect(missing).toBeNull();
+  });
+});
+
+describe("finance route projections", () => {
+  const settings: FinancePaymentSettingsReadModel = {
+    propertyId: "prop_abc123",
+    paymentsEnabled: true,
+    paymentProvider: "stripe",
+    acceptedMethods: ["card", "pay_at_property", "bank_transfer"],
+    defaultCurrency: "EUR",
+    supportedCurrencies: ["EUR"],
+    depositPolicy: {
+      depositPercent: 25,
+      summary: "25% deposit due at checkout.",
+      internalNotes: "Manual review before bank transfer.",
+      bankTransferInstructions: "IBAN PRIVATE",
+      providerSecret: "secret_ref",
+    },
+    refundPolicy: {
+      freeCancellationDays: 7,
+      partialRefundPercent: 50,
+      refundMethod: "original_payment",
+      appliesTo: "direct_booking",
+    },
+    taxPolicy: { taxIncluded: true },
+    statementDescriptor: "ALPENROSE",
+    requiresManualReview: false,
+    providerAccount: {
+      providerAccountId: "acct_123",
+      provider: "stripe",
+      status: "active",
+      onboardingStatus: "completed",
+      chargesEnabled: true,
+      payoutsEnabled: true,
+      capabilities: ["card_payments"],
+    },
+    sourceFreshness: { status: "fresh" },
+    updatedAt: "2026-06-07T10:00:00.000Z",
+  };
+
+  it("serializes the permissioned finance payment settings contract", () => {
+    expect(toFinancePaymentSettingsResponse(settings)).toMatchObject({
+      contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+      propertyId: "prop_abc123",
+      paymentSettings: {
+        paymentsEnabled: true,
+        acceptedMethods: ["card", "pay_at_property", "bank_transfer"],
+        providerAccount: {
+          providerAccountId: "acct_123",
+          status: "active",
+        },
+      },
+    });
+  });
+
+  it("projects only public-safe payment capability fields", () => {
+    const policy = cancellationPolicyFromRefundPolicy(settings.refundPolicy, settings.updatedAt);
+    const projection = toPublicPaymentCapabilityProjection(settings, policy);
+
+    expect(projection).toEqual({
+      paymentMethods: ["card", "pay_at_property", "bank_transfer"],
+      defaultCurrency: "EUR",
+      supportedCurrencies: ["EUR"],
+      depositPolicy: {
+        depositPercent: 25,
+        summary: "25% deposit due at checkout.",
+      },
+      cancellationPolicy: {
+        freeCancellationDays: 7,
+        partialRefundPercent: 50,
+        refundMethod: "original_payment",
+        appliesTo: "direct_booking",
+      },
+    });
+    expect(JSON.stringify(projection)).not.toMatch(
+      /providerAccountId|payoutsEnabled|acct_123|internalNotes|bankTransferInstructions|IBAN PRIVATE|providerSecret|secret_ref/,
+    );
   });
 });
 
