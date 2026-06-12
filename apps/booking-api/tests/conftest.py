@@ -16,7 +16,7 @@ os.environ.setdefault(
 os.environ.setdefault("MARKETPLACE_DATABASE_URL", "")
 os.environ.setdefault(
     "CORS_ORIGINS",
-    "http://localhost:3002,http://localhost:3003,https://booking.tigalombok.com",
+    "http://localhost:3000,http://localhost:3002,http://localhost:3003,https://booking.tigalombok.com",
 )
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("DEBUG", "true")

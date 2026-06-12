@@ -65,7 +65,7 @@ jobs:
             db_password: vayada_booking_password
             db_name: vayada_booking_db
             db_port: 5434
-            cors_origins: http://localhost:3000,http://localhost:3003
+            cors_origins: http://localhost:3000,http://localhost:3002,http://localhost:3003,https://booking.tigalombok.com
           - app: pms-api
             app_dir: apps/pms-api
             db_user: vayada_pms_user
