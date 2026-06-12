@@ -25,6 +25,9 @@ export type ApiAuthSessionConfig = {
   authPmsWebSuccessUrl?: string;
   authPmsWebLogoutUrl?: string;
   authLegacyPmsJwtSecret?: string;
+  authAffiliateDashboardSuccessUrl?: string;
+  authAffiliateDashboardLogoutUrl?: string;
+  authLegacyAffiliatePmsJwtSecret?: string;
 };
 
 export type ApiAskIntelligenceConfig =
@@ -205,6 +208,9 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authPmsWebSuccessUrl: readOptionalEnv(env, "AUTH_PMS_WEB_SUCCESS_URL"),
     authPmsWebLogoutUrl: readOptionalEnv(env, "AUTH_PMS_WEB_LOGOUT_URL"),
     authLegacyPmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_PMS_JWT_SECRET"),
+    authAffiliateDashboardSuccessUrl: readOptionalEnv(env, "AUTH_AFFILIATE_DASHBOARD_SUCCESS_URL"),
+    authAffiliateDashboardLogoutUrl: readOptionalEnv(env, "AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL"),
+    authLegacyAffiliatePmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET"),
   };
 }
 

@@ -33,6 +33,8 @@ interface RoomDetailModalProps {
   propertyName: string;
   showLocationMap?: boolean;
   pointsOfInterest?: PointOfInterest[];
+  selectRateDisabled?: boolean;
+  selectRatePending?: boolean;
 }
 
 export default function RoomDetailModal({
@@ -53,6 +55,8 @@ export default function RoomDetailModal({
   propertyName,
   showLocationMap = false,
   pointsOfInterest = [],
+  selectRateDisabled = false,
+  selectRatePending = false,
 }: RoomDetailModalProps) {
   const flexibleExpired = isFlexibleCancellationExpired(checkIn, room, hotelTimezone);
   // VAY-370: hide Flexible Rate when its cancellation deadline has passed, unless there is
@@ -74,6 +78,7 @@ export default function RoomDetailModal({
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const tc = useTranslations("common");
+  const t = useTranslations("home");
 
   const hasMultipleImages = room.images.length > 1;
   const hasRoomCoordinates = Number.isFinite(room.latitude) && Number.isFinite(room.longitude);
@@ -159,7 +164,8 @@ export default function RoomDetailModal({
       {showFlexibleRate && (
         <button
           onClick={() => setSelectedRate("flexible")}
-          className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === "flexible" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
+          disabled={selectRateDisabled}
+          className={`w-full text-left rounded-xl border-2 p-4 transition-colors disabled:cursor-not-allowed ${selectRateDisabled ? "opacity-60" : ""} ${selectedRate === "flexible" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -231,7 +237,8 @@ export default function RoomDetailModal({
       {room.nonRefundableRate != null && (
         <button
           onClick={() => setSelectedRate("nonrefundable")}
-          className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${selectedRate === "nonrefundable" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
+          disabled={selectRateDisabled}
+          className={`w-full text-left rounded-xl border-2 p-4 transition-colors disabled:cursor-not-allowed ${selectRateDisabled ? "opacity-60" : ""} ${selectedRate === "nonrefundable" ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -601,13 +608,30 @@ export default function RoomDetailModal({
               </p>
               {rateOptionsJsx}
               <button
+                data-testid={`select-rate-modal-desktop-${room.id}`}
                 onClick={() => {
-                  if (!soldOut) onSelectRate(selectedRate);
+                  if (!soldOut && !selectRateDisabled) onSelectRate(selectedRate);
                 }}
-                disabled={soldOut}
+                disabled={soldOut || selectRateDisabled}
+                aria-busy={selectRatePending}
+                aria-live={selectRatePending ? "polite" : undefined}
                 className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
               >
-                {soldOut ? "Sold Out" : "Select This Rate"}
+                <span className="inline-flex items-center justify-center gap-2">
+                  {selectRatePending && (
+                    <span
+                      className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span>
+                    {soldOut
+                      ? t("soldOut")
+                      : selectRatePending
+                        ? t("selectingRate")
+                        : t("selectThisRate")}
+                  </span>
+                </span>
               </button>
 
               {!soldOut && room.remainingRooms <= 3 && (
@@ -633,13 +657,30 @@ export default function RoomDetailModal({
         {/* Mobile sticky CTA — outside scroll area so it's always reachable */}
         <div className="md:hidden flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
           <button
+            data-testid={`select-rate-modal-mobile-${room.id}`}
             onClick={() => {
-              if (!soldOut) onSelectRate(selectedRate);
+              if (!soldOut && !selectRateDisabled) onSelectRate(selectedRate);
             }}
-            disabled={soldOut}
+            disabled={soldOut || selectRateDisabled}
+            aria-busy={selectRatePending}
+            aria-live={selectRatePending ? "polite" : undefined}
             className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
           >
-            {soldOut ? "Sold Out" : "Select This Rate"}
+            <span className="inline-flex items-center justify-center gap-2">
+              {selectRatePending && (
+                <span
+                  className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin"
+                  aria-hidden="true"
+                />
+              )}
+              <span>
+                {soldOut
+                  ? t("soldOut")
+                  : selectRatePending
+                    ? t("selectingRate")
+                    : t("selectThisRate")}
+              </span>
+            </span>
           </button>
 
           {!soldOut && room.remainingRooms <= 3 && (

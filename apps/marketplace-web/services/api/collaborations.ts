@@ -6,6 +6,18 @@ import { apiClient } from "./client";
 import type { Collaboration, PaginatedResponse } from "@/lib/types";
 import type { Hotel, Creator } from "@/lib/types";
 import { buildQueryString } from "@/lib/utils";
+import {
+  getMarketplaceCollaboration,
+  getMarketplaceConversations,
+  getMarketplaceMessages,
+  getMyMarketplaceCollaborations,
+  type MarketplaceCollaborationMessage,
+  type MarketplaceCollaborationRead,
+  type MarketplaceCollaborationSide,
+  type MarketplaceCollaborationStatus,
+  type MarketplaceCollaborationType,
+  type MarketplaceConversationSummary,
+} from "@vayada/marketplace-shared/api/collaborations";
 
 // Platform deliverable types
 export interface PlatformDeliverable {
@@ -122,7 +134,15 @@ export interface CollaborationResponse {
   id: string;
   initiator_type: "creator" | "hotel";
   is_initiator: boolean;
-  status: "pending" | "negotiating" | "accepted" | "declined" | "completed" | "cancelled";
+  status:
+    | "pending"
+    | "negotiating"
+    | "accepted"
+    | "active"
+    | "declined"
+    | "rejected"
+    | "completed"
+    | "cancelled";
   creator_id: string;
   creator_name: string;
   creator_profile_picture: string | null;
@@ -291,11 +311,18 @@ export const collaborationService = {
       status: params?.status,
       initiated_by: params?.initiated_by,
     });
-    const response = await apiClient.get<CollaborationResponse[]>(
-      `/creators/me/collaborations${query}`,
-    );
 
-    return response;
+    try {
+      const response = await getMyMarketplaceCollaborations({
+        side: "creator",
+        status: toTargetCollaborationStatus(params?.status),
+        initiatedBy: toTargetSide(params?.initiated_by),
+      });
+      return response.items.map((item) => toLegacyCollaborationResponse(item));
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.get<CollaborationResponse[]>(`/creators/me/collaborations${query}`);
+    }
   },
 
   /**
@@ -311,26 +338,39 @@ export const collaborationService = {
       status: params?.status,
       initiated_by: params?.initiated_by,
     });
-    const response = await apiClient.get<CollaborationResponse[]>(
-      `/hotels/me/collaborations${query}`,
-    );
-
-    return response;
+    try {
+      const response = await getMyMarketplaceCollaborations({
+        side: "hotel",
+        listingId: params?.listing_id,
+        status: toTargetCollaborationStatus(params?.status),
+        initiatedBy: toTargetSide(params?.initiated_by),
+      });
+      return response.items.map((item) => toLegacyCollaborationResponse(item));
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.get<CollaborationResponse[]>(`/hotels/me/collaborations${query}`);
+    }
   },
 
   getHotelCollaborationDetails: async (id: string): Promise<CollaborationResponse> => {
-    const response = await apiClient.get<CollaborationResponse>(`/hotels/me/collaborations/${id}`);
-    return response;
+    try {
+      return toLegacyCollaborationResponse(await getMarketplaceCollaboration(id, "hotel"));
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.get<CollaborationResponse>(`/hotels/me/collaborations/${id}`);
+    }
   },
 
   /**
    * Get creator collaboration details by ID
    */
   getCreatorCollaborationDetails: async (id: string): Promise<CollaborationResponse> => {
-    const response = await apiClient.get<CollaborationResponse>(
-      `/creators/me/collaborations/${id}`,
-    );
-    return response;
+    try {
+      return toLegacyCollaborationResponse(await getMarketplaceCollaboration(id, "creator"));
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.get<CollaborationResponse>(`/creators/me/collaborations/${id}`);
+    }
   },
 
   /**
@@ -385,7 +425,12 @@ export const collaborationService = {
    * Get all conversations for the current user
    */
   getConversations: async (): Promise<ConversationResponse[]> => {
-    return apiClient.get<ConversationResponse[]>("/collaborations/conversations");
+    try {
+      return (await getMarketplaceConversations()).map(toLegacyConversationResponse);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.get<ConversationResponse[]>("/collaborations/conversations");
+    }
   },
 
   /**
@@ -400,7 +445,15 @@ export const collaborationService = {
    */
   getMessages: async (collaborationId: string, before?: string): Promise<MessageResponse[]> => {
     const query = buildQueryString({ before });
-    return apiClient.get<MessageResponse[]>(`/collaborations/${collaborationId}/messages${query}`);
+    try {
+      const response = await getMarketplaceMessages(collaborationId, { before });
+      return response.items.map(toLegacyMessageResponse);
+    } catch (error) {
+      if (!isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.get<MessageResponse[]>(
+        `/collaborations/${collaborationId}/messages${query}`,
+      );
+    }
   },
 
   /**
@@ -622,4 +675,140 @@ export function transformCollaborationResponse(
   } as DetailedCollaboration;
 
   return result;
+}
+
+function isMissingMarketplaceCollaborationRoute(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status: unknown }).status === 404
+  );
+}
+
+function toTargetSide(value?: string): MarketplaceCollaborationSide | undefined {
+  return value === "creator" || value === "hotel" ? value : undefined;
+}
+
+function toTargetCollaborationStatus(value?: string): MarketplaceCollaborationStatus | undefined {
+  if (
+    value === "pending" ||
+    value === "negotiating" ||
+    value === "accepted" ||
+    value === "active" ||
+    value === "completed" ||
+    value === "cancelled" ||
+    value === "rejected" ||
+    value === "declined"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function toLegacyCollaborationType(
+  value: MarketplaceCollaborationType | null,
+): CollaborationResponse["collaboration_type"] {
+  switch (value) {
+    case "free_stay":
+      return "Free Stay";
+    case "paid":
+      return "Paid";
+    case "discount":
+      return "Discount";
+    case "affiliate":
+      return "Affiliate";
+    default:
+      return null;
+  }
+}
+
+function toLegacyCollaborationResponse(
+  collaboration: MarketplaceCollaborationRead,
+): CollaborationResponse {
+  const paidAmount = collaboration.terms.paidAmount ? Number(collaboration.terms.paidAmount) : null;
+  const creatorFee = collaboration.terms.creatorFee ? Number(collaboration.terms.creatorFee) : null;
+
+  return {
+    id: collaboration.collaborationId,
+    initiator_type: collaboration.initiatorSide,
+    is_initiator: collaboration.isInitiator,
+    status: collaboration.status,
+    creator_id: collaboration.creatorId,
+    creator_name: collaboration.creator.displayName,
+    creator_profile_picture: collaboration.creator.avatarUrl,
+    handle: null,
+    creator_location: null,
+    is_verified: true,
+    hotel_id: collaboration.hotelProfileId,
+    hotel_name: collaboration.hotel.displayName,
+    hotel_picture: collaboration.hotel.avatarUrl,
+    hotel_location: collaboration.listingLocation,
+    listing_id: collaboration.listingId,
+    listing_name: collaboration.listingName,
+    listing_location: collaboration.listingLocation ?? "",
+    collaboration_type: toLegacyCollaborationType(collaboration.collaborationType),
+    free_stay_min_nights: collaboration.terms.freeStayMinNights,
+    free_stay_max_nights: collaboration.terms.freeStayMaxNights,
+    paid_amount: paidAmount,
+    currency: collaboration.terms.currency,
+    discount_percentage: collaboration.terms.discountPercentage,
+    creator_fee: creatorFee,
+    travel_date_from: collaboration.terms.travelDateFrom,
+    travel_date_to: collaboration.terms.travelDateTo,
+    preferred_date_from: collaboration.terms.preferredDateFrom,
+    preferred_date_to: collaboration.terms.preferredDateTo,
+    preferred_months: collaboration.terms.preferredMonths,
+    why_great_fit: null,
+    platform_deliverables: collaboration.deliverables.map((deliverable) => ({
+      platform: deliverable.platform,
+      deliverables: [
+        {
+          id: deliverable.deliverableId,
+          type: deliverable.type,
+          quantity: deliverable.quantity,
+          status: deliverable.status,
+          completed: deliverable.status === "completed",
+          completed_at: deliverable.completedAt,
+        },
+      ],
+    })),
+    hotel_agreed_at: null,
+    creator_agreed_at: null,
+    consent: null,
+    created_at: collaboration.createdAt,
+    updated_at: collaboration.updatedAt,
+    cancelled_at: null,
+    completed_at: null,
+  };
+}
+
+function toLegacyConversationResponse(
+  conversation: MarketplaceConversationSummary,
+): ConversationResponse {
+  return {
+    collaboration_id: conversation.collaborationId,
+    partner_name: conversation.partnerName,
+    partner_avatar: conversation.partnerAvatarUrl,
+    last_message_content: conversation.lastMessageContent,
+    last_message_at: conversation.lastMessageAt,
+    unread_count: conversation.unreadCount,
+    collaboration_status: conversation.collaborationStatus,
+    my_role: conversation.side,
+    listing_name: conversation.listingName,
+  };
+}
+
+function toLegacyMessageResponse(message: MarketplaceCollaborationMessage): MessageResponse {
+  return {
+    id: message.messageId,
+    collaboration_id: message.collaborationId,
+    sender_id: message.senderUserId,
+    sender_name: message.senderName,
+    sender_avatar: message.senderAvatarUrl,
+    content: message.content,
+    content_type: message.contentType,
+    metadata: message.metadata,
+    created_at: message.createdAt,
+  };
 }

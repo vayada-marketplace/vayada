@@ -44,6 +44,9 @@ describe("api config", () => {
         AUTH_COOKIE_SECURE: "false",
         AUTH_COOKIE_DOMAIN: "localhost",
         AUTH_LEGACY_MARKETPLACE_JWT_SECRET: "legacy-secret",
+        AUTH_AFFILIATE_DASHBOARD_SUCCESS_URL: "https://affiliate.localhost/dashboard",
+        AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL: "https://affiliate.localhost/login",
+        AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET: "affiliate-pms-secret",
       }).authSession,
     ).toEqual({
       workosClientId: "client",
@@ -56,6 +59,9 @@ describe("api config", () => {
       authCookieSecure: false,
       authCookieDomain: "localhost",
       authLegacyMarketplaceJwtSecret: "legacy-secret",
+      authAffiliateDashboardSuccessUrl: "https://affiliate.localhost/dashboard",
+      authAffiliateDashboardLogoutUrl: "https://affiliate.localhost/login",
+      authLegacyAffiliatePmsJwtSecret: "affiliate-pms-secret",
     });
   });
 

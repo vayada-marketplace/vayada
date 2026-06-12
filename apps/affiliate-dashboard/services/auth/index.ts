@@ -1,81 +1,133 @@
-/**
- * Authentication service for the affiliate dashboard
- * Uses the booking engine auth backend (port 8001)
- */
+import {
+  clearAuthData,
+  getAuthBearerToken,
+  getAuthCsrfToken,
+  getUserName,
+  hasAuthenticatedSession,
+  hasCompatibilityToken,
+  isLoggedInHint,
+  setAuthKitSession,
+  setLegacyCompatibilityToken,
+  type AuthKitSessionResponse,
+} from "./storage";
 
-import { ApiClient } from "@/services/api/client";
-import { clearAuthData, getUserName, getUserType, isLoggedInHint, storeUser } from "./storage";
+const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
+const AFFILIATE_SURFACE = "affiliate-dashboard";
 
-const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.booking.localhost";
+type CompatibilityTokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+  tokenType: "Bearer";
+};
 
-const authClient = new ApiClient(AUTH_API_URL);
+async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${AUTH_API_URL}${endpoint}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string> | undefined),
+    },
+  });
 
-export interface LoginRequest {
-  email: string;
-  password: string;
+  const contentType = response.headers.get("content-type");
+  const body =
+    contentType?.includes("application/json") && response.status !== 204
+      ? await response.json()
+      : null;
+
+  if (!response.ok) {
+    throw new Error(body?.message ?? body?.error ?? "Authentication request failed");
+  }
+
+  return body as T;
 }
 
-export interface LoginResponse {
-  id: string;
-  email: string;
-  name: string;
-  type: string;
-  status: string;
-  access_token: string;
-  token_type: string;
-  expires_in: number;
-  message: string;
-}
+async function attachAffiliateCompatibilityToken(): Promise<void> {
+  const csrfToken = getAuthCsrfToken();
+  if (!csrfToken) {
+    throw new Error("AuthKit session is missing a CSRF token.");
+  }
 
-export interface ResetPasswordRequest {
-  token: string;
-  new_password: string;
+  const response = await authFetch<CompatibilityTokenResponse>(
+    "/auth/compat/affiliate-dashboard-token",
+    {
+      method: "POST",
+      headers: { "x-vayada-csrf": csrfToken },
+    },
+  );
+  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
 }
 
 export const authService = {
-  login: async (data: LoginRequest): Promise<LoginResponse> => {
-    // Server sets the httpOnly access_token cookie on this response —
-    // we don't read or store the token here. Body is just used for
-    // user display data.
-    const response = await authClient.post<LoginResponse>("/auth/login", data);
-
-    if (response.type !== "affiliate") {
-      throw new Error("Access denied. Affiliate account required.");
+  startHostedLogin: (loginHint?: string): void => {
+    const url = new URL(`${AUTH_API_URL}/auth/workos/login`);
+    url.searchParams.set("surface", AFFILIATE_SURFACE);
+    if (loginHint) url.searchParams.set("login_hint", loginHint);
+    if (typeof window !== "undefined") {
+      url.searchParams.set("return_to", `${window.location.origin}/dashboard`);
     }
+    window.location.href = url.toString();
+  },
 
-    storeUser({
-      id: response.id,
-      email: response.email,
-      name: response.name,
-      type: response.type,
-      status: response.status,
-    });
+  refreshSession: async (organizationId?: string): Promise<AuthKitSessionResponse> => {
+    const csrfToken = getAuthCsrfToken();
+    const response =
+      organizationId && csrfToken
+        ? await authFetch<AuthKitSessionResponse>("/auth/session/refresh", {
+            method: "POST",
+            headers: { "x-vayada-csrf": csrfToken },
+            body: JSON.stringify({ organizationId, surface: AFFILIATE_SURFACE }),
+          })
+        : await authFetch<AuthKitSessionResponse>(
+            `/auth/session?surface=${encodeURIComponent(AFFILIATE_SURFACE)}`,
+          );
 
+    setAuthKitSession(response);
+    await attachAffiliateCompatibilityToken();
     return response;
   },
 
-  setPassword: async (data: ResetPasswordRequest): Promise<void> => {
-    await authClient.post("/auth/reset-password", data);
+  ensureSession: async (): Promise<boolean> => {
+    if (hasAuthenticatedSession() && hasCompatibilityToken()) {
+      return true;
+    }
+    try {
+      await authService.refreshSession();
+      return Boolean(getAuthBearerToken());
+    } catch {
+      clearAuthData();
+      return false;
+    }
   },
 
   logout: async (): Promise<void> => {
-    // Best-effort: clear the server-side cookie. Even if this fails
-    // (network blip, server down), local state still gets wiped and
-    // the user is bounced to /login.
-    try {
-      await authClient.post("/auth/logout");
-    } catch {
-      // ignore
+    const csrfToken = getAuthCsrfToken();
+    let logoutUrl = "/login";
+
+    if (csrfToken) {
+      try {
+        const response = await authFetch<{ logoutUrl: string }>("/auth/logout", {
+          method: "POST",
+          headers: { "x-vayada-csrf": csrfToken },
+          body: JSON.stringify({ surface: AFFILIATE_SURFACE }),
+        });
+        logoutUrl = response.logoutUrl;
+      } catch {
+        logoutUrl = "/login";
+      }
     }
+
     clearAuthData();
+
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      window.location.href = logoutUrl;
     }
   },
 
   isLoggedIn: isLoggedInHint,
 
-  isAffiliate: (): boolean => getUserType() === "affiliate",
+  isAffiliate: (): boolean => isLoggedInHint(),
 
   getUserName,
 

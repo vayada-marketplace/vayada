@@ -151,6 +151,7 @@ INSERT INTO identity.permission_catalog (key, product, description) VALUES
   ('pms.operations.manage',            'pms',         'Manage PMS operational rooms, room types, inventory, assignments, and reservation actions for a property'),
   ('pms.booking.update',               'pms',         'Update PMS bookings for a hotel'),
   ('pms.finance.read',                 'pms',         'Read financial data in the PMS for a hotel'),
+  ('marketplace.collaboration.read',   'marketplace', 'Read marketplace collaborations and chat for linked creator or hotel resources'),
   ('marketplace.collaboration.review', 'marketplace', 'Review and manage marketplace collaborations'),
   ('marketplace.profile.manage',       'marketplace', 'Manage a marketplace hotel or creator profile'),
   ('affiliate.payout.manage',          'affiliate',   'Manage affiliate payout settings and runs')

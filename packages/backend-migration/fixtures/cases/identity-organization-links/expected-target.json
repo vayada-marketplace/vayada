@@ -93,6 +93,11 @@
       {
         "organizationKind": "hotel_group",
         "roleKey": "hotel_owner",
+        "permissionKey": "marketplace.collaboration.read"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
         "permissionKey": "marketplace.collaboration.review"
       }
     ],
@@ -101,6 +106,7 @@
       "booking.reservation.read",
       "pms.booking.update",
       "pms.finance.read",
+      "marketplace.collaboration.read",
       "marketplace.collaboration.review",
       "booking.analytics.read",
       "intelligence.ask.read"

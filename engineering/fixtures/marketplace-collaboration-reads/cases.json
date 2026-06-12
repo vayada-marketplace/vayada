@@ -1,0 +1,211 @@
+{
+  "contractVersion": "marketplace-collaboration-reads.v1",
+  "cases": [
+    {
+      "caseId": "creator-collaborations-linked-resource",
+      "description": "A creator workspace with marketplace.collaboration.read and an owner link to the creator profile can read its collaboration list.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/collaborations/me?side=creator",
+        "side": "creator",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_lina",
+          "permission": "marketplace.collaboration.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "creator_workspace_resource_link",
+        "mustInclude": [
+          "items[0].collaborationId",
+          "items[0].listingId",
+          "items[0].creatorId",
+          "items[0].hotelProfileId",
+          "items[0].creator.organizationId",
+          "items[0].hotel.organizationId",
+          "items[0].terms.preferredMonths",
+          "items[0].deliverables[0].deliverableId"
+        ],
+        "mustExclude": [
+          "user_id",
+          "userId",
+          "owner_user_id",
+          "ownerUserId",
+          "creator_email",
+          "creatorEmail",
+          "workosOrgId",
+          "membershipId",
+          "pmsHotelId",
+          "pms_database_url"
+        ]
+      }
+    },
+    {
+      "caseId": "hotel-conversations-linked-resources",
+      "description": "A hotel-group organization can read conversation summaries only for collaborations attached to its linked hotel profile or listing.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/collaborations/conversations?side=hotel",
+        "side": "hotel",
+        "auth": {
+          "organizationKind": "hotel_group",
+          "organizationId": "org_hotel_alpenrose",
+          "permission": "marketplace.collaboration.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "hotel_profile",
+              "resourceId": "hotel_profile_alpenrose",
+              "relationship": "owner"
+            },
+            {
+              "product": "marketplace",
+              "resourceType": "hotel_listing",
+              "resourceId": "hotel_listing_alpenrose_spa",
+              "relationship": "operator"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "hotel_group_resource_link",
+        "mustInclude": [
+          "items[0].collaborationId",
+          "items[0].partnerName",
+          "items[0].listingName",
+          "items[0].lastMessageContent",
+          "items[0].unreadCount"
+        ],
+        "mustExclude": [
+          "creator_email",
+          "creatorEmail",
+          "hotel_owner_email",
+          "hotelOwnerEmail",
+          "legacyJwtClaims"
+        ]
+      }
+    },
+    {
+      "caseId": "messages-linked-creator-resource",
+      "description": "A creator can read messages for one of its collaborations when the collaboration's creator_profile_id is linked to the selected organization.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/collaborations/collab_688/messages?side=creator",
+        "side": "creator",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_lina",
+          "permission": "marketplace.collaboration.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "creator_workspace_resource_link",
+        "mustInclude": [
+          "collaborationId",
+          "items[0].messageId",
+          "items[0].senderName",
+          "items[0].content",
+          "items[0].contentType",
+          "items[0].createdAt"
+        ]
+      }
+    },
+    {
+      "caseId": "messages-deny-missing-creator-link",
+      "description": "A creator workspace with the read permission but no link to the collaboration creator profile is denied.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/collaborations/collab_688/messages?side=creator",
+        "side": "creator",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_unlinked",
+          "permission": "marketplace.collaboration.read",
+          "linkedResources": []
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_creator_resource_link"
+      }
+    },
+    {
+      "caseId": "messages-deny-missing-hotel-listing-link",
+      "description": "A hotel-group organization with a hotel-profile link but no link to the addressed collaboration listing is denied.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/collaborations/collab_688/messages?side=hotel",
+        "side": "hotel",
+        "auth": {
+          "organizationKind": "hotel_group",
+          "organizationId": "org_hotel_alpenrose",
+          "permission": "marketplace.collaboration.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "hotel_profile",
+              "resourceId": "hotel_profile_alpenrose",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_hotel_resource_link"
+      }
+    },
+    {
+      "caseId": "collaboration-deny-wrong-side-org",
+      "description": "A hotel-group organization cannot request the creator side of a collaboration even if it has marketplace collaboration permission.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/collaborations/collab_688?side=creator",
+        "side": "creator",
+        "auth": {
+          "organizationKind": "hotel_group",
+          "organizationId": "org_hotel_alpenrose",
+          "permission": "marketplace.collaboration.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "hotel_profile",
+              "resourceId": "hotel_profile_alpenrose",
+              "relationship": "owner"
+            },
+            {
+              "product": "marketplace",
+              "resourceType": "hotel_listing",
+              "resourceId": "hotel_listing_alpenrose_spa",
+              "relationship": "operator"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "forbidden",
+        "messageIncludes": "selected organization kind"
+      }
+    }
+  ]
+}

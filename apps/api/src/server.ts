@@ -267,6 +267,21 @@ const app = buildApp({
                 resourceType: "pms_hotel",
               },
             },
+            "affiliate-dashboard": {
+              requiredOrganizationKind: "affiliate_partner",
+              callbackReturnUrl: config.authSession.authAffiliateDashboardSuccessUrl,
+              logoutReturnUrl:
+                config.authSession.authAffiliateDashboardLogoutUrl ??
+                config.authSession.authLogoutUrl,
+              legacyJwtSecret:
+                config.authSession.authLegacyAffiliatePmsJwtSecret ??
+                config.authSession.authLegacyPmsJwtSecret,
+              legacyJwtUserType: "affiliate",
+              requiredResourceLink: {
+                product: "affiliate",
+                resourceType: "affiliate",
+              },
+            },
           },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,

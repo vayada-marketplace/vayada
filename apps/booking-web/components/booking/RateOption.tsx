@@ -16,6 +16,7 @@ interface RateOptionProps {
   /** Optional `-X% OFF` badge next to the title. */
   discountPercent?: number;
   soldOut: boolean;
+  disabled?: boolean;
 }
 
 export default function RateOption({
@@ -29,13 +30,14 @@ export default function RateOption({
   nightlyLabel,
   discountPercent,
   soldOut,
+  disabled = false,
 }: RateOptionProps) {
   const t = useTranslations("home");
 
   return (
     <button
       onClick={onSelect}
-      disabled={soldOut}
+      disabled={soldOut || disabled}
       data-rate-type={rateType}
       className={`w-full text-left rounded-xl border-2 p-4 transition-colors disabled:cursor-not-allowed ${soldOut ? "opacity-50" : ""} ${selected ? "border-primary-500" : "border-gray-200 hover:border-gray-300"}`}
     >
