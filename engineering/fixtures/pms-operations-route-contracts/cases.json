@@ -44,8 +44,6 @@
     {
       "caseId": "calendar-blocks-read",
       "description": "Calendar rows include room-type and room-level blocks with balanced inventory counts.",
-      "skip": true,
-      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
         "query": { "from": "2026-08-15", "to": "2026-08-17" }
@@ -70,8 +68,6 @@
     {
       "caseId": "calendar-range-too-large",
       "description": "Calendar reads reject ranges that exceed the documented 370-day maximum.",
-      "skip": true,
-      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
         "query": { "from": "2026-01-01", "to": "2027-02-01" }
@@ -85,8 +81,6 @@
     {
       "caseId": "calendar-read-model-unavailable",
       "description": "Calendar reads fail explicitly when the target read model is unavailable.",
-      "skip": true,
-      "skipReason": "Future PMS calendar route fixture; P1a only implements rooms and room-types reads.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/calendar",
         "query": { "from": "2026-08-15", "to": "2026-08-17" },
@@ -96,6 +90,29 @@
         "status": 500,
         "errorCode": "read_model_unavailable",
         "message": "PMS calendar read model is unavailable."
+      }
+    },
+    {
+      "caseId": "room-blocks-read",
+      "description": "Room block reads expose room-type and room-level blocks without write side effects.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-blocks",
+        "query": { "from": "2026-08-15", "to": "2026-08-21" }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "mustInclude": [
+          "items[0].blockId",
+          "items[0].roomTypeId",
+          "items[0].roomId",
+          "items[0].startsOn",
+          "items[0].endsOn",
+          "items[0].blockedCount",
+          "items[0].reason",
+          "items[0].status"
+        ],
+        "blockScopes": ["room", "room_type"]
       }
     },
     {

@@ -1,6 +1,8 @@
+import hashlib
 import hmac
 import logging
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from app.config import settings
@@ -16,6 +18,85 @@ from app.services import stripe_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhooks"])
+
+
+def _webhook_receipt_id(provider: str, payload: bytes) -> str:
+    digest = hashlib.sha256(payload).hexdigest()
+    return f"legacy:{provider}:{digest}"
+
+
+async def _proxy_provider_webhook_to_target(provider: str, request: Request, payload: bytes) -> dict:
+    target_url = settings.provider_webhook_target_url(provider)
+    if not target_url:
+        logger.error(
+            "Legacy provider webhook proxy requested without target URL provider=%s",
+            provider,
+        )
+        raise HTTPException(status_code=503, detail="Webhook proxy target not configured")
+
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in {"host", "content-length"}
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(target_url, content=payload, headers=headers)
+    except httpx.RequestError as e:
+        logger.exception("Legacy provider webhook proxy failed provider=%s: %s", provider, e)
+        raise HTTPException(status_code=502, detail="Webhook proxy failed") from e
+
+    if response.status_code >= 400:
+        logger.warning(
+            "Legacy provider webhook proxy target rejected provider=%s status=%s",
+            provider,
+            response.status_code,
+        )
+        raise HTTPException(status_code=502, detail="Webhook proxy target rejected request")
+
+    logger.info(
+        "Legacy provider webhook proxied provider=%s mode=proxy_to_target target_status=%s",
+        provider,
+        response.status_code,
+    )
+    return {
+        "status": "proxied",
+        "mode": "proxy_to_target",
+        "provider": provider,
+        "target_status": response.status_code,
+    }
+
+
+async def _non_mutating_webhook_response(
+    provider: str,
+    mode: str,
+    request: Request,
+    payload: bytes,
+    *,
+    receipt_id: str | None = None,
+) -> dict | None:
+    if mode == "mutating":
+        return None
+
+    receipt_id = receipt_id or _webhook_receipt_id(provider, payload)
+    logger.info(
+        "Legacy provider webhook accepted without local mutation provider=%s mode=%s receipt=%s",
+        provider,
+        mode,
+        receipt_id,
+    )
+
+    if mode == "ack_only_with_receipt":
+        return {
+            "status": "accepted",
+            "mode": mode,
+            "provider": provider,
+            "receipt": receipt_id,
+        }
+
+    result = await _proxy_provider_webhook_to_target(provider, request, payload)
+    result["receipt"] = receipt_id
+    return result
 
 
 async def _materialize_or_get_booking_for_pi(pi_id: str, payment_status: str) -> dict | None:
@@ -56,10 +137,19 @@ async def stripe_webhook(request: Request):
         event = stripe_service.construct_webhook_event(payload, sig)
     except Exception as e:
         logger.warning("Webhook signature verification failed: %s", e)
-        raise HTTPException(status_code=400, detail="Invalid signature")
+        raise HTTPException(status_code=400, detail="Invalid signature") from e
 
     event_type = event["type"]
     data = event["data"]["object"]
+    mode = settings.provider_webhook_cutover_mode("stripe")
+    non_mutating_response = await _non_mutating_webhook_response(
+        "stripe",
+        mode,
+        request,
+        payload,
+    )
+    if non_mutating_response is not None:
+        return non_mutating_response
 
     if event_type == "payment_intent.amount_capturable_updated":
         # Payment authorized (hold placed) — request flow.
@@ -202,6 +292,15 @@ async def xendit_webhook(request: Request):
 
     data = json.loads(payload)
     event_type = data.get("event")
+    mode = settings.provider_webhook_cutover_mode("xendit")
+    non_mutating_response = await _non_mutating_webhook_response(
+        "xendit",
+        mode,
+        request,
+        payload,
+    )
+    if non_mutating_response is not None:
+        return non_mutating_response
 
     # ── Invoice callbacks (payment acceptance) ────────────────────
     # Xendit Invoice callbacks have top-level "id", "status", "external_id"
@@ -263,7 +362,6 @@ async def _handle_invoice_callback(data: dict):
 
     xendit_invoice_id = data.get("id")
     invoice_status = data.get("status")
-    external_id = data.get("external_id", "")
     payment_method = data.get("payment_method")
     payment_channel = data.get("payment_channel")
 
@@ -362,12 +460,22 @@ async def channex_webhook(request: Request):
     payload = await request.body()
     try:
         event = json.loads(payload)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail="Invalid JSON") from e
 
     event_type = event.get("event") or "unknown"
     event_payload = event.get("payload") or {}
     property_id = event.get("property_id") or event_payload.get("property_id")
+
+    mode = settings.provider_webhook_cutover_mode("channex")
+    non_mutating_response = await _non_mutating_webhook_response(
+        "channex",
+        mode,
+        request,
+        payload,
+    )
+    if non_mutating_response is not None:
+        return non_mutating_response
 
     # Always log the receipt — gives us "did the message webhook fire today?"
     # observability now that the safety-net poll is gone.

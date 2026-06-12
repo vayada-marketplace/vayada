@@ -44,6 +44,11 @@ import {
   type BookingWebPublicRoutesOptions,
   type BookingDomainResolutionSource,
 } from "./routes/bookingWebPublic.js";
+import {
+  registerBookingWebAffiliateRoutes,
+  type BookingWebAffiliateHotelResolver,
+  type BookingWebAffiliateRepository,
+} from "./routes/bookingWebAffiliate.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
@@ -79,6 +84,8 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingWebCalendarRepository?: BookingWebCalendarRepository;
   legacyCheckoutCommandProxyEnabled?: boolean;
   bookingWebCheckoutAdapter?: BookingWebCheckoutAdapter;
+  bookingWebAffiliateHotelResolver?: BookingWebAffiliateHotelResolver;
+  bookingWebAffiliateRepository?: BookingWebAffiliateRepository;
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
@@ -152,9 +159,18 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       calendarRepository: options.bookingWebCalendarRepository,
       legacyCheckoutCommandProxyEnabled: options.legacyCheckoutCommandProxyEnabled,
       checkoutAdapter: options.bookingWebCheckoutAdapter,
+      affiliateHotelResolver:
+        options.bookingWebAffiliateHotelResolver ?? options.publicHotelProfileRepository,
+      affiliateRepository: options.bookingWebAffiliateRepository,
       attributionSink: options.bookingWebAttributionSink,
       fetch: options.bookingWebPublicFetch,
       now: options.bookingWebPublicNow,
+    });
+  } else if (options.bookingWebAffiliateRepository && options.bookingWebAffiliateHotelResolver) {
+    app.register(registerBookingWebAffiliateRoutes, {
+      prefix: "/api/booking-web",
+      hotelResolver: options.bookingWebAffiliateHotelResolver,
+      repository: options.bookingWebAffiliateRepository,
     });
   }
   if (options.marketplaceDiscoveryRepository) {

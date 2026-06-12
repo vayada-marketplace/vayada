@@ -80,6 +80,10 @@ async def run_migrations():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting vayada PMS...")
+    logger.info(
+        "Legacy provider webhook cutover modes: %s",
+        settings.provider_webhook_cutover_status(),
+    )
     await run_migrations()
     logger.info("Migrations complete")
     scheduler_status = get_scheduler_status()
@@ -160,6 +164,9 @@ async def health():
         "status": "ok",
         "service": "pms",
         "scheduler": get_scheduler_health_status(),
+        "cutover": {
+            "legacyProviderWebhooks": settings.provider_webhook_cutover_status(),
+        },
     }
 
 
