@@ -1,43 +1,21 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { authService } from "@/services/auth";
-import { ApiErrorResponse } from "@/services/api/client";
 import LoginForm from "@/components/auth/LoginForm";
 
 function LoginPageInner() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [submitError, setSubmitError] = useState(
     searchParams.get("expired") === "true" ? "Your session has expired. Please sign in again." : "",
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleLogin = async (email: string, password: string) => {
+  const handleLogin = (email: string) => {
     setSubmitError("");
     setIsSubmitting(true);
-
-    try {
-      await authService.login({ email, password });
-      router.push("/");
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        if (error.status === 401) {
-          setSubmitError("Invalid email or password.");
-        } else if (error.status === 403) {
-          setSubmitError("Your account has been suspended. Please contact support.");
-        } else {
-          setSubmitError(error.message || "An unexpected error occurred. Please try again.");
-        }
-      } else if (error instanceof Error) {
-        setSubmitError(error.message || "An unexpected error occurred. Please try again.");
-      } else {
-        setSubmitError("An unexpected error occurred. Please try again.");
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
+    authService.startHostedLogin(email);
   };
 
   return (
@@ -63,7 +41,7 @@ function LoginPageInner() {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-gray-900">vayada Affiliate Portal</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Sign in to your affiliate dashboard</p>
+          <p className="text-[13px] text-gray-500 mt-1">Sign in with WorkOS AuthKit</p>
         </div>
 
         <LoginForm

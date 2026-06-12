@@ -470,6 +470,104 @@ describe("AuthKit session routes", () => {
     expect(response.json().message).toContain("booking/booking_hotel resource link");
   });
 
+  it("mints an affiliate-scoped compatibility token for an affiliate-partner session", async () => {
+    const auditEvents: ProductAuditEvent[] = [];
+    const affiliateSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_affiliate_partner",
+      user: {
+        ...session.user,
+        id: "user_workos_affiliate",
+        email: "affiliate@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://affiliate.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return affiliateSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(affiliateSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_affiliate",
+          email: "affiliate@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_affiliate_partner",
+          workosOrgId: "org_workos_affiliate_partner",
+          kind: "affiliate_partner",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_affiliate",
+          status: "active",
+          roleKey: "affiliate_owner",
+          workosMembershipId: "om_affiliate",
+          workosRoleSlugs: ["affiliate_owner"],
+        }),
+        linkedResources: async () => [
+          {
+            product: "affiliate",
+            resourceType: "affiliate",
+            resourceId: "affiliate_partner_bali",
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "affiliate-dashboard": {
+          requiredOrganizationKind: "affiliate_partner",
+          logoutReturnUrl: "https://affiliate.localhost/login",
+          legacyJwtSecret: "legacy-affiliate-pms-secret",
+          legacyJwtUserType: "affiliate",
+          requiredResourceLink: { product: "affiliate", resourceType: "affiliate" },
+        },
+      },
+      productAuditSink: {
+        async record(event) {
+          auditEvents.push(event);
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/affiliate-dashboard-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://affiliate.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(readJwtPayload(response.json().accessToken)).toMatchObject({
+      sub: "user_affiliate",
+      email: "affiliate@example.com",
+      type: "affiliate",
+      org: "org_affiliate_partner",
+      surface: "affiliate-dashboard",
+      resources: {
+        "affiliate:affiliate": ["affiliate_partner_bali"],
+      },
+    });
+    expect(auditEvents).toContainEqual(
+      expect.objectContaining({
+        action: "auth.compatibility_token.issued",
+        actorUserId: "user_affiliate",
+        organizationId: "org_affiliate_partner",
+        surface: "affiliate-dashboard",
+        resourceScope: {
+          "affiliate:affiliate": ["affiliate_partner_bali"],
+        },
+      }),
+    );
+  });
+
   it("clears the sealed session and returns the WorkOS logout URL", async () => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
@@ -533,7 +631,10 @@ function buildAuthSessionApp(
     legacyMarketplaceJwtSecret?: string;
     allowedOrigins?: string[];
     surfacePolicies?: Partial<
-      Record<"platform-admin" | "booking-admin" | "pms-web", AuthSurfacePolicy>
+      Record<
+        "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard",
+        AuthSurfacePolicy
+      >
     >;
   } = {},
 ) {

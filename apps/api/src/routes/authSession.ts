@@ -65,7 +65,7 @@ export type ProductAuditSink = {
   record(event: ProductAuditEvent): Promise<void>;
 };
 
-export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web";
+export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard";
 
 export type RequiredResourceLink = {
   product: Product;
@@ -146,6 +146,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     "/compat/marketplace-admin-token",
     "/compat/booking-admin-token",
     "/compat/pms-web-token",
+    "/compat/affiliate-dashboard-token",
   ]) {
     app.options(path, async (request, reply) => {
       if (!writeCorsHeaders(request, reply, options)) {
@@ -358,11 +359,21 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     surface: "pms-web",
     userType: "hotel",
   });
+  registerCompatibilityTokenRoute(app, options, {
+    path: "/compat/affiliate-dashboard-token",
+    surface: "affiliate-dashboard",
+    userType: "affiliate",
+  });
 };
 
 function parseSurface(value: string | undefined): AuthSurface {
   if (!value) return DEFAULT_SURFACE;
-  if (value === "platform-admin" || value === "booking-admin" || value === "pms-web") {
+  if (
+    value === "platform-admin" ||
+    value === "booking-admin" ||
+    value === "pms-web" ||
+    value === "affiliate-dashboard"
+  ) {
     return value;
   }
   throw new Error(`Unsupported AuthKit surface: ${value}`);
@@ -538,12 +549,7 @@ async function resolveOrCreateIdentity(
       externalId: user.userId,
     });
   }
-  const access = await resolveOrganizationAccess(
-    session,
-    user.userId,
-    options,
-    surfacePolicy,
-  );
+  const access = await resolveOrganizationAccess(session, user.userId, options, surfacePolicy);
   return { user, ...access };
 }
 

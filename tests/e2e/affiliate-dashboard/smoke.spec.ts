@@ -7,10 +7,11 @@ test.describe("affiliate-dashboard smoke", () => {
 
     await page.goto("/login");
 
-    await expect(page.getByRole("heading", { name: /vayada Affiliate Portal/i, level: 1 })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /vayada Affiliate Portal/i, level: 1 }),
+    ).toBeVisible();
     await expect(page.getByLabel(/email address/i)).toBeVisible();
-    await expect(page.getByRole("textbox", { name: /password/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /continue with workos/i })).toBeVisible();
 
     await assertHealthy();
   });

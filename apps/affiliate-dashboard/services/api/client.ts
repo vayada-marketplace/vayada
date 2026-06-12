@@ -1,13 +1,13 @@
 /**
  * API client for the affiliate dashboard.
  *
- * Auth: every request goes out with `credentials: 'include'` so the
- * httpOnly access_token cookie set by /auth/login flows back to the
- * backend automatically. No Bearer header, no localStorage token —
- * the frontend never sees the token.
+ * Auth: protected legacy PMS affiliate routes receive a short-lived
+ * compatibility bearer minted by apps/api after AuthKit session resolution.
+ * The token is kept in memory only and is never persisted to localStorage.
  */
 
-import { clearAuthData } from "@/services/auth/storage";
+import { authService } from "@/services/auth";
+import { clearAuthData, getAuthBearerToken } from "@/services/auth/storage";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.pms.localhost";
 
@@ -69,11 +69,18 @@ export class ApiClient {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
+    let token = getAuthBearerToken();
+    if (!token && !endpoint.startsWith("/auth/")) {
+      const refreshed = await authService.ensureSession();
+      token = refreshed ? getAuthBearerToken() : null;
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
 
     const response = await fetch(url, {
       ...options,
       headers,
-      credentials: "include",
     });
 
     if (response.status === 204) {
@@ -87,7 +94,7 @@ export class ApiClient {
     const isJson = contentType?.includes("application/json") ?? false;
     const text = await response.text();
 
-    let data: any;
+    let data: unknown;
     if (isJson) {
       try {
         data = text ? JSON.parse(text) : null;
@@ -99,10 +106,9 @@ export class ApiClient {
     }
 
     if (!response.ok) {
-      const errorData: ApiError =
-        data && typeof data === "object" && "detail" in data
-          ? (data as ApiError)
-          : { detail: typeof data === "string" && data ? data : `API Error: ${response.status}` };
+      const errorData: ApiError = isApiError(data)
+        ? (data as ApiError)
+        : { detail: typeof data === "string" && data ? data : `API Error: ${response.status}` };
       const error = new ApiErrorResponse(response.status, errorData);
 
       if (response.status === 401 && !endpoint.startsWith("/auth/")) {
@@ -137,3 +143,7 @@ export class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+function isApiError(value: unknown): value is ApiError {
+  return typeof value === "object" && value !== null && "detail" in value;
+}

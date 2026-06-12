@@ -1,11 +1,36 @@
-import SWRProvider from "@/components/SWRProvider";
+"use client";
 
-/**
- * Authentication is gated server-side by middleware.ts (cookie
- * presence check) plus the API client (401 handling on data fetches).
- * This layout no longer needs a client-side check or the loading flash
- * that came with it.
- */
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import SWRProvider from "@/components/SWRProvider";
+import { authService } from "@/services/auth";
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    authService.ensureSession().then((authorized) => {
+      if (cancelled) return;
+      if (authorized) {
+        setIsAuthorized(true);
+      } else {
+        router.push("/login?expired=true");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  if (!isAuthorized) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="text-gray-500 text-sm">Loading dashboard...</div>
+      </div>
+    );
+  }
+
   return <SWRProvider>{children}</SWRProvider>;
 }
