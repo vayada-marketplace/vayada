@@ -255,6 +255,11 @@ async def update_creator_profile(
                 status_code=http_status.HTTP_403_FORBIDDEN,
                 detail="This endpoint is only available for creators",
             )
+        if request.name is not None and request.name != user["name"]:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="Name is identity-owned. Use the identity user lifecycle route to update account profile fields.",
+            )
 
         # Get creator profile with completion status and current profile picture
         creator = await CreatorRepository.get_by_user_id(
@@ -269,10 +274,6 @@ async def update_creator_profile(
         creator_id = creator["id"]
         was_complete_before = creator.get("profile_complete", False)
         old_profile_picture = creator.get("profile_picture")
-
-        # Update user name on auth database (separate from business DB transaction)
-        if request.name is not None:
-            await UserRepository.update_name(user_id, request.name)
 
         await CreatorProfileService.update(creator_id, request)
 

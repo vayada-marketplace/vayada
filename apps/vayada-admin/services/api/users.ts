@@ -10,6 +10,17 @@ export interface UsersListResponse {
   total: number;
 }
 
+export interface IdentityCommandResponse {
+  userId: string;
+  status: "accepted" | "idempotent_replay";
+  commands: Array<{
+    commandType: string;
+    commandId: string;
+    idempotencyKey: string;
+    status: "accepted" | "idempotent_replay";
+  }>;
+}
+
 /**
  * Transform snake_case to camelCase for nested objects
  */
@@ -49,7 +60,7 @@ export const usersService = {
     if (params?.search) queryParams.append("search", params.search);
 
     const queryString = queryParams.toString();
-    const endpoint = `/admin/users${queryString ? `?${queryString}` : ""}`;
+    const endpoint = `/api/identity/admin/users${queryString ? `?${queryString}` : ""}`;
 
     return apiClient.get<UsersListResponse>(endpoint);
   },
@@ -58,17 +69,33 @@ export const usersService = {
    * Get user by ID with full details (profile, platforms, listings)
    */
   getUserById: async (userId: string): Promise<UserDetailResponse> => {
-    const response = await apiClient.get<any>(`/admin/users/${userId}`);
+    const response = await apiClient.get<any>(`/api/identity/admin/users/${userId}`);
     // Transform snake_case to camelCase to match TypeScript interfaces
     return transformSnakeToCamel(response) as UserDetailResponse;
   },
 
   /**
-   * Create a new user (creator or hotel)
+   * Create a new identity user. Product profile writes stay on the legacy
+   * marketplace admin route until their owning marketplace vertical migrates.
    */
   createUser: async (data: CreateUserRequest): Promise<User> => {
-    const response = await apiClient.post<any>("/admin/users", data);
-    return transformSnakeToCamel(response) as User;
+    const response = await apiClient.post<IdentityCommandResponse>("/api/identity/admin/users", {
+      email: data.email,
+      name: data.name,
+      type: data.type,
+      status: data.status,
+      emailVerified: data.emailVerified,
+    });
+    return {
+      id: response.userId,
+      email: data.email,
+      name: data.name,
+      type: data.type,
+      status: data.status ?? "pending",
+      email_verified: data.emailVerified,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
   },
 
   /**
@@ -83,7 +110,7 @@ export const usersService = {
       name?: string;
     },
   ): Promise<any> => {
-    const response = await apiClient.put<any>(`/admin/users/${userId}`, data);
+    const response = await apiClient.patch<any>(`/api/identity/admin/users/${userId}`, data);
     return transformSnakeToCamel(response);
   },
 
@@ -199,11 +226,30 @@ export const usersService = {
   },
 
   /**
-   * Delete a user permanently
-   * ⚠️ Warning: This action cannot be undone!
+   * Soft-delete an identity user through the identity lifecycle command bus.
    */
   deleteUser: async (userId: string): Promise<{ message: string; deleted_user: User }> => {
-    const response = await apiClient.delete<any>(`/admin/users/${userId}`);
-    return transformSnakeToCamel(response);
+    const response = await apiClient.delete<IdentityCommandResponse>(
+      `/api/identity/admin/users/${userId}`,
+    );
+    return {
+      message: "Identity user deletion command accepted.",
+      deleted_user: {
+        id: response.userId,
+        email: "",
+        name: "",
+        type: "admin",
+        status: "suspended",
+        created_at: "",
+        updated_at: "",
+      },
+    };
+  },
+
+  setPlatformAccess: async (userId: string, enabled: boolean): Promise<IdentityCommandResponse> => {
+    return apiClient.put<IdentityCommandResponse>(
+      `/api/identity/admin/users/${userId}/platform-access`,
+      { enabled },
+    );
   },
 };

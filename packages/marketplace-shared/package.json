@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./api/client": "./src/api/client.ts",
-    "./api/discovery": "./src/api/discovery.ts"
+    "./api/discovery": "./src/api/discovery.ts",
+    "./api/privacy": "./src/api/privacy.ts"
   }
 }

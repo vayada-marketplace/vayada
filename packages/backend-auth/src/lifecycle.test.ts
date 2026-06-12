@@ -41,6 +41,11 @@ describe("identity lifecycle command contract", () => {
       "identity.recovery.flow.create",
       "identity.invite.affiliate.create",
       "identity.invite.customer.create",
+      "identity.consent.cookie.upsert",
+      "identity.consent.marketing.update",
+      "identity.gdpr.export.request",
+      "identity.gdpr.deletion.request",
+      "identity.gdpr.deletion.cancel",
     ]);
 
     expect(identityLifecycleEventTypes).toEqual([
@@ -55,6 +60,11 @@ describe("identity lifecycle command contract", () => {
       "identity.recovery.flow.created",
       "identity.invite.affiliate.created",
       "identity.invite.customer.created",
+      "identity.consent.cookie.upserted",
+      "identity.consent.marketing.updated",
+      "identity.gdpr.export.requested",
+      "identity.gdpr.deletion.requested",
+      "identity.gdpr.deletion.cancelled",
     ]);
   });
 
@@ -252,6 +262,41 @@ describe("identity lifecycle command contract", () => {
     };
 
     expect(command.payload.bookingReference?.bookingId).toBe("guest_booking_001");
+  });
+
+  it("models privacy-owned cookie consent and GDPR requests", () => {
+    expect(
+      identityLifecycleIdempotencyScope({
+        commandType: "identity.consent.cookie.upsert",
+        commandId: "cmd_cookie_001",
+        idempotencyKey: "visitor:visitor_001:cookie-consent",
+        audit: { ...audit, source: "web" },
+        payload: {
+          visitorId: "visitor_001",
+          necessary: true,
+          functional: true,
+          analytics: false,
+          marketing: false,
+        },
+      }),
+    ).toBe("identity.consent.cookie.upsert:visitor:visitor_001:cookie-consent");
+
+    const deletionEvent: IdentityLifecycleEvent = {
+      eventType: "identity.gdpr.deletion.requested",
+      eventId: "evt_gdpr_delete_001",
+      commandId: "cmd_gdpr_delete_001",
+      idempotencyKey: "gdpr:user_001:deletion:pending",
+      userId: "user_001",
+      occurredAt: "2026-06-07T10:02:00.000Z",
+      audit,
+      payload: {
+        userId: "user_001",
+        requestId: "gdpr_request_001",
+        scheduledDeletionAt: "2026-07-07T10:02:00.000Z",
+      },
+    };
+
+    expect(deletionEvent.payload.scheduledDeletionAt).toBe("2026-07-07T10:02:00.000Z");
   });
 
   it("carries event-specific payloads for product consumers", () => {

@@ -19,6 +19,7 @@ export default function DataExportPage() {
   const [exportStatus, setExportStatus] = useState<GdprRequestStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRequesting, setIsRequesting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -51,12 +52,42 @@ export default function DataExportPage() {
 
       // Reload status
       const status = await consentService.getExportStatus();
-      setExportStatus(status);
+      setExportStatus({
+        ...status,
+        download_token: status.download_token ?? result.download_token,
+      });
     } catch (err) {
       console.error("Failed to request data export:", err);
       setError("Failed to request data export. Please try again later.");
     } finally {
       setIsRequesting(false);
+    }
+  };
+
+  const handleDownloadExport = async () => {
+    const token = exportStatus?.download_token;
+    if (!token) {
+      setError("The export download token is not available yet. Please refresh and try again.");
+      return;
+    }
+
+    try {
+      setIsDownloading(true);
+      setError(null);
+      const blob = await consentService.downloadExport(token);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "vayada-data-export.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to download data export:", err);
+      setError("Failed to download data export. Please try again later.");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -218,14 +249,11 @@ export default function DataExportPage() {
                         {formatDate(exportStatus.expires_at)}.
                       </p>
                       <button
-                        onClick={() => {
-                          // In a real implementation, this would trigger the download
-                          // with the download token from the backend
-                          window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/gdpr/export-download?token=${localStorage.getItem("access_token")}`;
-                        }}
+                        onClick={handleDownloadExport}
+                        disabled={isDownloading || !exportStatus.download_token}
                         className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 transition-colors"
                       >
-                        Download Export
+                        {isDownloading ? "Downloading..." : "Download Export"}
                       </button>
                     </div>
                   )}
