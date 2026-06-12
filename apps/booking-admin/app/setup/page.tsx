@@ -227,7 +227,8 @@ export default function SetupPage() {
         }
       }
 
-      if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
+      const authorized = await authService.ensureSession();
+      if (!authorized || !authService.isHotelAdmin()) {
         router.replace("/login");
         return;
       }

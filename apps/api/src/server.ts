@@ -205,6 +205,32 @@ const app = buildApp({
           logoutReturnUrl: config.authSession.authLogoutUrl,
           allowedOrigins: config.authSession.authAllowedOrigins,
           requiredOrganizationKind: "platform",
+          surfacePolicies: {
+            "booking-admin": {
+              requiredOrganizationKind: "hotel_group",
+              callbackReturnUrl: config.authSession.authBookingAdminSuccessUrl,
+              logoutReturnUrl:
+                config.authSession.authBookingAdminLogoutUrl ?? config.authSession.authLogoutUrl,
+              legacyJwtSecret: config.authSession.authLegacyBookingJwtSecret,
+              legacyJwtUserType: "hotel",
+              requiredResourceLink: {
+                product: "booking",
+                resourceType: "booking_hotel",
+              },
+            },
+            "pms-web": {
+              requiredOrganizationKind: "hotel_group",
+              callbackReturnUrl: config.authSession.authPmsWebSuccessUrl,
+              logoutReturnUrl:
+                config.authSession.authPmsWebLogoutUrl ?? config.authSession.authLogoutUrl,
+              legacyJwtSecret: config.authSession.authLegacyPmsJwtSecret,
+              legacyJwtUserType: "hotel",
+              requiredResourceLink: {
+                product: "pms",
+                resourceType: "pms_hotel",
+              },
+            },
+          },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,
           legacyMarketplaceJwtSecret: config.authSession.authLegacyMarketplaceJwtSecret,

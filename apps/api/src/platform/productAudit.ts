@@ -47,7 +47,7 @@ async function insertProductAuditEvent(pool: pg.Pool, event: ProductAuditEvent):
         'security', 'confidential')
      ON CONFLICT (product, audit_key) DO NOTHING`,
     [
-      `${event.action}:${event.workosSessionId ?? event.requestId}`,
+      `${event.action}:${event.surface ?? "default"}:${event.workosSessionId ?? event.requestId}`,
       event.action,
       event.occurredAt,
       event.organizationId ? "organization" : "platform",
@@ -60,6 +60,8 @@ async function insertProductAuditEvent(pool: pg.Pool, event: ProductAuditEvent):
         workosUserId: event.workosUserId,
         workosOrgId: event.workosOrgId,
         workosSessionId: event.workosSessionId,
+        surface: event.surface,
+        resourceScope: event.resourceScope,
       }),
       JSON.stringify({
         requestId: event.requestId,

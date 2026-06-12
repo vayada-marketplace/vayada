@@ -2,9 +2,12 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import type {
   IdentityLifecycleCommandBus,
   IdentityLifecycleCommandResult,
+  IdentityResourceLink,
   IdentityRepository,
   IdentityUser,
   OrganizationKind,
+  Product,
+  ResourceType,
   TokenVerifier,
 } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
@@ -46,9 +49,11 @@ export type AuthKitClient = {
 };
 
 export type ProductAuditEvent = {
-  action: "auth.login" | "auth.logout";
+  action: "auth.login" | "auth.logout" | "auth.compatibility_token.issued";
   actorUserId?: string;
   organizationId?: string;
+  surface?: AuthSurface;
+  resourceScope?: Record<string, string[]>;
   workosUserId?: string;
   workosOrgId?: string;
   workosSessionId?: string;
@@ -58,6 +63,22 @@ export type ProductAuditEvent = {
 
 export type ProductAuditSink = {
   record(event: ProductAuditEvent): Promise<void>;
+};
+
+export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web";
+
+export type RequiredResourceLink = {
+  product: Product;
+  resourceType: ResourceType;
+};
+
+export type AuthSurfacePolicy = {
+  requiredOrganizationKind: OrganizationKind;
+  callbackReturnUrl?: string;
+  logoutReturnUrl?: string;
+  legacyJwtSecret?: string;
+  legacyJwtUserType?: string;
+  requiredResourceLink?: RequiredResourceLink;
 };
 
 export type AuthSessionRouteOptions = {
@@ -71,6 +92,7 @@ export type AuthSessionRouteOptions = {
   logoutReturnUrl: string;
   allowedOrigins: string[];
   requiredOrganizationKind: OrganizationKind;
+  surfacePolicies?: Partial<Record<AuthSurface, AuthSurfacePolicy>>;
   cookieSecure: boolean;
   cookieDomain?: string;
   legacyMarketplaceJwtSecret?: string;
@@ -79,6 +101,7 @@ export type AuthSessionRouteOptions = {
 const SESSION_COOKIE = "vayada_workos_session";
 const STATE_COOKIE = "vayada_workos_state";
 const CSRF_COOKIE = "vayada_auth_csrf";
+const DEFAULT_SURFACE: AuthSurface = "platform-admin";
 
 export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptions> = async (
   app: FastifyInstance,
@@ -88,7 +111,14 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     const query = request.query as {
       organization_id?: string;
       login_hint?: string;
+      surface?: string;
+      return_to?: string;
     };
+    const surface = parseSurface(query.surface);
+    getSurfacePolicy(surface, options);
+    const returnTo = query.return_to
+      ? validateReturnTo(query.return_to, options.allowedOrigins)
+      : undefined;
     const state = randomBytes(24).toString("base64url");
     const authorizationUrl = options.authKitClient.getAuthorizationUrl({
       redirectUri: options.callbackUrl,
@@ -100,7 +130,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     reply
       .header(
         "set-cookie",
-        serializeCookie(STATE_COOKIE, state, {
+        serializeCookie(STATE_COOKIE, encodeStateCookie({ state, surface, returnTo }), {
           maxAge: 600,
           secure: options.cookieSecure,
           domain: options.cookieDomain,
@@ -114,6 +144,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     "/session/refresh",
     "/logout",
     "/compat/marketplace-admin-token",
+    "/compat/booking-admin-token",
+    "/compat/pms-web-token",
   ]) {
     app.options(path, async (request, reply) => {
       if (!writeCorsHeaders(request, reply, options)) {
@@ -136,12 +168,14 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         message: query.error_description ?? query.error,
       });
     }
-    if (!query.code || !query.state || query.state !== readCookie(request, STATE_COOKIE)) {
+    const stateContext = decodeStateCookie(readCookie(request, STATE_COOKIE));
+    if (!query.code || !query.state || !stateContext || query.state !== stateContext.state) {
       return reply.code(400).send({
         error: "invalid_auth_state",
         message: "AuthKit callback state is missing or invalid.",
       });
     }
+    const surfacePolicy = getSurfacePolicy(stateContext.surface, options);
 
     const session = await options.authKitClient.authenticateWithCode({
       code: query.code,
@@ -150,7 +184,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     });
     let resolution: { user: IdentityUser; organizationId?: string };
     try {
-      resolution = await resolveOrCreateIdentity(session, request, options);
+      resolution = await resolveOrCreateIdentity(session, request, options, surfacePolicy);
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
@@ -186,13 +220,16 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         }),
       ],
     });
-    if (options.callbackReturnUrl) {
-      return reply.redirect(options.callbackReturnUrl);
+    const callbackReturnUrl = stateContext.returnTo ?? surfacePolicy.callbackReturnUrl;
+    if (callbackReturnUrl) {
+      return reply.redirect(callbackReturnUrl);
     }
     return reply.send(toSessionResponse(session, resolution.user, csrfToken));
   });
 
   app.get("/session", async (request, reply) => {
+    const query = request.query as { surface?: string };
+    const surfacePolicy = getSurfacePolicy(parseSurface(query.surface), options);
     if (!writeCorsHeaders(request, reply, options)) {
       return reply.code(403).send({ error: "origin_rejected" });
     }
@@ -206,7 +243,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
     let resolution: { user: IdentityUser; organizationId?: string };
     try {
-      resolution = await resolveExistingIdentity(session, options);
+      resolution = await resolveExistingIdentity(session, options, surfacePolicy);
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
@@ -226,7 +263,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (!sealedSession) {
       return reply.code(401).send({ error: "missing_session" });
     }
-    const body = request.body as { organizationId?: string } | undefined;
+    const body = request.body as { organizationId?: string; surface?: string } | undefined;
+    const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
     const session = await options.authKitClient.refreshSession({
       sealedSession,
       organizationId: body?.organizationId,
@@ -236,7 +274,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
     let resolution: { user: IdentityUser; organizationId?: string };
     try {
-      resolution = await resolveExistingIdentity(session, options);
+      resolution = await resolveExistingIdentity(session, options, surfacePolicy);
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
@@ -259,12 +297,16 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (!passesCsrfCheck(request, options)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
+    const body = request.body as { surface?: string } | undefined;
+    const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
     const sealedSession = readCookie(request, SESSION_COOKIE);
-    let logoutUrl = options.logoutReturnUrl;
+    let logoutUrl = surfacePolicy.logoutReturnUrl ?? options.logoutReturnUrl;
     if (sealedSession) {
       const session = await options.authKitClient.authenticateSession({ sealedSession });
       if (session) {
-        const resolution = await resolveExistingIdentity(session, options).catch(() => null);
+        const resolution = await resolveExistingIdentity(session, options, surfacePolicy).catch(
+          () => null,
+        );
         await options.productAuditSink.record({
           action: "auth.logout",
           actorUserId: resolution?.user.userId,
@@ -278,7 +320,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       }
       logoutUrl = await options.authKitClient.getLogoutUrl({
         sealedSession,
-        returnTo: options.logoutReturnUrl,
+        returnTo: surfacePolicy.logoutReturnUrl ?? options.logoutReturnUrl,
       });
     }
 
@@ -301,12 +343,111 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       .send({ logoutUrl });
   });
 
-  app.post("/compat/marketplace-admin-token", async (request, reply) => {
+  registerCompatibilityTokenRoute(app, options, {
+    path: "/compat/marketplace-admin-token",
+    surface: "platform-admin",
+    userType: "admin",
+  });
+  registerCompatibilityTokenRoute(app, options, {
+    path: "/compat/booking-admin-token",
+    surface: "booking-admin",
+    userType: "hotel",
+  });
+  registerCompatibilityTokenRoute(app, options, {
+    path: "/compat/pms-web-token",
+    surface: "pms-web",
+    userType: "hotel",
+  });
+};
+
+function parseSurface(value: string | undefined): AuthSurface {
+  if (!value) return DEFAULT_SURFACE;
+  if (value === "platform-admin" || value === "booking-admin" || value === "pms-web") {
+    return value;
+  }
+  throw new Error(`Unsupported AuthKit surface: ${value}`);
+}
+
+function getSurfacePolicy(
+  surface: AuthSurface,
+  options: AuthSessionRouteOptions,
+): AuthSurfacePolicy {
+  const defaultPlatformPolicy: AuthSurfacePolicy = {
+    requiredOrganizationKind: options.requiredOrganizationKind,
+    callbackReturnUrl: options.callbackReturnUrl,
+    logoutReturnUrl: options.logoutReturnUrl,
+    legacyJwtSecret: options.legacyMarketplaceJwtSecret,
+    legacyJwtUserType: "admin",
+  };
+  if (surface === DEFAULT_SURFACE) {
+    return { ...defaultPlatformPolicy, ...options.surfacePolicies?.[surface] };
+  }
+  const configured = options.surfacePolicies?.[surface];
+  if (!configured) {
+    throw new Error(`AuthKit surface is not configured: ${surface}`);
+  }
+  return configured;
+}
+
+function validateReturnTo(rawReturnTo: string, allowedOrigins: string[]): string {
+  let url: URL;
+  try {
+    url = new URL(rawReturnTo);
+  } catch {
+    throw new Error("Invalid AuthKit return_to URL");
+  }
+  if (!allowedOrigins.includes(url.origin)) {
+    throw new Error("AuthKit return_to origin is not allowed");
+  }
+  return url.toString();
+}
+
+function encodeStateCookie(input: {
+  state: string;
+  surface: AuthSurface;
+  returnTo?: string;
+}): string {
+  return `v1.${Buffer.from(JSON.stringify(input)).toString("base64url")}`;
+}
+
+function decodeStateCookie(value: string | undefined): {
+  state: string;
+  surface: AuthSurface;
+  returnTo?: string;
+} | null {
+  if (!value) return null;
+  if (!value.startsWith("v1.")) {
+    return { state: value, surface: DEFAULT_SURFACE };
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8")) as {
+      state?: unknown;
+      surface?: unknown;
+      returnTo?: unknown;
+    };
+    if (typeof parsed.state !== "string") return null;
+    return {
+      state: parsed.state,
+      surface: parseSurface(typeof parsed.surface === "string" ? parsed.surface : undefined),
+      returnTo: typeof parsed.returnTo === "string" ? parsed.returnTo : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function registerCompatibilityTokenRoute(
+  app: FastifyInstance,
+  options: AuthSessionRouteOptions,
+  route: { path: string; surface: AuthSurface; userType: string },
+): void {
+  app.post(route.path, async (request, reply) => {
     if (!writeCorsHeaders(request, reply, options)) {
       return reply.code(403).send({ error: "origin_rejected" });
     }
-    if (!options.legacyMarketplaceJwtSecret) {
-      return reply.code(404).send({ error: "legacy_marketplace_bridge_not_configured" });
+    const surfacePolicy = getSurfacePolicy(route.surface, options);
+    if (!surfacePolicy.legacyJwtSecret) {
+      return reply.code(404).send({ error: "legacy_compatibility_bridge_not_configured" });
     }
     if (!passesCsrfCheck(request, options)) {
       return reply.code(403).send({ error: "csrf_rejected" });
@@ -319,34 +460,53 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (!session) {
       return reply.code(401).send({ error: "invalid_session" });
     }
-    let resolution: { user: IdentityUser; organizationId?: string };
+    let resolution: IdentityResolution;
     try {
-      resolution = await resolveExistingIdentity(session, options);
+      resolution = await resolveExistingIdentity(session, options, surfacePolicy);
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
     const expiresIn = 15 * 60;
+    const resourceScope = resolution.resourceScope
+      ? { [resourceScopeKey(resolution.resourceScope)]: resolution.resourceScope.resourceIds }
+      : undefined;
+    await options.productAuditSink.record({
+      action: "auth.compatibility_token.issued",
+      actorUserId: resolution.user.userId,
+      organizationId: resolution.organizationId,
+      surface: route.surface,
+      resourceScope,
+      workosUserId: session.user.id,
+      workosOrgId: session.organizationId,
+      workosSessionId: session.sessionId,
+      requestId: request.id,
+      occurredAt: new Date().toISOString(),
+    });
     return reply.send({
       accessToken: signLegacyMarketplaceJwt(
         {
           sub: resolution.user.userId,
           email: resolution.user.email,
-          type: "admin",
+          type: surfacePolicy.legacyJwtUserType ?? route.userType,
+          org: resolution.organizationId,
+          surface: route.surface,
+          resources: resourceScope,
         },
-        options.legacyMarketplaceJwtSecret,
+        surfacePolicy.legacyJwtSecret,
         expiresIn,
       ),
       expiresIn,
       tokenType: "Bearer",
     });
   });
-};
+}
 
 async function resolveOrCreateIdentity(
   session: AuthKitSession,
   request: FastifyRequest,
   options: AuthSessionRouteOptions,
-): Promise<{ user: IdentityUser; organizationId?: string }> {
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<IdentityResolution> {
   let user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
   if (!user) {
     const result = await options.lifecycleCommandBus.execute({
@@ -378,14 +538,20 @@ async function resolveOrCreateIdentity(
       externalId: user.userId,
     });
   }
-  const organizationId = await resolveOrganizationAccess(session, user.userId, options);
-  return { user, organizationId };
+  const access = await resolveOrganizationAccess(
+    session,
+    user.userId,
+    options,
+    surfacePolicy,
+  );
+  return { user, ...access };
 }
 
 async function resolveExistingIdentity(
   session: AuthKitSession,
   options: AuthSessionRouteOptions,
-): Promise<{ user: IdentityUser; organizationId?: string }> {
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<IdentityResolution> {
   const verified = await options.tokenVerifier(session.accessToken);
   const user = await options.identityRepository.findUserByProviderUserId(
     "workos",
@@ -394,13 +560,24 @@ async function resolveExistingIdentity(
   if (!user) {
     throw new Error(`No internal user for WorkOS user ${verified.workosUserId}`);
   }
-  const organizationId = await resolveOrganizationAccess(
+  const access = await resolveOrganizationAccess(
     { ...session, organizationId: verified.workosOrgId ?? session.organizationId },
     user.userId,
     options,
+    surfacePolicy,
   );
-  return { user, organizationId };
+  return { user, ...access };
 }
+
+type IdentityResolution = {
+  user: IdentityUser;
+  organizationId?: string;
+  resourceScope?: {
+    product: Product;
+    resourceType: ResourceType;
+    resourceIds: string[];
+  };
+};
 
 async function findUserAfterLifecycle(
   repository: IdentityRepository,
@@ -423,7 +600,8 @@ async function resolveOrganizationAccess(
   session: AuthKitSession,
   userId: string,
   options: AuthSessionRouteOptions,
-): Promise<string | undefined> {
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<Omit<IdentityResolution, "user">> {
   if (!session.organizationId) {
     throw new Error("AuthKit session is missing selected organization");
   }
@@ -436,8 +614,8 @@ async function resolveOrganizationAccess(
   if (organization.status !== "active") {
     throw new Error(`Organization ${organization.organizationId} is not active`);
   }
-  if (organization.kind !== options.requiredOrganizationKind) {
-    throw new Error(`Selected organization must be ${options.requiredOrganizationKind}`);
+  if (organization.kind !== surfacePolicy.requiredOrganizationKind) {
+    throw new Error(`Selected organization must be ${surfacePolicy.requiredOrganizationKind}`);
   }
   const membership = await options.identityRepository.findActiveMembership(
     userId,
@@ -446,7 +624,39 @@ async function resolveOrganizationAccess(
   if (!membership || membership.status !== "active") {
     throw new Error("No active membership for selected organization");
   }
-  return organization.organizationId;
+  if (surfacePolicy.requiredResourceLink) {
+    const links = await options.identityRepository.findLinkedResources(organization.organizationId);
+    const matchingLinks = findRequiredResourceLinks(links, surfacePolicy.requiredResourceLink);
+    if (matchingLinks.length === 0) {
+      throw new Error(
+        `Selected organization is missing an active ${surfacePolicy.requiredResourceLink.product}/${surfacePolicy.requiredResourceLink.resourceType} resource link`,
+      );
+    }
+    return {
+      organizationId: organization.organizationId,
+      resourceScope: {
+        ...surfacePolicy.requiredResourceLink,
+        resourceIds: matchingLinks.map((link) => link.resourceId),
+      },
+    };
+  }
+  return { organizationId: organization.organizationId };
+}
+
+function findRequiredResourceLinks(
+  links: IdentityResourceLink[],
+  required: RequiredResourceLink,
+): IdentityResourceLink[] {
+  return links.filter(
+    (link) =>
+      link.status === "active" &&
+      link.product === required.product &&
+      link.resourceType === required.resourceType,
+  );
+}
+
+function resourceScopeKey(scope: { product: Product; resourceType: ResourceType }): string {
+  return `${scope.product}:${scope.resourceType}`;
 }
 
 function toSessionResponse(session: AuthKitSession, user: IdentityUser, csrfToken?: string) {
@@ -481,7 +691,14 @@ function writeCorsHeaders(
 }
 
 function signLegacyMarketplaceJwt(
-  claims: { sub: string; email: string; type: string },
+  claims: {
+    sub: string;
+    email: string;
+    type: string;
+    org?: string;
+    surface?: AuthSurface;
+    resources?: Record<string, string[]>;
+  },
   secret: string,
   expiresInSeconds: number,
 ): string {

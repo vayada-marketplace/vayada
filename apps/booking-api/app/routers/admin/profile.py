@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.dependencies import require_hotel_admin
+from app.dependencies import get_allowed_booking_hotel_ids, require_hotel_admin
 from app.repositories.booking_hotel_repo import BookingHotelRepository
 from app.repositories.user_repo import UserRepository
 
@@ -8,8 +8,20 @@ router = APIRouter()
 
 
 @router.get("/hotels")
-async def list_hotels(user_id: str = Depends(require_hotel_admin)):
-    return await BookingHotelRepository.list_by_user_id(user_id)
+async def list_hotels(request: Request, user_id: str = Depends(require_hotel_admin)):
+    scoped_hotel_ids = get_allowed_booking_hotel_ids(request)
+    if scoped_hotel_ids is None:
+        return await BookingHotelRepository.list_by_user_id(user_id)
+
+    hotels = []
+    for hotel_id in scoped_hotel_ids:
+        hotel = await BookingHotelRepository.get_by_id(
+            hotel_id,
+            columns="id, name, slug, location, country",
+        )
+        if hotel:
+            hotels.append(hotel)
+    return hotels
 
 
 @router.get("/me")

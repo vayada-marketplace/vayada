@@ -72,6 +72,7 @@ async def _authenticate(
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    request.state.vayada_auth_claims = payload
 
     user_id = payload.get("sub")
     if not user_id:
@@ -100,6 +101,17 @@ async def _authenticate(
         )
 
     return user
+
+
+def get_allowed_booking_hotel_ids(request: Request) -> list[str] | None:
+    payload = getattr(request.state, "vayada_auth_claims", None)
+    resources = payload.get("resources") if isinstance(payload, dict) else None
+    if not isinstance(resources, dict):
+        return None
+    raw_ids = resources.get("booking:booking_hotel")
+    if not isinstance(raw_ids, list):
+        return None
+    return [str(resource_id) for resource_id in raw_ids if isinstance(resource_id, str)]
 
 
 async def get_current_user_id(
@@ -132,10 +144,16 @@ async def get_current_hotel(
     Falls back to first hotel if header is absent (backwards compat).
     """
     hotel_id = request.headers.get("x-hotel-id")
+    allowed_hotel_ids = get_allowed_booking_hotel_ids(request)
     user = await UserRepository.get_by_id(user_id, columns="id, is_superadmin")
     is_superadmin = bool(user and user.get("is_superadmin"))
 
     if hotel_id:
+        if allowed_hotel_ids is not None and hotel_id not in allowed_hotel_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Hotel not in selected AuthKit organization scope",
+            )
         hotel = (
             await BookingHotelRepository.get_by_id(hotel_id)
             if is_superadmin
@@ -147,6 +165,13 @@ async def get_current_hotel(
                 detail="Hotel not found or access denied",
             )
         return hotel
+
+    if allowed_hotel_ids is not None:
+        for allowed_hotel_id in allowed_hotel_ids:
+            hotel = await BookingHotelRepository.get_by_id(allowed_hotel_id)
+            if hotel:
+                return hotel
+        return None
 
     hotels = await BookingHotelRepository.list_by_user_id(user_id)
     if not hotels:

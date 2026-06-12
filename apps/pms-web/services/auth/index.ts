@@ -3,10 +3,24 @@
  * Uses the same booking engine auth backend (port 8001)
  */
 
-import { apiClient } from "../api/client";
+import { apiClient, ApiErrorResponse } from "../api/client";
+import {
+  clearAuthData,
+  getAuthBearerToken,
+  getAuthCsrfToken,
+  getLegacyPasswordToken,
+  hasAuthenticatedSession,
+  hasHotelAccessMarker,
+  isAuthKitLoginEnabled,
+  isLegacyPasswordFallbackEnabled,
+  setAuthKitSession,
+  setLegacyCompatibilityToken,
+  setLegacyPasswordSession,
+  type AuthKitSessionResponse,
+} from "./sessionStore";
 
-const TOKEN_KEY = "access_token";
-const EXPIRES_AT_KEY = "token_expires_at";
+const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
+const AUTH_SURFACE = "pms-web";
 
 export interface RegisterRequest {
   name: string;
@@ -41,73 +55,95 @@ export interface LoginResponse {
   message: string;
 }
 
-function storeToken(token: string, expiresIn: number): void {
-  if (typeof window === "undefined") return;
+type CompatibilityTokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+  tokenType: "Bearer";
+};
 
-  localStorage.setItem(TOKEN_KEY, token);
-  const expiresAt = Date.now() + expiresIn * 1000;
-  localStorage.setItem(EXPIRES_AT_KEY, expiresAt.toString());
-}
+async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers as Record<string, string> | undefined),
+    },
+  });
 
-function storeUserData(data: {
-  id: string;
-  email: string;
-  name: string;
-  type: string;
-  status: string;
-}): void {
-  if (typeof window === "undefined") return;
+  const contentType = response.headers.get("content-type");
+  const body =
+    contentType?.includes("application/json") && response.status !== 204
+      ? await response.json()
+      : null;
 
-  localStorage.setItem("isLoggedIn", "true");
-  localStorage.setItem("userId", data.id);
-  localStorage.setItem("userEmail", data.email);
-  localStorage.setItem("userName", data.name);
-  localStorage.setItem("userType", data.type);
-  localStorage.setItem("userStatus", data.status);
-
-  localStorage.setItem(
-    "user",
-    JSON.stringify({
-      id: data.id,
-      email: data.email,
-      name: data.name,
-      type: data.type,
-      status: data.status,
-    }),
-  );
-}
-
-function clearAuthData(): void {
-  if (typeof window === "undefined") return;
-
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(EXPIRES_AT_KEY);
-  localStorage.removeItem("userId");
-  localStorage.removeItem("userEmail");
-  localStorage.removeItem("userName");
-  localStorage.removeItem("userType");
-  localStorage.removeItem("userStatus");
-  localStorage.removeItem("user");
-  localStorage.setItem("isLoggedIn", "false");
-}
-
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const token = localStorage.getItem(TOKEN_KEY);
-  const expiresAt = localStorage.getItem(EXPIRES_AT_KEY);
-
-  if (!token || !expiresAt) return null;
-
-  if (Date.now() >= parseInt(expiresAt)) {
-    clearAuthData();
-    return null;
+  if (!response.ok) {
+    throw new ApiErrorResponse(response.status, {
+      detail: body?.message ?? body?.error ?? "Authentication request failed",
+    });
   }
 
-  return token;
+  return body as T;
+}
+
+async function attachPmsCompatibilityToken(): Promise<void> {
+  const csrfToken = getAuthCsrfToken();
+  if (!csrfToken) return;
+
+  const response = await authFetch<CompatibilityTokenResponse>("/auth/compat/pms-web-token", {
+    method: "POST",
+    headers: { "x-vayada-csrf": csrfToken },
+  });
+  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
 }
 
 export const authService = {
+  isAuthKitEnabled: isAuthKitLoginEnabled,
+
+  isLegacyFallbackEnabled: isLegacyPasswordFallbackEnabled,
+
+  startHostedLogin: (loginHint?: string): void => {
+    const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
+    url.searchParams.set("surface", AUTH_SURFACE);
+    if (typeof window !== "undefined") {
+      url.searchParams.set("return_to", `${window.location.origin}/login?auth=callback`);
+    }
+    if (loginHint) url.searchParams.set("login_hint", loginHint);
+    window.location.href = url.toString();
+  },
+
+  refreshSession: async (organizationId?: string): Promise<AuthKitSessionResponse> => {
+    const csrfToken = getAuthCsrfToken();
+    const response =
+      organizationId && csrfToken
+        ? await authFetch<AuthKitSessionResponse>("/auth/session/refresh", {
+            method: "POST",
+            headers: { "x-vayada-csrf": csrfToken },
+            body: JSON.stringify({ organizationId, surface: AUTH_SURFACE }),
+          })
+        : await authFetch<AuthKitSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
+
+    setAuthKitSession(response);
+    await attachPmsCompatibilityToken();
+    return response;
+  },
+
+  ensureSession: async (): Promise<boolean> => {
+    if (!isAuthKitLoginEnabled()) {
+      return Boolean(getLegacyPasswordToken() && hasHotelAccessMarker());
+    }
+    if (hasAuthenticatedSession() && hasHotelAccessMarker()) {
+      return true;
+    }
+    try {
+      await authService.refreshSession();
+      return true;
+    } catch {
+      clearAuthData();
+      return false;
+    }
+  },
+
   register: async (data: RegisterRequest): Promise<RegisterResponse> => {
     const response = await apiClient.post<RegisterResponse>("/auth/register", {
       ...data,
@@ -115,13 +151,16 @@ export const authService = {
       privacy_accepted: true,
     });
 
-    storeToken(response.access_token, response.expires_in);
-    storeUserData({
-      id: response.id,
-      email: response.email,
-      name: response.name,
-      type: "hotel",
-      status: "active",
+    setLegacyPasswordSession({
+      token: response.access_token,
+      expiresIn: response.expires_in,
+      user: {
+        id: response.id,
+        email: response.email,
+        name: response.name,
+        type: "hotel",
+        status: "active",
+      },
     });
 
     return response;
@@ -134,37 +173,54 @@ export const authService = {
       throw new Error("Access denied. Hotel admin account required.");
     }
 
-    storeToken(response.access_token, response.expires_in);
-    storeUserData({
-      id: response.id,
-      email: response.email,
-      name: response.name,
-      type: response.type,
-      status: response.status,
+    setLegacyPasswordSession({
+      token: response.access_token,
+      expiresIn: response.expires_in,
+      user: {
+        id: response.id,
+        email: response.email,
+        name: response.name,
+        type: response.type,
+        status: response.status,
+      },
     });
 
     return response;
   },
 
-  logout: (): void => {
+  logout: async (): Promise<void> => {
+    const csrfToken = getAuthCsrfToken();
+    let logoutUrl = "/login";
+
+    if (isAuthKitLoginEnabled() && csrfToken) {
+      try {
+        const response = await authFetch<{ logoutUrl: string }>("/auth/logout", {
+          method: "POST",
+          headers: { "x-vayada-csrf": csrfToken },
+          body: JSON.stringify({ surface: AUTH_SURFACE }),
+        });
+        logoutUrl = response.logoutUrl;
+      } catch {
+        logoutUrl = "/login";
+      }
+    }
+
     clearAuthData();
     if (typeof window !== "undefined") {
       localStorage.removeItem("pmsSetupComplete");
-      window.location.href = "/login";
+      window.location.href = logoutUrl;
     }
   },
 
   isLoggedIn: (): boolean => {
-    return getToken() !== null;
+    return hasAuthenticatedSession();
   },
 
   isHotelAdmin: (): boolean => {
-    if (typeof window === "undefined") return false;
-    const userType = localStorage.getItem("userType");
-    return userType === "hotel";
+    return hasHotelAccessMarker();
   },
 
   getToken: (): string | null => {
-    return getToken();
+    return getAuthBearerToken();
   },
 };

@@ -45,7 +45,9 @@ export default function PmsChoosePropertyPage() {
     let cancelled = false;
 
     async function load() {
-      if (!authService.isLoggedIn() || !authService.isHotelAdmin()) {
+      const authorized = await authService.ensureSession();
+      if (cancelled) return;
+      if (!authorized || !authService.isHotelAdmin()) {
         router.replace("/login");
         return;
       }

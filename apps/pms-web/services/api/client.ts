@@ -2,6 +2,8 @@
  * API client configuration
  */
 
+import { clearAuthData, getAuthBearerToken } from "../auth/sessionStore";
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.booking.localhost";
 
 export interface ApiError {
@@ -42,37 +44,13 @@ export class ApiErrorResponse extends Error {
 
 export class ApiClient {
   private baseURL: string;
-  private TOKEN_KEY = "access_token";
-  private EXPIRES_AT_KEY = "token_expires_at";
 
   constructor(baseURL: string = API_BASE_URL) {
     this.baseURL = baseURL;
   }
 
-  private getToken(): string | null {
-    if (typeof window === "undefined") return null;
-
-    const token = localStorage.getItem(this.TOKEN_KEY);
-    const expiresAt = localStorage.getItem(this.EXPIRES_AT_KEY);
-
-    if (!token || !expiresAt) return null;
-
-    if (Date.now() >= parseInt(expiresAt)) {
-      this.clearToken();
-      return null;
-    }
-
-    return token;
-  }
-
-  private clearToken(): void {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(this.TOKEN_KEY);
-    localStorage.removeItem(this.EXPIRES_AT_KEY);
-  }
-
   private handleUnauthorized(error: ApiErrorResponse): void {
-    this.clearToken();
+    clearAuthData();
 
     if (typeof window !== "undefined") {
       const errorMessage = (error.data.detail as string) || "";
@@ -89,7 +67,7 @@ export class ApiClient {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseURL}${endpoint}`;
 
-    const token = !endpoint.startsWith("/auth/") ? this.getToken() : null;
+    const token = !endpoint.startsWith("/auth/") ? getAuthBearerToken() : null;
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
