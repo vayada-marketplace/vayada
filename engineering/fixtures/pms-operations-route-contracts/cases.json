@@ -138,6 +138,104 @@
       }
     },
     {
+      "caseId": "assignment-command-assign",
+      "description": "Assigning a room persists the assignment and queues a calendar refresh through the outbox contract.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000002/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-assign",
+          "idempotencyKey": "pms-assignment-assign-001",
+          "expectedVersion": "reservation-v3",
+          "action": "assign",
+          "assignmentId": "f6855500-0000-0000-0000-000000000002",
+          "roomId": "f6855100-0000-0000-0000-000000000003"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["reservation.assignments[0].roomId", "commandMeta.idempotencyKey"],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["calendar_refresh", "audit_event"]
+        },
+        "mustNotCall": ["Channex API", "legacy PMS sync helper"]
+      }
+    },
+    {
+      "caseId": "assignment-command-move",
+      "description": "Moving an existing assignment to another available room uses the same command contract and queues calendar refresh only.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-move",
+          "idempotencyKey": "pms-assignment-move-001",
+          "expectedVersion": "reservation-v7",
+          "action": "move",
+          "assignmentId": "f6855500-0000-0000-0000-000000000001",
+          "roomId": "f6855100-0000-0000-0000-000000000002"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["calendar_refresh", "audit_event"]
+        },
+        "mustNotCall": ["Channex API", "legacy PMS sync helper"]
+      }
+    },
+    {
+      "caseId": "assignment-command-unassign",
+      "description": "Unassigning a room releases the room from the reservation and queues calendar refresh only.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-unassign",
+          "idempotencyKey": "pms-assignment-unassign-001",
+          "expectedVersion": "reservation-v7",
+          "action": "unassign",
+          "assignmentId": "f6855500-0000-0000-0000-000000000001",
+          "roomId": null
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["reservation.assignments[0].roomId", "commandMeta.sideEffects"],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["calendar_refresh", "audit_event"]
+        },
+        "mustNotCall": ["Channex API", "legacy PMS sync helper"]
+      }
+    },
+    {
+      "caseId": "assignment-command-swap",
+      "description": "Swapping two assignment positions validates both assignments and queues one calendar refresh outbox side effect.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-swap",
+          "idempotencyKey": "pms-assignment-swap-001",
+          "expectedVersion": "reservation-v7",
+          "action": "swap",
+          "assignmentId": "f6855500-0000-0000-0000-000000000001",
+          "targetAssignmentId": "f6855500-0000-0000-0000-000000000003"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["calendar_refresh", "audit_event"]
+        },
+        "mustNotCall": ["Channex API", "legacy PMS sync helper"]
+      }
+    },
+    {
       "caseId": "assignment-command-conflict",
       "description": "Assigning an unavailable room returns a conflict without mutating the assignment.",
       "request": {
@@ -173,6 +271,52 @@
         "status": 409,
         "errorCode": "version_conflict",
         "sideEffects": []
+      }
+    },
+    {
+      "caseId": "assignment-command-assignment-conflict",
+      "description": "Assignment commands reject a target assignment that does not belong to the reservation.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-assignment-conflict",
+          "idempotencyKey": "pms-assignment-conflict-002",
+          "expectedVersion": "reservation-v7",
+          "action": "swap",
+          "assignmentId": "f6855500-0000-0000-0000-000000000001",
+          "targetAssignmentId": "f6855500-0000-0000-0000-000000009999"
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "assignment_conflict",
+        "sideEffects": []
+      }
+    },
+    {
+      "caseId": "assignment-command-idempotency-replay",
+      "description": "Replaying the same idempotency key and payload returns the original accepted command response without enqueueing duplicate side effects.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000002/assignments",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-assignment-replay",
+          "idempotencyKey": "pms-assignment-replay-001",
+          "expectedVersion": "reservation-v3",
+          "action": "assign",
+          "assignmentId": "f6855500-0000-0000-0000-000000000002",
+          "roomId": "f6855100-0000-0000-0000-000000000003"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["calendar_refresh", "audit_event"],
+          "replayed": true
+        },
+        "outboxEnqueueCount": 1
       }
     },
     {

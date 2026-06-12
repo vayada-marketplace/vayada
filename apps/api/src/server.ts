@@ -25,6 +25,7 @@ import {
   createPgPublicHotelProfileRepository,
   createTargetPublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
+import { createTargetPmsOperationsCommandRepository } from "./domains/pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
 import {
   createPgBookingWebAffiliateHotelResolver,
@@ -152,6 +153,14 @@ const pmsOperationsRepository =
       })
     : undefined;
 
+const pmsOperationsCommandRepository =
+  config.pmsOperationsSource === "target" && pmsOperationsRepository
+    ? createTargetPmsOperationsCommandRepository({
+        connectionString: config.targetDatabaseUrl!,
+        readRepository: pmsOperationsRepository,
+      })
+    : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
@@ -267,6 +276,7 @@ const app = buildApp({
       : undefined,
   bookingReservationsRepository,
   pmsOperationsRepository,
+  pmsOperationsCommandRepository,
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,

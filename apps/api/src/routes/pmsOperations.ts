@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-
 import type {
   PmsCalendarDay,
   PmsOperationsReadRepository,
@@ -84,9 +83,77 @@ export type PmsReservationDetailResponse = {
   sourceFreshness: PmsSourceFreshness;
 };
 
+export type PmsAssignmentCommandAction = "assign" | "move" | "unassign" | "swap";
+export type PmsAssignmentCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
+
+export type PmsCommandMeta = {
+  contractVersion: PmsOperationsContractVersion;
+  commandId: string;
+  idempotencyKey: string;
+  acceptedAt: string;
+  sideEffects: PmsAssignmentCommandSideEffect[];
+};
+
+export type PmsAssignmentCommandRequest = {
+  commandId: string;
+  idempotencyKey: string;
+  expectedVersion?: string;
+  action?: PmsAssignmentCommandAction;
+  assignmentId?: string;
+  position?: number;
+  roomId?: string | null;
+  targetAssignmentId?: string;
+  targetPosition?: number;
+};
+
+export type PmsAssignmentCommand = PmsAssignmentCommandRequest & {
+  propertyId: string;
+  guestBookingId: string;
+  action: PmsAssignmentCommandAction;
+};
+
+export type PmsAssignmentCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  reservation: PmsOperationalReservation;
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsAssignmentCommandConflictCode =
+  | "version_conflict"
+  | "room_unavailable"
+  | "assignment_conflict"
+  | "idempotency_conflict";
+
+export type PmsAssignmentCommandResult =
+  | {
+      ok: true;
+      reservation: PmsOperationalReservation;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 404;
+      code: "reservation_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: PmsAssignmentCommandConflictCode;
+      message: string;
+    };
+
+export type PmsOperationsCommandRepository = {
+  executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
+  close?(): Promise<void>;
+};
+
 export type PmsOperationsRoutesOptions = {
   repository: PmsOperationsReadRepository;
   checkoutChargeMarkPaidFreezeEnabled?: boolean;
+  commandRepository?: PmsOperationsCommandRepository;
   allowedOrigins?: string[];
 };
 
@@ -149,6 +216,7 @@ type PmsOperationsErrorCode =
   | "invalid_body"
   | "invalid_date_range"
   | "finance_bridge_required"
+  | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found";
@@ -168,6 +236,7 @@ type PmsOperationsAuthorizationErrorCode = Exclude<
   | "invalid_body"
   | "invalid_date_range"
   | "finance_bridge_required"
+  | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found"
@@ -177,10 +246,11 @@ export async function registerPmsOperationsRoutes(
   app: FastifyInstance,
   options: PmsOperationsRoutesOptions,
 ): Promise<void> {
-  const { repository } = options;
+  const { repository, commandRepository } = options;
 
   app.addHook("onClose", async () => {
     await repository.close?.();
+    await commandRepository?.close?.();
   });
 
   for (const path of [
@@ -192,6 +262,7 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations",
     "/properties/:propertyId/reservations/:guestBookingId",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
+    "/properties/:propertyId/reservations/:guestBookingId/assignments",
   ]) {
     app.options(path, async (request, reply) => {
       if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
@@ -474,7 +545,7 @@ export async function registerPmsOperationsRoutes(
         });
       }
       const { propertyId } = request.params;
-      if (!enforcePmsOperationsWritePolicy(request, reply, propertyId)) return reply;
+      if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
 
       const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
       if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
@@ -498,6 +569,44 @@ export async function registerPmsOperationsRoutes(
       });
     },
   );
+
+  if (commandRepository) {
+    app.patch<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/assignments",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toAssignmentCommand(propertyId, guestBookingId, request.body);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.executeAssignmentCommand(command.value);
+        if (!result.ok) {
+          return sendPmsOperationsError(reply, {
+            statusCode: result.statusCode,
+            code: result.code,
+            category: result.statusCode === 404 ? "not_found" : "conflict",
+            message: result.message,
+          });
+        }
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          reservation: result.reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsAssignmentCommandResponse;
+      },
+    );
+  }
 }
 
 function enforcePmsOperationsReadPolicy(
@@ -533,13 +642,13 @@ function enforcePmsOperationsReadPolicy(
   }
 }
 
-function enforcePmsOperationsWritePolicy(
+function enforcePmsOperationsManagePolicy(
   request: FastifyRequest,
   reply: FastifyReply,
   propertyId: string,
-): ReturnType<typeof enforceRoutePolicy> | null {
+): boolean {
   try {
-    return enforceRoutePolicy(request, {
+    enforceRoutePolicy(request, {
       permission: "pms.operations.manage",
       entitlement: {
         product: "pms",
@@ -557,11 +666,12 @@ function enforcePmsOperationsWritePolicy(
         allowedRelationships: ["owner", "operator", "front_desk"],
       },
     });
+    return true;
   } catch (error) {
     const contractError = toPmsOperationsAccessError(error, request, propertyId);
     if (!contractError) throw error;
     sendPmsOperationsError(reply, contractError);
-    return null;
+    return false;
   }
 }
 
@@ -580,7 +690,7 @@ function writePmsOperationsCorsHeaders(
   reply
     .header("Access-Control-Allow-Origin", origin)
     .header("Access-Control-Allow-Headers", "authorization,content-type,x-hotel-id")
-    .header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    .header("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS")
     .header("Vary", "Origin");
   return true;
 }
@@ -748,6 +858,129 @@ function invalidReservationQueryError(): PmsOperationsError {
     category: "validation",
     message: "Invalid PMS reservations query.",
   };
+}
+
+function toAssignmentCommand(
+  propertyId: string,
+  guestBookingId: string,
+  body: unknown,
+): { value: PmsAssignmentCommand } | { error: PmsOperationsError } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: invalidAssignmentBodyError("Assignment command body must be an object.") };
+  }
+
+  const raw = body as Record<string, unknown>;
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  const expectedVersion = optionalStringField(raw.expectedVersion);
+  const explicitAction = optionalStringField(raw.action);
+  const inferredAction = inferAssignmentAction(raw, explicitAction);
+
+  if (!commandId || !idempotencyKey || !inferredAction) {
+    return {
+      error: invalidAssignmentBodyError(
+        "Assignment command requires commandId, idempotencyKey, and a valid action.",
+      ),
+    };
+  }
+
+  const assignmentId = optionalStringField(raw.assignmentId);
+  const targetAssignmentId = optionalStringField(raw.targetAssignmentId);
+  const position = optionalPositiveInteger(raw.position);
+  const targetPosition = optionalPositiveInteger(raw.targetPosition);
+  const roomId = nullableStringField(raw.roomId);
+
+  for (const [field, value] of [
+    ["assignmentId", assignmentId],
+    ["targetAssignmentId", targetAssignmentId],
+    ["roomId", roomId],
+  ] as const) {
+    if (value !== undefined && value !== null && !isUuid(value)) {
+      return { error: invalidAssignmentBodyError(`${field} must be a UUID.`) };
+    }
+  }
+
+  if ((inferredAction === "assign" || inferredAction === "move") && !roomId) {
+    return { error: invalidAssignmentBodyError("Assign and move commands require roomId.") };
+  }
+  if (inferredAction === "unassign" && roomId !== null) {
+    return { error: invalidAssignmentBodyError("Unassign commands must not include roomId.") };
+  }
+  if (inferredAction === "swap" && !targetAssignmentId && !targetPosition) {
+    return {
+      error: invalidAssignmentBodyError(
+        "Swap commands require targetAssignmentId or targetPosition.",
+      ),
+    };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      commandId,
+      idempotencyKey,
+      expectedVersion,
+      action: inferredAction,
+      assignmentId,
+      position,
+      roomId,
+      targetAssignmentId,
+      targetPosition,
+    },
+  };
+}
+
+function inferAssignmentAction(
+  raw: Record<string, unknown>,
+  explicitAction: string | undefined,
+): PmsAssignmentCommandAction | undefined {
+  if (
+    explicitAction === "assign" ||
+    explicitAction === "move" ||
+    explicitAction === "unassign" ||
+    explicitAction === "swap"
+  ) {
+    return explicitAction;
+  }
+  if (raw.roomId === null) return "unassign";
+  if (typeof raw.targetAssignmentId === "string" || typeof raw.targetPosition === "number") {
+    return "swap";
+  }
+  if (typeof raw.roomId === "string" && raw.roomId.trim()) return "assign";
+  return undefined;
+}
+
+function invalidAssignmentBodyError(message: string): PmsOperationsError {
+  return {
+    statusCode: 400,
+    code: "invalid_body",
+    category: "validation",
+    message,
+  };
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function optionalStringField(value: unknown): string | undefined {
+  return value === undefined ? undefined : stringField(value);
+}
+
+function nullableStringField(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return optionalStringField(value);
+}
+
+function optionalPositiveInteger(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function clampInteger(
