@@ -45,6 +45,10 @@ import {
   type BookingWebCalendarReadPool,
 } from "./routes/bookingWebPublic.js";
 import {
+  createTargetPmsOperationsReadRepository,
+  type PmsOperationsReadPool,
+} from "./domains/pmsOperationsReadModel.js";
+import {
   createCompatibilityPmsBookingReservationsReadRepository,
   toReservationResponse,
   type BookingReservationsReadPool,
@@ -52,7 +56,14 @@ import {
   type BookingReservationReadModel,
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
-import type { PmsOperationsReadRepository, PmsRoom, PmsRoomType } from "./routes/pmsOperations.js";
+import type {
+  PmsCalendarDay,
+  PmsOperationalReservation,
+  PmsOperationsReadRepository,
+  PmsRoom,
+  PmsRoomBlockSummary,
+  PmsRoomType,
+} from "./routes/pmsOperations.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 
 type PmsOperationsTestListResponse<T> = {
@@ -65,6 +76,23 @@ type PmsOperationsTestDetailResponse<T> = {
   contractVersion: "pms-operations.v1";
   propertyId: string;
   item: T;
+};
+
+type PmsOperationsTestCalendarResponse = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  days: PmsCalendarDay[];
+};
+
+type PmsOperationsTestReservationListResponse = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  items: PmsOperationalReservation[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+  };
 };
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
@@ -85,9 +113,12 @@ const pmsOperationsContractCases = JSON.parse(
     expected: {
       status?: number;
       itemCount?: number;
+      dayCount?: number;
       mustInclude?: string[];
       mustExclude?: string[];
       denials?: Array<{ condition: string; status: number; errorCode: string }>;
+      errorCode?: string;
+      message?: string;
     };
   }>;
 };
@@ -115,6 +146,21 @@ const pmsRoomsReadCase = pmsOperationsContractCases.cases.find(
 const pmsAuthorizationDenialCases = pmsOperationsContractCases.cases.filter((testCase) =>
   testCase.caseId.startsWith("authorization-denial-matrix-"),
 );
+const pmsCalendarBlocksReadCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "calendar-blocks-read",
+)!;
+const pmsCalendarRangeTooLargeCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "calendar-range-too-large",
+)!;
+const pmsCalendarReadModelUnavailableCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "calendar-read-model-unavailable",
+)!;
+const pmsRoomBlocksReadCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "room-blocks-read",
+)!;
+const pmsReservationsAssignedUnassignedCase = pmsOperationsContractCases.cases.find(
+  (testCase) => testCase.caseId === "reservations-assigned-unassigned",
+)!;
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_hotel_owner",
@@ -408,6 +454,129 @@ const pmsRooms: PmsRoom[] = [
   },
 ];
 
+const pmsRoomBlocks: PmsRoomBlockSummary[] = [
+  {
+    blockId: "f6855400-0000-0000-0000-000000000001",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    roomId: pmsRooms[1].roomId,
+    startsOn: "2026-08-15",
+    endsOn: "2026-08-15",
+    blockedCount: 1,
+    reason: "Maintenance inspection",
+    status: "active",
+  },
+  {
+    blockId: "f6855400-0000-0000-0000-000000000002",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    roomId: null,
+    startsOn: "2026-08-16",
+    endsOn: "2026-08-16",
+    blockedCount: 1,
+    reason: "Soft refurbishment",
+    status: "active",
+  },
+];
+
+const pmsCalendarDays: PmsCalendarDay[] = [
+  {
+    stayDate: "2026-08-15",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    totalCount: 2,
+    assignedCount: 1,
+    blockedCount: 1,
+    availableCount: 0,
+    status: "limited",
+    blocks: [pmsRoomBlocks[0]],
+    assignmentRefs: ["f6855500-0000-0000-0000-000000000001"],
+    sourceFreshness: { owner: "pms", status: "fresh" },
+  },
+  {
+    stayDate: "2026-08-16",
+    roomTypeId: pmsRoomTypes[0].roomTypeId,
+    totalCount: 2,
+    assignedCount: 1,
+    blockedCount: 1,
+    availableCount: 0,
+    status: "limited",
+    blocks: [pmsRoomBlocks[1]],
+    assignmentRefs: ["f6855500-0000-0000-0000-000000000001"],
+    sourceFreshness: { pms: { status: "fresh" } },
+  },
+  {
+    stayDate: "2026-08-17",
+    roomTypeId: pmsRoomTypes[1].roomTypeId,
+    totalCount: 1,
+    assignedCount: 0,
+    blockedCount: 0,
+    availableCount: 1,
+    status: "open",
+    blocks: [],
+    assignmentRefs: [],
+    sourceFreshness: { owner: "pms", status: "fresh" },
+  },
+];
+
+const pmsReservations: PmsOperationalReservation[] = [
+  {
+    guestBookingId: "f6854000-0000-0000-0000-000000000001",
+    bookingReference: "B-PMS-685",
+    status: "checked_out",
+    source: "channel",
+    stay: { checkIn: "2026-08-15", checkOut: "2026-08-18", adults: 2, children: 0 },
+    primaryGuest: {
+      displayName: "Nora Ops",
+      email: "nora.ops@example.test",
+      phone: "+43111222333",
+    },
+    assignments: [
+      {
+        assignmentId: "f6855500-0000-0000-0000-000000000001",
+        roomTypeId: pmsRoomTypes[0].roomTypeId,
+        ratePlanId: pmsRoomTypes[0].ratePlans[0].ratePlanId,
+        roomId: pmsRooms[0].roomId,
+        roomNumber: pmsRooms[0].roomNumber,
+        position: 1,
+        assignmentStatus: "assigned",
+        channel: "booking_com",
+        assignedAt: "2026-08-14T15:00:00.000Z",
+      },
+    ],
+    checkin: { completedAt: "2026-08-15T15:35:00.000Z", pendingFlags: [] },
+    checkout: { completedAt: "2026-08-18T10:15:00.000Z", pendingFlags: [] },
+    privateNoteCount: 1,
+    additionalGuestCount: 0,
+  },
+  {
+    guestBookingId: "f6854000-0000-0000-0000-000000000002",
+    bookingReference: "B-PMS-686",
+    status: "confirmed",
+    source: "direct_booking",
+    stay: { checkIn: "2026-08-16", checkOut: "2026-08-17", adults: 1, children: 0 },
+    primaryGuest: {
+      displayName: "Una Assigned",
+      email: "una@example.test",
+      phone: null,
+    },
+    assignments: [
+      {
+        assignmentId: "f6855500-0000-0000-0000-000000000002",
+        roomTypeId: pmsRoomTypes[1].roomTypeId,
+        ratePlanId: null,
+        roomId: null,
+        roomNumber: null,
+        position: 1,
+        assignmentStatus: "pending",
+        channel: "direct",
+        assignedAt: null,
+      },
+    ],
+    checkin: { completedAt: null, pendingFlags: ["id_document"] },
+    checkout: { completedAt: null, pendingFlags: [] },
+    privateNoteCount: 0,
+    additionalGuestCount: 0,
+  },
+];
+
 const pmsOperationsRepository: PmsOperationsReadRepository = {
   async listRoomsByPropertyId(propertyId) {
     expect(propertyId).toBe(pmsPropertyId);
@@ -420,6 +589,34 @@ const pmsOperationsRepository: PmsOperationsReadRepository = {
   async findRoomTypeById(propertyId, roomTypeId) {
     expect(propertyId).toBe(pmsPropertyId);
     return pmsRoomTypes.find((roomType) => roomType.roomTypeId === roomTypeId) ?? null;
+  },
+  async listCalendarDaysByPropertyId(propertyId, range) {
+    expect(propertyId).toBe(pmsPropertyId);
+    expect(range).toEqual({ from: "2026-08-15", to: "2026-08-17" });
+    return { items: pmsCalendarDays, sourceFreshness: { owner: "pms", status: "fresh" } };
+  },
+  async listRoomBlocksByPropertyId(propertyId, range) {
+    expect(propertyId).toBe(pmsPropertyId);
+    expect(range).toEqual({ from: "2026-08-15", to: "2026-08-21" });
+    return { items: pmsRoomBlocks, sourceFreshness: { owner: "pms", status: "fresh" } };
+  },
+  async listReservationsByPropertyId(propertyId, filters) {
+    expect(propertyId).toBe(pmsPropertyId);
+    expect(filters).toEqual({
+      status: undefined,
+      arrivalFrom: undefined,
+      arrivalTo: undefined,
+      search: undefined,
+      limit: 50,
+      offset: 0,
+    });
+    return { items: pmsReservations, total: pmsReservations.length };
+  },
+  async findReservationByGuestBookingId(propertyId, guestBookingId) {
+    expect(propertyId).toBe(pmsPropertyId);
+    return (
+      pmsReservations.find((reservation) => reservation.guestBookingId === guestBookingId) ?? null
+    );
   },
 };
 
@@ -5192,6 +5389,342 @@ describe("vayada-api", () => {
         roomTypeId: pmsRoomTypes[0].roomTypeId,
         name: "Alpine Suite",
       },
+    });
+  });
+
+  it("returns PMS calendar days and room blocks using the P1b route contract fixture", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsCalendarBlocksReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestCalendarResponse;
+    expect(response.statusCode).toBe(pmsCalendarBlocksReadCase.expected.status);
+    expect(body.contractVersion).toBe("pms-operations.v1");
+    expect(body.days).toHaveLength(pmsCalendarBlocksReadCase.expected.dayCount!);
+    for (const path of pmsCalendarBlocksReadCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    expect(body.days.every((day) => day.availableCount + day.assignedCount + day.blockedCount === day.totalCount)).toBe(
+      true,
+    );
+    expect(body.days.flatMap((day) => day.blocks)).toEqual(
+      expect.arrayContaining([pmsRoomBlocks[0], pmsRoomBlocks[1]]),
+    );
+    expect(body.days[0].assignmentRefs).toEqual(["f6855500-0000-0000-0000-000000000001"]);
+    expect(body.days[1].sourceFreshness).toEqual({ pms: { status: "fresh" } });
+  });
+
+  it("preserves nested PMS calendar source freshness from target rows", async () => {
+    const pool: PmsOperationsReadPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: unknown[],
+      ): Promise<QueryResult<T>> {
+        expect(text).toContain('inventory.source_freshness AS "sourceFreshness"');
+        expect(values).toEqual([pmsPropertyId, "2026-08-15", "2026-08-17"]);
+        return {
+          command: "SELECT",
+          rowCount: 1,
+          oid: 0,
+          fields: [],
+          rows: [
+            {
+              stayDate: "2026-08-15",
+              roomTypeId: pmsRoomTypes[0].roomTypeId,
+              totalCount: 2,
+              assignedCount: 1,
+              blockedCount: 1,
+              availableCount: 0,
+              status: "limited",
+              blocks: [pmsRoomBlocks[0]],
+              assignmentRefs: ["f6855500-0000-0000-0000-000000000001"],
+              sourceFreshness: { pms: { status: "fresh" } },
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPmsOperationsReadRepository({
+      connectionString: "postgresql://pms-operations-read",
+      pool,
+    });
+
+    const result = await repository.listCalendarDaysByPropertyId(pmsPropertyId, {
+      from: "2026-08-15",
+      to: "2026-08-17",
+    });
+
+    expect(result.items[0]?.sourceFreshness).toEqual({ pms: { status: "fresh" } });
+  });
+
+  it("rejects PMS calendar ranges over the documented maximum", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsCalendarRangeTooLargeCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(pmsCalendarRangeTooLargeCase.expected.status);
+    expect((response.body as { code: string }).code).toBe(
+      pmsCalendarRangeTooLargeCase.expected.errorCode,
+    );
+  });
+
+  it("fails PMS calendar reads explicitly when the read model is unavailable", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsRepository: {
+        ...pmsOperationsRepository,
+        async listCalendarDaysByPropertyId() {
+          throw new Error("projection unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsCalendarReadModelUnavailableCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(pmsCalendarReadModelUnavailableCase.expected.status);
+    expect(response.body).toMatchObject({
+      code: pmsCalendarReadModelUnavailableCase.expected.errorCode,
+      category: "read_model",
+      message: pmsCalendarReadModelUnavailableCase.expected.message,
+    });
+  });
+
+  it("rejects PMS calendar rows that violate the inventory count invariant", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsRepository: {
+        ...pmsOperationsRepository,
+        async listCalendarDaysByPropertyId() {
+          return {
+            items: [{ ...pmsCalendarDays[0], availableCount: 1 }],
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsCalendarBlocksReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toMatchObject({
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "PMS calendar read model is unavailable.",
+    });
+  });
+
+  it("returns PMS room blocks using the P1b route contract fixture", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsRoomBlocksReadCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestListResponse<PmsRoomBlockSummary>;
+    expect(response.statusCode).toBe(pmsRoomBlocksReadCase.expected.status);
+    expect(body.items).toHaveLength(pmsRoomBlocksReadCase.expected.itemCount!);
+    for (const path of pmsRoomBlocksReadCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    expect(body.items.some((block) => block.roomId)).toBe(true);
+    expect(body.items.some((block) => block.roomId === null)).toBe(true);
+  });
+
+  it("returns PMS operational reservations with assigned and unassigned positions", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      ...pmsOperationsRequestOptions(pmsReservationsAssignedUnassignedCase.request),
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    const body = response.body as PmsOperationsTestReservationListResponse;
+    expect(response.statusCode).toBe(pmsReservationsAssignedUnassignedCase.expected.status);
+    expect(body.items).toHaveLength(pmsReservationsAssignedUnassignedCase.expected.itemCount!);
+    for (const path of pmsReservationsAssignedUnassignedCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    expect(body.pagination).toEqual({ total: 2, limit: 50, offset: 0 });
+    expect(body.items.flatMap((item) => item.assignments.map((assignment) => assignment.assignmentStatus))).toEqual([
+      "assigned",
+      "pending",
+    ]);
+    expect(body.items[1].assignments[0].roomId).toBeNull();
+  });
+
+  it("returns PMS reservation empty states and forwards pagination/search filters", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsRepository: {
+        ...pmsOperationsRepository,
+        async listReservationsByPropertyId(propertyId, filters) {
+          expect(propertyId).toBe(pmsPropertyId);
+          expect(filters).toEqual({
+            status: "confirmed",
+            arrivalFrom: "2026-08-01",
+            arrivalTo: "2026-08-31",
+            search: "Nora",
+            limit: 500,
+            offset: 10,
+          });
+          return { items: [], total: 0 };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/reservations`,
+      query: {
+        status: " confirmed ",
+        arrivalFrom: "2026-08-01",
+        arrivalTo: "2026-08-31",
+        search: " Nora ",
+        limit: "999",
+        offset: "10",
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      propertyId: pmsPropertyId,
+      items: [],
+      pagination: { total: 0, limit: 500, offset: 10 },
+    });
+  });
+
+  it("returns PMS reservation detail and not-found errors", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+    });
+
+    const detail = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/reservations/${pmsReservations[0].guestBookingId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const missing = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/reservations/f6854000-0000-0000-0000-000000009999`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(detail.statusCode).toBe(200);
+    expect(detail.body as PmsOperationsTestDetailResponse<PmsOperationalReservation>).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      propertyId: pmsPropertyId,
+      item: {
+        guestBookingId: pmsReservations[0].guestBookingId,
+        assignments: [{ assignmentStatus: "assigned", roomNumber: "101" }],
+      },
+    });
+    expect(missing.statusCode).toBe(404);
+    expect(missing.body).toMatchObject({
+      code: "reservation_not_found",
+      category: "not_found",
     });
   });
 
