@@ -198,15 +198,21 @@ const legacyBooking = {
 describe("Booking Web public bootstrap parity", () => {
   it("records affiliate click attribution through the configured sink", async () => {
     const events: unknown[] = [];
+    const legacyRequests: unknown[] = [];
     const app = buildApp({
       logger: false,
       publicHotelProfileRepository: createProfileRepository(legacyHotel, {}),
+      bookingPublicApiUrl: "https://api.booking.localhost",
       bookingWebPublicNow: () => new Date("2026-06-06T11:00:00.000Z"),
       bookingWebAttributionSink: {
         async recordAffiliateClick(event) {
           events.push(event);
         },
         async recordTelemetryEvent() {},
+      },
+      async bookingWebPublicFetch(input) {
+        legacyRequests.push(input.toString());
+        return jsonResponse({ ok: true });
       },
     });
 
@@ -229,10 +235,11 @@ describe("Booking Web public bootstrap parity", () => {
         landingUrl: "https://hotel-alpenrose.booking.localhost/?ref=REF-123",
       },
     ]);
+    expect(legacyRequests).toEqual([]);
     await app.close();
   });
 
-  it("records booking-web telemetry through the configured sink", async () => {
+  it("records booking-web telemetry through the configured sink without legacy forwarding", async () => {
     const events: unknown[] = [];
     const legacyRequests: unknown[] = [];
     const app = buildApp({
@@ -262,6 +269,7 @@ describe("Booking Web public bootstrap parity", () => {
       payload: {
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
+        eventId: "event_page_visit_001",
         sessionId: "sid_123",
         metadata: { locale: "de" },
       },
@@ -272,22 +280,12 @@ describe("Booking Web public bootstrap parity", () => {
       {
         hotelSlug: "hotel-alpenrose",
         eventType: "page_visit",
+        eventId: "event_page_visit_001",
         sessionId: "sid_123",
         metadata: { locale: "de" },
       },
     ]);
-    expect(legacyRequests).toEqual([
-      {
-        url: "https://api.booking.localhost/api/events",
-        method: "POST",
-        body: {
-          hotel_slug: "hotel-alpenrose",
-          event_type: "page_visit",
-          session_id: "sid_123",
-          metadata: { locale: "de" },
-        },
-      },
-    ]);
+    expect(legacyRequests).toEqual([]);
     await app.close();
   });
 

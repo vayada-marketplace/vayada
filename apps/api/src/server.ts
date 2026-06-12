@@ -31,7 +31,10 @@ import {
   createPgBookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
-import { createTargetBookingWebCalendarRepository } from "./routes/bookingWebPublic.js";
+import {
+  createTargetBookingWebCalendarRepository,
+  createTargetBookingWebCheckoutAdapter,
+} from "./routes/bookingWebPublic.js";
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
@@ -129,6 +132,13 @@ const publicHotelQuoteRepository =
 const bookingWebCalendarRepository =
   config.publicBookabilitySource === "target"
     ? createTargetBookingWebCalendarRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
+const bookingWebCheckoutAdapter =
+  config.bookingCheckoutCommandSource === "target"
+    ? createTargetBookingWebCheckoutAdapter({
         connectionString: config.targetDatabaseUrl!,
       })
     : undefined;
@@ -246,14 +256,16 @@ const app = buildApp({
   bookingDomainResolutionSource: config.bookingDomainResolutionSource,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
   bookingWebCalendarRepository,
+  bookingWebCheckoutAdapter,
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
-  bookingWebAttributionSink: config.auth
-    ? createPgBookingWebEventSink({
-        connectionString: config.auth.databaseUrl,
-      })
-    : undefined,
+  bookingWebAttributionSink:
+    config.bookingWebEventSink === "target" && config.auth
+      ? createPgBookingWebEventSink({
+          connectionString: config.auth.databaseUrl,
+        })
+      : undefined,
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
 });

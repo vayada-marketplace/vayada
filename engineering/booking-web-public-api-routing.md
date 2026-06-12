@@ -79,7 +79,7 @@ Booking Web
 | `bookingService.submitChangeRequest`  | PMS API             | `POST /api/hotels/{slug}/bookings/{bookingId}/change-request`         | Booking/checkout plus PMS sink          | `POST /api/booking-web/hotels/{slug}/bookings/{bookingId}/change-request`                      |
 | `bookingService.getChangeRequest`     | PMS API             | `GET /api/hotels/{slug}/bookings/{bookingId}/change-request`          | Booking/checkout                        | `GET /api/booking-web/hotels/{slug}/bookings/{bookingId}/change-request`                       |
 | `hotelService.recordAffiliateClick`   | PMS API             | `POST /api/hotels/{slug}/affiliates/{referralCode}/click`             | Marketplace plus Jobs/events/audit      | `POST /api/booking-web/hotels/{slug}/attribution/clicks`                                       |
-| `trackEvent`                          | Booking API         | `POST /api/events`                                                    | Jobs/events/audit via Booking telemetry | Keep as event intake or merge with attribution intake                                          |
+| `trackEvent`                          | Booking API         | `POST /api/events`                                                    | Jobs/events/audit via Booking telemetry | `POST /api/booking-web/events`; no legacy Booking forwarding                                   |
 
 The target route family is intentionally Booking Web specific. Public AI and
 partner bookability routes may stay under `/api/ai/...`; Booking Web should not
@@ -177,6 +177,16 @@ responses, but it does not own the click write. The intake endpoint may emit
 marketplace attribution events and telemetry jobs, but Booking Web must not
 write PMS affiliate click rows or know which PMS adapter will eventually receive
 commission context.
+
+Dashboard source after VAY-769: Booking Web page/funnel telemetry is target-only
+when `BOOKING_WEB_EVENT_SINK=target` and `AUTH_DATABASE_URL`/WorkOS auth config
+are present. Dashboard readers should query `platform.domain_events` for
+`booking_web.*` distribution events and join the matching
+`platform.product_audit_events` rows when audit/correlation context is needed.
+The TypeScript intake no longer best-effort forwards telemetry to legacy Booking
+`/api/events`. Telemetry event keys use a client `eventId`/`idempotencyKey` when
+provided and otherwise the API request id; they must not dedupe all repeated
+events in a browser session.
 
 ## Transitional Compatibility
 
