@@ -25,7 +25,10 @@ import {
   createTargetPublicHotelProfileRepository,
 } from "./routes/aiHotels.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
-import { createTargetBookingWebCalendarRepository } from "./routes/bookingWebPublic.js";
+import {
+  createTargetBookingWebCalendarRepository,
+  createTargetBookingWebCheckoutAdapter,
+} from "./routes/bookingWebPublic.js";
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
@@ -127,6 +130,13 @@ const bookingWebCalendarRepository =
       })
     : undefined;
 
+const bookingWebCheckoutAdapter =
+  config.bookingCheckoutCommandSource === "target"
+    ? createTargetBookingWebCheckoutAdapter({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
@@ -196,6 +206,7 @@ const app = buildApp({
   bookingDomainResolutionSource: config.bookingDomainResolutionSource,
   pmsPublicApiUrl: config.pmsPublicApiUrl,
   bookingWebCalendarRepository,
+  bookingWebCheckoutAdapter,
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,

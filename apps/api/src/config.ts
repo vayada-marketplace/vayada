@@ -36,6 +36,7 @@ export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
+export type BookingCheckoutCommandSource = "legacy_proxy" | "target";
 
 export type ApiConfig = {
   host: string;
@@ -56,6 +57,7 @@ export type ApiConfig = {
   marketplaceDiscoveryAllowedOrigins: string[];
   pmsApiUrl?: string;
   pmsPublicApiUrl?: string;
+  bookingCheckoutCommandSource: BookingCheckoutCommandSource;
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingHostBase?: string;
 };
@@ -217,6 +219,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const bookingCheckoutCommandSource = readSourceEnv(
+    env,
+    "BOOKING_CHECKOUT_COMMAND_SOURCE",
+    ["legacy_proxy", "target"],
+    "legacy_proxy",
+  );
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
   }
@@ -236,6 +244,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (publicBookabilitySource === "target" && publicHotelProfileSource !== "target") {
     throw new Error("PUBLIC_BOOKABILITY_SOURCE=target requires PUBLIC_HOTEL_PROFILE_SOURCE=target");
+  }
+  if (bookingCheckoutCommandSource === "target" && !targetDatabaseUrl) {
+    throw new Error("BOOKING_CHECKOUT_COMMAND_SOURCE=target requires TARGET_DATABASE_URL");
   }
 
   return {
@@ -267,6 +278,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
     pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
+    bookingCheckoutCommandSource,
     bookingWebLegacyCheckoutCommandProxyEnabled: readBooleanEnv(
       env,
       "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
