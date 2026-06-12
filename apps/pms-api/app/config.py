@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     CHANNEX_ADMIN_IFRAME_URL_MODE: str = ""
     CHANNEX_ADMIN_WEBHOOK_SETUP_MODE: str = ""
 
+    # Legacy scheduler cutover controls
+    PMS_SCHEDULER_ENABLED: bool = True
+    PMS_SCHEDULER_JOB_ALLOWLIST: str = ""
+    PMS_SCHEDULER_JOB_BLOCKLIST: str = ""
+
     # Legacy provider webhook cutover controls. Provider-specific values
     # override PMS_LEGACY_WEBHOOK_MODE; proxy URLs can be set globally by base
     # URL or per provider when the target routes are not path-compatible.
