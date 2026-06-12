@@ -340,6 +340,35 @@ export type FinancePaymentLedgerResponse = {
   sourceFreshness: FinanceJsonObject;
 };
 
+export const FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS = [
+  "audit_event",
+  "booking_projection_refresh",
+  "pms_projection_refresh",
+] as const;
+
+export type FinanceManualPaymentSideEffect = (typeof FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS)[number];
+
+export type FinanceProjectionRefreshJob = {
+  jobType: "booking.projection-refresh" | "pms.projection-refresh";
+  idempotencyKey: string;
+  status: "queued" | "idempotent_replay";
+};
+
+export type FinanceCommandMeta = {
+  commandId: string;
+  idempotencyKey: string;
+  sideEffects: FinanceManualPaymentSideEffect[];
+  outboxEvents: string[];
+  jobs: FinanceProjectionRefreshJob[];
+};
+
+export type FinanceManualPaymentRecordResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  invoice: FinanceInvoiceDetail;
+  commandMeta: FinanceCommandMeta;
+};
+
 export type FinanceInvoiceCsvExportDisposition = {
   status: "ready" | "queued" | "unsupported";
   disposition: "stream_existing_read_model" | "durable_export_job" | "not_available";
@@ -427,6 +456,14 @@ export type SettleManualCheckoutChargePayload = {
   markedPaidAt: FinanceUtcDateTime;
   operatorUserId: string;
   pmsCommandId: string;
+};
+
+export type RecordManualInvoicePaymentPayload = {
+  invoiceId: string;
+  amount: FinanceDecimalAmount;
+  currency: FinanceCurrencyCode;
+  paymentMethod: Exclude<FinanceRoutePaymentMethod, "wallet" | "xendit">;
+  reference?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -574,8 +611,34 @@ export type FinancePropertyLedgerReadRepository = {
   ): Promise<Omit<FinanceInvoiceCsvExportResponse, "contractVersion" | "propertyId">>;
 };
 
+export type FinanceManualPaymentRecordCommand = FinanceCommandBase<
+  "finance.manual_payment.record",
+  RecordManualInvoicePaymentPayload
+>;
+
+export type FinanceManualPaymentRecordResult =
+  | {
+      ok: true;
+      status: "created" | "idempotent_replay";
+      invoice: FinanceInvoiceDetail;
+      commandMeta: FinanceCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 404 | 409 | 500;
+      code: "invalid_command" | "invoice_not_found" | "idempotency_conflict" | "write_unavailable";
+      message: string;
+    };
+
+export type FinancePropertyCommandRepository = {
+  recordManualPayment(
+    command: FinanceManualPaymentRecordCommand,
+  ): Promise<FinanceManualPaymentRecordResult>;
+};
+
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &
-  Partial<FinancePropertyLedgerReadRepository>;
+  Partial<FinancePropertyLedgerReadRepository> &
+  Partial<FinancePropertyCommandRepository>;
 
 export function toFinancePaymentSettingsResponse(
   settings: FinancePaymentSettingsReadModel,
@@ -830,6 +893,7 @@ export type FinanceCommand =
   | UpdatePropertyCurrencyCommand
   | UpdateBillingPlanCommand
   | UpdateAddOnPriceCommand
+  | FinanceManualPaymentRecordCommand
   | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
@@ -838,6 +902,7 @@ export const financeCommandTypes = [
   "finance.currency.update",
   "finance.billing.plan.update",
   "finance.add_on.price.update",
+  "finance.manual_payment.record",
   "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 
@@ -955,6 +1020,14 @@ export function buildCheckoutChargeSettlementIdempotencyKey(input: {
   pmsCommandId: string;
 }): string {
   return `finance.checkout-charge-settlement:checkout_charge:${input.checkoutChargeId}:mark-paid:${input.pmsCommandId}:v1`;
+}
+
+export function buildManualPaymentProjectionJobIdempotencyKey(input: {
+  jobType: FinanceProjectionRefreshJob["jobType"];
+  guestBookingId: string;
+  paymentIdempotencyKey: string;
+}): string {
+  return `${input.jobType}:booking:${input.guestBookingId}:finance-payment:${input.paymentIdempotencyKey}:v1`;
 }
 
 // ---------------------------------------------------------------------------

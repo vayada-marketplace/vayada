@@ -8,12 +8,15 @@ import {
 import { injectJson } from "@vayada/backend-test";
 import type {
   CancellationPolicy,
+  FinanceCommandMeta,
   FinanceFinancialSummary,
   FinanceInvoiceDetail,
   FinanceInvoiceListItem,
   FinanceInvoiceListQuery,
   FinanceInvoicePayment,
   FinanceInvoiceStatusCounts,
+  FinanceManualPaymentRecordCommand,
+  FinanceManualPaymentRecordResult,
   FinancePaymentLedgerItem,
   FinancePaymentLedgerQuery,
   FinancePaymentSettingsReadModel,
@@ -42,7 +45,12 @@ const financeContractCases = JSON.parse(
 ) as {
   cases: Array<{
     caseId: string;
-    request: { path: string; method?: string; query?: Record<string, string | number> };
+    request: {
+      path: string;
+      method?: string;
+      query?: Record<string, string | number>;
+      body?: Record<string, unknown>;
+    };
     expected: {
       status: number;
       itemCount?: number;
@@ -50,6 +58,7 @@ const financeContractCases = JSON.parse(
       mustInclude?: string[];
       mustExclude?: string[];
       errorCode?: string;
+      commandMeta?: { sideEffects?: string[] };
       enums?: Record<string, string[]>;
     };
   }>;
@@ -319,6 +328,79 @@ describe("finance route contracts", () => {
         /providerPayloadRaw|providerPaymentIntentSecret|cardFingerprint|processorFeeBreakdown|guestBirthDate|privatePmsNotes|providerPaymentIntentId|booking_guests/,
       );
     }
+  });
+
+  it("passes the F1d manual payment record fixture in target mode", async () => {
+    const repository = manualPaymentRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "manual-payment-record-command",
+    );
+    expect(contractCase).toBeDefined();
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    expect(response.body.commandMeta).toMatchObject({
+      idempotencyKey: "finance-manual-payment-inv-2026-abcd-001",
+      sideEffects: ["audit_event", "booking_projection_refresh", "pms_projection_refresh"],
+      jobs: [
+        {
+          jobType: "booking.projection-refresh",
+          status: "queued",
+        },
+        {
+          jobType: "pms.projection-refresh",
+          status: "queued",
+        },
+      ],
+    });
+    expect(repository.writeCount).toBe(1);
+    expect(repository.outboxEnqueueCount).toBe(2);
+    expect(JSON.stringify(response.body)).not.toMatch(/Stripe API|Xendit API|Channex API/);
+  });
+
+  it("replays the F1d manual payment idempotency key without duplicate side effects", async () => {
+    const repository = manualPaymentRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "manual-payment-record-command-idempotency-replay",
+    );
+    expect(contractCase).toBeDefined();
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(replay.statusCode).toBe(contractCase!.expected.status);
+    expect(readContractPath(first.body, "invoice.payments[0].paymentId")).toBe(
+      readContractPath(replay.body, "invoice.payments[0].paymentId"),
+    );
+    expect(readContractPath(replay.body, "commandMeta.jobs[0].status")).toBe("idempotent_replay");
+    expect(repository.writeCount).toBe(1);
+    expect(repository.outboxEnqueueCount).toBe(2);
   });
 
   it("returns financial summary with source freshness from the Finance read model", async () => {
@@ -879,6 +961,86 @@ const financeRepository: FinancePropertyReadRepository = {
   },
 };
 
+function manualPaymentRepository(): FinancePropertyReadRepository & {
+  writeCount: number;
+  outboxEnqueueCount: number;
+} {
+  const records = new Map<string, FinanceManualPaymentRecordResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & {
+    writeCount: number;
+    outboxEnqueueCount: number;
+  } = {
+    ...financeRepository,
+    writeCount: 0,
+    outboxEnqueueCount: 0,
+    async recordManualPayment(command) {
+      if (command.propertyId !== propertyId || command.payload.invoiceId !== "inv_2026_abcd") {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "invoice_not_found",
+          message: "Finance invoice was not found.",
+        };
+      }
+
+      const existing = records.get(command.idempotencyKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "idempotent_replay",
+          commandMeta: {
+            ...existing.commandMeta,
+            jobs: existing.commandMeta.jobs.map((job) => ({
+              ...job,
+              status: "idempotent_replay",
+            })),
+          },
+        };
+      }
+
+      repository.writeCount += 1;
+      repository.outboxEnqueueCount += 2;
+      const commandMeta = manualPaymentCommandMeta(command, "queued");
+      const result = {
+        ok: true,
+        status: "created",
+        invoice: invoiceDetails[0]!,
+        commandMeta,
+      } satisfies FinanceManualPaymentRecordResult & { ok: true };
+      records.set(command.idempotencyKey, result);
+      return result;
+    },
+  };
+  return repository;
+}
+
+function manualPaymentCommandMeta(
+  command: FinanceManualPaymentRecordCommand,
+  jobStatus: "queued" | "idempotent_replay",
+): FinanceCommandMeta {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: ["audit_event", "booking_projection_refresh", "pms_projection_refresh"],
+    outboxEvents: [
+      `finance.manual-payment.booking-projection.${command.idempotencyKey}.v1`,
+      `finance.manual-payment.pms-projection.${command.idempotencyKey}.v1`,
+    ],
+    jobs: [
+      {
+        jobType: "booking.projection-refresh",
+        idempotencyKey: `booking.projection-refresh:booking:${invoiceDetails[0]!.guestBookingId}:finance-payment:${command.idempotencyKey}:v1`,
+        status: jobStatus,
+      },
+      {
+        jobType: "pms.projection-refresh",
+        idempotencyKey: `pms.projection-refresh:booking:${invoiceDetails[0]!.guestBookingId}:finance-payment:${command.idempotencyKey}:v1`,
+        status: jobStatus,
+      },
+    ],
+  };
+}
+
 const emptyFinanceRepository: FinancePropertyReadRepository = {
   async getPaymentSettings() {
     return null;
@@ -887,6 +1049,10 @@ const emptyFinanceRepository: FinancePropertyReadRepository = {
     return null;
   },
 };
+
+function financeManagePermissions(): PermissionKey[] {
+  return ["pms.finance.read", "pms.finance.manage" as PermissionKey];
+}
 
 function filterInvoices(query: FinanceInvoiceListQuery): FinanceInvoiceListItem[] {
   const search = query.search?.toLowerCase();

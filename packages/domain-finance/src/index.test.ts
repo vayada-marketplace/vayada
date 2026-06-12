@@ -4,6 +4,7 @@ import {
   FINANCE_BILLING_PLANS,
   FINANCE_PAYMENT_METHODS,
   FINANCE_ROUTE_CONTRACT_VERSION,
+  buildManualPaymentProjectionJobIdempotencyKey,
   buildCheckoutChargeSettlementIdempotencyKey,
   buildUpdateAddOnPriceIdempotencyKey,
   calculatePayoutSplit,
@@ -17,6 +18,7 @@ import {
   type BillingConfigReadPort,
   type FinanceCommandBus,
   type FinanceCommandResult,
+  type FinanceManualPaymentRecordCommand,
   type FinancePaymentSettingsReadModel,
   type PaymentSettingsReadModel,
   type PaymentSettingsReadPort,
@@ -70,7 +72,54 @@ describe("@vayada/domain-finance constants", () => {
     expect(financeCommandTypes).toContain("finance.currency.update");
     expect(financeCommandTypes).toContain("finance.billing.plan.update");
     expect(financeCommandTypes).toContain("finance.add_on.price.update");
+    expect(financeCommandTypes).toContain("finance.manual_payment.record");
     expect(financeCommandTypes).toContain("finance.checkout_charge.settle_manual");
+  });
+});
+
+describe("manual payment record command", () => {
+  it("models F1d as an idempotent finance payment write with projection jobs", () => {
+    const command: FinanceManualPaymentRecordCommand = {
+      commandType: "finance.manual_payment.record",
+      commandId: "cmd-manual-payment-001",
+      idempotencyKey: "finance-manual-payment-inv-2026-abcd-001",
+      propertyId: "property_001",
+      audit: {
+        actor: { kind: "user", userId: "user_front_desk", organizationId: "org_hotel" },
+        requestId: "req_manual_payment_001",
+        correlationId: "corr_manual_payment_001",
+        reason: "Manual payment recorded by property finance user",
+        requestedAt: "2026-06-12T12:00:00.000Z",
+      },
+      payload: {
+        invoiceId: "inv_2026_abcd",
+        amount: "250.00",
+        currency: "EUR",
+        paymentMethod: "cash",
+        reference: "front desk receipt 8812",
+      },
+    };
+
+    expect(command.commandType).toBe("finance.manual_payment.record");
+    expect(command.payload.paymentMethod).toBe("cash");
+    expect(
+      buildManualPaymentProjectionJobIdempotencyKey({
+        jobType: "booking.projection-refresh",
+        guestBookingId: "guest_booking_001",
+        paymentIdempotencyKey: command.idempotencyKey,
+      }),
+    ).toBe(
+      "booking.projection-refresh:booking:guest_booking_001:finance-payment:finance-manual-payment-inv-2026-abcd-001:v1",
+    );
+    expect(
+      buildManualPaymentProjectionJobIdempotencyKey({
+        jobType: "pms.projection-refresh",
+        guestBookingId: "guest_booking_001",
+        paymentIdempotencyKey: command.idempotencyKey,
+      }),
+    ).toBe(
+      "pms.projection-refresh:booking:guest_booking_001:finance-payment:finance-manual-payment-inv-2026-abcd-001:v1",
+    );
   });
 });
 

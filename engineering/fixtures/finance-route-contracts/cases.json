@@ -202,9 +202,37 @@
           "commandMeta.idempotencyKey"
         ],
         "commandMeta": {
-          "sideEffects": ["audit_event", "booking_projection_refresh"]
+          "sideEffects": ["audit_event", "booking_projection_refresh", "pms_projection_refresh"]
         },
         "mustNotCall": ["Stripe API", "Xendit API", "Channex API"]
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command-idempotency-replay",
+      "description": "Replaying the manual payment idempotency key returns the original payment and does not enqueue duplicate projection jobs.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_abcd/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-001",
+          "idempotencyKey": "finance-manual-payment-inv-2026-abcd-001",
+          "amount": "250.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt 8812"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "invoice.payments[0].paymentId",
+          "commandMeta.idempotencyKey",
+          "commandMeta.jobs[0].status"
+        ],
+        "commandMeta": {
+          "sideEffects": ["audit_event", "booking_projection_refresh", "pms_projection_refresh"]
+        },
+        "outboxEnqueueCount": 2
       }
     },
     {
