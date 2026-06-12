@@ -80,6 +80,12 @@ describe("runParityChecks fixture config validation", () => {
             properties: [],
             forbiddenPrivateBoundaryValues: [1],
           },
+          platformMediaChecks: {
+            legacyUrlInventory: [],
+            requiredPurposes: [1],
+            requiredPublicVariants: [1],
+            forbiddenPublicValues: [1],
+          },
         }),
       );
 
@@ -91,7 +97,7 @@ describe("runParityChecks fixture config validation", () => {
       });
 
       expect(report.status).toBe("failed");
-      expect(report.summary.failures).toBe(16);
+      expect(report.summary.failures).toBe(20);
       expect(report.findings).toEqual([
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
@@ -157,6 +163,22 @@ describe("runParityChecks fixture config validation", () => {
         expect.objectContaining({
           code: "INVALID_FIXTURE_CONFIG",
           targetObject: "expected-target.json.intelligenceChecks.forbiddenPrivateBoundaryValues",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.platformMediaChecks.legacyUrlInventory",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.platformMediaChecks.requiredPurposes",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.platformMediaChecks.requiredPublicVariants",
+        }),
+        expect.objectContaining({
+          code: "INVALID_FIXTURE_CONFIG",
+          targetObject: "expected-target.json.platformMediaChecks.forbiddenPublicValues",
         }),
       ]);
     } finally {
@@ -475,7 +497,7 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
       const perms = await client.query(
         `SELECT count(*)::int AS count FROM identity.permission_catalog`,
       );
-      expect(perms.rows[0].count).toBe(18);
+      expect(perms.rows[0].count).toBe(20);
 
       const entitlements = await client.query(
         `SELECT count(*)::int AS count FROM identity.product_entitlements`,

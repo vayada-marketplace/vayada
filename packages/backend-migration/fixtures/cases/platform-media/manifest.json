@@ -1,0 +1,5 @@
+{
+  "caseId": "platform-media",
+  "sourceDatabases": ["target"],
+  "description": "Target-only platform media registry fixture covering purpose contracts, legacy URL classification, public variants, and private storage leakage parity."
+}
