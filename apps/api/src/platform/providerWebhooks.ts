@@ -187,12 +187,15 @@ async function promoteReceipt(
       ? "promoted"
       : promotionStatusForReceipt(await selectReceiptStatusById(client, input.receiptId));
 
+    const auditEventId = await insertOrFindFinanceAuditEvent(client, input, eventId, jobId);
+
     await client.query("COMMIT");
     return {
       status: promotionStatus,
       receiptId: input.receiptId,
       domainEventId: eventId,
       jobIds: [jobId],
+      auditEventIds: auditEventId ? [auditEventId] : [],
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -388,6 +391,104 @@ async function insertOrFindJob(
     throw new Error(`Unable to resolve webhook job ${input.normalizedPreview.jobKey}`);
   }
   return existingId;
+}
+
+async function insertOrFindFinanceAuditEvent(
+  client: pg.PoolClient,
+  input: ProviderWebhookPromotionInput,
+  domainEventId: string,
+  jobId: string,
+): Promise<string | null> {
+  if (input.normalizedPreview.resourceProduct !== "finance") {
+    return null;
+  }
+
+  const auditKey = input.normalizedPreview.domainEventKey;
+  const inserted = await client.query<{ id: string }>(
+    `INSERT INTO platform.product_audit_events
+       (
+         audit_key,
+         product,
+         action,
+         occurred_at,
+         tenant_scope,
+         actor_type,
+         target_resource_product,
+         target_resource_type,
+         target_resource_id,
+         domain_event_id,
+         external_webhook_event_id,
+         job_id,
+         correlation_id,
+         causation_id,
+         redacted_payload,
+         private_payload,
+         audit_metadata,
+         retention_class,
+         privacy_scope
+       )
+     VALUES
+       (
+         $1,
+         'finance',
+         $2,
+         now(),
+         'external',
+         'provider',
+         'finance',
+         $3,
+         $4,
+         $5,
+         $6,
+         $7,
+         $8,
+         $6,
+         $9,
+         '{}'::jsonb,
+         $10,
+         'financial',
+         'confidential'
+       )
+     ON CONFLICT (product, audit_key) DO NOTHING
+     RETURNING id`,
+    [
+      auditKey,
+      input.normalizedPreview.domainEventType,
+      input.normalizedPreview.resourceType,
+      input.normalizedPreview.resourceId,
+      domainEventId,
+      input.receiptId,
+      jobId,
+      input.receiptKey,
+      JSON.stringify({
+        provider: input.provider,
+        domainEventType: input.normalizedPreview.domainEventType,
+        resourceType: input.normalizedPreview.resourceType,
+        resourceId: input.normalizedPreview.resourceId,
+        jobType: input.normalizedPreview.jobType,
+        queueName: input.normalizedPreview.queueName,
+      }),
+      JSON.stringify({
+        source: "target_provider_webhook_intake",
+        receiptKey: input.receiptKey,
+        domainEventKey: input.normalizedPreview.domainEventKey,
+        jobKey: input.normalizedPreview.jobKey,
+        receiptKeyHash: input.receiptKeyHash,
+        payloadHash: input.payloadHash,
+      }),
+    ],
+  );
+  const insertedId = inserted.rows[0]?.id;
+  if (insertedId) return insertedId;
+
+  const existing = await client.query<{ id: string }>(
+    `SELECT id
+     FROM platform.product_audit_events
+     WHERE product = 'finance' AND audit_key = $1
+     LIMIT 1`,
+    [auditKey],
+  );
+  return existing.rows[0]?.id ?? null;
 }
 
 async function insertOrTouchIdempotencyKey(

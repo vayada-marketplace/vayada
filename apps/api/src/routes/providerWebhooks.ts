@@ -71,6 +71,7 @@ export type ProviderWebhookPromotionResult = {
   receiptId: string;
   domainEventId?: string;
   jobIds: string[];
+  auditEventIds?: string[];
 };
 
 export type ProviderWebhookStore = {
@@ -297,6 +298,7 @@ async function handleAuthenticatedProviderWebhook(input: {
     receiptKey: input.receiptKey,
     domainEventId: promotion.domainEventId,
     jobIds: promotion.jobIds,
+    auditEventIds: promotion.auditEventIds ?? [],
   });
 }
 
@@ -524,6 +526,16 @@ function previewStripeEvent(
       },
     };
   }
+  if (eventType.startsWith("payout.")) {
+    const status = optionalString(dataObject, "status") ?? eventType.replace("payout.", "");
+    return payoutPreview({
+      provider: "stripe",
+      payoutId: objectId,
+      providerStatus: status,
+      financeStatus: financePayoutStatus("stripe", status),
+      rawPayload: payload,
+    });
+  }
   return fallbackPreview("stripe", receiptKey, eventType, payload);
 }
 
@@ -555,22 +567,13 @@ function previewXenditEvent(
     });
   }
 
-  return {
-    domainEventKey: `payout.status:xendit:${classification.providerObjectId}:${classification.status}:v1`,
-    domainEventType: "payout.status",
-    resourceProduct: "finance",
-    resourceType: "payout",
-    resourceId: classification.providerObjectId,
-    jobKey: `finance.reconcile-payout:payout:${classification.providerObjectId}:xendit-status-${classification.status}:v1`,
-    queueName: "finance.webhooks",
-    jobType: "finance.reconcile-payout",
-    payload: {
-      provider: "xendit",
-      payoutId: classification.providerObjectId,
-      status: classification.status,
-      rawPayload: payload,
-    },
-  };
+  return payoutPreview({
+    provider: "xendit",
+    payoutId: classification.providerObjectId,
+    providerStatus: classification.status,
+    financeStatus: financePayoutStatus("xendit", classification.status),
+    rawPayload: payload,
+  });
 }
 
 function previewChannexEvent(
@@ -633,6 +636,12 @@ function paymentPreview(input: {
   domainEventKey: string;
   rawPayload: Record<string, unknown>;
 }): ProviderWebhookNormalizedPreview {
+  const financeStatus =
+    input.domainEventType === "payment.authorized"
+      ? "authorized"
+      : input.domainEventType === "payment.captured"
+        ? "paid"
+        : financePaymentTerminalStatus(input.provider, input.rawPayload);
   return {
     domainEventKey: input.domainEventKey,
     domainEventType: input.domainEventType,
@@ -646,9 +655,76 @@ function paymentPreview(input: {
       provider: input.provider,
       paymentId: input.paymentId,
       amount: input.amount,
+      financeStatus,
       rawPayload: input.rawPayload,
     },
   };
+}
+
+function payoutPreview(input: {
+  provider: "stripe" | "xendit";
+  payoutId: string;
+  providerStatus: string;
+  financeStatus:
+    | "pending"
+    | "scheduled"
+    | "processing"
+    | "paid"
+    | "failed"
+    | "canceled"
+    | "reversed";
+  rawPayload: Record<string, unknown>;
+}): ProviderWebhookNormalizedPreview {
+  return {
+    domainEventKey: `payout.status:${input.provider}:${input.payoutId}:${input.providerStatus}:v1`,
+    domainEventType: "payout.status",
+    resourceProduct: "finance",
+    resourceType: "payout",
+    resourceId: input.payoutId,
+    jobKey: `finance.reconcile-payout:payout:${input.payoutId}:${input.provider}-status-${input.providerStatus}:v1`,
+    queueName: "finance.webhooks",
+    jobType: "finance.reconcile-payout",
+    payload: {
+      provider: input.provider,
+      payoutId: input.payoutId,
+      providerStatus: input.providerStatus,
+      financeStatus: input.financeStatus,
+      rawPayload: input.rawPayload,
+    },
+  };
+}
+
+function financePaymentTerminalStatus(
+  provider: "stripe" | "xendit",
+  rawPayload: Record<string, unknown>,
+): "failed" | "canceled" {
+  const dataObject = optionalRecord(optionalRecord(rawPayload, "data"), "object") ?? rawPayload;
+  const providerStatus = optionalString(dataObject, "status") ?? "";
+  if (
+    providerStatus.toLowerCase() === "canceled" ||
+    providerStatus.toUpperCase() === "EXPIRED" ||
+    providerStatus.toUpperCase() === "CANCELED" ||
+    providerStatus.toUpperCase() === "CANCELLED"
+  ) {
+    return "canceled";
+  }
+  return provider === "xendit" && providerStatus.toUpperCase() === "VOIDED" ? "canceled" : "failed";
+}
+
+function financePayoutStatus(
+  provider: "stripe" | "xendit",
+  providerStatus: string,
+): "pending" | "scheduled" | "processing" | "paid" | "failed" | "canceled" | "reversed" {
+  const status = providerStatus.toUpperCase();
+  if (status === "PAID" || status === "SUCCEEDED" || status === "COMPLETED") return "paid";
+  if (status === "FAILED" || status === "FAILURE") return "failed";
+  if (status === "CANCELED" || status === "CANCELLED" || status === "VOIDED") return "canceled";
+  if (status === "REVERSED" || status === "RETURNED") return "reversed";
+  if (status === "SCHEDULED") return "scheduled";
+  if (status === "IN_TRANSIT" || status === "PROCESSING" || status === "PENDING") {
+    return provider === "stripe" && status === "PENDING" ? "pending" : "processing";
+  }
+  return "processing";
 }
 
 function fallbackPreview(

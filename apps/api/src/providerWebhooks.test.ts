@@ -181,6 +181,99 @@ describe("target provider webhook routes", () => {
     await app.close();
   });
 
+  it("replays Stripe and Xendit payment and payout events without duplicate finance status jobs", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: {
+          stripe: "whsec_stripe_test",
+          xendit: "xendit-secret",
+        },
+        modes: {
+          stripe: "mutating",
+          xendit: "mutating",
+        },
+        store,
+        now: () => fixedNow,
+      },
+    });
+    const samples: Array<{
+      provider: "stripe" | "xendit";
+      payload: Record<string, unknown>;
+      expectedReceiptKey: string;
+    }> = [
+      {
+        provider: "stripe",
+        payload: providerFixture("stripe").payload,
+        expectedReceiptKey: "webhook:stripe:evt_stripe_pi_succeeded",
+      },
+      {
+        provider: "stripe",
+        payload: stripePayoutPayload(),
+        expectedReceiptKey: "webhook:stripe:evt_stripe_payout_paid",
+      },
+      {
+        provider: "xendit",
+        payload: providerFixture("xendit").payload,
+        expectedReceiptKey: "webhook:xendit:invoice:inv_xendit_paid:PAID",
+      },
+      {
+        provider: "xendit",
+        payload: xenditPayoutPayload(),
+        expectedReceiptKey: "webhook:xendit:payout:po_xendit_123:SUCCEEDED",
+      },
+    ];
+
+    for (const sample of samples) {
+      const first = await postProviderPayload(app, sample.provider, sample.payload);
+      const replay = await postProviderPayload(app, sample.provider, sample.payload);
+
+      expect(first.statusCode).toBe(200);
+      expect(replay.statusCode).toBe(200);
+      expect(first.json()).toMatchObject({
+        status: "promoted",
+        receiptKey: sample.expectedReceiptKey,
+      });
+      expect(replay.json()).toMatchObject({
+        status: "duplicate",
+        receiptKey: sample.expectedReceiptKey,
+        lifecycleStatus: "promoted",
+      });
+    }
+
+    expect(store.receipts.map((receipt) => receipt.receiptKey)).toEqual([
+      "webhook:stripe:evt_stripe_pi_succeeded",
+      "webhook:stripe:evt_stripe_payout_paid",
+      "webhook:xendit:invoice:inv_xendit_paid:PAID",
+      "webhook:xendit:payout:po_xendit_123:SUCCEEDED",
+    ]);
+    expect(store.domainEvents.map((event) => event.domainEventKey)).toEqual([
+      "payment.captured:stripe:pi_stripe_123:42000:v1",
+      "payout.status:stripe:po_stripe_123:paid:v1",
+      "payment.captured:xendit:inv_xendit_paid:42000:v1",
+      "payout.status:xendit:po_xendit_123:SUCCEEDED:v1",
+    ]);
+    expect(store.jobs.map((job) => job.jobKey)).toEqual([
+      "payment.reconcile-status:payment:pi_stripe_123:stripe-event-evt_stripe_pi_succeeded:v1",
+      "finance.reconcile-payout:payout:po_stripe_123:stripe-status-paid:v1",
+      "payment.reconcile-status:payment:inv_xendit_paid:xendit-invoice-inv_xendit_paid:v1",
+      "finance.reconcile-payout:payout:po_xendit_123:xendit-status-SUCCEEDED:v1",
+    ]);
+    expect(store.auditEvents.map((event) => event.auditKey)).toEqual(
+      store.domainEvents.map((event) => event.domainEventKey),
+    );
+    expect(store.auditEvents.map((event) => event.action)).toEqual([
+      "payment.captured",
+      "payout.status",
+      "payment.captured",
+      "payout.status",
+    ]);
+    expect(
+      store.receipts.map((receipt) => receipt.normalizedPreview.payload.financeStatus),
+    ).toEqual(["paid", "paid", "paid", "paid"]);
+    await app.close();
+  });
+
   it("normalizes Channex message receipts into PMS channel events and dedupes by property/message", async () => {
     const store = createMemoryProviderWebhookStore();
     const app = buildApp({
@@ -426,6 +519,13 @@ type MemoryProviderWebhookStore = ProviderWebhookStore & {
   >;
   domainEvents: Array<{ domainEventId: string; domainEventKey: string }>;
   jobs: Array<{ jobId: string; jobKey: string }>;
+  auditEvents: Array<{
+    auditEventId: string;
+    auditKey: string;
+    action: string;
+    receiptId: string;
+    jobId: string;
+  }>;
   idempotencyKeys: string[];
 };
 
@@ -433,12 +533,14 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
   const receipts: MemoryProviderWebhookStore["receipts"] = [];
   const domainEvents: MemoryProviderWebhookStore["domainEvents"] = [];
   const jobs: MemoryProviderWebhookStore["jobs"] = [];
+  const auditEvents: MemoryProviderWebhookStore["auditEvents"] = [];
   const idempotencyKeys: string[] = [];
 
   return {
     receipts,
     domainEvents,
     jobs,
+    auditEvents,
     idempotencyKeys,
     async recordReceipt(input) {
       const existing = receipts.find((receipt) => receipt.receiptKey === input.receiptKey);
@@ -480,6 +582,19 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
       if (!existingJob) {
         jobs.push({ jobId, jobKey: input.normalizedPreview.jobKey });
       }
+      const existingAudit = auditEvents.find(
+        (event) => event.auditKey === input.normalizedPreview.domainEventKey,
+      );
+      const auditEventId = existingAudit?.auditEventId ?? `audit_${auditEvents.length + 1}`;
+      if (!existingAudit && input.normalizedPreview.resourceProduct === "finance") {
+        auditEvents.push({
+          auditEventId,
+          auditKey: input.normalizedPreview.domainEventKey,
+          action: input.normalizedPreview.domainEventType,
+          receiptId: input.receiptId,
+          jobId,
+        });
+      }
 
       if (receipt.lifecycleStatus !== "observed") {
         return {
@@ -487,6 +602,8 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
           receiptId: input.receiptId,
           domainEventId,
           jobIds: [jobId],
+          auditEventIds:
+            input.normalizedPreview.resourceProduct === "finance" ? [auditEventId] : [],
         };
       }
 
@@ -498,6 +615,7 @@ function createMemoryProviderWebhookStore(): MemoryProviderWebhookStore {
         receiptId: input.receiptId,
         domainEventId,
         jobIds: [jobId],
+        auditEventIds: input.normalizedPreview.resourceProduct === "finance" ? [auditEventId] : [],
       };
     },
   };
@@ -542,6 +660,19 @@ async function postChannexPayload(
     method: "POST",
     url: "/webhooks/channex",
     headers: fixtureHeaders("channex", payload),
+    payload: JSON.stringify(payload),
+  });
+}
+
+async function postProviderPayload(
+  app: ReturnType<typeof buildApp>,
+  provider: "stripe" | "xendit",
+  payload: Record<string, unknown>,
+) {
+  return app.inject({
+    method: "POST",
+    url: `/webhooks/${provider}`,
+    headers: fixtureHeaders(provider, payload),
     payload: JSON.stringify(payload),
   });
 }
@@ -623,6 +754,32 @@ function providerFixture(provider: "stripe" | "xendit" | "channex"): {
         },
       };
   }
+}
+
+function stripePayoutPayload(): Record<string, unknown> {
+  return {
+    id: "evt_stripe_payout_paid",
+    type: "payout.paid",
+    data: {
+      object: {
+        id: "po_stripe_123",
+        object: "payout",
+        status: "paid",
+        amount: 42000,
+      },
+    },
+  };
+}
+
+function xenditPayoutPayload(): Record<string, unknown> {
+  return {
+    event: "payout.succeeded",
+    data: {
+      id: "po_xendit_123",
+      status: "SUCCEEDED",
+      amount: 42000,
+    },
+  };
 }
 
 function fixtureHeaders(
