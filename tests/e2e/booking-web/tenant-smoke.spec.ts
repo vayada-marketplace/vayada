@@ -81,6 +81,23 @@ test.describe("booking-web tenant smoke", () => {
 
     await assertHealthy();
   });
+
+  test("keeps public structured data off checkout routes", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    await page.goto(
+      "/book?room=alpine-suite&checkIn=2026-09-12&checkOut=2026-09-15&adults=2&children=0&rooms=1&rateType=flexible",
+    );
+
+    await expect(page).toHaveTitle(/Guest Details \| Book Your Stay/);
+    await expect(
+      page.locator('script[type="application/ld+json"]#booking-web-public-structured-data'),
+    ).toHaveCount(0);
+    await expect(page.locator('script[type="application/ld+json"]')).toHaveCount(0);
+
+    await assertHealthy();
+  });
 });
 
 type JsonLdNode = {
