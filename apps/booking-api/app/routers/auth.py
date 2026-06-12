@@ -6,6 +6,7 @@ import logging
 import secrets
 from datetime import UTC, datetime
 
+from asyncpg import InvalidSchemaNameError, UndefinedTableError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -88,17 +89,20 @@ _INVALID_TOKEN = TokenValidationResponse(
 
 
 async def _is_workos_migrated_user(user_id: str) -> bool:
-    row = await AuthDatabase.fetchrow(
-        """
-        SELECT 1
-        FROM identity.external_identities
-        WHERE user_id = $1
-          AND provider = 'workos'
-          AND provider_user_id IS NOT NULL
-        LIMIT 1
-        """,
-        user_id,
-    )
+    try:
+        row = await AuthDatabase.fetchrow(
+            """
+            SELECT 1
+            FROM identity.external_identities
+            WHERE user_id = $1
+              AND provider = 'workos'
+              AND provider_user_id IS NOT NULL
+            LIMIT 1
+            """,
+            user_id,
+        )
+    except (InvalidSchemaNameError, UndefinedTableError):
+        return False
     return row is not None
 
 
