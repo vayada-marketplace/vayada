@@ -1,7 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import type {
+  PmsCalendarDay,
   PmsOperationsReadRepository,
+  PmsOperationalReservation,
+  PmsReservationListFilters,
+  PmsRoomBlockSummary,
   PmsRoom,
   PmsRoomType,
   PmsSourceFreshness,
@@ -12,10 +16,19 @@ export const PMS_OPERATIONS_CONTRACT_VERSION = "pms-operations.v1" as const;
 
 export type PmsOperationsContractVersion = typeof PMS_OPERATIONS_CONTRACT_VERSION;
 export type {
+  PmsCalendarDay,
   PmsOperationsReadRepository,
+  PmsOperationalReservation,
+  PmsRoomBlockSummary,
   PmsRoom,
   PmsRoomType,
 } from "../domains/pmsOperationsReadModel.js";
+
+export const PMS_RESERVATION_LIST_DEFAULT_LIMIT = 50;
+export const PMS_RESERVATION_LIST_MIN_LIMIT = 1;
+export const PMS_RESERVATION_LIST_MAX_LIMIT = 500;
+export const PMS_RESERVATION_LIST_DEFAULT_OFFSET = 0;
+export const PMS_CALENDAR_MAX_RANGE_DAYS = 370;
 
 export type PmsRoomsResponse = {
   contractVersion: PmsOperationsContractVersion;
@@ -38,6 +51,39 @@ export type PmsRoomTypeDetailResponse = {
   sourceFreshness: PmsSourceFreshness;
 };
 
+export type PmsCalendarResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  days: PmsCalendarDay[];
+  sourceFreshness: PmsSourceFreshness;
+};
+
+export type PmsRoomBlocksResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  items: PmsRoomBlockSummary[];
+  sourceFreshness: PmsSourceFreshness;
+};
+
+export type PmsReservationListResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  items: PmsOperationalReservation[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+  };
+  sourceFreshness: PmsSourceFreshness;
+};
+
+export type PmsReservationDetailResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  item: PmsOperationalReservation;
+  sourceFreshness: PmsSourceFreshness;
+};
+
 export type PmsOperationsRoutesOptions = {
   repository: PmsOperationsReadRepository;
   allowedOrigins?: string[];
@@ -51,7 +97,35 @@ type PmsRoomTypeParams = PmsPropertyParams & {
   roomTypeId: string;
 };
 
-type PmsOperationsErrorCategory = "authentication" | "authorization" | "read_model" | "not_found";
+type PmsReservationParams = PmsPropertyParams & {
+  guestBookingId: string;
+};
+
+type PmsCalendarQuery = {
+  from?: string;
+  to?: string;
+};
+
+type PmsRoomBlocksQuery = {
+  from?: string;
+  to?: string;
+};
+
+type PmsReservationListQuery = {
+  status?: string;
+  arrivalFrom?: string;
+  arrivalTo?: string;
+  search?: string;
+  limit?: string;
+  offset?: string;
+};
+
+type PmsOperationsErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "validation"
+  | "read_model"
+  | "not_found";
 
 type PmsOperationsErrorCode =
   | "unauthenticated"
@@ -60,11 +134,14 @@ type PmsOperationsErrorCode =
   | "missing_entitlement"
   | "inactive_entitlement"
   | "missing_resource_access"
+  | "invalid_query"
+  | "invalid_date_range"
   | "read_model_unavailable"
-  | "room_type_not_found";
+  | "room_type_not_found"
+  | "reservation_not_found";
 
 type PmsOperationsError = {
-  statusCode: 401 | 403 | 404 | 500;
+  statusCode: 400 | 401 | 403 | 404 | 500;
   code: PmsOperationsErrorCode;
   category: PmsOperationsErrorCategory;
   message: string;
@@ -84,6 +161,10 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/rooms",
     "/properties/:propertyId/room-types",
     "/properties/:propertyId/room-types/:roomTypeId",
+    "/properties/:propertyId/calendar",
+    "/properties/:propertyId/room-blocks",
+    "/properties/:propertyId/reservations",
+    "/properties/:propertyId/reservations/:guestBookingId",
   ]) {
     app.options(path, async (request, reply) => {
       if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
@@ -199,6 +280,160 @@ export async function registerPmsOperationsRoutes(
       }
     },
   );
+
+  app.get<{ Params: PmsPropertyParams; Querystring: PmsCalendarQuery }>(
+    "/properties/:propertyId/calendar",
+    async (request, reply) => {
+      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 403,
+          code: "missing_permission",
+          category: "authorization",
+          message: "PMS operations origin is not allowed.",
+        });
+      }
+      const { propertyId } = request.params;
+      if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+      const range = toCalendarRange(request.query);
+      if ("error" in range) return sendPmsOperationsError(reply, range.error);
+
+      try {
+        const result = await repository.listCalendarDaysByPropertyId(propertyId, range.value);
+        if (!result.items.every(hasBalancedCalendarCounts)) {
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS calendar read model is unavailable."),
+          );
+        }
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          days: result.items,
+          sourceFreshness: result.sourceFreshness ?? {},
+        } satisfies PmsCalendarResponse;
+      } catch {
+        return sendPmsOperationsError(
+          reply,
+          readModelUnavailable("PMS calendar read model is unavailable."),
+        );
+      }
+    },
+  );
+
+  app.get<{ Params: PmsPropertyParams; Querystring: PmsRoomBlocksQuery }>(
+    "/properties/:propertyId/room-blocks",
+    async (request, reply) => {
+      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 403,
+          code: "missing_permission",
+          category: "authorization",
+          message: "PMS operations origin is not allowed.",
+        });
+      }
+      const { propertyId } = request.params;
+      if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+      const range = toOptionalDateRange(request.query);
+      if ("error" in range) return sendPmsOperationsError(reply, range.error);
+
+      try {
+        const result = await repository.listRoomBlocksByPropertyId(propertyId, range.value);
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          items: result.items,
+          sourceFreshness: result.sourceFreshness ?? {},
+        } satisfies PmsRoomBlocksResponse;
+      } catch {
+        return sendPmsOperationsError(
+          reply,
+          readModelUnavailable("PMS room blocks read model is unavailable."),
+        );
+      }
+    },
+  );
+
+  app.get<{ Params: PmsPropertyParams; Querystring: PmsReservationListQuery }>(
+    "/properties/:propertyId/reservations",
+    async (request, reply) => {
+      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 403,
+          code: "missing_permission",
+          category: "authorization",
+          message: "PMS operations origin is not allowed.",
+        });
+      }
+      const { propertyId } = request.params;
+      if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+      const filters = toReservationFilters(request.query);
+      if ("error" in filters) return sendPmsOperationsError(reply, filters.error);
+
+      try {
+        const result = await repository.listReservationsByPropertyId(propertyId, filters.value);
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          items: result.items,
+          pagination: {
+            total: result.total,
+            limit: filters.value.limit,
+            offset: filters.value.offset,
+          },
+          sourceFreshness: result.sourceFreshness ?? {},
+        } satisfies PmsReservationListResponse;
+      } catch {
+        return sendPmsOperationsError(
+          reply,
+          readModelUnavailable("PMS reservations read model is unavailable."),
+        );
+      }
+    },
+  );
+
+  app.get<{ Params: PmsReservationParams }>(
+    "/properties/:propertyId/reservations/:guestBookingId",
+    async (request, reply) => {
+      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 403,
+          code: "missing_permission",
+          category: "authorization",
+          message: "PMS operations origin is not allowed.",
+        });
+      }
+      const { propertyId, guestBookingId } = request.params;
+      if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+      try {
+        const item = await repository.findReservationByGuestBookingId(propertyId, guestBookingId);
+        if (!item) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 404,
+            code: "reservation_not_found",
+            category: "not_found",
+            message: "PMS reservation not found.",
+          });
+        }
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          item,
+          sourceFreshness: {},
+        } satisfies PmsReservationDetailResponse;
+      } catch {
+        return sendPmsOperationsError(
+          reply,
+          readModelUnavailable("PMS reservations read model is unavailable."),
+        );
+      }
+    },
+  );
 }
 
 function enforcePmsOperationsReadPolicy(
@@ -263,6 +498,162 @@ function readModelUnavailable(message: string): PmsOperationsError {
   };
 }
 
+function toCalendarRange(
+  query: PmsCalendarQuery,
+):
+  | { value: { from: string; to: string } }
+  | { error: PmsOperationsError } {
+  if (!query.from || !query.to) {
+    return {
+      error: {
+        statusCode: 400,
+        code: "invalid_query",
+        category: "validation",
+        message: "Calendar requires from and to date query parameters.",
+      },
+    };
+  }
+
+  const range = toRequiredDateRange(query.from, query.to);
+  if ("error" in range) return range;
+
+  const days = daysInclusive(range.value.from, range.value.to);
+  if (days > PMS_CALENDAR_MAX_RANGE_DAYS) {
+    return {
+      error: {
+        statusCode: 400,
+        code: "invalid_date_range",
+        category: "validation",
+        message: "Calendar date range cannot exceed 370 days.",
+      },
+    };
+  }
+
+  return range;
+}
+
+function toOptionalDateRange(
+  query: PmsRoomBlocksQuery,
+):
+  | { value: { from?: string; to?: string } | undefined }
+  | { error: PmsOperationsError } {
+  const from = query.from?.trim() || undefined;
+  const to = query.to?.trim() || undefined;
+  if (!from && !to) return { value: undefined };
+
+  if (from && !isDateOnly(from)) {
+    return { error: invalidDateRangeError() };
+  }
+  if (to && !isDateOnly(to)) {
+    return { error: invalidDateRangeError() };
+  }
+  if (from && to && daysInclusive(from, to) < 1) {
+    return { error: invalidDateRangeError() };
+  }
+
+  return { value: { from, to } };
+}
+
+function toRequiredDateRange(
+  rawFrom: string,
+  rawTo: string,
+):
+  | { value: { from: string; to: string } }
+  | { error: PmsOperationsError } {
+  const from = rawFrom.trim();
+  const to = rawTo.trim();
+  if (!isDateOnly(from) || !isDateOnly(to) || daysInclusive(from, to) < 1) {
+    return { error: invalidDateRangeError() };
+  }
+
+  return { value: { from, to } };
+}
+
+function invalidDateRangeError(): PmsOperationsError {
+  return {
+    statusCode: 400,
+    code: "invalid_date_range",
+    category: "validation",
+    message: "Invalid PMS operations date range.",
+  };
+}
+
+function toReservationFilters(
+  query: PmsReservationListQuery,
+): { value: PmsReservationListFilters } | { error: PmsOperationsError } {
+  const arrivalFrom = query.arrivalFrom?.trim() || undefined;
+  const arrivalTo = query.arrivalTo?.trim() || undefined;
+
+  if (arrivalFrom && !isDateOnly(arrivalFrom)) {
+    return { error: invalidReservationQueryError() };
+  }
+  if (arrivalTo && !isDateOnly(arrivalTo)) {
+    return { error: invalidReservationQueryError() };
+  }
+  if (arrivalFrom && arrivalTo && daysInclusive(arrivalFrom, arrivalTo) < 1) {
+    return { error: invalidReservationQueryError() };
+  }
+
+  return {
+    value: {
+      status: query.status?.trim() || undefined,
+      arrivalFrom,
+      arrivalTo,
+      search: query.search?.trim() || undefined,
+      limit: clampInteger(
+        query.limit,
+        PMS_RESERVATION_LIST_DEFAULT_LIMIT,
+        PMS_RESERVATION_LIST_MIN_LIMIT,
+        PMS_RESERVATION_LIST_MAX_LIMIT,
+      ),
+      offset: clampInteger(
+        query.offset,
+        PMS_RESERVATION_LIST_DEFAULT_OFFSET,
+        PMS_RESERVATION_LIST_DEFAULT_OFFSET,
+        Number.MAX_SAFE_INTEGER,
+      ),
+    },
+  };
+}
+
+function invalidReservationQueryError(): PmsOperationsError {
+  return {
+    statusCode: 400,
+    code: "invalid_query",
+    category: "validation",
+    message: "Invalid PMS reservations query.",
+  };
+}
+
+function clampInteger(
+  raw: string | undefined,
+  defaultValue: number,
+  min: number,
+  max: number,
+): number {
+  if (!raw) return defaultValue;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function hasBalancedCalendarCounts(day: PmsCalendarDay): boolean {
+  return day.availableCount + day.assignedCount + day.blockedCount === day.totalCount;
+}
+
+function isDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function daysInclusive(from: string, to: string): number {
+  const fromTime = Date.parse(`${from}T00:00:00.000Z`);
+  const toTime = Date.parse(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(fromTime) || !Number.isFinite(toTime)) return 0;
+  return Math.floor((toTime - fromTime) / 86_400_000) + 1;
+}
+
 function toPmsOperationsAccessError(
   error: unknown,
   request: FastifyRequest,
@@ -296,7 +687,13 @@ function toPmsOperationsAuthorizationCode(
   propertyId: string,
 ): Exclude<
   PmsOperationsErrorCode,
-  "unauthenticated" | "invalid_token" | "read_model_unavailable" | "room_type_not_found"
+  | "unauthenticated"
+  | "invalid_token"
+  | "invalid_query"
+  | "invalid_date_range"
+  | "read_model_unavailable"
+  | "room_type_not_found"
+  | "reservation_not_found"
 > {
   const normalized = message.toLowerCase();
   if (normalized.includes("permission")) return "missing_permission";
@@ -311,7 +708,13 @@ function toPmsOperationsAuthorizationCode(
 function toPmsOperationsAuthorizationMessage(
   code: Exclude<
     PmsOperationsErrorCode,
-    "unauthenticated" | "invalid_token" | "read_model_unavailable" | "room_type_not_found"
+    | "unauthenticated"
+    | "invalid_token"
+    | "invalid_query"
+    | "invalid_date_range"
+    | "read_model_unavailable"
+    | "room_type_not_found"
+    | "reservation_not_found"
   >,
 ): string {
   switch (code) {

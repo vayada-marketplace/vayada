@@ -79,6 +79,23 @@ test("fails when Booking domain code imports Channex", () => {
   }
 });
 
+test("fails when Booking domain code imports PMS Channex contracts", () => {
+  const root = createFixtureRoot({
+    "packages/domain-booking/src/index.ts": `
+      import type { ChannexInboundRevisionJob } from "@vayada/domain-pms-channex";
+      export type BookingChannexJob = ChannexInboundRevisionJob;
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Channex/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("fails when route code uses product database env names even without a booking filename", () => {
   const root = createFixtureRoot({
     "apps/api/src/routes/reservations.ts": `

@@ -28,7 +28,7 @@ need those deployment-specific values.
 | `BOOKING_DATABASE_URL`                   | `createPgPublicHotelProfileRepository` reads `booking_hotels` for `/api/ai/hotels/:slug` and `/api/booking-web/hotels/:slug`; `findProfileByCustomDomain` is also used by host resolution.                                                                                                                     | `booking-api` DB                               | Public AI profile routes and Booking Web hotel/profile routes stop mounting. Known booking subdomain host resolution can no longer find a profile; custom-domain fallback loses the only local lookup when `BOOKING_PUBLIC_API_URL` is absent.                                                             | Replace with target-schema public profile read repository fed by hotel catalog, booking, finance, and distribution projections.                                                                                                                                                                                                                                                                 |
 | `BOOKING_DATABASE_URL`                   | `createPgBookingSettingsReadRepository` reads and writes `booking_hotels` columns for booking add-ons, guest-form, benefits, localization, and room-filter settings.                                                                                                                                           | `booking-api` DB                               | Authenticated Booking settings GET/PUT routes fail or are not registered. Until cutover, legacy Booking/PMS UIs and guest flows can also miss settings because the TypeScript route writes only the legacy table.                                                                                          | Keep writes on legacy until the cutover write-freeze. Implement target settings read/write repository dark, then flip writes during cutover after migrated snapshot validation.                                                                                                                                                                                                                 |
 | `BOOKING_RESERVATIONS_READ_DATABASE_URL` | `createCompatibilityPmsBookingReservationsReadRepository` reads PMS `bookings`, `room_types`, `rooms`, and `booking_rooms` for `/api/booking/hotels/:hotelId/reservations`.                                                                                                                                    | `pms-api` DB                                   | Booking admin reservation list has no read model; status/search pagination and assigned-room projection disappear.                                                                                                                                                                                         | Replace with target booking reservation read model backed by booking/checkout and PMS operations schemas. Activate after reservation migration parity passes.                                                                                                                                                                                                                                   |
-| `BOOKING_PUBLIC_API_URL`                 | Booking Web host resolution calls `/api/resolve-domain`; promo validation proxies `/api/hotels/:slug/validate-promo`; telemetry best-effort forwards `/api/events`.                                                                                                                                            | `booking-api` Python service                   | Verified custom domains can no longer be resolved through legacy verification, promo validation returns adapter failure, and legacy Booking dashboards stop receiving public telemetry forwarded from the TypeScript endpoint.                                                                             | Split by purpose: custom-domain resolution moves to target property/domain verification; promo validation moves to booking/checkout target rules; telemetry forwarding retires after platform event intake is the only dashboard source.                                                                                                                                                        |
+| `BOOKING_PUBLIC_API_URL`                 | Booking Web host resolution calls `/api/resolve-domain`; promo validation proxies `/api/hotels/:slug/validate-promo`. Booking Web telemetry no longer forwards to legacy `/api/events`; it uses the target event sink when `BOOKING_WEB_EVENT_SINK=target`.                                                    | `booking-api` Python service                   | Verified custom domains can no longer be resolved through legacy verification, and promo validation returns adapter failure. Booking Web dashboards must read target platform events for telemetry.                                                                                                        | Split by purpose: custom-domain resolution moves to target property/domain verification; promo validation moves to booking/checkout target rules. Telemetry forwarding is retired; keep `BOOKING_PUBLIC_API_URL` until B2/B4 remove the remaining domain and promo uses.                                                                                                                        |
 | `PMS_PUBLIC_API_URL`                     | Public AI quote fetches `/api/hotels/:slug/rooms`; Booking Web calendar fetches `/api/hotels/:slug/unavailable-dates`; checkout adapter proxies payment settings, booking creation, booking lookup/status, guest cancel/withdraw/change-request flows, and affiliate public registration/check/connect routes. | `pms-api` public surface                       | Public quote data becomes `unavailable_data`; Booking Web calendar returns empty unavailable dates; checkout config/status/lookup/affiliate routes fail; booking creation and guest command routes remain unavailable unless the explicit legacy command proxy flag is enabled and the legacy API is live. | Replace reads with target distribution/bookability projections. Replace checkout commands with booking/checkout command handlers plus PMS reservation handoff. Move affiliate registration/checks to marketplace/affiliate target ownership and Stripe Connect/onboarding to finance ownership; keep Booking Web only as the public compatibility facade while its referral modal remains live. |
 | `PMS_API_URL`                            | `createHttpPmsGuestFormSettingsSync` PATCHes `/admin/guest-form-settings` after Booking guest-form settings writes.                                                                                                                                                                                            | `pms-api` admin surface                        | Guest-form settings writes still update the legacy Booking DB, but PMS guest verification/check-in behavior can drift because the PMS copy is not synced.                                                                                                                                                  | Remove cross-service sync by making guest-form settings target-owned and consumed from the target read model by PMS/check-in flows after cutover. No runtime admin API call remains.                                                                                                                                                                                                            |
 | `MARKETPLACE_DATABASE_URL`               | `createPgMarketplaceDiscoveryReadRepository` reads target-looking marketplace schemas for public `/api/marketplace/listings` and `/api/marketplace/creators`.                                                                                                                                                  | Marketplace/product DB used by current runtime | Marketplace public discovery routes stop mounting; landing, marketplace-web, and vayada-admin consumers lose listing/creator browse data.                                                                                                                                                                  | Keep as temporary production data path until the scheduled refresh / target marketplace read model path is accepted, then point the repository at the cutover target DB and remove the legacy product DB env var.                                                                                                                                                                               |
@@ -88,6 +88,11 @@ need those deployment-specific values.
    custom-domain, telemetry).
    Replace promo/custom-domain behavior in the target services and retire the
    telemetry forwarder once platform event intake is the only dashboard source.
+   VAY-769 retires only the telemetry bridge: Booking Web public telemetry and
+   attribution clicks use `BOOKING_WEB_EVENT_SINK=target` with the auth DB event
+   store configured, which persists dashboard events to `platform.domain_events` with matching
+   `platform.product_audit_events`; `BOOKING_PUBLIC_API_URL` remains for
+   custom-domain resolution and promo validation until the B2/B4 cutovers land.
 
 ## Cutover-day activation
 
@@ -107,7 +112,7 @@ explicit switch and startup assertion.
 | Reservation list reads                          | `BOOKING_RESERVATIONS_READ_DATABASE_URL`                                                            | `TARGET_DATABASE_URL` plus `BOOKING_RESERVATIONS_SOURCE=target`                                                                                                                                    | `/api/booking/hotels/:hotelId/reservations` mounts and passes migrated-snapshot parity with the PMS legacy DB URL unset.                                                                                                                                                                                                                                                                  |
 | Booking Web checkout commands                   | `PMS_PUBLIC_API_URL`, `BOOKING_PUBLIC_API_URL`, `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED` | `TARGET_DATABASE_URL` plus `BOOKING_CHECKOUT_COMMAND_SOURCE=target`                                                                                                                                | Booking create/confirm/status/lookup/cancel/withdraw/change-request/promo/payment-instruction routes pass parity with all legacy public API URLs unset and the legacy proxy flag absent.                                                                                                                                                                                                  |
 | Booking Web affiliate routes                    | `PMS_PUBLIC_API_URL` affiliate calls and any legacy affiliate click handler                         | `TARGET_DATABASE_URL` plus `AFFILIATE_PUBLIC_SOURCE=target`, including `/api/booking-web/hotels/:slug/attribution/clicks`; route retirement flag only if the Booking Web referral modal is removed | Public affiliate routes mount against marketplace/affiliate plus finance target ownership, and `/api/booking-web/hotels/:slug/attribution/clicks` persists click-attribution events to the target event store with the legacy forwarding/handler disabled; or the routes return the accepted retired-contract response only after the public UI is removed, with no PMS proxy either way. |
-| Booking telemetry forwarding                    | `BOOKING_PUBLIC_API_URL` for `/api/events`                                                          | `AUTH_DATABASE_URL`/target event store plus `BOOKING_WEB_EVENT_SINK=target`                                                                                                                        | `/api/booking-web/events` and attribution click routes persist target events and make no legacy forwarding attempt.                                                                                                                                                                                                                                                                       |
+| Booking telemetry forwarding                    | `BOOKING_PUBLIC_API_URL` for `/api/events`                                                          | `AUTH_DATABASE_URL`/target event store plus explicit `BOOKING_WEB_EVENT_SINK=target`                                                                                                               | `/api/booking-web/events` and attribution click routes persist target events and make no legacy forwarding attempt.                                                                                                                                                                                                                                                                       |
 
 The staging rehearsal should prove the same steps against a migrated snapshot
 before production:
@@ -131,10 +136,47 @@ before production:
     `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED` and remaining
     command-path use of `PMS_PUBLIC_API_URL`.
 11. Flip or retire affiliate public routes and the remaining
-    `BOOKING_PUBLIC_API_URL` promo/domain/telemetry paths.
+    `BOOKING_PUBLIC_API_URL` promo/domain paths.
 12. Start `apps/api` with no legacy product DB URLs and no legacy product API
     URLs configured. The app must still mount all accepted replacement
     contracts needed for frontend and public traffic.
+
+### Checkout command flip notes
+
+`BOOKING_CHECKOUT_COMMAND_SOURCE=target` is a cutover-window switch, not a
+normal canary. Turn it on only after the final booking/finance/PMS target
+snapshot has passed parity and the legacy write-freeze is active for guest
+booking creation, guest lifecycle changes, promo application changes, payment
+state writes, and PMS reservation handoff writes.
+
+Forward cutover:
+
+1. Confirm `TARGET_DATABASE_URL` points at the migrated target database and
+   `PMS_PUBLIC_API_URL`, `BOOKING_PUBLIC_API_URL`, and
+   `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED` are absent from the
+   rehearsal environment.
+2. Set `BOOKING_CHECKOUT_COMMAND_SOURCE=target`.
+3. Smoke the Booking Web public checkout command matrix: config, create,
+   confirm authorization, status, lookup, withdraw, cancel preview, cancel,
+   change preview, change submit/get, payment instructions, and promo validate.
+4. Verify `platform.idempotency_keys`, `platform.product_audit_events`, and
+   `platform.jobs` contain property-scoped rows for the exercised command
+   paths. Create/cancel/change commands must enqueue PMS reservation handoff
+   work rather than calling legacy PMS public routes.
+
+Rollback:
+
+1. Stop new guest checkout writes briefly or keep the write-freeze active while
+   switching the source.
+2. Set `BOOKING_CHECKOUT_COMMAND_SOURCE=legacy_proxy`, restore
+   `PMS_PUBLIC_API_URL` and `BOOKING_PUBLIC_API_URL`, and explicitly set
+   `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED=true`.
+3. Replay only target commands whose idempotency/audit rows show no completed
+   PMS handoff job. Never replay a command that has a completed target
+   idempotency row and a completed PMS handoff job without a manual duplicate
+   booking review.
+4. Leave target audit/idempotency rows intact for reconciliation; do not delete
+   them during rollback.
 
 ## Follow-up implementation tickets
 
@@ -193,8 +235,9 @@ These scopes are ready to create once this decision record is accepted:
      persists to the target event store with legacy forwarding disabled, and no
      PMS proxy remains.
 
-9. **Retire legacy Booking public domain and telemetry bridges**
+9. **Retire remaining legacy Booking public domain bridge**
    - Replace `/api/resolve-domain` compatibility with target domain
-     verification and remove best-effort `/api/events` forwarding.
+     verification. VAY-769 already removed best-effort `/api/events`
+     forwarding from Booking Web telemetry intake.
    - Validation: custom-domain host resolution and dashboard telemetry use
      target services only.

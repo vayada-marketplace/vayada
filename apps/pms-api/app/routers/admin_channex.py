@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import settings
 from app.database import Database
@@ -28,6 +28,11 @@ from app.services import channex_service
 from app.services.channex.inbound import poll_bookings_for_hotel
 from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.channex.provisioning import provision_property
+from app.services.channex_admin_cutover import (
+    ChannexAdminRouteGroup,
+    describe_channex_admin_cutover_modes,
+    guard_channex_admin_route,
+)
 from app.services.channex_service import ChannexAPIError
 from app.utils import get_hotel_id
 
@@ -57,6 +62,7 @@ def _normalize_channex_application(app: str) -> str:
 
 @router.post("/channex/enable")
 async def channex_enable(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Enable the channel manager for this hotel.
@@ -64,6 +70,13 @@ async def channex_enable(
     Creates the Channex connection, provisions the property, room types,
     and rate plans — all in one step. Uses the platform-wide API key.
     """
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.ENABLE_DISABLE,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
 
@@ -110,9 +123,18 @@ async def channex_enable(
 
 @router.post("/channex/disable", status_code=204)
 async def channex_disable(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Disable the channel manager for this hotel."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.ENABLE_DISABLE,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
+
     hotel_id = await get_hotel_id(user_id)
     await ChannexConnectionRepository.deactivate(hotel_id)
 
@@ -120,11 +142,28 @@ async def channex_disable(
 # ── Status overview ──────────────────────────────────────────────────
 
 
+@router.get("/channex/cutover/modes")
+async def channex_cutover_modes(
+    user_id: str = Depends(require_super_admin),
+):
+    """Expose legacy Channex admin route modes for cutover evidence."""
+    return describe_channex_admin_cutover_modes()
+
+
 @router.get("/channex/status", response_model=ChannexSyncStatusResponse)
 async def channex_status(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Get a summary of the Channex integration status."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.READ_MODEL,
+        request,
+        mutation=False,
+    )
+    if proxy_response:
+        return proxy_response
+
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
 
@@ -158,9 +197,17 @@ async def channex_status(
 
 @router.post("/channex/provision")
 async def channex_provision(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Re-provision: create any new room types and rate plans in Channex."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.PROVISIONING,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -192,8 +239,17 @@ async def channex_provision(
     response_model=list[ChannexRoomTypeMappingResponse],
 )
 async def channex_list_room_type_mappings(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.READ_MODEL,
+        request,
+        mutation=False,
+    )
+    if proxy_response:
+        return proxy_response
+
     hotel_id = await get_hotel_id(user_id)
     mappings = await ChannexRoomTypeMappingRepository.list_by_hotel_id(hotel_id)
     return [
@@ -214,8 +270,17 @@ async def channex_list_room_type_mappings(
     response_model=list[ChannexRatePlanMappingResponse],
 )
 async def channex_list_rate_plan_mappings(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.READ_MODEL,
+        request,
+        mutation=False,
+    )
+    if proxy_response:
+        return proxy_response
+
     hotel_id = await get_hotel_id(user_id)
     mappings = await ChannexRatePlanMappingRepository.list_by_hotel_id(hotel_id)
     return [
@@ -240,9 +305,17 @@ async def channex_list_rate_plan_mappings(
 
 @router.post("/channex/sync-ari")
 async def channex_sync_ari(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Trigger a full availability + rates push to Channex."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.MANUAL_ARI_SYNC,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -258,9 +331,17 @@ async def channex_sync_ari(
 
 @router.post("/channex/sync-bookings")
 async def channex_sync_bookings(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Poll Channex booking revision feed and import new bookings."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.MANUAL_BOOKING_SYNC,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -276,6 +357,7 @@ async def channex_sync_bookings(
 
 @router.get("/channex/channels", response_model=ConnectedChannelsResponse)
 async def channex_list_channels(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Return the OTA channels currently connected for this hotel.
@@ -283,6 +365,13 @@ async def channex_list_channels(
     Used by the calendar legend to only show OTAs the hotel actually
     has wired up via the channel manager.
     """
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.READ_MODEL,
+        request,
+        mutation=False,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -323,10 +412,19 @@ async def channex_list_channels(
 
 @router.get("/channex/markups", response_model=ChannelMarkupsResponse)
 async def channex_get_markups(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Return current per-channel markup percentages for the hotel.
     Channels with no configured row default to 0%."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.READ_MODEL,
+        request,
+        mutation=False,
+    )
+    if proxy_response:
+        return proxy_response
+
     hotel_id = await get_hotel_id(user_id)
     rows = await ChannexChannelMarkupRepository.list_by_hotel_id(hotel_id)
     by_channel = {r["channel"]: r["markup_pct"] for r in rows}
@@ -339,11 +437,19 @@ async def channex_get_markups(
 @router.put("/channex/markups", response_model=ChannelMarkupsResponse)
 async def channex_update_markups(
     req: ChannelMarkupsUpdateRequest,
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Upsert per-channel markup percentages, ensure per-channel rate plans
     exist in Channex, and trigger an ARI re-sync so the updated prices
     propagate to OTAs."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.MARKUPS,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -389,6 +495,7 @@ async def channex_update_markups(
 
 @router.post("/channex/iframe-url")
 async def channex_iframe_url(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Generate a one-time iframe URL for channel management.
@@ -397,6 +504,13 @@ async def channex_iframe_url(
     (Booking.com, Airbnb, Expedia, etc.) and map rooms/rates
     without leaving the PMS UI.
     """
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.IFRAME_URL,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
 
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
@@ -425,10 +539,19 @@ WEBHOOK_HEADER_NAME = "X-Vayada-Webhook-Token"
 
 @router.post("/channex/messaging/backfill")
 async def channex_messaging_backfill(
+    request: Request,
     user_id: str = Depends(require_super_admin),
 ):
     """Install the Channex Messaging & Reviews app on every existing
     channex_connections row that doesn't have it yet. Idempotent."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.MESSAGING,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
+
     api_key = channex_service.get_platform_api_key()
 
     rows = await Database.fetch(
@@ -458,11 +581,20 @@ async def channex_messaging_backfill(
 
 @router.post("/channex/messaging/install")
 async def channex_messaging_install(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Install (or re-attempt installing) the Channex Messaging & Reviews app
     for the requesting hotel's property. Lets a hotel admin recover from a
     failed install without waiting for a super-admin backfill. Idempotent."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.MESSAGING,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
+
     hotel_id = await get_hotel_id(user_id)
     conn = await ChannexConnectionRepository.get_by_hotel_id(hotel_id)
     if not conn or not conn["is_active"]:
@@ -485,12 +617,21 @@ async def channex_messaging_install(
 
 @router.get("/channex/webhook-events/summary")
 async def channex_webhook_events_summary(
+    request: Request,
     hours: int = 24,
     user_id: str = Depends(require_super_admin),
 ):
     """Counts of Channex webhook events received in the last N hours, grouped
     by event_type. Use to detect a stuck webhook pipeline (zero `message`
     events for a sustained window means Channex has stopped delivering)."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.READ_MODEL,
+        request,
+        mutation=False,
+    )
+    if proxy_response:
+        return proxy_response
+
     if hours < 1 or hours > 24 * 30:
         raise HTTPException(status_code=400, detail="hours must be 1..720")
     rows = await ChannexWebhookEventRepository.summary_since(hours)
@@ -514,6 +655,7 @@ async def channex_webhook_events_summary(
 
 @router.post("/channex/webhook/setup")
 async def channex_webhook_setup(
+    request: Request,
     callback_url: str,
     user_id: str = Depends(require_super_admin),
 ):
@@ -523,6 +665,14 @@ async def channex_webhook_setup(
 
     Pass the public callback URL (e.g.
     `https://api.vayada.com/webhooks/channex`)."""
+    proxy_response = await guard_channex_admin_route(
+        ChannexAdminRouteGroup.WEBHOOK_SETUP,
+        request,
+        mutation=True,
+    )
+    if proxy_response:
+        return proxy_response
+
     if not settings.CHANNEX_WEBHOOK_SECRET:
         raise HTTPException(
             status_code=400,

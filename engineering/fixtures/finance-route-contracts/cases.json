@@ -1,0 +1,637 @@
+{
+  "contractVersion": "finance-route-contracts.v1",
+  "cases": [
+    {
+      "caseId": "payment-settings-read",
+      "description": "Property finance settings expose payment capabilities and provider onboarding state without sensitive provider configuration.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/payment-settings",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "contractVersion",
+          "propertyId",
+          "paymentSettings.paymentsEnabled",
+          "paymentSettings.acceptedMethods",
+          "paymentSettings.defaultCurrency",
+          "paymentSettings.providerAccount.status",
+          "paymentSettings.providerAccount.chargesEnabled",
+          "paymentSettings.sourceFreshness"
+        ],
+        "mustExclude": [
+          "stripeConnectAccountId",
+          "xenditAccountNumber",
+          "xenditAccountHolderName",
+          "sensitiveConfigRef",
+          "providerSecret",
+          "legacyPmsTable"
+        ],
+        "enums": {
+          "paymentSettings.acceptedMethods[]": [
+            "card",
+            "pay_at_property",
+            "xendit",
+            "cash",
+            "bank_transfer",
+            "manual_card",
+            "wallet",
+            "other"
+          ]
+        }
+      }
+    },
+    {
+      "caseId": "payment-settings-update-enqueues-redenomination",
+      "description": "Payment settings writes are idempotent and queue audited side effects instead of inline cross-domain currency conversion.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/payment-settings",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-finance-payment-settings-001",
+          "idempotencyKey": "finance-payment-settings-f300686-001",
+          "defaultCurrency": "EUR",
+          "acceptedMethods": ["card", "pay_at_property", "bank_transfer"],
+          "paymentsEnabled": true
+        }
+      },
+      "expected": {
+        "status": 200,
+        "commandMeta": {
+          "contractVersion": "finance-route-contracts.v1",
+          "idempotencyKey": "finance-payment-settings-f300686-001",
+          "sideEffects": ["audit_event", "booking_projection_refresh"]
+        },
+        "mustNotCall": [
+          "legacy BookingEngineDatabase",
+          "legacy PMS hotel_payment_settings sync",
+          "Stripe API",
+          "Xendit API"
+        ]
+      }
+    },
+    {
+      "caseId": "public-payment-capability-projection",
+      "description": "Booking Web receives only public-safe payment capability fields derived from finance settings.",
+      "request": {
+        "path": "/api/booking-web/hotels/hotel-alpenrose/payment-settings",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "paymentMethods",
+          "defaultCurrency",
+          "depositPolicy",
+          "cancellationPolicy.freeCancellationDays"
+        ],
+        "mustExclude": [
+          "providerAccountId",
+          "providerAccountRef",
+          "payoutsEnabled",
+          "xenditAccountNumber",
+          "platformFeeValue",
+          "financeVisibility"
+        ]
+      }
+    },
+    {
+      "caseId": "cancellation-policy-update",
+      "description": "Cancellation policy writes stay finance-owned and are exposed to checkout through a public-safe projection.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/cancellation-policy",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-cancellation-policy-001",
+          "idempotencyKey": "finance-cancellation-policy-f300686-001",
+          "freeCancellationDays": 7,
+          "partialRefundPercent": 50,
+          "refundMethod": "original_payment",
+          "appliesTo": "direct_booking"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "policy.freeCancellationDays",
+          "policy.partialRefundPercent",
+          "commandMeta"
+        ],
+        "mustNotWrite": ["pms.cancellation_policy", "booking.guest_bookings.status"]
+      }
+    },
+    {
+      "caseId": "invoice-list-read",
+      "description": "Invoice list is a finance read model over booking, PMS operation, and finance payment facts with stable pagination and counts.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices",
+        "query": {
+          "status": "partial",
+          "limit": 50,
+          "offset": 0,
+          "sort": "issuedAt"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "mustInclude": [
+          "invoices[0].invoiceId",
+          "invoices[0].invoiceNumber",
+          "invoices[0].guestBookingId",
+          "invoices[0].bookingReference",
+          "invoices[0].guest.displayName",
+          "invoices[0].totalAmount",
+          "invoices[0].amountPaid",
+          "invoices[0].balanceDue",
+          "counts.partial",
+          "sourceFreshness"
+        ],
+        "stableOrdering": "issuedAt DESC, invoiceNumber ASC",
+        "mustExclude": ["guestBirthDate", "privatePmsNotes", "providerPaymentIntentId"]
+      }
+    },
+    {
+      "caseId": "invoice-detail-read",
+      "description": "Invoice detail includes charge lines and settled payments while preserving Booking guest PII ownership.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_abcd",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "invoice.invoiceId",
+          "invoice.charges[0].description",
+          "invoice.charges[0].amount",
+          "invoice.payments[0].paymentId",
+          "invoice.payments[0].method",
+          "invoice.payments[0].status",
+          "invoice.balanceDue"
+        ],
+        "mustExclude": [
+          "payment.providerTransactionId",
+          "payment.providerPaymentIntentId",
+          "payment.processorFeeBreakdown",
+          "booking_guests"
+        ]
+      }
+    },
+    {
+      "caseId": "manual-payment-record-command",
+      "description": "Manual payment records write finance payment facts idempotently and enqueue projection refresh jobs without provider calls.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices/inv_2026_abcd/payments",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-manual-payment-001",
+          "idempotencyKey": "finance-manual-payment-inv-2026-abcd-001",
+          "amount": "250.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt 8812"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "mustInclude": [
+          "invoice.payments[0].paymentId",
+          "invoice.amountPaid",
+          "invoice.balanceDue",
+          "commandMeta.idempotencyKey"
+        ],
+        "commandMeta": {
+          "sideEffects": ["audit_event", "booking_projection_refresh"]
+        },
+        "mustNotCall": ["Stripe API", "Xendit API", "Channex API"]
+      }
+    },
+    {
+      "caseId": "payment-ledger-read",
+      "description": "The property payment ledger is a stable paginated finance read model and does not collapse into invoice-detail rows.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/payments",
+        "query": {
+          "status": "paid",
+          "provider": "manual",
+          "limit": 50,
+          "offset": 0,
+          "sort": "recordedAt"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 2,
+        "stableOrdering": "recordedAt DESC, paymentId ASC",
+        "mustInclude": [
+          "payments[0].paymentId",
+          "payments[0].invoiceId",
+          "payments[0].guestBookingId",
+          "payments[0].bookingReference",
+          "payments[0].amount",
+          "payments[0].currency",
+          "payments[0].provider",
+          "payments[0].reconciliationStatus",
+          "counts.paid",
+          "sourceFreshness"
+        ],
+        "mustExclude": [
+          "providerPayloadRaw",
+          "providerPaymentIntentSecret",
+          "cardFingerprint",
+          "guestBirthDate",
+          "processorFeeBreakdown"
+        ]
+      }
+    },
+    {
+      "caseId": "payout-list-read",
+      "description": "Property payout reads expose lifecycle and retry state without destination account secrets.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/payouts",
+        "query": {
+          "limit": 50,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 1,
+        "mustInclude": [
+          "payouts[0].payoutId",
+          "payouts[0].payoutStatus",
+          "payouts[0].amount",
+          "payouts[0].provider",
+          "payouts[0].providerPayoutId",
+          "payouts[0].retryCount"
+        ],
+        "mustExclude": [
+          "accountNumber",
+          "accountHolderName",
+          "sensitiveDestinationRef",
+          "stripeSecretKey",
+          "xenditApiKey"
+        ]
+      }
+    },
+    {
+      "caseId": "affiliate-payout-settings-read",
+      "description": "Affiliate payout settings are finance-owned while marketplace/affiliate remains the referral identity owner.",
+      "request": {
+        "path": "/api/finance/affiliates/affiliate_finance_partner_686/payout-settings",
+        "query": {}
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "affiliateId",
+          "payoutSettings.payoutsEnabled",
+          "payoutSettings.payoutProvider",
+          "payoutSettings.payoutCurrency",
+          "payoutSettings.providerAccount.status",
+          "payoutSettings.sourceFreshness"
+        ],
+        "ownershipBoundary": {
+          "affiliateIdentityOwner": "marketplace/affiliate",
+          "providerAccountOwner": "finance",
+          "settlementOwner": "finance"
+        },
+        "mustExclude": [
+          "referralCode",
+          "affiliateProfileEmail",
+          "accountNumber",
+          "stripeSecretKey",
+          "providerSecret"
+        ]
+      }
+    },
+    {
+      "caseId": "affiliate-payout-settings-update",
+      "description": "Affiliate payout settings writes are idempotent finance commands and never rewrite marketplace referral identity.",
+      "request": {
+        "path": "/api/finance/affiliates/affiliate_finance_partner_686/payout-settings",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-affiliate-payout-settings-001",
+          "idempotencyKey": "finance-affiliate-payout-settings-686-001",
+          "payoutsEnabled": true,
+          "payoutProvider": "stripe",
+          "payoutCurrency": "EUR",
+          "payoutSchedule": "monthly"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "commandMeta": {
+          "idempotencyKey": "finance-affiliate-payout-settings-686-001",
+          "sideEffects": ["audit_event"]
+        },
+        "mustNotWrite": ["marketplace.affiliates", "marketplace.referral_codes"]
+      }
+    },
+    {
+      "caseId": "affiliate-payout-list-read",
+      "description": "Affiliate payout ledger exposes settlement state without provider destination secrets.",
+      "request": {
+        "path": "/api/finance/affiliates/affiliate_finance_partner_686/payouts",
+        "query": {
+          "limit": 50,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "itemCount": 1,
+        "mustInclude": [
+          "payouts[0].payoutId",
+          "payouts[0].ownerScope",
+          "payouts[0].organizationId",
+          "payouts[0].amount",
+          "payouts[0].netAmount",
+          "payouts[0].provider",
+          "payouts[0].payoutStatus",
+          "sourceFreshness"
+        ],
+        "mustExclude": ["referralCode", "accountNumber", "stripeSecretKey", "xenditApiKey"]
+      }
+    },
+    {
+      "caseId": "stripe-property-onboarding-idempotent",
+      "description": "Repeated property Stripe Connect commands return the existing provider account and latest onboarding link.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/provider-accounts/stripe",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-stripe-property-001",
+          "idempotencyKey": "finance-stripe-property-f300686",
+          "email": "owner@example.test",
+          "country": "AT"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "providerAccountId": "f7000000-0000-0000-0000-000000000686",
+        "duplicateBehavior": "same providerAccountId; no duplicate Stripe account",
+        "idempotencyKey": "finance-stripe-property-f300686",
+        "mustInclude": ["providerAccountRef", "onboardingStatus", "commandMeta"],
+        "mustExclude": ["stripeSecretKey", "accountLinkRefreshToken"]
+      }
+    },
+    {
+      "caseId": "stripe-affiliate-onboarding-boundary",
+      "description": "Affiliate Stripe onboarding is finance-owned after marketplace/affiliate resolves referral identity.",
+      "request": {
+        "path": "/api/finance/affiliates/affiliate_finance_partner_686/provider-accounts/stripe",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-stripe-affiliate-001",
+          "idempotencyKey": "finance-stripe-affiliate-686",
+          "email": "affiliate@example.test",
+          "country": "AT"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "providerAccountId": "f7100000-0000-0000-0000-000000000686",
+        "ownershipBoundary": {
+          "affiliateIdentityOwner": "marketplace/affiliate",
+          "providerAccountOwner": "finance",
+          "bookingWebRole": "compatibility facade only"
+        },
+        "mustNotWrite": ["marketplace.affiliates.referral_code", "booking_web_affiliates"]
+      }
+    },
+    {
+      "caseId": "xendit-bank-validation",
+      "description": "Xendit bank validation returns provider validation status and masked destination data without saving raw account numbers in route responses.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/provider-accounts/xendit/bank-validation",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-xendit-bank-validation-001",
+          "idempotencyKey": "finance-xendit-bank-validation-f300686",
+          "channelCode": "ID_BCA",
+          "accountNumber": "1234567890",
+          "accountHolderName": "Alpenrose Hotel GmbH"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["validation.status", "validation.maskedAccountNumber", "provider"],
+        "mustExclude": ["accountNumber", "xenditApiKey", "sensitiveDestinationRef"]
+      }
+    },
+    {
+      "caseId": "payout-reconciliation-enqueues-job",
+      "description": "Manual Xendit payout reconciliation enqueues a finance job and cannot mutate legacy payout state during rehearsal.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/reconciliation/xendit-payouts",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-xendit-reconcile-001",
+          "idempotencyKey": "finance-reconcile-xendit-payouts-f300686-2026-06-12",
+          "olderThanMinutes": 0
+        }
+      },
+      "expected": {
+        "status": 202,
+        "job": {
+          "jobType": "finance.reconcile-payout",
+          "idempotencyKey": "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1"
+        },
+        "legacyDisposition": "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal",
+        "mustNotWrite": ["legacy pms.payouts"]
+      }
+    },
+    {
+      "caseId": "payment-reconciliation-view",
+      "description": "Payment reconciliation compares finance rows, provider receipts, jobs, and audit outcomes.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/reconciliation/payments",
+        "query": {
+          "status": "needs_review",
+          "limit": 50,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "items[0].paymentId",
+          "items[0].provider",
+          "items[0].financeStatus",
+          "items[0].latestReceiptStatus",
+          "items[0].jobStatus",
+          "items[0].recommendedAction"
+        ],
+        "mustExclude": ["providerPayloadRaw", "guestEmail", "processorSecret"]
+      }
+    },
+    {
+      "caseId": "payout-reconciliation-view",
+      "description": "Payout reconciliation compares finance payout rows, provider transfer/callback state, retry jobs, and dead letters.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/reconciliation/payouts",
+        "query": {
+          "status": "dead_lettered",
+          "limit": 50,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "items[0].subjectId",
+          "items[0].subjectType",
+          "items[0].provider",
+          "items[0].financeStatus",
+          "items[0].latestReceiptStatus",
+          "items[0].jobStatus",
+          "items[0].recommendedAction",
+          "sourceFreshness.deadLettersFreshAt"
+        ],
+        "mustExclude": ["providerPayloadRaw", "accountNumber", "processorSecret"]
+      }
+    },
+    {
+      "caseId": "provider-account-reconciliation-view",
+      "description": "Provider-account reconciliation surfaces onboarding drift, required action, webhook freshness, and retry state.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/reconciliation/provider-accounts",
+        "query": {
+          "provider": "stripe",
+          "limit": 50,
+          "offset": 0
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "items[0].subjectId",
+          "items[0].subjectType",
+          "items[0].provider",
+          "items[0].financeStatus",
+          "items[0].providerStatus",
+          "items[0].latestReceiptStatus",
+          "items[0].recommendedAction",
+          "sourceFreshness.providerReceiptsFreshAt"
+        ],
+        "mustExclude": ["providerPayloadRaw", "stripeSecretKey", "accountLinkRefreshToken"]
+      }
+    },
+    {
+      "caseId": "checkout-charge-settlement-bridge",
+      "description": "PMS checkout-charge mark-paid hands off to Finance settlement with a stable idempotency key and no provider side effects.",
+      "input": {
+        "eventType": "pms.checkout_charge.marked_paid",
+        "payload": {
+          "propertyId": "f3000000-0000-0000-0000-000000000686",
+          "guestBookingId": "f6000000-0000-0000-0000-000000000686",
+          "checkoutChargeId": "charge_checkout_001",
+          "amount": "75.00",
+          "currency": "EUR",
+          "paymentMethod": "cash",
+          "reference": "front desk receipt 8813",
+          "pmsCommandId": "cmd-pms-charge-mark-paid-001"
+        }
+      },
+      "expected": {
+        "financeCommandType": "finance.checkout_charge.settle_manual",
+        "financePaymentStatus": "paid",
+        "idempotencyKey": "finance.checkout-charge-settlement:checkout_charge:charge_checkout_001:mark-paid:cmd-pms-charge-mark-paid-001:v1",
+        "mustWrite": ["finance.payments", "product_audit_events", "outbox_events"],
+        "mustNotCall": ["Stripe API", "Xendit API"],
+        "mustNotWrite": ["pms.booking_checkout_charges.provider_payment_id"]
+      }
+    },
+    {
+      "caseId": "checkout-charge-mark-paid-freeze",
+      "description": "If F1a is not enabled for rehearsal, PMS mark-paid on unsettled checkout charges is frozen with no operational mutation.",
+      "request": {
+        "path": "/api/pms/properties/f3000000-0000-0000-0000-000000000686/reservations/f6000000-0000-0000-0000-000000000686/checkout-charges/charge_checkout_001/paid",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-pms-charge-mark-paid-001",
+          "idempotencyKey": "pms-charge-mark-paid-001",
+          "amount": "75.00",
+          "currency": "EUR",
+          "paymentMethod": "cash"
+        },
+        "simulate": {
+          "financeBridgeEnabled": false,
+          "rehearsalFreeze": true
+        }
+      },
+      "expected": {
+        "status": 409,
+        "errorCode": "finance_bridge_required",
+        "sideEffects": [],
+        "mustNotWrite": ["pms.booking_checkout_charges", "finance.payments"]
+      }
+    },
+    {
+      "caseId": "scheduler-freeze-disposition",
+      "description": "Finance provider schedulers cannot run in legacy and target mutating modes at the same time.",
+      "input": {
+        "legacyJobs": [
+          "process_property_payouts",
+          "process_affiliate_payouts",
+          "poll_xendit_processing_payouts"
+        ],
+        "targetJobs": [
+          "finance.dispatch-property-payout",
+          "finance.dispatch-affiliate-payout",
+          "finance.reconcile-payout"
+        ]
+      },
+      "expected": {
+        "rehearsalRequiredLegacyState": "disabled or non-mutating observe-only equivalent",
+        "targetEnablementOrder": [
+          "finance.reconcile-payout",
+          "finance.dispatch-property-payout",
+          "finance.dispatch-affiliate-payout"
+        ],
+        "mustProve": [
+          "legacy job did not fire for one scheduled interval",
+          "target job idempotency key reused on duplicate enqueue",
+          "no duplicate provider transfer id"
+        ]
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-missing-permission",
+      "description": "Finance property reads deny authenticated users without pms.finance.read.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices",
+        "query": {},
+        "auth": {
+          "permissions": ["pms.operations.read"],
+          "entitlements": ["pms:property-management"],
+          "resourceLinks": ["pms_property:f3000000-0000-0000-0000-000000000686"]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_permission"
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-missing-resource",
+      "description": "Finance property reads deny users with finance permission but no linked property resource.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/invoices",
+        "query": {},
+        "auth": {
+          "permissions": ["pms.finance.read"],
+          "entitlements": ["pms:property-management"],
+          "resourceLinks": []
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_resource_access"
+      }
+    }
+  ]
+}

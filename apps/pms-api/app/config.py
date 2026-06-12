@@ -1,6 +1,12 @@
 from pydantic import ConfigDict, Field
 from pydantic_settings import BaseSettings
 
+PROVIDER_WEBHOOK_CUTOVER_MODES = {
+    "mutating",
+    "ack_only_with_receipt",
+    "proxy_to_target",
+}
+
 
 class Settings(BaseSettings):
     # API
@@ -99,6 +105,32 @@ class Settings(BaseSettings):
     # header — Channex does not natively sign webhooks). Compared against
     # X-Vayada-Webhook-Token on incoming requests.
     CHANNEX_WEBHOOK_SECRET: str = ""
+    # Legacy Channex admin cutover guards. Supported modes are:
+    # legacy-owned, read-only, disabled, proxy-to-target, target-owned.
+    CHANNEX_ADMIN_DEFAULT_MODE: str = "legacy-owned"
+    CHANNEX_ADMIN_TARGET_BASE_URL: str = ""
+    CHANNEX_ADMIN_TARGET_TIMEOUT_SECONDS: float = 10.0
+    CHANNEX_ADMIN_READ_MODEL_MODE: str = ""
+    CHANNEX_ADMIN_ENABLE_DISABLE_MODE: str = ""
+    CHANNEX_ADMIN_PROVISIONING_MODE: str = ""
+    CHANNEX_ADMIN_MARKUPS_MODE: str = ""
+    CHANNEX_ADMIN_MANUAL_ARI_SYNC_MODE: str = ""
+    CHANNEX_ADMIN_MANUAL_BOOKING_SYNC_MODE: str = ""
+    CHANNEX_ADMIN_MESSAGING_MODE: str = ""
+    CHANNEX_ADMIN_IFRAME_URL_MODE: str = ""
+    CHANNEX_ADMIN_WEBHOOK_SETUP_MODE: str = ""
+
+    # Legacy provider webhook cutover controls. Provider-specific values
+    # override PMS_LEGACY_WEBHOOK_MODE; proxy URLs can be set globally by base
+    # URL or per provider when the target routes are not path-compatible.
+    PMS_LEGACY_WEBHOOK_MODE: str = "mutating"
+    PMS_LEGACY_STRIPE_WEBHOOK_MODE: str = ""
+    PMS_LEGACY_XENDIT_WEBHOOK_MODE: str = ""
+    PMS_LEGACY_CHANNEX_WEBHOOK_MODE: str = ""
+    PMS_WEBHOOK_TARGET_BASE_URL: str = ""
+    PMS_STRIPE_WEBHOOK_TARGET_URL: str = ""
+    PMS_XENDIT_WEBHOOK_TARGET_URL: str = ""
+    PMS_CHANNEX_WEBHOOK_TARGET_URL: str = ""
 
     # Listing Import (Claude AI + Firecrawl)
     ANTHROPIC_API_KEY: str = ""
@@ -126,6 +158,36 @@ class Settings(BaseSettings):
                 seen.add(o)
                 unique.append(o)
         return unique
+
+    def provider_webhook_cutover_mode(self, provider: str) -> str:
+        provider_key = provider.upper()
+        raw = getattr(self, f"PMS_LEGACY_{provider_key}_WEBHOOK_MODE", "") or ""
+        mode = (raw or self.PMS_LEGACY_WEBHOOK_MODE).strip().lower()
+        if mode not in PROVIDER_WEBHOOK_CUTOVER_MODES:
+            valid = ", ".join(sorted(PROVIDER_WEBHOOK_CUTOVER_MODES))
+            raise ValueError(f"Invalid PMS legacy webhook mode {mode!r}; expected one of {valid}")
+        return mode
+
+    def provider_webhook_target_url(self, provider: str) -> str:
+        provider_key = provider.upper()
+        specific_url = getattr(self, f"PMS_{provider_key}_WEBHOOK_TARGET_URL", "") or ""
+        if specific_url.strip():
+            return specific_url.strip()
+        base_url = self.PMS_WEBHOOK_TARGET_BASE_URL.strip().rstrip("/")
+        if not base_url:
+            return ""
+        return f"{base_url}/webhooks/{provider.lower()}"
+
+    def provider_webhook_cutover_status(self) -> dict[str, dict[str, str | bool]]:
+        status = {}
+        for provider in ("stripe", "xendit", "channex"):
+            mode = self.provider_webhook_cutover_mode(provider)
+            target_url = self.provider_webhook_target_url(provider)
+            status[provider] = {
+                "mode": mode,
+                "proxyTargetConfigured": bool(target_url),
+            }
+        return status
 
 
 settings = Settings()

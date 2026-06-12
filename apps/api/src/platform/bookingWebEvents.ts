@@ -61,6 +61,7 @@ export function createPgBookingWebEventSink(
     },
     async recordTelemetryEvent(event) {
       const normalizedType = event.eventType.replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 80);
+      const occurrenceKey = event.eventId ?? event.requestId;
       await insertDomainEventWithAudit(pool, {
         sourceSystem: "distribution",
         eventKey: eventKey(
@@ -68,7 +69,7 @@ export function createPgBookingWebEventSink(
           "telemetry",
           event.hotelSlug,
           normalizedType,
-          event.sessionId ?? event.requestId,
+          occurrenceKey,
         ),
         eventType: `booking_web.${normalizedType}`,
         occurredAt: event.occurredAt,
@@ -76,14 +77,11 @@ export function createPgBookingWebEventSink(
         resourceType: "booking_web_hotel",
         resourceId: event.hotelSlug,
         correlationId: event.sessionId ?? event.requestId,
-        idempotencyKeyHash: hashKey(
-          event.hotelSlug,
-          normalizedType,
-          event.sessionId ?? event.requestId,
-        ),
+        idempotencyKeyHash: hashKey(event.hotelSlug, normalizedType, occurrenceKey),
         payload: {
           hotelSlug: event.hotelSlug,
           eventType: normalizedType,
+          eventId: event.eventId ?? null,
           sessionId: event.sessionId ?? null,
           metadata: event.metadata,
         },
