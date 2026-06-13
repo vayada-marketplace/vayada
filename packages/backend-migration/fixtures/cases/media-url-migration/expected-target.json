@@ -6,6 +6,7 @@
     "hotel_catalog.property_source_links": 3,
     "hotel_catalog.property_slugs": 2,
     "hotel_catalog.property_media": 2,
+    "hotel_catalog.property_public_profile_read_model": 1,
     "marketplace.creator_profiles": 1,
     "marketplace.marketplace_hotel_profiles": 1,
     "marketplace.marketplace_hotel_listings": 1,
@@ -122,14 +123,26 @@
         "mediaType": "hero_image",
         "url": "https://media.localhost/public-cdn/properties/f8223000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000001/original_safe.webp",
         "sourceSystem": "booking",
-        "publicApproved": true
+        "publicApproved": true,
+        "platformMediaObjectId": "f8224000-0000-0000-0000-000000000001"
       },
       {
         "id": "f8225000-0000-0000-0000-000000000002",
         "mediaType": "gallery_image",
         "url": "https://external-images.example.test/booking/gallery-1.jpg",
         "sourceSystem": "booking",
-        "publicApproved": true
+        "publicApproved": true,
+        "platformMediaObjectId": "f8224000-0000-0000-0000-000000000002"
+      }
+    ],
+    "propertyPublicProfiles": [
+      {
+        "propertyId": "f8223000-0000-0000-0000-000000000001",
+        "mediaObjectIds": ["f8224000-0000-0000-0000-000000000001"],
+        "urls": [
+          "https://media.localhost/public-cdn/properties/f8223000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000001/original_safe.webp"
+        ],
+        "forbiddenUrls": ["https://external-images.example.test/booking/gallery-1.jpg"]
       }
     ],
     "marketplace": {

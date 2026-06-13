@@ -7,6 +7,13 @@ type MediaUrlMigrationChecks = {
     url: string;
     sourceSystem: string;
     publicApproved: boolean;
+    platformMediaObjectId: string;
+  }>;
+  propertyPublicProfiles?: Array<{
+    propertyId: string;
+    mediaObjectIds: string[];
+    urls: string[];
+    forbiddenUrls: string[];
   }>;
   marketplace?: {
     creatorProfileId: string;
@@ -79,9 +86,11 @@ export async function checkMediaUrlMigrationParity({
       url: string;
       source_system: string;
       public_approved: boolean;
+      platform_media_object_id: string | null;
     }>(
       `
-        SELECT media_type, url, source_system, public_approved
+        SELECT media_type, url, source_system, public_approved,
+               platform_media_object_id::text
         FROM hotel_catalog.property_media
         WHERE id = $1
       `,
@@ -93,7 +102,8 @@ export async function checkMediaUrlMigrationParity({
       actual.media_type === propertyMedia.mediaType &&
       actual.url === propertyMedia.url &&
       actual.source_system === propertyMedia.sourceSystem &&
-      actual.public_approved === propertyMedia.publicApproved
+      actual.public_approved === propertyMedia.publicApproved &&
+      actual.platform_media_object_id === propertyMedia.platformMediaObjectId
     ) {
       continue;
     }
@@ -106,6 +116,41 @@ export async function checkMediaUrlMigrationParity({
       JSON.stringify(propertyMedia),
       JSON.stringify(actual ?? null),
       "Check Booking hero_image/images mapping and copied/external URL selection.",
+    );
+  }
+
+  for (const publicProfile of config.propertyPublicProfiles ?? []) {
+    const { rows } = await client.query<{ media: unknown }>(
+      `
+        SELECT media
+        FROM hotel_catalog.property_public_profile_read_model
+        WHERE property_id = $1
+      `,
+      [publicProfile.propertyId],
+    );
+    const media = JSON.stringify(rows[0]?.media ?? []);
+    const missingMediaObjectIds = publicProfile.mediaObjectIds.filter(
+      (mediaObjectId) => !media.includes(mediaObjectId),
+    );
+    const missingUrls = publicProfile.urls.filter((url) => !media.includes(url));
+    const leakedForbiddenUrls = publicProfile.forbiddenUrls.filter((url) => media.includes(url));
+    if (
+      rows.length === 1 &&
+      missingMediaObjectIds.length === 0 &&
+      missingUrls.length === 0 &&
+      leakedForbiddenUrls.length === 0
+    ) {
+      continue;
+    }
+
+    addMediaUrlFinding(
+      findings,
+      "MEDIA_URL_PROPERTY_PUBLIC_PROFILE_MEDIA_MISMATCH",
+      `hotel_catalog.property_public_profile_read_model.${publicProfile.propertyId}.media`,
+      "Property public profile media did not expose exactly the approved public platform variants expected by the fixture",
+      JSON.stringify(publicProfile),
+      media,
+      "Check property_media platform_media_object_id mapping and public profile media projection filters.",
     );
   }
 

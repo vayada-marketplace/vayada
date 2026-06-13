@@ -255,6 +255,8 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     expect(result.applied).toContain("0009");
     expect(result.applied).toContain("0010");
     expect(result.applied).toContain("0011");
+    expect(result.applied).toContain("0015");
+    expect(result.applied).toContain("0016");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();

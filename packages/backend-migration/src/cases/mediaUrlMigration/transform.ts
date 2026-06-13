@@ -432,7 +432,18 @@ export async function transformMediaUrlMigration(client: pg.Client): Promise<voi
 
   await client.query(`
     INSERT INTO hotel_catalog.property_media
-      (id, property_id, media_type, url, alt_text, sort_order, source_system, public_approved, rights_metadata)
+      (
+        id,
+        property_id,
+        media_type,
+        url,
+        alt_text,
+        sort_order,
+        source_system,
+        public_approved,
+        rights_metadata,
+        platform_media_object_id
+      )
     SELECT
       id,
       property_id,
@@ -442,8 +453,76 @@ export async function transformMediaUrlMigration(client: pg.Client): Promise<voi
       sort_order,
       source_system,
       public_approved,
-      rights_metadata
+      rights_metadata,
+      platform_media_object_id
     FROM migration_source_media.booking_property_media
+  `);
+
+  await client.query(`
+    WITH canonical_slugs AS (
+      SELECT property_id, slug
+      FROM hotel_catalog.property_slugs
+      WHERE purpose = 'canonical'
+        AND status = 'active'
+    ),
+    media AS (
+      SELECT
+        property_media.property_id,
+        jsonb_agg(
+          jsonb_strip_nulls(jsonb_build_object(
+            'id', property_media.id::text,
+            'type', property_media.media_type,
+            'url', variant.public_cdn_url,
+            'altText', property_media.alt_text,
+            'sortOrder', property_media.sort_order,
+            'platformMediaObjectId', property_media.platform_media_object_id::text
+          ))
+          ORDER BY property_media.sort_order, property_media.id
+        ) AS media
+      FROM hotel_catalog.property_media property_media
+      JOIN platform.media_objects media_object
+        ON media_object.id = property_media.platform_media_object_id
+       AND media_object.visibility = 'public'
+       AND media_object.public_approved = TRUE
+       AND media_object.lifecycle_status = 'active'
+      JOIN platform.media_variants variant
+        ON variant.media_object_id = media_object.id
+       AND variant.visibility = 'public'
+       AND variant.variant_name = 'original_safe'
+      WHERE property_media.public_approved = TRUE
+      GROUP BY property_media.property_id
+    )
+    INSERT INTO hotel_catalog.property_public_profile_read_model
+      (
+        property_id,
+        public_id,
+        display_name,
+        canonical_slug,
+        default_locale,
+        supported_locales,
+        profile_status,
+        completeness_reasons,
+        media,
+        source_freshness
+      )
+    SELECT
+      property.id,
+      property.public_id,
+      property.display_name,
+      canonical_slugs.slug,
+      property.default_locale,
+      property.supported_locales,
+      property.profile_status,
+      '{}',
+      COALESCE(media.media, '[]'::jsonb),
+      '{"source": "media-url-migration"}'::jsonb
+    FROM hotel_catalog.properties property
+    JOIN canonical_slugs ON canonical_slugs.property_id = property.id
+    LEFT JOIN media ON media.property_id = property.id
+    ON CONFLICT (property_id) DO UPDATE SET
+      media = EXCLUDED.media,
+      source_freshness = EXCLUDED.source_freshness,
+      projected_at = now()
   `);
 
   await client.query(`

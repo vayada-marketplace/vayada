@@ -620,7 +620,8 @@ SELECT
   0::integer AS sort_order,
   'booking'::text AS source_system,
   TRUE::boolean AS public_approved,
-  '{"platformMediaObjectId": "f8224000-0000-0000-0000-000000000001"}'::jsonb AS rights_metadata
+  '{"platformMediaObjectId": "f8224000-0000-0000-0000-000000000001"}'::jsonb AS rights_metadata,
+  'f8224000-0000-0000-0000-000000000001'::uuid AS platform_media_object_id
 UNION ALL
 SELECT
   'f8225000-0000-0000-0000-000000000002'::uuid,
@@ -631,7 +632,8 @@ SELECT
   1::integer,
   'booking'::text,
   TRUE::boolean,
-  '{"platformMediaObjectId": "f8224000-0000-0000-0000-000000000002", "externalReference": true}'::jsonb;
+  '{"platformMediaObjectId": "f8224000-0000-0000-0000-000000000002", "externalReference": true}'::jsonb,
+  'f8224000-0000-0000-0000-000000000002'::uuid;
 
 CREATE TABLE migration_source_media.marketplace_creator_profile_references AS
 SELECT
