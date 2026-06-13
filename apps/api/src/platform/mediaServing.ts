@@ -126,10 +126,11 @@ export function createPlatformMediaServingConfig(
 ): PlatformMediaServingConfig {
   assertSafeSegment(config.bucketName, "PLATFORM_MEDIA_BUCKET");
   const cdnBaseUrl = normalizeHttpsOrigin(config.cdnBaseUrl, "PLATFORM_MEDIA_CDN_BASE_URL");
+  const cdnBaseHost = normalizeHost(new URL(cdnBaseUrl).hostname, "PLATFORM_MEDIA_CDN_BASE_URL");
   const cdnOriginHost = normalizeHost(config.cdnOriginHost, "PLATFORM_MEDIA_CDN_ORIGIN_HOST");
   const publicPathPrefix = normalizePathPrefix(config.publicPathPrefix);
 
-  if (new URL(cdnBaseUrl).hostname === cdnOriginHost) {
+  if (cdnBaseHost === cdnOriginHost) {
     throw new Error("PLATFORM_MEDIA_CDN_BASE_URL must not point directly at the CDN origin host");
   }
 

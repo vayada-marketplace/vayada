@@ -67,6 +67,14 @@ describe("platform media serving policy", () => {
         PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-production.s3.us-east-1.amazonaws.com",
       }),
     ).toThrow("must not point directly at the CDN origin host");
+
+    expect(() =>
+      loadPlatformMediaServingConfig({
+        PLATFORM_MEDIA_BUCKET: "vayada-media-production",
+        PLATFORM_MEDIA_CDN_BASE_URL: "https://vayada-media-production.s3.us-east-1.amazonaws.com.",
+        PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-production.s3.us-east-1.amazonaws.com",
+      }),
+    ).toThrow("must not point directly at the CDN origin host");
   });
 
   it("rejects public path prefixes that collide with storage namespaces", () => {
