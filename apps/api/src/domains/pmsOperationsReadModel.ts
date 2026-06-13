@@ -338,12 +338,12 @@ export function createTargetPmsOperationsReadRepository(config: {
         ),
         pool.query<{ total: string }>(
           `SELECT COUNT(*)::text AS total
-           FROM booking.guest_bookings booking
-           LEFT JOIN LATERAL (
-             SELECT assignment.assignment_status
-             FROM pms.operational_booking_assignments assignment
-             WHERE assignment.guest_booking_id = booking.id
-               AND assignment.property_id = booking.property_id
+	           FROM booking.guest_bookings booking
+	           LEFT JOIN LATERAL (
+	             SELECT assignment.assignment_status, assignment.assignment_payload
+	             FROM pms.operational_booking_assignments assignment
+	             WHERE assignment.guest_booking_id = booking.id
+	               AND assignment.property_id = booking.property_id
              ORDER BY assignment.position, assignment.created_at, assignment.id
              LIMIT 1
            ) primary_assignment ON TRUE
@@ -468,6 +468,8 @@ type TargetPmsOperationalReservationRow = {
 };
 
 const PMS_OPERATIONAL_RESERVATION_STATUS_SQL = `CASE
+  WHEN primary_assignment.assignment_payload ->> 'operationalStatus' = 'no_show'
+    THEN 'no_show'
   WHEN primary_assignment.assignment_status IN ('checked_in', 'in_house', 'checked_out')
     THEN primary_assignment.assignment_status
   ELSE booking.lifecycle_status
@@ -904,9 +906,7 @@ function toJsonRecord(value: unknown): PmsJsonRecord {
 function toJsonValue(value: unknown): PmsJsonValue | undefined {
   if (isJsonScalar(value)) return value;
   if (Array.isArray(value)) {
-    return value
-      .map(toJsonValue)
-      .filter((item): item is PmsJsonValue => item !== undefined);
+    return value.map(toJsonValue).filter((item): item is PmsJsonValue => item !== undefined);
   }
   if (value && typeof value === "object") {
     return toJsonRecord(value);

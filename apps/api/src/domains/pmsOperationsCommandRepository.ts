@@ -4,10 +4,16 @@ import pg, { type QueryResult, type QueryResultRow } from "pg";
 import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
+  type PmsCheckInCommand,
   type PmsAssignmentCommand,
   type PmsAssignmentCommandConflictCode,
   type PmsAssignmentCommandResult,
   type PmsCommandMeta,
+  type PmsNoShowCommand,
+  type PmsOperationalCommandResult,
+  type PmsOperationalStatus,
+  type PmsOperationalStatusCommand,
+  type PmsOperationsCommandSideEffect,
   type PmsOperationsCommandRepository,
 } from "../routes/pmsOperations.js";
 
@@ -56,6 +62,20 @@ type PmsIdempotencyRow = {
   requestFingerprintHash: string;
   idempotencyMetadata: Record<string, unknown> | null;
 };
+
+type PmsOperationalCommand = PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand;
+
+type PmsOperationalCommandOperation = "status_command" | "checkin_command" | "no_show_command";
+
+const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
+  string,
+  ReadonlySet<PmsOperationalStatus>
+> = new Map<string, ReadonlySet<PmsOperationalStatus>>([
+  ["pending", new Set<PmsOperationalStatus>(["assigned"])],
+  ["assigned", new Set<PmsOperationalStatus>(["checked_in", "in_house"])],
+  ["checked_in", new Set<PmsOperationalStatus>(["in_house"])],
+  ["in_house", new Set<PmsOperationalStatus>(["checked_out"])],
+]);
 
 export function createTargetPmsOperationsCommandRepository(
   config: TargetPmsOperationsCommandRepositoryConfig,
@@ -187,10 +207,141 @@ export function createTargetPmsOperationsCommandRepository(
         ? { ok: true, reservation, commandMeta }
         : reservationNotFound(command.guestBookingId);
     },
+    async executeOperationalStatusCommand(command) {
+      return executeOperationalCommand(config, pool, now, {
+        command,
+        operation: "status_command",
+        sideEffects: ["audit_event"],
+        mutate: applyOperationalStatusCommandMutation,
+      });
+    },
+    async executeCheckInCommand(command) {
+      return executeOperationalCommand(config, pool, now, {
+        command,
+        operation: "checkin_command",
+        sideEffects: ["audit_event"],
+        mutate: applyCheckInCommandMutation,
+      });
+    },
+    async executeNoShowCommand(command) {
+      return executeOperationalCommand(config, pool, now, {
+        command,
+        operation: "no_show_command",
+        sideEffects: ["audit_event"],
+        mutate: applyNoShowCommandMutation,
+      });
+    },
     async close() {
       if (ownsPool) await pool.end();
     },
   };
+}
+
+async function executeOperationalCommand<TCommand extends PmsOperationalCommand>(
+  config: TargetPmsOperationsCommandRepositoryConfig,
+  pool: PmsOperationsCommandPool,
+  now: () => Date,
+  options: {
+    command: TCommand;
+    operation: PmsOperationalCommandOperation;
+    sideEffects: PmsOperationsCommandSideEffect[];
+    mutate: (
+      client: PmsOperationsCommandClient,
+      command: TCommand,
+      acceptedAt: string,
+    ) => Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>>;
+  },
+): Promise<PmsOperationalCommandResult> {
+  const { command, operation, sideEffects, mutate } = options;
+  const client = await pool.connect();
+  const acceptedAt = now().toISOString();
+  const keyHash = sha256(command.idempotencyKey);
+  const requestFingerprintHash = sha256(stableJson(operationalCommandFingerprint(command)));
+  const commandMeta: PmsCommandMeta = {
+    contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    acceptedAt,
+    sideEffects,
+  };
+
+  try {
+    await client.query("BEGIN");
+
+    const replay = await findOperationalCommandReplay(
+      client,
+      command,
+      operation,
+      keyHash,
+      requestFingerprintHash,
+    );
+    if (replay) {
+      if ("ok" in replay) {
+        await client.query("ROLLBACK");
+        return replay;
+      }
+      await client.query("COMMIT");
+      return reservationResultForCommand(config, command, replay, true);
+    }
+
+    const insertedIdempotencyKey = await recordOperationalCommandIdempotency(
+      client,
+      command,
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      acceptedAt,
+    );
+    if (!insertedIdempotencyKey) {
+      const existing = await findOperationalCommandReplay(
+        client,
+        command,
+        operation,
+        keyHash,
+        requestFingerprintHash,
+      );
+      if (existing) {
+        await client.query("ROLLBACK");
+        if ("ok" in existing) return existing;
+        return reservationResultForCommand(config, command, existing, true);
+      }
+      await client.query("ROLLBACK");
+      return operationalConflict(
+        "idempotency_conflict",
+        "Operational command idempotency key could not be reserved.",
+      );
+    }
+
+    const mutation = await mutate(client, command, acceptedAt);
+    if (!mutation.ok) {
+      await client.query("ROLLBACK");
+      return mutation;
+    }
+
+    await recordOperationalCommandAuditEvent(client, command, operation, commandMeta, keyHash);
+    await completeOperationalCommandIdempotency(
+      client,
+      command,
+      operation,
+      keyHash,
+      commandMeta,
+      acceptedAt,
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await rollbackQuietly(client);
+    if (isPgUniqueViolation(error)) {
+      return operationalConflict(
+        "idempotency_conflict",
+        "Operational command conflicts with the current reservation state.",
+      );
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return reservationResultForCommand(config, command, commandMeta, false);
 }
 
 async function findAssignmentCommandReplay(
@@ -223,6 +374,46 @@ async function findAssignmentCommandReplay(
   }
   if (existing.status !== "completed") {
     return assignmentConflict("idempotency_conflict", "Assignment command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  return isPmsCommandMeta(commandMeta) ? commandMeta : null;
+}
+
+async function findOperationalCommandReplay(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalCommand,
+  operation: PmsOperationalCommandOperation,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsCommandMeta | Exclude<PmsOperationalCommandResult, { ok: true }> | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     FOR UPDATE`,
+    [operation, keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return operationalConflict(
+      "idempotency_conflict",
+      "Idempotency key was used with a different PMS operational command.",
+    );
+  }
+  if (existing.status !== "completed") {
+    return operationalConflict(
+      "idempotency_conflict",
+      "PMS operational command is already in progress.",
+    );
   }
 
   const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
@@ -273,6 +464,183 @@ async function recordAssignmentCommandIdempotency(
     ],
   );
   return (result.rowCount ?? 0) > 0;
+}
+
+async function recordOperationalCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalCommand,
+  operation: PmsOperationalCommandOperation,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'property',
+       $4::uuid,
+       $5,
+       $6::timestamptz + interval '24 hours',
+       $7::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      acceptedAt,
+      JSON.stringify({ commandId: command.commandId, audit: command.audit }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function applyOperationalStatusCommandMutation(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalStatusCommand,
+): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
+  const sources = await findAssignmentsForOperationalCommand(client, command);
+  if (sources.length === 0) return reservationNotFound(command.guestBookingId);
+  const expectedVersion = command.expectedVersion;
+  if (
+    expectedVersion &&
+    sources.some((source) => !assignmentVersionMatches(source, expectedVersion))
+  ) {
+    return operationalConflict("version_conflict", "Reservation operational status is stale.");
+  }
+  const invalidSource = sources.find(
+    (source) => !isAllowedOperationalStatusTransition(source, command.status),
+  );
+  if (invalidSource) {
+    return invalidStatusTransition(invalidSource.assignmentStatus, command.status);
+  }
+
+  await updateAssignmentsOperationalStatus(client, command, sources, command.status);
+  return { ok: true };
+}
+
+async function applyCheckInCommandMutation(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckInCommand,
+  acceptedAt: string,
+): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
+  const sources = await findAssignmentsForOperationalCommand(client, command);
+  if (sources.length === 0) return reservationNotFound(command.guestBookingId);
+  const expectedVersion = command.expectedVersion;
+  if (
+    expectedVersion &&
+    sources.some((source) => !assignmentVersionMatches(source, expectedVersion))
+  ) {
+    return operationalConflict("version_conflict", "Reservation check-in version is stale.");
+  }
+  const invalidSource = sources.find(
+    (source) => !isAllowedOperationalStatusTransition(source, "checked_in"),
+  );
+  if (invalidSource) {
+    return invalidStatusTransition(invalidSource.assignmentStatus, "checked_in");
+  }
+  if (await hasExistingCheckInRecord(client, command)) {
+    return invalidStatusTransition("checked_in", "checked_in");
+  }
+
+  await client.query(
+    `INSERT INTO pms.booking_checkin_records (
+       property_id,
+       guest_booking_id,
+       assignment_id,
+       completed_by_user_id,
+       completed_at,
+       step_results,
+       pending_flags
+     )
+     SELECT $1::uuid, $2::uuid, source.assignment_id, $3::uuid, $4::timestamptz, $5::jsonb, $6::jsonb
+     FROM unnest($7::uuid[]) AS source(assignment_id)`,
+    [
+      command.propertyId,
+      command.guestBookingId,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      acceptedAt,
+      JSON.stringify(command.stepResults),
+      JSON.stringify(command.pendingFlags),
+      sources.map((source) => source.assignmentId),
+    ],
+  );
+  await updateAssignmentsOperationalStatus(client, command, sources, "checked_in");
+  return { ok: true };
+}
+
+async function applyNoShowCommandMutation(
+  client: PmsOperationsCommandClient,
+  command: PmsNoShowCommand,
+): Promise<{ ok: true } | Exclude<PmsOperationalCommandResult, { ok: true }>> {
+  const sources = await findAssignmentsForOperationalCommand(client, command);
+  if (sources.length === 0) return reservationNotFound(command.guestBookingId);
+  const expectedVersion = command.expectedVersion;
+  if (
+    expectedVersion &&
+    sources.some((source) => !assignmentVersionMatches(source, expectedVersion))
+  ) {
+    return operationalConflict("version_conflict", "Reservation no-show version is stale.");
+  }
+  const invalidSource = sources.find((source) => !isAllowedNoShowTransition(source));
+  if (invalidSource) {
+    return invalidStatusTransition(invalidSource.assignmentStatus, "no_show");
+  }
+
+  const nextVersion = nextAssignmentVersion(sources[0]!);
+  await client.query(
+    `UPDATE pms.operational_booking_assignments
+     SET room_id = NULL,
+         assignment_status = 'released',
+         assigned_at = NULL,
+         assignment_payload = jsonb_set(
+           jsonb_set(
+             jsonb_set(
+               COALESCE(assignment_payload, '{}'::jsonb),
+               '{version}',
+               to_jsonb($4::text),
+               true
+             ),
+             '{operationalStatus}',
+             to_jsonb('no_show'::text),
+             true
+           ),
+           '{noShowReason}',
+           to_jsonb($5::text),
+           true
+         ),
+         updated_at = now()
+     WHERE id = ANY($1::uuid[])
+       AND property_id = $2::uuid
+       AND guest_booking_id = $3::uuid`,
+    [
+      sources.map((source) => source.assignmentId),
+      command.propertyId,
+      command.guestBookingId,
+      nextVersion,
+      command.reason ?? "",
+    ],
+  );
+  return { ok: true };
 }
 
 async function applyAssignmentCommandMutation(
@@ -442,6 +810,103 @@ async function findAssignmentForCommand(
     ],
   );
   return result.rows[0] ?? null;
+}
+
+async function findAssignmentsForOperationalCommand(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalCommand,
+): Promise<PmsAssignmentRow[]> {
+  const assignmentId = "stepResults" in command ? command.assignmentId : undefined;
+  const result = await client.query<PmsAssignmentRow>(
+    `SELECT
+       id::text AS "assignmentId",
+       guest_booking_id::text AS "guestBookingId",
+       room_type_id::text AS "roomTypeId",
+       room_id::text AS "roomId",
+       position,
+       assignment_status AS "assignmentStatus",
+       assignment_payload ->> 'version' AS version,
+       assignment.updated_at AS "updatedAt",
+       booking.check_in::text AS "checkIn",
+       booking.check_out::text AS "checkOut"
+     FROM pms.operational_booking_assignments assignment
+     JOIN booking.guest_bookings booking
+       ON booking.id = assignment.guest_booking_id
+      AND booking.property_id = assignment.property_id
+     WHERE assignment.property_id = $1::uuid
+       AND assignment.guest_booking_id = $2::uuid
+       AND (
+         ($3::uuid IS NOT NULL AND assignment.id = $3::uuid)
+         OR ($3::uuid IS NULL)
+       )
+     ORDER BY assignment.position, assignment.created_at, assignment.id
+     FOR UPDATE OF assignment`,
+    [command.propertyId, command.guestBookingId, assignmentId ?? null],
+  );
+  return result.rows;
+}
+
+async function updateAssignmentsOperationalStatus(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalCommand,
+  sources: PmsAssignmentRow[],
+  status: PmsOperationalStatus,
+): Promise<void> {
+  const nextVersion = nextAssignmentVersion(sources[0]!);
+  await client.query(
+    `UPDATE pms.operational_booking_assignments
+     SET assignment_status = $1,
+         assignment_payload = jsonb_set(
+           jsonb_set(
+             COALESCE(assignment_payload, '{}'::jsonb),
+             '{version}',
+             to_jsonb($5::text),
+             true
+           ),
+           '{operationalStatus}',
+           to_jsonb($1::text),
+           true
+         ),
+         updated_at = now()
+     WHERE id = ANY($2::uuid[])
+       AND property_id = $3::uuid
+       AND guest_booking_id = $4::uuid`,
+    [
+      status,
+      sources.map((source) => source.assignmentId),
+      command.propertyId,
+      command.guestBookingId,
+      nextVersion,
+    ],
+  );
+}
+
+function isAllowedOperationalStatusTransition(
+  source: PmsAssignmentRow,
+  target: PmsOperationalStatus,
+): boolean {
+  return ALLOWED_OPERATIONAL_STATUS_TRANSITIONS.get(source.assignmentStatus)?.has(target) ?? false;
+}
+
+function isAllowedNoShowTransition(source: PmsAssignmentRow): boolean {
+  return source.assignmentStatus === "pending" || source.assignmentStatus === "assigned";
+}
+
+async function hasExistingCheckInRecord(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckInCommand,
+): Promise<boolean> {
+  const result = await client.query(
+    `SELECT id
+     FROM pms.booking_checkin_records
+     WHERE property_id = $1::uuid
+       AND guest_booking_id = $2::uuid
+       AND ($3::uuid IS NULL OR assignment_id = $3::uuid)
+     LIMIT 1
+     FOR UPDATE`,
+    [command.propertyId, command.guestBookingId, command.assignmentId ?? null],
+  );
+  return (result.rowCount ?? result.rows.length) > 0;
 }
 
 async function findTargetAssignmentForSwap(
@@ -767,6 +1232,129 @@ async function completeAssignmentCommandIdempotency(
   );
 }
 
+async function recordOperationalCommandAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalCommand,
+  operation: PmsOperationalCommandOperation,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata
+     )
+     VALUES (
+       $1,
+       'pms',
+       $2,
+       1,
+       $3::timestamptz,
+       'property',
+       NULL,
+       $4::uuid,
+       $5,
+       $6::uuid,
+       'pms',
+       'operational_booking',
+       $7,
+       $8,
+       $9,
+       $10::jsonb,
+       $11::jsonb,
+       $12::jsonb
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.${operation}.${command.idempotencyKey}.audit.v1`,
+      `pms.${operation.replace("_command", "")}`,
+      command.audit.requestedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      command.guestBookingId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
+      JSON.stringify({}),
+      JSON.stringify({
+        commandId: command.commandId,
+        reason: command.audit.reason,
+        requestId: command.audit.requestId,
+        actorOrganizationId:
+          command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      }),
+    ],
+  );
+}
+
+async function completeOperationalCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalCommand,
+  operation: PmsOperationalCommandOperation,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'operational_booking',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      command.guestBookingId,
+      sha256(stableJson(commandMeta)),
+      acceptedAt,
+      JSON.stringify({ commandMeta }),
+      operation,
+      keyHash,
+      command.propertyId,
+    ],
+  );
+}
+
+async function reservationResultForCommand(
+  config: TargetPmsOperationsCommandRepositoryConfig,
+  command: PmsOperationalCommand,
+  commandMeta: PmsCommandMeta,
+  replayed: boolean,
+): Promise<PmsOperationalCommandResult> {
+  const reservation = await config.readRepository.findReservationByGuestBookingId(
+    command.propertyId,
+    command.guestBookingId,
+  );
+  return reservation
+    ? { ok: true, reservation, commandMeta, replayed }
+    : reservationNotFound(command.guestBookingId);
+}
+
 function assignmentVersionMatches(row: PmsAssignmentRow, expectedVersion: string): boolean {
   const updatedAt =
     row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt);
@@ -778,9 +1366,12 @@ function nextAssignmentVersion(row: PmsAssignmentRow): string {
   return `reservation-v${match ? Number(match[1]) + 1 : 1}`;
 }
 
-function reservationNotFound(
-  guestBookingId: string,
-): Exclude<PmsAssignmentCommandResult, { ok: true }> {
+function reservationNotFound(guestBookingId: string): {
+  ok: false;
+  statusCode: 404;
+  code: "reservation_not_found";
+  message: string;
+} {
   return {
     ok: false,
     statusCode: 404,
@@ -801,6 +1392,30 @@ function assignmentConflict(
   };
 }
 
+function operationalConflict(
+  code: "version_conflict" | "idempotency_conflict",
+  message: string,
+): Exclude<PmsOperationalCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code,
+    message,
+  };
+}
+
+function invalidStatusTransition(
+  fromStatus: string,
+  toStatus: string,
+): Exclude<PmsOperationalCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_status_transition",
+    message: `Cannot transition PMS reservation from ${fromStatus} to ${toStatus}.`,
+  };
+}
+
 function isPmsCommandMeta(value: unknown): value is PmsCommandMeta {
   return (
     !!value &&
@@ -813,8 +1428,23 @@ function isPmsCommandMeta(value: unknown): value is PmsCommandMeta {
   );
 }
 
+function operationalCommandFingerprint(command: PmsOperationalCommand): unknown {
+  const { audit: _audit, ...fingerprint } = command;
+  return fingerprint;
+}
+
 function stableJson(value: unknown): string {
-  return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort());
+  return JSON.stringify(sortJsonValue(value));
+}
+
+function sortJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJsonValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, sortJsonValue(entry)]),
+  );
 }
 
 function sha256(value: string): string {

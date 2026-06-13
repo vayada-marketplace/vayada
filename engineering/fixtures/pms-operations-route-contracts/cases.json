@@ -364,7 +364,12 @@
           "reservation.checkin.pendingFlags",
           "reservation.assignments[0].assignmentStatus",
           "commandMeta.idempotencyKey"
-        ]
+        ],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["audit_event"]
+        },
+        "assignmentState": "checked_in"
       }
     },
     {
@@ -383,8 +388,31 @@
       "expected": {
         "status": 200,
         "mustInclude": ["reservation.status", "reservation.assignments[0].assignmentStatus"],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["audit_event"]
+        },
         "mustNotWrite": ["booking.guest_bookings.status"],
         "guestVisibleEvents": "Only emitted through an explicit Booking-owned bridge when the status is guest-visible."
+      }
+    },
+    {
+      "caseId": "operational-status-invalid-transition",
+      "description": "Operational status transitions reject impossible state changes with the contract validation code.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/status",
+        "method": "PATCH",
+        "body": {
+          "commandId": "cmd-status-invalid-transition",
+          "idempotencyKey": "pms-status-invalid-transition-001",
+          "expectedVersion": "reservation-v7",
+          "status": "checked_out"
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_status_transition",
+        "sideEffects": []
       }
     },
     {
@@ -422,6 +450,10 @@
       "expected": {
         "status": 200,
         "mustInclude": ["reservation.status", "commandMeta.sideEffects"],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["audit_event"]
+        },
         "sideEffects": ["audit_event"],
         "mustNotCall": ["Booking cancellation command", "payment provider refund"]
       }
@@ -653,6 +685,37 @@
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/room-types/f6855000-0000-0000-0000-000000000001",
         "query": {}
+      },
+      "expected": {
+        "denials": [
+          { "condition": "missing auth", "status": 401, "errorCode": "unauthenticated" },
+          { "condition": "missing permission", "status": 403, "errorCode": "missing_permission" },
+          { "condition": "missing entitlement", "status": 403, "errorCode": "missing_entitlement" },
+          {
+            "condition": "inactive entitlement",
+            "status": 403,
+            "errorCode": "inactive_entitlement"
+          },
+          {
+            "condition": "missing linked property",
+            "status": 403,
+            "errorCode": "missing_resource_access"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "authorization-denial-matrix-operational-command",
+      "description": "Protected PMS operational command routes require manage permission, active entitlement, and linked property access.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-in",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkin-denial",
+          "idempotencyKey": "pms-checkin-denial-001",
+          "stepResults": [],
+          "pendingFlags": []
+        }
       },
       "expected": {
         "denials": [
