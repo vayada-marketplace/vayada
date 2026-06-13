@@ -253,6 +253,7 @@ class MessageAttachmentRepository:
     async def add(
         *,
         message_id: str,
+        platform_media_object_id: str | None = None,
         s3_key: str | None = None,
         source_url: str | None = None,
         filename: str | None = None,
@@ -263,13 +264,14 @@ class MessageAttachmentRepository:
         row = await Database.fetchrow(
             """
             INSERT INTO message_attachments (
-                message_id, s3_key, source_url, filename,
+                message_id, platform_media_object_id, s3_key, source_url, filename,
                 content_type, size_bytes, source_attachment_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
             """,
             message_id,
+            platform_media_object_id,
             s3_key,
             source_url,
             filename,
@@ -286,6 +288,24 @@ class MessageAttachmentRepository:
             message_id,
         )
         return [dict(r) for r in rows]
+
+    @staticmethod
+    async def set_platform_media_object(
+        *,
+        attachment_id: str,
+        platform_media_object_id: str,
+    ) -> dict | None:
+        row = await Database.fetchrow(
+            """
+            UPDATE message_attachments
+            SET platform_media_object_id = $2
+            WHERE id = $1
+            RETURNING *
+            """,
+            attachment_id,
+            platform_media_object_id,
+        )
+        return dict(row) if row else None
 
     @staticmethod
     async def list_by_thread(thread_id: str) -> list[dict]:

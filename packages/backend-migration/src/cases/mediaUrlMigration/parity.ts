@@ -31,6 +31,7 @@ type MediaUrlMigrationChecks = {
       id: string;
       s3Key: string | null;
       sourceUrl: string | null;
+      platformMediaObjectId: string;
     }>;
   };
   forbiddenPublicReferenceValues?: string[];
@@ -232,9 +233,13 @@ export async function checkMediaUrlMigrationParity({
     }
 
     for (const attachment of config.pms.attachments) {
-      const { rows } = await client.query<{ s3_key: string | null; source_url: string | null }>(
+      const { rows } = await client.query<{
+        s3_key: string | null;
+        source_url: string | null;
+        platform_media_object_id: string | null;
+      }>(
         `
-          SELECT s3_key, source_url
+          SELECT s3_key, source_url, platform_media_object_id::text
           FROM pms.message_attachments
           WHERE id = $1
         `,
@@ -244,7 +249,8 @@ export async function checkMediaUrlMigrationParity({
       if (
         actual &&
         actual.s3_key === attachment.s3Key &&
-        actual.source_url === attachment.sourceUrl
+        actual.source_url === attachment.sourceUrl &&
+        actual.platform_media_object_id === attachment.platformMediaObjectId
       ) {
         continue;
       }

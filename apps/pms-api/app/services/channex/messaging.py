@@ -9,6 +9,7 @@ from app.repositories.messaging_repo import (
     MessageRepository,
     MessageThreadRepository,
 )
+from app.repositories.platform_media_repo import PlatformMediaAttachmentRepository
 from app.services import channex_service
 
 logger = logging.getLogger(__name__)
@@ -101,12 +102,18 @@ async def _ensure_thread(
     )
 
 
-async def _persist_attachments(message_id: str, attachments: list) -> None:
+async def _persist_attachments(
+    *,
+    property_id: str,
+    thread_id: str,
+    message_id: str,
+    attachments: list,
+) -> None:
     for att in attachments or []:
         # Channex returns either URL-only objects or {id, links: {url, thumbnail}}
         links = att.get("links") or {}
         url = links.get("url") or att.get("url")
-        await MessageAttachmentRepository.add(
+        attachment = await MessageAttachmentRepository.add(
             message_id=message_id,
             source_url=url,
             filename=att.get("file_name") or att.get("filename"),
@@ -114,6 +121,21 @@ async def _persist_attachments(message_id: str, attachments: list) -> None:
             size_bytes=att.get("size"),
             source_attachment_id=att.get("id"),
         )
+        if url:
+            media = await PlatformMediaAttachmentRepository.create_provider_external_reference(
+                property_id=property_id,
+                thread_id=thread_id,
+                message_attachment_id=str(attachment["id"]),
+                source_attachment_id=att.get("id"),
+                source_url=url,
+                filename=att.get("file_name") or att.get("filename"),
+                content_type=att.get("file_type") or att.get("content_type"),
+                size_bytes=att.get("size"),
+            )
+            await MessageAttachmentRepository.set_platform_media_object(
+                attachment_id=str(attachment["id"]),
+                platform_media_object_id=media.media_id,
+            )
 
 
 async def process_inbound_message_event(payload: dict, top_level: dict) -> None:
@@ -158,7 +180,12 @@ async def process_inbound_message_event(payload: dict, top_level: dict) -> None:
     )
 
     if inserted:
-        await _persist_attachments(str(inserted["id"]), payload.get("attachments") or [])
+        await _persist_attachments(
+            property_id=hotel_id,
+            thread_id=str(thread["id"]),
+            message_id=str(inserted["id"]),
+            attachments=payload.get("attachments") or [],
+        )
 
 
 async def sync_threads_for_hotel(hotel_id: str) -> None:
@@ -220,8 +247,10 @@ async def sync_threads_for_hotel(hotel_id: str) -> None:
             )
             if inserted:
                 await _persist_attachments(
-                    str(inserted["id"]),
-                    m_attrs.get("attachments") or [],
+                    property_id=hotel_id,
+                    thread_id=str(local_thread["id"]),
+                    message_id=str(inserted["id"]),
+                    attachments=m_attrs.get("attachments") or [],
                 )
 
     await ChannexConnectionRepository.update_last_message_sync(

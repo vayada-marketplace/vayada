@@ -669,9 +669,11 @@ CREATE TABLE migration_source_media.pms_attachment_references AS
 SELECT
   'f8227300-0000-0000-0000-000000000001'::uuid AS attachment_id,
   'private/pms/properties/f8223000-0000-0000-0000-000000000001/messages/f8227100-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000008/invoice.pdf'::text AS target_s3_key,
-  'https://legacy-pms-private.s3.amazonaws.com/legacy-pms-message-attachments/thread-822/invoice.pdf'::text AS target_source_url
+  'https://legacy-pms-private.s3.amazonaws.com/legacy-pms-message-attachments/thread-822/invoice.pdf'::text AS target_source_url,
+  'f8224000-0000-0000-0000-000000000008'::uuid AS platform_media_object_id
 UNION ALL
 SELECT
   'f8227300-0000-0000-0000-000000000002'::uuid,
   NULL::text,
-  'https://provider.example.test/messages/thread-822/passport.png'::text;
+  'https://provider.example.test/messages/thread-822/passport.png'::text,
+  'f8224000-0000-0000-0000-000000000009'::uuid;
