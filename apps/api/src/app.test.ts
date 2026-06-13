@@ -69,6 +69,15 @@ import type {
   PmsAssignmentCommand,
   PmsAssignmentCommandResult,
   PmsCheckInCommand,
+  PmsCheckOutCommand,
+  PmsCheckOutCommandResponse,
+  PmsCheckOutCommandResult,
+  PmsCheckOutRecord,
+  PmsCheckoutCharge,
+  PmsCheckoutChargeCommandResponse,
+  PmsCheckoutChargeCreateCommand,
+  PmsCheckoutChargeMarkPaidCommand,
+  PmsCheckoutChargeWaiveCommand,
   PmsNoShowCommand,
   PmsOperationalCommandResult,
   PmsOperationalStatusCommand,
@@ -157,6 +166,7 @@ const pmsOperationsContractCases = JSON.parse(
       message?: string;
       sideEffects?: string[];
       mustCall?: string[];
+      mustNotCall?: string[];
       mustNotWrite?: string[];
       commandMeta?: {
         contractVersion?: string;
@@ -308,6 +318,18 @@ const pmsOperationalTemplateCases = Object.fromEntries(
     "template-validation-oversized",
     "template-validation-missing-label",
   ].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
+const pmsCheckoutChargeCases = Object.fromEntries(
+  ["checkout-charge-create-mark-paid-waive"].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
+const pmsCheckOutCases = Object.fromEntries(
+  ["checkout-charges-and-checkout", "checkout-version-conflict"].map((caseId) => [
     caseId,
     pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
   ]),
@@ -909,8 +931,16 @@ const pmsOperationsRepository: PmsOperationsReadRepository = {
 
 function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository & {
   commands: Array<
-    PmsAssignmentCommand | PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand
+    | PmsAssignmentCommand
+    | PmsOperationalStatusCommand
+    | PmsCheckInCommand
+    | PmsNoShowCommand
+    | PmsCheckOutCommand
   >;
+  checkOutCommands: PmsCheckOutCommand[];
+  checkoutChargeCreates: PmsCheckoutChargeCreateCommand[];
+  checkoutChargeMarkPaids: PmsCheckoutChargeMarkPaidCommand[];
+  checkoutChargeWaives: PmsCheckoutChargeWaiveCommand[];
   noteCreates: PmsPrivateNoteCreateCommand[];
   noteDeletes: PmsPrivateNoteDeleteCommand[];
   templateUpdates: PmsOperationalTemplateUpdateCommand[];
@@ -918,8 +948,16 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   auditEvents: string[];
 } {
   const commands: Array<
-    PmsAssignmentCommand | PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand
+    | PmsAssignmentCommand
+    | PmsOperationalStatusCommand
+    | PmsCheckInCommand
+    | PmsNoShowCommand
+    | PmsCheckOutCommand
   > = [];
+  const checkOutCommands: PmsCheckOutCommand[] = [];
+  const checkoutChargeCreates: PmsCheckoutChargeCreateCommand[] = [];
+  const checkoutChargeMarkPaids: PmsCheckoutChargeMarkPaidCommand[] = [];
+  const checkoutChargeWaives: PmsCheckoutChargeWaiveCommand[] = [];
   const noteCreates: PmsPrivateNoteCreateCommand[] = [];
   const noteDeletes: PmsPrivateNoteDeleteCommand[] = [];
   const templateUpdates: PmsOperationalTemplateUpdateCommand[] = [];
@@ -928,6 +966,32 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   const notesByReservation = new Map<string, PmsPrivateNote[]>([
     [pmsReservations[0].guestBookingId, structuredClone(pmsPrivateNotes)],
     [pmsReservations[1].guestBookingId, []],
+  ]);
+  const checkoutChargesByReservation = new Map<string, PmsCheckoutCharge[]>([
+    [
+      pmsReservations[0].guestBookingId,
+      [
+        {
+          chargeId: "f6855700-0000-0000-0000-000000000001",
+          propertyId: pmsPropertyId,
+          guestBookingId: pmsReservations[0].guestBookingId,
+          assignmentId: pmsReservations[0].assignments[0]!.assignmentId,
+          label: "Late checkout",
+          amount: { amountDecimal: "25.00", currency: "EUR" },
+          originalAmount: { amountDecimal: "25.00", currency: "EUR" },
+          status: "paid",
+          createdByUserId: "user_hotel_owner",
+          createdAt: "2026-08-14T16:45:00.000Z",
+          settledAt: "2026-08-14T16:55:00.000Z",
+          waivedAt: null,
+          operationalOwnership: {
+            owner: "pms",
+            financeSettlementOwner: "finance",
+            providerSettlement: false,
+          },
+        },
+      ],
+    ],
   ]);
   const templates = new Map<PmsOperationalTemplateKind, PmsOperationalTemplate>([
     [
@@ -962,6 +1026,10 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
 
   return {
     commands,
+    checkOutCommands,
+    checkoutChargeCreates,
+    checkoutChargeMarkPaids,
+    checkoutChargeWaives,
     noteCreates,
     noteDeletes,
     templateUpdates,
@@ -998,6 +1066,201 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
           commandId: command.commandId,
           idempotencyKey: command.idempotencyKey,
           acceptedAt: "2026-08-14T17:10:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
+    async listCheckoutCharges(propertyId, guestBookingId) {
+      expect(propertyId).toBe(pmsPropertyId);
+      return checkoutChargesByReservation.has(guestBookingId)
+        ? structuredClone(checkoutChargesByReservation.get(guestBookingId)!)
+        : null;
+    },
+    async createCheckoutCharge(command) {
+      checkoutChargeCreates.push(command);
+      const charges = checkoutChargesByReservation.get(command.guestBookingId);
+      if (!charges) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "reservation_not_found",
+          message: "PMS reservation not found.",
+        };
+      }
+      const charge: PmsCheckoutCharge = {
+        chargeId: "f6855700-0000-0000-0000-000000000002",
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        assignmentId: command.assignmentId ?? null,
+        label: command.label,
+        amount: { amountDecimal: command.amountDecimal, currency: command.currency },
+        originalAmount: { amountDecimal: command.amountDecimal, currency: command.currency },
+        status: "pending",
+        createdByUserId: "user_hotel_owner",
+        createdAt: "2026-08-14T17:20:00.000Z",
+        settledAt: null,
+        waivedAt: null,
+        operationalOwnership: {
+          owner: "pms",
+          financeSettlementOwner: "finance",
+          providerSettlement: false,
+        },
+      };
+      charges.unshift(charge);
+      auditEvents.push(`checkout_charge_created:${charge.chargeId}`);
+      return {
+        ok: true,
+        charge,
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:20:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
+    async markCheckoutChargePaid(command) {
+      checkoutChargeMarkPaids.push(command);
+      const charges = checkoutChargesByReservation.get(command.guestBookingId);
+      const charge = charges?.find((item) => item.chargeId === command.chargeId);
+      if (!charge) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "charge_not_found",
+          message: "PMS checkout charge not found.",
+        };
+      }
+      charge.status = "paid";
+      charge.settledAt = "2026-08-14T17:25:00.000Z";
+      charge.waivedAt = null;
+      auditEvents.push(`checkout_charge_marked_paid:${charge.chargeId}`);
+      return {
+        ok: true,
+        charge: structuredClone(charge),
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:25:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
+    async waiveCheckoutCharge(command) {
+      checkoutChargeWaives.push(command);
+      const charges = checkoutChargesByReservation.get(command.guestBookingId);
+      const charge = charges?.find((item) => item.chargeId === command.chargeId);
+      if (!charge) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "charge_not_found",
+          message: "PMS checkout charge not found.",
+        };
+      }
+      charge.status = "waived";
+      charge.settledAt = null;
+      charge.waivedAt = "2026-08-14T17:30:00.000Z";
+      auditEvents.push(`checkout_charge_waived:${charge.chargeId}`);
+      return {
+        ok: true,
+        charge: structuredClone(charge),
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:30:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
+    async executeCheckOutCommand(command) {
+      commands.push(command);
+      checkOutCommands.push(command);
+      const reservation = pmsReservations.find(
+        (item) => item.guestBookingId === command.guestBookingId,
+      );
+      const charges = checkoutChargesByReservation.get(command.guestBookingId);
+      if (!reservation || !charges) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "reservation_not_found",
+          message: "PMS reservation not found.",
+        };
+      }
+      if (command.expectedVersion === "reservation-v6") {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "version_conflict",
+          message: "Reservation check-out version is stale.",
+        };
+      }
+      if (command.expectedVersion === "reservation-invalid-transition") {
+        return {
+          ok: false,
+          statusCode: 400,
+          code: "invalid_status_transition",
+          message: "Cannot transition PMS reservation from assigned to checked_out.",
+        };
+      }
+      const settled = charges.filter((charge) => command.chargesSettled.includes(charge.chargeId));
+      const pendingChargeIds = charges
+        .filter(
+          (charge) =>
+            charge.status === "pending" && !command.chargesSettled.includes(charge.chargeId),
+        )
+        .map((charge) => charge.chargeId);
+      const unsettledPaidChargeIds = charges
+        .filter((charge) => charge.status === "paid")
+        .map((charge) => charge.chargeId);
+      const pendingFlags = [
+        ...new Set([
+          ...command.pendingFlags,
+          ...(pendingChargeIds.length > 0 ? ["checkout_charges_unsettled"] : []),
+          ...(unsettledPaidChargeIds.length > 0 ? ["finance_settlement_handoff_required"] : []),
+        ]),
+      ].sort();
+      const checkout: PmsCheckOutRecord = {
+        checkoutRecordId: "f6855a00-0000-0000-0000-000000000001",
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        assignmentId: command.assignmentId ?? null,
+        completedByUserId: "user_hotel_owner",
+        completedAt: "2026-08-18T10:15:00.000Z",
+        inspectionResults: structuredClone(command.inspectionResults),
+        chargesSettled: structuredClone(settled),
+        pendingFlags,
+        checkoutNotes: command.checkoutNotes ?? null,
+        financeHandoff: {
+          financeSettlementOwner: "finance",
+          providerSettlement: false,
+          pendingChargeIds,
+          unsettledPaidChargeIds,
+        },
+      };
+      const checkedOutReservation: PmsOperationalReservation = {
+        ...structuredClone(reservation),
+        checkout: { completedAt: checkout.completedAt, pendingFlags },
+        assignments: reservation.assignments.map((assignment) => ({
+          ...assignment,
+          assignmentStatus: "checked_out",
+        })),
+      };
+      auditEvents.push(`checkout_completed:${checkout.checkoutRecordId}`);
+      return {
+        ok: true,
+        reservation: checkedOutReservation,
+        checkout,
+        charges: structuredClone(charges),
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: checkout.completedAt,
           sideEffects: ["audit_event"],
         },
       };
@@ -6750,6 +7013,293 @@ describe("vayada-api", () => {
       code: checkoutChargeMarkPaidFreezeCase.expected.errorCode,
       category: "conflict",
     });
+  });
+
+  it("lists, creates, marks paid, and waives PMS checkout charges as operational state only", async () => {
+    const chargeCase = pmsCheckoutChargeCases["checkout-charge-create-mark-paid-waive"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage", "pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsCheckoutChargeMarkPaidFreezeEnabled: false,
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const listed = await injectJson(app, {
+      method: "GET",
+      url: chargeCase.request.path,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const created = await injectJson(app, {
+      method: chargeCase.request.method ?? "POST",
+      url: chargeCase.request.path,
+      payload: chargeCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const createdBody = created.body as PmsCheckoutChargeCommandResponse;
+    const paid = await injectJson(app, {
+      method: "POST",
+      url: `${chargeCase.request.path}/${createdBody.charge.chargeId}/mark-paid`,
+      payload: {
+        commandId: "cmd-checkout-charge-mark-paid-001",
+        idempotencyKey: "pms-checkout-charge-mark-paid-001",
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const waived = await injectJson(app, {
+      method: "POST",
+      url: `${chargeCase.request.path}/${createdBody.charge.chargeId}/waive`,
+      payload: {
+        commandId: "cmd-checkout-charge-waive-001",
+        idempotencyKey: "pms-checkout-charge-waive-001",
+        reason: "service recovery",
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(listed.statusCode).toBe(200);
+    expect(created.statusCode).toBe(chargeCase.expected.status);
+    expect(paid.statusCode).toBe(chargeCase.expected.status);
+    expect(waived.statusCode).toBe(chargeCase.expected.status);
+    expect(createdBody.charge).toMatchObject({
+      label: chargeCase.request.body?.label,
+      amount: { amountDecimal: "12.00", currency: "EUR" },
+      status: "pending",
+      operationalOwnership: {
+        owner: "pms",
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+      },
+    });
+    expect((paid.body as PmsCheckoutChargeCommandResponse).charge).toMatchObject({
+      status: "paid",
+      settledAt: "2026-08-14T17:25:00.000Z",
+      operationalOwnership: { financeSettlementOwner: "finance", providerSettlement: false },
+    });
+    expect((waived.body as PmsCheckoutChargeCommandResponse).charge).toMatchObject({
+      status: "waived",
+      waivedAt: "2026-08-14T17:30:00.000Z",
+      operationalOwnership: { financeSettlementOwner: "finance", providerSettlement: false },
+    });
+    for (const response of [created, paid, waived]) {
+      expect((response.body as PmsCheckoutChargeCommandResponse).commandMeta).toMatchObject({
+        contractVersion: "pms-operations.v1",
+        sideEffects: ["audit_event"],
+      });
+      expect(
+        (response.body as PmsCheckoutChargeCommandResponse).commandMeta.sideEffects,
+      ).not.toEqual(expect.arrayContaining(["finance_reconciliation", "payout_dispatch"]));
+    }
+    for (const forbiddenCall of chargeCase.expected.mustNotCall ?? []) {
+      expect(forbiddenCall).not.toBe("PMS checkout charge command repository");
+    }
+    expect(commandRepository.checkoutChargeCreates).toHaveLength(1);
+    expect(commandRepository.checkoutChargeMarkPaids).toHaveLength(1);
+    expect(commandRepository.checkoutChargeWaives).toHaveLength(1);
+    expect(commandRepository.auditEvents).toEqual([
+      "checkout_charge_created:f6855700-0000-0000-0000-000000000002",
+      "checkout_charge_marked_paid:f6855700-0000-0000-0000-000000000002",
+      "checkout_charge_waived:f6855700-0000-0000-0000-000000000002",
+    ]);
+    expect(commandRepository.outboxEnqueues).toEqual([]);
+  });
+
+  it("checks out PMS reservations with inspection results, pending flags, charge snapshots, and no finance side effects", async () => {
+    const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: checkoutCase.request.method ?? "POST",
+      url: checkoutCase.request.path,
+      payload: checkoutCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const body = response.body as PmsCheckOutCommandResponse;
+
+    expect(response.statusCode).toBe(checkoutCase.expected.status);
+    expect(body.commandMeta).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      idempotencyKey: checkoutCase.request.body?.idempotencyKey,
+      sideEffects: ["audit_event"],
+    });
+    for (const path of checkoutCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    expect(body.reservation.assignments).toEqual(
+      expect.arrayContaining([expect.objectContaining({ assignmentStatus: "checked_out" })]),
+    );
+    expect(body.checkout).toMatchObject({
+      inspectionResults: checkoutCase.request.body?.inspectionResults,
+      chargesSettled: [expect.objectContaining({ status: "paid" })],
+      checkoutNotes: checkoutCase.request.body?.checkoutNotes,
+      financeHandoff: {
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+        unsettledPaidChargeIds: ["f6855700-0000-0000-0000-000000000001"],
+      },
+    });
+    expect(body.reservation.checkout.pendingFlags).toContain("finance_settlement_handoff_required");
+    expect(body.commandMeta.sideEffects).not.toEqual(
+      expect.arrayContaining(["finance_reconciliation", "payout_dispatch"]),
+    );
+    expect(commandRepository.checkOutCommands).toHaveLength(1);
+    expect(commandRepository.auditEvents).toContain(
+      "checkout_completed:f6855a00-0000-0000-0000-000000000001",
+    );
+    expect(commandRepository.outboxEnqueues).toEqual([]);
+  });
+
+  it("surfaces checkout pending flags for unresolved checkout charges", async () => {
+    const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: checkoutCase.request.path,
+      payload: {
+        ...checkoutCase.request.body,
+        commandId: "cmd-checkout-pending-001",
+        idempotencyKey: "pms-checkout-pending-001",
+        chargesSettled: [],
+        pendingFlags: ["manual_review"],
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const body = response.body as PmsCheckOutCommandResponse;
+
+    expect(response.statusCode).toBe(200);
+    expect(body.checkout.pendingFlags).toEqual([
+      "finance_settlement_handoff_required",
+      "manual_review",
+    ]);
+    expect(body.checkout.chargesSettled).toEqual([]);
+    expect(body.checkout.financeHandoff.unsettledPaidChargeIds).toEqual([
+      "f6855700-0000-0000-0000-000000000001",
+    ]);
+  });
+
+  it("rejects malformed PMS check-out settled charge ids before dispatch", async () => {
+    const checkoutCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: checkoutCase.request.path,
+      payload: {
+        ...checkoutCase.request.body,
+        chargesSettled: [123],
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      code: "invalid_body",
+      message: "chargesSettled entries must be UUIDs.",
+    });
+    expect(commandRepository.checkOutCommands).toEqual([]);
+  });
+
+  it("maps PMS check-out version conflicts and replays without finance side effects", async () => {
+    const conflictCase = pmsCheckOutCases["checkout-version-conflict"]!;
+    const successCase = pmsCheckOutCases["checkout-charges-and-checkout"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const conflict = await injectJson(app, {
+      method: conflictCase.request.method ?? "POST",
+      url: conflictCase.request.path,
+      payload: conflictCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const first = await injectJson(app, {
+      method: "POST",
+      url: successCase.request.path,
+      payload: successCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const replay = await injectJson(app, {
+      method: "POST",
+      url: successCase.request.path,
+      payload: successCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(conflict.statusCode).toBe(conflictCase.expected.status);
+    expect(conflict.body).toMatchObject({ code: conflictCase.expected.errorCode });
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.body).toEqual(first.body);
+    expect(commandRepository.outboxEnqueues).toEqual([]);
   });
 
   it("executes PMS assignment assign/move/unassign/swap commands through the P1c contract", async () => {
