@@ -16,6 +16,7 @@ const EXPECTED_TARGET_KEYS = new Set([
   "distributionBookabilityChecks",
   "intelligenceChecks",
   "platformMediaChecks",
+  "mediaUrlMigrationChecks",
 ]);
 const IDENTITY_CHECK_KEYS = new Set([
   "memberships",
@@ -112,6 +113,13 @@ const PLATFORM_MEDIA_INVENTORY_KEYS = new Set([
   "publicObjectCount",
   "privateObjectCount",
 ]);
+const MEDIA_URL_MIGRATION_CHECK_KEYS = new Set([
+  "bookingPropertyMedia",
+  "marketplace",
+  "pms",
+  "forbiddenPublicReferenceValues",
+]);
+const MEDIA_URL_BOOKING_PROPERTY_MEDIA_STRING_FIELDS = ["id", "mediaType", "url", "sourceSystem"];
 const INTELLIGENCE_PROPERTY_STRING_FIELDS = [
   "propertyId",
   "organizationId",
@@ -436,6 +444,7 @@ export function validateExpectedTargetConfig(
     "distributionBookabilityChecks",
     "intelligenceChecks",
     "platformMediaChecks",
+    "mediaUrlMigrationChecks",
   ]) {
     const extension = expected[extensionKey];
     if (extension !== undefined && !isRecord(extension)) {
@@ -883,6 +892,31 @@ export function validateExpectedTargetConfig(
       validateStringArray(
         platformMediaChecks["forbiddenPublicValues"],
         "expected-target.json.platformMediaChecks.forbiddenPublicValues",
+        findings,
+      );
+    }
+  }
+
+  const mediaUrlMigrationChecks = expected["mediaUrlMigrationChecks"];
+  if (isRecord(mediaUrlMigrationChecks)) {
+    validateKnownKeys(
+      mediaUrlMigrationChecks,
+      MEDIA_URL_MIGRATION_CHECK_KEYS,
+      "expected-target.json.mediaUrlMigrationChecks",
+      findings,
+    );
+    if (mediaUrlMigrationChecks["bookingPropertyMedia"] !== undefined) {
+      validateObjectArray(
+        mediaUrlMigrationChecks["bookingPropertyMedia"],
+        "expected-target.json.mediaUrlMigrationChecks.bookingPropertyMedia",
+        MEDIA_URL_BOOKING_PROPERTY_MEDIA_STRING_FIELDS,
+        findings,
+      );
+    }
+    if (mediaUrlMigrationChecks["forbiddenPublicReferenceValues"] !== undefined) {
+      validateStringArray(
+        mediaUrlMigrationChecks["forbiddenPublicReferenceValues"],
+        "expected-target.json.mediaUrlMigrationChecks.forbiddenPublicReferenceValues",
         findings,
       );
     }
