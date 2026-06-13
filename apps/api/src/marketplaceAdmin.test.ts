@@ -231,6 +231,47 @@ describe("marketplace admin routes", () => {
       title: "Creator suite",
     });
   });
+
+  it("rejects blank listing titles on marketplace admin updates", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/user_hotel/listings/listing_801",
+      headers: { authorization: "Bearer platform-token" },
+      payload: { title: "   " },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({ code: "title_required" });
+    expect(repository.calls.updateListing).toHaveLength(0);
+  });
+
+  it("rejects invalid collaboration offering values on marketplace admin listing updates", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+    const offering = listingPayload().collaborationOfferings[0]!;
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/user_hotel/listings/listing_801",
+      headers: { authorization: "Bearer platform-token" },
+      payload: {
+        collaborationOfferings: [
+          {
+            ...offering,
+            freeStayMinNights: 4,
+            freeStayMaxNights: 2,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({ code: "invalid_free_stay" });
+    expect(repository.calls.updateListing).toHaveLength(0);
+  });
 });
 
 function buildMarketplaceAdminApp(repository: MarketplaceAdminRepository) {

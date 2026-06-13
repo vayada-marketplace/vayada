@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { requireAuthContext, type PermissionKey, type RequestContext } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import pg, { type PoolClient, type QueryResult, type QueryResultRow } from "pg";
@@ -301,50 +303,74 @@ export function createPgMarketplaceAdminRepository(config: {
     },
     async respondToCollaborationAsHotel(input) {
       const nextStatus = input.status === "accepted" ? "negotiating" : "declined";
-      const result = await pool.query<CollaborationRow>(
-        `${COLLABORATION_MUTATION_CTE}
-         UPDATE marketplace.collaborations AS collaboration
-         SET lifecycle_status = $2,
-             responded_at = now(),
-             collaboration_metadata = jsonb_set(
-               collaboration.collaboration_metadata,
-               '{adminResponseMessage}',
-               to_jsonb($3::text),
-               true
-             ),
-             updated_at = now()
-         FROM matched
-         WHERE collaboration.id = matched.id
-         RETURNING collaboration.id`,
-        [input.collaborationId, nextStatus, input.responseMessage ?? ""],
-      );
-      if (!result.rows[0]) return null;
-      return readLifecycleWrite(pool, result.rows[0].id, {
-        action: "respond",
+      return executeMarketplaceAdminLifecycleCommand(pool, {
+        operation: "marketplace_admin_collaboration_respond",
+        collaborationId: input.collaborationId,
         idempotencyKey: input.idempotencyKey,
+        fingerprintPayload: {
+          action: "respond",
+          collaborationId: input.collaborationId,
+          status: input.status,
+          responseMessage: input.responseMessage ?? "",
+        },
+        command: {
+          action: "respond",
+          idempotencyKey: input.idempotencyKey,
+        },
+        async mutate(client) {
+          const result = await client.query<CollaborationRow>(
+            `${COLLABORATION_MUTATION_CTE}
+             UPDATE marketplace.collaborations AS collaboration
+             SET lifecycle_status = $2,
+                 responded_at = now(),
+                 collaboration_metadata = jsonb_set(
+                   collaboration.collaboration_metadata,
+                   '{adminResponseMessage}',
+                   to_jsonb($3::text),
+                   true
+                 ),
+                 updated_at = now()
+             FROM matched
+             WHERE collaboration.id = matched.id
+             RETURNING collaboration.id`,
+            [input.collaborationId, nextStatus, input.responseMessage ?? ""],
+          );
+          return result.rows[0]?.id ?? null;
+        },
       });
     },
     async approveCollaborationAsHotel(input) {
       const acceptedAt = new Date().toISOString();
-      const result = await pool.query<CollaborationRow>(
-        `${COLLABORATION_MUTATION_CTE}
-         UPDATE marketplace.collaborations AS collaboration
-         SET hotel_agreed_at = COALESCE(collaboration.hotel_agreed_at, now()),
-             lifecycle_status = CASE
-               WHEN collaboration.creator_agreed_at IS NOT NULL THEN 'accepted'
-               ELSE 'negotiating'
-             END,
-             updated_at = now()
-         FROM matched
-         WHERE collaboration.id = matched.id
-         RETURNING collaboration.id`,
-        [input.collaborationId],
-      );
-      if (!result.rows[0]) return null;
-      return readLifecycleWrite(pool, result.rows[0].id, {
-        action: "approve_terms",
+      return executeMarketplaceAdminLifecycleCommand(pool, {
+        operation: "marketplace_admin_collaboration_approve_terms",
+        collaborationId: input.collaborationId,
         idempotencyKey: input.idempotencyKey,
-        acceptedAt,
+        fingerprintPayload: {
+          action: "approve_terms",
+          collaborationId: input.collaborationId,
+        },
+        command: {
+          action: "approve_terms",
+          idempotencyKey: input.idempotencyKey,
+          acceptedAt,
+        },
+        async mutate(client) {
+          const result = await client.query<CollaborationRow>(
+            `${COLLABORATION_MUTATION_CTE}
+             UPDATE marketplace.collaborations AS collaboration
+             SET hotel_agreed_at = COALESCE(collaboration.hotel_agreed_at, now()),
+                 lifecycle_status = CASE
+                   WHEN collaboration.creator_agreed_at IS NOT NULL THEN 'accepted'
+                   ELSE 'negotiating'
+                 END,
+                 updated_at = now()
+             FROM matched
+             WHERE collaboration.id = matched.id
+             RETURNING collaboration.id`,
+            [input.collaborationId],
+          );
+          return result.rows[0]?.id ?? null;
+        },
       });
     },
     async createHotelListingForUser(input) {
@@ -649,6 +675,7 @@ function validateUpdateListingRequest(
   body: MarketplaceAdminUpdateHotelListingRequest | undefined,
 ): string | null {
   if (!body) return "body_required";
+  if (body.title !== undefined && !readNonEmptyString(body.title)) return "title_required";
   if (body.collaborationOfferings?.length === 0) return "collaboration_offerings_required";
   return validateListingChildren(body.collaborationOfferings, body.creatorRequirements);
 }
@@ -663,15 +690,27 @@ function validateListingChildren(
         return "invalid_collaboration_type";
       }
       if (offering.collaborationType === "free_stay") {
-        if (!offering.freeStayMinNights || !offering.freeStayMaxNights) return "invalid_free_stay";
+        if (
+          !isPositiveInteger(offering.freeStayMinNights) ||
+          !isPositiveInteger(offering.freeStayMaxNights) ||
+          offering.freeStayMinNights > offering.freeStayMaxNights
+        ) {
+          return "invalid_free_stay";
+        }
       }
-      if (offering.collaborationType === "paid" && !offering.paidMaxAmount) {
+      if (
+        offering.collaborationType === "paid" &&
+        !isPositiveDecimalString(offering.paidMaxAmount)
+      ) {
         return "invalid_paid_amount";
       }
-      if (offering.collaborationType === "discount" && !offering.discountPercentage) {
+      if (offering.collaborationType === "discount" && !isPercentage(offering.discountPercentage)) {
         return "invalid_discount";
       }
-      if (offering.collaborationType === "affiliate" && !offering.commissionPercentage) {
+      if (
+        offering.collaborationType === "affiliate" &&
+        !isPercentage(offering.commissionPercentage)
+      ) {
         return "invalid_commission";
       }
     }
@@ -707,6 +746,240 @@ async function writeListing<T>(
   }
 }
 
+type MarketplaceAdminLifecycleOperation =
+  | "marketplace_admin_collaboration_respond"
+  | "marketplace_admin_collaboration_approve_terms";
+
+type MarketplaceAdminLifecycleReplayRow = {
+  status: "in_progress" | "completed" | "failed" | "expired" | "conflict";
+  requestFingerprintHash: string;
+  metadata: unknown;
+};
+
+async function executeMarketplaceAdminLifecycleCommand(
+  pool: MarketplaceAdminPool,
+  input: {
+    operation: MarketplaceAdminLifecycleOperation;
+    collaborationId: string;
+    idempotencyKey: string;
+    fingerprintPayload: unknown;
+    command: MarketplaceCollaborationLifecycleWriteResponse["command"];
+    mutate(client: PoolClient): Promise<string | null>;
+  },
+): Promise<MarketplaceCollaborationLifecycleWriteResponse | null> {
+  const keyHash = sha256(
+    stableJson({ collaborationId: input.collaborationId, key: input.idempotencyKey }),
+  );
+  const fingerprint = sha256(stableJson(input.fingerprintPayload));
+  const client = await pool.connect();
+  let transactionOpen = false;
+  try {
+    await client.query("BEGIN");
+    transactionOpen = true;
+
+    const existing = await findMarketplaceAdminLifecycleReplay(client, {
+      operation: input.operation,
+      keyHash,
+    });
+    const replay = readMarketplaceAdminLifecycleReplay(existing, fingerprint);
+    if (replay) {
+      await client.query("COMMIT");
+      transactionOpen = false;
+      return replay;
+    }
+
+    const reserved = await reserveMarketplaceAdminLifecycleIdempotency(client, {
+      operation: input.operation,
+      collaborationId: input.collaborationId,
+      idempotencyKey: input.idempotencyKey,
+      keyHash,
+      fingerprint,
+    });
+    if (!reserved) {
+      const current = await findMarketplaceAdminLifecycleReplay(client, {
+        operation: input.operation,
+        keyHash,
+      });
+      const currentReplay = readMarketplaceAdminLifecycleReplay(current, fingerprint);
+      if (currentReplay) {
+        await client.query("COMMIT");
+        transactionOpen = false;
+        return currentReplay;
+      }
+      throw new Error("Marketplace admin lifecycle idempotency key is already in progress.");
+    }
+
+    const collaborationResourceId = await input.mutate(client);
+    if (!collaborationResourceId) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return null;
+    }
+
+    const response = await readLifecycleWrite(client, collaborationResourceId, input.command);
+    await completeMarketplaceAdminLifecycleIdempotency(client, {
+      operation: input.operation,
+      keyHash,
+      fingerprint,
+      response,
+    });
+    await client.query("COMMIT");
+    transactionOpen = false;
+    return response;
+  } catch (error) {
+    if (transactionOpen) await rollbackQuietly(client);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function findMarketplaceAdminLifecycleReplay(
+  client: Pick<MarketplaceAdminPool, "query">,
+  input: { operation: MarketplaceAdminLifecycleOperation; keyHash: string },
+): Promise<MarketplaceAdminLifecycleReplayRow | null> {
+  const result = await client.query<MarketplaceAdminLifecycleReplayRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS metadata
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'marketplace'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'platform'
+     LIMIT 1
+     FOR UPDATE`,
+    [input.operation, input.keyHash],
+  );
+  return result.rows[0] ?? null;
+}
+
+function readMarketplaceAdminLifecycleReplay(
+  row: MarketplaceAdminLifecycleReplayRow | null,
+  fingerprint: string,
+): MarketplaceCollaborationLifecycleWriteResponse | null {
+  if (!row) return null;
+  if (row.requestFingerprintHash !== fingerprint) {
+    throw new Error("Idempotency key was already used with a different marketplace admin payload.");
+  }
+  if (row.status === "completed") {
+    const response = readLifecycleReplayResponse(row.metadata);
+    if (!response) throw new Error("Completed marketplace admin idempotency key has no response.");
+    return response;
+  }
+  return null;
+}
+
+async function reserveMarketplaceAdminLifecycleIdempotency(
+  client: Pick<MarketplaceAdminPool, "query">,
+  input: {
+    operation: MarketplaceAdminLifecycleOperation;
+    collaborationId: string;
+    idempotencyKey: string;
+    keyHash: string;
+    fingerprint: string;
+  },
+): Promise<boolean> {
+  const result = await client.query<{ id: string }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'marketplace',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'platform',
+       $4,
+       now() + interval '24 hours',
+       $5::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key) DO NOTHING
+     RETURNING id::text AS id`,
+    [
+      input.operation,
+      input.keyHash,
+      input.fingerprint,
+      input.idempotencyKey,
+      JSON.stringify({
+        collaborationId: input.collaborationId,
+        idempotencyKey: input.idempotencyKey,
+      }),
+    ],
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function completeMarketplaceAdminLifecycleIdempotency(
+  client: Pick<MarketplaceAdminPool, "query">,
+  input: {
+    operation: MarketplaceAdminLifecycleOperation;
+    keyHash: string;
+    fingerprint: string;
+    response: MarketplaceCollaborationLifecycleWriteResponse;
+  },
+): Promise<void> {
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         request_fingerprint_hash = $1,
+         response_status_code = 200,
+         response_body_hash = $2,
+         response_resource_product = 'marketplace',
+         response_resource_type = 'collaboration',
+         response_resource_id = $3,
+         completed_at = now(),
+         last_seen_at = now(),
+         idempotency_metadata = idempotency_metadata || $4::jsonb
+     WHERE operation_scope = 'marketplace'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'platform'`,
+    [
+      input.fingerprint,
+      sha256(stableJson(input.response)),
+      input.response.collaboration.collaborationId,
+      JSON.stringify({ response: input.response }),
+      input.operation,
+      input.keyHash,
+    ],
+  );
+}
+
+function readLifecycleReplayResponse(
+  metadata: unknown,
+): MarketplaceCollaborationLifecycleWriteResponse | null {
+  if (!isRecord(metadata) || !isRecord(metadata.response)) return null;
+  const response = metadata.response;
+  if (
+    response.contractVersion !== "marketplace-collaboration-lifecycle-writes.v1" ||
+    !isRecord(response.command) ||
+    !isRecord(response.collaboration) ||
+    !Array.isArray(response.sideEffects)
+  ) {
+    return null;
+  }
+  return response as MarketplaceCollaborationLifecycleWriteResponse;
+}
+
+async function rollbackQuietly(client: PoolClient): Promise<void> {
+  try {
+    await client.query("ROLLBACK");
+  } catch {
+    // Preserve the original write error.
+  }
+}
+
 async function readLifecycleWrite(
   pool: Pick<MarketplaceAdminPool, "query">,
   collaborationResourceId: string,
@@ -724,7 +997,12 @@ async function readLifecycleWrite(
     contractVersion: "marketplace-collaboration-lifecycle-writes.v1",
     command,
     collaboration: mapCollaborationRow(collaboration),
-    sideEffects: [{ type: "marketplace.collaboration.system_message_requested" }],
+    sideEffects: [
+      {
+        type: "marketplace.collaboration.system_message_requested",
+        idempotencyKey: command.idempotencyKey,
+      },
+    ],
   };
 }
 
@@ -1088,6 +1366,20 @@ function parsePositiveInteger(raw: string | undefined, fallback: number): number
   return parsed > 0 ? parsed : fallback;
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isPositiveDecimalString(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0;
+}
+
+function isPercentage(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100;
+}
+
 function toNullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
   const number = typeof value === "number" ? value : Number(value);
@@ -1129,6 +1421,24 @@ function toDateString(value: Date | string | null): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, sortJson(entry)]),
+  );
 }
 
 type AdminCollaborationsQuery = {
