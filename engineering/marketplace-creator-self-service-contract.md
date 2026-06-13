@@ -115,6 +115,7 @@ type UpdateCreatorProfileRequest = {
   portfolioUrl?: string | null;
   phone?: string | null;
   profilePictureUrl?: string | null;
+  profilePictureMediaObjectId?: string | null;
   platforms?: CreatorProfilePlatformInput[];
 };
 

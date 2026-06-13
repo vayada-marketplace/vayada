@@ -316,7 +316,10 @@ const purposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePolicy> 
     purpose: "property.hero_image",
     permission: "booking.settings.manage",
     allowedRelationships: ["owner", "operator"],
-    allowedResources: [{ product: "booking", resourceType: "booking_hotel" }],
+    allowedResources: [
+      { product: "booking", resourceType: "booking_hotel" },
+      { product: "marketplace", resourceType: "hotel_profile" },
+    ],
     allowedContentTypes: imageContentTypes,
     allowedExtensions: imageExtensions,
     maxFileSizeBytes: 10 * 1024 * 1024,
@@ -493,7 +496,7 @@ export async function registerPlatformMediaRoutes(
       }
 
       const context = enforceRoutePolicy(request, {
-        permission: policy.permission,
+        permission: permissionForResource(policy, request.body.resource),
         resource: {
           product: request.body.resource.product,
           resourceType: request.body.resource.resourceType,
@@ -614,7 +617,7 @@ export async function registerPlatformMediaRoutes(
       }
       const policy = purposePolicies[session.purpose];
       const context = enforceRoutePolicy(request, {
-        permission: policy.permission,
+        permission: permissionForResource(policy, session.resource),
         resource: {
           product: session.resource.product,
           resourceType: session.resource.resourceType,
@@ -1038,6 +1041,16 @@ function validateImportRequest(
     };
   }
   return { ok: true };
+}
+
+function permissionForResource(
+  policy: PlatformMediaPurposePolicy,
+  resource: PlatformMediaResourceScope,
+): PermissionKey {
+  if (policy.purpose === "property.hero_image" && resource.product === "marketplace") {
+    return "marketplace.profile.manage";
+  }
+  return policy.permission;
 }
 
 function validateResourceScope(

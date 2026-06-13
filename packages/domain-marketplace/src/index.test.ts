@@ -162,6 +162,7 @@ describe("@vayada/domain-marketplace", () => {
       portfolioUrl: "https://lina.example.com",
       phone: "+431234567",
       profilePictureUrl: "https://cdn.example.com/creators/lina.jpg",
+      profilePictureMediaObjectId: "media_creator_profile_lina",
       platforms: [
         {
           platform: "instagram",
@@ -177,6 +178,7 @@ describe("@vayada/domain-marketplace", () => {
     };
 
     expect(patch.platforms?.[0].platform).toBe("instagram");
+    expect(patch.profilePictureMediaObjectId).toBe("media_creator_profile_lina");
     expect(patch).not.toHaveProperty("email");
     expect(patch).not.toHaveProperty("ownerUserId");
     expect(patch).not.toHaveProperty("audienceSize");
@@ -336,6 +338,7 @@ describe("@vayada/domain-marketplace", () => {
       accommodationType: "boutique_hotel",
       rawLocationText: "Zermatt, Switzerland",
       imageUrls: ["https://cdn.example.com/listing/spa.jpg"],
+      imageMediaObjectIds: ["media_listing_spa"],
       collaborationOfferings: [
         {
           collaborationType: "paid",
@@ -362,6 +365,7 @@ describe("@vayada/domain-marketplace", () => {
     };
 
     expect(createListing.accommodationType).toBe("boutique_hotel");
+    expect(createListing.imageMediaObjectIds).toEqual(["media_listing_spa"]);
     expect(createListing.collaborationOfferings[0].paidMaxAmount).toBe("1200.00");
     expect(createListing.creatorRequirements.creatorTypes).toEqual(["travel"]);
   });
