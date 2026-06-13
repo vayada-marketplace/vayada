@@ -180,6 +180,25 @@ export type PmsCheckoutCharge = {
   };
 };
 
+export type PmsCheckOutRecord = {
+  checkoutRecordId: string;
+  propertyId: string;
+  guestBookingId: string;
+  assignmentId: string | null;
+  completedByUserId: string | null;
+  completedAt: string;
+  inspectionResults: unknown[];
+  chargesSettled: PmsCheckoutCharge[];
+  pendingFlags: string[];
+  checkoutNotes: string | null;
+  financeHandoff: {
+    financeSettlementOwner: "finance";
+    providerSettlement: false;
+    pendingChargeIds: string[];
+    unsettledPaidChargeIds: string[];
+  };
+};
+
 export type PmsAssignmentCommandRequest = {
   commandId: string;
   idempotencyKey: string;
@@ -240,6 +259,20 @@ export type PmsNoShowCommand = {
   idempotencyKey: string;
   expectedVersion?: string;
   reason?: string;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsCheckOutCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  expectedVersion?: string;
+  assignmentId?: string;
+  inspectionResults: unknown[];
+  chargesSettled: string[];
+  pendingFlags: string[];
+  checkoutNotes?: string;
   audit: PmsOperationsCommandAudit;
 };
 
@@ -373,6 +406,16 @@ export type PmsCheckoutChargeCommandResponse = {
   commandMeta: PmsCommandMeta;
 };
 
+export type PmsCheckOutCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  reservation: PmsOperationalReservation;
+  checkout: PmsCheckOutRecord;
+  charges: PmsCheckoutCharge[];
+  commandMeta: PmsCommandMeta;
+};
+
 export type PmsAssignmentCommandConflictCode =
   | "version_conflict"
   | "room_unavailable"
@@ -492,6 +535,34 @@ export type PmsCheckoutChargeCommandResult =
       message: string;
     };
 
+export type PmsCheckOutCommandResult =
+  | {
+      ok: true;
+      reservation: PmsOperationalReservation;
+      checkout: PmsCheckOutRecord;
+      charges: PmsCheckoutCharge[];
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "invalid_body" | "invalid_status_transition";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 404;
+      code: "reservation_not_found" | "charge_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "version_conflict" | "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
@@ -522,6 +593,7 @@ export type PmsOperationsCommandRepository = {
   waiveCheckoutCharge(
     command: PmsCheckoutChargeWaiveCommand,
   ): Promise<PmsCheckoutChargeCommandResult>;
+  executeCheckOutCommand(command: PmsCheckOutCommand): Promise<PmsCheckOutCommandResult>;
   close?(): Promise<void>;
 };
 
@@ -590,6 +662,17 @@ type PmsCheckoutChargeCommandBody = {
   amount?: unknown;
   currency?: unknown;
   reason?: unknown;
+};
+
+type PmsCheckOutCommandBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  expectedVersion?: unknown;
+  assignmentId?: unknown;
+  inspectionResults?: unknown;
+  chargesSettled?: unknown;
+  pendingFlags?: unknown;
+  checkoutNotes?: unknown;
 };
 
 type PmsOperationsErrorCategory =
@@ -677,6 +760,7 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/waive",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
+    "/properties/:propertyId/reservations/:guestBookingId/check-out",
     "/properties/:propertyId/reservations/:guestBookingId/assignments",
     "/properties/:propertyId/reservations/:guestBookingId/status",
     "/properties/:propertyId/reservations/:guestBookingId/check-in",
@@ -1294,6 +1378,38 @@ export async function registerPmsOperationsRoutes(
         } satisfies PmsCheckoutChargeCommandResponse;
       },
     );
+
+    app.post<{ Params: PmsReservationParams; Body: PmsCheckOutCommandBody }>(
+      "/properties/:propertyId/reservations/:guestBookingId/check-out",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckOutCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.executeCheckOutCommand(command.value);
+        if (!result.ok) return sendPmsCheckOutCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          reservation: result.reservation,
+          checkout: result.checkout,
+          charges: result.charges,
+          commandMeta: result.commandMeta,
+        } satisfies PmsCheckOutCommandResponse;
+      },
+    );
   }
 
   if (commandRepository) {
@@ -1709,6 +1825,23 @@ function sendPmsOperationalCommandError(
 function sendPmsCheckoutChargeCommandError(
   reply: FastifyReply,
   result: Exclude<PmsCheckoutChargeCommandResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
+    message: result.message,
+  });
+}
+
+function sendPmsCheckOutCommandError(
+  reply: FastifyReply,
+  result: Exclude<PmsCheckOutCommandResult, { ok: true }>,
 ): FastifyReply {
   return sendPmsOperationsError(reply, {
     statusCode: result.statusCode,
@@ -2460,6 +2593,53 @@ function toCheckInCommand(
       stepResults: Array.isArray(raw.stepResults) ? raw.stepResults : [],
       pendingFlags: toStringArray(raw.pendingFlags),
       audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Check in guest"),
+    },
+  };
+}
+
+function toCheckOutCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: PmsCheckOutCommandBody }>,
+): { value: PmsCheckOutCommand } | { error: PmsOperationsError } {
+  const metadata = toOperationalCommandMetadata(request.body, "Check-out command");
+  if ("error" in metadata) return metadata;
+  const raw = request.body as Record<string, unknown>;
+  const assignmentId = optionalStringField(raw.assignmentId);
+  const checkoutNotes = optionalStringField(raw.checkoutNotes);
+
+  if (assignmentId && !isUuid(assignmentId)) {
+    return { error: invalidBody("assignmentId must be a UUID.") };
+  }
+  if (!Array.isArray(raw.inspectionResults)) {
+    return { error: invalidBody("Check-out command requires inspectionResults as an array.") };
+  }
+  if (!Array.isArray(raw.chargesSettled)) {
+    return { error: invalidBody("Check-out command requires chargesSettled as an array.") };
+  }
+  if (
+    !raw.chargesSettled.every(
+      (chargeId): chargeId is string => typeof chargeId === "string" && isUuid(chargeId.trim()),
+    )
+  ) {
+    return { error: invalidBody("chargesSettled entries must be UUIDs.") };
+  }
+  const chargesSettled = raw.chargesSettled.map((chargeId) => chargeId.trim());
+  if (checkoutNotes && checkoutNotes.length > 5000) {
+    return { error: invalidBody("checkoutNotes must be 5000 characters or fewer.") };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      ...metadata.value,
+      assignmentId,
+      inspectionResults: raw.inspectionResults,
+      chargesSettled,
+      pendingFlags: toStringArray(raw.pendingFlags),
+      checkoutNotes,
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Check out guest"),
     },
   };
 }

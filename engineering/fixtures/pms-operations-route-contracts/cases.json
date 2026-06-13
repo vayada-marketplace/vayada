@@ -768,7 +768,7 @@
     },
     {
       "caseId": "checkout-charges-and-checkout",
-      "description": "Checkout charge commands update operational charge state without claiming finance settlement ownership.",
+      "description": "Check-out creates a PMS checkout record, snapshots paid operational charges, updates assignment status, and hands finance-owned settlement forward without dispatching finance work.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
         "method": "POST",
@@ -786,10 +786,47 @@
         "mustInclude": [
           "reservation.checkout.completedAt",
           "reservation.checkout.pendingFlags",
+          "reservation.assignments[0].assignmentStatus",
+          "checkout.inspectionResults",
+          "checkout.chargesSettled",
+          "checkout.financeHandoff.financeSettlementOwner",
           "charges[0].status",
           "commandMeta.sideEffects"
         ],
-        "financeOwnership": "Payment provider collection, invoice posting, and payouts are out of scope for this command."
+        "financeOwnership": "Payment provider collection, invoice posting, payouts, and reconciliation are out of scope for this command.",
+        "mustNotCall": [
+          "payment provider capture",
+          "invoice posting",
+          "payout dispatcher",
+          "finance reconciliation"
+        ],
+        "mustNotWrite": ["finance.payments", "finance.payouts", "platform.outbox_events"]
+      }
+    },
+    {
+      "caseId": "checkout-pending-flags",
+      "description": "Check-out persists explicit pending flags and records finance handoff metadata when paid operational charges still require finance-owned settlement handling.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkout-pending-001",
+          "idempotencyKey": "pms-checkout-pending-001",
+          "expectedVersion": "reservation-v7",
+          "inspectionResults": [{ "stepId": "minibar", "status": "completed" }],
+          "chargesSettled": [],
+          "pendingFlags": ["manual_review"],
+          "checkoutNotes": "Guest departed while finance settlement remains owner-controlled."
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "reservation.checkout.pendingFlags",
+          "checkout.pendingFlags",
+          "checkout.financeHandoff.unsettledPaidChargeIds"
+        ],
+        "mustNotWrite": ["finance.payments", "finance.payouts", "platform.outbox_events"]
       }
     },
     {
