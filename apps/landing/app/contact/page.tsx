@@ -40,7 +40,7 @@ export default function ContactPage() {
     setIsSubmitting(true);
 
     try {
-      await apiClient.post("/contact", {
+      await apiClient.post("/api/contact", {
         name: formData.name,
         email: formData.email,
         phone: formData.phone || undefined,

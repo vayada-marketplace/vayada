@@ -85,6 +85,10 @@ import {
   registerPlatformMediaRoutes,
   type PlatformMediaRoutesOptions,
 } from "./routes/platformMedia.js";
+import {
+  registerPlatformContactIntakeRoutes,
+  type PlatformContactIntakeRoutesOptions,
+} from "./routes/platformContactIntake.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
@@ -127,6 +131,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   askModelMetadata?: AskRoutesOptions["modelMetadata"];
   askBudgets?: AskRoutesOptions["budgets"];
   askNow?: AskRoutesOptions["now"];
+  platformContactIntake?: PlatformContactIntakeRoutesOptions;
   marketplaceDiscoveryAllowedOrigins?: string[];
   identityPrivacyAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
@@ -299,6 +304,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       closePublicHotelProfileRepository:
         Boolean(options.financePublicHotelProfileRepository) &&
         options.financePublicHotelProfileRepository !== options.publicHotelProfileRepository,
+    });
+  }
+  if (options.platformContactIntake) {
+    app.register(registerPlatformContactIntakeRoutes, {
+      prefix: "/api",
+      ...options.platformContactIntake,
     });
   }
   if (options.platformMedia) {

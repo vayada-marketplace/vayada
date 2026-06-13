@@ -59,6 +59,7 @@ import {
   createInMemoryPlatformMediaRepository,
   createPassthroughPlatformMediaTargetResolver,
 } from "./routes/platformMedia.js";
+import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
 
 const config = loadConfig();
 
@@ -355,6 +356,14 @@ const app = buildApp({
   financeXenditBankValidator: xenditBankValidator,
   financePublicHotelProfileRepository,
   financePublicHotelPropertyResolver,
+  platformContactIntake: config.targetDatabaseUrl
+    ? {
+        repository: createPgPlatformContactIntakeRepository({
+          connectionString: config.targetDatabaseUrl,
+        }),
+        allowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
+      }
+    : undefined,
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
