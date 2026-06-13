@@ -52,8 +52,14 @@ import {
   type FinanceReconciliationViewResponse,
   type FinanceRoutePaymentMethod,
   type FinanceRoutePaymentProvider,
+  type FinanceXenditBankValidationCommand,
+  type FinanceXenditBankValidationResponse,
+  type FinanceXenditPayoutReconciliationCommand,
+  type FinanceXenditPayoutReconciliationResult,
+  type FinanceXenditPayoutReconciliationResponse,
 } from "@vayada/domain-finance";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
@@ -65,6 +71,19 @@ const MANUAL_PAYMENT_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
   "booking_projection_refresh",
   "pms_projection_refresh",
 ];
+
+const XENDIT_BANK_VALIDATION_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "provider_validation",
+  "audit_event",
+];
+
+const XENDIT_PAYOUT_RECONCILIATION_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "reconciliation_job",
+  "audit_event",
+];
+
+const XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION =
+  "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal";
 
 type FinanceQueryExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -88,10 +107,39 @@ type FinancePropertySettingsWriteClient = {
 
 export type FinanceRoutesOptions = {
   repository: FinancePropertyReadRepository;
+  xenditBankValidator?: FinanceXenditBankValidator;
   publicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   closePublicHotelProfileRepository?: boolean;
 };
+
+export type FinanceXenditBankValidator = {
+  validateBankAccount(input: {
+    channelCode: string;
+    accountNumber: string;
+    accountHolderName: string;
+    idempotencyKey: string;
+  }): Promise<{
+    status: "valid" | "invalid" | "unknown";
+    accountHolderName: string | null;
+    providerReference: string | null;
+  }>;
+};
+
+type FinanceXenditBankValidatorFetch = (
+  input: string,
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+  },
+) => Promise<{
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+}>;
 
 export type FinancePublicHotelPropertyResolver = {
   findPropertyIdBySlug(slug: string): Promise<string | null>;
@@ -300,6 +348,20 @@ type ManualPaymentBody = {
   reference?: unknown;
 };
 
+type XenditBankValidationBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  channelCode?: unknown;
+  accountNumber?: unknown;
+  accountHolderName?: unknown;
+};
+
+type XenditPayoutReconciliationBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  olderThanMinutes?: unknown;
+};
+
 export async function registerFinanceRoutes(
   app: FastifyInstance,
   options: FinanceRoutesOptions,
@@ -504,6 +566,104 @@ export async function registerFinanceRoutes(
     },
   );
 
+  app.post<{ Params: FinancePropertyParams; Body: XenditBankValidationBody }>(
+    "/finance/properties/:propertyId/provider-accounts/xendit/bank-validation",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+      if (!options.xenditBankValidator) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Xendit bank validation is not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toXenditBankValidationCommand(request, propertyId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      let validation: Awaited<ReturnType<FinanceXenditBankValidator["validateBankAccount"]>>;
+      try {
+        validation = await options.xenditBankValidator.validateBankAccount({
+          channelCode: parsed.payload.channelCode,
+          accountNumber: parsed.payload.accountNumber,
+          accountHolderName: parsed.payload.accountHolderName,
+          idempotencyKey: parsed.idempotencyKey,
+        });
+      } catch (error) {
+        reply.code(400);
+        return {
+          statusCode: 400,
+          code: "invalid_command",
+          category: "validation",
+          message: error instanceof Error ? error.message : "Xendit bank validation failed.",
+        } satisfies FinanceCommandError;
+      }
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        provider: "xendit",
+        validation: {
+          status: validation.status,
+          maskedAccountNumber: maskAccountNumber(parsed.payload.accountNumber),
+          accountHolderName: validation.accountHolderName,
+          providerReference: validation.providerReference,
+        },
+        commandMeta: {
+          commandId: parsed.commandId,
+          idempotencyKey: parsed.idempotencyKey,
+          sideEffects: [...XENDIT_BANK_VALIDATION_SIDE_EFFECTS],
+          outboxEvents: [],
+          jobs: [],
+        },
+      } satisfies FinanceXenditBankValidationResponse;
+    },
+  );
+
+  app.post<{ Params: FinancePropertyParams; Body: XenditPayoutReconciliationBody }>(
+    "/finance/properties/:propertyId/reconciliation/xendit-payouts",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+      if (!options.repository.enqueueXenditPayoutReconciliation) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance payout reconciliation writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toXenditPayoutReconciliationCommand(request, propertyId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.enqueueXenditPayoutReconciliation(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      reply.code(202);
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        job: result.job,
+        legacyDisposition: result.legacyDisposition,
+        commandMeta: result.commandMeta,
+      } satisfies FinanceXenditPayoutReconciliationResponse;
+    },
+  );
+
   app.get<{ Params: FinancePropertyParams }>(
     "/finance/properties/:propertyId/reconciliation/payments",
     async (request, reply) => {
@@ -638,6 +798,54 @@ export function createTargetFinancePublicHotelPropertyResolver(config: {
   };
 }
 
+export function createXenditBankValidator(config: {
+  secretKey: string;
+  endpoint?: string;
+  timeoutMs?: number;
+  fetch?: FinanceXenditBankValidatorFetch;
+}): FinanceXenditBankValidator {
+  const endpoint = config.endpoint ?? "https://api.xendit.co/bank_account_data/inquiries";
+  const fetchImpl = config.fetch ?? globalThis.fetch;
+  return {
+    async validateBankAccount(input) {
+      if (!config.secretKey.trim()) {
+        throw new Error("XENDIT_SECRET_KEY is required for bank validation.");
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? 15_000);
+      try {
+        const response = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${config.secretKey}:`).toString("base64")}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": input.idempotencyKey,
+          },
+          body: JSON.stringify({
+            bank_code: input.channelCode.replace(/^ID_/, ""),
+            account_number: input.accountNumber,
+          }),
+          signal: controller.signal,
+        });
+        const responseText = await response.text();
+        if (!response.ok) {
+          throw new Error(`Xendit bank validation failed with status ${response.status}.`);
+        }
+        const data = parseJsonObject(responseText);
+        return {
+          status: xenditValidationStatus(optionalString(data, "status")),
+          accountHolderName:
+            optionalString(data, "account_holder") ?? optionalString(data, "accountHolder") ?? null,
+          providerReference:
+            optionalString(data, "id") ?? optionalString(data, "reference_id") ?? null,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
 export function createTargetFinancePropertySettingsRepository(config: {
   connectionString: string;
   max?: number;
@@ -741,6 +949,21 @@ export function createTargetFinancePropertySettingsRepository(config: {
       try {
         if (ownsTransaction) await client.query("BEGIN");
         const result = await recordManualPaymentInClient(client, command);
+        if (ownsTransaction) await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        if (ownsTransaction) await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
+    async enqueueXenditPayoutReconciliation(command) {
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        if (ownsTransaction) await client.query("BEGIN");
+        const result = await enqueueXenditPayoutReconciliationInClient(client, command);
         if (ownsTransaction) await client.query("COMMIT");
         return result;
       } catch (error) {
@@ -904,6 +1127,161 @@ async function recordManualPaymentInClient(
     ok: true,
     status: payment.replay ? "idempotent_replay" : "created",
     invoice: updatedInvoice,
+    commandMeta,
+  };
+}
+
+async function enqueueXenditPayoutReconciliationInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceXenditPayoutReconciliationCommand,
+): Promise<FinanceXenditPayoutReconciliationResult> {
+  if (command.payload.olderThanMinutes < 0 || command.payload.olderThanMinutes > 10080) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: "invalid_command",
+      message: "olderThanMinutes must be between 0 and 10080.",
+    };
+  }
+
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(stableJson(command.payload));
+  const requestedAt = command.audit.requestedAt;
+  const jobKey = buildXenditPayoutReconciliationJobKey(command);
+  const idempotency = await client.query<{
+    status: string;
+    requestFingerprintHash: string;
+  }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       organization_id,
+       property_id,
+       correlation_id,
+       first_seen_at,
+       last_seen_at,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'finance',
+       'xendit_payout_reconciliation',
+       $1,
+       $2,
+       'completed',
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::timestamptz,
+       $5::timestamptz,
+       $5::timestamptz + interval '24 hours',
+       $6::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key)
+     DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+     RETURNING
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash"`,
+    [
+      keyHash,
+      fingerprint,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      requestedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        provider: "xendit",
+        olderThanMinutes: command.payload.olderThanMinutes,
+        legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
+      }),
+    ],
+  );
+  const idempotencyRow = idempotency.rows[0];
+  if (idempotencyRow && idempotencyRow.requestFingerprintHash !== fingerprint) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message: "Idempotency key was already used with a different reconciliation payload.",
+    };
+  }
+
+  const job = await client.query<{ jobId: string; replay: boolean }>(
+    `WITH inserted AS (
+       INSERT INTO platform.jobs (
+         job_key,
+         queue_name,
+         job_type,
+         tenant_scope,
+         organization_id,
+         property_id,
+         resource_product,
+         resource_type,
+         resource_id,
+         correlation_id,
+         idempotency_key_hash,
+         payload,
+         job_metadata
+       )
+       VALUES (
+         $1,
+         'finance-reconciliation',
+         'finance.reconcile-payout',
+         'property',
+         NULL,
+         $2::uuid,
+         'finance',
+         'payout',
+         $2,
+         $3,
+         $4,
+         $5::jsonb,
+         $6::jsonb
+       )
+       ON CONFLICT (queue_name, job_key) DO NOTHING
+       RETURNING id::text AS "jobId", false AS replay
+     )
+     SELECT "jobId", replay FROM inserted
+     UNION ALL
+     SELECT id::text AS "jobId", true AS replay
+     FROM platform.jobs
+     WHERE queue_name = 'finance-reconciliation'
+       AND job_key = $1
+     LIMIT 1`,
+    [
+      jobKey,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      keyHash,
+      JSON.stringify({
+        provider: "xendit",
+        propertyId: command.propertyId,
+        olderThanMinutes: command.payload.olderThanMinutes,
+        requestedAt,
+      }),
+      JSON.stringify({
+        commandId: command.commandId,
+        legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
+      }),
+    ],
+  );
+  const replay = Boolean(job.rows[0]?.replay);
+  const commandMeta = buildXenditPayoutReconciliationCommandMeta(command, replay);
+  await recordXenditPayoutReconciliationAuditEvent(client, command, keyHash, jobKey, requestedAt);
+  return {
+    ok: true,
+    status: replay ? "idempotent_replay" : "queued",
+    job: commandMeta.jobs[0] as Extract<
+      FinanceCommandMeta["jobs"][number],
+      { jobType: "finance.reconcile-payout" }
+    >,
+    legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
     commandMeta,
   };
 }
@@ -1170,6 +1548,39 @@ function buildManualPaymentCommandMeta(
   };
 }
 
+function buildXenditPayoutReconciliationCommandMeta(
+  command: FinanceXenditPayoutReconciliationCommand,
+  replay: boolean,
+): FinanceCommandMeta {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: [...XENDIT_PAYOUT_RECONCILIATION_SIDE_EFFECTS],
+    outboxEvents: [],
+    jobs: [
+      {
+        jobType: "finance.reconcile-payout",
+        idempotencyKey: buildXenditPayoutReconciliationJobKey(command),
+        status: replay ? "idempotent_replay" : "queued",
+      },
+    ],
+  };
+}
+
+function buildXenditPayoutReconciliationJobKey(
+  command: FinanceXenditPayoutReconciliationCommand,
+): string {
+  return `finance.reconcile-payout:property:${command.propertyId}:xendit-manual-${xenditPayoutReconciliationWindow(command)}:v1`;
+}
+
+function xenditPayoutReconciliationWindow(
+  command: FinanceXenditPayoutReconciliationCommand,
+): string {
+  const dateMatch = /\b\d{4}-\d{2}-\d{2}\b/.exec(command.idempotencyKey);
+  if (dateMatch) return dateMatch[0];
+  return `key-${sha256(command.idempotencyKey).slice(0, 12)}`;
+}
+
 function manualPaymentScopedPersistenceKey(
   propertyId: string,
   keyHash: string,
@@ -1370,6 +1781,77 @@ async function enqueueManualPaymentOutboxEvents(
       .outboxEventId,
     pms: result.rows.find((row) => row.destination === "pms.projection-refresh")!.outboxEventId,
   };
+}
+
+async function recordXenditPayoutReconciliationAuditEvent(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceXenditPayoutReconciliationCommand,
+  keyHash: string,
+  jobKey: string,
+  recordedAt: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       payload,
+       audit_metadata,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'finance',
+       'finance.xendit_payouts.reconcile_requested',
+       1,
+       $2::timestamptz,
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::uuid,
+       'finance',
+       'payout',
+       $3,
+       $6,
+       $7,
+       $8::jsonb,
+       $9::jsonb,
+       'confidential'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `finance.xendit-payout-reconciliation.audit.property.${command.propertyId}.key.${keyHash}.v1`,
+      recordedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        provider: "xendit",
+        olderThanMinutes: command.payload.olderThanMinutes,
+        jobKey,
+      }),
+      JSON.stringify({
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
+      }),
+    ],
+  );
 }
 
 async function enqueueManualPaymentJobs(
@@ -2956,6 +3438,107 @@ function toManualPaymentCommand(
   };
 }
 
+function toXenditBankValidationCommand(
+  request: FastifyRequest<{ Body: XenditBankValidationBody }>,
+  propertyId: string,
+): FinanceXenditBankValidationCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const channelCode = nonEmptyString(body.channelCode);
+  const accountNumber = nonEmptyString(body.accountNumber);
+  const accountHolderName = nonEmptyString(body.accountHolderName);
+
+  if (!commandId || !idempotencyKey || !channelCode || !accountNumber || !accountHolderName) {
+    return invalidQuery(
+      "invalid_body",
+      "Xendit bank validation requires commandId, idempotencyKey, channelCode, accountNumber, and accountHolderName.",
+    );
+  }
+  if (!/^ID_[A-Z0-9_]{2,32}$/.test(channelCode)) {
+    return invalidQuery("invalid_body", "Xendit channelCode must be an ID_* bank channel code.");
+  }
+  if (!/^[0-9]{4,34}$/.test(accountNumber)) {
+    return invalidQuery("invalid_body", "Xendit accountNumber must contain 4 to 34 digits.");
+  }
+
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    commandType: "finance.xendit_bank_account.validate",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: {
+      actor: authContext
+        ? {
+            kind: "user",
+            userId: authContext.actor.internalUserId,
+            organizationId: authContext.selectedOrganization.organizationId,
+          }
+        : { kind: "system", service: "apps/api" },
+      requestId: authContext?.audit.requestId ?? commandId,
+      correlationId: authContext?.audit.correlationId,
+      reason: "Validate Xendit payout bank destination",
+      requestedAt: authContext?.audit.receivedAt ?? now,
+    },
+    payload: {
+      channelCode,
+      accountNumber,
+      accountHolderName,
+    },
+  };
+}
+
+function toXenditPayoutReconciliationCommand(
+  request: FastifyRequest<{ Body: XenditPayoutReconciliationBody }>,
+  propertyId: string,
+): FinanceXenditPayoutReconciliationCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const olderThanMinutes = integerBodyNumber(body.olderThanMinutes);
+
+  if (!commandId || !idempotencyKey || olderThanMinutes === undefined) {
+    return invalidQuery(
+      "invalid_body",
+      "Xendit payout reconciliation requires commandId, idempotencyKey, and olderThanMinutes.",
+    );
+  }
+
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    commandType: "finance.xendit_payouts.reconcile",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: {
+      actor: authContext
+        ? {
+            kind: "user",
+            userId: authContext.actor.internalUserId,
+            organizationId: authContext.selectedOrganization.organizationId,
+          }
+        : { kind: "system", service: "apps/api" },
+      requestId: authContext?.audit.requestId ?? commandId,
+      correlationId: authContext?.audit.correlationId,
+      reason: "Manually enqueue Xendit payout status reconciliation",
+      requestedAt: authContext?.audit.receivedAt ?? now,
+    },
+    payload: {
+      olderThanMinutes,
+    },
+  };
+}
+
+function integerBodyNumber(value: unknown): number | undefined {
+  const numberValue =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isInteger(numberValue) || numberValue < 0 || numberValue > 10080) return undefined;
+  return numberValue;
+}
+
 function decimalBodyString(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const text = String(value).trim();
@@ -2991,7 +3574,16 @@ function nullableTrimmedString(value: unknown): string | null | undefined {
   return trimmed ? trimmed : null;
 }
 
-function toFinanceCommandError(result: Extract<FinanceManualPaymentRecordResult, { ok: false }>) {
+function maskAccountNumber(accountNumber: string): string {
+  const visibleTail = accountNumber.slice(-4);
+  return `${"*".repeat(Math.max(0, accountNumber.length - 4))}${visibleTail}`;
+}
+
+function toFinanceCommandError(
+  result:
+    | Extract<FinanceManualPaymentRecordResult, { ok: false }>
+    | Extract<FinanceXenditPayoutReconciliationResult, { ok: false }>,
+) {
   return {
     statusCode: result.statusCode,
     code: result.code,
@@ -3390,6 +3982,31 @@ function financeJsonObject(value: unknown): FinanceJsonObject {
       return jsonValue === undefined ? [] : [[key, jsonValue]];
     }),
   );
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function optionalString(value: Record<string, unknown>, key: string): string | undefined {
+  const entry = value[key];
+  return typeof entry === "string" && entry.trim() ? entry.trim() : undefined;
+}
+
+function xenditValidationStatus(value: string | undefined): "valid" | "invalid" | "unknown" {
+  const normalized = value?.toLowerCase();
+  if (normalized === "success" || normalized === "valid" || normalized === "found") return "valid";
+  if (normalized === "failed" || normalized === "invalid" || normalized === "not_found") {
+    return "invalid";
+  }
+  return "unknown";
 }
 
 function toFinanceJsonValue(value: unknown): FinanceJsonObject[string] | undefined {

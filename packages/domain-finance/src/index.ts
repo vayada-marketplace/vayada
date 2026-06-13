@@ -473,24 +473,96 @@ export const FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS = [
 
 export type FinanceManualPaymentSideEffect = (typeof FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS)[number];
 
+export const FINANCE_COMMAND_SIDE_EFFECTS = [
+  ...FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS,
+  "provider_validation",
+  "reconciliation_job",
+] as const;
+
+export type FinanceCommandSideEffect = (typeof FINANCE_COMMAND_SIDE_EFFECTS)[number];
+
 export type FinanceProjectionRefreshJob = {
   jobType: "booking.projection-refresh" | "pms.projection-refresh";
   idempotencyKey: string;
   status: "queued" | "idempotent_replay";
 };
 
+export type FinanceReconcilePayoutJob = {
+  jobType: "finance.reconcile-payout";
+  idempotencyKey: string;
+  status: "queued" | "idempotent_replay";
+};
+
+export type FinanceCommandJob = FinanceProjectionRefreshJob | FinanceReconcilePayoutJob;
+
 export type FinanceCommandMeta = {
   commandId: string;
   idempotencyKey: string;
-  sideEffects: FinanceManualPaymentSideEffect[];
+  sideEffects: FinanceCommandSideEffect[];
   outboxEvents: string[];
-  jobs: FinanceProjectionRefreshJob[];
+  jobs: FinanceCommandJob[];
 };
 
 export type FinanceManualPaymentRecordResponse = {
   contractVersion: FinanceContractVersion;
   propertyId: FinancePropertyId;
   invoice: FinanceInvoiceDetail;
+  commandMeta: FinanceCommandMeta;
+};
+
+export type XenditBankValidationPayload = {
+  channelCode: string;
+  accountNumber: string;
+  accountHolderName: string;
+};
+
+export type FinanceXenditBankValidationCommand = FinanceCommandBase<
+  "finance.xendit_bank_account.validate",
+  XenditBankValidationPayload
+>;
+
+export type FinanceXenditBankValidationResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  provider: "xendit";
+  validation: {
+    status: "valid" | "invalid" | "unknown";
+    maskedAccountNumber: string;
+    accountHolderName: string | null;
+    providerReference: string | null;
+  };
+  commandMeta: FinanceCommandMeta;
+};
+
+export type FinanceXenditPayoutReconciliationPayload = {
+  olderThanMinutes: number;
+};
+
+export type FinanceXenditPayoutReconciliationCommand = FinanceCommandBase<
+  "finance.xendit_payouts.reconcile",
+  FinanceXenditPayoutReconciliationPayload
+>;
+
+export type FinanceXenditPayoutReconciliationResult =
+  | {
+      ok: true;
+      status: "queued" | "idempotent_replay";
+      job: Extract<FinanceCommandJob, { jobType: "finance.reconcile-payout" }>;
+      legacyDisposition: string;
+      commandMeta: FinanceCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 409 | 500;
+      code: "invalid_command" | "idempotency_conflict" | "write_unavailable";
+      message: string;
+    };
+
+export type FinanceXenditPayoutReconciliationResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  job: Extract<FinanceCommandJob, { jobType: "finance.reconcile-payout" }>;
+  legacyDisposition: string;
   commandMeta: FinanceCommandMeta;
 };
 
@@ -770,6 +842,10 @@ export type FinancePropertyCommandRepository = {
   recordManualPayment(
     command: FinanceManualPaymentRecordCommand,
   ): Promise<FinanceManualPaymentRecordResult>;
+
+  enqueueXenditPayoutReconciliation(
+    command: FinanceXenditPayoutReconciliationCommand,
+  ): Promise<FinanceXenditPayoutReconciliationResult>;
 };
 
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &

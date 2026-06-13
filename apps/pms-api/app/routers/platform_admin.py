@@ -9,6 +9,7 @@ from app.models.platform_admin import (
     UpdatePlatformPropertyStatusRequest,
 )
 from app.repositories.platform_admin_repo import PlatformAdminRepository
+from app.services.finance_payout_cutover import finance_payout_reconciliation_cutover_status
 from app.services.scheduler import get_scheduler_status
 
 router = APIRouter(prefix="/platform-admin", tags=["platform-admin"])
@@ -16,7 +17,13 @@ router = APIRouter(prefix="/platform-admin", tags=["platform-admin"])
 
 @router.get("/scheduler")
 async def get_scheduler_freeze_status(user_id: str = Depends(require_super_admin)):
-    return get_scheduler_status()
+    status = get_scheduler_status()
+    return {
+        **status,
+        "manual_route_guards": {
+            "xendit_payout_reconciliation": finance_payout_reconciliation_cutover_status()
+        },
+    }
 
 
 @router.get("/growth", response_model=GrowthDashboardResponse)

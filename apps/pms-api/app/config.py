@@ -137,6 +137,12 @@ class Settings(BaseSettings):
     PMS_XENDIT_WEBHOOK_TARGET_URL: str = ""
     PMS_CHANNEX_WEBHOOK_TARGET_URL: str = ""
 
+    # Legacy finance payout reconciliation cutover controls.
+    # Modes: legacy-owned, disabled, proxy-to-target, target-owned.
+    FINANCE_XENDIT_PAYOUT_RECONCILIATION_LEGACY_MODE: str = "legacy-owned"
+    FINANCE_TARGET_BASE_URL: str = ""
+    FINANCE_TARGET_TIMEOUT_SECONDS: float = 10.0
+
     # Listing Import (Claude AI + Firecrawl)
     ANTHROPIC_API_KEY: str = ""
     FIRECRAWL_API_KEY: str = ""
