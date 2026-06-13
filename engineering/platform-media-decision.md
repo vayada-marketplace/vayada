@@ -162,6 +162,47 @@ authorized for download.
 Public approval is separate from upload success. A completed upload may remain
 private until the owning domain marks it public-safe.
 
+### Serving Environment Contract
+
+VAY-821 implements the app-side serving contract without changing production
+environment values. Activation happens at media cutover by provisioning all
+required values together in deployment secrets/task definitions:
+
+- `PLATFORM_MEDIA_BUCKET` — private platform media bucket for the environment.
+- `PLATFORM_MEDIA_CDN_BASE_URL` — public HTTPS CDN origin, with no path, query,
+  or fragment.
+- `PLATFORM_MEDIA_CDN_ORIGIN_HOST` — private bucket origin host used by the CDN.
+
+Optional serving controls:
+
+- `PLATFORM_MEDIA_PUBLIC_PATH_PREFIX` defaults to `media`.
+- `PLATFORM_MEDIA_PUBLIC_CACHE_CONTROL` defaults to
+  `public, max-age=31536000, immutable`.
+- `PLATFORM_MEDIA_PRIVATE_DOWNLOAD_TTL_SECONDS` defaults to `300`.
+- `PLATFORM_MEDIA_PRIVATE_DOWNLOAD_MAX_TTL_SECONDS` defaults to `900` and may
+  not exceed `3600`.
+
+The public URL shape is:
+
+```text
+{PLATFORM_MEDIA_CDN_BASE_URL}/{prefix}/{mediaId}/{variant}/{version}.{ext}
+```
+
+`mediaId`, `variant`, and `version` are opaque registry values. Public URLs do
+not expose bucket names, raw storage keys, or private prefixes. Public variants
+must be active, public, and domain-approved before a CDN URL is issued.
+
+Private media download signing takes the platform bucket, a `private/...`
+storage key, `GET`, the configured short TTL, and `Cache-Control: private,
+no-store`. Public objects are not eligible for this policy, and private objects
+must never receive a public CDN URL.
+
+Cache invalidation is not part of normal replacement. Public media replacement
+must publish a new immutable URL by creating a new media object or variant
+version. The retired URL may stay cacheable through its TTL or be lifecycle
+deleted after retention/rollback windows; do not overwrite the object behind an
+existing public URL.
+
 ## Property Catalog and Discovery Consumption
 
 Property catalog consumes platform media through `mediaId` plus CDN URL, not
