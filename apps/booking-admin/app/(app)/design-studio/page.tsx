@@ -84,7 +84,7 @@ export default function DesignStudioPage() {
 
     try {
       setUploading(true);
-      const s3Url = await uploadSingleImage(file);
+      const s3Url = await uploadSingleImage(file, "property.hero_image");
       URL.revokeObjectURL(previewUrl);
       setHeroImage(s3Url);
 

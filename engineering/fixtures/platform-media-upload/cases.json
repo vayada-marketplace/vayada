@@ -196,6 +196,209 @@
         "status": 400,
         "errorCode": "unsupported_media_type"
       }
+    },
+    {
+      "caseId": "pms-room-type-media-upload-session",
+      "description": "PMS room type images use platform media sessions and target the PMS room type media snapshot.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "pms.room_type.media",
+          "visibility": "public",
+          "resource": {
+            "product": "pms",
+            "resourceType": "pms_hotel",
+            "resourceId": "pms_hotel_alpenrose",
+            "propertyId": "property_alpenrose",
+            "targetResourceId": "room_type_suite"
+          },
+          "files": [
+            {
+              "clientFileId": "room-1",
+              "filename": "suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/jpeg",
+            "sizeBytes": 2048,
+            "widthPx": 1800,
+            "heightPx": 1200
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 1,
+        "mediaObject": {
+          "purpose": "pms.room_type.media",
+          "resourceProduct": "pms",
+          "resourceType": "room_type",
+          "resourceId": "room_type_suite",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
+      "caseId": "marketplace-creator-profile-upload-session",
+      "description": "Creator profile image uploads use the marketplace creator profile resource and return a platform media object ID.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "marketplace.creator.profile_image",
+          "visibility": "public",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "creator_profile",
+            "resourceId": "creator_profile_lina"
+          },
+          "files": [
+            {
+              "clientFileId": "profile",
+              "filename": "lina.webp",
+              "contentType": "image/webp",
+              "sizeBytes": 1024
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/webp",
+            "sizeBytes": 1024,
+            "widthPx": 800,
+            "heightPx": 800
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 1,
+        "mediaObject": {
+          "purpose": "marketplace.creator.profile_image",
+          "resourceProduct": "marketplace",
+          "resourceType": "creator_profile",
+          "resourceId": "creator_profile_lina",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
+      "caseId": "pms-import-source-image-job",
+      "description": "PMS listing import source images queue a platform media import job instead of PMS-owned downloads.",
+      "request": {
+        "path": "/api/media/imports",
+        "method": "POST",
+        "body": {
+          "purpose": "pms.import.source_image",
+          "resource": {
+            "product": "pms",
+            "resourceType": "pms_hotel",
+            "resourceId": "pms_hotel_alpenrose",
+            "propertyId": "property_alpenrose",
+            "targetResourceId": "room_type_suite"
+          },
+          "sourceImageUrls": [
+            "https://provider.example.test/images/suite-1.jpg",
+            "https://provider.example.test/cdn/suite-render?width=1200"
+          ],
+          "idempotencyKey": "media.import:pms:room_type_suite:listing-preview-1:v1"
+        }
+      },
+      "expected": {
+        "status": 202,
+        "mediaObject": {
+          "purpose": "pms.import.source_image",
+          "resourceProduct": "pms",
+          "resourceType": "import_job",
+          "resourceId": "room_type_suite"
+        },
+        "sideEffects": ["media_import_job_created", "audit_event"]
+      }
+    },
+    {
+      "caseId": "marketplace-listing-gallery-upload-session",
+      "description": "Marketplace listing galleries batch through platform media and return one media object per file.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "marketplace.listing.gallery",
+          "visibility": "public",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "hotel_listing",
+            "resourceId": "listing_alpenrose"
+          },
+          "files": [
+            {
+              "clientFileId": "suite",
+              "filename": "suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            },
+            {
+              "clientFileId": "spa",
+              "filename": "spa.png",
+              "contentType": "image/png",
+              "sizeBytes": 4096
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/jpeg",
+            "sizeBytes": 2048,
+            "widthPx": 1600,
+            "heightPx": 1000
+          },
+          {
+            "contentType": "image/png",
+            "sizeBytes": 4096,
+            "widthPx": 1200,
+            "heightPx": 900
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 2,
+        "mediaObject": {
+          "purpose": "marketplace.listing.gallery",
+          "resourceProduct": "marketplace",
+          "resourceType": "hotel_listing",
+          "resourceId": "listing_alpenrose",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
     }
   ]
 }

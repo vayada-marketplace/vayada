@@ -1,0 +1,107 @@
+{
+  "contractVersion": "platform-media-cleanup-jobs.v1",
+  "description": "Platform media cleanup, retention, and deletion lifecycle cases for abandoned staging uploads, replaced public images, private attachment retention, and rollback-window cleanup.",
+  "cases": [
+    {
+      "caseId": "abandoned-staging-upload-expires-session",
+      "runName": "abandonedStagingUploads",
+      "candidate": {
+        "uploadSessionId": "00000000-0000-0000-0000-000000000101",
+        "resourceProduct": "hotel_catalog",
+        "resourceType": "property",
+        "resourceId": "property_alpenrose",
+        "purpose": "property.gallery_image",
+        "visibility": "private",
+        "lifecycleStatus": "signed",
+        "stagingPrefix": "staging/00000000-0000-0000-0000-000000000101",
+        "expiresAt": "2026-06-13T08:00:00.000Z"
+      },
+      "expected": {
+        "action": "abandoned-staging-upload",
+        "statusAfter": "expired",
+        "cleanupKey": "platform.media.cleanup:00000000-0000-0000-0000-000000000101:abandoned-staging-upload:2026-06-13T08:00:00.000Z:v1",
+        "jobType": "platform.media.cleanup.abandoned-staging-upload",
+        "eventType": "platform_media.upload_session.expired",
+        "auditAction": "platform_media.cleanup.abandoned_staging_upload"
+      }
+    },
+    {
+      "caseId": "replaced-public-image-deletes-after-request",
+      "runName": "replacedPublicImages",
+      "candidate": {
+        "mediaObjectId": "00000000-0000-0000-0000-000000000201",
+        "resourceProduct": "hotel_catalog",
+        "resourceType": "property",
+        "resourceId": "property_alpenrose",
+        "purpose": "property.hero_image",
+        "visibility": "public",
+        "lifecycleStatus": "delete_requested",
+        "bucket": "vayada-media-local",
+        "storageKey": "public/properties/property_alpenrose/00000000-0000-0000-0000-000000000201/original_safe.jpg",
+        "deletionRequestedAt": "2026-06-06T10:00:00.000Z",
+        "replacedByMediaObjectId": "00000000-0000-0000-0000-000000000202"
+      },
+      "expected": {
+        "action": "delete-replaced-public-image",
+        "statusAfter": "deleted",
+        "cleanupKey": "platform.media.cleanup:00000000-0000-0000-0000-000000000201:delete-replaced-public-image:2026-06-06T10:00:00.000Z:v1",
+        "jobType": "platform.media.cleanup.delete-replaced-public-image",
+        "eventType": "platform_media.object.deleted",
+        "auditAction": "platform_media.cleanup.replaced_public_image_deleted"
+      }
+    },
+    {
+      "caseId": "private-attachment-deletes-after-retention",
+      "runName": "privateAttachmentRetention",
+      "candidate": {
+        "mediaObjectId": "00000000-0000-0000-0000-000000000301",
+        "ownerOrganizationId": "00000000-0000-0000-0000-000000000011",
+        "propertyId": "00000000-0000-0000-0000-000000000012",
+        "resourceProduct": "pms",
+        "resourceType": "message_thread",
+        "resourceId": "thread_guest_123",
+        "purpose": "pms.messaging.attachment",
+        "visibility": "private",
+        "lifecycleStatus": "retained",
+        "bucket": "vayada-media-local",
+        "storageKey": "private/pms/properties/property_alpenrose/messages/thread_guest_123/00000000-0000-0000-0000-000000000301/invoice.pdf",
+        "retainedUntil": "2026-06-12T00:00:00.000Z"
+      },
+      "expected": {
+        "action": "delete-private-attachment-after-retention",
+        "statusAfter": "deleted",
+        "cleanupKey": "platform.media.cleanup:00000000-0000-0000-0000-000000000301:delete-private-attachment-after-retention:2026-06-12T00:00:00.000Z:v1",
+        "jobType": "platform.media.cleanup.private-attachment-retention",
+        "eventType": "platform_media.private_attachment.deleted_after_retention",
+        "auditAction": "platform_media.cleanup.private_attachment_deleted_after_retention"
+      }
+    },
+    {
+      "caseId": "rollback-window-cleans-legacy-source-only",
+      "runName": "rollbackWindowCleanup",
+      "candidate": {
+        "mediaObjectId": "00000000-0000-0000-0000-000000000401",
+        "resourceProduct": "migration",
+        "resourceType": "legacy_media_copy",
+        "resourceId": "legacy_booking_hero_1",
+        "purpose": "property.hero_image",
+        "visibility": "public",
+        "lifecycleStatus": "active",
+        "bucket": "vayada-media-local",
+        "storageKey": "public/properties/property_alpenrose/00000000-0000-0000-0000-000000000401/original_safe.jpg",
+        "rollbackBucket": "legacy-vayada-media",
+        "rollbackStorageKey": "legacy/booking/hotels/alpenrose/hero.jpg",
+        "rollbackWindowEndsAt": "2026-06-01T00:00:00.000Z"
+      },
+      "expected": {
+        "action": "cleanup-rollback-window-object",
+        "statusAfter": "active",
+        "rollbackCleanupStatus": "completed",
+        "cleanupKey": "platform.media.cleanup:00000000-0000-0000-0000-000000000401:cleanup-rollback-window-object:2026-06-01T00:00:00.000Z:v1",
+        "jobType": "platform.media.cleanup.rollback-window-object",
+        "eventType": "platform_media.rollback_window.cleaned",
+        "auditAction": "platform_media.cleanup.rollback_window_object_deleted"
+      }
+    }
+  ]
+}

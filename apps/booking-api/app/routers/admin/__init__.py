@@ -15,7 +15,6 @@ from app.routers.admin.profile import router as profile_router
 from app.routers.admin.promo_codes import router as promo_codes_router
 from app.routers.admin.settings import router as settings_router
 from app.routers.admin.setup import router as setup_router
-from app.routers.admin.upload import router as upload_router
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -24,7 +23,6 @@ router.include_router(setup_router)
 router.include_router(settings_router)
 router.include_router(custom_domain_router)
 router.include_router(design_router)
-router.include_router(upload_router)
 router.include_router(addons_router)
 router.include_router(dashboard_router)
 router.include_router(benefits_router)

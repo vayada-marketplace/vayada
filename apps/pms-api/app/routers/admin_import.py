@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import settings
 from app.dependencies import require_hotel_admin
@@ -13,7 +13,7 @@ from app.models.listing_import import (
 )
 from app.repositories.room_type_repo import RoomTypeRepository
 from app.services.listing_import_service import (
-    download_and_upload_images,
+    create_platform_media_import_job,
     extract_listing_data,
 )
 from app.utils import get_hotel_id
@@ -55,16 +55,18 @@ async def import_preview(
 @router.post("/import/confirm", response_model=ListingImportResult, status_code=201)
 async def import_confirm(
     data: ListingImportConfirm,
-    background_tasks: BackgroundTasks,
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Create room types from the confirmed import data. Images are processed in the background."""
+    """Create room types and queue platform media import jobs for source images."""
     hotel_id = await get_hotel_id(user_id)
     if not hotel_id:
         raise HTTPException(status_code=404, detail="Hotel not found")
 
     room_type_ids = []
-    has_images = False
+    queued_image_imports = 0
+    failed_image_imports = 0
+    auth_header = request.headers.get("authorization", "")
 
     for rt in data.room_types:
         room_data = {
@@ -88,19 +90,31 @@ async def import_confirm(
         room_type_ids.append(room_type_id)
 
         if rt.source_image_urls:
-            has_images = True
-            background_tasks.add_task(
-                download_and_upload_images,
-                rt.source_image_urls,
-                user_id,
-                room_type_id,
-            )
+            try:
+                await create_platform_media_import_job(
+                    rt.source_image_urls,
+                    auth_header,
+                    hotel_id,
+                    room_type_id,
+                )
+                queued_image_imports += 1
+            except Exception as e:
+                failed_image_imports += 1
+                logger.warning(
+                    "Failed to queue platform media import job for room type %s: %s",
+                    room_type_id,
+                    e,
+                )
 
     count = len(room_type_ids)
-    img_msg = " Images are being processed in the background." if has_images else ""
+    img_msg = ""
+    if queued_image_imports:
+        img_msg = " Image imports were queued in platform media."
+    elif failed_image_imports:
+        img_msg = " Image import queueing failed; retry from the imported room type."
     return ListingImportResult(
         room_type_ids=room_type_ids,
-        images_pending=has_images,
+        images_pending=queued_image_imports > 0,
         message=f"{count} room type{'s' if count != 1 else ''} created.{img_msg}",
     )
 
@@ -108,17 +122,26 @@ async def import_confirm(
 @router.post("/import/images", status_code=202)
 async def import_images(
     data: ImportImagesRequest,
-    background_tasks: BackgroundTasks,
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
-    """Download images from source URLs and attach them to an existing room type."""
+    """Queue a platform media import job for source image URLs."""
     if not data.source_image_urls:
         return {"message": "No images to import"}
 
-    background_tasks.add_task(
-        download_and_upload_images,
+    hotel_id = await get_hotel_id(user_id)
+    if not hotel_id:
+        raise HTTPException(status_code=404, detail="Hotel not found")
+
+    result = await create_platform_media_import_job(
         data.source_image_urls,
-        user_id,
+        request.headers.get("authorization", ""),
+        hotel_id,
         data.room_type_id,
     )
-    return {"message": f"Downloading {len(data.source_image_urls)} images in the background"}
+    import_job = result.get("importJob", {})
+    return {
+        "message": f"Queued {len(data.source_image_urls)} image import job in platform media",
+        "import_job_id": import_job.get("importJobId"),
+        "job_key": import_job.get("jobKey"),
+    }

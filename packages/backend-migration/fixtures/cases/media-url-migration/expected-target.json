@@ -1,0 +1,188 @@
+{
+  "counts": {
+    "identity.users": 2,
+    "identity.organizations": 2,
+    "hotel_catalog.properties": 1,
+    "hotel_catalog.property_source_links": 3,
+    "hotel_catalog.property_slugs": 2,
+    "hotel_catalog.property_media": 2,
+    "hotel_catalog.property_public_profile_read_model": 1,
+    "marketplace.creator_profiles": 1,
+    "marketplace.marketplace_hotel_profiles": 1,
+    "marketplace.marketplace_hotel_listings": 1,
+    "marketplace.collaborations": 1,
+    "marketplace.marketplace_chat_messages": 1,
+    "marketplace.marketplace_listing_read_model": 1,
+    "pms.room_types": 1,
+    "pms.message_threads": 1,
+    "pms.messages": 1,
+    "pms.message_attachments": 2,
+    "platform.media_objects": 9,
+    "platform.media_variants": 18
+  },
+  "idStability": {
+    "identity.users": [
+      "f8221000-0000-0000-0000-000000000001",
+      "f8221000-0000-0000-0000-000000000002"
+    ],
+    "identity.organizations": [
+      "f8222000-0000-0000-0000-000000000001",
+      "f8222000-0000-0000-0000-000000000002"
+    ],
+    "hotel_catalog.properties": ["f8223000-0000-0000-0000-000000000001"],
+    "hotel_catalog.property_source_links": [
+      "f8223100-0000-0000-0000-000000000001",
+      "f8223100-0000-0000-0000-000000000002",
+      "f8223100-0000-0000-0000-000000000003"
+    ],
+    "hotel_catalog.property_slugs": [
+      "f8223200-0000-0000-0000-000000000001",
+      "f8223200-0000-0000-0000-000000000002"
+    ],
+    "hotel_catalog.property_media": [
+      "f8225000-0000-0000-0000-000000000001",
+      "f8225000-0000-0000-0000-000000000002"
+    ],
+    "marketplace.creator_profiles": ["f8226000-0000-0000-0000-000000000001"],
+    "marketplace.marketplace_hotel_listings": ["f8226100-0000-0000-0000-000000000001"],
+    "marketplace.collaborations": ["f8226200-0000-0000-0000-000000000001"],
+    "marketplace.marketplace_chat_messages": ["f8226300-0000-0000-0000-000000000001"],
+    "pms.room_types": ["f8227000-0000-0000-0000-000000000001"],
+    "pms.message_threads": ["f8227100-0000-0000-0000-000000000001"],
+    "pms.messages": ["f8227200-0000-0000-0000-000000000001"],
+    "pms.message_attachments": [
+      "f8227300-0000-0000-0000-000000000001",
+      "f8227300-0000-0000-0000-000000000002"
+    ],
+    "platform.media_objects": [
+      "f8224000-0000-0000-0000-000000000001",
+      "f8224000-0000-0000-0000-000000000002",
+      "f8224000-0000-0000-0000-000000000003",
+      "f8224000-0000-0000-0000-000000000004",
+      "f8224000-0000-0000-0000-000000000005",
+      "f8224000-0000-0000-0000-000000000006",
+      "f8224000-0000-0000-0000-000000000007",
+      "f8224000-0000-0000-0000-000000000008",
+      "f8224000-0000-0000-0000-000000000009"
+    ],
+    "platform.media_variants": [
+      "f8224100-0000-0000-0000-000000000001",
+      "f8224100-0000-0000-0000-000000000002",
+      "f8224100-0000-0000-0000-000000000003",
+      "f8224100-0000-0000-0000-000000000004",
+      "f8224100-0000-0000-0000-000000000005",
+      "f8224100-0000-0000-0000-000000000006",
+      "f8224100-0000-0000-0000-000000000007",
+      "f8224100-0000-0000-0000-000000000008",
+      "f8224100-0000-0000-0000-000000000009",
+      "f8224100-0000-0000-0000-000000000010",
+      "f8224100-0000-0000-0000-000000000011",
+      "f8224100-0000-0000-0000-000000000012",
+      "f8224100-0000-0000-0000-000000000013",
+      "f8224100-0000-0000-0000-000000000014",
+      "f8224100-0000-0000-0000-000000000015",
+      "f8224100-0000-0000-0000-000000000016",
+      "f8224100-0000-0000-0000-000000000017",
+      "f8224100-0000-0000-0000-000000000018"
+    ]
+  },
+  "platformMediaChecks": {
+    "legacyUrlInventory": {
+      "sourceUrlCount": 9,
+      "copiedObjectCount": 6,
+      "externalReferenceCount": 3,
+      "unresolvedExternalUrlCount": 3,
+      "publicObjectCount": 4,
+      "privateObjectCount": 5
+    },
+    "requiredPurposes": [
+      "property.hero_image",
+      "property.gallery_image",
+      "property.logo",
+      "marketplace.listing.gallery",
+      "marketplace.creator.profile_image",
+      "marketplace.collaboration_chat.attachment",
+      "pms.room_type.media",
+      "pms.messaging.attachment",
+      "pms.import.source_image"
+    ],
+    "requiredPublicVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+    "forbiddenPublicValues": [
+      "private/marketplace",
+      "private/pms",
+      "https://legacy-marketplace-private.s3.amazonaws.com",
+      "https://legacy-pms-private.s3.amazonaws.com",
+      "https://provider.example.test",
+      "https://vendor-import.example.test"
+    ]
+  },
+  "mediaUrlMigrationChecks": {
+    "bookingPropertyMedia": [
+      {
+        "id": "f8225000-0000-0000-0000-000000000001",
+        "mediaType": "hero_image",
+        "url": "https://media.localhost/public-cdn/properties/f8223000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000001/original_safe.webp",
+        "sourceSystem": "booking",
+        "publicApproved": true,
+        "platformMediaObjectId": "f8224000-0000-0000-0000-000000000001"
+      },
+      {
+        "id": "f8225000-0000-0000-0000-000000000002",
+        "mediaType": "gallery_image",
+        "url": "https://external-images.example.test/booking/gallery-1.jpg",
+        "sourceSystem": "booking",
+        "publicApproved": true,
+        "platformMediaObjectId": "f8224000-0000-0000-0000-000000000002"
+      }
+    ],
+    "propertyPublicProfiles": [
+      {
+        "propertyId": "f8223000-0000-0000-0000-000000000001",
+        "mediaObjectIds": ["f8224000-0000-0000-0000-000000000001"],
+        "urls": [
+          "https://media.localhost/public-cdn/properties/f8223000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000001/original_safe.webp"
+        ],
+        "forbiddenUrls": ["https://external-images.example.test/booking/gallery-1.jpg"]
+      }
+    ],
+    "marketplace": {
+      "creatorProfileId": "f8226000-0000-0000-0000-000000000001",
+      "profilePictureUrl": "https://media.localhost/public-cdn/marketplace/creators/f8226000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000004/original_safe.webp",
+      "listingId": "f8226100-0000-0000-0000-000000000001",
+      "listingImageUrls": [
+        "https://media.localhost/public-cdn/marketplace/listings/f8226100-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000003/original_safe.webp"
+      ],
+      "chatMessageId": "f8226300-0000-0000-0000-000000000001",
+      "chatMediaObjectId": "f8224000-0000-0000-0000-000000000005"
+    },
+    "pms": {
+      "roomTypeId": "f8227000-0000-0000-0000-000000000001",
+      "roomMediaObjectIds": ["f8224000-0000-0000-0000-000000000006"],
+      "roomMediaUrls": [
+        "https://media.localhost/public-cdn/properties/f8223000-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000006/original_safe.webp"
+      ],
+      "attachments": [
+        {
+          "id": "f8227300-0000-0000-0000-000000000001",
+          "s3Key": "private/pms/properties/f8223000-0000-0000-0000-000000000001/messages/f8227100-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000008/invoice.pdf",
+          "sourceUrl": "https://legacy-pms-private.s3.amazonaws.com/legacy-pms-message-attachments/thread-822/invoice.pdf",
+          "platformMediaObjectId": "f8224000-0000-0000-0000-000000000008"
+        },
+        {
+          "id": "f8227300-0000-0000-0000-000000000002",
+          "s3Key": null,
+          "sourceUrl": "https://provider.example.test/messages/thread-822/passport.png",
+          "platformMediaObjectId": "f8224000-0000-0000-0000-000000000009"
+        }
+      ]
+    },
+    "forbiddenPublicReferenceValues": [
+      "private/marketplace",
+      "private/pms",
+      "https://legacy-marketplace-private.s3.amazonaws.com",
+      "https://legacy-pms-private.s3.amazonaws.com",
+      "https://provider.example.test",
+      "https://vendor-import.example.test"
+    ]
+  }
+}

@@ -20,6 +20,10 @@ from app.repositories.messaging_repo import (
     MessageRepository,
     MessageThreadRepository,
 )
+from app.repositories.platform_media_repo import (
+    PlatformMediaAttachmentRepository,
+    normalize_attachment_content_type,
+)
 from app.services import channex_service
 from app.utils import get_hotel_id
 
@@ -75,7 +79,7 @@ def validate_attachment(
     Validation happens up front rather than after upload so the user sees the
     real reason instead of a generic Channex 4xx surfaced as a 502.
     """
-    ct = (content_type or "").lower().split(";")[0].strip()
+    ct = normalize_attachment_content_type(content_type)
     if ct not in ALLOWED_ATTACHMENT_CONTENT_TYPES:
         channel_label = channel or "the OTA"
         raise HTTPException(
@@ -85,6 +89,9 @@ def validate_attachment(
                 f"({ct or 'unknown'}). Try JPG, PNG, HEIC, WEBP, GIF or PDF."
             ),
         )
+
+    if size_bytes <= 0:
+        raise HTTPException(status_code=400, detail="Attachment file is empty.")
 
     limit = max_attachment_bytes_for_channel(channel)
     if size_bytes > limit:
@@ -240,7 +247,7 @@ async def send_message(
                 )
             else:
                 detail = f"Channex send failed: {e}"
-            raise HTTPException(status_code=502, detail=detail)
+            raise HTTPException(status_code=502, detail=detail) from e
         logger.info(
             "Channex message accepted: thread=%s channel=%s channex_message_id=%s",
             thread_id,
@@ -265,10 +272,25 @@ async def send_message(
             raw_payload=channex_msg,
         )
         if inserted and attachment_id:
-            await MessageAttachmentRepository.add(
-                message_id=str(inserted["id"]),
+            media = await PlatformMediaAttachmentRepository.find_by_provider_attachment_id(
+                property_id=hotel_id,
+                thread_id=thread_id,
                 source_attachment_id=attachment_id,
             )
+            attachment = await MessageAttachmentRepository.add(
+                message_id=str(inserted["id"]),
+                platform_media_object_id=media.media_id if media else None,
+                s3_key=media.storage_key if media else None,
+                filename=media.filename if media else None,
+                content_type=media.content_type if media else None,
+                size_bytes=media.size_bytes if media else None,
+                source_attachment_id=attachment_id,
+            )
+            if media:
+                await PlatformMediaAttachmentRepository.link_message_attachment(
+                    media_id=media.media_id,
+                    message_attachment_id=str(attachment["id"]),
+                )
         last_inserted = inserted
 
     if not last_inserted:
@@ -305,13 +327,34 @@ async def upload_thread_attachment(
         channel=channel,
     )
 
+    try:
+        media = await PlatformMediaAttachmentRepository.store_private_attachment(
+            property_id=hotel_id,
+            thread_id=thread_id,
+            actor_user_id=user_id,
+            file_bytes=contents,
+            filename=file.filename or "attachment",
+            content_type=file.content_type,
+        )
+    except Exception as e:
+        logger.exception(
+            "Platform media attachment storage failed: thread=%s channel=%s "
+            "filename=%s content_type=%s size=%d",
+            thread_id,
+            channel,
+            file.filename,
+            file.content_type,
+            len(contents),
+        )
+        raise HTTPException(status_code=503, detail=f"Platform media storage failed: {e}") from e
+
     api_key = channex_service.get_platform_api_key()
     try:
         result = await channex_service.upload_attachment(
             api_key,
             file_bytes=contents,
             filename=file.filename or "attachment",
-            content_type=file.content_type or "application/octet-stream",
+            content_type=media.content_type or "application/octet-stream",
         )
     except Exception as e:
         logger.exception(
@@ -323,18 +366,25 @@ async def upload_thread_attachment(
             file.content_type,
             len(contents),
         )
-        raise HTTPException(status_code=502, detail=f"Upload failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Upload failed: {e}") from e
 
     attachment_id = result.get("id")
+    if not attachment_id:
+        raise HTTPException(status_code=502, detail="Upload failed: provider did not return an id")
+    await PlatformMediaAttachmentRepository.record_provider_attachment_id(
+        media_id=media.media_id,
+        source_attachment_id=str(attachment_id),
+    )
     logger.info(
         "Channex attachment uploaded: thread=%s channel=%s filename=%s "
-        "content_type=%s size=%d attachment_id=%s",
+        "content_type=%s size=%d attachment_id=%s media_id=%s",
         thread_id,
         channel,
         file.filename,
         file.content_type,
         len(contents),
         attachment_id,
+        media.media_id,
     )
     return {"attachment_id": attachment_id}
 
@@ -390,7 +440,7 @@ async def mark_no_reply_needed(
         await channex_service.mark_thread_no_reply_needed(api_key, thread["source_thread_id"])
     except Exception as e:
         logger.exception("Channex no_reply_needed failed")
-        raise HTTPException(status_code=502, detail=f"Channex call failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Channex call failed: {e}") from e
 
     row = await MessageThreadRepository.update_status(thread_id, hotel_id, "no_reply_needed")
     return _thread_to_model(row) if row else _thread_to_model(thread)

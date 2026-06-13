@@ -10,6 +10,8 @@ import { checkIntelligenceParity } from "./intelligence/parity.js";
 import { transformIntelligence } from "./intelligence/transform.js";
 import { checkMarketplaceParity } from "./marketplace/parity.js";
 import { transformMarketplace } from "./marketplace/transform.js";
+import { checkMediaUrlMigrationParity } from "./mediaUrlMigration/parity.js";
+import { transformMediaUrlMigration } from "./mediaUrlMigration/transform.js";
 import { checkPlatformJobsEventsAuditParity } from "./platformJobsEventsAudit/parity.js";
 import { transformPlatformJobsEventsAudit } from "./platformJobsEventsAudit/transform.js";
 import { checkPlatformMediaParity } from "./platformMedia/parity.js";
@@ -69,6 +71,11 @@ const fixtureCases: FixtureCaseRegistration[] = [
   {
     fixtureCase: "platform-media",
     parityHandlers: [checkPlatformMediaParity],
+  },
+  {
+    fixtureCase: "media-url-migration",
+    transform: transformMediaUrlMigration,
+    parityHandlers: [checkPlatformMediaParity, checkMediaUrlMigrationParity],
   },
 ];
 

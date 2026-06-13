@@ -50,6 +50,12 @@ import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplace
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
+import {
+  createDeterministicPlatformMediaFinalizer,
+  createDeterministicPlatformMediaUploadSigner,
+  createInMemoryPlatformMediaRepository,
+  createPassthroughPlatformMediaTargetResolver,
+} from "./routes/platformMedia.js";
 
 const config = loadConfig();
 
@@ -381,6 +387,14 @@ const app = buildApp({
       : undefined,
   bookingWebAffiliateHotelResolver,
   bookingWebAffiliateRepository,
+  platformMedia: config.auth
+    ? {
+        repository: createInMemoryPlatformMediaRepository(),
+        signer: createDeterministicPlatformMediaUploadSigner(),
+        targetResolver: createPassthroughPlatformMediaTargetResolver(),
+        finalizer: createDeterministicPlatformMediaFinalizer(),
+      }
+    : undefined,
 });
 
 try {

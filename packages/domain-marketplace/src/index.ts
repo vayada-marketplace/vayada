@@ -245,6 +245,7 @@ export type UpdateCreatorProfileRequest = {
   portfolioUrl?: string | null;
   phone?: string | null;
   profilePictureUrl?: string | null;
+  profilePictureMediaObjectId?: string | null;
   platforms?: CreatorProfilePlatformInput[];
 };
 
@@ -447,6 +448,7 @@ export type CreateMarketplaceHotelListingRequest = {
   accommodationType?: MarketplaceAccommodationType | null;
   rawLocationText?: string | null;
   imageUrls?: string[];
+  imageMediaObjectIds?: string[];
   collaborationOfferings: MarketplaceHotelListingOfferingWrite[];
   creatorRequirements: MarketplaceHotelListingCreatorRequirementsWrite;
 };

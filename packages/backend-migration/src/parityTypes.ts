@@ -380,6 +380,34 @@ export type ExpectedTarget = {
     requiredPublicVariants: string[];
     forbiddenPublicValues?: string[];
   };
+  mediaUrlMigrationChecks?: {
+    bookingPropertyMedia?: Array<{
+      id: string;
+      mediaType: string;
+      url: string;
+      sourceSystem: string;
+      publicApproved: boolean;
+    }>;
+    marketplace?: {
+      creatorProfileId: string;
+      profilePictureUrl: string;
+      listingId: string;
+      listingImageUrls: string[];
+      chatMessageId: string;
+      chatMediaObjectId: string;
+    };
+    pms?: {
+      roomTypeId: string;
+      roomMediaObjectIds: string[];
+      roomMediaUrls: string[];
+      attachments: Array<{
+        id: string;
+        s3Key: string | null;
+        sourceUrl: string | null;
+      }>;
+    };
+    forbiddenPublicReferenceValues?: string[];
+  };
 };
 
 export type ParityHandlerContext = {

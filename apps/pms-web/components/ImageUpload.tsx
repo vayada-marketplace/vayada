@@ -2,13 +2,17 @@
 
 import { useState, useRef, useCallback } from "react";
 import { XMarkIcon, PhotoIcon, ArrowUpTrayIcon } from "@heroicons/react/24/outline";
-import { uploadService, UploadedImage } from "@/services/upload";
+import { imageReferenceUrl, uploadService } from "@/services/upload";
+import type { RoomImageReference, UploadedImage } from "@/services/upload";
+import type { PlatformMediaResourceScope } from "@/services/platform-media";
 
 interface ImageUploadProps {
-  /** Already-uploaded image URLs (from the server) */
-  images: string[];
-  /** Called when images change (URLs array) */
-  onChange: (urls: string[]) => void;
+  /** Already-uploaded image references (legacy URLs or platform media refs) */
+  images: RoomImageReference[];
+  /** Called when images change */
+  onChange: (images: RoomImageReference[]) => void;
+  /** Platform media scope for new uploads */
+  mediaResource: PlatformMediaResourceScope;
   /** Max number of images */
   maxImages?: number;
   /** Max file size in MB */
@@ -22,6 +26,7 @@ interface ImageUploadProps {
 export default function ImageUpload({
   images,
   onChange,
+  mediaResource,
   maxImages = 10,
   maxSizeMB = 20,
   label = "Room Images",
@@ -65,9 +70,13 @@ export default function ImageUpload({
 
       setUploading(true);
       try {
-        const result = await uploadService.uploadImages(fileArray);
-        const newUrls = result.images.map((img: UploadedImage) => img.url);
-        onChange([...images, ...newUrls]);
+        const result = await uploadService.uploadImages(fileArray, mediaResource);
+        const newImages = result.images.map((img: UploadedImage) => ({
+          url: img.url,
+          platformMediaObjectId: img.platformMediaObjectId,
+          storageKey: img.storageKey,
+        }));
+        onChange([...images, ...newImages]);
       } catch (err: any) {
         setError(err.message || "Upload failed");
       } finally {
@@ -75,7 +84,7 @@ export default function ImageUpload({
         e.target.value = "";
       }
     },
-    [images, onChange, maxImages, maxSizeMB],
+    [images, onChange, maxImages, maxSizeMB, mediaResource],
   );
 
   const removeImage = useCallback(
@@ -129,41 +138,44 @@ export default function ImageUpload({
       {/* Image grid */}
       {images.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-          {images.map((url, i) => (
-            <div
-              key={url + i}
-              draggable
-              onDragStart={() => handleDragStart(i)}
-              onDragOver={(e) => handleDragOver(e, i)}
-              onDrop={(e) => handleDrop(e, i)}
-              onDragEnd={handleDragEnd}
-              className={`relative group aspect-square rounded-lg overflow-hidden border-2 bg-gray-50 cursor-grab active:cursor-grabbing transition-all ${
-                dragIndex === i
-                  ? "opacity-40 border-primary-300"
-                  : overIndex === i && dragIndex !== null
-                    ? "border-primary-500 scale-[1.03]"
-                    : "border-gray-200"
-              }`}
-            >
-              <img
-                src={url}
-                alt={`Room image ${i + 1}`}
-                className="w-full h-full object-cover pointer-events-none"
-              />
-              <button
-                type="button"
-                onClick={() => removeImage(i)}
-                className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          {images.map((image, i) => {
+            const url = imageReferenceUrl(image);
+            return (
+              <div
+                key={url + i}
+                draggable
+                onDragStart={() => handleDragStart(i)}
+                onDragOver={(e) => handleDragOver(e, i)}
+                onDrop={(e) => handleDrop(e, i)}
+                onDragEnd={handleDragEnd}
+                className={`relative group aspect-square rounded-lg overflow-hidden border-2 bg-gray-50 cursor-grab active:cursor-grabbing transition-all ${
+                  dragIndex === i
+                    ? "opacity-40 border-primary-300"
+                    : overIndex === i && dragIndex !== null
+                      ? "border-primary-500 scale-[1.03]"
+                      : "border-gray-200"
+                }`}
               >
-                <XMarkIcon className="w-3 h-3" />
-              </button>
-              {i === 0 && (
-                <span className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/60 text-white text-[10px] font-medium rounded">
-                  Cover
-                </span>
-              )}
-            </div>
-          ))}
+                <img
+                  src={url}
+                  alt={`Room image ${i + 1}`}
+                  className="w-full h-full object-cover pointer-events-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(i)}
+                  className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <XMarkIcon className="w-3 h-3" />
+                </button>
+                {i === 0 && (
+                  <span className="absolute bottom-1 left-1 px-1.5 py-0.5 bg-black/60 text-white text-[10px] font-medium rounded">
+                    Cover
+                  </span>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

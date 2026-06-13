@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # PMS Configuration
     PMS_API_URL: str = Field(
-        "https://pms-api.vayada.com", description="PMS backend URL for proxying image uploads"
+        "https://pms-api.vayada.com", description="PMS backend URL for hotel lifecycle sync"
     )
     PMS_DATABASE_URL: str = Field(
         default="", description="PMS PostgreSQL connection string (for dashboard stats)"

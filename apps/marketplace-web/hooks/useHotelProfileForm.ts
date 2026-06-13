@@ -78,6 +78,7 @@ export function useHotelProfileForm(options: UseHotelProfileFormOptions = {}) {
         description: "",
         accommodation_type: "",
         images: [],
+        imageMediaObjectIds: [],
         imageFiles: [],
         collaborationTypes: [],
         availability: [],

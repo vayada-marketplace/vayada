@@ -17,6 +17,7 @@ import ConfirmDialog from "@/components/ConfirmDialog";
 import ListingImportModal from "@/components/rooms/ListingImportModal";
 import { formatCurrency } from "@/lib/formatCurrency";
 import { useTranslation } from "@/lib/i18n";
+import { imageReferenceUrl } from "@/services/upload";
 
 const CATEGORY_STYLES: Record<string, string> = {
   suite: "bg-blue-50 text-blue-600 border border-blue-200",
@@ -135,6 +136,7 @@ function RoomTypeCard({
   const typeRooms = rooms.filter((r) => r.roomTypeId === room.id);
   const available = typeRooms.filter((r) => r.status === "available").length;
   const rateOverview = getRateOverview(room);
+  const thumbnailUrl = imageReferenceUrl(room.images?.[0]);
 
   const handleAddRoom = async () => {
     if (!newRoomNumber.trim()) return;
@@ -215,9 +217,9 @@ function RoomTypeCard({
         />
 
         {/* Room type thumbnail or fallback icon */}
-        {room.images?.[0] ? (
+        {thumbnailUrl ? (
           <img
-            src={room.images[0]}
+            src={thumbnailUrl}
             alt={room.name}
             className="w-9 h-9 md:w-10 md:h-10 rounded-xl object-cover shrink-0"
           />
