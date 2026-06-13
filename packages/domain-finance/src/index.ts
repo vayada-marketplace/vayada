@@ -477,6 +477,7 @@ export const FINANCE_COMMAND_SIDE_EFFECTS = [
   ...FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS,
   "provider_validation",
   "reconciliation_job",
+  "payout_job",
 ] as const;
 
 export type FinanceCommandSideEffect = (typeof FINANCE_COMMAND_SIDE_EFFECTS)[number];
@@ -493,7 +494,18 @@ export type FinanceReconcilePayoutJob = {
   status: "queued" | "idempotent_replay";
 };
 
-export type FinanceCommandJob = FinanceProjectionRefreshJob | FinanceReconcilePayoutJob;
+export type FinanceDispatchPropertyPayoutJob = {
+  jobType: "finance.dispatch-property-payout";
+  payoutId: string;
+  provider: FinanceRoutePaymentProvider;
+  idempotencyKey: string;
+  status: "queued" | "idempotent_replay";
+};
+
+export type FinanceCommandJob =
+  | FinanceProjectionRefreshJob
+  | FinanceReconcilePayoutJob
+  | FinanceDispatchPropertyPayoutJob;
 
 export type FinanceCommandMeta = {
   commandId: string;
@@ -563,6 +575,62 @@ export type FinanceXenditPayoutReconciliationResponse = {
   propertyId: FinancePropertyId;
   job: Extract<FinanceCommandJob, { jobType: "finance.reconcile-payout" }>;
   legacyDisposition: string;
+  commandMeta: FinanceCommandMeta;
+};
+
+export type FinancePropertyPayoutDispatchPayload = {
+  payoutId: string;
+  legacySchedulerFrozenAt: FinanceUtcDateTime;
+  reconciliationReadyAt: FinanceUtcDateTime;
+};
+
+export type FinancePropertyPayoutDispatchCommand = FinanceCommandBase<
+  "finance.property_payout.dispatch",
+  FinancePropertyPayoutDispatchPayload
+>;
+
+export type FinancePropertyPayoutDispatchReadiness = {
+  payoutId: string;
+  reconciliationReady: boolean;
+  legacySchedulerFrozen: boolean;
+  activeLegacyTransferWindow: boolean;
+  existingProviderPayoutId: string | null;
+  provider: FinanceRoutePaymentProvider | null;
+  blockingReasons: string[];
+};
+
+export type FinancePropertyPayoutDispatchResult =
+  | {
+      ok: true;
+      status: "queued" | "idempotent_replay";
+      job: Extract<FinanceCommandJob, { jobType: "finance.dispatch-property-payout" }>;
+      readiness: FinancePropertyPayoutDispatchReadiness;
+      legacyDisposition: string;
+      rollbackRule: string;
+      commandMeta: FinanceCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 404 | 409 | 500;
+      code:
+        | "invalid_command"
+        | "payout_not_found"
+        | "reconciliation_not_ready"
+        | "legacy_scheduler_not_frozen"
+        | "active_legacy_transfer_window"
+        | "payout_already_dispatched"
+        | "idempotency_conflict"
+        | "write_unavailable";
+      message: string;
+    };
+
+export type FinancePropertyPayoutDispatchResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  job: Extract<FinanceCommandJob, { jobType: "finance.dispatch-property-payout" }>;
+  readiness: FinancePropertyPayoutDispatchReadiness;
+  legacyDisposition: string;
+  rollbackRule: string;
   commandMeta: FinanceCommandMeta;
 };
 
@@ -846,6 +914,10 @@ export type FinancePropertyCommandRepository = {
   enqueueXenditPayoutReconciliation(
     command: FinanceXenditPayoutReconciliationCommand,
   ): Promise<FinanceXenditPayoutReconciliationResult>;
+
+  enqueuePropertyPayoutDispatch(
+    command: FinancePropertyPayoutDispatchCommand,
+  ): Promise<FinancePropertyPayoutDispatchResult>;
 };
 
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &
@@ -1106,6 +1178,7 @@ export type FinanceCommand =
   | UpdateBillingPlanCommand
   | UpdateAddOnPriceCommand
   | FinanceManualPaymentRecordCommand
+  | FinancePropertyPayoutDispatchCommand
   | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
@@ -1115,6 +1188,7 @@ export const financeCommandTypes = [
   "finance.billing.plan.update",
   "finance.add_on.price.update",
   "finance.manual_payment.record",
+  "finance.property_payout.dispatch",
   "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 

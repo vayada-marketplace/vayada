@@ -22,6 +22,8 @@ import type {
   FinancePaymentSettingsReadModel,
   FinancePayout,
   FinancePayoutListQuery,
+  FinancePropertyPayoutDispatchCommand,
+  FinancePropertyPayoutDispatchResult,
   FinanceReconciliationItem,
   FinanceReconciliationViewKind,
   FinanceReconciliationViewQuery,
@@ -69,6 +71,7 @@ const financeContractCases = JSON.parse(
       mustNotWrite?: string[];
       errorCode?: string;
       legacyDisposition?: string;
+      rollbackRule?: string;
       job?: { jobType: string; idempotencyKey: string };
       commandMeta?: { sideEffects?: string[] };
       enums?: Record<string, string[]>;
@@ -550,6 +553,91 @@ describe("finance route contracts", () => {
     });
     assertExcludes(first.body, contractCase!.expected.mustNotWrite ?? [], contractCase!.caseId);
     expect(repository.enqueueCount).toBe(1);
+  });
+
+  it("passes the F1h property payout dispatch fixture idempotently", async () => {
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "property-payout-dispatch-enqueues-job",
+    );
+    expect(contractCase).toBeDefined();
+    const repository = propertyPayoutDispatchRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(contractCase!.expected.status);
+    expect(replay.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(first.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    expect(first.body).toMatchObject({
+      job: contractCase!.expected.job,
+      legacyDisposition: contractCase!.expected.legacyDisposition,
+      rollbackRule: contractCase!.expected.rollbackRule,
+      readiness: {
+        reconciliationReady: true,
+        legacySchedulerFrozen: true,
+        activeLegacyTransferWindow: false,
+        existingProviderPayoutId: null,
+        blockingReasons: [],
+      },
+      commandMeta: {
+        idempotencyKey: "finance-dispatch-property-payout-686-2026-06-13",
+        sideEffects: ["payout_job", "audit_event"],
+        jobs: [{ status: "queued" }],
+      },
+    });
+    expect(replay.body).toMatchObject({
+      job: {
+        idempotencyKey:
+          "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1",
+        status: "idempotent_replay",
+      },
+      commandMeta: {
+        jobs: [{ status: "idempotent_replay" }],
+      },
+    });
+    assertExcludes(first.body, contractCase!.expected.mustNotWrite ?? [], contractCase!.caseId);
+    expect(repository.enqueueCount).toBe(1);
+  });
+
+  it("blocks property payout dispatch without reconciliation readiness", async () => {
+    const repository = propertyPayoutDispatchRepository({
+      readiness: {
+        reconciliationReady: false,
+        blockingReasons: ["reconciliation_not_ready"],
+      },
+    });
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: `/api/finance/properties/${propertyId}/payouts/payout_2026_abcd/dispatch`,
+      payload: propertyPayoutDispatchBody(),
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toMatchObject({
+      code: "reconciliation_not_ready",
+      category: "conflict",
+    });
+    expect(repository.enqueueCount).toBe(0);
   });
 
   it("passes the F1d manual payment record fixture in target mode", async () => {
@@ -1465,6 +1553,112 @@ describe("finance route contracts", () => {
     );
   });
 
+  it("enqueues property payout dispatch only after readiness and legacy freeze checks", async () => {
+    const calls: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          calls.push({ text, values });
+          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          if (text.includes("INSERT INTO platform.idempotency_keys")) {
+            expect(text).toContain("'property_payout_dispatch'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+            expect(values?.[2]).toBe(propertyId);
+            return {
+              rows: [
+                {
+                  status: "completed",
+                  requestFingerprintHash: values?.[1],
+                },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("FROM finance.payouts payout")) {
+            expect(text).toContain("job.job_type = 'finance.reconcile-payout'");
+            expect(text).toContain("activeLegacyTransferWindow");
+            expect(text).toContain("legacyPropertyPayoutSchedulerFrozenAt");
+            expect(text).toContain("payout.id = $2::uuid");
+            return {
+              rows: [
+                {
+                  payoutId: "payout_2026_abcd",
+                  provider: "stripe",
+                  providerPayoutId: null,
+                  reconciliationReadyAt: "2026-06-13T09:00:00.000Z",
+                  legacySchedulerFrozenAt: "2026-06-13T08:00:00.000Z",
+                  reconciliationBlockers: 0,
+                  activeLegacyTransferWindow: false,
+                },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.jobs")) {
+            expect(text).toContain("'finance-property-payout-dispatch'");
+            expect(text).toContain("'finance.dispatch-property-payout'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$2::uuid/);
+            expect(values?.[0]).toBe(
+              `finance.dispatch-property-payout:property:${propertyId}:payout:payout_2026_abcd:v1`,
+            );
+            expect(values?.[1]).toBe(propertyId);
+            expect(values?.[2]).toBe("payout_2026_abcd");
+            return {
+              rows: [
+                { jobId: "job_dispatch_property_payout_686", replay: false },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.product_audit_events")) {
+            expect(text).toContain("'finance.property_payout.dispatch_requested'");
+            expect(values?.[2]).toBe(propertyId);
+            expect(values?.[5]).toBe("payout_2026_abcd");
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          throw new Error(`Unexpected SQL: ${text}`);
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.enqueuePropertyPayoutDispatch!(
+        propertyPayoutDispatchCommand({
+          requestedAt: "2026-06-13T10:00:00.000Z",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      job: {
+        jobType: "finance.dispatch-property-payout",
+        idempotencyKey:
+          "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1",
+        status: "queued",
+      },
+      readiness: {
+        reconciliationReady: true,
+        legacySchedulerFrozen: true,
+        activeLegacyTransferWindow: false,
+      },
+      legacyDisposition:
+        "legacy process_property_payouts disabled before target property payout dispatch",
+    });
+    const queryTexts = calls.map((call) => call.text);
+    expect(
+      queryTexts.findIndex((text) => text.includes("FROM finance.payouts payout")),
+    ).toBeLessThan(queryTexts.findIndex((text) => text.includes("INSERT INTO platform.jobs")));
+    expect(queryTexts).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/UPDATE\s+payouts/i)]),
+    );
+  });
+
   it("passes the Finance property read denial matrix", async () => {
     const cases: Array<{
       name: string;
@@ -1833,6 +2027,54 @@ function xenditPayoutReconciliationCommand(
   };
 }
 
+function propertyPayoutDispatchBody(
+  overrides: Partial<FinancePropertyPayoutDispatchCommand["payload"]> & {
+    commandId?: string;
+    idempotencyKey?: string;
+  } = {},
+): Record<string, unknown> {
+  return {
+    commandId: overrides.commandId ?? "cmd-dispatch-property-payout-001",
+    idempotencyKey: overrides.idempotencyKey ?? "finance-dispatch-property-payout-686-2026-06-13",
+    legacySchedulerFrozenAt: overrides.legacySchedulerFrozenAt ?? "2026-06-13T08:00:00.000Z",
+    reconciliationReadyAt: overrides.reconciliationReadyAt ?? "2026-06-13T09:00:00.000Z",
+  };
+}
+
+function propertyPayoutDispatchCommand(
+  options: {
+    propertyId?: string;
+    idempotencyKey?: string;
+    requestedAt?: string;
+    payload?: Partial<FinancePropertyPayoutDispatchCommand["payload"]>;
+  } = {},
+): FinancePropertyPayoutDispatchCommand {
+  const commandPropertyId = options.propertyId ?? propertyId;
+  return {
+    commandType: "finance.property_payout.dispatch",
+    commandId: "cmd-dispatch-property-payout-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-dispatch-property-payout-686-2026-06-13",
+    propertyId: commandPropertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "f2000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_dispatch_property_payout_target",
+      correlationId: "corr_dispatch_property_payout_target",
+      reason: "Property payout dispatch target test",
+      requestedAt: options.requestedAt ?? "2026-06-13T10:00:00.000Z",
+    },
+    payload: {
+      payoutId: "payout_2026_abcd",
+      legacySchedulerFrozenAt: "2026-06-13T08:00:00.000Z",
+      reconciliationReadyAt: "2026-06-13T09:00:00.000Z",
+      ...options.payload,
+    },
+  };
+}
+
 function buildFinanceApp(
   options: {
     permissions?: PermissionKey[];
@@ -2061,6 +2303,84 @@ function xenditPayoutReconciliationRepository(): FinancePropertyReadRepository &
   return repository;
 }
 
+function propertyPayoutDispatchRepository(
+  options: {
+    readiness?: Partial<Extract<FinancePropertyPayoutDispatchResult, { ok: true }>["readiness"]>;
+  } = {},
+): FinancePropertyReadRepository & { enqueueCount: number } {
+  const records = new Map<string, FinancePropertyPayoutDispatchResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & { enqueueCount: number } = {
+    ...financeRepository,
+    enqueueCount: 0,
+    async enqueuePropertyPayoutDispatch(command) {
+      const readiness = {
+        payoutId: command.payload.payoutId,
+        reconciliationReady: true,
+        legacySchedulerFrozen: true,
+        activeLegacyTransferWindow: false,
+        existingProviderPayoutId: null,
+        provider: "stripe",
+        blockingReasons: [],
+        ...options.readiness,
+      } satisfies Extract<FinancePropertyPayoutDispatchResult, { ok: true }>["readiness"];
+      if (!readiness.reconciliationReady) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "reconciliation_not_ready",
+          message: "Property payout dispatch is blocked until payout reconciliation is ready.",
+        };
+      }
+      if (!readiness.legacySchedulerFrozen) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "legacy_scheduler_not_frozen",
+          message:
+            "Property payout dispatch is blocked until legacy process_property_payouts is frozen.",
+        };
+      }
+      if (readiness.activeLegacyTransferWindow) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "active_legacy_transfer_window",
+          message: "Property payout dispatch is blocked by an active legacy transfer window.",
+        };
+      }
+      if (readiness.existingProviderPayoutId) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "payout_already_dispatched",
+          message: "Property payout already has a provider payout id.",
+        };
+      }
+
+      const existing = records.get(command.idempotencyKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "idempotent_replay",
+          job: { ...existing.job, status: "idempotent_replay" },
+          commandMeta: {
+            ...existing.commandMeta,
+            jobs: existing.commandMeta.jobs.map((job) => ({
+              ...job,
+              status: "idempotent_replay",
+            })),
+          },
+        };
+      }
+      repository.enqueueCount += 1;
+      const result = propertyPayoutDispatchResult(command, readiness, "queued");
+      records.set(command.idempotencyKey, result);
+      return result;
+    },
+  };
+  return repository;
+}
+
 function xenditPayoutReconciliationResult(
   command: FinanceXenditPayoutReconciliationCommand,
   status: "queued" | "idempotent_replay",
@@ -2081,6 +2401,38 @@ function xenditPayoutReconciliationResult(
       commandId: command.commandId,
       idempotencyKey: command.idempotencyKey,
       sideEffects: ["reconciliation_job", "audit_event"],
+      outboxEvents: [],
+      jobs: [job],
+    },
+  };
+}
+
+function propertyPayoutDispatchResult(
+  command: FinancePropertyPayoutDispatchCommand,
+  readiness: Extract<FinancePropertyPayoutDispatchResult, { ok: true }>["readiness"],
+  status: "queued" | "idempotent_replay",
+): FinancePropertyPayoutDispatchResult & { ok: true } {
+  const job = {
+    jobType: "finance.dispatch-property-payout",
+    payoutId: command.payload.payoutId,
+    provider: "stripe",
+    idempotencyKey:
+      "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1",
+    status,
+  } as const;
+  return {
+    ok: true,
+    status,
+    job,
+    readiness,
+    legacyDisposition:
+      "legacy process_property_payouts disabled before target property payout dispatch",
+    rollbackRule:
+      "Stop target dispatcher, reconcile provider transfer IDs, and re-enable legacy only for payouts with no successful target transfer.",
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["payout_job", "audit_event"],
       outboxEvents: [],
       jobs: [job],
     },

@@ -822,6 +822,39 @@
       }
     },
     {
+      "caseId": "property-payout-dispatch-enqueues-job",
+      "description": "Target property payout dispatch enqueues a provider job only after reconciliation readiness and legacy scheduler freeze evidence.",
+      "request": {
+        "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/payouts/payout_2026_abcd/dispatch",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-dispatch-property-payout-001",
+          "idempotencyKey": "finance-dispatch-property-payout-686-2026-06-13",
+          "legacySchedulerFrozenAt": "2026-06-13T08:00:00.000Z",
+          "reconciliationReadyAt": "2026-06-13T09:00:00.000Z"
+        }
+      },
+      "expected": {
+        "status": 202,
+        "job": {
+          "jobType": "finance.dispatch-property-payout",
+          "idempotencyKey": "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1"
+        },
+        "legacyDisposition": "legacy process_property_payouts disabled before target property payout dispatch",
+        "rollbackRule": "Stop target dispatcher, reconcile provider transfer IDs, and re-enable legacy only for payouts with no successful target transfer.",
+        "mustInclude": [
+          "job.jobType",
+          "job.idempotencyKey",
+          "readiness.reconciliationReady",
+          "readiness.legacySchedulerFrozen",
+          "legacyDisposition",
+          "rollbackRule",
+          "commandMeta.sideEffects"
+        ],
+        "mustNotWrite": ["legacy pms.payouts", "provider transfer inline"]
+      }
+    },
+    {
       "caseId": "scheduler-freeze-disposition",
       "description": "Finance provider schedulers cannot run in legacy and target mutating modes at the same time.",
       "input": {
