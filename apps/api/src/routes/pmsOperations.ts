@@ -85,6 +85,8 @@ export type PmsReservationDetailResponse = {
 
 export type PmsAssignmentCommandAction = "assign" | "move" | "unassign" | "swap";
 export type PmsOperationsCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
+export type PmsAssignmentCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
+export type PmsPrivateNoteSource = "pms" | "migration" | "system";
 
 export type PmsCommandMeta = {
   contractVersion: PmsOperationsContractVersion;
@@ -108,6 +110,23 @@ export type PmsOperationsCommandAudit = {
   requestedAt: string;
 };
 
+export type PmsPrivateNoteAuditMetadata = {
+  source: PmsPrivateNoteSource;
+  createdByUserId: string | null;
+  createdByDisplayName: string;
+  createdAt: string;
+  privacyScope: "internal";
+};
+
+export type PmsPrivateNote = {
+  noteId: string;
+  body: string;
+  authorUserId: string | null;
+  authorDisplayName: string;
+  createdAt: string;
+  auditMetadata: PmsPrivateNoteAuditMetadata;
+};
+
 export type PmsAssignmentCommandRequest = {
   commandId: string;
   idempotencyKey: string;
@@ -118,6 +137,17 @@ export type PmsAssignmentCommandRequest = {
   roomId?: string | null;
   targetAssignmentId?: string;
   targetPosition?: number;
+};
+
+export type PmsPrivateNoteCreateRequest = {
+  commandId: string;
+  idempotencyKey: string;
+  body: string;
+};
+
+export type PmsPrivateNoteDeleteRequest = {
+  commandId: string;
+  idempotencyKey: string;
 };
 
 export type PmsAssignmentCommand = PmsAssignmentCommandRequest & {
@@ -160,10 +190,49 @@ export type PmsNoShowCommand = {
   audit: PmsOperationsCommandAudit;
 };
 
-export type PmsOperationsCommandResponse = {
+export type PmsPrivateNoteCreateCommand = PmsPrivateNoteCreateRequest & {
+  propertyId: string;
+  guestBookingId: string;
+  actorUserId: string;
+  authorDisplayName: string;
+};
+
+export type PmsPrivateNoteDeleteCommand = PmsPrivateNoteDeleteRequest & {
+  propertyId: string;
+  guestBookingId: string;
+  noteId: string;
+  actorUserId: string;
+};
+
+export type PmsAssignmentCommandResponse = {
   contractVersion: PmsOperationsContractVersion;
   propertyId: string;
   reservation: PmsOperationalReservation;
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsOperationsCommandResponse = PmsAssignmentCommandResponse;
+
+export type PmsPrivateNotesResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  items: PmsPrivateNote[];
+};
+
+export type PmsPrivateNoteCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  note: PmsPrivateNote;
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsPrivateNoteDeleteResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  noteId: string;
   commandMeta: PmsCommandMeta;
 };
 
@@ -219,6 +288,34 @@ export type PmsOperationalCommandResult =
       message: string;
     };
 
+export type PmsPrivateNoteCommandResult =
+  | {
+      ok: true;
+      note: PmsPrivateNote;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 404 | 409;
+      code: "reservation_not_found" | "note_not_found" | "idempotency_conflict";
+      message: string;
+    };
+
+export type PmsPrivateNoteDeleteResult =
+  | {
+      ok: true;
+      noteId: string;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 404 | 409;
+      code: "reservation_not_found" | "note_not_found" | "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
@@ -226,6 +323,9 @@ export type PmsOperationsCommandRepository = {
   ): Promise<PmsOperationalCommandResult>;
   executeCheckInCommand(command: PmsCheckInCommand): Promise<PmsOperationalCommandResult>;
   executeNoShowCommand(command: PmsNoShowCommand): Promise<PmsOperationalCommandResult>;
+  listPrivateNotes(propertyId: string, guestBookingId: string): Promise<PmsPrivateNote[] | null>;
+  createPrivateNote(command: PmsPrivateNoteCreateCommand): Promise<PmsPrivateNoteCommandResult>;
+  deletePrivateNote(command: PmsPrivateNoteDeleteCommand): Promise<PmsPrivateNoteDeleteResult>;
   close?(): Promise<void>;
 };
 
@@ -246,6 +346,10 @@ type PmsRoomTypeParams = PmsPropertyParams & {
 
 type PmsReservationParams = PmsPropertyParams & {
   guestBookingId: string;
+};
+
+type PmsPrivateNoteParams = PmsReservationParams & {
+  noteId: string;
 };
 
 type PmsCheckoutChargeParams = PmsReservationParams & {
@@ -299,7 +403,8 @@ type PmsOperationsErrorCode =
   | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
   | "room_type_not_found"
-  | "reservation_not_found";
+  | "reservation_not_found"
+  | "note_not_found";
 
 type PmsOperationsError = {
   statusCode: 400 | 401 | 403 | 404 | 409 | 500;
@@ -321,6 +426,7 @@ type PmsOperationsAuthorizationErrorCode = Exclude<
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found"
+  | "note_not_found"
 >;
 
 export async function registerPmsOperationsRoutes(
@@ -342,6 +448,8 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/room-blocks",
     "/properties/:propertyId/reservations",
     "/properties/:propertyId/reservations/:guestBookingId",
+    "/properties/:propertyId/reservations/:guestBookingId/notes",
+    "/properties/:propertyId/reservations/:guestBookingId/notes/:noteId",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
     "/properties/:propertyId/reservations/:guestBookingId/assignments",
     "/properties/:propertyId/reservations/:guestBookingId/status",
@@ -655,6 +763,120 @@ export async function registerPmsOperationsRoutes(
   );
 
   if (commandRepository) {
+    app.get<{ Params: PmsReservationParams }>(
+      "/properties/:propertyId/reservations/:guestBookingId/notes",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+        try {
+          const notes = await commandRepository.listPrivateNotes(propertyId, guestBookingId);
+          if (!notes) {
+            return sendPmsOperationsError(reply, {
+              statusCode: 404,
+              code: "reservation_not_found",
+              category: "not_found",
+              message: "PMS reservation not found.",
+            });
+          }
+
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            guestBookingId,
+            items: notes,
+          } satisfies PmsPrivateNotesResponse;
+        } catch {
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS private notes read model is unavailable."),
+          );
+        }
+      },
+    );
+
+    app.post<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/notes",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toPrivateNoteCreateCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.createPrivateNote(command.value);
+        if (!result.ok) {
+          return sendPmsOperationsError(reply, {
+            statusCode: result.statusCode,
+            code: result.code,
+            category: result.statusCode === 404 ? "not_found" : "conflict",
+            message: result.message,
+          });
+        }
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          note: result.note,
+          commandMeta: result.commandMeta,
+        } satisfies PmsPrivateNoteCommandResponse;
+      },
+    );
+
+    app.delete<{ Params: PmsPrivateNoteParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/notes/:noteId",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId, noteId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toPrivateNoteDeleteCommand(propertyId, guestBookingId, noteId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.deletePrivateNote(command.value);
+        if (!result.ok) {
+          return sendPmsOperationsError(reply, {
+            statusCode: result.statusCode,
+            code: result.code,
+            category: result.statusCode === 404 ? "not_found" : "conflict",
+            message: result.message,
+          });
+        }
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          noteId: result.noteId,
+          commandMeta: result.commandMeta,
+        } satisfies PmsPrivateNoteDeleteResponse;
+      },
+    );
+
     app.patch<{ Params: PmsReservationParams; Body: unknown }>(
       "/properties/:propertyId/reservations/:guestBookingId/assignments",
       async (request, reply) => {
@@ -878,7 +1100,7 @@ function writePmsOperationsCorsHeaders(
   reply
     .header("Access-Control-Allow-Origin", origin)
     .header("Access-Control-Allow-Headers", "authorization,content-type,x-hotel-id")
-    .header("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS")
+    .header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
     .header("Vary", "Origin");
   return true;
 }
@@ -916,6 +1138,78 @@ function invalidBody(message: string): PmsOperationsError {
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function toPrivateNoteCreateCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsPrivateNoteCreateCommand } | { error: PmsOperationsError } {
+  const body = objectBody(request.body);
+  if (!body) return { error: invalidBody("Private note create body must be an object.") };
+
+  const commandId = stringField(body.commandId);
+  const idempotencyKey = stringField(body.idempotencyKey);
+  const noteBody = stringField(body.body);
+  if (!commandId || !idempotencyKey || !noteBody) {
+    return {
+      error: invalidBody("Private note create requires commandId, idempotencyKey, and body."),
+    };
+  }
+
+  if (noteBody.length > 5000) {
+    return { error: invalidBody("Private note body cannot exceed 5000 characters.") };
+  }
+
+  const context = request.authContext!;
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      commandId,
+      idempotencyKey,
+      body: noteBody,
+      actorUserId: context.actor.internalUserId,
+      authorDisplayName: context.actor.email,
+    },
+  };
+}
+
+function toPrivateNoteDeleteCommand(
+  propertyId: string,
+  guestBookingId: string,
+  noteId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsPrivateNoteDeleteCommand } | { error: PmsOperationsError } {
+  if (!isUuid(noteId)) return { error: invalidBody("noteId must be a UUID.") };
+
+  const body = objectBody(request.body);
+  if (!body) return { error: invalidBody("Private note delete body must be an object.") };
+
+  const commandId = stringField(body.commandId);
+  const idempotencyKey = stringField(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return {
+      error: invalidBody("Private note delete requires commandId and idempotencyKey."),
+    };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      noteId,
+      commandId,
+      idempotencyKey,
+      actorUserId: request.authContext!.actor.internalUserId,
+    },
+  };
+}
+
+function objectBody(body: unknown): Record<string, unknown> | undefined {
+  return body && typeof body === "object" && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : undefined;
 }
 
 function readModelUnavailable(message: string): PmsOperationsError {

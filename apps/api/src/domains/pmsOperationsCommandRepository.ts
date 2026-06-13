@@ -15,6 +15,11 @@ import {
   type PmsOperationalStatusCommand,
   type PmsOperationsCommandSideEffect,
   type PmsOperationsCommandRepository,
+  type PmsPrivateNote,
+  type PmsPrivateNoteCommandResult,
+  type PmsPrivateNoteCreateCommand,
+  type PmsPrivateNoteDeleteCommand,
+  type PmsPrivateNoteDeleteResult,
 } from "../routes/pmsOperations.js";
 
 export type PmsOperationsCommandClient = {
@@ -76,6 +81,20 @@ const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
   ["checked_in", new Set<PmsOperationalStatus>(["in_house"])],
   ["in_house", new Set<PmsOperationalStatus>(["checked_out"])],
 ]);
+type PmsPrivateNoteReplay = {
+  commandMeta: PmsCommandMeta;
+  noteId: string;
+  note?: PmsPrivateNote;
+};
+
+type PmsPrivateNoteRow = {
+  noteId: string;
+  body: string;
+  authorUserId: string | null;
+  authorDisplayName: string;
+  source: "pms" | "migration" | "system";
+  createdAt: Date | string;
+};
 
 export function createTargetPmsOperationsCommandRepository(
   config: TargetPmsOperationsCommandRepositoryConfig,
@@ -94,6 +113,240 @@ export function createTargetPmsOperationsCommandRepository(
   const now = config.now ?? (() => new Date());
 
   return {
+    async listPrivateNotes(propertyId, guestBookingId) {
+      const client = await pool.connect();
+      try {
+        if (!(await reservationExists(client, propertyId, guestBookingId))) return null;
+        const result = await client.query<PmsPrivateNoteRow>(
+          `SELECT
+             note.id::text AS "noteId",
+             note.body,
+             note.author_user_id::text AS "authorUserId",
+             note.author_display_name AS "authorDisplayName",
+             note.source,
+             note.created_at AS "createdAt"
+           FROM pms.booking_notes_private note
+           WHERE note.property_id = $1::uuid
+             AND note.guest_booking_id = $2::uuid
+           ORDER BY note.created_at DESC, note.id DESC`,
+          [propertyId, guestBookingId],
+        );
+        return result.rows.map(toPmsPrivateNote);
+      } finally {
+        client.release();
+      }
+    },
+
+    async createPrivateNote(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(command));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findPrivateNoteCommandReplay(
+          client,
+          "private_note_create",
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          if (!replay.ok) return replay;
+          return replay.note
+            ? { ok: true, note: replay.note, commandMeta: replay.commandMeta, replayed: true }
+            : privateNoteConflict("Private note create replay metadata is unavailable.");
+        }
+
+        if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
+          await client.query("ROLLBACK");
+          return privateNoteReservationNotFound(command.guestBookingId);
+        }
+
+        const insertedIdempotencyKey = await recordPrivateNoteCommandIdempotency(
+          client,
+          "private_note_create",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return privateNoteConflict(
+            "Idempotency key was already used for a private note command.",
+          );
+        }
+
+        const noteResult = await client.query<PmsPrivateNoteRow>(
+          `INSERT INTO pms.booking_notes_private (
+             property_id,
+             guest_booking_id,
+             author_user_id,
+             author_display_name,
+             body,
+             source,
+             created_at
+           )
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'pms', $6::timestamptz)
+           RETURNING
+             id::text AS "noteId",
+             body,
+             author_user_id::text AS "authorUserId",
+             author_display_name AS "authorDisplayName",
+             source,
+             created_at AS "createdAt"`,
+          [
+            command.propertyId,
+            command.guestBookingId,
+            command.actorUserId,
+            command.authorDisplayName,
+            command.body,
+            acceptedAt,
+          ],
+        );
+        const note = toPmsPrivateNote(noteResult.rows[0]!);
+
+        await insertPrivateNoteAuditEvent(client, {
+          action: "pms.private_note.created",
+          auditKey: privateNoteAuditKey("created", command.propertyId, note.noteId, keyHash),
+          command,
+          keyHash,
+          noteId: note.noteId,
+          occurredAt: acceptedAt,
+          privatePayload: { bodyRedacted: true, bodyLength: command.body.length },
+        });
+        await completePrivateNoteCommandIdempotency(
+          client,
+          "private_note_create",
+          command.propertyId,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          note.noteId,
+          note,
+        );
+        await client.query("COMMIT");
+        return { ok: true, note, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return privateNoteConflict("Private note command conflicts with current note state.");
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async deletePrivateNote(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(command));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findPrivateNoteCommandReplay(
+          client,
+          "private_note_delete",
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay.ok
+            ? {
+                ok: true,
+                noteId: replay.noteId,
+                commandMeta: replay.commandMeta,
+                replayed: true,
+              }
+            : replay;
+        }
+
+        if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
+          await client.query("ROLLBACK");
+          return privateNoteReservationNotFound(command.guestBookingId);
+        }
+
+        const insertedIdempotencyKey = await recordPrivateNoteCommandIdempotency(
+          client,
+          "private_note_delete",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return privateNoteConflict(
+            "Idempotency key was already used for a private note command.",
+          );
+        }
+
+        const deleted = await client.query<{ noteId: string }>(
+          `DELETE FROM pms.booking_notes_private
+           WHERE id = $1::uuid
+             AND property_id = $2::uuid
+             AND guest_booking_id = $3::uuid
+           RETURNING id::text AS "noteId"`,
+          [command.noteId, command.propertyId, command.guestBookingId],
+        );
+        const noteId = deleted.rows[0]?.noteId;
+        if (!noteId) {
+          await client.query("ROLLBACK");
+          return noteNotFound(command.noteId);
+        }
+
+        await insertPrivateNoteAuditEvent(client, {
+          action: "pms.private_note.deleted",
+          auditKey: privateNoteAuditKey("deleted", command.propertyId, noteId, keyHash),
+          command,
+          keyHash,
+          noteId,
+          occurredAt: acceptedAt,
+          privatePayload: { deleted: true },
+        });
+        await completePrivateNoteCommandIdempotency(
+          client,
+          "private_note_delete",
+          command.propertyId,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          noteId,
+        );
+        await client.query("COMMIT");
+        return { ok: true, noteId, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return privateNoteConflict("Private note command conflicts with current note state.");
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
     async executeAssignmentCommand(command) {
       const client = await pool.connect();
       const acceptedAt = now().toISOString();
@@ -342,6 +595,267 @@ async function executeOperationalCommand<TCommand extends PmsOperationalCommand>
   }
 
   return reservationResultForCommand(config, command, commandMeta, false);
+}
+
+async function reservationExists(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  guestBookingId: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1
+     FROM booking.guest_bookings booking
+     WHERE booking.property_id = $1::uuid
+       AND booking.id = $2::uuid
+     LIMIT 1`,
+    [propertyId, guestBookingId],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+function toPmsPrivateNote(row: PmsPrivateNoteRow): PmsPrivateNote {
+  const createdAt =
+    row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt);
+  return {
+    noteId: row.noteId,
+    body: row.body,
+    authorUserId: row.authorUserId,
+    authorDisplayName: row.authorDisplayName,
+    createdAt,
+    auditMetadata: {
+      source: row.source,
+      createdByUserId: row.authorUserId,
+      createdByDisplayName: row.authorDisplayName,
+      createdAt,
+      privacyScope: "internal",
+    },
+  };
+}
+
+async function findPrivateNoteCommandReplay(
+  client: PmsOperationsCommandClient,
+  operation: "private_note_create" | "private_note_delete",
+  command: PmsPrivateNoteCreateCommand | PmsPrivateNoteDeleteCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<
+  | ({ ok: true } & PmsPrivateNoteReplay)
+  | Exclude<PmsPrivateNoteCommandResult | PmsPrivateNoteDeleteResult, { ok: true }>
+  | null
+> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     FOR UPDATE`,
+    [operation, keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return privateNoteConflict("Idempotency key was used with a different private note command.");
+  }
+  if (existing.status !== "completed") {
+    return privateNoteConflict("Private note command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const noteId = existing.idempotencyMetadata?.["noteId"];
+  const note = existing.idempotencyMetadata?.["note"];
+  if (!isPmsCommandMeta(commandMeta) || typeof noteId !== "string") {
+    return privateNoteConflict("Private note command replay metadata is unavailable.");
+  }
+  return isPmsPrivateNote(note)
+    ? { ok: true, commandMeta, noteId, note }
+    : { ok: true, commandMeta, noteId };
+}
+
+async function recordPrivateNoteCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  operation: "private_note_create" | "private_note_delete",
+  command: PmsPrivateNoteCreateCommand | PmsPrivateNoteDeleteCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'property',
+       $4::uuid,
+       $5,
+       $6::timestamptz + interval '24 hours',
+       $7::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.commandId,
+      acceptedAt,
+      JSON.stringify({ commandId: command.commandId }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function insertPrivateNoteAuditEvent(
+  client: PmsOperationsCommandClient,
+  input: {
+    action: "pms.private_note.created" | "pms.private_note.deleted";
+    auditKey: string;
+    command: PmsPrivateNoteCreateCommand | PmsPrivateNoteDeleteCommand;
+    keyHash: string;
+    noteId: string;
+    occurredAt: string;
+    privatePayload: Record<string, unknown>;
+  },
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       secondary_resource_product,
+       secondary_resource_type,
+       secondary_resource_id,
+       correlation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       $2,
+       1,
+       $3::timestamptz,
+       'property',
+       $4::uuid,
+       'user',
+       $5::uuid,
+       'pms',
+       'booking_note_private',
+       $6,
+       'booking',
+       'guest_booking',
+       $7,
+       $8,
+       $9::jsonb,
+       $10::jsonb,
+       $11::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      input.auditKey,
+      input.action,
+      input.occurredAt,
+      input.command.propertyId,
+      input.command.actorUserId,
+      input.noteId,
+      input.command.guestBookingId,
+      input.command.commandId,
+      JSON.stringify({
+        propertyId: input.command.propertyId,
+        guestBookingId: input.command.guestBookingId,
+        noteId: input.noteId,
+        bodyRedacted: true,
+      }),
+      JSON.stringify(input.privatePayload),
+      JSON.stringify({
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        idempotencyKeyHash: input.keyHash,
+        visibility: "pms_private_only",
+      }),
+    ],
+  );
+}
+
+async function completePrivateNoteCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  operation: "private_note_create" | "private_note_delete",
+  propertyId: string,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  noteId: string,
+  note?: PmsPrivateNote,
+): Promise<void> {
+  const idempotencyMetadata = note ? { commandMeta, noteId, note } : { commandMeta, noteId };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'booking_note_private',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      noteId,
+      sha256(stableJson(idempotencyMetadata)),
+      acceptedAt,
+      JSON.stringify(idempotencyMetadata),
+      operation,
+      keyHash,
+      propertyId,
+    ],
+  );
+}
+
+function privateNoteAuditKey(
+  action: "created" | "deleted",
+  propertyId: string,
+  noteId: string,
+  keyHash: string,
+): string {
+  return `pms.private_note.${action}.property.${propertyId}.note.${noteId}.key.${keyHash}.v1`;
 }
 
 async function findAssignmentCommandReplay(
@@ -1416,6 +1930,39 @@ function invalidStatusTransition(
   };
 }
 
+function privateNoteReservationNotFound(
+  guestBookingId: string,
+): Exclude<PmsPrivateNoteCommandResult | PmsPrivateNoteDeleteResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "reservation_not_found",
+    message: `PMS reservation ${guestBookingId} was not found.`,
+  };
+}
+
+function noteNotFound(
+  noteId: string,
+): Exclude<PmsPrivateNoteCommandResult | PmsPrivateNoteDeleteResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "note_not_found",
+    message: `PMS private note ${noteId} was not found.`,
+  };
+}
+
+function privateNoteConflict(
+  message: string,
+): Exclude<PmsPrivateNoteCommandResult | PmsPrivateNoteDeleteResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "idempotency_conflict",
+    message,
+  };
+}
+
 function isPmsCommandMeta(value: unknown): value is PmsCommandMeta {
   return (
     !!value &&
@@ -1431,6 +1978,23 @@ function isPmsCommandMeta(value: unknown): value is PmsCommandMeta {
 function operationalCommandFingerprint(command: PmsOperationalCommand): unknown {
   const { audit: _audit, ...fingerprint } = command;
   return fingerprint;
+}
+
+function isPmsPrivateNote(value: unknown): value is PmsPrivateNote {
+  if (!value || typeof value !== "object") return false;
+  const note = value as PmsPrivateNote;
+  return (
+    typeof note.noteId === "string" &&
+    typeof note.body === "string" &&
+    (note.authorUserId === null || typeof note.authorUserId === "string") &&
+    typeof note.authorDisplayName === "string" &&
+    typeof note.createdAt === "string" &&
+    !!note.auditMetadata &&
+    typeof note.auditMetadata === "object" &&
+    note.auditMetadata.privacyScope === "internal" &&
+    typeof note.auditMetadata.createdAt === "string" &&
+    typeof note.auditMetadata.createdByDisplayName === "string"
+  );
 }
 
 function stableJson(value: unknown): string {

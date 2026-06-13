@@ -488,7 +488,83 @@
         "status": 200,
         "itemCount": 1,
         "mustInclude": ["items[0].noteId", "items[0].body", "items[0].authorDisplayName"],
-        "publicPayloadMustExclude": ["booking_notes_private", "privateNoteCount", "items[].body"]
+        "publicPayloadMustExclude": [
+          "booking_notes_private",
+          "bookingNotesPrivate",
+          "notesPrivate",
+          "privateNoteCount",
+          "privateNoteId",
+          "privateNoteBody",
+          "f6855900-0000-0000-0000-000000000001",
+          "Guest asked not to mention the anniversary surprise at check-in.",
+          "items[].body"
+        ]
+      }
+    },
+    {
+      "caseId": "private-note-create",
+      "description": "Creating a PMS private note stores PMS-only note content with audit metadata and no guest-visible event.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/notes",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-private-note-create-001",
+          "idempotencyKey": "pms-private-note-create-001",
+          "body": "Guest asked not to mention the anniversary surprise at check-in."
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "note.noteId",
+          "note.body",
+          "note.auditMetadata.createdByUserId",
+          "note.auditMetadata.privacyScope",
+          "commandMeta.sideEffects"
+        ],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["audit_event"]
+        },
+        "mustNotCall": ["Booking guest-visible event", "public bookability projection"]
+      }
+    },
+    {
+      "caseId": "private-note-delete",
+      "description": "Deleting a PMS private note removes the private note row and records audit metadata only.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/notes/f6855900-0000-0000-0000-000000000001",
+        "method": "DELETE",
+        "body": {
+          "commandId": "cmd-private-note-delete-001",
+          "idempotencyKey": "pms-private-note-delete-001"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": ["noteId", "commandMeta.sideEffects"],
+        "commandMeta": {
+          "contractVersion": "pms-operations.v1",
+          "sideEffects": ["audit_event"]
+        },
+        "mustNotCall": ["Booking guest-visible event", "public bookability projection"]
+      }
+    },
+    {
+      "caseId": "private-note-not-found",
+      "description": "Deleting an unknown PMS private note returns a note_not_found error without audit side effects.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/notes/f6855900-0000-0000-0000-000000009999",
+        "method": "DELETE",
+        "body": {
+          "commandId": "cmd-private-note-delete-missing",
+          "idempotencyKey": "pms-private-note-delete-missing"
+        }
+      },
+      "expected": {
+        "status": 404,
+        "errorCode": "note_not_found",
+        "sideEffects": []
       }
     },
     {
