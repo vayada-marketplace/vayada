@@ -1,12 +1,18 @@
+import { createHash } from "node:crypto";
+
 import {
   COLLABORATION_STATUSES,
   MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES,
   MARKETPLACE_COLLABORATION_CREATOR_READ_POLICY,
+  MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY,
   MARKETPLACE_COLLABORATION_HOTEL_READ_POLICY,
+  MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY,
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
   MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
   type CollaborationStatus,
   type MarketplaceCollaborationAuthorizationMode,
   type MarketplaceCollaborationAuthorizationSide,
+  type MarketplaceCollaborationLifecycleSideEffect,
   type MarketplaceCollaborationListResponse,
   type MarketplaceCollaborationMessage,
   type MarketplaceCollaborationMessagesResponse,
@@ -15,7 +21,7 @@ import {
 } from "@vayada/domain-marketplace";
 import type { RequestContext } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import pg, { type QueryResult, type QueryResultRow } from "pg";
+import pg, { type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 
 import { enforceRoutePolicy } from "./policy.js";
 
@@ -50,6 +56,12 @@ export type MarketplaceCollaborationReadRepository = {
     side: MarketplaceCollaborationAuthorizationSide;
     filters: MarketplaceCollaborationMessageFilters;
   }): Promise<MarketplaceCollaborationMessagesResponse | null>;
+  executeLifecycleWrite?(
+    input: MarketplaceCollaborationLifecycleWriteInput,
+  ): Promise<MarketplaceCollaborationLifecycleWriteResponse | null>;
+  sendMessage?(
+    input: MarketplaceCollaborationSendMessageInput,
+  ): Promise<MarketplaceCollaborationMessage | null>;
   close?(): Promise<void>;
 };
 
@@ -59,6 +71,12 @@ export type MarketplaceCollaborationReadPool = {
     values?: readonly unknown[],
   ): Promise<Pick<QueryResult<T>, "rows">>;
   end(): Promise<void>;
+};
+
+type MarketplaceCollaborationQueryable = Pick<MarketplaceCollaborationReadPool, "query">;
+
+type MarketplaceCollaborationTransactionalPool = MarketplaceCollaborationReadPool & {
+  connect(): Promise<PoolClient>;
 };
 
 export type MarketplaceCollaborationRoutesOptions = {
@@ -145,10 +163,93 @@ type CollaborationParams = {
   collaborationId: string;
 };
 
+type CollaborationDeliverableParams = CollaborationParams & {
+  deliverableId: string;
+};
+
+type MarketplaceCollaborationLifecycleWriteAction =
+  | "create"
+  | "respond"
+  | "update_terms"
+  | "approve_terms"
+  | "cancel"
+  | "toggle_deliverable"
+  | "rate_creator";
+
+type MarketplaceCollaborationLifecycleWriteCommand = {
+  action: MarketplaceCollaborationLifecycleWriteAction;
+  idempotencyKey: string;
+  replayed?: boolean;
+  acceptedAt?: string;
+  ratingId?: string;
+};
+
+export type MarketplaceCollaborationLifecycleWriteResponse = {
+  contractVersion: typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION;
+  command: MarketplaceCollaborationLifecycleWriteCommand;
+  collaboration: MarketplaceCollaborationRead;
+  sideEffects: MarketplaceCollaborationLifecycleSideEffect[];
+};
+
+export type MarketplaceCollaborationLifecycleWriteInput = {
+  context: RequestContext;
+  side: MarketplaceCollaborationAuthorizationSide;
+  action: MarketplaceCollaborationLifecycleWriteAction;
+  idempotencyKey: string;
+  collaborationId?: string;
+  deliverableId?: string;
+  payload: Record<string, unknown>;
+};
+
+export type MarketplaceCollaborationSendMessageInput = {
+  context: RequestContext;
+  side: MarketplaceCollaborationAuthorizationSide;
+  collaborationId: string;
+  content: string;
+  contentType: "text" | "image";
+};
+
+type LifecycleWriteBody = {
+  idempotencyKey?: unknown;
+  side?: unknown;
+  initiatorSide?: unknown;
+  [key: string]: unknown;
+};
+
+type SendMessageBody = {
+  content?: unknown;
+  message_type?: unknown;
+  contentType?: unknown;
+};
+
 export function registerMarketplaceCollaborationRoutes(
   app: FastifyInstance,
   options: MarketplaceCollaborationRoutesOptions,
 ): void {
+  app.post<{ Body: LifecycleWriteBody }>("/collaborations", async (request, reply) => {
+    const parsed = parseLifecycleWriteBody(request.body, "create");
+    if (!parsed.ok) return sendMarketplaceCollaborationError(reply, parsed.error);
+    const side = parseLifecycleWriteSide(request.body?.side ?? request.body?.initiatorSide);
+    if (!side.ok) return sendMarketplaceCollaborationError(reply, side.error);
+    const authorization = authorizeRequiredSideCollaborationWrite(request, side.value);
+    if (!authorization.ok) return sendMarketplaceCollaborationError(reply, authorization.error);
+    if (!options.repository.executeLifecycleWrite) {
+      return sendMarketplaceCollaborationError(reply, writeUnavailable());
+    }
+
+    const result = await executeRepositoryLifecycleWrite(reply, options.repository, {
+      context: authorization.context,
+      side: authorization.side,
+      action: "create",
+      idempotencyKey: parsed.value.idempotencyKey,
+      payload: request.body ?? {},
+    });
+    if (isReply(result)) return result;
+    if (!result) return sendMarketplaceCollaborationError(reply, notFound());
+    reply.code(201);
+    return result;
+  });
+
   app.get<{ Querystring: CollaborationListQuery }>("/collaborations/me", async (request, reply) => {
     const side = parseRequiredSide(request.query.side);
     if (!side.ok) {
@@ -249,9 +350,171 @@ export function registerMarketplaceCollaborationRoutes(
     },
   );
 
+  app.post<{ Params: CollaborationParams; Body: SendMessageBody }>(
+    "/collaborations/:collaborationId/messages",
+    async (request, reply) => {
+      const parsed = parseSendMessageBody(request.body);
+      if (!parsed.ok) return sendMarketplaceCollaborationError(reply, parsed.error);
+      const authorization = authorizeOptionalSideCollaborationWrite(request, undefined);
+      if (!authorization.ok) return sendMarketplaceCollaborationError(reply, authorization.error);
+      if (!options.repository.sendMessage) {
+        return sendMarketplaceCollaborationError(reply, writeUnavailable());
+      }
+
+      const result = await sendRepositoryMessage(reply, options.repository, {
+        context: authorization.context,
+        side: authorization.side,
+        collaborationId: request.params.collaborationId,
+        content: parsed.value.content,
+        contentType: parsed.value.contentType,
+      });
+      if (isReply(result)) return result;
+      if (!result) return sendMarketplaceCollaborationError(reply, notFound());
+      reply.code(201);
+      return result;
+    },
+  );
+
+  app.post<{ Params: CollaborationParams; Body: LifecycleWriteBody }>(
+    "/collaborations/:collaborationId/respond",
+    async (request, reply) =>
+      executeLifecycleWriteRoute(
+        request,
+        reply,
+        options,
+        "respond",
+        request.params.collaborationId,
+      ),
+  );
+
+  app.put<{ Params: CollaborationParams; Body: LifecycleWriteBody }>(
+    "/collaborations/:collaborationId/terms",
+    async (request, reply) =>
+      executeLifecycleWriteRoute(
+        request,
+        reply,
+        options,
+        "update_terms",
+        request.params.collaborationId,
+      ),
+  );
+
+  app.post<{ Params: CollaborationParams; Body: LifecycleWriteBody }>(
+    "/collaborations/:collaborationId/approve",
+    async (request, reply) =>
+      executeLifecycleWriteRoute(
+        request,
+        reply,
+        options,
+        "approve_terms",
+        request.params.collaborationId,
+      ),
+  );
+
+  app.post<{ Params: CollaborationParams; Body: LifecycleWriteBody }>(
+    "/collaborations/:collaborationId/cancel",
+    async (request, reply) =>
+      executeLifecycleWriteRoute(request, reply, options, "cancel", request.params.collaborationId),
+  );
+
+  app.post<{ Params: CollaborationDeliverableParams; Body: LifecycleWriteBody }>(
+    "/collaborations/:collaborationId/deliverables/:deliverableId/toggle",
+    async (request, reply) =>
+      executeLifecycleWriteRoute(
+        request,
+        reply,
+        options,
+        "toggle_deliverable",
+        request.params.collaborationId,
+        request.params.deliverableId,
+      ),
+  );
+
+  app.post<{ Params: CollaborationParams; Body: LifecycleWriteBody }>(
+    "/collaborations/:collaborationId/rate",
+    async (request, reply) =>
+      executeLifecycleWriteRoute(
+        request,
+        reply,
+        options,
+        "rate_creator",
+        request.params.collaborationId,
+      ),
+  );
+
   app.addHook("onClose", async () => {
     await options.repository.close?.();
   });
+}
+
+async function executeLifecycleWriteRoute(
+  request: FastifyRequest<{ Body: LifecycleWriteBody }>,
+  reply: FastifyReply,
+  options: MarketplaceCollaborationRoutesOptions,
+  action: Exclude<MarketplaceCollaborationLifecycleWriteAction, "create">,
+  collaborationId: string,
+  deliverableId?: string,
+): Promise<FastifyReply | MarketplaceCollaborationLifecycleWriteResponse> {
+  const parsed = parseLifecycleWriteBody(request.body, action);
+  if (!parsed.ok) return sendMarketplaceCollaborationError(reply, parsed.error);
+  const authorization = authorizeOptionalSideCollaborationWrite(request, request.body?.side);
+  if (!authorization.ok) return sendMarketplaceCollaborationError(reply, authorization.error);
+  if (!options.repository.executeLifecycleWrite) {
+    return sendMarketplaceCollaborationError(reply, writeUnavailable());
+  }
+
+  const result = await executeRepositoryLifecycleWrite(reply, options.repository, {
+    context: authorization.context,
+    side: authorization.side,
+    action,
+    idempotencyKey: parsed.value.idempotencyKey,
+    collaborationId,
+    deliverableId,
+    payload: request.body ?? {},
+  });
+  if (isReply(result)) return result;
+  if (!result) return sendMarketplaceCollaborationError(reply, notFound());
+  return result;
+}
+
+async function executeRepositoryLifecycleWrite(
+  reply: FastifyReply,
+  repository: MarketplaceCollaborationReadRepository,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+): Promise<FastifyReply | MarketplaceCollaborationLifecycleWriteResponse | null> {
+  if (!repository.executeLifecycleWrite) {
+    return sendMarketplaceCollaborationError(reply, writeUnavailable());
+  }
+  try {
+    return await repository.executeLifecycleWrite(input);
+  } catch (error) {
+    if (error instanceof MarketplaceCollaborationWriteError) {
+      return sendMarketplaceCollaborationError(reply, error);
+    }
+    throw error;
+  }
+}
+
+async function sendRepositoryMessage(
+  reply: FastifyReply,
+  repository: MarketplaceCollaborationReadRepository,
+  input: MarketplaceCollaborationSendMessageInput,
+): Promise<FastifyReply | MarketplaceCollaborationMessage | null> {
+  if (!repository.sendMessage) {
+    return sendMarketplaceCollaborationError(reply, writeUnavailable());
+  }
+  try {
+    return await repository.sendMessage(input);
+  } catch (error) {
+    if (error instanceof MarketplaceCollaborationWriteError) {
+      return sendMarketplaceCollaborationError(reply, error);
+    }
+    throw error;
+  }
+}
+
+function isReply(value: unknown): value is FastifyReply {
+  return value !== null && typeof value === "object" && "sent" in value;
 }
 
 export function createPgMarketplaceCollaborationReadRepository(config: {
@@ -366,10 +629,973 @@ export function createPgMarketplaceCollaborationReadRepository(config: {
         items: result.rows.map(mapMessageRow),
       });
     },
+    async executeLifecycleWrite(input) {
+      return executePgLifecycleWrite(pool as MarketplaceCollaborationTransactionalPool, input);
+    },
+    async sendMessage(input) {
+      return sendPgCollaborationMessage(pool, input);
+    },
     async close() {
       await pool.end();
     },
   };
+}
+
+type CollaborationMutationRow = {
+  id: string;
+  propertyId: string;
+  lifecycleStatus: string;
+  initiatorSide: string;
+  sourceCollaborationId: string;
+  collaborationType: string | null;
+  creatorProfileId: string;
+  creatorOrganizationId: string;
+  hotelOrganizationId: string;
+  creatorAgreedAt: Date | string | null;
+  hotelAgreedAt: Date | string | null;
+};
+
+type MarketplaceCollaborationReplayRow = {
+  status: "in_progress" | "completed" | "failed" | "expired" | "conflict";
+  requestFingerprintHash: string;
+  metadata: unknown;
+};
+
+type MarketplaceCollaborationLifecycleMutationResult = {
+  collaborationResourceId: string;
+  command: MarketplaceCollaborationLifecycleWriteCommand;
+  sideEffects: MarketplaceCollaborationLifecycleSideEffect[];
+};
+
+type MarketplaceCollaborationWriteOperation =
+  `marketplace_collaboration_${MarketplaceCollaborationLifecycleWriteAction}`;
+
+async function executePgLifecycleWrite(
+  pool: MarketplaceCollaborationTransactionalPool,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+): Promise<MarketplaceCollaborationLifecycleWriteResponse | null> {
+  const operation: MarketplaceCollaborationWriteOperation = `marketplace_collaboration_${input.action}`;
+  return executeMarketplaceCollaborationLifecycleCommand(pool, {
+    operation,
+    side: input.side,
+    collaborationId: input.collaborationId ?? createCollaborationCorrelationId(input),
+    idempotencyKey: input.idempotencyKey,
+    fingerprintPayload: {
+      action: input.action,
+      side: input.side,
+      collaborationId: input.collaborationId ?? null,
+      deliverableId: input.deliverableId ?? null,
+      payload: input.payload,
+    },
+    async mutate(client) {
+      switch (input.action) {
+        case "create":
+          return createPgCollaboration(client, input);
+        case "respond":
+          return mutateExistingPgCollaboration(client, input, respondPgCollaboration);
+        case "update_terms":
+          return mutateExistingPgCollaboration(client, input, updatePgCollaborationTerms);
+        case "approve_terms":
+          return mutateExistingPgCollaboration(client, input, approvePgCollaborationTerms);
+        case "cancel":
+          return mutateExistingPgCollaboration(client, input, cancelPgCollaboration);
+        case "toggle_deliverable":
+          return mutateExistingPgCollaboration(client, input, togglePgCollaborationDeliverable);
+        case "rate_creator":
+          return mutateExistingPgCollaboration(client, input, ratePgCollaborationCreator);
+      }
+    },
+  });
+}
+
+async function sendPgCollaborationMessage(
+  pool: MarketplaceCollaborationQueryable,
+  input: MarketplaceCollaborationSendMessageInput,
+): Promise<MarketplaceCollaborationMessage | null> {
+  const collaboration = await findPgCollaborationForSide(pool, input.context, input.side, {
+    collaborationId: input.collaborationId,
+  });
+  if (!collaboration) return null;
+
+  const result = await pool.query<MarketplaceMessageRow>(
+    `INSERT INTO marketplace.marketplace_chat_messages (
+       collaboration_id,
+       property_id,
+       sender_user_id,
+       sender_type,
+       message_type,
+       body,
+       message_metadata
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb)
+     RETURNING
+       id::text AS "messageId",
+       $7::text AS "collaborationId",
+       sender_user_id::text AS "senderUserId",
+       sender_type AS "senderName",
+       NULL::text AS "senderAvatarUrl",
+       body AS content,
+       message_type AS "contentType",
+       message_metadata AS metadata,
+       created_at AS "createdAt"`,
+    [
+      collaboration.id,
+      collaboration.propertyId,
+      input.context.actor.internalUserId,
+      input.side,
+      input.contentType,
+      input.content,
+      collaboration.sourceCollaborationId,
+    ],
+  );
+  return result.rows[0] ? mapMessageRow(result.rows[0]) : null;
+}
+
+async function executeMarketplaceCollaborationLifecycleCommand(
+  pool: MarketplaceCollaborationTransactionalPool,
+  input: {
+    operation: MarketplaceCollaborationWriteOperation;
+    side: MarketplaceCollaborationAuthorizationSide;
+    collaborationId: string;
+    idempotencyKey: string;
+    fingerprintPayload: unknown;
+    mutate(client: PoolClient): Promise<MarketplaceCollaborationLifecycleMutationResult | null>;
+  },
+): Promise<MarketplaceCollaborationLifecycleWriteResponse | null> {
+  const keyHash = sha256(
+    stableJson({ collaborationId: input.collaborationId, key: input.idempotencyKey }),
+  );
+  const fingerprint = sha256(stableJson(input.fingerprintPayload));
+  const client = await pool.connect();
+  let transactionOpen = false;
+  try {
+    await client.query("BEGIN");
+    transactionOpen = true;
+
+    const existing = await findMarketplaceCollaborationReplay(client, {
+      operation: input.operation,
+      keyHash,
+    });
+    const replay = readMarketplaceCollaborationReplay(existing, fingerprint);
+    if (replay) {
+      await client.query("COMMIT");
+      transactionOpen = false;
+      return replay;
+    }
+
+    const reserved = await reserveMarketplaceCollaborationIdempotency(client, {
+      operation: input.operation,
+      collaborationId: input.collaborationId,
+      idempotencyKey: input.idempotencyKey,
+      keyHash,
+      fingerprint,
+    });
+    if (!reserved) {
+      const current = await findMarketplaceCollaborationReplay(client, {
+        operation: input.operation,
+        keyHash,
+      });
+      const currentReplay = readMarketplaceCollaborationReplay(current, fingerprint);
+      if (currentReplay) {
+        await client.query("COMMIT");
+        transactionOpen = false;
+        return currentReplay;
+      }
+      throw new MarketplaceCollaborationWriteError(
+        409,
+        "idempotency_conflict",
+        "Marketplace collaboration idempotency key is already in progress.",
+      );
+    }
+
+    const mutation = await input.mutate(client);
+    if (!mutation) {
+      await client.query("ROLLBACK");
+      transactionOpen = false;
+      return null;
+    }
+
+    const response = await readLifecycleWrite(client, {
+      collaborationResourceId: mutation.collaborationResourceId,
+      side: input.side,
+      command: mutation.command,
+      sideEffects: mutation.sideEffects,
+    });
+    await completeMarketplaceCollaborationIdempotency(client, {
+      operation: input.operation,
+      keyHash,
+      fingerprint,
+      response,
+    });
+    await client.query("COMMIT");
+    transactionOpen = false;
+    return response;
+  } catch (error) {
+    if (transactionOpen) await rollbackQuietly(client);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function createPgCollaboration(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  const listingId = readString(input.payload.listingId);
+  if (!listingId) {
+    throw new MarketplaceCollaborationWriteError(
+      400,
+      "invalid_query",
+      "create requires listingId.",
+    );
+  }
+  const initiatorSide = readCollaborationSide(input.payload.initiatorSide) ?? input.side;
+  const creator = await resolveCreatorProfileForCreate(client, input);
+  if (!creator) return null;
+
+  const listing = await resolveListingForCreate(client, input.context, input.side, listingId);
+  if (!listing) return null;
+
+  const terms = readTermsInput(input.payload);
+  const newId = await client.query<{ id: string }>(`SELECT gen_random_uuid()::text AS id`);
+  const collaborationId = newId.rows[0]?.id;
+  if (!collaborationId) {
+    throw new Error("Failed to allocate marketplace collaboration id.");
+  }
+
+  const insert = await client.query<{ id: string }>(
+    `INSERT INTO marketplace.collaborations (
+       id,
+       creator_profile_id,
+       creator_organization_id,
+       property_id,
+       hotel_organization_id,
+       listing_id,
+       source_system,
+       source_collaboration_id,
+       initiator_type,
+       lifecycle_status,
+       collaboration_type,
+       application_message,
+       free_stay_min_nights,
+       free_stay_max_nights,
+       paid_amount,
+       currency,
+       discount_percentage,
+       creator_fee,
+       travel_date_from,
+       travel_date_to,
+       preferred_date_from,
+       preferred_date_to,
+       preferred_months,
+       creator_consent,
+       collaboration_metadata
+     )
+     VALUES (
+       $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid,
+       'marketplace', $1, $7, 'pending', $8, $9, $10, $11, $12, $13, $14, $15,
+       $16, $17, $18, $19, $20::text[], $21,
+       jsonb_build_object('whyGreatFit', $22::text)
+     )
+     RETURNING id::text AS id`,
+    [
+      collaborationId,
+      creator.id,
+      creator.organizationId,
+      listing.propertyId,
+      listing.organizationId,
+      listing.id,
+      initiatorSide,
+      terms.collaborationType,
+      readString(input.payload.message) ?? readString(input.payload.whyGreatFit),
+      terms.freeStayMinNights,
+      terms.freeStayMaxNights,
+      terms.paidAmount,
+      terms.currency ?? "USD",
+      terms.discountPercentage,
+      terms.creatorFee,
+      terms.travelDateFrom,
+      terms.travelDateTo,
+      terms.preferredDateFrom,
+      terms.preferredDateTo,
+      terms.preferredMonths,
+      input.side === "creator" ? true : readBoolean(input.payload.consent),
+      readString(input.payload.whyGreatFit) ?? "",
+    ],
+  );
+  const insertedId = insert.rows[0]?.id;
+  if (!insertedId) return null;
+
+  await replacePgDeliverables(
+    client,
+    insertedId,
+    listing.propertyId,
+    readDeliverables(input.payload),
+  );
+
+  return {
+    collaborationResourceId: insertedId,
+    command: { action: "create", idempotencyKey: input.idempotencyKey },
+    sideEffects: [{ type: "marketplace.collaboration.notification_requested" }],
+  };
+}
+
+async function mutateExistingPgCollaboration(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  mutate: (
+    client: PoolClient,
+    input: MarketplaceCollaborationLifecycleWriteInput,
+    collaboration: CollaborationMutationRow,
+  ) => Promise<MarketplaceCollaborationLifecycleMutationResult | null>,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (!input.collaborationId) return null;
+  const collaboration = await findPgCollaborationForSide(client, input.context, input.side, {
+    collaborationId: input.collaborationId,
+  });
+  if (!collaboration) return null;
+  return mutate(client, input, collaboration);
+}
+
+async function respondPgCollaboration(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  collaboration: CollaborationMutationRow,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (collaboration.initiatorSide === input.side) {
+    throw new MarketplaceCollaborationWriteError(
+      403,
+      "forbidden",
+      "Collaboration initiator cannot respond to their own request.",
+    );
+  }
+  if (collaboration.lifecycleStatus !== "pending") {
+    throw new MarketplaceCollaborationWriteError(
+      409,
+      "invalid_transition",
+      "Only pending collaborations can be accepted or declined.",
+    );
+  }
+  const status = readString(input.payload.status);
+  if (status !== "accepted" && status !== "declined") {
+    throw new MarketplaceCollaborationWriteError(
+      400,
+      "invalid_query",
+      "respond status must be accepted or declined.",
+    );
+  }
+  const nextStatus = status === "accepted" ? "negotiating" : "declined";
+  await client.query(
+    `UPDATE marketplace.collaborations
+     SET lifecycle_status = $2,
+         responded_at = now(),
+         collaboration_metadata = jsonb_set(
+           collaboration_metadata,
+           '{responseMessage}',
+           to_jsonb($3::text),
+           true
+         ),
+         updated_at = now()
+     WHERE id = $1::uuid`,
+    [collaboration.id, nextStatus, readString(input.payload.responseMessage) ?? ""],
+  );
+  return {
+    collaborationResourceId: collaboration.id,
+    command: { action: "respond", idempotencyKey: input.idempotencyKey },
+    sideEffects: [{ type: "marketplace.collaboration.system_message_requested" }],
+  };
+}
+
+async function updatePgCollaborationTerms(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  collaboration: CollaborationMutationRow,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (["declined", "completed", "cancelled"].includes(collaboration.lifecycleStatus)) {
+    throw new MarketplaceCollaborationWriteError(
+      409,
+      "invalid_transition",
+      "Terms cannot be updated for a closed collaboration.",
+    );
+  }
+  const terms = readTermsInput(input.payload);
+  await client.query(
+    `UPDATE marketplace.collaborations
+     SET lifecycle_status = 'negotiating',
+         collaboration_type = COALESCE($2, collaboration_type),
+         free_stay_min_nights = COALESCE($3, free_stay_min_nights),
+         free_stay_max_nights = COALESCE($4, free_stay_max_nights),
+         paid_amount = COALESCE($5, paid_amount),
+         currency = COALESCE($6, currency),
+         discount_percentage = COALESCE($7, discount_percentage),
+         creator_fee = COALESCE($8, creator_fee),
+         travel_date_from = COALESCE($9, travel_date_from),
+         travel_date_to = COALESCE($10, travel_date_to),
+         preferred_date_from = COALESCE($11, preferred_date_from),
+         preferred_date_to = COALESCE($12, preferred_date_to),
+         preferred_months = CASE WHEN $13::text[] IS NULL THEN preferred_months ELSE $13::text[] END,
+         term_last_updated_at = now(),
+         creator_agreed_at = CASE WHEN $14 = 'creator' THEN now() ELSE NULL END,
+         hotel_agreed_at = CASE WHEN $14 = 'hotel' THEN now() ELSE NULL END,
+         updated_at = now()
+     WHERE id = $1::uuid`,
+    [
+      collaboration.id,
+      terms.collaborationType,
+      terms.freeStayMinNights,
+      terms.freeStayMaxNights,
+      terms.paidAmount,
+      terms.currency,
+      terms.discountPercentage,
+      terms.creatorFee,
+      terms.travelDateFrom,
+      terms.travelDateTo,
+      terms.preferredDateFrom,
+      terms.preferredDateTo,
+      terms.preferredMonths,
+      input.side,
+    ],
+  );
+  const deliverables = readDeliverables(input.payload);
+  if (deliverables) {
+    await replacePgDeliverables(client, collaboration.id, collaboration.propertyId, deliverables);
+  }
+  return {
+    collaborationResourceId: collaboration.id,
+    command: { action: "update_terms", idempotencyKey: input.idempotencyKey },
+    sideEffects: [{ type: "marketplace.collaboration.system_message_requested" }],
+  };
+}
+
+async function approvePgCollaborationTerms(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  collaboration: CollaborationMutationRow,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (
+    collaboration.lifecycleStatus !== "negotiating" &&
+    collaboration.lifecycleStatus !== "accepted"
+  ) {
+    throw new MarketplaceCollaborationWriteError(
+      409,
+      "invalid_transition",
+      "Only negotiating collaborations can approve terms.",
+    );
+  }
+  const acceptedAt = new Date().toISOString();
+  const oppositeAlreadyAgreed =
+    input.side === "hotel"
+      ? collaboration.creatorAgreedAt !== null
+      : collaboration.hotelAgreedAt !== null;
+  const nextStatus =
+    collaboration.lifecycleStatus === "accepted" || oppositeAlreadyAgreed
+      ? "accepted"
+      : "negotiating";
+  await client.query(
+    `UPDATE marketplace.collaborations
+     SET creator_agreed_at = CASE WHEN $2 = 'creator' THEN COALESCE(creator_agreed_at, now()) ELSE creator_agreed_at END,
+         hotel_agreed_at = CASE WHEN $2 = 'hotel' THEN COALESCE(hotel_agreed_at, now()) ELSE hotel_agreed_at END,
+         lifecycle_status = $3,
+         updated_at = now()
+     WHERE id = $1::uuid`,
+    [collaboration.id, input.side, nextStatus],
+  );
+  const sideEffects: MarketplaceCollaborationLifecycleSideEffect[] =
+    nextStatus === "accepted"
+      ? [
+          { type: "marketplace.collaboration.accepted" },
+          {
+            type: "marketplace.affiliate.provision.command_requested",
+            idempotencyKey: `marketplace.affiliate.provision:collaboration:${collaboration.sourceCollaborationId}:v1`,
+          },
+        ]
+      : [{ type: "marketplace.collaboration.system_message_requested" }];
+  return {
+    collaborationResourceId: collaboration.id,
+    command: { action: "approve_terms", idempotencyKey: input.idempotencyKey, acceptedAt },
+    sideEffects,
+  };
+}
+
+async function cancelPgCollaboration(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  collaboration: CollaborationMutationRow,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (["completed", "cancelled"].includes(collaboration.lifecycleStatus)) {
+    throw new MarketplaceCollaborationWriteError(
+      409,
+      "invalid_transition",
+      "Completed or cancelled collaborations cannot be cancelled.",
+    );
+  }
+  await client.query(
+    `UPDATE marketplace.collaborations
+     SET lifecycle_status = 'cancelled',
+         cancelled_at = now(),
+         collaboration_metadata = jsonb_set(
+           collaboration_metadata,
+           '{cancellationReason}',
+           to_jsonb($2::text),
+           true
+         ),
+         updated_at = now()
+     WHERE id = $1::uuid`,
+    [collaboration.id, readString(input.payload.reason) ?? ""],
+  );
+  return {
+    collaborationResourceId: collaboration.id,
+    command: { action: "cancel", idempotencyKey: input.idempotencyKey },
+    sideEffects: [
+      { type: "marketplace.collaboration.system_message_requested" },
+      { type: "marketplace.collaboration.notification_requested" },
+    ],
+  };
+}
+
+async function togglePgCollaborationDeliverable(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  collaboration: CollaborationMutationRow,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (!input.deliverableId) return null;
+  const result = await client.query<{ id: string }>(
+    `UPDATE marketplace.collaboration_deliverables
+     SET deliverable_status = CASE WHEN deliverable_status = 'completed' THEN 'pending' ELSE 'completed' END,
+         completed_at = CASE WHEN deliverable_status = 'completed' THEN NULL ELSE now() END,
+         updated_at = now()
+     WHERE id::text = $1
+       AND collaboration_id = $2::uuid
+       AND property_id = $3::uuid
+     RETURNING id::text AS id`,
+    [input.deliverableId, collaboration.id, collaboration.propertyId],
+  );
+  if (!result.rows[0]) return null;
+  return {
+    collaborationResourceId: collaboration.id,
+    command: { action: "toggle_deliverable", idempotencyKey: input.idempotencyKey },
+    sideEffects: [{ type: "marketplace.collaboration.system_message_requested" }],
+  };
+}
+
+async function ratePgCollaborationCreator(
+  client: PoolClient,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+  collaboration: CollaborationMutationRow,
+): Promise<MarketplaceCollaborationLifecycleMutationResult | null> {
+  if (input.side !== "hotel") {
+    throw new MarketplaceCollaborationWriteError(
+      403,
+      "forbidden",
+      "Only hotel-side users can rate collaboration creators.",
+    );
+  }
+  if (collaboration.lifecycleStatus !== "completed") {
+    throw new MarketplaceCollaborationWriteError(
+      409,
+      "invalid_transition",
+      "Only completed collaborations can be rated.",
+    );
+  }
+  const rating = readInteger(input.payload.rating);
+  if (rating === null || rating < 1 || rating > 5) {
+    throw new MarketplaceCollaborationWriteError(
+      400,
+      "invalid_query",
+      "rating must be an integer from 1 to 5.",
+    );
+  }
+  const result = await client.query<{ id: string }>(
+    `INSERT INTO marketplace.creator_ratings (
+       creator_profile_id,
+       creator_organization_id,
+       property_id,
+       hotel_organization_id,
+       collaboration_id,
+       rating,
+       comment,
+       created_by_user_id
+     )
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8::uuid)
+     ON CONFLICT (collaboration_id) DO UPDATE
+       SET rating = marketplace.creator_ratings.rating
+     RETURNING id::text AS id`,
+    [
+      collaboration.creatorProfileId,
+      collaboration.creatorOrganizationId,
+      collaboration.propertyId,
+      collaboration.hotelOrganizationId,
+      collaboration.id,
+      rating,
+      readString(input.payload.comment),
+      input.context.actor.internalUserId,
+    ],
+  );
+  const ratingId = result.rows[0]?.id;
+  if (!ratingId) return null;
+  return {
+    collaborationResourceId: collaboration.id,
+    command: { action: "rate_creator", idempotencyKey: input.idempotencyKey, ratingId },
+    sideEffects: [{ type: "marketplace.collaboration.notification_requested" }],
+  };
+}
+
+async function findPgCollaborationForSide(
+  pool: MarketplaceCollaborationQueryable,
+  context: RequestContext,
+  side: MarketplaceCollaborationAuthorizationSide,
+  filters: { collaborationId: string },
+): Promise<CollaborationMutationRow | null> {
+  const access = collaborationAccessValues(context, side);
+  const result = await pool.query<CollaborationMutationRow>(
+    `${collaborationFromSql(
+      side,
+      `collaboration.id::text AS id,
+       collaboration.property_id::text AS "propertyId",
+       collaboration.lifecycle_status AS "lifecycleStatus",
+       collaboration.initiator_type AS "initiatorSide",
+       collaboration.source_collaboration_id AS "sourceCollaborationId",
+       collaboration.collaboration_type AS "collaborationType",
+       collaboration.creator_profile_id::text AS "creatorProfileId",
+       collaboration.creator_organization_id::text AS "creatorOrganizationId",
+       collaboration.hotel_organization_id::text AS "hotelOrganizationId",
+       collaboration.creator_agreed_at AS "creatorAgreedAt",
+       collaboration.hotel_agreed_at AS "hotelAgreedAt"`,
+    )}
+     WHERE ${collaborationAccessWhereSql(side)}
+       AND collaboration.source_collaboration_id = $${access.length + 1}
+     LIMIT 1`,
+    [...access, filters.collaborationId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function resolveCreatorProfileForCreate(
+  client: MarketplaceCollaborationQueryable,
+  input: MarketplaceCollaborationLifecycleWriteInput,
+): Promise<{ id: string; organizationId: string } | null> {
+  const creatorId = readString(input.payload.creatorId);
+  const values: unknown[] = [];
+  const clauses: string[] = [];
+  if (creatorId) {
+    values.push(creatorId);
+    clauses.push(`source_creator_id = $${values.length}`);
+  }
+  if (input.side === "creator") {
+    values.push(activeResourceIds(input.context, "creator_profile", "owner"));
+    clauses.push(`id::text = ANY($${values.length}::text[])`);
+  }
+  if (clauses.length === 0) return null;
+
+  const result = await client.query<{ id: string; organizationId: string }>(
+    `SELECT id::text AS id,
+            organization_id::text AS "organizationId"
+     FROM marketplace.creator_profiles
+     WHERE ${clauses.join(" AND ")}
+     LIMIT 1`,
+    values,
+  );
+  return result.rows[0] ?? null;
+}
+
+async function resolveListingForCreate(
+  client: MarketplaceCollaborationQueryable,
+  context: RequestContext,
+  side: MarketplaceCollaborationAuthorizationSide,
+  listingId: string,
+): Promise<{ id: string; propertyId: string; organizationId: string } | null> {
+  const values: unknown[] = [listingId];
+  const clauses = ["source_listing_id = $1", "listing_status IN ('pending', 'verified')"];
+  if (side === "hotel") {
+    values.push(activeResourceIds(context, "hotel_listing", "operator"));
+    clauses.push(`id::text = ANY($${values.length}::text[])`);
+  }
+  const result = await client.query<{ id: string; propertyId: string; organizationId: string }>(
+    `SELECT id::text AS id,
+            property_id::text AS "propertyId",
+            organization_id::text AS "organizationId"
+     FROM marketplace.marketplace_hotel_listings
+     WHERE ${clauses.join(" AND ")}
+     LIMIT 1`,
+    values,
+  );
+  return result.rows[0] ?? null;
+}
+
+async function replacePgDeliverables(
+  client: MarketplaceCollaborationQueryable,
+  collaborationId: string,
+  propertyId: string,
+  deliverables: MarketplaceCollaborationDeliverableInput[] | null,
+): Promise<void> {
+  if (!deliverables) return;
+  await client.query(
+    `DELETE FROM marketplace.collaboration_deliverables
+     WHERE collaboration_id = $1::uuid
+       AND property_id = $2::uuid`,
+    [collaborationId, propertyId],
+  );
+  for (const deliverable of deliverables) {
+    await client.query(
+      `INSERT INTO marketplace.collaboration_deliverables (
+         collaboration_id,
+         property_id,
+         platform,
+         deliverable_type,
+         quantity,
+         deliverable_status
+       )
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, 'pending')`,
+      [collaborationId, propertyId, deliverable.platform, deliverable.type, deliverable.quantity],
+    );
+  }
+}
+
+async function readLifecycleWrite(
+  pool: MarketplaceCollaborationQueryable,
+  input: {
+    collaborationResourceId: string;
+    side: MarketplaceCollaborationAuthorizationSide;
+    command: MarketplaceCollaborationLifecycleWriteCommand;
+    sideEffects: MarketplaceCollaborationLifecycleSideEffect[];
+  },
+): Promise<MarketplaceCollaborationLifecycleWriteResponse> {
+  const result = await pool.query<MarketplaceCollaborationRow>(
+    `${collaborationFromSql(input.side)}
+     WHERE collaboration.id::text = $1
+     LIMIT 1`,
+    [input.collaborationResourceId],
+  );
+  const collaboration = result.rows[0];
+  if (!collaboration) throw new Error("Updated marketplace collaboration was not found.");
+  return {
+    contractVersion: MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
+    command: input.command,
+    collaboration: mapCollaborationRow(collaboration, input.side),
+    sideEffects: input.sideEffects,
+  };
+}
+
+async function findMarketplaceCollaborationReplay(
+  client: MarketplaceCollaborationQueryable,
+  input: { operation: MarketplaceCollaborationWriteOperation; keyHash: string },
+): Promise<MarketplaceCollaborationReplayRow | null> {
+  const result = await client.query<MarketplaceCollaborationReplayRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS metadata
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'marketplace'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'platform'
+     LIMIT 1
+     FOR UPDATE`,
+    [input.operation, input.keyHash],
+  );
+  return result.rows[0] ?? null;
+}
+
+function readMarketplaceCollaborationReplay(
+  row: MarketplaceCollaborationReplayRow | null,
+  fingerprint: string,
+): MarketplaceCollaborationLifecycleWriteResponse | null {
+  if (!row) return null;
+  if (row.requestFingerprintHash !== fingerprint) {
+    throw new MarketplaceCollaborationWriteError(
+      409,
+      "idempotency_conflict",
+      "Idempotency key was already used with a different marketplace collaboration payload.",
+    );
+  }
+  if (row.status === "completed") {
+    const response = readLifecycleReplayResponse(row.metadata);
+    if (!response) {
+      throw new Error("Completed marketplace collaboration idempotency key has no response.");
+    }
+    return {
+      ...response,
+      command: { ...response.command, replayed: true },
+    };
+  }
+  return null;
+}
+
+async function reserveMarketplaceCollaborationIdempotency(
+  client: MarketplaceCollaborationQueryable,
+  input: {
+    operation: MarketplaceCollaborationWriteOperation;
+    collaborationId: string;
+    idempotencyKey: string;
+    keyHash: string;
+    fingerprint: string;
+  },
+): Promise<boolean> {
+  const result = await client.query<{ id: string }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'marketplace',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'platform',
+       $4,
+       now() + interval '24 hours',
+       $5::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key) DO NOTHING
+     RETURNING id::text AS id`,
+    [
+      input.operation,
+      input.keyHash,
+      input.fingerprint,
+      input.idempotencyKey,
+      JSON.stringify({
+        collaborationId: input.collaborationId,
+        idempotencyKey: input.idempotencyKey,
+      }),
+    ],
+  );
+  return Boolean(result.rows[0]);
+}
+
+async function completeMarketplaceCollaborationIdempotency(
+  client: MarketplaceCollaborationQueryable,
+  input: {
+    operation: MarketplaceCollaborationWriteOperation;
+    keyHash: string;
+    fingerprint: string;
+    response: MarketplaceCollaborationLifecycleWriteResponse;
+  },
+): Promise<void> {
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         request_fingerprint_hash = $1,
+         response_status_code = 200,
+         response_body_hash = $2,
+         response_resource_product = 'marketplace',
+         response_resource_type = 'collaboration',
+         response_resource_id = $3,
+         completed_at = now(),
+         last_seen_at = now(),
+         idempotency_metadata = idempotency_metadata || $4::jsonb
+     WHERE operation_scope = 'marketplace'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'platform'`,
+    [
+      input.fingerprint,
+      sha256(stableJson(input.response)),
+      input.response.collaboration.collaborationId,
+      JSON.stringify({ response: input.response }),
+      input.operation,
+      input.keyHash,
+    ],
+  );
+}
+
+function readLifecycleReplayResponse(
+  metadata: unknown,
+): MarketplaceCollaborationLifecycleWriteResponse | null {
+  if (!isRecord(metadata) || !isRecord(metadata.response)) return null;
+  const response = metadata.response;
+  if (
+    response.contractVersion !== MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION ||
+    !isRecord(response.command) ||
+    !isRecord(response.collaboration) ||
+    !Array.isArray(response.sideEffects)
+  ) {
+    return null;
+  }
+  return response as MarketplaceCollaborationLifecycleWriteResponse;
+}
+
+async function rollbackQuietly(client: PoolClient): Promise<void> {
+  try {
+    await client.query("ROLLBACK");
+  } catch {
+    // Preserve the original write error.
+  }
+}
+
+function readTermsInput(payload: Record<string, unknown>): MarketplaceCollaborationTermsInput {
+  const terms = isRecord(payload.terms) ? payload.terms : payload;
+  return {
+    collaborationType: readCollaborationType(terms.collaborationType),
+    freeStayMinNights: readInteger(terms.freeStayMinNights),
+    freeStayMaxNights: readInteger(terms.freeStayMaxNights),
+    paidAmount: readString(terms.paidAmount),
+    currency: readCurrency(terms.currency),
+    discountPercentage: readInteger(terms.discountPercentage),
+    creatorFee: readString(terms.creatorFee),
+    travelDateFrom: readDateString(terms.travelDateFrom),
+    travelDateTo: readDateString(terms.travelDateTo),
+    preferredDateFrom: readDateString(terms.preferredDateFrom),
+    preferredDateTo: readDateString(terms.preferredDateTo),
+    preferredMonths: readStringArray(terms.preferredMonths),
+  };
+}
+
+type MarketplaceCollaborationTermsInput = {
+  collaborationType: MarketplaceCollaborationRead["collaborationType"];
+  freeStayMinNights: number | null;
+  freeStayMaxNights: number | null;
+  paidAmount: string | null;
+  currency: string | null;
+  discountPercentage: number | null;
+  creatorFee: string | null;
+  travelDateFrom: string | null;
+  travelDateTo: string | null;
+  preferredDateFrom: string | null;
+  preferredDateTo: string | null;
+  preferredMonths: string[] | null;
+};
+
+type MarketplaceCollaborationDeliverableInput = {
+  platform: string;
+  type: string;
+  quantity: number;
+};
+
+function readDeliverables(
+  payload: Record<string, unknown>,
+): MarketplaceCollaborationDeliverableInput[] | null {
+  const value = payload.deliverables;
+  if (!Array.isArray(value)) return null;
+  return value
+    .map((entry) => (isRecord(entry) ? entry : null))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .map((entry) => ({
+      platform: readString(entry.platform) ?? "other",
+      type: readString(entry.type) ?? "post",
+      quantity: readInteger(entry.quantity) ?? 1,
+    }))
+    .filter((entry) => entry.platform.length > 0 && entry.type.length > 0 && entry.quantity > 0);
+}
+
+function createCollaborationCorrelationId(
+  input: MarketplaceCollaborationLifecycleWriteInput,
+): string {
+  const listingId = readString(input.payload.listingId) ?? "unknown_listing";
+  const creatorId =
+    readString(input.payload.creatorId) ??
+    activeResourceIds(input.context, "creator_profile", "owner")[0] ??
+    "unknown_creator";
+  return `${listingId}:${creatorId}`;
 }
 
 async function queryCollaborationRows(
@@ -692,6 +1918,65 @@ function toDateString(value: Date | string | null): string | null {
   return value.slice(0, 10);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return null;
+}
+
+function readDateString(value: unknown): string | null {
+  const text = readString(value);
+  return text && /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
+function readStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.map(readString).filter((entry): entry is string => Boolean(entry));
+}
+
+function readCurrency(value: unknown): string | null {
+  const text = readString(value);
+  return text && /^[A-Za-z]{3}$/.test(text) ? text.toUpperCase() : null;
+}
+
+function readCollaborationSide(value: unknown): MarketplaceCollaborationAuthorizationSide | null {
+  return typeof value === "string" && isCollaborationSide(value) ? value : null;
+}
+
+function readCollaborationType(value: unknown): MarketplaceCollaborationRead["collaborationType"] {
+  return typeof value === "string" ? toCollaborationType(value) : null;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, sortJson(entry)]),
+  );
+}
+
 function authorizeRequiredSideCollaborationRead(
   request: FastifyRequest,
   side: MarketplaceCollaborationAuthorizationSide,
@@ -777,6 +2062,91 @@ function authorizeOptionalSideCollaborationRead(
   return { ok: true, context, side: inferredSide };
 }
 
+function authorizeRequiredSideCollaborationWrite(
+  request: FastifyRequest,
+  side: MarketplaceCollaborationAuthorizationSide,
+): AuthorizationResult {
+  const policy =
+    side === "creator"
+      ? MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY
+      : MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY;
+  const context = enforceRoutePolicy(request, { permission: policy.permission });
+  const expectedKind = policy.selectedOrganizationKind;
+  if (context.selectedOrganization.kind !== expectedKind) {
+    return {
+      ok: false,
+      error: {
+        statusCode: 403,
+        code: "forbidden",
+        message: `Selected organization must be ${expectedKind}.`,
+      },
+    };
+  }
+  const resourceCheck = checkRequiredWriteResourceLinks(context, side);
+  if (!resourceCheck.ok) return resourceCheck;
+  return { ok: true, context, side };
+}
+
+function authorizeOptionalSideCollaborationWrite(
+  request: FastifyRequest,
+  requestedSide: unknown,
+): AuthorizationResult {
+  const context = enforceRoutePolicy(request, {
+    permission: MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY.permission,
+  });
+  const parsedSide =
+    typeof requestedSide === "string" ? normalizeOptionalString(requestedSide) : undefined;
+  if (parsedSide) {
+    if (!isCollaborationSide(parsedSide)) {
+      return {
+        ok: false,
+        error: {
+          statusCode: 400,
+          code: "invalid_query",
+          message: `side must be one of: ${MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES.join(", ")}.`,
+        },
+      };
+    }
+    return authorizeResolvedWriteContext(context, parsedSide);
+  }
+
+  const inferredSide = inferSideFromOrganizationKind(context);
+  if (!inferredSide) {
+    return {
+      ok: false,
+      error: {
+        statusCode: 403,
+        code: "forbidden",
+        message: "Selected organization is not a marketplace collaboration participant.",
+      },
+    };
+  }
+  return authorizeResolvedWriteContext(context, inferredSide);
+}
+
+function authorizeResolvedWriteContext(
+  context: RequestContext,
+  side: MarketplaceCollaborationAuthorizationSide,
+): AuthorizationResult {
+  const policy =
+    side === "creator"
+      ? MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY
+      : MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY;
+  if (context.selectedOrganization.kind !== policy.selectedOrganizationKind) {
+    return {
+      ok: false,
+      error: {
+        statusCode: 403,
+        code: "forbidden",
+        message: `Selected organization must be ${policy.selectedOrganizationKind}.`,
+      },
+    };
+  }
+  const resourceCheck = checkRequiredWriteResourceLinks(context, side);
+  if (!resourceCheck.ok) return resourceCheck;
+  return { ok: true, context, side };
+}
+
 function inferSideFromOrganizationKind(
   context: RequestContext,
 ): MarketplaceCollaborationAuthorizationSide | null {
@@ -822,6 +2192,39 @@ function checkRequiredResourceLinks(
   };
 }
 
+function checkRequiredWriteResourceLinks(
+  context: RequestContext,
+  side: MarketplaceCollaborationAuthorizationSide,
+): { ok: true } | { ok: false; error: MarketplaceCollaborationRouteError } {
+  const policy =
+    side === "creator"
+      ? MARKETPLACE_COLLABORATION_CREATOR_WRITE_POLICY
+      : MARKETPLACE_COLLABORATION_HOTEL_WRITE_POLICY;
+  const missing = policy.requiredResources.find(
+    (required) =>
+      !context.linkedResources.some(
+        (resource) =>
+          resource.status === "active" &&
+          resource.product === required.product &&
+          resource.resourceType === required.resourceType &&
+          resource.relationship === required.relationship,
+      ),
+  );
+  if (!missing) {
+    return { ok: true };
+  }
+
+  const code = side === "creator" ? "missing_creator_resource_link" : "missing_hotel_resource_link";
+  return {
+    ok: false,
+    error: {
+      statusCode: 403,
+      code,
+      message: `Missing active ${missing.resourceType} ${missing.relationship} link for marketplace collaboration writes.`,
+    },
+  };
+}
+
 function parseRequiredSide(
   value: string | undefined,
 ): ParseResult<MarketplaceCollaborationAuthorizationSide> {
@@ -861,6 +2264,43 @@ function parseOptionalStatus(
   return { ok: true, value: status };
 }
 
+function parseLifecycleWriteSide(
+  value: unknown,
+): ParseResult<MarketplaceCollaborationAuthorizationSide> {
+  if (typeof value !== "string") return invalidQuery("side is required.");
+  const side = normalizeOptionalString(value);
+  if (!side) return invalidQuery("side is required.");
+  if (!isCollaborationSide(side)) {
+    return invalidQuery(
+      `side must be one of: ${MARKETPLACE_COLLABORATION_AUTHORIZATION_SIDES.join(", ")}.`,
+    );
+  }
+  return { ok: true, value: side };
+}
+
+function parseLifecycleWriteBody(
+  body: LifecycleWriteBody | undefined,
+  action: MarketplaceCollaborationLifecycleWriteAction,
+): ParseResult<{ idempotencyKey: string }> {
+  const idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+  if (!idempotencyKey) {
+    return invalidQuery(`${action} requires idempotencyKey.`);
+  }
+  return { ok: true, value: { idempotencyKey } };
+}
+
+function parseSendMessageBody(
+  body: SendMessageBody | undefined,
+): ParseResult<{ content: string; contentType: "text" | "image" }> {
+  const content = typeof body?.content === "string" ? body.content.trim() : "";
+  if (!content) return invalidQuery("message content is required.");
+  const rawContentType = body?.contentType ?? body?.message_type ?? "text";
+  const contentType =
+    rawContentType === "image" ? "image" : rawContentType === "text" ? "text" : null;
+  if (!contentType) return invalidQuery("message content type must be text or image.");
+  return { ok: true, value: { content, contentType } };
+}
+
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
@@ -881,9 +2321,33 @@ function sendMarketplaceCollaborationError(
   return reply.status(error.statusCode).send({
     code: error.code,
     category:
-      error.statusCode === 404 ? "not_found" : error.statusCode === 400 ? "validation" : "auth",
+      error.statusCode === 404
+        ? "not_found"
+        : error.statusCode === 409
+          ? "conflict"
+          : error.statusCode === 400
+            ? "validation"
+            : error.statusCode === 501
+              ? "write_model"
+              : "auth",
     message: error.message,
   });
+}
+
+function notFound(): MarketplaceCollaborationRouteError {
+  return {
+    statusCode: 404,
+    code: "collaboration_not_found",
+    message: "Collaboration was not found for the selected marketplace side.",
+  };
+}
+
+function writeUnavailable(): MarketplaceCollaborationRouteError {
+  return {
+    statusCode: 501,
+    code: "write_unavailable",
+    message: "Marketplace collaboration write repository is not configured.",
+  };
 }
 
 function invalidQuery<T = never>(message: string): ParseResult<T> {
@@ -919,15 +2383,28 @@ type AuthorizationResult =
     };
 
 type MarketplaceCollaborationRouteError = {
-  statusCode: 400 | 403 | 404;
+  statusCode: 400 | 403 | 404 | 409 | 501;
   code:
     | "invalid_query"
     | "forbidden"
     | "missing_creator_resource_link"
     | "missing_hotel_resource_link"
-    | "collaboration_not_found";
+    | "collaboration_not_found"
+    | "invalid_transition"
+    | "idempotency_conflict"
+    | "write_unavailable";
   message: string;
 };
+
+class MarketplaceCollaborationWriteError extends Error {
+  constructor(
+    readonly statusCode: MarketplaceCollaborationRouteError["statusCode"],
+    readonly code: MarketplaceCollaborationRouteError["code"],
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 export function toMarketplaceCollaborationListResponse(input: {
   authorizationMode: MarketplaceCollaborationAuthorizationMode;

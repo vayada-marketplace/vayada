@@ -15,8 +15,10 @@ INSERT INTO identity.role_permission_grants (organization_kind, role_key, permis
   ('hotel_group',       'hotel_owner',    'pms.booking.update'),
   ('hotel_group',       'hotel_owner',    'pms.finance.read'),
   ('hotel_group',       'hotel_owner',    'marketplace.collaboration.read'),
+  ('hotel_group',       'hotel_owner',    'marketplace.collaboration.write'),
   ('hotel_group',       'hotel_owner',    'marketplace.collaboration.review'),
   ('creator_workspace', 'creator_owner',  'marketplace.collaboration.read'),
+  ('creator_workspace', 'creator_owner',  'marketplace.collaboration.write'),
   ('creator_workspace', 'creator_owner',  'marketplace.profile.manage'),
   ('affiliate_partner', 'affiliate_owner', 'affiliate.payout.manage')
 ON CONFLICT (organization_kind, role_key, permission_key) DO NOTHING;

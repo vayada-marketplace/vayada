@@ -9,7 +9,9 @@ import {
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
 import {
+  MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
   MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+  type MarketplaceCollaborationMessage,
   type MarketplaceCollaborationRead,
 } from "@vayada/domain-marketplace";
 import { describe, expect, it } from "vitest";
@@ -18,6 +20,8 @@ import { buildApp } from "./app.js";
 import {
   toMarketplaceCollaborationListResponse,
   type MarketplaceCollaborationListFilters,
+  type MarketplaceCollaborationLifecycleWriteInput,
+  type MarketplaceCollaborationLifecycleWriteResponse,
   type MarketplaceCollaborationReadRepository,
 } from "./routes/marketplaceCollaborations.js";
 
@@ -216,6 +220,141 @@ describe("marketplace collaboration read routes", () => {
       category: "not_found",
     });
   });
+
+  it("routes lifecycle writes through the V4 write repository with side auth and idempotency", async () => {
+    const calls: MarketplaceCollaborationLifecycleWriteInput[] = [];
+    const repository = createCollaborationRepository({
+      async executeLifecycleWrite(input) {
+        calls.push(input);
+        return lifecycleWriteResponse(input);
+      },
+    });
+    const app = buildMarketplaceCollaborationsApp({
+      repository,
+      permissions: ["marketplace.collaboration.read", "marketplace.collaboration.write"],
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/marketplace/collaborations/collab_001/respond",
+      payload: {
+        idempotencyKey: "marketplace.collaboration.respond:collab_001:test:v1",
+        side: "creator",
+        status: "accepted",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      contractVersion: MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
+      command: {
+        action: "respond",
+        idempotencyKey: "marketplace.collaboration.respond:collab_001:test:v1",
+      },
+      collaboration: { collaborationId: "collab_001" },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      side: "creator",
+      action: "respond",
+      collaborationId: "collab_001",
+      idempotencyKey: "marketplace.collaboration.respond:collab_001:test:v1",
+    });
+  });
+
+  it("routes chat message writes through the V4 write repository", async () => {
+    const messages: string[] = [];
+    const repository = createCollaborationRepository({
+      async sendMessage(input) {
+        messages.push(`${input.side}:${input.content}:${input.contentType}`);
+        return messageRead(input.collaborationId, input.content, input.contentType);
+      },
+    });
+    const app = buildMarketplaceCollaborationsApp({
+      repository,
+      permissions: ["marketplace.collaboration.read", "marketplace.collaboration.write"],
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/marketplace/collaborations/collab_001/messages",
+      payload: { content: "Looks good to me.", message_type: "text" },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toMatchObject({
+      collaborationId: "collab_001",
+      content: "Looks good to me.",
+      contentType: "text",
+    });
+    expect(messages).toEqual(["creator:Looks good to me.:text"]);
+  });
+
+  it("denies lifecycle writes without the required marketplace resource link", async () => {
+    const repository = createCollaborationRepository({
+      async executeLifecycleWrite() {
+        throw new Error("repository should not be called");
+      },
+    });
+    const app = buildMarketplaceCollaborationsApp({
+      repository,
+      permissions: ["marketplace.collaboration.read", "marketplace.collaboration.write"],
+      resources: [],
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/marketplace/collaborations/collab_001/approve",
+      payload: {
+        idempotencyKey: "marketplace.collaboration.approve_terms:collab_001:test:v1",
+        side: "creator",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toMatchObject({
+      code: "missing_creator_resource_link",
+    });
+  });
+
+  it("requires hotel-profile and listing resource links for hotel lifecycle writes", async () => {
+    const repository = createCollaborationRepository({
+      async executeLifecycleWrite() {
+        throw new Error("repository should not be called");
+      },
+    });
+    const app = buildMarketplaceCollaborationsApp({
+      repository,
+      organizationKind: "hotel_group",
+      permissions: ["marketplace.collaboration.read", "marketplace.collaboration.write"],
+      resources: [
+        {
+          product: "marketplace",
+          resourceType: "hotel_listing",
+          resourceId: "hotel_listing_001",
+          relationship: "operator",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/marketplace/collaborations/collab_001/approve",
+      payload: {
+        idempotencyKey: "marketplace.collaboration.approve_terms:collab_001:test:v1",
+        side: "hotel",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toMatchObject({
+      code: "missing_hotel_resource_link",
+    });
+  });
 });
 
 function buildMarketplaceCollaborationsApp(
@@ -273,7 +412,49 @@ function createCollaborationRepository(
         items: [],
       };
     },
+    async executeLifecycleWrite(input) {
+      return lifecycleWriteResponse(input);
+    },
+    async sendMessage(input) {
+      return messageRead(input.collaborationId, input.content, input.contentType);
+    },
     ...overrides,
+  };
+}
+
+function lifecycleWriteResponse(
+  input: Pick<MarketplaceCollaborationLifecycleWriteInput, "action" | "idempotencyKey" | "side">,
+): MarketplaceCollaborationLifecycleWriteResponse {
+  return {
+    contractVersion: MARKETPLACE_COLLABORATION_LIFECYCLE_WRITES_CONTRACT_VERSION,
+    command: {
+      action: input.action,
+      idempotencyKey: input.idempotencyKey,
+    },
+    collaboration: {
+      ...collaborationRead(),
+      side: input.side,
+    },
+    sideEffects: [{ type: "marketplace.collaboration.system_message_requested" }],
+  };
+}
+
+function messageRead(
+  collaborationId: string,
+  content: string,
+  contentType: "text" | "image",
+): MarketplaceCollaborationMessage {
+  return {
+    contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+    messageId: "msg_target_001",
+    collaborationId,
+    senderUserId: "user_creator",
+    senderName: "creator",
+    senderAvatarUrl: null,
+    content,
+    contentType,
+    metadata: null,
+    createdAt: "2026-06-13T12:00:00.000Z",
   };
 }
 
