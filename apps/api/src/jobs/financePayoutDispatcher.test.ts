@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAffiliatePayoutDispatchJobKey,
   buildPropertyPayoutDispatchJobKey,
+  runFinanceAffiliatePayoutDispatcher,
   runFinancePropertyPayoutDispatcher,
+  type FinanceAffiliatePayoutDispatchCandidate,
+  type FinanceAffiliatePayoutDispatchContext,
+  type FinanceAffiliatePayoutDispatchMutationResult,
+  type FinanceAffiliatePayoutDispatcherStore,
+  type FinanceAffiliatePayoutProviderClient,
   type FinancePayoutProvider,
   type FinancePayoutProviderAttemptRecord,
   type FinancePayoutProviderResult,
@@ -165,6 +172,99 @@ describe("Finance property payout dispatcher", () => {
   });
 });
 
+describe("Finance affiliate payout dispatcher", () => {
+  it("dispatches only monthly affiliate payouts after resource, legacy, and notification gates", async () => {
+    const ready = affiliatePayoutCandidate({ payoutId: "affiliate_payout_ready" });
+    const store = new MemoryFinanceAffiliatePayoutDispatcherStore([
+      affiliatePayoutCandidate({
+        payoutId: "affiliate_payout_unlinked",
+        affiliateResourceLinked: false,
+      }),
+      affiliatePayoutCandidate({
+        payoutId: "affiliate_payout_manual",
+        payoutSchedule: "manual",
+      }),
+      affiliatePayoutCandidate({
+        payoutId: "affiliate_payout_legacy_active",
+        legacySchedulerFrozen: false,
+      }),
+      affiliatePayoutCandidate({
+        payoutId: "affiliate_payout_notification_pending",
+        notificationAuditReady: false,
+      }),
+      affiliatePayoutCandidate({
+        payoutId: "affiliate_payout_provider_exists",
+        providerPayoutId: "po_existing_affiliate",
+      }),
+      ready,
+    ]);
+    const provider = createAffiliateSequenceProvider([
+      {
+        ok: true,
+        providerPayoutId: "po_affiliate_ready",
+        providerRequestId: "req_affiliate_ready",
+        status: "processing",
+      },
+    ]);
+
+    const result = await runFinanceAffiliatePayoutDispatcher(store, provider, {
+      now: fixedNow,
+      workerId: "worker_affiliate_finance",
+    });
+
+    expect(provider.calls.map((candidate) => candidate.payoutId)).toEqual([
+      "affiliate_payout_ready",
+    ]);
+    expect(result).toMatchObject({
+      scanned: 6,
+      dispatched: 1,
+      retryScheduled: 0,
+      failed: 0,
+      skipped: [
+        { payoutId: "affiliate_payout_unlinked", reason: "affiliate_resource_not_linked" },
+        { payoutId: "affiliate_payout_manual", reason: "non_monthly_schedule" },
+        { payoutId: "affiliate_payout_legacy_active", reason: "legacy_scheduler_not_frozen" },
+        {
+          payoutId: "affiliate_payout_notification_pending",
+          reason: "notification_audit_not_ready",
+        },
+        { payoutId: "affiliate_payout_provider_exists", reason: "payout_already_dispatched" },
+      ],
+    });
+    expect(store.payout("affiliate_payout_ready")?.providerPayoutId).toBe("po_affiliate_ready");
+    expect(store.providerAttempts).toHaveLength(1);
+    expect(store.providerAttempts[0]).toMatchObject({
+      payoutId: "affiliate_payout_ready",
+      propertyId: null,
+      affiliateId: "affiliate_finance_partner_686",
+      organizationId: "a6000000-0000-0000-0000-000000000686",
+      provider: "stripe",
+      queueName: "finance-affiliate-payout-dispatch",
+      status: "succeeded",
+    });
+    expect(store.pmsWrites).toEqual([]);
+    expect(store.affiliateIdentityWrites).toEqual([]);
+    expect(store.notificationAudit).toEqual([
+      {
+        affiliateId: "affiliate_finance_partner_686",
+        payoutId: "affiliate_payout_ready",
+        providerPayoutId: "po_affiliate_ready",
+      },
+    ]);
+  });
+
+  it("uses the finance affiliate payout dispatch job key format", () => {
+    expect(
+      buildAffiliatePayoutDispatchJobKey({
+        affiliateId: "affiliate_finance_partner_686",
+        payoutId: "affiliate_payout_2026_06",
+      }),
+    ).toBe(
+      "finance.dispatch-affiliate-payout:affiliate:affiliate_finance_partner_686:payout:affiliate_payout_2026_06:v1",
+    );
+  });
+});
+
 class MemoryFinancePayoutDispatcherStore implements FinancePropertyPayoutDispatcherStore {
   readonly providerAttempts: FinancePayoutProviderAttemptRecord[] = [];
   readonly claimConflicts = new Set<string>();
@@ -239,6 +339,79 @@ class MemoryFinancePayoutDispatcherStore implements FinancePropertyPayoutDispatc
   }
 }
 
+class MemoryFinanceAffiliatePayoutDispatcherStore implements FinanceAffiliatePayoutDispatcherStore {
+  readonly providerAttempts: FinancePayoutProviderAttemptRecord[] = [];
+  readonly claimConflicts = new Set<string>();
+  readonly pmsWrites: string[] = [];
+  readonly affiliateIdentityWrites: string[] = [];
+  readonly notificationAudit: Array<{
+    affiliateId: string;
+    payoutId: string;
+    providerPayoutId: string;
+  }> = [];
+
+  constructor(private readonly payouts: FinanceAffiliatePayoutDispatchCandidate[]) {}
+
+  payout(payoutId: string): FinanceAffiliatePayoutDispatchCandidate | undefined {
+    return this.payouts.find((payout) => payout.payoutId === payoutId);
+  }
+
+  async findDueAffiliatePayoutDispatchCandidates(
+    now: Date,
+    limit: number,
+  ): Promise<FinanceAffiliatePayoutDispatchCandidate[]> {
+    return this.payouts.filter((payout) => new Date(payout.scheduledAt) <= now).slice(0, limit);
+  }
+
+  async claimAffiliatePayoutDispatch(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+  ): Promise<boolean> {
+    return !candidate.providerPayoutId && !this.claimConflicts.has(candidate.payoutId);
+  }
+
+  async recordProviderAttempt(attempt: FinancePayoutProviderAttemptRecord): Promise<void> {
+    this.providerAttempts.push(attempt);
+  }
+
+  async markAffiliatePayoutDispatched(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+    result: { providerPayoutId: string },
+  ): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
+    candidate.providerPayoutId = result.providerPayoutId;
+    this.notificationAudit.push({
+      affiliateId: candidate.affiliateId,
+      payoutId: candidate.payoutId,
+      providerPayoutId: result.providerPayoutId,
+    });
+    return {
+      payoutId: candidate.payoutId,
+      affiliateId: candidate.affiliateId,
+      organizationId: candidate.organizationId,
+      status: "dispatched",
+      providerPayoutId: result.providerPayoutId,
+    };
+  }
+
+  async markAffiliatePayoutDispatchFailed(
+    candidate: FinanceAffiliatePayoutDispatchCandidate,
+    result: { retryable: boolean },
+    _attempt: FinancePayoutProviderAttemptRecord,
+    _context: FinanceAffiliatePayoutDispatchContext,
+  ): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
+    candidate.retryCount += 1;
+    return {
+      payoutId: candidate.payoutId,
+      affiliateId: candidate.affiliateId,
+      organizationId: candidate.organizationId,
+      status:
+        result.retryable && candidate.retryCount < candidate.maxAttempts
+          ? "retry_scheduled"
+          : "failed",
+      providerPayoutId: null,
+    };
+  }
+}
+
 function payoutCandidate(
   overrides: Partial<FinancePropertyPayoutDispatchCandidate> = {},
 ): FinancePropertyPayoutDispatchCandidate {
@@ -260,6 +433,29 @@ function payoutCandidate(
   };
 }
 
+function affiliatePayoutCandidate(
+  overrides: Partial<FinanceAffiliatePayoutDispatchCandidate> = {},
+): FinanceAffiliatePayoutDispatchCandidate {
+  return {
+    payoutId: "affiliate_payout_ready",
+    affiliateId: "affiliate_finance_partner_686",
+    organizationId: "a6000000-0000-0000-0000-000000000686",
+    amount: "350.00",
+    currency: "EUR",
+    provider: "stripe",
+    providerAccountId: "acct_affiliate_target",
+    retryCount: 0,
+    maxAttempts: 2,
+    scheduledAt: "2026-06-01T09:00:00.000Z",
+    payoutSchedule: "monthly",
+    affiliateResourceLinked: true,
+    legacySchedulerFrozen: true,
+    notificationAuditReady: true,
+    providerPayoutId: null,
+    ...overrides,
+  };
+}
+
 function createSequenceProvider(results: FinancePayoutProviderResult[]): FinancePayoutProvider & {
   calls: FinancePropertyPayoutDispatchCandidate[];
 } {
@@ -275,6 +471,30 @@ function createSequenceProvider(results: FinancePayoutProviderResult[]): Finance
           retryable: false,
           errorCategory: "provider_rejected",
           message: "No provider fixture result configured.",
+        };
+      }
+      return next;
+    },
+  };
+}
+
+function createAffiliateSequenceProvider(
+  results: FinancePayoutProviderResult[],
+): FinanceAffiliatePayoutProviderClient & {
+  calls: FinanceAffiliatePayoutDispatchCandidate[];
+} {
+  const calls: FinanceAffiliatePayoutDispatchCandidate[] = [];
+  return {
+    calls,
+    async dispatchAffiliatePayout(candidate) {
+      calls.push(candidate);
+      const next = results.shift();
+      if (!next) {
+        return {
+          ok: false,
+          retryable: false,
+          errorCategory: "provider_rejected",
+          message: "No affiliate provider fixture result configured.",
         };
       }
       return next;

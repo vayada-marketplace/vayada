@@ -10,7 +10,15 @@ import {
   FINANCE_ROUTE_PAYMENT_METHODS,
   FINANCE_ROUTE_PAYMENT_PROVIDERS,
   cancellationPolicyFromRefundPolicy,
+  setupIncompleteAffiliatePayoutSettings,
   setupIncompletePaymentSettings,
+  type FinanceAffiliatePayoutListResponse,
+  type FinanceAffiliatePayoutProvider,
+  type FinanceAffiliatePayoutSettingsPatchCommand,
+  type FinanceAffiliatePayoutSettingsPatchResult,
+  type FinanceAffiliatePayoutSettingsReadModel,
+  type FinanceAffiliatePayoutSettingsResponse,
+  type FinanceAffiliatePayoutSchedule,
   toFinanceCancellationPolicyResponse,
   toFinancePaymentSettingsResponse,
   toPublicPaymentCapabilityProjection,
@@ -98,6 +106,8 @@ const PROPERTY_PAYOUT_DISPATCH_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] =
   "payout_job",
   "audit_event",
 ];
+
+const AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
 
 const XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION =
   "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal";
@@ -219,6 +229,28 @@ type FinancePaymentSettingsRow = {
   chargesEnabled: boolean | null;
   payoutsEnabled: boolean | null;
   providerCapabilities: unknown;
+};
+
+type FinanceAffiliateResourceRow = {
+  organizationId: string;
+};
+
+type FinanceAffiliatePayoutSettingsRow = {
+  affiliateId: string;
+  marketplaceOrganizationId: string | null;
+  payoutsEnabled: boolean | null;
+  payoutProvider: string | null;
+  payoutCurrency: string | null;
+  payoutSchedule: unknown;
+  payoutPreferences: unknown;
+  payoutThresholdAmount: string | null;
+  updatedAt: Date | string | null;
+  providerAccountId: string | null;
+  provider: string | null;
+  providerStatus: string | null;
+  providerOnboardingStatus: string | null;
+  providerPayoutsEnabled: boolean | null;
+  sourceFreshness: unknown;
 };
 
 type FinanceVisibilitySummaryRow = {
@@ -393,6 +425,7 @@ type FinanceCommandError = {
   statusCode: 400 | 404 | 409 | 500 | 501 | 502;
   code:
     | "invalid_command"
+    | "affiliate_not_found"
     | "invoice_not_found"
     | "provider_account_not_found"
     | "payout_not_found"
@@ -448,6 +481,16 @@ type PropertyPayoutDispatchBody = {
   idempotencyKey?: unknown;
   legacySchedulerFrozenAt?: unknown;
   reconciliationReadyAt?: unknown;
+};
+
+type AffiliatePayoutSettingsPatchBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  payoutsEnabled?: unknown;
+  payoutProvider?: unknown;
+  payoutCurrency?: unknown;
+  payoutSchedule?: unknown;
+  payoutThresholdAmount?: unknown;
 };
 
 export async function registerFinanceRoutes(
@@ -796,6 +839,88 @@ export async function registerFinanceRoutes(
         propertyId,
         ...result,
       } satisfies FinancePayoutListResponse;
+    },
+  );
+
+  app.get<{ Params: FinanceAffiliateParams }>(
+    "/finance/affiliates/:affiliateId/payout-settings",
+    async (request, reply) => {
+      const affiliateId = request.params.affiliateId;
+      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+
+      const settings = await options.repository.getAffiliatePayoutSettings?.(affiliateId);
+      if (!settings) {
+        reply.code(404);
+        return {
+          code: "affiliate_not_found",
+          category: "not_found",
+          message: "Affiliate finance resource was not found.",
+        };
+      }
+      return toAffiliatePayoutSettingsResponse(settings);
+    },
+  );
+
+  app.patch<{ Params: FinanceAffiliateParams; Body: AffiliatePayoutSettingsPatchBody }>(
+    "/finance/affiliates/:affiliateId/payout-settings",
+    async (request, reply) => {
+      const affiliateId = request.params.affiliateId;
+      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+      if (!options.repository.updateAffiliatePayoutSettings) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Affiliate payout settings writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toAffiliatePayoutSettingsPatchCommand(request, affiliateId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.updateAffiliatePayoutSettings(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      return {
+        ...toAffiliatePayoutSettingsResponse(result.settings),
+        commandMeta: result.commandMeta,
+      };
+    },
+  );
+
+  app.get<{ Params: FinanceAffiliateParams }>(
+    "/finance/affiliates/:affiliateId/payouts",
+    async (request, reply) => {
+      const affiliateId = request.params.affiliateId;
+      if (!enforceFinanceAffiliatePolicy(request, reply, affiliateId)) return reply;
+      const query = parsePayoutListQuery(request.query);
+      if ("statusCode" in query) {
+        reply.code(query.statusCode);
+        return query;
+      }
+
+      const result = await options.repository.listAffiliatePayouts?.(affiliateId, query);
+      if (!result) {
+        reply.code(404);
+        return {
+          code: "affiliate_not_found",
+          category: "not_found",
+          message: "Affiliate finance resource was not found.",
+        };
+      }
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        affiliateId,
+        ...result,
+      } satisfies FinanceAffiliatePayoutListResponse;
     },
   );
 
@@ -1196,6 +1321,29 @@ export function createTargetFinancePropertySettingsRepository(config: {
       const result = await loadPayoutRows(pool, propertyId, query);
       return toPayoutListResponseBody(result, query);
     },
+    async getAffiliatePayoutSettings(affiliateId) {
+      const row = await loadAffiliatePayoutSettingsRow(pool, affiliateId);
+      if (row) return toAffiliatePayoutSettingsReadModel(row);
+      const resource = await resolveAffiliateResource(pool, affiliateId);
+      return resource
+        ? setupIncompleteAffiliatePayoutSettings(
+            affiliateId,
+            new Date().toISOString(),
+            resource.organizationId,
+          )
+        : null;
+    },
+    async listAffiliatePayouts(affiliateId, query) {
+      const resource = await resolveAffiliateResource(pool, affiliateId);
+      if (!resource) return null;
+      const result = await loadAffiliatePayoutRows(
+        pool,
+        affiliateId,
+        resource.organizationId,
+        query,
+      );
+      return toAffiliatePayoutListResponseBody(result, query);
+    },
     async listReconciliationItems(propertyId, view, query) {
       const result = await loadReconciliationRows(pool, propertyId, view, query);
       return toReconciliationViewResponseBody(result, query);
@@ -1300,6 +1448,21 @@ export function createTargetFinancePropertySettingsRepository(config: {
       try {
         if (ownsTransaction) await client.query("BEGIN");
         const result = await enqueuePropertyPayoutDispatchInClient(client, command);
+        if (ownsTransaction) await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        if (ownsTransaction) await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
+    async updateAffiliatePayoutSettings(command) {
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        if (ownsTransaction) await client.query("BEGIN");
+        const result = await updateAffiliatePayoutSettingsInClient(client, command);
         if (ownsTransaction) await client.query("COMMIT");
         return result;
       } catch (error) {
@@ -2370,6 +2533,295 @@ async function enqueuePropertyPayoutDispatchInClient(
   };
 }
 
+async function updateAffiliatePayoutSettingsInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceAffiliatePayoutSettingsPatchCommand,
+): Promise<FinanceAffiliatePayoutSettingsPatchResult> {
+  const affiliateResource = await resolveAffiliateResource(client, command.affiliateId);
+  if (!affiliateResource) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "affiliate_not_found",
+      message: "Affiliate finance resource was not found.",
+    };
+  }
+
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(stableJson(command.payload));
+  const requestedAt = command.audit.requestedAt;
+  const idempotency = await client.query<
+    FinanceManualPaymentIdempotencyRow & { inserted: boolean }
+  >(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       organization_id,
+       property_id,
+       correlation_id,
+       first_seen_at,
+       last_seen_at,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'finance',
+       'affiliate_payout_settings_update',
+       $1,
+       $2,
+       'completed',
+       'organization',
+       $3::uuid,
+       NULL,
+       $4,
+       $5::timestamptz,
+       $5::timestamptz,
+       $5::timestamptz + interval '24 hours',
+       $6::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key)
+     DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+     RETURNING
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       (xmax = 0) AS inserted`,
+    [
+      keyHash,
+      fingerprint,
+      affiliateResource.organizationId,
+      command.audit.correlationId ?? command.audit.requestId,
+      requestedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        affiliateId: command.affiliateId,
+      }),
+    ],
+  );
+  const idempotencyRow = idempotency.rows[0];
+  if (
+    idempotencyRow &&
+    !idempotencyRow.inserted &&
+    idempotencyRow.requestFingerprintHash !== fingerprint
+  ) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message:
+        "Idempotency key was already used with a different affiliate payout settings payload.",
+    };
+  }
+  if (idempotencyRow && !idempotencyRow.inserted) {
+    const replaySettings = await loadAffiliatePayoutSettingsRow(client, command.affiliateId);
+    return {
+      ok: true,
+      status: "idempotent_replay",
+      settings: replaySettings
+        ? toAffiliatePayoutSettingsReadModel(replaySettings)
+        : setupIncompleteAffiliatePayoutSettings(
+            command.affiliateId,
+            requestedAt,
+            affiliateResource.organizationId,
+            command.payload.payoutCurrency,
+          ),
+      commandMeta: buildAffiliatePayoutSettingsCommandMeta(command),
+    };
+  }
+
+  await upsertAffiliatePayoutSettings(client, command, affiliateResource.organizationId);
+  await recordAffiliatePayoutSettingsAuditEvent(
+    client,
+    command,
+    affiliateResource.organizationId,
+    keyHash,
+  );
+  const settingsRow = await loadAffiliatePayoutSettingsRow(client, command.affiliateId);
+  const settings = settingsRow
+    ? toAffiliatePayoutSettingsReadModel(settingsRow)
+    : setupIncompleteAffiliatePayoutSettings(
+        command.affiliateId,
+        requestedAt,
+        affiliateResource.organizationId,
+        command.payload.payoutCurrency,
+      );
+  return {
+    ok: true,
+    status: "updated",
+    settings,
+    commandMeta: buildAffiliatePayoutSettingsCommandMeta(command),
+  };
+}
+
+async function upsertAffiliatePayoutSettings(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceAffiliatePayoutSettingsPatchCommand,
+  organizationId: string,
+): Promise<void> {
+  const existing = await loadAffiliatePayoutSettingsRow(client, command.affiliateId);
+  const current = existing
+    ? toAffiliatePayoutSettingsReadModel(existing)
+    : setupIncompleteAffiliatePayoutSettings(
+        command.affiliateId,
+        command.audit.requestedAt,
+        organizationId,
+        command.payload.payoutCurrency,
+      );
+  const nextProvider = command.payload.payoutProvider ?? current.payoutProvider;
+  const nextCurrency = command.payload.payoutCurrency ?? current.payoutCurrency;
+  const nextSchedule = command.payload.payoutSchedule ?? current.payoutSchedule;
+  const nextThreshold =
+    command.payload.payoutThresholdAmount !== undefined
+      ? command.payload.payoutThresholdAmount
+      : current.payoutThresholdAmount;
+  const nextEnabled = command.payload.payoutsEnabled ?? current.payoutsEnabled;
+
+  await client.query(
+    `WITH existing AS (
+       SELECT id
+       FROM finance.payout_settings
+       WHERE owner_scope = 'organization'
+         AND organization_id = $1::uuid
+       ORDER BY updated_at DESC, id
+       LIMIT 1
+     ),
+     updated AS (
+       UPDATE finance.payout_settings settings
+       SET payout_method = $2,
+           default_currency = $3,
+           status = $4,
+           schedule = $5::jsonb,
+           payout_preferences = payout_preferences || $6::jsonb,
+           source_system = 'finance',
+           updated_at = $7::timestamptz
+       FROM existing
+       WHERE settings.id = existing.id
+       RETURNING settings.id
+     )
+     INSERT INTO finance.payout_settings (
+       organization_id,
+       owner_scope,
+       payout_method,
+       default_currency,
+       status,
+       schedule,
+       payout_preferences,
+       source_system,
+       created_at,
+       updated_at
+     )
+     SELECT
+       $1::uuid,
+       'organization',
+       $2,
+       $3,
+       $4,
+       $5::jsonb,
+       $6::jsonb,
+       'finance',
+       $7::timestamptz,
+       $7::timestamptz
+     WHERE NOT EXISTS (SELECT 1 FROM updated)`,
+    [
+      organizationId,
+      payoutMethodValue(nextProvider),
+      nextCurrency,
+      nextEnabled ? "active" : "paused",
+      JSON.stringify({
+        type: nextSchedule,
+        thresholdAmount: nextThreshold,
+      }),
+      JSON.stringify({
+        payoutsEnabled: nextEnabled,
+        affiliateId: command.affiliateId,
+        updatedByCommandId: command.commandId,
+      }),
+      command.audit.requestedAt,
+    ],
+  );
+}
+
+async function recordAffiliatePayoutSettingsAuditEvent(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceAffiliatePayoutSettingsPatchCommand,
+  organizationId: string,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'finance',
+       'finance.affiliate_payout_settings.updated',
+       1,
+       $2::timestamptz,
+       'organization',
+       $3::uuid,
+       NULL,
+       $4,
+       $5::uuid,
+       'finance',
+       'affiliate_payout_settings',
+       $6,
+       $7,
+       $8,
+       $9::jsonb,
+       '{}'::jsonb,
+       $10::jsonb,
+       'financial',
+       'confidential'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `finance.affiliate-payout-settings.audit.affiliate.${command.affiliateId}.key.${keyHash}.v1`,
+      command.audit.requestedAt,
+      organizationId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      command.affiliateId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        affiliateId: command.affiliateId,
+        changedFields: Object.keys(command.payload).sort(),
+      }),
+      JSON.stringify({
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        ownershipBoundary: {
+          affiliateIdentityOwner: "marketplace/affiliate",
+          providerAccountOwner: "finance",
+          settlementOwner: "finance",
+        },
+      }),
+    ],
+  );
+}
+
 async function loadPropertyPayoutDispatchReadiness(
   client: FinancePropertySettingsWriteClient,
   command: FinancePropertyPayoutDispatchCommand,
@@ -2869,6 +3321,18 @@ function buildPropertyPayoutDispatchCommandMeta(
 
 function buildPropertyPayoutDispatchJobKey(command: FinancePropertyPayoutDispatchCommand): string {
   return `finance.dispatch-property-payout:property:${command.propertyId}:payout:${command.payload.payoutId}:v1`;
+}
+
+function buildAffiliatePayoutSettingsCommandMeta(
+  command: FinanceAffiliatePayoutSettingsPatchCommand,
+): FinanceCommandMeta {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: [...AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS],
+    outboxEvents: [],
+    jobs: [],
+  };
 }
 
 function xenditPayoutReconciliationWindow(
@@ -3444,6 +3908,83 @@ async function loadPaymentSettingsRow(
   return result.rows[0] ?? null;
 }
 
+async function resolveAffiliateResource(
+  pool: FinanceQueryExecutor,
+  affiliateId: string,
+): Promise<FinanceAffiliateResourceRow | null> {
+  const result = await pool.query<FinanceAffiliateResourceRow>(
+    `SELECT link.organization_id::text AS "organizationId"
+     FROM identity.organization_resource_links link
+     JOIN identity.organizations organization
+       ON organization.id = link.organization_id
+      AND organization.kind = 'affiliate_partner'
+      AND organization.status = 'active'
+     WHERE link.product = 'affiliate'
+       AND link.resource_type = 'affiliate'
+       AND link.resource_id = $1
+       AND link.status = 'active'
+     ORDER BY link.updated_at DESC
+     LIMIT 1`,
+    [affiliateId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function loadAffiliatePayoutSettingsRow(
+  pool: FinanceQueryExecutor,
+  affiliateId: string,
+): Promise<FinanceAffiliatePayoutSettingsRow | null> {
+  const result = await pool.query<FinanceAffiliatePayoutSettingsRow>(
+    `SELECT
+       link.resource_id AS "affiliateId",
+       link.organization_id::text AS "marketplaceOrganizationId",
+       settings.status = 'active' AS "payoutsEnabled",
+       settings.payout_method AS "payoutProvider",
+       settings.default_currency AS "payoutCurrency",
+       settings.schedule AS "payoutSchedule",
+       settings.payout_preferences AS "payoutPreferences",
+       settings.schedule ->> 'thresholdAmount' AS "payoutThresholdAmount",
+       settings.updated_at AS "updatedAt",
+       account.provider_account_id AS "providerAccountId",
+       account.provider,
+       account.status AS "providerStatus",
+       account.onboarding_status AS "providerOnboardingStatus",
+       account.payouts_enabled AS "providerPayoutsEnabled",
+       COALESCE(visibility.source_freshness, '{}'::jsonb) AS "sourceFreshness"
+     FROM identity.organization_resource_links link
+     JOIN identity.organizations organization
+       ON organization.id = link.organization_id
+      AND organization.kind = 'affiliate_partner'
+      AND organization.status = 'active'
+     LEFT JOIN finance.payout_settings settings
+       ON settings.organization_id = link.organization_id
+      AND settings.owner_scope = 'organization'
+     LEFT JOIN finance.payment_provider_accounts account
+       ON account.id = settings.organization_provider_account_id
+      AND account.organization_id = settings.organization_id
+      AND account.account_scope = 'organization'
+     LEFT JOIN LATERAL (
+       SELECT source_freshness
+       FROM finance.finance_visibility_read_model visibility
+       WHERE visibility.organization_id = link.organization_id
+         AND visibility.visibility_scope = 'affiliate_payout'
+         AND visibility.resource_type = 'affiliate'
+         AND visibility.resource_id = link.resource_id
+         AND visibility.required_permission_key = 'affiliate.payout.manage'
+       ORDER BY visibility.projected_at DESC
+       LIMIT 1
+     ) visibility ON TRUE
+     WHERE link.product = 'affiliate'
+       AND link.resource_type = 'affiliate'
+       AND link.resource_id = $1
+       AND link.status = 'active'
+     ORDER BY settings.updated_at DESC NULLS LAST
+     LIMIT 1`,
+    [affiliateId],
+  );
+  return result.rows[0] ?? null;
+}
+
 async function loadFinancialSummaryRow(
   pool: FinanceQueryExecutor,
   propertyId: string,
@@ -3793,6 +4334,94 @@ async function loadPayoutRows(
   };
 }
 
+async function loadAffiliatePayoutRows(
+  pool: FinanceQueryExecutor,
+  affiliateId: string,
+  organizationId: string,
+  query: FinancePayoutListQuery,
+): Promise<FinanceRowsWithTotal<FinancePayoutRow>> {
+  const result = await pool.query<FinancePayoutRow>(
+    `WITH payout_base AS (
+       SELECT
+         payout.id::text AS "payoutId",
+         payout.owner_scope AS "ownerScope",
+         payout.property_id::text AS "propertyId",
+         payout.organization_id::text AS "organizationId",
+         payout.related_property_id::text AS "relatedPropertyId",
+         payout.guest_booking_id::text AS "guestBookingId",
+         payout.payment_id::text AS "paymentId",
+         payout.payout_status AS "payoutStatus",
+         payout.amount::text AS amount,
+         payout.fee_amount::text AS "feeAmount",
+         payout.net_amount::text AS "netAmount",
+         payout.currency,
+         COALESCE(account.provider, 'manual') AS provider,
+         payout.provider_payout_id AS "providerPayoutId",
+         payout.scheduled_at AS "scheduledAt",
+         payout.paid_at AS "paidAt",
+         payout.failed_at AS "failedAt",
+         payout.failure_code AS "failureCode",
+         payout.retry_count AS "retryCount",
+         COALESCE(visibility.source_freshness, '{}'::jsonb) AS "sourceFreshness",
+         COALESCE(payout.scheduled_at, payout.paid_at, payout.failed_at, payout.created_at) AS "sortAt"
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.organization_provider_account_id
+        AND account.organization_id = payout.organization_id
+        AND account.account_scope = 'organization'
+       LEFT JOIN LATERAL (
+         SELECT source_freshness
+         FROM finance.finance_visibility_read_model visibility
+         WHERE visibility.organization_id = payout.organization_id
+           AND visibility.visibility_scope = 'affiliate_payout'
+           AND visibility.resource_type = 'affiliate'
+           AND visibility.resource_id = $1
+           AND visibility.required_permission_key = 'affiliate.payout.manage'
+         ORDER BY visibility.projected_at DESC
+         LIMIT 1
+       ) visibility ON TRUE
+       WHERE payout.organization_id = $2::uuid
+         AND payout.owner_scope = 'organization'
+     ),
+     filtered AS (
+       SELECT *
+       FROM payout_base
+       WHERE ($3::text IS NULL OR "payoutStatus" = $3::text)
+         AND ($4::text IS NULL OR provider = $4::text)
+     ),
+     total_count AS (
+       SELECT count(*)::text AS total
+       FROM filtered
+     ),
+     page AS (
+       SELECT *
+       FROM filtered
+       ORDER BY "sortAt" DESC, "payoutId" ASC
+       LIMIT $5::integer OFFSET $6::integer
+     )
+     SELECT
+       page.*,
+       total_count.total
+     FROM page
+     CROSS JOIN total_count`,
+    [
+      affiliateId,
+      organizationId,
+      query.status ?? null,
+      query.provider ?? null,
+      query.limit,
+      query.offset,
+    ],
+  );
+  return {
+    rows: result.rows,
+    total: await totalForPossiblyEmptyPage(pool, result.rows, query.offset, {
+      sql: affiliatePayoutTotalSql(),
+      values: [organizationId, query.status ?? null, query.provider ?? null],
+    }),
+  };
+}
+
 async function loadReconciliationRows(
   pool: FinanceQueryExecutor,
   propertyId: string,
@@ -3814,6 +4443,29 @@ async function loadReconciliationRows(
       values: [propertyId, query.status ?? null, query.provider ?? null],
     }),
   };
+}
+
+function affiliatePayoutTotalSql(): string {
+  return `WITH payout_base AS (
+       SELECT
+         payout.payout_status AS "payoutStatus",
+         COALESCE(account.provider, 'manual') AS provider
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.organization_provider_account_id
+        AND account.organization_id = payout.organization_id
+        AND account.account_scope = 'organization'
+       WHERE payout.organization_id = $1::uuid
+         AND payout.owner_scope = 'organization'
+     ),
+     filtered AS (
+       SELECT *
+       FROM payout_base
+       WHERE ($2::text IS NULL OR "payoutStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)
+     )
+     SELECT count(*)::text AS total
+     FROM filtered`;
 }
 
 function payoutTotalSql(): string {
@@ -4311,6 +4963,50 @@ function toFinancePaymentSettingsReadModel(
   };
 }
 
+function toAffiliatePayoutSettingsReadModel(
+  row: FinanceAffiliatePayoutSettingsRow,
+): FinanceAffiliatePayoutSettingsReadModel {
+  const provider = affiliatePayoutProvider(row.payoutProvider);
+  const providerStatus = providerAccountStatus(row.providerStatus);
+  return {
+    affiliateId: row.affiliateId,
+    marketplaceOrganizationId: row.marketplaceOrganizationId,
+    payoutsEnabled: row.payoutsEnabled ?? false,
+    payoutProvider: provider,
+    payoutCurrency: currencyCode(row.payoutCurrency),
+    payoutSchedule: affiliatePayoutSchedule(row.payoutSchedule),
+    payoutThresholdAmount: row.payoutThresholdAmount
+      ? decimalString(row.payoutThresholdAmount)
+      : null,
+    providerAccount: {
+      providerAccountId: row.providerAccountId,
+      provider: row.provider ? affiliatePayoutProvider(row.provider) : null,
+      status: providerStatus,
+      onboardingStatus: providerOnboardingStatus(row.providerOnboardingStatus),
+      payoutsEnabled: row.providerPayoutsEnabled ?? false,
+    },
+    sourceFreshness: jsonPolicy(row.sourceFreshness),
+    updatedAt: utcDateTime(row.updatedAt, new Date().toISOString()),
+  };
+}
+
+function toAffiliatePayoutSettingsResponse(
+  settings: FinanceAffiliatePayoutSettingsReadModel,
+): FinanceAffiliatePayoutSettingsResponse {
+  const {
+    affiliateId,
+    marketplaceOrganizationId,
+    updatedAt: _updatedAt,
+    ...payoutSettings
+  } = settings;
+  return {
+    contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+    affiliateId,
+    marketplaceOrganizationId,
+    payoutSettings,
+  };
+}
+
 function toFinancialSummaryResponseBody(
   row: FinanceVisibilitySummaryRow,
 ): Omit<FinanceFinancialSummaryResponse, "contractVersion" | "propertyId"> {
@@ -4422,6 +5118,20 @@ function toPayoutListResponseBody(
   result: FinanceRowsWithTotal<FinancePayoutRow>,
   query: FinancePayoutListQuery,
 ): Omit<FinancePayoutListResponse, "contractVersion" | "propertyId"> {
+  const rows = result.rows;
+  return {
+    payouts: rows.map(toPayout),
+    total: result.total,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: financeJsonObject(rows[0]?.sourceFreshness),
+  };
+}
+
+function toAffiliatePayoutListResponseBody(
+  result: FinanceRowsWithTotal<FinancePayoutRow>,
+  query: FinancePayoutListQuery,
+): Omit<FinanceAffiliatePayoutListResponse, "contractVersion" | "affiliateId"> {
   const rows = result.rows;
   return {
     payouts: rows.map(toPayout),
@@ -5019,6 +5729,85 @@ function toPropertyPayoutDispatchCommand(
   };
 }
 
+function toAffiliatePayoutSettingsPatchCommand(
+  request: FastifyRequest<{ Body: AffiliatePayoutSettingsPatchBody }>,
+  affiliateId: string,
+): FinanceAffiliatePayoutSettingsPatchCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return invalidQuery(
+      "invalid_body",
+      "Affiliate payout settings update requires commandId and idempotencyKey.",
+    );
+  }
+
+  const payload: FinanceAffiliatePayoutSettingsPatchCommand["payload"] = {};
+  if (body.payoutsEnabled !== undefined) {
+    if (typeof body.payoutsEnabled !== "boolean") {
+      return invalidQuery("invalid_body", "payoutsEnabled must be a boolean.");
+    }
+    payload.payoutsEnabled = body.payoutsEnabled;
+  }
+  if (body.payoutProvider !== undefined) {
+    const provider = affiliatePayoutProviderBody(body.payoutProvider);
+    if (!provider)
+      return invalidQuery("invalid_provider", "Unsupported affiliate payout provider.");
+    payload.payoutProvider = provider;
+  }
+  if (body.payoutCurrency !== undefined) {
+    const currency = currencyBodyString(body.payoutCurrency);
+    if (!currency) return invalidQuery("invalid_body", "payoutCurrency must be an ISO-4217 code.");
+    payload.payoutCurrency = currency;
+  }
+  if (body.payoutSchedule !== undefined) {
+    const schedule = affiliatePayoutScheduleBody(body.payoutSchedule);
+    if (!schedule) return invalidQuery("invalid_body", "Unsupported affiliate payout schedule.");
+    payload.payoutSchedule = schedule;
+  }
+  if (body.payoutThresholdAmount !== undefined) {
+    if (body.payoutThresholdAmount === null) {
+      payload.payoutThresholdAmount = null;
+    } else {
+      const amount = decimalBodyString(body.payoutThresholdAmount);
+      if (!amount) {
+        return invalidQuery(
+          "invalid_body",
+          "payoutThresholdAmount must be a positive decimal string or null.",
+        );
+      }
+      payload.payoutThresholdAmount = amount;
+    }
+  }
+  if (Object.keys(payload).length === 0) {
+    return invalidQuery("invalid_body", "Affiliate payout settings update has no changes.");
+  }
+
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    commandType: "finance.affiliate_payout_settings.update",
+    commandId,
+    idempotencyKey,
+    affiliateId,
+    audit: {
+      actor: authContext
+        ? {
+            kind: "user",
+            userId: authContext.actor.internalUserId,
+            organizationId: authContext.selectedOrganization.organizationId,
+          }
+        : { kind: "system", service: "apps/api" },
+      requestId: authContext?.audit.requestId ?? commandId,
+      correlationId: authContext?.audit.correlationId,
+      reason: "Update affiliate payout settings",
+      requestedAt: authContext?.audit.receivedAt ?? now,
+    },
+    payload,
+  };
+}
+
 function integerBodyNumber(value: unknown): number | undefined {
   const numberValue =
     typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -5087,7 +5876,8 @@ function toFinanceCommandError(
     | Extract<FinanceManualPaymentRecordResult, { ok: false }>
     | Extract<FinanceProviderAccountCommandResult, { ok: false }>
     | Extract<FinanceXenditPayoutReconciliationResult, { ok: false }>
-    | Extract<FinancePropertyPayoutDispatchResult, { ok: false }>,
+    | Extract<FinancePropertyPayoutDispatchResult, { ok: false }>
+    | Extract<FinanceAffiliatePayoutSettingsPatchResult, { ok: false }>,
 ) {
   return {
     statusCode: result.statusCode,
@@ -5173,6 +5963,23 @@ function enforceFinanceAffiliateWritePolicy(
   }
 }
 
+function enforceFinanceAffiliatePolicy(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  affiliateId: string,
+): boolean {
+  const policy = financeAffiliatePolicy(affiliateId);
+  try {
+    enforceRoutePolicy(request, policy);
+    return true;
+  } catch (error) {
+    const accessError = toFinanceAffiliateAccessError(error, request, affiliateId);
+    if (!accessError) throw error;
+    reply.code(accessError.statusCode).send(accessError);
+    return false;
+  }
+}
+
 function financePropertyReadPolicies(propertyId: string): RouteAuthorizationPolicy[] {
   const resourceTypes = ["pms_property", "property"] as const;
   return resourceTypes.flatMap((resourceType) => [
@@ -5213,6 +6020,27 @@ function financePropertyReadPolicies(propertyId: string): RouteAuthorizationPoli
       },
     },
   ]);
+}
+
+function financeAffiliatePolicy(affiliateId: string): RouteAuthorizationPolicy {
+  return {
+    permission: "affiliate.payout.manage",
+    entitlement: {
+      product: "affiliate",
+      key: "affiliate-payouts",
+      resource: {
+        product: "affiliate",
+        resourceType: "affiliate",
+        resourceId: affiliateId,
+      },
+    },
+    resource: {
+      product: "affiliate",
+      resourceType: "affiliate",
+      resourceId: affiliateId,
+      allowedRelationships: ["owner", "finance_manager"],
+    },
+  };
 }
 
 function financePropertyWritePolicies(propertyId: string): RouteAuthorizationPolicy[] {
@@ -5257,6 +6085,60 @@ function financePropertyWritePolicies(propertyId: string): RouteAuthorizationPol
   ]);
 }
 
+function toFinanceAffiliateAccessError(
+  error: unknown,
+  request: FastifyRequest,
+  affiliateId: string,
+): FinanceAccessError | null {
+  if (!isStatusError(error)) return null;
+
+  if (error.statusCode === 401) {
+    return {
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    };
+  }
+
+  if (error.statusCode !== 403) return null;
+
+  const code = toFinanceAffiliateAuthorizationCode(error.message, request, affiliateId);
+  return {
+    statusCode: 403,
+    code,
+    category: "authorization",
+    message: toFinanceAffiliateAuthorizationMessage(code),
+  };
+}
+
+function toFinanceAffiliateAuthorizationCode(
+  message: string,
+  request: FastifyRequest,
+  affiliateId: string,
+): Exclude<FinanceAccessError["code"], "unauthenticated"> {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("permission")) return "missing_permission";
+  if (hasActiveFinanceAffiliateEntitlement(request, affiliateId)) return "missing_resource_access";
+  if (hasInactiveFinanceAffiliateEntitlement(request, affiliateId)) return "inactive_entitlement";
+  return "missing_entitlement";
+}
+
+function toFinanceAffiliateAuthorizationMessage(
+  code: Exclude<FinanceAccessError["code"], "unauthenticated">,
+): string {
+  switch (code) {
+    case "missing_permission":
+      return "Missing required affiliate payout permission.";
+    case "inactive_entitlement":
+      return "Affiliate payout entitlement is not active.";
+    case "missing_entitlement":
+      return "Missing active affiliate payout entitlement.";
+    case "missing_resource_access":
+      return "Missing affiliate payout resource access.";
+  }
+}
+
 function enforceAnyFinancePropertyReadPolicy(
   request: FastifyRequest,
   policies: RouteAuthorizationPolicy[],
@@ -5272,6 +6154,48 @@ function enforceAnyFinancePropertyReadPolicy(
     }
   }
   throw errors[0] ?? new Error("Finance property read policy denied.");
+}
+
+function hasInactiveFinanceAffiliateEntitlement(
+  request: FastifyRequest,
+  affiliateId: string,
+): boolean {
+  return (
+    request.authContext?.entitlements.some((entitlement) => {
+      if (!isFinanceAffiliateEntitlement(entitlement.product, entitlement.key)) return false;
+      if (entitlement.status === "active") return false;
+      return entitlementAppliesToFinanceAffiliate(entitlement.resource, affiliateId);
+    }) ?? false
+  );
+}
+
+function hasActiveFinanceAffiliateEntitlement(
+  request: FastifyRequest,
+  affiliateId: string,
+): boolean {
+  return (
+    request.authContext?.entitlements.some((entitlement) => {
+      if (!isFinanceAffiliateEntitlement(entitlement.product, entitlement.key)) return false;
+      if (entitlement.status !== "active") return false;
+      return entitlementAppliesToFinanceAffiliate(entitlement.resource, affiliateId);
+    }) ?? false
+  );
+}
+
+function isFinanceAffiliateEntitlement(product: string, key: string): boolean {
+  return product === "affiliate" && key === "affiliate-payouts";
+}
+
+function entitlementAppliesToFinanceAffiliate(
+  resource: { product: string; resourceType: string; resourceId: string } | undefined,
+  affiliateId: string,
+): boolean {
+  if (!resource) return true;
+  return (
+    resource.product === "affiliate" &&
+    resource.resourceType === "affiliate" &&
+    resource.resourceId === affiliateId
+  );
 }
 
 function toFinanceAccessError(
@@ -5440,6 +6364,37 @@ function paymentProvider(value: unknown): FinanceRoutePaymentProvider {
     return value;
   }
   return "manual";
+}
+
+function affiliatePayoutProvider(value: unknown): FinanceAffiliatePayoutProvider {
+  if (value === "stripe" || value === "bank_transfer" || value === "manual") return value;
+  if (value === "bank" || value === "bank_account") return "bank_transfer";
+  return "manual";
+}
+
+function affiliatePayoutProviderBody(value: unknown): FinanceAffiliatePayoutProvider | undefined {
+  if (value === "stripe" || value === "bank_transfer" || value === "manual") return value;
+  return undefined;
+}
+
+function payoutMethodValue(value: FinanceAffiliatePayoutProvider): string {
+  return value;
+}
+
+function affiliatePayoutSchedule(value: unknown): FinanceAffiliatePayoutSchedule {
+  const scheduleType =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)["type"]
+      : value;
+  if (scheduleType === "manual" || scheduleType === "monthly" || scheduleType === "threshold") {
+    return scheduleType;
+  }
+  return "monthly";
+}
+
+function affiliatePayoutScheduleBody(value: unknown): FinanceAffiliatePayoutSchedule | undefined {
+  if (value === "manual" || value === "monthly" || value === "threshold") return value;
+  return undefined;
 }
 
 function paymentMethods(value: unknown): FinanceRoutePaymentMethod[] {
