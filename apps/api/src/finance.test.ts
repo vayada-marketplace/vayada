@@ -1837,7 +1837,9 @@ describe("finance route contracts", () => {
             expect(text).toContain("job.job_type = 'finance.reconcile-payout'");
             expect(text).toContain("activeLegacyTransferWindow");
             expect(text).toContain("legacyPropertyPayoutSchedulerFrozenAt");
-            expect(text).toContain("payout.id = $2::uuid");
+            expect(text).toContain("payout.source_payout_id = $2::text");
+            expect(text).toContain("payout.payout_metadata ->> 'payoutId' = $2::text");
+            expect(text).toContain("THEN $2::uuid");
             return {
               rows: [
                 {

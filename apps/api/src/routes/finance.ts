@@ -1322,9 +1322,10 @@ export function createTargetFinancePropertySettingsRepository(config: {
       return toPayoutListResponseBody(result, query);
     },
     async getAffiliatePayoutSettings(affiliateId) {
-      const row = await loadAffiliatePayoutSettingsRow(pool, affiliateId);
-      if (row) return toAffiliatePayoutSettingsReadModel(row);
       const resource = await resolveAffiliateResource(pool, affiliateId);
+      if (!resource) return null;
+      const row = await loadAffiliatePayoutSettingsRow(pool, affiliateId, resource.organizationId);
+      if (row) return toAffiliatePayoutSettingsReadModel(row);
       return resource
         ? setupIncompleteAffiliatePayoutSettings(
             affiliateId,
@@ -2650,7 +2651,11 @@ async function updateAffiliatePayoutSettingsInClient(
     };
   }
   if (idempotencyRow && !idempotencyRow.inserted) {
-    const replaySettings = await loadAffiliatePayoutSettingsRow(client, command.affiliateId);
+    const replaySettings = await loadAffiliatePayoutSettingsRow(
+      client,
+      command.affiliateId,
+      affiliateResource.organizationId,
+    );
     return {
       ok: true,
       status: "idempotent_replay",
@@ -2673,7 +2678,11 @@ async function updateAffiliatePayoutSettingsInClient(
     affiliateResource.organizationId,
     keyHash,
   );
-  const settingsRow = await loadAffiliatePayoutSettingsRow(client, command.affiliateId);
+  const settingsRow = await loadAffiliatePayoutSettingsRow(
+    client,
+    command.affiliateId,
+    affiliateResource.organizationId,
+  );
   const settings = settingsRow
     ? toAffiliatePayoutSettingsReadModel(settingsRow)
     : setupIncompleteAffiliatePayoutSettings(
@@ -2695,7 +2704,11 @@ async function upsertAffiliatePayoutSettings(
   command: FinanceAffiliatePayoutSettingsPatchCommand,
   organizationId: string,
 ): Promise<void> {
-  const existing = await loadAffiliatePayoutSettingsRow(client, command.affiliateId);
+  const existing = await loadAffiliatePayoutSettingsRow(
+    client,
+    command.affiliateId,
+    organizationId,
+  );
   const current = existing
     ? toAffiliatePayoutSettingsReadModel(existing)
     : setupIncompleteAffiliatePayoutSettings(
@@ -2893,7 +2906,15 @@ async function loadPropertyPayoutDispatchReadiness(
          AND job.status IN ('pending', 'running', 'failed', 'dead_lettered')
      ) reconciliation ON TRUE
      WHERE payout.property_id = $1::uuid
-       AND payout.id = $2::uuid
+       AND (
+         payout.id = CASE
+           WHEN $2::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+             THEN $2::uuid
+           ELSE NULL
+         END
+         OR payout.source_payout_id = $2::text
+         OR payout.payout_metadata ->> 'payoutId' = $2::text
+       )
        AND payout.owner_scope = 'property'
      LIMIT 1`,
     [command.propertyId, command.payload.payoutId],
@@ -3968,6 +3989,7 @@ async function resolveAffiliateResource(
 async function loadAffiliatePayoutSettingsRow(
   pool: FinanceQueryExecutor,
   affiliateId: string,
+  organizationId?: string,
 ): Promise<FinanceAffiliatePayoutSettingsRow | null> {
   const result = await pool.query<FinanceAffiliatePayoutSettingsRow>(
     `SELECT
@@ -4013,10 +4035,11 @@ async function loadAffiliatePayoutSettingsRow(
      WHERE link.product = 'affiliate'
        AND link.resource_type = 'affiliate'
        AND link.resource_id = $1
+       AND ($2::uuid IS NULL OR link.organization_id = $2::uuid)
        AND link.status = 'active'
      ORDER BY settings.updated_at DESC NULLS LAST
      LIMIT 1`,
-    [affiliateId],
+    [affiliateId, organizationId ?? null],
   );
   return result.rows[0] ?? null;
 }

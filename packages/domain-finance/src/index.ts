@@ -1451,6 +1451,7 @@ export type FinanceCommand =
   | CreateStripeProviderAccountCommand
   | IssueStripeOnboardingLinkCommand
   | FinancePropertyPayoutDispatchCommand
+  | FinanceAffiliatePayoutSettingsPatchCommand
   | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
@@ -1463,6 +1464,7 @@ export const financeCommandTypes = [
   "finance.provider_account.stripe.create",
   "finance.provider_account.stripe.onboarding_link.issue",
   "finance.property_payout.dispatch",
+  "finance.affiliate_payout_settings.update",
   "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 

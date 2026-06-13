@@ -694,6 +694,20 @@ async function insertProviderAttempt(
   db: Queryable,
   attempt: FinancePayoutProviderAttemptRecord,
 ): Promise<void> {
+  const job = await db.query<{ id: string }>(
+    `SELECT id::text AS id
+     FROM platform.jobs
+     WHERE queue_name = $1
+       AND job_key = $2
+     LIMIT 1`,
+    [attempt.queueName, attempt.idempotencyKey],
+  );
+  if (!job.rows[0]) {
+    throw new Error(
+      `Missing ${attempt.queueName} platform job for payout provider attempt ${attempt.idempotencyKey}.`,
+    );
+  }
+
   const result = await db.query(
     `INSERT INTO platform.job_attempts (
        job_id,
@@ -707,7 +721,7 @@ async function insertProviderAttempt(
        error_metadata
      )
      SELECT
-       job.id,
+       $9::uuid,
        $2,
        $3,
        $4,
@@ -716,9 +730,6 @@ async function insertProviderAttempt(
        $6,
        $7,
        $8::jsonb
-     FROM platform.jobs job
-     WHERE job.queue_name = $9
-       AND job.job_key = $1
      ON CONFLICT (job_id, attempt_number) DO NOTHING`,
     [
       attempt.idempotencyKey,
@@ -737,14 +748,10 @@ async function insertProviderAttempt(
         requestPayloadHash: attempt.requestPayloadHash,
         retryable: attempt.retryable,
       }),
-      attempt.queueName,
+      job.rows[0].id,
     ],
   );
-  if ((result.rowCount ?? 0) === 0) {
-    throw new Error(
-      `Missing ${attempt.queueName} platform job for payout provider attempt ${attempt.idempotencyKey}.`,
-    );
-  }
+  if ((result.rowCount ?? 0) === 0) return;
 }
 
 async function claimPropertyPayoutDispatch(
@@ -783,7 +790,7 @@ async function markPropertyPayoutDispatched(
   attempt: FinancePayoutProviderAttemptRecord,
   context: FinancePropertyPayoutDispatchContext,
 ): Promise<FinancePropertyPayoutDispatchMutationResult> {
-  await db.query(
+  const update = await db.query(
     `UPDATE finance.payouts
      SET payout_status = $1,
          provider_payout_id = $2,
@@ -807,6 +814,11 @@ async function markPropertyPayoutDispatched(
       candidate.propertyId,
     ],
   );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark property payout dispatched",
+    candidate.payoutId,
+  );
   await markDispatchJobFinished(db, candidate, "succeeded", context);
   return {
     payoutId: candidate.payoutId,
@@ -824,7 +836,7 @@ async function markPropertyPayoutDispatchFailed(
   context: FinancePropertyPayoutDispatchContext,
 ): Promise<FinancePropertyPayoutDispatchMutationResult> {
   const exhausted = !result.retryable || attempt.attemptNumber >= candidate.maxAttempts;
-  await db.query(
+  const update = await db.query(
     `UPDATE finance.payouts
      SET payout_status = $1,
          retry_count = GREATEST(retry_count, $2),
@@ -851,6 +863,11 @@ async function markPropertyPayoutDispatchFailed(
       candidate.payoutId,
       candidate.propertyId,
     ],
+  );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark property payout dispatch failed",
+    candidate.payoutId,
   );
   await markDispatchJobFinished(db, candidate, exhausted ? "failed" : "pending", context);
   return {
@@ -898,7 +915,7 @@ async function markAffiliatePayoutDispatched(
   attempt: FinancePayoutProviderAttemptRecord,
   context: FinanceAffiliatePayoutDispatchContext,
 ): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
-  await db.query(
+  const update = await db.query(
     `UPDATE finance.payouts
      SET payout_status = $1,
          provider_payout_id = $2,
@@ -924,6 +941,11 @@ async function markAffiliatePayoutDispatched(
       candidate.organizationId,
     ],
   );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark affiliate payout dispatched",
+    candidate.payoutId,
+  );
   await recordAffiliatePayoutNotificationAudit(db, candidate, result, context);
   await markAffiliateDispatchJobFinished(db, candidate, "succeeded", context);
   return {
@@ -943,7 +965,7 @@ async function markAffiliatePayoutDispatchFailed(
   context: FinanceAffiliatePayoutDispatchContext,
 ): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
   const exhausted = !result.retryable || attempt.attemptNumber >= candidate.maxAttempts;
-  await db.query(
+  const update = await db.query(
     `UPDATE finance.payouts
      SET payout_status = $1,
          retry_count = GREATEST(retry_count, $2),
@@ -972,6 +994,11 @@ async function markAffiliatePayoutDispatchFailed(
       candidate.organizationId,
     ],
   );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark affiliate payout dispatch failed",
+    candidate.payoutId,
+  );
   await markAffiliateDispatchJobFinished(db, candidate, exhausted ? "failed" : "pending", context);
   return {
     payoutId: candidate.payoutId,
@@ -988,7 +1015,7 @@ async function markDispatchJobFinished(
   status: "succeeded" | "failed" | "pending",
   context: FinancePropertyPayoutDispatchContext,
 ): Promise<void> {
-  await db.query(
+  const update = await db.query(
     `UPDATE platform.jobs
      SET status = $1,
          attempts_count = attempts_count + 1,
@@ -1004,6 +1031,11 @@ async function markDispatchJobFinished(
       buildPropertyPayoutDispatchJobKey(candidate),
     ],
   );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark property payout dispatch job",
+    candidate.payoutId,
+  );
 }
 
 async function markAffiliateDispatchJobFinished(
@@ -1012,7 +1044,7 @@ async function markAffiliateDispatchJobFinished(
   status: "succeeded" | "failed" | "pending",
   context: FinanceAffiliatePayoutDispatchContext,
 ): Promise<void> {
-  await db.query(
+  const update = await db.query(
     `UPDATE platform.jobs
      SET status = $1,
          attempts_count = attempts_count + 1,
@@ -1028,6 +1060,21 @@ async function markAffiliateDispatchJobFinished(
       buildAffiliatePayoutDispatchJobKey(candidate),
     ],
   );
+  assertSinglePayoutMutation(
+    update.rowCount,
+    "mark affiliate payout dispatch job",
+    candidate.payoutId,
+  );
+}
+
+function assertSinglePayoutMutation(
+  rowCount: number | null | undefined,
+  action: string,
+  payoutId: string,
+): void {
+  if (rowCount !== 1) {
+    throw new Error(`${action} expected to update one row for payout ${payoutId}.`);
+  }
 }
 
 async function recordAffiliatePayoutNotificationAudit(
