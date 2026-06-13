@@ -801,14 +801,16 @@ function executeOperationalTestCommand<
   auditEvents: string[],
   mutate: (command: TCommand) => PmsOperationalCommandResult,
 ): PmsOperationalCommandResult {
-  const replay = replayResponses.get(command.idempotencyKey);
+  const commandType = "status" in command ? "status" : "reason" in command ? "no_show" : "check_in";
+  const replayKey = `${command.guestBookingId}:${command.idempotencyKey}:${commandType}`;
+  const replay = replayResponses.get(replayKey);
   if (replay) return replay;
 
   const conflict = operationalCommandConflict(command);
   if (conflict) return conflict;
 
   const result = mutate(command);
-  replayResponses.set(command.idempotencyKey, result);
+  replayResponses.set(replayKey, result);
   auditEvents.push(`audit_event:${command.guestBookingId}:${command.commandId}`);
   return result;
 }
