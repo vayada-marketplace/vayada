@@ -17,7 +17,8 @@ repo contains only public website pages — no authenticated app code.
 | `/api/health`                                                                       | Health check (for the container platform) |
 
 `/hotel-creator-network` pulls live creators/hotels from the marketplace
-backend API (cross-origin, like the contact form) — see `NEXT_PUBLIC_API_URL`.
+backend API, and `/contact` submits to the target platform intake route —
+see `NEXT_PUBLIC_API_URL`.
 
 The `/choose-product` login router stays in `vayada-creator-marketplace-frontend`
 (it's part of the auth flow, linked from `/login`). The marketing chrome
@@ -34,9 +35,9 @@ npm run build    # always run before declaring a change done
 npm run lint
 ```
 
-`NEXT_PUBLIC_API_URL` points the contact form + HCN data fetch at the
-marketplace backend (`http://localhost:8000` locally, `https://api.vayada.com`
-in prod). See `.env.example`.
+`NEXT_PUBLIC_API_URL` points the contact form and HCN data fetch at the public
+API host (`http://localhost:8003` for the target API locally,
+`https://api.vayada.com` in prod). See `.env.example`.
 
 ## Deploy
 
