@@ -7,6 +7,10 @@ import {
   type PmsOperationsCommandPool,
 } from "./domains/pmsOperationsCommandRepository.js";
 import type {
+  PmsCheckoutCharge,
+  PmsCheckoutChargeCreateCommand,
+  PmsCheckoutChargeMarkPaidCommand,
+  PmsCheckoutChargeWaiveCommand,
   PmsOperationalTemplate,
   PmsOperationalTemplateUpdateCommand,
   PmsOperationsReadRepository,
@@ -172,6 +176,98 @@ describe("PMS operations command repository", () => {
       ),
     ).toHaveLength(1);
   });
+
+  it("persists checkout charge operational commands without finance writes or outbox side effects", async () => {
+    const target = targetPrivateNotesPool();
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository: unusedReadRepository,
+      now: target.now,
+    });
+
+    const create = await repository.createCheckoutCharge(checkoutChargeCreateCommand());
+    expect(create.ok).toBe(true);
+    if (!create.ok) throw new Error("checkout charge create unexpectedly failed");
+
+    const listed = await repository.listCheckoutCharges(defaultPropertyId, defaultGuestBookingId);
+    const paid = await repository.markCheckoutChargePaid(
+      checkoutChargeMarkPaidCommand({ chargeId: create.charge.chargeId }),
+    );
+    const waived = await repository.waiveCheckoutCharge(
+      checkoutChargeWaiveCommand({ chargeId: create.charge.chargeId }),
+    );
+    const replay = await repository.createCheckoutCharge(checkoutChargeCreateCommand());
+
+    expect(listed).toHaveLength(1);
+    expect(paid.ok).toBe(true);
+    expect(waived.ok).toBe(true);
+    expect(replay).toEqual({ ...create, replayed: true });
+    if (!paid.ok || !waived.ok) {
+      throw new Error("checkout charge state command unexpectedly failed");
+    }
+    expect(create.charge).toMatchObject({
+      label: "Minibar",
+      amount: { amountDecimal: "12.00", currency: "EUR" },
+      status: "pending",
+      operationalOwnership: {
+        owner: "pms",
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+      },
+    });
+    expect(paid.charge).toMatchObject({
+      status: "paid",
+      settledAt: "2026-08-14T17:01:00.000Z",
+      operationalOwnership: { financeSettlementOwner: "finance", providerSettlement: false },
+    });
+    expect(waived.charge).toMatchObject({
+      status: "waived",
+      waivedAt: "2026-08-14T17:02:00.000Z",
+      operationalOwnership: { financeSettlementOwner: "finance", providerSettlement: false },
+    });
+    expect(create.commandMeta.sideEffects).toEqual(["audit_event"]);
+    expect(paid.commandMeta.sideEffects).toEqual(["audit_event"]);
+    expect(waived.commandMeta.sideEffects).toEqual(["audit_event"]);
+    expect(target.auditEvents.map((event) => event.action)).toEqual([
+      "pms.checkout_charge.created",
+      "pms.checkout_charge.marked_paid",
+      "pms.checkout_charge.waived",
+    ]);
+    expect(target.calls.some((call) => call.text.includes("finance."))).toBe(false);
+    expect(target.calls.some((call) => call.text.includes("platform.outbox_events"))).toBe(false);
+    expect(
+      target.calls.filter((call) => call.text.includes("INSERT INTO pms.booking_checkout_charges")),
+    ).toHaveLength(1);
+  });
+
+  it("rejects checkout charge assignment IDs outside the reservation before insert", async () => {
+    const target = targetPrivateNotesPool();
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository: unusedReadRepository,
+      now: target.now,
+    });
+
+    const result = await repository.createCheckoutCharge(
+      checkoutChargeCreateCommand({
+        commandId: "cmd-checkout-charge-stale-assignment",
+        idempotencyKey: "client-checkout-charge-stale-assignment",
+        assignmentId: "f6855500-0000-0000-0000-000000009999",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      statusCode: 400,
+      code: "invalid_body",
+    });
+    expect(
+      target.calls.some((call) => call.text.includes("INSERT INTO pms.booking_checkout_charges")),
+    ).toBe(false);
+    expect(target.auditEvents).toHaveLength(0);
+  });
 });
 
 const defaultPropertyId = "f6853000-0000-0000-0000-000000000001";
@@ -193,6 +289,12 @@ type TemplateRecord = {
   template: PmsOperationalTemplate;
 };
 
+type CheckoutChargeRecord = {
+  propertyId: string;
+  guestBookingId: string;
+  charge: PmsCheckoutCharge;
+};
+
 type IdempotencyRecord = {
   status: "in_progress" | "completed";
   requestFingerprintHash: string;
@@ -212,11 +314,16 @@ function targetPrivateNotesPool(): {
   const idempotencyRows = new Map<string, IdempotencyRecord>();
   const notes = new Map<string, PrivateNoteRecord>();
   const templates = new Map<string, TemplateRecord>();
+  const checkoutCharges = new Map<string, CheckoutChargeRecord>();
+  const assignments = new Set([
+    `${defaultPropertyId}:${defaultGuestBookingId}:f6855500-0000-0000-0000-000000000001`,
+  ]);
   const reservations = new Set([
     `${defaultPropertyId}:${defaultGuestBookingId}`,
     `${"f6853000-0000-0000-0000-000000000002"}:${"f6854000-0000-0000-0000-000000000002"}`,
   ]);
   let noteSequence = 1;
+  let checkoutChargeSequence = 1;
   let nowSequence = 0;
 
   const query = async <T extends QueryResultRow = QueryResultRow>(
@@ -248,6 +355,15 @@ function targetPrivateNotesPool(): {
               idempotencyMetadata: record.metadata,
             } as unknown as T,
           ])
+        : emptyRows<T>();
+    }
+
+    if (text.includes("FROM pms.operational_booking_assignments assignment")) {
+      const [assignmentId, propertyId, guestBookingId] = values ?? [];
+      return assignments.has(
+        `${String(propertyId)}:${String(guestBookingId)}:${String(assignmentId)}`,
+      )
+        ? rows([{ exists: 1 } as unknown as T])
         : emptyRows<T>();
     }
 
@@ -298,6 +414,69 @@ function targetPrivateNotesPool(): {
           createdAt: note.createdAt,
         } as unknown as T,
       ]);
+    }
+
+    if (text.includes("FROM pms.booking_checkout_charges charge")) {
+      if (text.includes("charge.id = $1::uuid")) {
+        const [chargeId, propertyId, guestBookingId] = values ?? [];
+        const record = checkoutCharges.get(String(chargeId));
+        return record &&
+          record.propertyId === propertyId &&
+          record.guestBookingId === guestBookingId
+          ? rows([toCheckoutChargeRow(record.charge) as unknown as T])
+          : emptyRows<T>();
+      }
+      const [propertyId, guestBookingId] = values ?? [];
+      return rows(
+        [...checkoutCharges.values()]
+          .filter(
+            (record) =>
+              record.propertyId === propertyId && record.guestBookingId === guestBookingId,
+          )
+          .map((record) => toCheckoutChargeRow(record.charge) as unknown as T),
+      );
+    }
+
+    if (text.includes("INSERT INTO pms.booking_checkout_charges")) {
+      const chargeId = `f6855700-0000-0000-0000-${String(checkoutChargeSequence).padStart(12, "0")}`;
+      checkoutChargeSequence += 1;
+      const charge: PmsCheckoutCharge = {
+        chargeId,
+        propertyId: String(values?.[0]),
+        guestBookingId: String(values?.[1]),
+        assignmentId: values?.[2] ? String(values[2]) : null,
+        label: String(values?.[3]),
+        amount: { amountDecimal: String(values?.[4]), currency: String(values?.[5]) },
+        originalAmount: { amountDecimal: String(values?.[4]), currency: String(values?.[5]) },
+        status: "pending",
+        createdByUserId: values?.[6] ? String(values[6]) : null,
+        createdAt: String(values?.[7]),
+        settledAt: null,
+        waivedAt: null,
+        operationalOwnership: {
+          owner: "pms",
+          financeSettlementOwner: "finance",
+          providerSettlement: false,
+        },
+      };
+      checkoutCharges.set(chargeId, {
+        propertyId: charge.propertyId,
+        guestBookingId: charge.guestBookingId,
+        charge,
+      });
+      return rows([toCheckoutChargeRow(charge) as unknown as T]);
+    }
+
+    if (text.includes("UPDATE pms.booking_checkout_charges")) {
+      const [status, chargeId, propertyId, guestBookingId, acceptedAt] = values ?? [];
+      const record = checkoutCharges.get(String(chargeId));
+      if (!record || record.propertyId !== propertyId || record.guestBookingId !== guestBookingId) {
+        return emptyRows<T>();
+      }
+      record.charge.status = status as PmsCheckoutCharge["status"];
+      record.charge.settledAt = status === "paid" ? String(acceptedAt) : null;
+      record.charge.waivedAt = status === "waived" ? String(acceptedAt) : null;
+      return rows([toCheckoutChargeRow(record.charge) as unknown as T]);
     }
 
     if (text.includes("DELETE FROM pms.booking_notes_private")) {
@@ -404,6 +583,86 @@ function targetPrivateNotesPool(): {
       },
       async end() {},
     },
+  };
+}
+
+function checkoutChargeCreateCommand(
+  overrides: Partial<PmsCheckoutChargeCreateCommand> = {},
+): PmsCheckoutChargeCreateCommand {
+  return {
+    propertyId: defaultPropertyId,
+    guestBookingId: defaultGuestBookingId,
+    commandId: "cmd-checkout-charge-create",
+    idempotencyKey: "client-checkout-charge-create",
+    label: "Minibar",
+    amountDecimal: "12.00",
+    currency: "EUR",
+    audit: checkoutChargeAudit("cmd-checkout-charge-create", "Create checkout charge"),
+    ...overrides,
+  };
+}
+
+function checkoutChargeMarkPaidCommand(
+  overrides: Partial<PmsCheckoutChargeMarkPaidCommand> = {},
+): PmsCheckoutChargeMarkPaidCommand {
+  return {
+    propertyId: defaultPropertyId,
+    guestBookingId: defaultGuestBookingId,
+    chargeId: "f6855700-0000-0000-0000-000000000001",
+    commandId: "cmd-checkout-charge-paid",
+    idempotencyKey: "client-checkout-charge-paid",
+    audit: checkoutChargeAudit("cmd-checkout-charge-paid", "Mark checkout charge paid"),
+    ...overrides,
+  };
+}
+
+function checkoutChargeWaiveCommand(
+  overrides: Partial<PmsCheckoutChargeWaiveCommand> = {},
+): PmsCheckoutChargeWaiveCommand {
+  return {
+    propertyId: defaultPropertyId,
+    guestBookingId: defaultGuestBookingId,
+    chargeId: "f6855700-0000-0000-0000-000000000001",
+    commandId: "cmd-checkout-charge-waive",
+    idempotencyKey: "client-checkout-charge-waive",
+    reason: "service recovery",
+    audit: checkoutChargeAudit("cmd-checkout-charge-waive", "Waive checkout charge"),
+    ...overrides,
+  };
+}
+
+function checkoutChargeAudit(
+  commandId: string,
+  reason: string,
+): PmsCheckoutChargeCreateCommand["audit"] {
+  return {
+    actor: {
+      kind: "user",
+      userId: "f6851000-0000-0000-0000-000000000001",
+      organizationId: "f6852000-0000-0000-0000-000000000001",
+    },
+    requestId: commandId,
+    correlationId: commandId,
+    reason,
+    requestedAt: "2026-08-14T17:00:00.000Z",
+  };
+}
+
+function toCheckoutChargeRow(charge: PmsCheckoutCharge): Record<string, unknown> {
+  return {
+    chargeId: charge.chargeId,
+    propertyId: charge.propertyId,
+    guestBookingId: charge.guestBookingId,
+    assignmentId: charge.assignmentId,
+    label: charge.label,
+    amountDecimal: charge.amount.amountDecimal,
+    originalAmountDecimal: charge.originalAmount.amountDecimal,
+    currency: charge.amount.currency,
+    status: charge.status,
+    createdByUserId: charge.createdByUserId,
+    createdAt: charge.createdAt,
+    settledAt: charge.settledAt,
+    waivedAt: charge.waivedAt,
   };
 }
 

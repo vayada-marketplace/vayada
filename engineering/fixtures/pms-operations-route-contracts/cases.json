@@ -728,7 +728,7 @@
     },
     {
       "caseId": "checkout-charge-create-mark-paid-waive",
-      "description": "Checkout charge operations update PMS operational charge state without finance provider side effects.",
+      "description": "Checkout charge operations update PMS operational charge state without finance provider settlement, invoice, payout, or reconciliation ownership.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/checkout-charges",
         "method": "POST",
@@ -741,14 +741,29 @@
         }
       },
       "alsoExercises": [
+        "GET /checkout-charges",
         "POST /checkout-charges/:chargeId/mark-paid",
         "POST /checkout-charges/:chargeId/waive"
       ],
       "expected": {
         "status": 200,
-        "mustInclude": ["charge.chargeId", "charge.status", "commandMeta.sideEffects"],
+        "mustInclude": [
+          "charge.chargeId",
+          "charge.status",
+          "charge.operationalOwnership.owner",
+          "charge.operationalOwnership.financeSettlementOwner",
+          "charge.operationalOwnership.providerSettlement",
+          "commandMeta.sideEffects"
+        ],
         "enums": { "charge.status": ["pending", "paid", "waived", "void"] },
-        "mustNotCall": ["payment provider capture", "invoice posting", "payout dispatcher"]
+        "financeOwnership": "PMS owns checkout charge operational state only; finance owns provider collection, manual settlement contracts, invoices, payouts, reconciliation, and payout dispatch.",
+        "mustNotCall": [
+          "payment provider capture",
+          "invoice posting",
+          "payout dispatcher",
+          "finance reconciliation"
+        ],
+        "mustNotWrite": ["finance.payments", "finance.payouts", "platform.outbox_events"]
       }
     },
     {

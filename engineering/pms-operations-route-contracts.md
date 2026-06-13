@@ -314,7 +314,18 @@ and persist PMS-owned operational setup steps to
 `pms.checkin_checklist_templates` and `pms.checkout_inspection_templates`.
 Template writes validate that `steps` is an array of bounded step objects with
 stable `stepId`, required `label`, and boolean `required` state. Checkout charge
-commands and the check-out command remain out of scope for VAY-783/VAY-784.
+commands are handled by VAY-783; the check-out command remains VAY-784.
+
+VAY-783 implements the P2c checkout charge operational subset in `apps/api`.
+`GET /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges`
+uses the PMS operations read policy; `POST /checkout-charges`,
+`POST /checkout-charges/:chargeId/mark-paid`, and
+`POST /checkout-charges/:chargeId/waive` use the PMS operations manage policy
+and persist only `pms.booking_checkout_charges` operational state plus PMS audit
+events. The legacy F1a guard path
+`POST /checkout-charges/:chargeId/paid` remains as a compatibility alias for
+the same operational mark-paid command. The check-out command is still VAY-784
+and is not implemented by this slice.
 
 `mark-paid` on checkout charges means a front-desk operator marked the
 operational charge as settled for checkout. It is not a provider payment

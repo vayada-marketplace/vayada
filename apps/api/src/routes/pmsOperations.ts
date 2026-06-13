@@ -15,6 +15,7 @@ import type {
   PmsCalendarDay,
   PmsOperationsReadRepository,
   PmsOperationalReservation,
+  PmsMoney,
   PmsReservationListFilters,
   PmsRoomBlockSummary,
   PmsRoom,
@@ -102,6 +103,7 @@ export type PmsOperationalReservationDetail = PmsOperationalReservation & {
 export type PmsAssignmentCommandAction = "assign" | "move" | "unassign" | "swap";
 export type PmsOperationsCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
 export type PmsPrivateNoteSource = "pms" | "migration" | "system";
+export type PmsCheckoutChargeStatus = "pending" | "paid" | "waived" | "void";
 
 export type PmsCommandMeta = {
   contractVersion: PmsOperationsContractVersion;
@@ -156,6 +158,26 @@ export type PmsOperationalTemplate = {
   steps: PmsTemplateStep[];
   updatedByUserId: string | null;
   updatedAt: string | null;
+};
+
+export type PmsCheckoutCharge = {
+  chargeId: string;
+  propertyId: string;
+  guestBookingId: string;
+  assignmentId: string | null;
+  label: string;
+  amount: PmsMoney;
+  originalAmount: PmsMoney;
+  status: PmsCheckoutChargeStatus;
+  createdByUserId: string | null;
+  createdAt: string;
+  settledAt: string | null;
+  waivedAt: string | null;
+  operationalOwnership: {
+    owner: "pms";
+    financeSettlementOwner: "finance";
+    providerSettlement: false;
+  };
 };
 
 export type PmsAssignmentCommandRequest = {
@@ -244,6 +266,31 @@ export type PmsOperationalTemplateUpdateCommand = {
   actorUserId: string;
 };
 
+export type PmsCheckoutChargeCreateCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  assignmentId?: string;
+  label: string;
+  amountDecimal: string;
+  currency: string;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsCheckoutChargeMarkPaidCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  chargeId: string;
+  commandId: string;
+  idempotencyKey: string;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsCheckoutChargeWaiveCommand = PmsCheckoutChargeMarkPaidCommand & {
+  reason?: string;
+};
+
 export type PmsAssignmentCommandResponse = {
   contractVersion: PmsOperationsContractVersion;
   propertyId: string;
@@ -311,6 +358,21 @@ export type PmsOperationalTemplateCommandResponse = PmsOperationalTemplateRespon
   commandMeta: PmsCommandMeta;
 };
 
+export type PmsCheckoutChargesResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  items: PmsCheckoutCharge[];
+};
+
+export type PmsCheckoutChargeCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  charge: PmsCheckoutCharge;
+  commandMeta: PmsCommandMeta;
+};
+
 export type PmsAssignmentCommandConflictCode =
   | "version_conflict"
   | "room_unavailable"
@@ -347,7 +409,7 @@ export type PmsOperationalCommandResult =
   | {
       ok: false;
       statusCode: 400;
-      code: "invalid_status_transition";
+      code: "invalid_body" | "invalid_status_transition";
       message: string;
     }
   | {
@@ -404,6 +466,32 @@ export type PmsOperationalTemplateCommandResult =
       message: string;
     };
 
+export type PmsCheckoutChargeCommandResult =
+  | {
+      ok: true;
+      charge: PmsCheckoutCharge;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "invalid_body" | "invalid_status_transition";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 404;
+      code: "reservation_not_found" | "charge_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
@@ -421,6 +509,19 @@ export type PmsOperationsCommandRepository = {
   updateOperationalTemplate(
     command: PmsOperationalTemplateUpdateCommand,
   ): Promise<PmsOperationalTemplateCommandResult>;
+  listCheckoutCharges(
+    propertyId: string,
+    guestBookingId: string,
+  ): Promise<PmsCheckoutCharge[] | null>;
+  createCheckoutCharge(
+    command: PmsCheckoutChargeCreateCommand,
+  ): Promise<PmsCheckoutChargeCommandResult>;
+  markCheckoutChargePaid(
+    command: PmsCheckoutChargeMarkPaidCommand,
+  ): Promise<PmsCheckoutChargeCommandResult>;
+  waiveCheckoutCharge(
+    command: PmsCheckoutChargeWaiveCommand,
+  ): Promise<PmsCheckoutChargeCommandResult>;
   close?(): Promise<void>;
 };
 
@@ -480,6 +581,17 @@ type PmsCheckoutChargeMarkPaidBody = {
   idempotencyKey?: unknown;
 };
 
+type PmsCheckoutChargeCommandBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  assignmentId?: unknown;
+  label?: unknown;
+  amountDecimal?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  reason?: unknown;
+};
+
 type PmsOperationsErrorCategory =
   | "authentication"
   | "authorization"
@@ -506,7 +618,8 @@ type PmsOperationsErrorCode =
   | "room_type_not_found"
   | "reservation_not_found"
   | "additional_guest_not_found"
-  | "note_not_found";
+  | "note_not_found"
+  | "charge_not_found";
 
 type PmsOperationsError = {
   statusCode: 400 | 401 | 403 | 404 | 409 | 500;
@@ -531,6 +644,7 @@ type PmsOperationsAuthorizationErrorCode = Exclude<
   | "reservation_not_found"
   | "additional_guest_not_found"
   | "note_not_found"
+  | "charge_not_found"
 >;
 
 export async function registerPmsOperationsRoutes(
@@ -559,6 +673,9 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations/:guestBookingId/additional-guests/:guestId",
     "/properties/:propertyId/check-in-checklist",
     "/properties/:propertyId/check-out-inspection",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/waive",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
     "/properties/:propertyId/reservations/:guestBookingId/assignments",
     "/properties/:propertyId/reservations/:guestBookingId/status",
@@ -1009,33 +1126,40 @@ export async function registerPmsOperationsRoutes(
     );
   }
 
-  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
-    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
-    async (request, reply) => {
-      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
-        return sendPmsOperationsError(reply, {
-          statusCode: 403,
-          code: "missing_permission",
-          category: "authorization",
-          message: "PMS operations origin is not allowed.",
-        });
-      }
-      const { propertyId } = request.params;
-      if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+  async function handleCheckoutChargeMarkPaid(
+    request: FastifyRequest<{
+      Params: PmsCheckoutChargeParams;
+      Body: PmsCheckoutChargeMarkPaidBody;
+    }>,
+    reply: FastifyReply,
+  ): Promise<FastifyReply | PmsCheckoutChargeCommandResponse> {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+    const { propertyId, guestBookingId, chargeId } = request.params;
+    if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
 
-      const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
-      if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
+    const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
+    if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
 
-      const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
-      if (freezeEnabled) {
-        return sendPmsOperationsError(reply, {
-          statusCode: 409,
-          code: "finance_bridge_required",
-          category: "conflict",
-          message: "Finance settlement bridge is required before marking checkout charges paid.",
-        });
-      }
+    const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
+    if (freezeEnabled) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 409,
+        code: "finance_bridge_required",
+        category: "conflict",
+        message: "Finance settlement bridge is required before marking checkout charges paid.",
+      });
+    }
+    if (!isUuid(chargeId))
+      return sendPmsOperationsError(reply, invalidBody("chargeId must be a UUID."));
 
+    if (!commandRepository) {
       return sendPmsOperationsError(reply, {
         statusCode: 500,
         code: "read_model_unavailable",
@@ -1043,8 +1167,134 @@ export async function registerPmsOperationsRoutes(
         message:
           "PMS checkout charge mark-paid must be wired to a durable command service before the freeze can be disabled.",
       });
-    },
+    }
+
+    const result = await commandRepository.markCheckoutChargePaid({
+      propertyId,
+      guestBookingId,
+      chargeId,
+      ...commandInput.value,
+      audit: pmsOperationsCommandAudit(
+        request,
+        commandInput.value.commandId,
+        "Mark checkout charge paid",
+      ),
+    });
+    if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
+
+    return {
+      contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+      propertyId,
+      guestBookingId,
+      charge: result.charge,
+      commandMeta: result.commandMeta,
+    } satisfies PmsCheckoutChargeCommandResponse;
+  }
+
+  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
+    handleCheckoutChargeMarkPaid,
   );
+
+  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid",
+    handleCheckoutChargeMarkPaid,
+  );
+
+  if (commandRepository) {
+    app.get<{ Params: PmsReservationParams }>(
+      "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+        try {
+          const charges = await commandRepository.listCheckoutCharges(propertyId, guestBookingId);
+          if (!charges) return sendPmsOperationsError(reply, reservationNotFoundError());
+
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            guestBookingId,
+            items: charges,
+          } satisfies PmsCheckoutChargesResponse;
+        } catch {
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS checkout charges read model is unavailable."),
+          );
+        }
+      },
+    );
+
+    app.post<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckoutChargeCreateCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.createCheckoutCharge(command.value);
+        if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          charge: result.charge,
+          commandMeta: result.commandMeta,
+        } satisfies PmsCheckoutChargeCommandResponse;
+      },
+    );
+
+    app.post<{ Params: PmsCheckoutChargeParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/waive",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId, chargeId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckoutChargeWaiveCommand(propertyId, guestBookingId, chargeId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.waiveCheckoutCharge(command.value);
+        if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          charge: result.charge,
+          commandMeta: result.commandMeta,
+        } satisfies PmsCheckoutChargeCommandResponse;
+      },
+    );
+  }
 
   if (commandRepository) {
     for (const templateRoute of [
@@ -1456,6 +1706,23 @@ function sendPmsOperationalCommandError(
   });
 }
 
+function sendPmsCheckoutChargeCommandError(
+  reply: FastifyReply,
+  result: Exclude<PmsCheckoutChargeCommandResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
+    message: result.message,
+  });
+}
+
 function sendBookingGuestPiiCommandError(
   reply: FastifyReply,
   result: Exclude<BookingGuestPiiCommandResult | BookingGuestPiiDeleteResult, { ok: true }>,
@@ -1506,8 +1773,10 @@ function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaid
       };
     }
   | { error: PmsOperationsError } {
-  const commandId = nonEmptyString(body.commandId);
-  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const raw = objectBody(body);
+  if (!raw) return { error: invalidBody("Checkout charge mark-paid body must be an object.") };
+  const commandId = nonEmptyString(raw.commandId);
+  const idempotencyKey = nonEmptyString(raw.idempotencyKey);
   if (!commandId || !idempotencyKey) {
     return { error: invalidBody("Checkout charge mark-paid requires command metadata.") };
   }
@@ -1518,6 +1787,93 @@ function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaid
       idempotencyKey,
     },
   };
+}
+
+function toCheckoutChargeCreateCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsCheckoutChargeCreateCommand } | { error: PmsOperationsError } {
+  const metadata = toCheckoutChargeCommandMetadata(request.body, "Checkout charge create");
+  if ("error" in metadata) return metadata;
+  const raw = metadata.body;
+  const assignmentId = optionalStringField(raw.assignmentId);
+  const label = stringField(raw.label);
+  const amountDecimal = stringField(raw.amountDecimal) ?? stringField(raw.amount);
+  const currency = stringField(raw.currency)?.toUpperCase();
+
+  if (assignmentId && !isUuid(assignmentId)) {
+    return { error: invalidBody("assignmentId must be a UUID.") };
+  }
+  if (!label || label.length > 200) {
+    return { error: invalidBody("Checkout charge create requires a label up to 200 characters.") };
+  }
+  if (!amountDecimal || !isMoneyAmount(amountDecimal)) {
+    return { error: invalidBody("Checkout charge create requires a valid amountDecimal.") };
+  }
+  if (!currency || !/^[A-Z]{3}$/.test(currency)) {
+    return { error: invalidBody("Checkout charge create requires a three-letter currency.") };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      assignmentId,
+      label,
+      amountDecimal,
+      currency,
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Create checkout charge"),
+    },
+  };
+}
+
+function toCheckoutChargeWaiveCommand(
+  propertyId: string,
+  guestBookingId: string,
+  chargeId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsCheckoutChargeWaiveCommand } | { error: PmsOperationsError } {
+  if (!isUuid(chargeId)) return { error: invalidBody("chargeId must be a UUID.") };
+  const metadata = toCheckoutChargeCommandMetadata(request.body, "Checkout charge waive");
+  if ("error" in metadata) return metadata;
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      chargeId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      reason: optionalStringField(metadata.body.reason),
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Waive checkout charge"),
+    },
+  };
+}
+
+function toCheckoutChargeCommandMetadata(
+  body: unknown,
+  commandName: string,
+):
+  | {
+      body: Record<string, unknown>;
+      value: { commandId: string; idempotencyKey: string };
+    }
+  | { error: PmsOperationsError } {
+  const raw = objectBody(body);
+  if (!raw) return { error: invalidBody(`${commandName} body must be an object.`) };
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody(`${commandName} requires commandId and idempotencyKey.`) };
+  }
+  return { body: raw, value: { commandId, idempotencyKey } };
+}
+
+function isMoneyAmount(value: string): boolean {
+  return /^(0|[1-9]\d{0,12})(\.\d{1,2})?$/.test(value);
 }
 
 function invalidBody(message: string): PmsOperationsError {
