@@ -50,6 +50,7 @@ export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
 export type MarketplaceDiscoverySource = "disabled" | "target";
+export type MarketplaceAdminSource = "disabled" | "target";
 export type BookingCheckoutCommandSource = "legacy_proxy" | "target";
 export type PmsOperationsSource = "disabled" | "target";
 export type FinanceSource = "legacy" | "target";
@@ -81,6 +82,7 @@ export type ApiConfig = {
   bookingReservationsReadDatabaseUrl?: string;
   bookingPublicApiUrl?: string;
   marketplaceDiscoverySource: MarketplaceDiscoverySource;
+  marketplaceAdminSource: MarketplaceAdminSource;
   pmsOperationsSource: PmsOperationsSource;
   financeSource: FinanceSource;
   marketplaceDiscoveryAllowedOrigins: string[];
@@ -307,6 +309,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const marketplaceAdminSource = readSourceEnv(
+    env,
+    "MARKETPLACE_ADMIN_SOURCE",
+    ["disabled", "target"],
+    "disabled",
+  );
   const bookingCheckoutCommandSource = readSourceEnv(
     env,
     "BOOKING_CHECKOUT_COMMAND_SOURCE",
@@ -333,6 +341,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (marketplaceDiscoverySource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_DISCOVERY_SOURCE=target");
+  }
+  if (marketplaceAdminSource === "target" && !targetDatabaseUrl) {
+    throw new Error("TARGET_DATABASE_URL is required when MARKETPLACE_ADMIN_SOURCE=target");
+  }
+  if (marketplaceAdminSource === "target" && !auth) {
+    throw new Error("MARKETPLACE_ADMIN_SOURCE=target requires complete auth config");
   }
   if (pmsOperationsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when PMS_OPERATIONS_SOURCE=target");
@@ -384,6 +398,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
     marketplaceDiscoverySource,
+    marketplaceAdminSource,
     pmsOperationsSource,
     financeSource,
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(

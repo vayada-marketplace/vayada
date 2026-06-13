@@ -3,6 +3,15 @@
  */
 
 import { apiClient } from "./client";
+import {
+  createMarketplaceAdminHotelListing,
+  deleteMarketplaceAdminHotelListing,
+  updateMarketplaceAdminHotelListing,
+  type MarketplaceAdminCreateHotelListingRequest,
+  type MarketplaceAdminUpdateHotelListingRequest,
+  type MarketplaceHotelListingCreatorRequirementsWrite,
+  type MarketplaceHotelListingOfferingWrite,
+} from "@vayada/marketplace-shared/api/admin";
 import type { User, UserDetailResponse, CreateUserRequest } from "@/lib/types";
 
 export interface UsersListResponse {
@@ -175,7 +184,10 @@ export const usersService = {
       creatorRequirements?: any;
     },
   ): Promise<any> => {
-    const response = await apiClient.post<any>(`/admin/users/${hotelUserId}/listings`, data);
+    const response = await createMarketplaceAdminHotelListing(
+      hotelUserId,
+      toMarketplaceAdminCreateListingRequest(data),
+    );
     return transformSnakeToCamel(response);
   },
 
@@ -195,9 +207,10 @@ export const usersService = {
       creatorRequirements?: any;
     },
   ): Promise<any> => {
-    const response = await apiClient.put<any>(
-      `/admin/users/${hotelUserId}/listings/${listingId}`,
-      data,
+    const response = await updateMarketplaceAdminHotelListing(
+      hotelUserId,
+      listingId,
+      toMarketplaceAdminUpdateListingRequest(data),
     );
     return transformSnakeToCamel(response);
   },
@@ -219,10 +232,16 @@ export const usersService = {
     imagesDeleted: number;
     imagesFailed: number;
   }> => {
-    const response = await apiClient.delete<any>(
-      `/admin/users/${hotelUserId}/listings/${listingId}`,
-    );
-    return transformSnakeToCamel(response);
+    const response = await deleteMarketplaceAdminHotelListing(hotelUserId, listingId);
+    return {
+      message: "Listing archived.",
+      deletedListing: {
+        id: response.deletedListing.listingId,
+        name: response.deletedListing.title,
+      },
+      imagesDeleted: 0,
+      imagesFailed: 0,
+    };
   },
 
   /**
@@ -253,3 +272,147 @@ export const usersService = {
     );
   },
 };
+
+function toMarketplaceAdminCreateListingRequest(data: {
+  name: string;
+  location: string;
+  description: string;
+  accommodationType?: string;
+  images?: string[];
+  collaborationOfferings?: any[];
+  creatorRequirements?: any;
+}): MarketplaceAdminCreateHotelListingRequest {
+  return {
+    title: data.name,
+    listingSummary: data.description,
+    accommodationType: toMarketplaceAccommodationType(data.accommodationType),
+    rawLocationText: data.location,
+    imageUrls: data.images ?? [],
+    collaborationOfferings: toMarketplaceOfferings(data.collaborationOfferings),
+    creatorRequirements: toMarketplaceCreatorRequirements(data.creatorRequirements),
+  };
+}
+
+function toMarketplaceAdminUpdateListingRequest(data: {
+  name?: string;
+  location?: string;
+  description?: string;
+  accommodationType?: string;
+  images?: string[];
+  collaborationOfferings?: any[];
+  creatorRequirements?: any;
+}): MarketplaceAdminUpdateHotelListingRequest {
+  return {
+    ...(data.name !== undefined ? { title: data.name } : {}),
+    ...(data.description !== undefined ? { listingSummary: data.description } : {}),
+    ...(data.accommodationType !== undefined
+      ? { accommodationType: toMarketplaceAccommodationType(data.accommodationType) }
+      : {}),
+    ...(data.location !== undefined ? { rawLocationText: data.location } : {}),
+    ...(data.images !== undefined ? { imageUrls: data.images } : {}),
+    ...(data.collaborationOfferings !== undefined
+      ? { collaborationOfferings: toMarketplaceOfferings(data.collaborationOfferings) }
+      : {}),
+    ...(data.creatorRequirements !== undefined
+      ? { creatorRequirements: toMarketplaceCreatorRequirements(data.creatorRequirements) }
+      : {}),
+  };
+}
+
+function toMarketplaceOfferings(
+  offerings: any[] | undefined,
+): MarketplaceHotelListingOfferingWrite[] {
+  return (offerings ?? []).map((offering) => ({
+    collaborationType: toMarketplaceCollaborationType(offering.collaborationType),
+    availabilityMonths: offering.availabilityMonths ?? [],
+    platforms: (offering.platforms ?? []).map(toMarketplacePlatform),
+    freeStayMinNights: toNullableNumber(offering.freeStayMinNights),
+    freeStayMaxNights: toNullableNumber(offering.freeStayMaxNights),
+    paidMaxAmount:
+      offering.paidMaxAmount === null || offering.paidMaxAmount === undefined
+        ? null
+        : String(offering.paidMaxAmount),
+    discountPercentage: toNullableNumber(offering.discountPercentage),
+    commissionPercentage: toNullableNumber(offering.commissionPercentage),
+    minFollowers: toNullableNumber(offering.minFollowers),
+    currency: offering.currency ?? null,
+    termsSummary: offering.termsSummary ?? null,
+  }));
+}
+
+function toMarketplaceCreatorRequirements(
+  requirements: any,
+): MarketplaceHotelListingCreatorRequirementsWrite {
+  return {
+    platforms: (requirements?.platforms ?? []).map(toMarketplacePlatform),
+    targetCountries: requirements?.targetCountries ?? [],
+    targetAgeMin: toNullableNumber(requirements?.targetAgeMin),
+    targetAgeMax: toNullableNumber(requirements?.targetAgeMax),
+    targetAgeGroups: requirements?.targetAgeGroups ?? [],
+    creatorTypes: requirements?.creatorTypes ?? [],
+  };
+}
+
+function toMarketplaceCollaborationType(
+  value: string | undefined,
+): MarketplaceHotelListingOfferingWrite["collaborationType"] {
+  switch (value) {
+    case "Paid":
+      return "paid";
+    case "Discount":
+      return "discount";
+    case "Affiliate":
+      return "affiliate";
+    case "Free Stay":
+    default:
+      return "free_stay";
+  }
+}
+
+function toMarketplacePlatform(
+  value: string,
+): "instagram" | "tiktok" | "youtube" | "facebook" | "blog" | "x" | "other" {
+  switch (value) {
+    case "Instagram":
+      return "instagram";
+    case "TikTok":
+      return "tiktok";
+    case "YouTube":
+      return "youtube";
+    case "Facebook":
+      return "facebook";
+    case "Blog":
+      return "blog";
+    case "X":
+      return "x";
+    default:
+      return "other";
+  }
+}
+
+function toMarketplaceAccommodationType(
+  value: string | undefined,
+): "hotel" | "resort" | "boutique_hotel" | "lodge" | "apartment" | "villa" | "other" | null {
+  switch (value) {
+    case "Hotel":
+    case "City Hotel":
+    case "Luxury Hotel":
+      return "hotel";
+    case "Boutiques Hotel":
+      return "boutique_hotel";
+    case "Apartment":
+      return "apartment";
+    case "Villa":
+      return "villa";
+    case "Lodge":
+      return "lodge";
+    default:
+      return value ? "other" : null;
+  }
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}

@@ -50,6 +50,10 @@ import {
   type MarketplaceTripReadRepository,
 } from "./routes/marketplaceTrips.js";
 import {
+  registerMarketplaceAdminRoutes,
+  type MarketplaceAdminRepository,
+} from "./routes/marketplaceAdmin.js";
+import {
   registerIdentityAdminUserRoutes,
   type IdentityAdminUsersReadRepository,
   type IdentityAdminUserRoutesOptions,
@@ -108,6 +112,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
   marketplaceCollaborationRepository?: MarketplaceCollaborationReadRepository;
   marketplaceTripRepository?: MarketplaceTripReadRepository;
+  marketplaceAdminRepository?: MarketplaceAdminRepository;
   identityPrivacyRepository?: IdentityPrivacyRepository;
   identityLifecycleCommandBus?: IdentityLifecycleCommandBus;
   identityAdminUsersReadRepository?: IdentityAdminUsersReadRepository;
@@ -241,6 +246,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceTripRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceTripRepository,
+    });
+  }
+  if (options.marketplaceAdminRepository) {
+    app.register(registerMarketplaceAdminRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceAdminRepository,
     });
   }
   if (options.identityPrivacyRepository) {
