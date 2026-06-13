@@ -8,6 +8,9 @@ import {
 import { injectJson } from "@vayada/backend-test";
 import type {
   CancellationPolicy,
+  FinanceAffiliatePayoutSettingsPatchCommand,
+  FinanceAffiliatePayoutSettingsPatchResult,
+  FinanceAffiliatePayoutSettingsReadModel,
   FinanceCommandMeta,
   FinanceFinancialSummary,
   FinanceInvoiceDetail,
@@ -22,6 +25,8 @@ import type {
   FinancePaymentSettingsReadModel,
   FinancePayout,
   FinancePayoutListQuery,
+  FinancePropertyPayoutDispatchCommand,
+  FinancePropertyPayoutDispatchResult,
   FinanceReconciliationItem,
   FinanceReconciliationViewKind,
   FinanceReconciliationViewQuery,
@@ -76,6 +81,7 @@ const financeContractCases = JSON.parse(
       errorCode?: string;
       providerAccountId?: string;
       legacyDisposition?: string;
+      rollbackRule?: string;
       job?: { jobType: string; idempotencyKey: string };
       commandMeta?: { sideEffects?: string[] };
       enums?: Record<string, string[]>;
@@ -131,6 +137,28 @@ const cancellationPolicy: CancellationPolicy = {
   partialRefundPercent: 50,
   refundMethod: "original_payment",
   appliesTo: "direct_booking",
+  updatedAt: "2026-06-12T10:00:00.000Z",
+};
+
+const affiliatePayoutSettings: FinanceAffiliatePayoutSettingsReadModel = {
+  affiliateId,
+  marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
+  payoutsEnabled: true,
+  payoutProvider: "stripe",
+  payoutCurrency: "EUR",
+  payoutSchedule: "monthly",
+  payoutThresholdAmount: null,
+  providerAccount: {
+    providerAccountId: "acct_affiliate_target",
+    provider: "stripe",
+    status: "active",
+    onboardingStatus: "completed",
+    payoutsEnabled: true,
+  },
+  sourceFreshness: {
+    finance: "target",
+    status: "fresh",
+  },
   updatedAt: "2026-06-12T10:00:00.000Z",
 };
 
@@ -276,6 +304,30 @@ const payoutItems: FinancePayout[] = [
     failedAt: "2026-06-12T11:30:00.000Z",
     failureCode: "bank_account_restricted",
     retryCount: 2,
+  },
+];
+
+const affiliatePayoutItems: FinancePayout[] = [
+  {
+    payoutId: "affiliate_payout_2026_06",
+    ownerScope: "organization",
+    propertyId: null,
+    organizationId: "a6000000-0000-0000-0000-000000000686",
+    relatedPropertyId: propertyId,
+    guestBookingId: invoiceListItems[0]!.guestBookingId,
+    paymentId: paymentLedgerItems[0]!.paymentId,
+    payoutStatus: "scheduled",
+    amount: "350.00",
+    feeAmount: "0.00",
+    netAmount: "350.00",
+    currency: "EUR",
+    provider: "stripe",
+    providerPayoutId: null,
+    scheduledAt: "2026-06-30T09:00:00.000Z",
+    paidAt: null,
+    failedAt: null,
+    failureCode: null,
+    retryCount: 0,
   },
 ];
 
@@ -601,6 +653,60 @@ describe("finance route contracts", () => {
     expect(accountInsert.values?.[2]).toBe("property");
   });
 
+  it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
+    app = buildFinanceApp({
+      permissions: ["affiliate.payout.manage"],
+      entitlements: [affiliatePayoutEntitlement()],
+    });
+
+    for (const caseId of [
+      "affiliate-payout-settings-read",
+      "affiliate-payout-settings-update",
+      "affiliate-payout-list-read",
+    ]) {
+      const contractCase = financeContractCases.cases.find(
+        (candidate) => candidate.caseId === caseId,
+      );
+      expect(contractCase, caseId).toBeDefined();
+      const method = (contractCase!.request.method ?? "GET") as "GET" | "PATCH";
+
+      const response = await injectJson<Record<string, unknown>>(app, {
+        method,
+        url: contractCase!.request.path,
+        query: queryStrings(contractCase!.request.query),
+        payload: contractCase!.request.body,
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
+      if (contractCase!.expected.itemCount !== undefined) {
+        expect(response.body.payouts, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
+      assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
+      expect(JSON.stringify(response.body), caseId).not.toMatch(
+        /referralCode|affiliateProfileEmail|accountNumber|stripeSecretKey|providerSecret|xenditApiKey/,
+      );
+    }
+  });
+
+  it("denies affiliate payout settings without the affiliate resource link", async () => {
+    app = buildFinanceApp({
+      permissions: ["affiliate.payout.manage"],
+      entitlements: [affiliatePayoutEntitlement()],
+      linkedAffiliateId: null,
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "GET",
+      url: `/api/finance/affiliates/${affiliateId}/payout-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body.code).toBe("missing_resource_access");
+  });
+
   it("passes the F1g Xendit bank validation fixture without leaking raw bank data", async () => {
     const contractCase = financeContractCases.cases.find(
       (candidate) => candidate.caseId === "xendit-bank-validation",
@@ -700,6 +806,91 @@ describe("finance route contracts", () => {
     });
     assertExcludes(first.body, contractCase!.expected.mustNotWrite ?? [], contractCase!.caseId);
     expect(repository.enqueueCount).toBe(1);
+  });
+
+  it("passes the F1h property payout dispatch fixture idempotently", async () => {
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "property-payout-dispatch-enqueues-job",
+    );
+    expect(contractCase).toBeDefined();
+    const repository = propertyPayoutDispatchRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(contractCase!.expected.status);
+    expect(replay.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(first.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    expect(first.body).toMatchObject({
+      job: contractCase!.expected.job,
+      legacyDisposition: contractCase!.expected.legacyDisposition,
+      rollbackRule: contractCase!.expected.rollbackRule,
+      readiness: {
+        reconciliationReady: true,
+        legacySchedulerFrozen: true,
+        activeLegacyTransferWindow: false,
+        existingProviderPayoutId: null,
+        blockingReasons: [],
+      },
+      commandMeta: {
+        idempotencyKey: "finance-dispatch-property-payout-686-2026-06-13",
+        sideEffects: ["payout_job", "audit_event"],
+        jobs: [{ status: "queued" }],
+      },
+    });
+    expect(replay.body).toMatchObject({
+      job: {
+        idempotencyKey:
+          "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1",
+        status: "idempotent_replay",
+      },
+      commandMeta: {
+        jobs: [{ status: "idempotent_replay" }],
+      },
+    });
+    assertExcludes(first.body, contractCase!.expected.mustNotWrite ?? [], contractCase!.caseId);
+    expect(repository.enqueueCount).toBe(1);
+  });
+
+  it("blocks property payout dispatch without reconciliation readiness", async () => {
+    const repository = propertyPayoutDispatchRepository({
+      readiness: {
+        reconciliationReady: false,
+        blockingReasons: ["reconciliation_not_ready"],
+      },
+    });
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: `/api/finance/properties/${propertyId}/payouts/payout_2026_abcd/dispatch`,
+      payload: propertyPayoutDispatchBody(),
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toMatchObject({
+      code: "reconciliation_not_ready",
+      category: "conflict",
+    });
+    expect(repository.enqueueCount).toBe(0);
   });
 
   it("passes the F1d manual payment record fixture in target mode", async () => {
@@ -1615,6 +1806,214 @@ describe("finance route contracts", () => {
     );
   });
 
+  it("enqueues property payout dispatch only after readiness and legacy freeze checks", async () => {
+    const calls: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          calls.push({ text, values });
+          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          if (text.includes("INSERT INTO platform.idempotency_keys")) {
+            expect(text).toContain("'property_payout_dispatch'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+            expect(values?.[2]).toBe(propertyId);
+            return {
+              rows: [
+                {
+                  status: "completed",
+                  requestFingerprintHash: values?.[1],
+                },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("FROM finance.payouts payout")) {
+            expect(text).toContain("job.job_type = 'finance.reconcile-payout'");
+            expect(text).toContain("activeLegacyTransferWindow");
+            expect(text).toContain("legacyPropertyPayoutSchedulerFrozenAt");
+            expect(text).toContain("payout.source_payout_id = $2::text");
+            expect(text).toContain("payout.payout_metadata ->> 'payoutId' = $2::text");
+            expect(text).toContain("THEN $2::uuid");
+            return {
+              rows: [
+                {
+                  payoutId: "payout_2026_abcd",
+                  provider: "stripe",
+                  providerPayoutId: null,
+                  reconciliationReadyAt: "2026-06-13T09:00:00.000Z",
+                  legacySchedulerFrozenAt: "2026-06-13T08:00:00.000Z",
+                  reconciliationBlockers: 0,
+                  activeLegacyTransferWindow: false,
+                },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.jobs")) {
+            expect(text).toContain("'finance-property-payout-dispatch'");
+            expect(text).toContain("'finance.dispatch-property-payout'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$2::uuid/);
+            expect(values?.[0]).toBe(
+              `finance.dispatch-property-payout:property:${propertyId}:payout:payout_2026_abcd:v1`,
+            );
+            expect(values?.[1]).toBe(propertyId);
+            expect(values?.[2]).toBe("payout_2026_abcd");
+            return {
+              rows: [
+                { jobId: "job_dispatch_property_payout_686", replay: false },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.product_audit_events")) {
+            expect(text).toContain("'finance.property_payout.dispatch_requested'");
+            expect(values?.[2]).toBe(propertyId);
+            expect(values?.[5]).toBe("payout_2026_abcd");
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          throw new Error(`Unexpected SQL: ${text}`);
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.enqueuePropertyPayoutDispatch!(
+        propertyPayoutDispatchCommand({
+          requestedAt: "2026-06-13T10:00:00.000Z",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      job: {
+        jobType: "finance.dispatch-property-payout",
+        idempotencyKey:
+          "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1",
+        status: "queued",
+      },
+      readiness: {
+        reconciliationReady: true,
+        legacySchedulerFrozen: true,
+        activeLegacyTransferWindow: false,
+      },
+      legacyDisposition:
+        "legacy process_property_payouts disabled before target property payout dispatch",
+    });
+    const queryTexts = calls.map((call) => call.text);
+    expect(
+      queryTexts.findIndex((text) => text.includes("FROM finance.payouts payout")),
+    ).toBeLessThan(queryTexts.findIndex((text) => text.includes("INSERT INTO platform.jobs")));
+    expect(queryTexts).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/UPDATE\s+payouts/i)]),
+    );
+  });
+
+  it("updates affiliate payout settings through finance tables without PMS or marketplace writes", async () => {
+    const calls: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          calls.push({ text, values });
+          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          if (text.includes("FROM identity.organization_resource_links link")) {
+            expect(text).toContain("link.product = 'affiliate'");
+            expect(text).toContain("link.resource_type = 'affiliate'");
+            if (text.includes("finance.payout_settings settings")) {
+              return {
+                rows: [
+                  {
+                    affiliateId,
+                    marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
+                    payoutsEnabled: true,
+                    payoutProvider: "stripe",
+                    payoutCurrency: "EUR",
+                    payoutSchedule: { type: "monthly" },
+                    payoutPreferences: {},
+                    payoutThresholdAmount: null,
+                    updatedAt: "2026-06-13T10:00:00.000Z",
+                    providerAccountId: "acct_affiliate_target",
+                    provider: "stripe",
+                    providerStatus: "active",
+                    providerOnboardingStatus: "completed",
+                    providerPayoutsEnabled: true,
+                    sourceFreshness: { finance: "target" },
+                  },
+                ] as unknown as T[],
+                rowCount: 1,
+              };
+            }
+            return {
+              rows: [{ organizationId: "a6000000-0000-0000-0000-000000000686" }] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.idempotency_keys")) {
+            expect(text).toContain("'affiliate_payout_settings_update'");
+            expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
+            return {
+              rows: [
+                { status: "completed", requestFingerprintHash: values?.[1], inserted: true },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO finance.payout_settings")) {
+            expect(text).toContain("owner_scope");
+            expect(text).toContain("'organization'");
+            return { rows: [] as T[], rowCount: 1 };
+          }
+          if (text.includes("INSERT INTO platform.product_audit_events")) {
+            expect(text).toContain("'finance.affiliate_payout_settings.updated'");
+            expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
+            return { rows: [] as T[], rowCount: 1 };
+          }
+          throw new Error(`Unexpected SQL: ${text}`);
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.updateAffiliatePayoutSettings!(
+        affiliatePayoutSettingsPatchCommand({
+          requestedAt: "2026-06-13T10:00:00.000Z",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      settings: {
+        affiliateId,
+        payoutProvider: "stripe",
+        payoutSchedule: "monthly",
+      },
+      commandMeta: {
+        sideEffects: ["audit_event"],
+        jobs: [],
+      },
+    });
+    const queryTexts = calls.map((call) => call.text);
+    expect(queryTexts).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/INSERT\s+INTO\s+pms\./i),
+        expect.stringMatching(/UPDATE\s+pms\./i),
+        expect.stringMatching(/INSERT\s+INTO\s+marketplace\./i),
+        expect.stringMatching(/UPDATE\s+marketplace\./i),
+      ]),
+    );
+  });
+
   it("passes the Finance property read denial matrix", async () => {
     const cases: Array<{
       name: string;
@@ -2145,12 +2544,93 @@ function xenditPayoutReconciliationCommand(
   };
 }
 
+function propertyPayoutDispatchBody(
+  overrides: Partial<FinancePropertyPayoutDispatchCommand["payload"]> & {
+    commandId?: string;
+    idempotencyKey?: string;
+  } = {},
+): Record<string, unknown> {
+  return {
+    commandId: overrides.commandId ?? "cmd-dispatch-property-payout-001",
+    idempotencyKey: overrides.idempotencyKey ?? "finance-dispatch-property-payout-686-2026-06-13",
+    legacySchedulerFrozenAt: overrides.legacySchedulerFrozenAt ?? "2026-06-13T08:00:00.000Z",
+    reconciliationReadyAt: overrides.reconciliationReadyAt ?? "2026-06-13T09:00:00.000Z",
+  };
+}
+
+function propertyPayoutDispatchCommand(
+  options: {
+    propertyId?: string;
+    idempotencyKey?: string;
+    requestedAt?: string;
+    payload?: Partial<FinancePropertyPayoutDispatchCommand["payload"]>;
+  } = {},
+): FinancePropertyPayoutDispatchCommand {
+  const commandPropertyId = options.propertyId ?? propertyId;
+  return {
+    commandType: "finance.property_payout.dispatch",
+    commandId: "cmd-dispatch-property-payout-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-dispatch-property-payout-686-2026-06-13",
+    propertyId: commandPropertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "f2000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_dispatch_property_payout_target",
+      correlationId: "corr_dispatch_property_payout_target",
+      reason: "Property payout dispatch target test",
+      requestedAt: options.requestedAt ?? "2026-06-13T10:00:00.000Z",
+    },
+    payload: {
+      payoutId: "payout_2026_abcd",
+      legacySchedulerFrozenAt: "2026-06-13T08:00:00.000Z",
+      reconciliationReadyAt: "2026-06-13T09:00:00.000Z",
+      ...options.payload,
+    },
+  };
+}
+
+function affiliatePayoutSettingsPatchCommand(
+  options: {
+    requestedAt?: string;
+    payload?: Partial<FinanceAffiliatePayoutSettingsPatchCommand["payload"]>;
+  } = {},
+): FinanceAffiliatePayoutSettingsPatchCommand {
+  return {
+    commandType: "finance.affiliate_payout_settings.update",
+    commandId: "cmd-affiliate-payout-settings-001",
+    idempotencyKey: "finance-affiliate-payout-settings-686-001",
+    affiliateId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "a6000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_affiliate_payout_settings_target",
+      correlationId: "corr_affiliate_payout_settings_target",
+      reason: "Affiliate payout settings target test",
+      requestedAt: options.requestedAt ?? "2026-06-13T10:00:00.000Z",
+    },
+    payload: {
+      payoutsEnabled: true,
+      payoutProvider: "stripe",
+      payoutCurrency: "EUR",
+      payoutSchedule: "monthly",
+      ...options.payload,
+    },
+  };
+}
+
 function buildFinanceApp(
   options: {
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
+    linkedAffiliateId?: string | null;
     repository?: FinancePropertyReadRepository;
     xenditBankValidator?: FinanceXenditBankValidator;
     publicHotelProfileRepository?: PublicHotelProfileRepository | null;
@@ -2170,7 +2650,11 @@ function buildFinanceApp(
     financeXenditBankValidator: options.xenditBankValidator,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
-      repository: identityRepository(options.linkedPropertyId, options.linkedResourceType),
+      repository: identityRepository({
+        linkedPropertyId: options.linkedPropertyId,
+        linkedResourceType: options.linkedResourceType,
+        linkedAffiliateId: options.linkedAffiliateId,
+      }),
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["pms.finance.read"];
@@ -2291,6 +2775,31 @@ const financeRepository: FinancePropertyReadRepository = {
       offset: query.offset,
       sourceFreshness,
     };
+  },
+  async getAffiliatePayoutSettings(requestedAffiliateId) {
+    return requestedAffiliateId === affiliateId ? affiliatePayoutSettings : null;
+  },
+  async listAffiliatePayouts(requestedAffiliateId, query) {
+    if (requestedAffiliateId !== affiliateId) return null;
+    const filtered = filterAffiliatePayouts(query);
+    return {
+      payouts: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness,
+    };
+  },
+  async updateAffiliatePayoutSettings(command) {
+    if (command.affiliateId !== affiliateId) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "affiliate_not_found",
+        message: "Affiliate finance resource was not found.",
+      };
+    }
+    return affiliatePayoutSettingsPatchResult(command, "updated");
   },
   async listReconciliationItems(requestedPropertyId, view, query) {
     const filtered =
@@ -2528,6 +3037,84 @@ function stripeAffiliateCommand(): CreateStripeProviderAccountCommand {
   };
 }
 
+function propertyPayoutDispatchRepository(
+  options: {
+    readiness?: Partial<Extract<FinancePropertyPayoutDispatchResult, { ok: true }>["readiness"]>;
+  } = {},
+): FinancePropertyReadRepository & { enqueueCount: number } {
+  const records = new Map<string, FinancePropertyPayoutDispatchResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & { enqueueCount: number } = {
+    ...financeRepository,
+    enqueueCount: 0,
+    async enqueuePropertyPayoutDispatch(command) {
+      const readiness = {
+        payoutId: command.payload.payoutId,
+        reconciliationReady: true,
+        legacySchedulerFrozen: true,
+        activeLegacyTransferWindow: false,
+        existingProviderPayoutId: null,
+        provider: "stripe",
+        blockingReasons: [],
+        ...options.readiness,
+      } satisfies Extract<FinancePropertyPayoutDispatchResult, { ok: true }>["readiness"];
+      if (!readiness.reconciliationReady) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "reconciliation_not_ready",
+          message: "Property payout dispatch is blocked until payout reconciliation is ready.",
+        };
+      }
+      if (!readiness.legacySchedulerFrozen) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "legacy_scheduler_not_frozen",
+          message:
+            "Property payout dispatch is blocked until legacy process_property_payouts is frozen.",
+        };
+      }
+      if (readiness.activeLegacyTransferWindow) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "active_legacy_transfer_window",
+          message: "Property payout dispatch is blocked by an active legacy transfer window.",
+        };
+      }
+      if (readiness.existingProviderPayoutId) {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "payout_already_dispatched",
+          message: "Property payout already has a provider payout id.",
+        };
+      }
+
+      const existing = records.get(command.idempotencyKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "idempotent_replay",
+          job: { ...existing.job, status: "idempotent_replay" },
+          commandMeta: {
+            ...existing.commandMeta,
+            jobs: existing.commandMeta.jobs.map((job) => ({
+              ...job,
+              status: "idempotent_replay",
+            })),
+          },
+        };
+      }
+      repository.enqueueCount += 1;
+      const result = propertyPayoutDispatchResult(command, readiness, "queued");
+      records.set(command.idempotencyKey, result);
+      return result;
+    },
+  };
+  return repository;
+}
+
 function xenditPayoutReconciliationResult(
   command: FinanceXenditPayoutReconciliationCommand,
   status: "queued" | "idempotent_replay",
@@ -2550,6 +3137,66 @@ function xenditPayoutReconciliationResult(
       sideEffects: ["reconciliation_job", "audit_event"],
       outboxEvents: [],
       jobs: [job],
+    },
+  };
+}
+
+function propertyPayoutDispatchResult(
+  command: FinancePropertyPayoutDispatchCommand,
+  readiness: Extract<FinancePropertyPayoutDispatchResult, { ok: true }>["readiness"],
+  status: "queued" | "idempotent_replay",
+): FinancePropertyPayoutDispatchResult & { ok: true } {
+  const job = {
+    jobType: "finance.dispatch-property-payout",
+    payoutId: command.payload.payoutId,
+    provider: "stripe",
+    idempotencyKey:
+      "finance.dispatch-property-payout:property:f3000000-0000-0000-0000-000000000686:payout:payout_2026_abcd:v1",
+    status,
+  } as const;
+  return {
+    ok: true,
+    status,
+    job,
+    readiness,
+    legacyDisposition:
+      "legacy process_property_payouts disabled before target property payout dispatch",
+    rollbackRule:
+      "Stop target dispatcher, reconcile provider transfer IDs, and re-enable legacy only for payouts with no successful target transfer.",
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["payout_job", "audit_event"],
+      outboxEvents: [],
+      jobs: [job],
+    },
+  };
+}
+
+function affiliatePayoutSettingsPatchResult(
+  command: FinanceAffiliatePayoutSettingsPatchCommand,
+  status: "updated" | "idempotent_replay",
+): FinanceAffiliatePayoutSettingsPatchResult & { ok: true } {
+  return {
+    ok: true,
+    status,
+    settings: {
+      ...affiliatePayoutSettings,
+      payoutsEnabled: command.payload.payoutsEnabled ?? affiliatePayoutSettings.payoutsEnabled,
+      payoutProvider: command.payload.payoutProvider ?? affiliatePayoutSettings.payoutProvider,
+      payoutCurrency: command.payload.payoutCurrency ?? affiliatePayoutSettings.payoutCurrency,
+      payoutSchedule: command.payload.payoutSchedule ?? affiliatePayoutSettings.payoutSchedule,
+      payoutThresholdAmount:
+        command.payload.payoutThresholdAmount !== undefined
+          ? command.payload.payoutThresholdAmount
+          : affiliatePayoutSettings.payoutThresholdAmount,
+    },
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["audit_event"],
+      outboxEvents: [],
+      jobs: [],
     },
   };
 }
@@ -2685,6 +3332,14 @@ function filterPayouts(query: FinancePayoutListQuery): FinancePayout[] {
   });
 }
 
+function filterAffiliatePayouts(query: FinancePayoutListQuery): FinancePayout[] {
+  return affiliatePayoutItems.filter((payout) => {
+    if (query.status && payout.payoutStatus !== query.status) return false;
+    if (query.provider && payout.provider !== query.provider) return false;
+    return true;
+  });
+}
+
 function filterReconciliationItems(
   view: FinanceReconciliationViewKind,
   query: FinanceReconciliationViewQuery,
@@ -2750,9 +3405,27 @@ function directBookingFinanceEntitlement(
   };
 }
 
+function affiliatePayoutEntitlement(
+  status: ProductEntitlement["status"] = "active",
+): ProductEntitlement {
+  return {
+    product: "affiliate",
+    key: "affiliate-payouts",
+    status,
+    resource: {
+      product: "affiliate",
+      resourceType: "affiliate",
+      resourceId: affiliateId,
+    },
+  };
+}
+
 function identityRepository(
-  linkedPropertyId: string | null | undefined,
-  linkedResourceType: "pms_property" | "property" = "pms_property",
+  options: {
+    linkedPropertyId?: string | null;
+    linkedResourceType?: "pms_property" | "property";
+    linkedAffiliateId?: string | null;
+  } = {},
 ): IdentityRepository {
   return {
     async findUserByProviderUserId() {
@@ -2780,16 +3453,26 @@ function identityRepository(
       };
     },
     async findLinkedResources() {
-      if (linkedPropertyId === null) return [];
-      return [
-        {
+      const resources = [];
+      if (options.linkedPropertyId !== null) {
+        resources.push({
           product: "pms",
-          resourceType: linkedResourceType,
-          resourceId: linkedPropertyId ?? propertyId,
+          resourceType: options.linkedResourceType ?? "pms_property",
+          resourceId: options.linkedPropertyId ?? propertyId,
           relationship: "finance_manager",
           status: "active",
-        },
-      ];
+        });
+      }
+      if (options.linkedAffiliateId !== null) {
+        resources.push({
+          product: "affiliate",
+          resourceType: "affiliate",
+          resourceId: options.linkedAffiliateId ?? affiliateId,
+          relationship: "owner",
+          status: "active",
+        });
+      }
+      return [...resources];
     },
   };
 }
