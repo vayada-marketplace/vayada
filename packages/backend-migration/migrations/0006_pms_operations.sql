@@ -400,6 +400,7 @@ CREATE TABLE pms.message_attachments (
   id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   property_id            UUID        NOT NULL REFERENCES hotel_catalog.properties(id),
   message_id            UUID        NOT NULL,
+  platform_media_object_id UUID,
   s3_key                TEXT,
   source_url            TEXT,
   filename              TEXT,

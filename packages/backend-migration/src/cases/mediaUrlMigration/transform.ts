@@ -567,7 +567,8 @@ export async function transformMediaUrlMigration(client: pg.Client): Promise<voi
     UPDATE pms.message_attachments attachment
     SET
       s3_key = source.target_s3_key,
-      source_url = source.target_source_url
+      source_url = source.target_source_url,
+      platform_media_object_id = source.platform_media_object_id
     FROM migration_source_media.pms_attachment_references source
     WHERE attachment.id = source.attachment_id
   `);

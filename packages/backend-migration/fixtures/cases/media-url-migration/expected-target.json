@@ -165,12 +165,14 @@
         {
           "id": "f8227300-0000-0000-0000-000000000001",
           "s3Key": "private/pms/properties/f8223000-0000-0000-0000-000000000001/messages/f8227100-0000-0000-0000-000000000001/f8224000-0000-0000-0000-000000000008/invoice.pdf",
-          "sourceUrl": "https://legacy-pms-private.s3.amazonaws.com/legacy-pms-message-attachments/thread-822/invoice.pdf"
+          "sourceUrl": "https://legacy-pms-private.s3.amazonaws.com/legacy-pms-message-attachments/thread-822/invoice.pdf",
+          "platformMediaObjectId": "f8224000-0000-0000-0000-000000000008"
         },
         {
           "id": "f8227300-0000-0000-0000-000000000002",
           "s3Key": null,
-          "sourceUrl": "https://provider.example.test/messages/thread-822/passport.png"
+          "sourceUrl": "https://provider.example.test/messages/thread-822/passport.png",
+          "platformMediaObjectId": "f8224000-0000-0000-0000-000000000009"
         }
       ]
     },
