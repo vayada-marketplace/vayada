@@ -76,6 +76,15 @@ export const FINANCE_ROUTE_PAYMENT_PROVIDERS = [
 
 export type FinanceRoutePaymentProvider = (typeof FINANCE_ROUTE_PAYMENT_PROVIDERS)[number];
 
+export const FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS = [
+  "audit_event",
+  "reconciliation_job",
+  "provider_compensation",
+] as const;
+
+export type FinanceProviderAccountCommandSideEffect =
+  (typeof FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS)[number];
+
 export const FINANCE_ROUTE_PAYMENT_METHODS = [
   "card",
   "pay_at_property",
@@ -482,9 +491,13 @@ export type FinanceProjectionRefreshJob = {
 export type FinanceCommandMeta = {
   commandId: string;
   idempotencyKey: string;
-  sideEffects: FinanceManualPaymentSideEffect[];
+  sideEffects: Array<FinanceManualPaymentSideEffect | FinanceProviderAccountCommandSideEffect>;
   outboxEvents: string[];
   jobs: FinanceProjectionRefreshJob[];
+};
+
+export type FinanceProviderAccountCommandMeta = Omit<FinanceCommandMeta, "sideEffects"> & {
+  sideEffects: FinanceProviderAccountCommandSideEffect[];
 };
 
 export type FinanceManualPaymentRecordResponse = {
@@ -492,6 +505,127 @@ export type FinanceManualPaymentRecordResponse = {
   propertyId: FinancePropertyId;
   invoice: FinanceInvoiceDetail;
   commandMeta: FinanceCommandMeta;
+};
+
+export type FinanceProviderAccountOwnerScope = "property" | "affiliate";
+
+export type FinanceProviderAccountOwner =
+  | {
+      ownerScope: "property";
+      propertyId: FinancePropertyId;
+      organizationId: string | null;
+    }
+  | {
+      ownerScope: "affiliate";
+      affiliateId: string;
+      organizationId: string;
+    };
+
+export type CreateStripeProviderAccountPayload = {
+  email: string;
+  country: string;
+};
+
+export type CreateStripePropertyAccountCommand = FinanceCommandBase<
+  "finance.provider_account.stripe.create",
+  CreateStripeProviderAccountPayload
+>;
+
+export type CreateStripeAffiliateAccountCommand = Omit<
+  FinanceCommandBase<"finance.provider_account.stripe.create", CreateStripeProviderAccountPayload>,
+  "propertyId"
+> & {
+  affiliateId: string;
+  organizationId: string;
+};
+
+export type CreateStripeProviderAccountCommand =
+  | CreateStripePropertyAccountCommand
+  | CreateStripeAffiliateAccountCommand;
+
+export type IssueStripeOnboardingLinkPayload = {
+  providerAccountId: string;
+};
+
+export type IssueStripePropertyOnboardingLinkCommand = FinanceCommandBase<
+  "finance.provider_account.stripe.onboarding_link.issue",
+  IssueStripeOnboardingLinkPayload
+>;
+
+export type IssueStripeAffiliateOnboardingLinkCommand = Omit<
+  FinanceCommandBase<
+    "finance.provider_account.stripe.onboarding_link.issue",
+    IssueStripeOnboardingLinkPayload
+  >,
+  "propertyId"
+> & {
+  affiliateId: string;
+  organizationId: string;
+};
+
+export type IssueStripeOnboardingLinkCommand =
+  | IssueStripePropertyOnboardingLinkCommand
+  | IssueStripeAffiliateOnboardingLinkCommand;
+
+export type FinanceProviderAccountCommandResponse = {
+  contractVersion: FinanceContractVersion;
+  providerAccountId: string;
+  provider: "stripe" | "xendit";
+  providerAccountRef: string;
+  status: FinanceProviderAccountStatus;
+  onboardingStatus: FinanceProviderOnboardingStatus;
+  onboardingUrl: string;
+  commandMeta: FinanceProviderAccountCommandMeta;
+};
+
+export type FinanceProviderAccountCommandResult =
+  | {
+      ok: true;
+      status: "created" | "idempotent_replay" | "existing_owner_account";
+      response: FinanceProviderAccountCommandResponse;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 404 | 409 | 500 | 502;
+      code:
+        | "invalid_command"
+        | "provider_account_not_found"
+        | "idempotency_conflict"
+        | "write_unavailable"
+        | "provider_unavailable"
+        | "provider_rejected";
+      message: string;
+    };
+
+export type StripeConnectAccountCreateRequest = {
+  owner: FinanceProviderAccountOwner;
+  email: string;
+  country: string;
+  idempotencyKey: string;
+};
+
+export type StripeConnectOnboardingLinkRequest = {
+  owner: FinanceProviderAccountOwner;
+  providerAccountRef: string;
+  idempotencyKey: string;
+};
+
+export type StripeConnectCompensationRequest = {
+  owner: FinanceProviderAccountOwner;
+  providerAccountRef: string;
+  reason: "db_write_failed";
+  idempotencyKey: string;
+};
+
+export type StripeConnectProviderAccount = {
+  providerAccountRef: string;
+  onboardingUrl: string;
+};
+
+export type FinanceStripeConnectProvider = {
+  createAccount(request: StripeConnectAccountCreateRequest): Promise<StripeConnectProviderAccount>;
+  createOnboardingLink(request: StripeConnectOnboardingLinkRequest): Promise<string>;
+  compensateAccountCreation?(request: StripeConnectCompensationRequest): Promise<void>;
 };
 
 export type FinanceInvoiceCsvExportDisposition = {
@@ -770,6 +904,14 @@ export type FinancePropertyCommandRepository = {
   recordManualPayment(
     command: FinanceManualPaymentRecordCommand,
   ): Promise<FinanceManualPaymentRecordResult>;
+
+  createStripeProviderAccount(
+    command: CreateStripeProviderAccountCommand,
+  ): Promise<FinanceProviderAccountCommandResult>;
+
+  issueStripeOnboardingLink(
+    command: IssueStripeOnboardingLinkCommand,
+  ): Promise<FinanceProviderAccountCommandResult>;
 };
 
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &
@@ -1030,6 +1172,8 @@ export type FinanceCommand =
   | UpdateBillingPlanCommand
   | UpdateAddOnPriceCommand
   | FinanceManualPaymentRecordCommand
+  | CreateStripeProviderAccountCommand
+  | IssueStripeOnboardingLinkCommand
   | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
@@ -1039,6 +1183,8 @@ export const financeCommandTypes = [
   "finance.billing.plan.update",
   "finance.add_on.price.update",
   "finance.manual_payment.record",
+  "finance.provider_account.stripe.create",
+  "finance.provider_account.stripe.onboarding_link.issue",
   "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 

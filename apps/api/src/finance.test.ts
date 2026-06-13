@@ -26,6 +26,10 @@ import type {
   FinanceReconciliationViewKind,
   FinanceReconciliationViewQuery,
   FinancePropertyReadRepository,
+  FinanceProviderAccountCommandResult,
+  FinanceStripeConnectProvider,
+  CreateStripeProviderAccountCommand,
+  IssueStripeOnboardingLinkCommand,
 } from "@vayada/domain-finance";
 import { createHash } from "node:crypto";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
@@ -41,6 +45,8 @@ import {
 } from "./routes/finance.js";
 
 const propertyId = "f3000000-0000-0000-0000-000000000686";
+const affiliateId = "affiliate_finance_partner_686";
+const affiliateOrganizationId = "f2000000-0000-0000-0000-000000000686";
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 
 const financeContractCases = JSON.parse(
@@ -64,6 +70,7 @@ const financeContractCases = JSON.parse(
       mustInclude?: string[];
       mustExclude?: string[];
       errorCode?: string;
+      providerAccountId?: string;
       commandMeta?: { sideEffects?: string[] };
       enums?: Record<string, string[]>;
     };
@@ -443,6 +450,149 @@ describe("finance route contracts", () => {
         /providerPayloadRaw|accountNumber|accountHolderName|sensitiveDestinationRef|stripeSecretKey|xenditApiKey|processorSecret|guestEmail/,
       );
     }
+  });
+
+  it("passes F1f Stripe property and affiliate onboarding fixture cases without duplicate accounts", async () => {
+    const propertyRepository = stripeProviderAccountRepository();
+    app = buildFinanceApp({
+      repository: propertyRepository,
+      permissions: financeManagePermissions(),
+    });
+    const propertyCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "stripe-property-onboarding-idempotent",
+    );
+    expect(propertyCase).toBeDefined();
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: propertyCase!.request.path,
+      payload: propertyCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: propertyCase!.request.path,
+      payload: propertyCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(propertyCase!.expected.status);
+    expect(replay.statusCode).toBe(propertyCase!.expected.status);
+    expect(first.body.providerAccountId).toBe(propertyCase!.expected.providerAccountId);
+    expect(replay.body.providerAccountId).toBe(first.body.providerAccountId);
+    expect(readContractPath(replay.body, "commandMeta.idempotencyKey")).toBe(
+      "finance-stripe-property-f300686",
+    );
+    assertIncludes(first.body, propertyCase!.expected.mustInclude ?? [], propertyCase!.caseId);
+    assertExcludes(first.body, propertyCase!.expected.mustExclude ?? [], propertyCase!.caseId);
+    expect(propertyRepository.providerCreateCount).toBe(1);
+    await app.close();
+    app = null;
+
+    const affiliateRepository = stripeProviderAccountRepository();
+    app = buildAffiliateFinanceApp({ repository: affiliateRepository });
+    const affiliateCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "stripe-affiliate-onboarding-boundary",
+    );
+    expect(affiliateCase).toBeDefined();
+
+    const affiliateResponse = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: affiliateCase!.request.path,
+      payload: affiliateCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(affiliateResponse.statusCode).toBe(affiliateCase!.expected.status);
+    expect(affiliateResponse.body.providerAccountId).toBe(
+      affiliateCase!.expected.providerAccountId,
+    );
+    expect(JSON.stringify(affiliateResponse.body)).not.toMatch(
+      /referralCode|booking_web_affiliates|stripeSecretKey/,
+    );
+    expect(affiliateRepository.providerCreateCount).toBe(1);
+  });
+
+  it("preserves the VAY-774 affiliate onboarding-link facade shape", async () => {
+    const repository = stripeProviderAccountRepository();
+    repository.seedAffiliateProviderAccount();
+    app = buildAffiliateFinanceApp({ repository });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: `/api/finance/affiliates/${affiliateId}/provider-accounts/f7100000-0000-0000-0000-000000000686/onboarding-link`,
+      payload: {
+        commandId: "cmd-stripe-affiliate-link-001",
+        idempotencyKey: "finance-stripe-affiliate-link-686",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      onboardingUrl: "https://connect.stripe.test/onboard/acct_affiliate_686/2",
+    });
+  });
+
+  it("compensates when Stripe succeeds but the target provider-account write fails", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool({ failInsert: true });
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+
+    const result = await repository.createStripeProviderAccount!(
+      stripePropertyTargetCommand({
+        idempotencyKey: "finance-stripe-property-compensation",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      statusCode: 500,
+      code: "write_unavailable",
+    });
+    expect(provider.createAccountCount).toBe(1);
+    expect(provider.compensationCount).toBe(1);
+    expect(target.requiredCall("UPDATE platform.idempotency_keys").values?.[1]).toEqual(
+      expect.stringContaining("compensation"),
+    );
+  });
+
+  it("persists target Stripe provider accounts by owner scope and replays without duplicate provider accounts", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+
+    const first = await repository.createStripeProviderAccount!(stripePropertyTargetCommand());
+    target.existingAccount = {
+      providerAccountId: first.ok ? first.response.providerAccountId : "",
+      providerAccountRef: first.ok ? first.response.providerAccountRef : "",
+      status: "setup_incomplete",
+      onboardingStatus: "invited",
+      onboardingUrl: first.ok ? first.response.onboardingUrl : null,
+    };
+    const replay = await repository.createStripeProviderAccount!(stripePropertyTargetCommand());
+
+    expect(first.ok).toBe(true);
+    expect(replay.ok).toBe(true);
+    if (!first.ok || !replay.ok) throw new Error("Unexpected Stripe provider-account failure");
+    expect(replay.response.providerAccountId).toBe(first.response.providerAccountId);
+    expect(provider.createAccountCount).toBe(1);
+
+    const idempotencyInsert = target.requiredCall("INSERT INTO platform.idempotency_keys");
+    expect(idempotencyInsert.text).toMatch(/'finance'/);
+    expect(idempotencyInsert.values?.[3]).toBe("property");
+    const accountInsert = target.requiredCall("INSERT INTO finance.payment_provider_accounts");
+    expect(accountInsert.values?.[0]).toBe(propertyId);
+    expect(accountInsert.values?.[1]).toBeNull();
+    expect(accountInsert.values?.[2]).toBe("property");
   });
 
   it("passes the F1d manual payment record fixture in target mode", async () => {
@@ -1557,6 +1707,168 @@ function targetManualPaymentRows<T extends QueryResultRow>(
   return [];
 }
 
+function targetStripeProviderAccountPool(options: { failInsert?: boolean } = {}): {
+  calls: QueryCall[];
+  existingAccount: FinanceProviderAccountRowFixture | null;
+  pool: {
+    connect(): Promise<{
+      query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rows: T[]; rowCount: number }>;
+      release(): void;
+    }>;
+    query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: readonly unknown[],
+    ): Promise<{ rows: T[]; rowCount: number }>;
+    end(): Promise<void>;
+  };
+  requiredCall(fragment: string): QueryCall;
+} {
+  const state: {
+    calls: QueryCall[];
+    existingAccount: FinanceProviderAccountRowFixture | null;
+  } = {
+    calls: [],
+    existingAccount: null,
+  };
+
+  const query = async <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[]; rowCount: number }> => {
+    state.calls.push({ text, values });
+    if (text.includes("SELECT") && text.includes("FROM platform.idempotency_keys")) {
+      return { rows: [] as T[], rowCount: 0 };
+    }
+    if (text.includes("FROM finance.payment_provider_accounts")) {
+      const rows = state.existingAccount ? [state.existingAccount as unknown as T] : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (text.includes("INSERT INTO platform.idempotency_keys")) {
+      return {
+        rows: [{ requestFingerprintHash: String(values?.[2]) } as unknown as T],
+        rowCount: 1,
+      };
+    }
+    if (text.includes("INSERT INTO finance.payment_provider_accounts")) {
+      if (options.failInsert) {
+        throw new Error("simulated provider-account insert failure");
+      }
+      const account: FinanceProviderAccountRowFixture = {
+        providerAccountId: "f7000000-0000-0000-0000-000000000686",
+        providerAccountRef: "acct_target_property_686",
+        status: "setup_incomplete",
+        onboardingStatus: "invited",
+        onboardingUrl: "https://connect.stripe.test/onboard/acct_target_property_686/1",
+      };
+      state.existingAccount = account;
+      return { rows: [account as unknown as T], rowCount: 1 };
+    }
+    if (text.includes("UPDATE finance.payment_provider_accounts")) {
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    if (text.includes("UPDATE platform.idempotency_keys")) {
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    return { rows: [] as T[], rowCount: 0 };
+  };
+
+  const client = { query, release() {} };
+  const result = {
+    get calls() {
+      return state.calls;
+    },
+    get existingAccount() {
+      return state.existingAccount;
+    },
+    set existingAccount(account: FinanceProviderAccountRowFixture | null) {
+      state.existingAccount = account;
+    },
+    pool: {
+      async connect() {
+        return client;
+      },
+      query,
+      async end() {},
+    },
+    requiredCall(fragment: string) {
+      const call = state.calls.find((candidate) => candidate.text.includes(fragment));
+      expect(call, fragment).toBeDefined();
+      return call!;
+    },
+  };
+  return result;
+}
+
+type FinanceProviderAccountRowFixture = {
+  providerAccountId: string;
+  providerAccountRef: string;
+  status: string;
+  onboardingStatus: string;
+  onboardingUrl: string | null;
+};
+
+function fakeStripeConnectProvider(): FinanceStripeConnectProvider & {
+  createAccountCount: number;
+  compensationCount: number;
+} {
+  let createAccountCount = 0;
+  let compensationCount = 0;
+  const provider: FinanceStripeConnectProvider & {
+    createAccountCount: number;
+    compensationCount: number;
+  } = {
+    get createAccountCount() {
+      return createAccountCount;
+    },
+    get compensationCount() {
+      return compensationCount;
+    },
+    async createAccount() {
+      createAccountCount += 1;
+      return {
+        providerAccountRef: "acct_target_property_686",
+        onboardingUrl: "https://connect.stripe.test/onboard/acct_target_property_686/1",
+      };
+    },
+    async createOnboardingLink(request) {
+      return `https://connect.stripe.test/onboard/${request.providerAccountRef}/2`;
+    },
+    async compensateAccountCreation() {
+      compensationCount += 1;
+    },
+  };
+  return provider;
+}
+
+function stripePropertyTargetCommand(
+  options: { idempotencyKey?: string } = {},
+): CreateStripeProviderAccountCommand {
+  return {
+    commandType: "finance.provider_account.stripe.create",
+    commandId: "cmd-stripe-property-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-stripe-property-f300686",
+    propertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: affiliateOrganizationId,
+      },
+      requestId: "req_stripe_property_target",
+      correlationId: "corr_stripe_property_target",
+      reason: "Stripe property account target test",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+    },
+    payload: {
+      email: "owner@example.test",
+      country: "AT",
+    },
+  };
+}
+
 function financeInvoiceRowFixture(
   overrides: Partial<FinanceInvoiceRowFixture> = {},
 ): FinanceInvoiceRowFixture {
@@ -1652,6 +1964,40 @@ function buildFinanceApp(
       entitlementRepository: {
         async findEntitlementsForContext() {
           return options.entitlements ?? [pmsFinanceEntitlement()];
+        },
+      },
+    },
+  });
+}
+
+function buildAffiliateFinanceApp(options: {
+  repository: FinancePropertyReadRepository;
+}): ReturnType<typeof buildApp> {
+  return buildApp({
+    logger: false,
+    financeRepository: options.repository,
+    auth: {
+      verifier: createFakeVerifier(new Map([["valid-token", session]])),
+      repository: affiliateIdentityRepository(),
+      rolePermissionRepository: {
+        async findPermissionsForRole() {
+          return ["affiliate.payout.manage"];
+        },
+      },
+      entitlementRepository: {
+        async findEntitlementsForContext() {
+          return [
+            {
+              product: "affiliate",
+              key: "affiliate-payouts",
+              status: "active",
+              resource: {
+                product: "affiliate",
+                resourceType: "affiliate",
+                resourceId: affiliateId,
+              },
+            },
+          ];
         },
       },
     },
@@ -1812,6 +2158,127 @@ function manualPaymentRepository(): FinancePropertyReadRepository & {
     },
   };
   return repository;
+}
+
+function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
+  providerCreateCount: number;
+  seedAffiliateProviderAccount(): void;
+} {
+  const accounts = new Map<string, FinanceProviderAccountCommandResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & {
+    providerCreateCount: number;
+    seedAffiliateProviderAccount(): void;
+  } = {
+    ...financeRepository,
+    providerCreateCount: 0,
+    seedAffiliateProviderAccount() {
+      const command = stripeAffiliateCommand();
+      const result = stripeProviderAccountResult(command, "f7100000-0000-0000-0000-000000000686");
+      accounts.set("affiliate", result);
+    },
+    async createStripeProviderAccount(command) {
+      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const existing = accounts.get(ownerKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "existing_owner_account",
+          response: {
+            ...existing.response,
+            commandMeta: stripeProviderAccountCommandMeta(command),
+          },
+        };
+      }
+      repository.providerCreateCount += 1;
+      const providerAccountId =
+        ownerKey === "property"
+          ? "f7000000-0000-0000-0000-000000000686"
+          : "f7100000-0000-0000-0000-000000000686";
+      const result = stripeProviderAccountResult(command, providerAccountId);
+      accounts.set(ownerKey, result);
+      return result;
+    },
+    async issueStripeOnboardingLink(command) {
+      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const existing = accounts.get(ownerKey);
+      if (!existing || existing.response.providerAccountId !== command.payload.providerAccountId) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "provider_account_not_found",
+          message: "Finance provider account was not found.",
+        };
+      }
+      const providerAccountRef = existing.response.providerAccountRef;
+      return {
+        ok: true,
+        status: "created",
+        response: {
+          ...existing.response,
+          onboardingUrl: `https://connect.stripe.test/onboard/${providerAccountRef}/2`,
+          commandMeta: stripeProviderAccountCommandMeta(command),
+        },
+      };
+    },
+  };
+  return repository;
+}
+
+function stripeProviderAccountResult(
+  command: CreateStripeProviderAccountCommand,
+  providerAccountId: string,
+): FinanceProviderAccountCommandResult & { ok: true } {
+  const providerAccountRef = "propertyId" in command ? "acct_property_686" : "acct_affiliate_686";
+  return {
+    ok: true,
+    status: "created",
+    response: {
+      contractVersion: "finance-route-contracts.v1",
+      providerAccountId,
+      provider: "stripe",
+      providerAccountRef,
+      status: "setup_incomplete",
+      onboardingStatus: "invited",
+      onboardingUrl: `https://connect.stripe.test/onboard/${providerAccountRef}/1`,
+      commandMeta: stripeProviderAccountCommandMeta(command),
+    },
+  };
+}
+
+function stripeProviderAccountCommandMeta(
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+): Extract<FinanceProviderAccountCommandResult, { ok: true }>["response"]["commandMeta"] {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: ["audit_event", "reconciliation_job"],
+    outboxEvents: [],
+    jobs: [],
+  };
+}
+
+function stripeAffiliateCommand(): CreateStripeProviderAccountCommand {
+  return {
+    commandType: "finance.provider_account.stripe.create",
+    commandId: "cmd-stripe-affiliate-001",
+    idempotencyKey: "finance-stripe-affiliate-686",
+    affiliateId,
+    organizationId: affiliateOrganizationId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "user_affiliate",
+        organizationId: affiliateOrganizationId,
+      },
+      requestId: "req_stripe_affiliate",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+      reason: "Affiliate Stripe Connect test",
+    },
+    payload: {
+      email: "affiliate@example.test",
+      country: "AT",
+    },
+  };
 }
 
 function manualPaymentValidationError(
@@ -2047,6 +2514,46 @@ function identityRepository(
           resourceType: linkedResourceType,
           resourceId: linkedPropertyId ?? propertyId,
           relationship: "finance_manager",
+          status: "active",
+        },
+      ];
+    },
+  };
+}
+
+function affiliateIdentityRepository(): IdentityRepository {
+  return {
+    async findUserByProviderUserId() {
+      return {
+        userId: "user_affiliate",
+        email: "affiliate@example.test",
+        status: "active",
+      };
+    },
+    async findOrganizationByWorkosOrgId() {
+      return {
+        organizationId: affiliateOrganizationId,
+        workosOrgId: "workos_finance_org",
+        kind: "affiliate_partner",
+        status: "active",
+      };
+    },
+    async findActiveMembership() {
+      return {
+        membershipId: "membership_affiliate",
+        status: "active",
+        roleKey: "affiliate_owner",
+        workosMembershipId: "membership_workos_affiliate",
+        workosRoleSlugs: ["affiliate_owner"],
+      };
+    },
+    async findLinkedResources() {
+      return [
+        {
+          product: "affiliate",
+          resourceType: "affiliate",
+          resourceId: affiliateId,
+          relationship: "owner",
           status: "active",
         },
       ];
