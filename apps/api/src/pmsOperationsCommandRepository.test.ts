@@ -7,6 +7,8 @@ import {
   type PmsOperationsCommandPool,
 } from "./domains/pmsOperationsCommandRepository.js";
 import type {
+  PmsOperationalTemplate,
+  PmsOperationalTemplateUpdateCommand,
   PmsOperationsReadRepository,
   PmsPrivateNote,
   PmsPrivateNoteCreateCommand,
@@ -90,6 +92,86 @@ describe("PMS operations command repository", () => {
       expect(event.auditKey).not.toBe(`pms.private_note.created.${idempotencyKey}.v1`);
     }
   });
+
+  it("reads and upserts PMS operational templates into the owned template tables", async () => {
+    const target = targetPrivateNotesPool();
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository: unusedReadRepository,
+      now: target.now,
+    });
+
+    const emptyChecklist = await repository.getOperationalTemplate(
+      defaultPropertyId,
+      "check_in_checklist",
+    );
+    expect(emptyChecklist).toMatchObject({
+      propertyId: defaultPropertyId,
+      templateKind: "check_in_checklist",
+      steps: [],
+      updatedAt: null,
+    });
+
+    const checklist = await repository.updateOperationalTemplate(
+      templateUpdateCommand("check_in_checklist"),
+    );
+    const inspection = await repository.updateOperationalTemplate(
+      templateUpdateCommand("check_out_inspection", {
+        commandId: "cmd-inspection-template",
+        idempotencyKey: "client-inspection-template",
+      }),
+    );
+
+    expect(checklist.ok).toBe(true);
+    expect(inspection.ok).toBe(true);
+    if (!checklist.ok || !inspection.ok) {
+      throw new Error("template update unexpectedly failed");
+    }
+    expect(checklist.template).toMatchObject({
+      propertyId: defaultPropertyId,
+      templateKind: "check_in_checklist",
+      steps: [{ stepId: "passport", label: "Verify passport", required: true }],
+      updatedByUserId: "f6851000-0000-0000-0000-000000000001",
+    });
+    expect(inspection.template.templateKind).toBe("check_out_inspection");
+
+    const replayedRead = await repository.getOperationalTemplate(
+      defaultPropertyId,
+      "check_in_checklist",
+    );
+    const replayedWrite = await repository.updateOperationalTemplate(
+      templateUpdateCommand("check_in_checklist"),
+    );
+    const conflictingWrite = await repository.updateOperationalTemplate(
+      templateUpdateCommand("check_in_checklist", {
+        steps: [{ stepId: "deposit", label: "Review deposit", required: false }],
+      }),
+    );
+
+    expect(replayedRead.steps).toEqual(checklist.template.steps);
+    expect(replayedWrite).toEqual(checklist);
+    expect(conflictingWrite).toMatchObject({
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+    });
+    expect(target.calls.some((call) => call.text.includes("pms.checkin_checklist_templates"))).toBe(
+      true,
+    );
+    expect(
+      target.calls.some((call) => call.text.includes("pms.checkout_inspection_templates")),
+    ).toBe(true);
+    expect(target.auditEvents.map((event) => event.action)).toEqual([
+      "pms.check_in_checklist.updated",
+      "pms.check_out_inspection.updated",
+    ]);
+    expect(
+      target.calls.filter((call) =>
+        call.text.includes("INSERT INTO pms.checkin_checklist_templates"),
+      ),
+    ).toHaveLength(1);
+  });
 });
 
 const defaultPropertyId = "f6853000-0000-0000-0000-000000000001";
@@ -104,6 +186,11 @@ type PrivateNoteRecord = {
   propertyId: string;
   guestBookingId: string;
   note: PmsPrivateNote;
+};
+
+type TemplateRecord = {
+  propertyId: string;
+  template: PmsOperationalTemplate;
 };
 
 type IdempotencyRecord = {
@@ -124,6 +211,7 @@ function targetPrivateNotesPool(): {
   const auditKeys = new Set<string>();
   const idempotencyRows = new Map<string, IdempotencyRecord>();
   const notes = new Map<string, PrivateNoteRecord>();
+  const templates = new Map<string, TemplateRecord>();
   const reservations = new Set([
     `${defaultPropertyId}:${defaultGuestBookingId}`,
     `${"f6853000-0000-0000-0000-000000000002"}:${"f6854000-0000-0000-0000-000000000002"}`,
@@ -222,6 +310,52 @@ function targetPrivateNotesPool(): {
       return rows([{ noteId } as unknown as T]);
     }
 
+    if (
+      text.includes("FROM pms.checkin_checklist_templates") ||
+      text.includes("FROM pms.checkout_inspection_templates")
+    ) {
+      const templateKind = text.includes("pms.checkin_checklist_templates")
+        ? "check_in_checklist"
+        : "check_out_inspection";
+      const record = templates.get(`${templateKind}:${String(values?.[0])}`);
+      return record
+        ? rows([
+            {
+              propertyId: record.propertyId,
+              steps: record.template.steps,
+              updatedByUserId: record.template.updatedByUserId,
+              updatedAt: record.template.updatedAt,
+            } as unknown as T,
+          ])
+        : emptyRows<T>();
+    }
+
+    if (
+      text.includes("INSERT INTO pms.checkin_checklist_templates") ||
+      text.includes("INSERT INTO pms.checkout_inspection_templates")
+    ) {
+      const templateKind = text.includes("pms.checkin_checklist_templates")
+        ? "check_in_checklist"
+        : "check_out_inspection";
+      const propertyId = String(values?.[0]);
+      const template: PmsOperationalTemplate = {
+        propertyId,
+        templateKind,
+        steps: JSON.parse(String(values?.[1])) as PmsOperationalTemplate["steps"],
+        updatedByUserId: String(values?.[2]),
+        updatedAt: String(values?.[3]),
+      };
+      templates.set(`${templateKind}:${propertyId}`, { propertyId, template });
+      return rows([
+        {
+          propertyId,
+          steps: template.steps,
+          updatedByUserId: template.updatedByUserId,
+          updatedAt: template.updatedAt,
+        } as unknown as T,
+      ]);
+    }
+
     if (text.includes("INSERT INTO platform.product_audit_events")) {
       const auditKey = String(values?.[0]);
       if (!auditKeys.has(auditKey)) {
@@ -284,6 +418,21 @@ function privateNoteCreateCommand(
     commandId: "cmd-private-note-create-replay-test",
     idempotencyKey: "client-private-note-create",
     body: "Sentinel private note body: do not expose the anniversary surprise.",
+    ...overrides,
+  };
+}
+
+function templateUpdateCommand(
+  templateKind: PmsOperationalTemplateUpdateCommand["templateKind"],
+  overrides: Partial<PmsOperationalTemplateUpdateCommand> = {},
+): PmsOperationalTemplateUpdateCommand {
+  return {
+    propertyId: defaultPropertyId,
+    templateKind,
+    actorUserId: "f6851000-0000-0000-0000-000000000001",
+    commandId: "cmd-checklist-template",
+    idempotencyKey: "client-checklist-template",
+    steps: [{ stepId: "passport", label: "Verify passport", required: true }],
     ...overrides,
   };
 }

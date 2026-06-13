@@ -72,6 +72,11 @@ import type {
   PmsNoShowCommand,
   PmsOperationalCommandResult,
   PmsOperationalStatusCommand,
+  PmsOperationalTemplate,
+  PmsOperationalTemplateCommandResponse,
+  PmsOperationalTemplateKind,
+  PmsOperationalTemplateResponse,
+  PmsOperationalTemplateUpdateCommand,
   PmsOperationsCommandResponse,
   PmsOperationsCommandRepository,
   PmsCalendarDay,
@@ -288,6 +293,20 @@ const pmsPrivateNoteCases = Object.fromEntries(
     "private-note-create",
     "private-note-delete",
     "private-note-not-found",
+  ].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
+const pmsOperationalTemplateCases = Object.fromEntries(
+  [
+    "checklist-template-read",
+    "checklist-template-write",
+    "inspection-template-read",
+    "inspection-template-write",
+    "template-validation-non-array",
+    "template-validation-oversized",
+    "template-validation-missing-label",
   ].map((caseId) => [
     caseId,
     pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
@@ -894,6 +913,7 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   >;
   noteCreates: PmsPrivateNoteCreateCommand[];
   noteDeletes: PmsPrivateNoteDeleteCommand[];
+  templateUpdates: PmsOperationalTemplateUpdateCommand[];
   outboxEnqueues: string[];
   auditEvents: string[];
 } {
@@ -902,11 +922,40 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   > = [];
   const noteCreates: PmsPrivateNoteCreateCommand[] = [];
   const noteDeletes: PmsPrivateNoteDeleteCommand[] = [];
+  const templateUpdates: PmsOperationalTemplateUpdateCommand[] = [];
   const outboxEnqueues: string[] = [];
   const auditEvents: string[] = [];
   const notesByReservation = new Map<string, PmsPrivateNote[]>([
     [pmsReservations[0].guestBookingId, structuredClone(pmsPrivateNotes)],
     [pmsReservations[1].guestBookingId, []],
+  ]);
+  const templates = new Map<PmsOperationalTemplateKind, PmsOperationalTemplate>([
+    [
+      "check_in_checklist",
+      {
+        propertyId: pmsPropertyId,
+        templateKind: "check_in_checklist",
+        steps: [
+          { stepId: "passport", label: "Verify passport", required: true },
+          { stepId: "deposit", label: "Review deposit", required: false },
+        ],
+        updatedByUserId: "user_hotel_owner",
+        updatedAt: "2026-08-14T16:30:00.000Z",
+      },
+    ],
+    [
+      "check_out_inspection",
+      {
+        propertyId: pmsPropertyId,
+        templateKind: "check_out_inspection",
+        steps: [
+          { stepId: "minibar", label: "Check minibar", required: false },
+          { stepId: "damage", label: "Inspect damage", required: true },
+        ],
+        updatedByUserId: "user_hotel_owner",
+        updatedAt: "2026-08-14T16:35:00.000Z",
+      },
+    ],
   ]);
   const replayResponses = new Map<string, PmsAssignmentCommandResult>();
   const operationalReplayResponses = new Map<string, PmsOperationalCommandResult>();
@@ -915,8 +964,44 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
     commands,
     noteCreates,
     noteDeletes,
+    templateUpdates,
     outboxEnqueues,
     auditEvents,
+    async getOperationalTemplate(propertyId, templateKind) {
+      expect(propertyId).toBe(pmsPropertyId);
+      return structuredClone(
+        templates.get(templateKind) ?? {
+          propertyId,
+          templateKind,
+          steps: [],
+          updatedByUserId: null,
+          updatedAt: null,
+        },
+      );
+    },
+    async updateOperationalTemplate(command) {
+      templateUpdates.push(command);
+      const template: PmsOperationalTemplate = {
+        propertyId: command.propertyId,
+        templateKind: command.templateKind,
+        steps: structuredClone(command.steps),
+        updatedByUserId: command.actorUserId,
+        updatedAt: "2026-08-14T17:10:00.000Z",
+      };
+      templates.set(command.templateKind, template);
+      auditEvents.push(`template_updated:${command.templateKind}`);
+      return {
+        ok: true,
+        template: structuredClone(template),
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:10:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
     async listPrivateNotes(propertyId, guestBookingId) {
       expect(propertyId).toBe(pmsPropertyId);
       return notesByReservation.has(guestBookingId)
@@ -5972,7 +6057,9 @@ describe("vayada-api", () => {
     expect(preflight.headers["access-control-allow-headers"]).toBe(
       "authorization,content-type,x-hotel-id",
     );
-    expect(preflight.headers["access-control-allow-methods"]).toBe("GET,POST,PATCH,DELETE,OPTIONS");
+    expect(preflight.headers["access-control-allow-methods"]).toBe(
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    );
     expect(read.statusCode).toBe(200);
     expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
   });
@@ -6921,6 +7008,132 @@ describe("vayada-api", () => {
     }
 
     expect(commandRepository.auditEvents).toEqual([]);
+  });
+
+  it("reads PMS operational templates with read policy", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    for (const caseId of ["checklist-template-read", "inspection-template-read"]) {
+      const templateCase = pmsOperationalTemplateCases[caseId]!;
+      const response = await injectJson(app, {
+        method: templateCase.request.method ?? "GET",
+        ...pmsOperationsRequestOptions(templateCase.request),
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+      const body = response.body as PmsOperationalTemplateResponse;
+
+      expect(response.statusCode, caseId).toBe(templateCase.expected.status);
+      expect(body.contractVersion, caseId).toBe("pms-operations.v1");
+      for (const path of templateCase.expected.mustInclude ?? []) {
+        expect(readContractPath(body, path), `${caseId}: ${path}`).not.toBeUndefined();
+      }
+    }
+  });
+
+  it("writes PMS operational templates with manage policy and validation fixtures", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    for (const caseId of ["checklist-template-write", "inspection-template-write"]) {
+      const templateCase = pmsOperationalTemplateCases[caseId]!;
+      const response = await injectJson(app, {
+        method: templateCase.request.method ?? "PUT",
+        ...pmsOperationsRequestOptions(templateCase.request),
+        payload: templateCase.request.body,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+      const body = response.body as PmsOperationalTemplateCommandResponse;
+
+      expect(response.statusCode, caseId).toBe(templateCase.expected.status);
+      expect(body.contractVersion, caseId).toBe("pms-operations.v1");
+      expect(body.commandMeta, caseId).toMatchObject({
+        contractVersion: "pms-operations.v1",
+        idempotencyKey: templateCase.request.body?.idempotencyKey,
+        sideEffects: ["audit_event"],
+      });
+      for (const path of templateCase.expected.mustInclude ?? []) {
+        expect(readContractPath(body, path), `${caseId}: ${path}`).not.toBeUndefined();
+      }
+    }
+
+    expect(commandRepository.templateUpdates).toHaveLength(2);
+    expect(commandRepository.templateUpdates.map((command) => command.templateKind)).toEqual([
+      "check_in_checklist",
+      "check_out_inspection",
+    ]);
+
+    for (const caseId of [
+      "template-validation-non-array",
+      "template-validation-oversized",
+      "template-validation-missing-label",
+    ]) {
+      const templateCase = pmsOperationalTemplateCases[caseId]!;
+      const response = await injectJson(app, {
+        method: templateCase.request.method ?? "PUT",
+        ...pmsOperationsRequestOptions(templateCase.request),
+        payload: templateCase.request.body,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+
+      expect(response.statusCode, caseId).toBe(templateCase.expected.status);
+      expect(response.body, caseId).toMatchObject({
+        code: templateCase.expected.errorCode,
+      });
+    }
+
+    expect(commandRepository.templateUpdates).toHaveLength(2);
+
+    await app.close();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+    const readOnlyWrite = await injectJson(app, {
+      method: "PUT",
+      ...pmsOperationsRequestOptions(
+        pmsOperationalTemplateCases["checklist-template-write"]!.request,
+      ),
+      payload: pmsOperationalTemplateCases["checklist-template-write"]!.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    expect(readOnlyWrite.statusCode).toBe(403);
+    expect(readOnlyWrite.body).toMatchObject({ code: "missing_permission" });
   });
 
   it("rejects PMS operations reads with an invalid token", async () => {

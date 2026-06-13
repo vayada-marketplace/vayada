@@ -13,6 +13,11 @@ import {
   type PmsOperationalCommandResult,
   type PmsOperationalStatus,
   type PmsOperationalStatusCommand,
+  type PmsOperationalTemplate,
+  type PmsOperationalTemplateCommandResult,
+  type PmsOperationalTemplateKind,
+  type PmsOperationalTemplateUpdateCommand,
+  type PmsTemplateStep,
   type PmsOperationsCommandSideEffect,
   type PmsOperationsCommandRepository,
   type PmsPrivateNote,
@@ -71,6 +76,9 @@ type PmsIdempotencyRow = {
 type PmsOperationalCommand = PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand;
 
 type PmsOperationalCommandOperation = "status_command" | "checkin_command" | "no_show_command";
+type PmsOperationalTemplateOperation =
+  | "checkin_checklist_template_update"
+  | "checkout_inspection_template_update";
 
 const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
   string,
@@ -95,6 +103,13 @@ type PmsPrivateNoteRow = {
   authorDisplayName: string;
   source: "pms" | "migration" | "system";
   createdAt: Date | string;
+};
+
+type PmsOperationalTemplateRow = {
+  propertyId: string;
+  steps: unknown;
+  updatedByUserId: string | null;
+  updatedAt: Date | string;
 };
 
 export function createTargetPmsOperationsCommandRepository(
@@ -485,6 +500,82 @@ export function createTargetPmsOperationsCommandRepository(
         mutate: applyNoShowCommandMutation,
       });
     },
+    async getOperationalTemplate(propertyId, templateKind) {
+      const client = await pool.connect();
+      try {
+        return readOperationalTemplate(client, propertyId, templateKind);
+      } finally {
+        client.release();
+      }
+    },
+    async updateOperationalTemplate(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const operation = operationalTemplateOperation(command.templateKind);
+      const requestFingerprintHash = sha256(stableJson(command));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findOperationalTemplateCommandReplay(
+          client,
+          command,
+          operation,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+
+        const insertedIdempotencyKey = await recordOperationalTemplateCommandIdempotency(
+          client,
+          command,
+          operation,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return operationalTemplateConflict(
+            "Operational template idempotency key could not be reserved.",
+          );
+        }
+
+        const template = await upsertOperationalTemplate(client, command, acceptedAt);
+        await insertOperationalTemplateAuditEvent(client, command, template, commandMeta, keyHash);
+        await completeOperationalTemplateCommandIdempotency(
+          client,
+          command,
+          operation,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          template,
+        );
+        await client.query("COMMIT");
+        return { ok: true, template, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return operationalTemplateConflict(
+            "Operational template update conflicts with the current template state.",
+          );
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     async close() {
       if (ownsPool) await pool.end();
     },
@@ -631,6 +722,305 @@ function toPmsPrivateNote(row: PmsPrivateNoteRow): PmsPrivateNote {
       privacyScope: "internal",
     },
   };
+}
+
+async function readOperationalTemplate(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  templateKind: PmsOperationalTemplateKind,
+): Promise<PmsOperationalTemplate> {
+  const result = await client.query<PmsOperationalTemplateRow>(
+    `SELECT
+       property_id::text AS "propertyId",
+       steps,
+       updated_by_user_id::text AS "updatedByUserId",
+       updated_at AS "updatedAt"
+     FROM ${operationalTemplateTable(templateKind)}
+     WHERE property_id = $1::uuid`,
+    [propertyId],
+  );
+  const row = result.rows[0];
+  return row
+    ? toPmsOperationalTemplate(templateKind, row)
+    : {
+        propertyId,
+        templateKind,
+        steps: [],
+        updatedByUserId: null,
+        updatedAt: null,
+      };
+}
+
+async function upsertOperationalTemplate(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  acceptedAt: string,
+): Promise<PmsOperationalTemplate> {
+  const result = await client.query<PmsOperationalTemplateRow>(
+    `INSERT INTO ${operationalTemplateTable(command.templateKind)} (
+       property_id,
+       steps,
+       updated_by_user_id,
+       updated_at
+     )
+     VALUES ($1::uuid, $2::jsonb, $3::uuid, $4::timestamptz)
+     ON CONFLICT (property_id) DO UPDATE
+     SET steps = EXCLUDED.steps,
+         updated_by_user_id = EXCLUDED.updated_by_user_id,
+         updated_at = EXCLUDED.updated_at
+     RETURNING
+       property_id::text AS "propertyId",
+       steps,
+       updated_by_user_id::text AS "updatedByUserId",
+       updated_at AS "updatedAt"`,
+    [command.propertyId, JSON.stringify(command.steps), command.actorUserId, acceptedAt],
+  );
+  return toPmsOperationalTemplate(command.templateKind, result.rows[0]!);
+}
+
+function operationalTemplateTable(templateKind: PmsOperationalTemplateKind): string {
+  return templateKind === "check_in_checklist"
+    ? "pms.checkin_checklist_templates"
+    : "pms.checkout_inspection_templates";
+}
+
+function operationalTemplateOperation(
+  templateKind: PmsOperationalTemplateKind,
+): PmsOperationalTemplateOperation {
+  return templateKind === "check_in_checklist"
+    ? "checkin_checklist_template_update"
+    : "checkout_inspection_template_update";
+}
+
+function toPmsOperationalTemplate(
+  templateKind: PmsOperationalTemplateKind,
+  row: PmsOperationalTemplateRow,
+): PmsOperationalTemplate {
+  const updatedAt =
+    row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt);
+  return {
+    propertyId: row.propertyId,
+    templateKind,
+    steps: toPmsTemplateSteps(row.steps),
+    updatedByUserId: row.updatedByUserId,
+    updatedAt,
+  };
+}
+
+function toPmsTemplateSteps(value: unknown): PmsTemplateStep[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): PmsTemplateStep | null => {
+      if (!item || typeof item !== "object") return null;
+      const step = item as Partial<PmsTemplateStep>;
+      if (typeof step.stepId !== "string" || typeof step.label !== "string") return null;
+      return {
+        stepId: step.stepId,
+        label: step.label,
+        required: step.required === true,
+      };
+    })
+    .filter((step): step is PmsTemplateStep => step !== null);
+}
+
+async function insertOperationalTemplateAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  template: PmsOperationalTemplate,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       $2,
+       1,
+       $3::timestamptz,
+       'property',
+       $4::uuid,
+       'user',
+       $5::uuid,
+       'pms',
+       'operational_template',
+       $6,
+       $7,
+       $8::jsonb,
+       $9::jsonb,
+       $10::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.${command.templateKind}.updated.property.${command.propertyId}.key.${keyHash}.v1`,
+      `pms.${command.templateKind}.updated`,
+      commandMeta.acceptedAt,
+      command.propertyId,
+      command.actorUserId,
+      command.templateKind,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        templateKind: command.templateKind,
+        stepCount: template.steps.length,
+      }),
+      JSON.stringify({ steps: template.steps }),
+      JSON.stringify({
+        commandMeta,
+        idempotencyKeyHash: keyHash,
+        targetOwner: operationalTemplateTable(command.templateKind),
+      }),
+    ],
+  );
+}
+
+async function findOperationalTemplateCommandReplay(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  operation: PmsOperationalTemplateOperation,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsOperationalTemplateCommandResult | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     FOR UPDATE`,
+    [operation, keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return operationalTemplateConflict(
+      "Idempotency key was used with a different operational template command.",
+    );
+  }
+  if (existing.status !== "completed") {
+    return operationalTemplateConflict("Operational template command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const template = existing.idempotencyMetadata?.["template"];
+  if (!isPmsCommandMeta(commandMeta) || !isPmsOperationalTemplate(template)) {
+    return operationalTemplateConflict(
+      "Operational template command replay metadata is unavailable.",
+    );
+  }
+  return { ok: true, template, commandMeta };
+}
+
+async function recordOperationalTemplateCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  operation: PmsOperationalTemplateOperation,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'property',
+       $4::uuid,
+       $5,
+       $6::timestamptz + interval '24 hours',
+       $7::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.commandId,
+      acceptedAt,
+      JSON.stringify({ commandId: command.commandId, templateKind: command.templateKind }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function completeOperationalTemplateCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  operation: PmsOperationalTemplateOperation,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  template: PmsOperationalTemplate,
+): Promise<void> {
+  const idempotencyMetadata = { commandMeta, template };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'operational_template',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      command.templateKind,
+      sha256(stableJson(idempotencyMetadata)),
+      acceptedAt,
+      JSON.stringify(idempotencyMetadata),
+      operation,
+      keyHash,
+      command.propertyId,
+    ],
+  );
 }
 
 async function findPrivateNoteCommandReplay(
@@ -1952,6 +2342,17 @@ function privateNoteConflict(
   };
 }
 
+function operationalTemplateConflict(
+  message: string,
+): Exclude<PmsOperationalTemplateCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "idempotency_conflict",
+    message,
+  };
+}
+
 function invalidStatusTransition(
   fromStatus: string,
   toStatus: string,
@@ -1995,6 +2396,19 @@ function isPmsPrivateNote(value: unknown): value is PmsPrivateNote {
     note.auditMetadata.privacyScope === "internal" &&
     typeof note.auditMetadata.createdAt === "string" &&
     typeof note.auditMetadata.createdByDisplayName === "string"
+  );
+}
+
+function isPmsOperationalTemplate(value: unknown): value is PmsOperationalTemplate {
+  if (!value || typeof value !== "object") return false;
+  const template = value as PmsOperationalTemplate;
+  return (
+    typeof template.propertyId === "string" &&
+    (template.templateKind === "check_in_checklist" ||
+      template.templateKind === "check_out_inspection") &&
+    Array.isArray(template.steps) &&
+    (template.updatedByUserId === null || typeof template.updatedByUserId === "string") &&
+    (template.updatedAt === null || typeof template.updatedAt === "string")
   );
 }
 

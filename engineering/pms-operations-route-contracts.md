@@ -306,6 +306,16 @@ PMS route/domain code must call the port. The architecture boundary check
 blocks direct `booking.booking_guests` mutations from `pmsOperations` route code
 and PMS domain modules.
 
+VAY-782 implements the P2c checklist/inspection template subset in `apps/api`.
+`GET /api/pms/properties/:propertyId/check-in-checklist` and
+`GET /api/pms/properties/:propertyId/check-out-inspection` use the PMS
+operations read policy; the corresponding `PUT` routes use the manage policy
+and persist PMS-owned operational setup steps to
+`pms.checkin_checklist_templates` and `pms.checkout_inspection_templates`.
+Template writes validate that `steps` is an array of bounded step objects with
+stable `stepId`, required `label`, and boolean `required` state. Checkout charge
+commands and the check-out command remain out of scope for VAY-783/VAY-784.
+
 `mark-paid` on checkout charges means a front-desk operator marked the
 operational charge as settled for checkout. It is not a provider payment
 capture, invoice post, payout trigger, or finance reconciliation event.

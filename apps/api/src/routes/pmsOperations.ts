@@ -142,6 +142,22 @@ export type PmsPrivateNote = {
   auditMetadata: PmsPrivateNoteAuditMetadata;
 };
 
+export type PmsTemplateStep = {
+  stepId: string;
+  label: string;
+  required: boolean;
+};
+
+export type PmsOperationalTemplateKind = "check_in_checklist" | "check_out_inspection";
+
+export type PmsOperationalTemplate = {
+  propertyId: string;
+  templateKind: PmsOperationalTemplateKind;
+  steps: PmsTemplateStep[];
+  updatedByUserId: string | null;
+  updatedAt: string | null;
+};
+
 export type PmsAssignmentCommandRequest = {
   commandId: string;
   idempotencyKey: string;
@@ -219,6 +235,15 @@ export type PmsPrivateNoteDeleteCommand = PmsPrivateNoteDeleteRequest & {
   actorUserId: string;
 };
 
+export type PmsOperationalTemplateUpdateCommand = {
+  propertyId: string;
+  templateKind: PmsOperationalTemplateKind;
+  commandId: string;
+  idempotencyKey: string;
+  steps: PmsTemplateStep[];
+  actorUserId: string;
+};
+
 export type PmsAssignmentCommandResponse = {
   contractVersion: PmsOperationsContractVersion;
   propertyId: string;
@@ -273,6 +298,16 @@ export type PmsPrivateNoteDeleteResponse = {
   propertyId: string;
   guestBookingId: string;
   noteId: string;
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsOperationalTemplateResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  template: PmsOperationalTemplate;
+};
+
+export type PmsOperationalTemplateCommandResponse = PmsOperationalTemplateResponse & {
   commandMeta: PmsCommandMeta;
 };
 
@@ -356,6 +391,19 @@ export type PmsPrivateNoteDeleteResult =
       message: string;
     };
 
+export type PmsOperationalTemplateCommandResult =
+  | {
+      ok: true;
+      template: PmsOperationalTemplate;
+      commandMeta: PmsCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
@@ -366,6 +414,13 @@ export type PmsOperationsCommandRepository = {
   listPrivateNotes(propertyId: string, guestBookingId: string): Promise<PmsPrivateNote[] | null>;
   createPrivateNote(command: PmsPrivateNoteCreateCommand): Promise<PmsPrivateNoteCommandResult>;
   deletePrivateNote(command: PmsPrivateNoteDeleteCommand): Promise<PmsPrivateNoteDeleteResult>;
+  getOperationalTemplate(
+    propertyId: string,
+    templateKind: PmsOperationalTemplateKind,
+  ): Promise<PmsOperationalTemplate>;
+  updateOperationalTemplate(
+    command: PmsOperationalTemplateUpdateCommand,
+  ): Promise<PmsOperationalTemplateCommandResult>;
   close?(): Promise<void>;
 };
 
@@ -502,6 +557,8 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations/:guestBookingId/notes/:noteId",
     "/properties/:propertyId/reservations/:guestBookingId/additional-guests",
     "/properties/:propertyId/reservations/:guestBookingId/additional-guests/:guestId",
+    "/properties/:propertyId/check-in-checklist",
+    "/properties/:propertyId/check-out-inspection",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
     "/properties/:propertyId/reservations/:guestBookingId/assignments",
     "/properties/:propertyId/reservations/:guestBookingId/status",
@@ -990,6 +1047,89 @@ export async function registerPmsOperationsRoutes(
   );
 
   if (commandRepository) {
+    for (const templateRoute of [
+      {
+        path: "/properties/:propertyId/check-in-checklist",
+        templateKind: "check_in_checklist",
+        unavailableMessage: "PMS check-in checklist template read model is unavailable.",
+      },
+      {
+        path: "/properties/:propertyId/check-out-inspection",
+        templateKind: "check_out_inspection",
+        unavailableMessage: "PMS check-out inspection template read model is unavailable.",
+      },
+    ] as const) {
+      app.get<{ Params: PmsPropertyParams }>(templateRoute.path, async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId } = request.params;
+        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+        try {
+          const template = await commandRepository.getOperationalTemplate(
+            propertyId,
+            templateRoute.templateKind,
+          );
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            template,
+          } satisfies PmsOperationalTemplateResponse;
+        } catch {
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable(templateRoute.unavailableMessage),
+          );
+        }
+      });
+
+      app.put<{ Params: PmsPropertyParams; Body: unknown }>(
+        templateRoute.path,
+        async (request, reply) => {
+          if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+            return sendPmsOperationsError(reply, {
+              statusCode: 403,
+              code: "missing_permission",
+              category: "authorization",
+              message: "PMS operations origin is not allowed.",
+            });
+          }
+          const { propertyId } = request.params;
+          if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+          const command = toOperationalTemplateUpdateCommand(
+            propertyId,
+            templateRoute.templateKind,
+            request,
+          );
+          if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+          const result = await commandRepository.updateOperationalTemplate(command.value);
+          if (!result.ok) {
+            return sendPmsOperationsError(reply, {
+              statusCode: result.statusCode,
+              code: result.code,
+              category: "conflict",
+              message: result.message,
+            });
+          }
+
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            template: result.template,
+            commandMeta: result.commandMeta,
+          } satisfies PmsOperationalTemplateCommandResponse;
+        },
+      );
+    }
+
     app.get<{ Params: PmsReservationParams }>(
       "/properties/:propertyId/reservations/:guestBookingId/notes",
       async (request, reply) => {
@@ -1353,7 +1493,7 @@ function writePmsOperationsCorsHeaders(
   reply
     .header("Access-Control-Allow-Origin", origin)
     .header("Access-Control-Allow-Headers", "authorization,content-type,x-hotel-id")
-    .header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+    .header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
     .header("Vary", "Origin");
   return true;
 }
@@ -1426,6 +1566,87 @@ function toPrivateNoteCreateCommand(
       authorDisplayName: context.actor.email,
     },
   };
+}
+
+function toOperationalTemplateUpdateCommand(
+  propertyId: string,
+  templateKind: PmsOperationalTemplateKind,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsOperationalTemplateUpdateCommand } | { error: PmsOperationsError } {
+  const body = objectBody(request.body);
+  if (!body) return { error: invalidBody("Template update body must be an object.") };
+
+  const commandId = stringField(body.commandId);
+  const idempotencyKey = stringField(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody("Template update requires commandId and idempotencyKey.") };
+  }
+
+  const steps = toOperationalTemplateSteps(body.steps);
+  if ("error" in steps) return steps;
+
+  return {
+    value: {
+      propertyId,
+      templateKind,
+      commandId,
+      idempotencyKey,
+      steps: steps.value,
+      actorUserId: request.authContext!.actor.internalUserId,
+    },
+  };
+}
+
+function toOperationalTemplateSteps(
+  value: unknown,
+): { value: PmsTemplateStep[] } | { error: PmsOperationsError } {
+  if (!Array.isArray(value)) {
+    return { error: invalidBody("Template steps must be an array.") };
+  }
+  if (value.length > 50) {
+    return { error: invalidBody("Template steps cannot exceed 50 items.") };
+  }
+
+  const steps: PmsTemplateStep[] = [];
+  const seenStepIds = new Set<string>();
+  for (const [index, item] of value.entries()) {
+    const raw = objectBody(item);
+    if (!raw) {
+      return { error: invalidBody(`Template step ${index + 1} must be an object.`) };
+    }
+
+    const stepId = stringField(raw.stepId);
+    const label = stringField(raw.label);
+    if (!stepId) {
+      return { error: invalidBody(`Template step ${index + 1} requires stepId.`) };
+    }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,99}$/.test(stepId)) {
+      return {
+        error: invalidBody(
+          `Template step ${index + 1} stepId must use letters, numbers, dots, underscores, colons, or hyphens.`,
+        ),
+      };
+    }
+    if (seenStepIds.has(stepId)) {
+      return { error: invalidBody(`Template stepId ${stepId} is duplicated.`) };
+    }
+    if (!label) {
+      return { error: invalidBody(`Template step ${index + 1} requires label.`) };
+    }
+    if (label.length > 200) {
+      return {
+        error: invalidBody(`Template step ${index + 1} label cannot exceed 200 characters.`),
+      };
+    }
+    if (raw.required !== undefined && typeof raw.required !== "boolean") {
+      return { error: invalidBody(`Template step ${index + 1} required must be a boolean.`) };
+    }
+
+    seenStepIds.add(stepId);
+    steps.push({ stepId, label, required: raw.required === true });
+  }
+
+  return { value: steps };
 }
 
 function toPrivateNoteDeleteCommand(
