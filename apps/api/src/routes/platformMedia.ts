@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import { enforceRoutePolicy } from "./policy.js";
 
 export const PLATFORM_MEDIA_UPLOAD_CONTRACT_VERSION = "platform-media-upload.v1" as const;
+export const PLATFORM_MEDIA_IMPORT_CONTRACT_VERSION = "platform-media-import.v1" as const;
 
 export type PlatformMediaPurpose =
   | "property.hero_image"
@@ -152,14 +153,37 @@ export type PlatformMediaObjectRecord = {
 };
 
 export type PlatformMediaAuditEvent = {
-  action: "platform_media.upload_session.created" | "platform_media.upload_session.finalized";
+  action:
+    | "platform_media.upload_session.created"
+    | "platform_media.upload_session.finalized"
+    | "platform_media.import_job.created";
   auditKey: string;
   actorUserId: string;
   organizationId: string;
-  targetType: "media_upload_session" | "media_object";
+  targetType: "media_upload_session" | "media_object" | "media_import_job";
   targetId: string;
   requestId: string;
   metadata: Record<string, unknown>;
+};
+
+export type PlatformMediaImportRequest = {
+  purpose: "pms.import.source_image";
+  resource: PlatformMediaResourceScope;
+  sourceImageUrls: string[];
+  idempotencyKey?: string;
+};
+
+export type PlatformMediaImportJobRecord = {
+  importJobId: string;
+  jobKey: string;
+  purpose: "pms.import.source_image";
+  status: "pending";
+  actorUserId: string;
+  ownerOrganizationId: string;
+  sourceImageUrls: string[];
+  resource: PlatformMediaResourceScope;
+  target: PlatformMediaResolvedTarget;
+  createdAt: string;
 };
 
 export type PlatformMediaFinalizedFileInspection = {
@@ -202,6 +226,15 @@ export type PlatformMediaRepository = {
     bucketName: string;
     now: string;
   }): Promise<PlatformMediaCompleteUploadSessionResult>;
+  createImportJob(input: {
+    importJobId: string;
+    jobKey: string;
+    context: RequestContext;
+    request: PlatformMediaImportRequest;
+    policy: PlatformMediaPurposePolicy;
+    target: PlatformMediaResolvedTarget;
+    now: string;
+  }): Promise<PlatformMediaImportJobRecord>;
   recordAudit(event: PlatformMediaAuditEvent): Promise<void>;
   close?(): Promise<void>;
 };
@@ -674,6 +707,88 @@ export async function registerPlatformMediaRoutes(
       });
     },
   );
+
+  app.post<{ Body: PlatformMediaImportRequest }>("/imports", async (request, reply) => {
+    const validation = validateImportRequest(request.body);
+    if (!validation.ok) return sendMediaError(reply, 400, validation.code, validation.message);
+
+    const policy = purposePolicies[request.body.purpose];
+    const resourceError = validateResourceScope(request.body.resource, policy);
+    if (resourceError) {
+      return sendMediaError(reply, 400, resourceError.code, resourceError.message);
+    }
+
+    const context = enforceRoutePolicy(request, {
+      permission: policy.permission,
+      resource: {
+        product: request.body.resource.product,
+        resourceType: request.body.resource.resourceType,
+        resourceId: request.body.resource.resourceId,
+        allowedRelationships: policy.allowedRelationships,
+      },
+    });
+
+    const resolvedTarget = await options.targetResolver.resolveTarget({
+      context,
+      request: {
+        ...request.body,
+        visibility: "private",
+        files: request.body.sourceImageUrls.map((sourceImageUrl, index) => ({
+          clientFileId: `source_${index + 1}`,
+          filename: sourceFilename(sourceImageUrl, index),
+          contentType: "image/jpeg",
+          sizeBytes: 1,
+        })),
+      },
+      policy,
+    });
+    if (!resolvedTarget.ok) {
+      return sendMediaError(
+        reply,
+        resolvedTarget.statusCode,
+        resolvedTarget.code,
+        resolvedTarget.message,
+      );
+    }
+
+    const createdAt = now().toISOString();
+    const importJobId = randomUUID();
+    const jobKey =
+      request.body.idempotencyKey?.trim() ||
+      `media.import:pms:${request.body.resource.targetResourceId ?? request.body.resource.resourceId}:${importJobId}:v1`;
+    const importJob = await options.repository.createImportJob({
+      context,
+      importJobId,
+      jobKey,
+      request: request.body,
+      policy,
+      target: resolvedTarget.target,
+      now: createdAt,
+    });
+
+    await options.repository.recordAudit({
+      action: "platform_media.import_job.created",
+      auditKey: jobKey,
+      actorUserId: context.actor.internalUserId,
+      organizationId: context.selectedOrganization.organizationId,
+      targetType: "media_import_job",
+      targetId: importJob.importJobId,
+      requestId: context.audit.requestId,
+      metadata: {
+        purpose: importJob.purpose,
+        sourceImageCount: importJob.sourceImageUrls.length,
+        resource: importJob.resource,
+        target: importJob.target,
+      },
+    });
+
+    return reply.code(202).send({
+      contractVersion: PLATFORM_MEDIA_IMPORT_CONTRACT_VERSION,
+      importJob: serializeImportJob(importJob),
+      sideEffects: ["media_import_job_created", "audit_event"],
+      audit: serializeAudit(context),
+    });
+  });
 }
 
 export function createDeterministicPlatformMediaUploadSigner(
@@ -735,13 +850,16 @@ export function createDeterministicPlatformMediaFinalizer(
 
 export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository & {
   sessions: Map<string, PlatformMediaSessionRecord>;
+  importJobs: Map<string, PlatformMediaImportJobRecord>;
   auditEvents: PlatformMediaAuditEvent[];
 } {
   const sessions = new Map<string, PlatformMediaSessionRecord>();
+  const importJobs = new Map<string, PlatformMediaImportJobRecord>();
   const auditEvents: PlatformMediaAuditEvent[] = [];
 
   return {
     sessions,
+    importJobs,
     auditEvents,
     async createUploadSession(input) {
       const session: PlatformMediaSessionRecord = {
@@ -810,8 +928,43 @@ export function createInMemoryPlatformMediaRepository(): PlatformMediaRepository
       sessions.set(uploadSession.sessionId, uploadSession);
       return { uploadSession, mediaObjects };
     },
+    async createImportJob(input) {
+      const importJob: PlatformMediaImportJobRecord = {
+        importJobId: input.importJobId,
+        jobKey: input.jobKey,
+        purpose: input.request.purpose,
+        status: "pending",
+        actorUserId: input.context.actor.internalUserId,
+        ownerOrganizationId: input.context.selectedOrganization.organizationId,
+        sourceImageUrls: input.request.sourceImageUrls,
+        resource: input.request.resource,
+        target: input.target,
+        createdAt: input.now,
+      };
+      importJobs.set(importJob.importJobId, importJob);
+      return importJob;
+    },
     async recordAudit(event) {
       auditEvents.push(event);
+    },
+  };
+}
+
+export function createPassthroughPlatformMediaTargetResolver(): PlatformMediaTargetResolver {
+  return {
+    async resolveTarget({ request, policy }) {
+      return {
+        ok: true,
+        target: {
+          resourceProduct: policy.targetResourceProduct,
+          resourceType: policy.targetResourceType,
+          resourceId:
+            request.resource.targetResourceId ??
+            request.resource.propertyId ??
+            request.resource.resourceId,
+          propertyId: request.resource.propertyId,
+        },
+      };
     },
   };
 }
@@ -837,6 +990,52 @@ function validateUploadSessionRequest(
   }
   if (!Array.isArray(body.files) || body.files.length === 0) {
     return { ok: false, code: "invalid_upload_files", message: "At least one file is required." };
+  }
+  return { ok: true };
+}
+
+function validateImportRequest(
+  body: PlatformMediaImportRequest | undefined,
+): { ok: true } | { ok: false; code: string; message: string } {
+  if (!body || typeof body !== "object") {
+    return { ok: false, code: "invalid_import_request", message: "Request body is required." };
+  }
+  if (body.purpose !== "pms.import.source_image") {
+    return { ok: false, code: "invalid_media_purpose", message: "Unsupported media purpose." };
+  }
+  if (!body.resource || typeof body.resource !== "object") {
+    return { ok: false, code: "invalid_resource_scope", message: "Resource scope is required." };
+  }
+  if (!Array.isArray(body.sourceImageUrls) || body.sourceImageUrls.length === 0) {
+    return {
+      ok: false,
+      code: "invalid_import_sources",
+      message: "At least one source image URL is required.",
+    };
+  }
+  const policy = purposePolicies["pms.import.source_image"];
+  if (body.sourceImageUrls.length > policy.maxFileCount) {
+    return {
+      ok: false,
+      code: "media_file_count_exceeded",
+      message: `${policy.purpose} accepts at most ${policy.maxFileCount} source URL(s).`,
+    };
+  }
+  for (const sourceImageUrl of body.sourceImageUrls) {
+    if (typeof sourceImageUrl !== "string" || !isSupportedSourceImageUrl(sourceImageUrl)) {
+      return {
+        ok: false,
+        code: "invalid_import_source_url",
+        message: "Each source image URL must be an http(s) URL with a supported image extension.",
+      };
+    }
+  }
+  if (body.idempotencyKey !== undefined && typeof body.idempotencyKey !== "string") {
+    return {
+      ok: false,
+      code: "invalid_import_request",
+      message: "idempotencyKey must be a string.",
+    };
   }
   return { ok: true };
 }
@@ -1172,6 +1371,19 @@ function serializeSession(session: PlatformMediaSessionRecord): Record<string, u
   };
 }
 
+function serializeImportJob(importJob: PlatformMediaImportJobRecord): Record<string, unknown> {
+  return {
+    importJobId: importJob.importJobId,
+    jobKey: importJob.jobKey,
+    purpose: importJob.purpose,
+    status: importJob.status,
+    resource: importJob.resource,
+    target: importJob.target,
+    sourceImageCount: importJob.sourceImageUrls.length,
+    createdAt: importJob.createdAt,
+  };
+}
+
 function serializeAudit(context: RequestContext): Record<string, string> {
   return {
     requestId: context.audit.requestId,
@@ -1229,4 +1441,28 @@ function isImageContentType(contentType: string): boolean {
 
 function isSha256Hex(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isSupportedSourceImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+    const extension = filenameExtension(url.pathname);
+    if (extension === null) return true;
+    return (
+      purposePolicies["pms.import.source_image"].allowedExtensions.includes(extension)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function sourceFilename(sourceImageUrl: string, index: number): string {
+  try {
+    const pathname = new URL(sourceImageUrl).pathname;
+    const filename = pathname.split("/").filter(Boolean).pop();
+    return filename ? normalizeFilename(filename) : `source-${index + 1}.jpg`;
+  } catch {
+    return `source-${index + 1}.jpg`;
+  }
 }

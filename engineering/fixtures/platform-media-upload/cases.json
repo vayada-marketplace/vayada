@@ -196,6 +196,93 @@
         "status": 400,
         "errorCode": "unsupported_media_type"
       }
+    },
+    {
+      "caseId": "pms-room-type-media-upload-session",
+      "description": "PMS room type images use platform media sessions and target the PMS room type media snapshot.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "pms.room_type.media",
+          "visibility": "public",
+          "resource": {
+            "product": "pms",
+            "resourceType": "pms_hotel",
+            "resourceId": "pms_hotel_alpenrose",
+            "propertyId": "property_alpenrose",
+            "targetResourceId": "room_type_suite"
+          },
+          "files": [
+            {
+              "clientFileId": "room-1",
+              "filename": "suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/jpeg",
+            "sizeBytes": 2048,
+            "widthPx": 1800,
+            "heightPx": 1200
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 1,
+        "mediaObject": {
+          "purpose": "pms.room_type.media",
+          "resourceProduct": "pms",
+          "resourceType": "room_type",
+          "resourceId": "room_type_suite",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
+      "caseId": "pms-import-source-image-job",
+      "description": "PMS listing import source images queue a platform media import job instead of PMS-owned downloads.",
+      "request": {
+        "path": "/api/media/imports",
+        "method": "POST",
+        "body": {
+          "purpose": "pms.import.source_image",
+          "resource": {
+            "product": "pms",
+            "resourceType": "pms_hotel",
+            "resourceId": "pms_hotel_alpenrose",
+            "propertyId": "property_alpenrose",
+            "targetResourceId": "room_type_suite"
+          },
+          "sourceImageUrls": [
+            "https://provider.example.test/images/suite-1.jpg",
+            "https://provider.example.test/cdn/suite-render?width=1200"
+          ],
+          "idempotencyKey": "media.import:pms:room_type_suite:listing-preview-1:v1"
+        }
+      },
+      "expected": {
+        "status": 202,
+        "mediaObject": {
+          "purpose": "pms.import.source_image",
+          "resourceProduct": "pms",
+          "resourceType": "import_job",
+          "resourceId": "room_type_suite"
+        },
+        "sideEffects": ["media_import_job_created", "audit_event"]
+      }
     }
   ]
 }

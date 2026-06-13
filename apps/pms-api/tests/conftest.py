@@ -19,7 +19,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-testing-only")
 os.environ.setdefault("DEBUG", "true")
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("SMTP_HOST", "")
-# S3 config for tests — required so /upload/images doesn't return 503
+# S3 config for tests that still exercise legacy S3-backed helpers.
 os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_fake")
 os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_fake")
 os.environ.setdefault("STRIPE_PLATFORM_ACCOUNT_ID", "")
@@ -246,7 +246,6 @@ def mock_s3_operations():
     with (
         patch("app.s3_service.upload_file_to_s3", side_effect=mock_upload),
         patch("app.s3_service.delete_file_from_s3", side_effect=mock_delete),
-        patch("app.routers.upload.upload_file_to_s3", side_effect=mock_upload),
     ):
         yield {"uploaded": uploaded_files, "deleted": deleted_files}
 

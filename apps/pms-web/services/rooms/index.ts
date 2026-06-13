@@ -3,6 +3,7 @@ import {
   assertPmsOperationsReadModelEnabled,
   pmsOperationsClient,
 } from "../api/pmsOperationsClient";
+import type { RoomImageReference } from "../upload";
 
 export interface MonthlyRate {
   baseRate?: number | null;
@@ -53,7 +54,7 @@ export interface RoomType {
   latitude: number | null;
   longitude: number | null;
   amenities: string[];
-  images: string[];
+  images: RoomImageReference[];
   bedType: string;
   features: string[];
   benefits: string[];
@@ -109,7 +110,7 @@ export interface RoomTypeCreate {
   latitude?: number | null;
   longitude?: number | null;
   amenities?: string[];
-  images?: string[];
+  images?: RoomImageReference[];
   bedType?: string;
   features?: string[];
   benefits?: string[];

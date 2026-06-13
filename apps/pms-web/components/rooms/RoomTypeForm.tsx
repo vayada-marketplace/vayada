@@ -190,6 +190,7 @@ interface RoomTypeFormProps {
   // generated room units to match (VAY-406). The DB trigger keeps
   // total_rooms truthful so the VAY-402 oversell invariant still holds.
   mode?: "create" | "edit";
+  roomTypeId?: string;
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -754,6 +755,7 @@ export default function RoomTypeForm({
   submitLabel = "Save",
   cancelHref = "/rooms",
   mode = "create",
+  roomTypeId,
 }: RoomTypeFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
   const skipPriceWarningConfirmRef = useRef(false);
@@ -3456,7 +3458,16 @@ export default function RoomTypeForm({
           <div className="bg-white rounded-xl border border-gray-200 px-4 py-5 md:px-6 md:py-6">
             <ImageUpload
               images={form.images || []}
-              onChange={(urls) => updateForm({ images: urls })}
+              onChange={(images) => updateForm({ images })}
+              mediaResource={{
+                product: "pms",
+                resourceType: "pms_hotel",
+                resourceId:
+                  typeof window !== "undefined"
+                    ? localStorage.getItem("selectedHotelId") || "pms_hotel_current"
+                    : "pms_hotel_current",
+                targetResourceId: roomTypeId || "pending-room-type",
+              }}
               maxImages={10}
               label="Room Images"
             />

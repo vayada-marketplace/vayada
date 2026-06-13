@@ -196,6 +196,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         submitLabel="Save Changes"
         cancelHref="/rooms"
         mode="edit"
+        roomTypeId={id}
       />
       {showDeleteConfirm && (
         <ConfirmDialog
