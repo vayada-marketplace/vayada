@@ -225,7 +225,19 @@ export async function transformPropertyCatalogPublicProfiles(client: pg.Client):
 
   await client.query(`
     INSERT INTO hotel_catalog.property_media
-      (id, property_id, media_type, url, alt_text, sort_order, source_system, public_approved, created_at, updated_at)
+      (
+        id,
+        property_id,
+        media_type,
+        url,
+        alt_text,
+        sort_order,
+        source_system,
+        public_approved,
+        platform_media_object_id,
+        created_at,
+        updated_at
+      )
     SELECT
       media.id,
       source.property_id,
@@ -235,11 +247,20 @@ export async function transformPropertyCatalogPublicProfiles(client: pg.Client):
       media.sort_order,
       'booking',
       media.public_approved,
+      media.platform_media_object_id,
       source.created_at,
       source.updated_at
     FROM migration_source_booking.property_catalog_inputs source
     CROSS JOIN LATERAL jsonb_to_recordset(source.media)
-      AS media(id uuid, media_type text, url text, alt_text text, sort_order integer, public_approved boolean)
+      AS media(
+        id uuid,
+        media_type text,
+        url text,
+        alt_text text,
+        sort_order integer,
+        public_approved boolean,
+        platform_media_object_id uuid
+      )
     UNION ALL
     SELECT
       media.id,
@@ -250,11 +271,20 @@ export async function transformPropertyCatalogPublicProfiles(client: pg.Client):
       media.sort_order,
       'marketplace',
       media.public_approved,
+      media.platform_media_object_id,
       source.created_at,
       source.updated_at
     FROM migration_source_marketplace.property_catalog_inputs source
     CROSS JOIN LATERAL jsonb_to_recordset(source.media)
-      AS media(id uuid, media_type text, url text, alt_text text, sort_order integer, public_approved boolean)
+      AS media(
+        id uuid,
+        media_type text,
+        url text,
+        alt_text text,
+        sort_order integer,
+        public_approved boolean,
+        platform_media_object_id uuid
+      )
     ON CONFLICT (id) DO UPDATE SET
       property_id = EXCLUDED.property_id,
       media_type = EXCLUDED.media_type,
@@ -263,6 +293,7 @@ export async function transformPropertyCatalogPublicProfiles(client: pg.Client):
       sort_order = EXCLUDED.sort_order,
       source_system = EXCLUDED.source_system,
       public_approved = EXCLUDED.public_approved,
+      platform_media_object_id = EXCLUDED.platform_media_object_id,
       updated_at = EXCLUDED.updated_at
   `);
 
@@ -368,13 +399,30 @@ export async function transformPropertyCatalogPublicProfiles(client: pg.Client):
     ),
     media AS (
       SELECT
-        property_id,
+        property_media.property_id,
         jsonb_agg(
-          jsonb_build_object('type', media_type, 'url', url)
-          ORDER BY sort_order, id
-        ) FILTER (WHERE public_approved) AS media
-      FROM hotel_catalog.property_media
-      GROUP BY property_id
+          jsonb_strip_nulls(jsonb_build_object(
+            'id', property_media.id::text,
+            'type', property_media.media_type,
+            'url', variant.public_cdn_url,
+            'altText', property_media.alt_text,
+            'sortOrder', property_media.sort_order,
+            'platformMediaObjectId', property_media.platform_media_object_id::text
+          ))
+          ORDER BY property_media.sort_order, property_media.id
+        ) FILTER (WHERE property_media.public_approved) AS media
+      FROM hotel_catalog.property_media property_media
+      JOIN platform.media_objects media_object
+        ON media_object.id = property_media.platform_media_object_id
+       AND media_object.visibility = 'public'
+       AND media_object.public_approved = TRUE
+       AND media_object.lifecycle_status = 'active'
+      JOIN platform.media_variants variant
+        ON variant.media_object_id = media_object.id
+       AND variant.visibility = 'public'
+       AND variant.variant_name = 'original_safe'
+      WHERE property_media.public_approved = TRUE
+      GROUP BY property_media.property_id
     ),
     amenities AS (
       SELECT

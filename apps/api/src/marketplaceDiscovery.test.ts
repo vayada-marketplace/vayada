@@ -733,6 +733,7 @@ describe("pg marketplace discovery repository", () => {
     expect(pool.sql.join("\n")).toContain('listing.source_listing_id AS "listingId"');
     expect(pool.sql.join("\n")).toContain("listing.source_listing_id IS NOT NULL");
     expect(pool.sql.join("\n")).toContain("property_public_profile_read_model");
+    expect(pool.sql.join("\n")).toContain("platformMediaObjectId");
     expect(pool.sql.join("\n")).not.toMatch(/\bauth\b|users/i);
   });
 

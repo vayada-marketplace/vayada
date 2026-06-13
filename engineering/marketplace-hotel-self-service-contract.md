@@ -347,6 +347,7 @@ type CreateMarketplaceHotelListingRequest = {
   accommodationType?: MarketplaceAccommodationType | null;
   rawLocationText?: string | null;
   imageUrls?: string[];
+  imageMediaObjectIds?: string[];
   collaborationOfferings: MarketplaceHotelListingOfferingWrite[];
   creatorRequirements: MarketplaceHotelListingCreatorRequirementsWrite;
 };

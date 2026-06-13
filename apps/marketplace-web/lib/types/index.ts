@@ -349,6 +349,7 @@ export interface ListingFormData {
   description: string;
   accommodation_type: string;
   images: string[];
+  imageMediaObjectIds?: string[];
   imageFiles: File[];
   collaborationTypes: ("Free Stay" | "Paid" | "Discount" | "Affiliate")[];
   availability: string[];

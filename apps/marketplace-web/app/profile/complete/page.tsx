@@ -147,12 +147,16 @@ export default function ProfileCompletePage() {
       const audienceSize = platforms.reduce((sum, p) => sum + p.followers, 0);
 
       let profilePictureUrl: string | undefined;
+      let profilePictureMediaObjectId: string | undefined;
       if (creatorForm.profilePictureFile) {
         try {
+          const currentProfile = await creatorService.getMyProfile();
           const uploadResponse = await creatorService.uploadProfilePicture(
             creatorForm.profilePictureFile,
+            currentProfile.id,
           );
           profilePictureUrl = uploadResponse.url;
+          profilePictureMediaObjectId = uploadResponse.mediaObjectId;
         } catch (err) {
           if (err instanceof ApiErrorResponse) {
             setError(formatErrorDetail(err.data.detail) || "Failed to upload profile picture");
@@ -178,6 +182,10 @@ export default function ProfileCompletePage() {
         }),
         ...(creatorForm.form.phone?.trim() && { phone: creatorForm.form.phone.trim() }),
         ...(profilePictureUrl && { profilePicture: profilePictureUrl }),
+        ...(profilePictureMediaObjectId && {
+          profilePictureMediaObjectId,
+          profile_picture_media_object_id: profilePictureMediaObjectId,
+        }),
       };
 
       const updatedProfile = await creatorService.updateMyProfile(updatePayload);
@@ -221,12 +229,16 @@ export default function ProfileCompletePage() {
       }
 
       let profilePictureUrl: string | undefined;
+      let profilePictureMediaObjectId: string | undefined;
       if (hotelForm.profilePictureFile) {
         try {
+          const currentProfile = await hotelService.getMyProfile();
           const uploadResponse = await hotelService.uploadProfileImage(
             hotelForm.profilePictureFile,
+            currentProfile.id,
           );
           profilePictureUrl = uploadResponse.url;
+          profilePictureMediaObjectId = uploadResponse.mediaObjectId;
         } catch (err) {
           if (err instanceof ApiErrorResponse) {
             setError(formatErrorDetail(err.data.detail) || "Failed to upload profile picture");
@@ -246,6 +258,10 @@ export default function ProfileCompletePage() {
         phone: hotelForm.form.phone.trim(),
         email: userEmail,
         ...(profilePictureUrl && { picture: profilePictureUrl }),
+        ...(profilePictureMediaObjectId && {
+          pictureMediaObjectId: profilePictureMediaObjectId,
+          picture_media_object_id: profilePictureMediaObjectId,
+        }),
       };
 
       const updatedProfile = await hotelService.updateMyProfile(updatePayload);
@@ -257,12 +273,45 @@ export default function ProfileCompletePage() {
       for (const listing of hotelForm.listings) {
         const offerings = buildListingOfferings(listing);
         let imageUrls = listing.images.filter((img) => !img.startsWith("data:"));
+        let imageMediaObjectIds = listing.imageMediaObjectIds ?? [];
+
+        if (imageUrls.length === 0 && !listing.imageFiles?.length) {
+          setError(`Listing "${listing.name}": At least one image is required`);
+          setSubmitting(false);
+          return;
+        }
+
+        const createdListing = await hotelService.createListing({
+          name: listing.name,
+          location: listing.location,
+          description: listing.description,
+          accommodation_type: listing.accommodation_type || undefined,
+          images: imageUrls,
+          image_media_object_ids: imageMediaObjectIds,
+          collaboration_offerings: offerings,
+          creator_requirements: buildCreatorRequirements(listing),
+        });
 
         if (listing.imageFiles?.length) {
           try {
-            const uploadResponse = await hotelService.uploadListingImages(listing.imageFiles);
+            const uploadResponse = await hotelService.uploadListingImages(
+              listing.imageFiles,
+              createdListing.id,
+            );
             imageUrls = [...imageUrls, ...uploadResponse.images.map((img) => img.url)];
+            imageMediaObjectIds = [
+              ...imageMediaObjectIds,
+              ...uploadResponse.images.map((img) => img.mediaObjectId),
+            ];
+
+            await hotelService.updateListing(createdListing.id, {
+              images: imageUrls,
+              image_media_object_ids: imageMediaObjectIds,
+            });
           } catch (err) {
+            await hotelService.deleteListing(createdListing.id).catch((deleteError) => {
+              console.error("Failed to clean up listing after media upload failure:", deleteError);
+            });
             if (err instanceof ApiErrorResponse) {
               setError(
                 formatErrorDetail(err.data.detail) ||
@@ -275,22 +324,6 @@ export default function ProfileCompletePage() {
             return;
           }
         }
-
-        if (imageUrls.length === 0) {
-          setError(`Listing "${listing.name}": At least one image is required`);
-          setSubmitting(false);
-          return;
-        }
-
-        await hotelService.createListing({
-          name: listing.name,
-          location: listing.location,
-          description: listing.description,
-          accommodation_type: listing.accommodation_type || undefined,
-          images: imageUrls,
-          collaboration_offerings: offerings,
-          creator_requirements: buildCreatorRequirements(listing),
-        });
       }
 
       const complete = await isProfileComplete("hotel");

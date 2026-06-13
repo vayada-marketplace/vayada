@@ -221,6 +221,8 @@ export function createPgMarketplaceDiscoveryReadRepository(config: {
              SELECT media_entry->>'url' AS cover_image_url
              FROM jsonb_array_elements(COALESCE(property_profile.media, '[]'::jsonb)) media_entry
              WHERE media_entry->>'type' IN ('hero_image', 'gallery_image')
+               AND media_entry ? 'platformMediaObjectId'
+               AND media_entry->>'url' LIKE 'https://%'
              ORDER BY CASE WHEN media_entry->>'type' = 'hero_image' THEN 0 ELSE 1 END
              LIMIT 1
            ) media ON TRUE

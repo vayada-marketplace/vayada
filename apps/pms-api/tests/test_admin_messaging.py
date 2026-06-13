@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from app.models.messaging import SendMessageRequest
+from app.repositories.platform_media_repo import PlatformMediaAttachment
 from app.routers import admin_messaging
 from app.routers.admin_messaging import (
     max_attachment_bytes_for_channel,
@@ -77,6 +78,16 @@ def test_validate_attachment_rejects_missing_content_type():
     assert exc.value.status_code == 415
 
 
+def test_validate_attachment_rejects_empty_file():
+    with pytest.raises(HTTPException) as exc:
+        validate_attachment(
+            content_type="image/jpeg",
+            size_bytes=0,
+            channel="airbnb",
+        )
+    assert exc.value.status_code == 400
+
+
 def test_validate_attachment_rejects_oversize_for_bdc():
     # Booking.com cap is 8MB.
     with pytest.raises(HTTPException) as exc:
@@ -141,6 +152,7 @@ class _FakeUploadFile:
 @pytest.mark.asyncio
 async def test_upload_rejects_disallowed_mime_before_calling_channex():
     fake_upload_attachment = AsyncMock()
+    fake_store_attachment = AsyncMock()
     with (
         patch.object(admin_messaging, "get_hotel_id", AsyncMock(return_value="h1")),
         patch.object(
@@ -152,6 +164,11 @@ async def test_upload_rejects_disallowed_mime_before_calling_channex():
             admin_messaging.channex_service,
             "upload_attachment",
             fake_upload_attachment,
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "store_private_attachment",
+            fake_store_attachment,
         ),
     ):
         with pytest.raises(HTTPException) as exc:
@@ -166,11 +183,13 @@ async def test_upload_rejects_disallowed_mime_before_calling_channex():
             )
     assert exc.value.status_code == 415
     fake_upload_attachment.assert_not_awaited()
+    fake_store_attachment.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_upload_rejects_oversize_before_calling_channex():
     fake_upload_attachment = AsyncMock()
+    fake_store_attachment = AsyncMock()
     big = b"\x00" * (9 * 1024 * 1024)  # 9MB > BDC's 8MB
     with (
         patch.object(admin_messaging, "get_hotel_id", AsyncMock(return_value="h1")),
@@ -183,6 +202,11 @@ async def test_upload_rejects_oversize_before_calling_channex():
             admin_messaging.channex_service,
             "upload_attachment",
             fake_upload_attachment,
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "store_private_attachment",
+            fake_store_attachment,
         ),
     ):
         with pytest.raises(HTTPException) as exc:
@@ -197,11 +221,30 @@ async def test_upload_rejects_oversize_before_calling_channex():
             )
     assert exc.value.status_code == 413
     fake_upload_attachment.assert_not_awaited()
+    fake_store_attachment.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_upload_calls_channex_for_allowed_jpeg():
-    fake_upload_attachment = AsyncMock(return_value={"id": "att-123"})
+    calls: list[str] = []
+
+    async def store_attachment(**_kwargs):
+        calls.append("platform-media")
+        return PlatformMediaAttachment(
+            media_id="media-1",
+            storage_key="private/pms/messages/t1/media-1/ok.jpg",
+            filename="ok.jpg",
+            content_type="image/jpeg",
+            size_bytes=8,
+        )
+
+    async def upload_attachment(*_args, **_kwargs):
+        calls.append("channex")
+        return {"id": "att-123"}
+
+    fake_upload_attachment = AsyncMock(side_effect=upload_attachment)
+    fake_store_attachment = AsyncMock(side_effect=store_attachment)
+    fake_record_provider = AsyncMock()
     with (
         patch.object(admin_messaging, "get_hotel_id", AsyncMock(return_value="h1")),
         patch.object(
@@ -213,6 +256,16 @@ async def test_upload_calls_channex_for_allowed_jpeg():
             admin_messaging.channex_service,
             "upload_attachment",
             fake_upload_attachment,
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "store_private_attachment",
+            fake_store_attachment,
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "record_provider_attachment_id",
+            fake_record_provider,
         ),
         patch.object(
             admin_messaging.channex_service,
@@ -230,7 +283,20 @@ async def test_upload_calls_channex_for_allowed_jpeg():
             user_id="u1",
         )
     assert result == {"attachment_id": "att-123"}
+    assert calls == ["platform-media", "channex"]
+    fake_store_attachment.assert_awaited_once_with(
+        property_id="h1",
+        thread_id="t1",
+        actor_user_id="u1",
+        file_bytes=b"jpegdata",
+        filename="ok.jpg",
+        content_type="image/jpeg",
+    )
     fake_upload_attachment.assert_awaited_once()
+    fake_record_provider.assert_awaited_once_with(
+        media_id="media-1",
+        source_attachment_id="att-123",
+    )
 
 
 # ── send_message loop dispatch ─────────────────────────────────────────
@@ -297,6 +363,11 @@ async def test_send_message_with_two_attachments_issues_two_channex_calls():
             AsyncMock(return_value=[]),
         ),
         patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "find_by_provider_attachment_id",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
             admin_messaging.channex_service,
             "post_thread_message",
             post_mock,
@@ -356,6 +427,11 @@ async def test_send_message_attachment_only_issues_one_channex_call():
             AsyncMock(return_value=[]),
         ),
         patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "find_by_provider_attachment_id",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
             admin_messaging.channex_service,
             "post_thread_message",
             post_mock,
@@ -376,6 +452,97 @@ async def test_send_message_attachment_only_issues_one_channex_call():
     kwargs = post_mock.await_args.kwargs
     assert kwargs["message"] == ""
     assert kwargs["attachment_id"] == "a1"
+
+
+@pytest.mark.asyncio
+async def test_send_message_persists_platform_media_reference_for_attachment():
+    post_mock = AsyncMock(return_value=_channex_msg("m1"))
+    insert_mock = AsyncMock(return_value=_inserted_row("row1"))
+    add_attachment_mock = AsyncMock(return_value={"id": "message-attachment-1"})
+    link_attachment_mock = AsyncMock()
+    find_media_mock = AsyncMock(
+        return_value=PlatformMediaAttachment(
+            media_id="media-1",
+            storage_key="private/pms/messages/t1/media-1/ok.jpg",
+            filename="ok.jpg",
+            content_type="image/jpeg",
+            size_bytes=8,
+        )
+    )
+
+    with (
+        patch.object(admin_messaging, "get_hotel_id", AsyncMock(return_value="h1")),
+        patch.object(
+            admin_messaging.MessageThreadRepository,
+            "get_by_id",
+            AsyncMock(
+                return_value={
+                    "id": "t1",
+                    "channel": "airbnb",
+                    "source_thread_id": "t-src",
+                }
+            ),
+        ),
+        patch.object(
+            admin_messaging.MessageRepository,
+            "insert_and_update_thread",
+            insert_mock,
+        ),
+        patch.object(
+            admin_messaging.MessageAttachmentRepository,
+            "add",
+            add_attachment_mock,
+        ),
+        patch.object(
+            admin_messaging.MessageAttachmentRepository,
+            "list_by_message",
+            AsyncMock(return_value=[]),
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "find_by_provider_attachment_id",
+            find_media_mock,
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "link_message_attachment",
+            link_attachment_mock,
+        ),
+        patch.object(
+            admin_messaging.channex_service,
+            "post_thread_message",
+            post_mock,
+        ),
+        patch.object(
+            admin_messaging.channex_service,
+            "get_platform_api_key",
+            return_value="key",
+        ),
+    ):
+        await send_message(
+            thread_id="t1",
+            body=SendMessageRequest(body="", attachment_ids=["att-123"]),
+            user_id="u1",
+        )
+
+    find_media_mock.assert_awaited_once_with(
+        property_id="h1",
+        thread_id="t1",
+        source_attachment_id="att-123",
+    )
+    add_attachment_mock.assert_awaited_once_with(
+        message_id="row1",
+        platform_media_object_id="media-1",
+        s3_key="private/pms/messages/t1/media-1/ok.jpg",
+        filename="ok.jpg",
+        content_type="image/jpeg",
+        size_bytes=8,
+        source_attachment_id="att-123",
+    )
+    link_attachment_mock.assert_awaited_once_with(
+        media_id="media-1",
+        message_attachment_id="message-attachment-1",
+    )
 
 
 @pytest.mark.asyncio
@@ -411,6 +578,11 @@ async def test_send_message_partial_failure_surfaces_count_in_error():
             admin_messaging.MessageAttachmentRepository,
             "add",
             AsyncMock(),
+        ),
+        patch.object(
+            admin_messaging.PlatformMediaAttachmentRepository,
+            "find_by_provider_attachment_id",
+            AsyncMock(return_value=None),
         ),
         patch.object(
             admin_messaging.channex_service,

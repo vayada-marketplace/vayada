@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -10,6 +11,8 @@ VALID_MEAL_PLAN_CODES = {1, 3, 4, 9}
 VALID_MEAL_PLAN_CHARGE_UNITS = {"room", "person"}
 
 MAX_PARTIAL_REFUND_TIERS = 10
+
+RoomImageReference = str | dict[str, Any]
 
 
 def _validate_partial_refund_tiers(tiers: list) -> list:
@@ -327,7 +330,7 @@ class RoomTypeCreate(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str] = []
-    images: list[str] = []
+    images: list[RoomImageReference] = []
     bed_type: str = ""
     features: list[str] = []
     benefits: list[str] = []
@@ -461,7 +464,7 @@ class RoomTypeUpdate(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str] | None = None
-    images: list[str] | None = None
+    images: list[RoomImageReference] | None = None
     bed_type: str | None = None
     features: list[str] | None = None
     benefits: list[str] | None = None
@@ -621,7 +624,7 @@ class RoomTypeResponse(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str]
-    images: list[str]
+    images: list[RoomImageReference]
     bed_type: str
     remaining_rooms: int
     features: list[str]
@@ -659,7 +662,7 @@ class RoomTypeAdminResponse(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str]
-    images: list[str]
+    images: list[RoomImageReference]
     bed_type: str
     features: list[str]
     benefits: list[str] = []

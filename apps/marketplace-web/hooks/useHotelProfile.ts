@@ -178,6 +178,8 @@ export function useHotelProfile(
         name?: string;
         location?: string;
         picture?: string | null;
+        pictureMediaObjectId?: string | null;
+        picture_media_object_id?: string | null;
         website?: string;
         about?: string;
         email?: string;
@@ -201,33 +203,22 @@ export function useHotelProfile(
       }
 
       if (hotelProfilePictureFile) {
-        const formData = new FormData();
+        const uploadResponse = await hotelService.uploadProfileImage(
+          hotelProfilePictureFile,
+          hotelProfile.id,
+        );
 
-        if (hotelEditFormData.name.trim() !== hotelProfile.name) {
-          formData.append("name", hotelEditFormData.name.trim());
-        }
-        if (hotelEditFormData.location.trim() !== hotelProfile.location) {
-          formData.append("location", hotelEditFormData.location.trim());
-        }
-        if ((hotelEditFormData.website || "") !== (hotelProfile.website || "")) {
-          formData.append("website", hotelEditFormData.website.trim() || "");
-        }
-        if ((hotelEditFormData.about || "") !== (hotelProfile.about || "")) {
-          formData.append("about", hotelEditFormData.about.trim() || "");
-        }
-        if ((phone || "") !== (hotelProfile.phone || "")) {
-          formData.append("phone", phone || "");
-        }
+        payload.picture = uploadResponse.url;
+        payload.pictureMediaObjectId = uploadResponse.mediaObjectId;
+        payload.picture_media_object_id = uploadResponse.mediaObjectId;
 
         const userEmail =
           typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEYS.USER_EMAIL) : null;
         if (userEmail && userEmail !== hotelProfile.email) {
-          formData.append("email", userEmail);
+          payload.email = userEmail;
         }
 
-        formData.append("picture", hotelProfilePictureFile);
-
-        const updatedProfile = await hotelService.updateMyProfile(formData);
+        const updatedProfile = await hotelService.updateMyProfile(payload);
 
         if (updatedProfile && updatedProfile.picture) {
           setHotelEditFormData((prev) => ({
