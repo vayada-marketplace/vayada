@@ -10,7 +10,8 @@ const platformMediaApiClient = new ApiClient(PLATFORM_MEDIA_API_BASE_URL);
 export type PlatformMediaPurpose =
   | "property.hero_image"
   | "marketplace.listing.gallery"
-  | "marketplace.creator.profile_image";
+  | "marketplace.creator.profile_image"
+  | "marketplace.collaboration_chat.attachment";
 
 export type PlatformMediaResourceScope = {
   product: "booking" | "marketplace";

@@ -14,11 +14,13 @@ helpers for profile or listing media:
 | `POST /upload/image/listing`                  | Retired from marketplace-web upload flow. | Platform media `marketplace.listing.gallery`; listing commands attach returned platform media object IDs.               |
 | `POST /upload/images/listing`                 | Retired from marketplace-web upload flow. | Batch platform media `marketplace.listing.gallery`; listing commands attach returned platform media object IDs.         |
 | `POST /upload/image/creator-profile`          | Retired from marketplace-web upload flow. | Platform media `marketplace.creator.profile_image`; creator profile commands attach returned platform media object IDs. |
+| `POST /upload/image/chat`                     | Retired from marketplace-web chat flow.   | Private platform media `marketplace.collaboration_chat.attachment`; the V4 message command attaches returned media IDs. |
 | `POST /hotels/me/upload-picture`              | Retired deprecated helper.                | Same platform media/profile command flow as `property.hero_image`.                                                      |
 | `POST /hotels/me/listings/{id}/upload-images` | Retired deprecated helper.                | Same platform media/listing command flow as `marketplace.listing.gallery`.                                              |
 
-`POST /upload/image/chat` is intentionally not retired by VAY-824. Chat
-attachments move in VAY-825 through a collaboration message attachment command.
+VAY-825 retires `POST /upload/image/chat` from marketplace-web. Chat
+attachments now create private platform media and send the returned media ID
+through the collaboration message command.
 
 Residual dependency: the VAY-823 base exposes marketplace self-service command
 contracts, but the TypeScript profile/listing write adapters are not present in

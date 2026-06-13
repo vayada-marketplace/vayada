@@ -5,8 +5,9 @@ This is the first V4 write slice after
 It defines collaboration lifecycle writes only: create, respond, update terms,
 approve, cancel, toggle deliverables, and rate creator.
 
-Chat message sends, read receipts, upload/session commands, and admin
-moderation stay out of this slice.
+Chat lifecycle actions stay out of this slice. Message sends and private
+platform-media attachments are covered by
+[`marketplace-collaboration-message-commands-contract.md`](marketplace-collaboration-message-commands-contract.md).
 
 Contract version: `marketplace-collaboration-lifecycle-writes.v1`.
 

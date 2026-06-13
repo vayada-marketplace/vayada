@@ -17,6 +17,11 @@ import {
   MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ENDPOINTS,
   MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_ERROR_CODES,
   MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS,
+  MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION,
+  MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ACTIONS,
+  MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ENDPOINTS,
+  MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ERROR_CODES,
+  MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_PRIVATE_KEYS,
   MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
   MARKETPLACE_COLLABORATION_READ_ENDPOINTS,
   MARKETPLACE_COLLABORATION_READ_ERROR_CODES,
@@ -45,6 +50,7 @@ import {
   type CreatorProfileUpdatedEvent,
   type MarketplaceCollaborationLifecycleSideEffect,
   type MarketplaceCollaborationListResponse,
+  type MarketplaceCollaborationMessageCommandResponse,
   type MarketplaceCollaborationMessagesResponse,
   type MarketplaceConversationSummary,
   type MarketplaceHotelListingAuthorizationTarget,
@@ -810,6 +816,128 @@ describe("@vayada/domain-marketplace", () => {
           (target) => target === "pms.*" || target === "finance.*" || target === "affiliate.*",
         ),
     ).toEqual(expect.arrayContaining(["pms.*", "finance.*", "affiliate.*"]));
+  });
+
+  it("exports the collaboration message command contract and private attachment shape", () => {
+    expect(MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION).toBe(
+      "marketplace-collaboration-message-commands.v1",
+    );
+    expect(MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ENDPOINTS.sendMessage).toMatchObject({
+      method: "POST",
+      path: "/api/marketplace/collaborations/{collaborationId}/messages",
+    });
+    expect(MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ACTIONS).toEqual(["send_message"]);
+    expect(MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ERROR_CODES).toEqual(
+      expect.arrayContaining(["invalid_attachment", "media_not_found", "idempotency_conflict"]),
+    );
+
+    const response: MarketplaceCollaborationMessageCommandResponse = {
+      contractVersion: MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION,
+      readContractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+      command: {
+        action: "send_message",
+        idempotencyKey: "marketplace.collaboration.message:collab_688:nonce_image:v1",
+        messageId: "msg_attachment_001",
+      },
+      message: {
+        contractVersion: MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION,
+        messageId: "msg_attachment_001",
+        collaborationId: "collab_688",
+        senderUserId: null,
+        senderName: "Lina Travels",
+        senderAvatarUrl: null,
+        content: "",
+        contentType: "image",
+        metadata: {
+          attachment: {
+            mediaObjectId: "media_chat_001",
+            purpose: "marketplace.collaboration_chat.attachment",
+            originalFilename: "brief.gif",
+            contentType: "image/gif",
+            sizeBytes: 1024,
+          },
+        },
+        createdAt: "2026-06-12T09:20:00.000Z",
+      },
+      sideEffects: [
+        {
+          type: "marketplace.collaboration.message_stored",
+          idempotencyKey: "marketplace.collaboration.message:collab_688:nonce_image:v1",
+        },
+      ],
+    };
+
+    expect(response.message.contentType).toBe("image");
+    expect(response.message.metadata).toMatchObject({
+      attachment: {
+        mediaObjectId: "media_chat_001",
+        purpose: "marketplace.collaboration_chat.attachment",
+      },
+    });
+    const serialized = JSON.stringify(response);
+    for (const privateKey of MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_PRIVATE_KEYS) {
+      expect(serialized).not.toContain(privateKey);
+    }
+  });
+
+  it("keeps the V4 collaboration message command fixtures focused on private attachments", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        new URL(
+          "../../../engineering/fixtures/marketplace-collaboration-message-commands/cases.json",
+          import.meta.url,
+        ),
+        "utf8",
+      ),
+    ) as {
+      contractVersion: string;
+      readContractVersion: string;
+      cases: Array<{
+        caseId: string;
+        request: {
+          path: string;
+          action?: string;
+          body?: {
+            contentType?: string;
+            attachment?: { purpose?: string; mediaObjectId?: string };
+          };
+        };
+        expected: {
+          status: number;
+          errorCode?: string;
+          attachmentPurpose?: string;
+          mustNotCall?: string[];
+        };
+      }>;
+    };
+
+    expect(fixture.contractVersion).toBe(
+      MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION,
+    );
+    expect(fixture.readContractVersion).toBe(MARKETPLACE_COLLABORATION_READS_CONTRACT_VERSION);
+    expect(fixture.cases.map((entry) => entry.caseId)).toEqual(
+      expect.arrayContaining([
+        "send-text-message-linked-creator",
+        "send-image-message-attaches-private-platform-media",
+        "send-image-deny-wrong-media-purpose",
+        "send-image-deny-missing-media-object",
+      ]),
+    );
+    const attachmentCase = fixture.cases.find(
+      (entry) => entry.caseId === "send-image-message-attaches-private-platform-media",
+    );
+    expect(attachmentCase?.request.path).toBe(
+      "/api/marketplace/collaborations/collab_688/messages",
+    );
+    expect(attachmentCase?.request.body?.attachment).toMatchObject({
+      mediaObjectId: "media_chat_001",
+      purpose: "marketplace.collaboration_chat.attachment",
+    });
+    expect(attachmentCase?.expected).toMatchObject({
+      status: 201,
+      attachmentPurpose: "marketplace.collaboration_chat.attachment",
+      mustNotCall: ["/upload/image/chat"],
+    });
   });
 
   it("exports affiliate provisioning statuses", () => {

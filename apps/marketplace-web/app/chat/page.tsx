@@ -10,6 +10,7 @@ import {
   MessageResponse,
   UpdateCollaborationTermsRequest,
   ConversationResponse,
+  ChatAttachmentResource,
 } from "@/services/api/collaborations";
 import { AuthenticatedNavigation } from "@/components/layout";
 import { useSidebar } from "@/components/layout/AuthenticatedNavigation";
@@ -362,7 +363,9 @@ function ChatPageContent() {
         return [updatedChat, ...filtered];
       });
 
-      await collaborationService.sendMessage(selectedChatId, content);
+      await collaborationService.sendMessage(selectedChatId, content, "text", {
+        side: activeChat?.my_role,
+      });
     } catch (error) {
       console.error("Failed to send message:", error);
       setRealMessages((prev) => prev.filter((m) => !m.id.toString().startsWith("temp-")));
@@ -371,10 +374,12 @@ function ChatPageContent() {
   };
 
   const handleSendImageMessage = async (file: File, caption?: string) => {
-    if (!selectedChatId) return;
+    if (!selectedChatId || !activeChat || !activeCollaboration) {
+      throw new Error("Collaboration details are required before sending an attachment.");
+    }
 
-    // Upload image
-    const { url } = await collaborationService.uploadChatImage(file);
+    const attachmentResource = buildChatAttachmentResource(activeChat, activeCollaboration);
+    const uploaded = await collaborationService.uploadChatAttachment(file, attachmentResource);
 
     // Create temp message for image
     const tempImageMessage = {
@@ -383,16 +388,34 @@ function ChatPageContent() {
       sender_id: "me",
       sender_name: "Me",
       sender_avatar: null,
-      content: url,
+      content: uploaded.url,
       content_type: "image" as const,
-      metadata: null,
+      metadata: {
+        attachment: {
+          mediaObjectId: uploaded.mediaObjectId,
+          purpose: "marketplace.collaboration_chat.attachment" as const,
+          originalFilename: uploaded.originalFilename,
+          contentType: uploaded.contentType,
+          sizeBytes: uploaded.sizeBytes,
+        },
+      },
       created_at: new Date().toISOString(),
     };
 
     setRealMessages((prev) => [...prev, tempImageMessage]);
 
     // Send image message
-    await collaborationService.sendMessage(selectedChatId, url, "image");
+    await collaborationService.sendMessage(selectedChatId, caption || "", "image", {
+      side: activeChat.my_role,
+      legacyFallback: false,
+      attachment: {
+        mediaObjectId: uploaded.mediaObjectId,
+        purpose: "marketplace.collaboration_chat.attachment",
+        originalFilename: uploaded.originalFilename,
+        contentType: uploaded.contentType,
+        sizeBytes: uploaded.sizeBytes,
+      },
+    });
 
     // Update conversation list
     setConversations((prev) => {
@@ -409,24 +432,6 @@ function ChatPageContent() {
       const filtered = prev.filter((c) => c.collaboration_id !== selectedChatId);
       return [updatedChat, ...filtered];
     });
-
-    // If caption provided, send it as a separate text message
-    if (caption) {
-      const tempCaptionMessage = {
-        id: `temp-caption-${Date.now()}`,
-        collaboration_id: selectedChatId,
-        sender_id: "me",
-        sender_name: "Me",
-        sender_avatar: null,
-        content: caption,
-        content_type: "text" as const,
-        metadata: null,
-        created_at: new Date().toISOString(),
-      };
-
-      setRealMessages((prev) => [...prev, tempCaptionMessage]);
-      await collaborationService.sendMessage(selectedChatId, caption);
-    }
   };
 
   return (
@@ -685,4 +690,31 @@ function ChatPageContent() {
 
 export default function ChatPage() {
   return <ChatPageContent />;
+}
+
+function buildChatAttachmentResource(
+  activeChat: ConversationResponse,
+  activeCollaboration: DetailedCollaboration,
+): ChatAttachmentResource {
+  if (activeChat.my_role === "creator") {
+    const resourceId = activeCollaboration.creatorProfileId ?? activeCollaboration.creatorId;
+    if (!resourceId) {
+      throw new Error("Creator profile resource is required for chat attachments.");
+    }
+    return {
+      product: "marketplace",
+      resourceType: "creator_profile",
+      resourceId,
+    };
+  }
+
+  const resourceId = activeCollaboration.listingId;
+  if (!resourceId) {
+    throw new Error("Hotel listing resource is required for chat attachments.");
+  }
+  return {
+    product: "marketplace",
+    resourceType: "hotel_listing",
+    resourceId,
+  };
 }

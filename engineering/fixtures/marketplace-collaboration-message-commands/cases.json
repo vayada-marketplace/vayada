@@ -1,0 +1,128 @@
+{
+  "contractVersion": "marketplace-collaboration-message-commands.v1",
+  "readContractVersion": "marketplace-collaboration-reads.v1",
+  "platformMediaPurpose": "marketplace.collaboration_chat.attachment",
+  "authContexts": {
+    "creatorLinked": {
+      "organizationKind": "creator_workspace",
+      "organizationId": "org_creator_lina",
+      "permission": "marketplace.collaboration.write",
+      "linkedResources": ["marketplace:creator_profile:creator_profile_lina:owner"]
+    },
+    "hotelLinked": {
+      "organizationKind": "hotel_group",
+      "organizationId": "org_hotel_alpenrose",
+      "permission": "marketplace.collaboration.write",
+      "linkedResources": [
+        "marketplace:hotel_profile:hotel_profile_alpenrose:owner",
+        "marketplace:hotel_listing:hotel_listing_alpenrose_spa:operator"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "caseId": "send-text-message-linked-creator",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/messages",
+        "action": "send_message",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.message:collab_688:nonce_text:v1",
+        "body": {
+          "content": "The September dates work for me.",
+          "contentType": "text"
+        }
+      },
+      "expected": {
+        "status": 201,
+        "messageContentType": "text",
+        "sideEffects": ["marketplace.collaboration.message_stored"]
+      }
+    },
+    {
+      "caseId": "send-image-message-attaches-private-platform-media",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/messages",
+        "action": "send_message",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.message:collab_688:nonce_image:v1",
+        "platformMediaUpload": {
+          "path": "/api/media/upload-sessions",
+          "purpose": "marketplace.collaboration_chat.attachment",
+          "visibility": "private",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "creator_profile",
+            "resourceId": "creator_profile_lina"
+          }
+        },
+        "body": {
+          "content": "Attaching the mood board.",
+          "contentType": "image",
+          "attachment": {
+            "mediaObjectId": "media_chat_001",
+            "purpose": "marketplace.collaboration_chat.attachment",
+            "originalFilename": "brief.gif",
+            "contentType": "image/gif",
+            "sizeBytes": 1024
+          }
+        }
+      },
+      "expected": {
+        "status": 201,
+        "messageContentType": "image",
+        "attachmentPurpose": "marketplace.collaboration_chat.attachment",
+        "mustInclude": ["message.metadata.attachment.mediaObjectId"],
+        "mustNotCall": ["/upload/image/chat"],
+        "mustNotExpose": ["storageKey", "bucket", "signedUrl", "privateCdnToken"]
+      }
+    },
+    {
+      "caseId": "send-image-deny-wrong-media-purpose",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/messages",
+        "action": "send_message",
+        "side": "hotel",
+        "authRef": "hotelLinked",
+        "idempotencyKey": "marketplace.collaboration.message:collab_688:nonce_wrong_purpose:v1",
+        "body": {
+          "contentType": "image",
+          "attachment": {
+            "mediaObjectId": "media_listing_001",
+            "purpose": "marketplace.listing.gallery"
+          }
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_attachment"
+      }
+    },
+    {
+      "caseId": "send-image-deny-missing-media-object",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/collaborations/collab_688/messages",
+        "action": "send_message",
+        "side": "creator",
+        "authRef": "creatorLinked",
+        "idempotencyKey": "marketplace.collaboration.message:collab_688:nonce_missing_media:v1",
+        "body": {
+          "contentType": "image",
+          "attachment": {
+            "mediaObjectId": "media_missing",
+            "purpose": "marketplace.collaboration_chat.attachment"
+          }
+        }
+      },
+      "expected": {
+        "status": 404,
+        "errorCode": "media_not_found"
+      }
+    }
+  ]
+}

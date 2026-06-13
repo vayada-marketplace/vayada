@@ -858,6 +858,87 @@ export const MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS = [
 export type MarketplaceCollaborationLifecycleWritePrivateKey =
   (typeof MARKETPLACE_COLLABORATION_LIFECYCLE_WRITE_PRIVATE_KEYS)[number];
 
+export const MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION =
+  "marketplace-collaboration-message-commands.v1" as const;
+
+export type MarketplaceCollaborationMessageCommandsContractVersion =
+  typeof MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION;
+
+export const MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ENDPOINTS = {
+  sendMessage: {
+    method: "POST",
+    path: "/api/marketplace/collaborations/{collaborationId}/messages",
+    doc: "engineering/marketplace-collaboration-message-commands-contract.md",
+  },
+} as const;
+
+export const MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ACTIONS = ["send_message"] as const;
+
+export type MarketplaceCollaborationMessageCommandAction =
+  (typeof MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ACTIONS)[number];
+
+export type MarketplaceCollaborationMessageAttachment = {
+  mediaObjectId: string;
+  purpose: "marketplace.collaboration_chat.attachment";
+  originalFilename?: string;
+  contentType?: string;
+  sizeBytes?: number;
+};
+
+export type SendMarketplaceCollaborationMessageCommandRequest = {
+  idempotencyKey: string;
+  side?: MarketplaceCollaborationAuthorizationSide;
+  content?: string;
+  contentType?: Exclude<MarketplaceMessageContentType, "system">;
+  attachment?: MarketplaceCollaborationMessageAttachment;
+};
+
+export type MarketplaceCollaborationMessageCommand = {
+  action: "send_message";
+  idempotencyKey: string;
+  messageId: string;
+  replayed?: boolean;
+  acceptedAt?: MarketplaceUtcDateTime;
+};
+
+export type MarketplaceCollaborationMessageCommandResponse = {
+  contractVersion: MarketplaceCollaborationMessageCommandsContractVersion;
+  readContractVersion: MarketplaceCollaborationReadsContractVersion;
+  command: MarketplaceCollaborationMessageCommand;
+  message: MarketplaceCollaborationMessage;
+  sideEffects: Array<{
+    type: "marketplace.collaboration.message_stored";
+    idempotencyKey: string;
+  }>;
+};
+
+export const MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ERROR_CODES = [
+  "invalid_request",
+  "invalid_attachment",
+  "unauthorized",
+  "forbidden",
+  "missing_creator_resource_link",
+  "missing_hotel_resource_link",
+  "collaboration_not_found",
+  "media_not_found",
+  "idempotency_conflict",
+  "internal_error",
+] as const;
+
+export type MarketplaceCollaborationMessageCommandErrorCode =
+  (typeof MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_ERROR_CODES)[number];
+
+export const MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_PRIVATE_KEYS = [
+  ...MARKETPLACE_COLLABORATION_READ_PRIVATE_KEYS,
+  "storageKey",
+  "bucket",
+  "signedUrl",
+  "privateCdnToken",
+] as const;
+
+export type MarketplaceCollaborationMessageCommandPrivateKey =
+  (typeof MARKETPLACE_COLLABORATION_MESSAGE_COMMAND_PRIVATE_KEYS)[number];
+
 // ---------------------------------------------------------------------------
 // Affiliate / referral contract
 // ---------------------------------------------------------------------------

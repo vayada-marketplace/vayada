@@ -121,8 +121,9 @@ type MarketplaceCollaborationRead = {
 ```
 
 Conversation summaries and messages use the same contract version and
-authorization modes. Message metadata may include platform-media references, but
-new upload commands are out of scope for this read slice.
+authorization modes. Message metadata may include private platform-media
+references created by the VAY-825 message command, but upload/session commands
+stay out of this read slice.
 
 ## Error Codes
 
@@ -142,7 +143,7 @@ The following lifecycle writes stay in follow-up slices:
 
 - create collaboration from `listingId`/`creatorId`
 - respond, approve, cancel, update terms, toggle deliverables, and rate creator
-- mark chat messages read and send chat messages
+- mark chat messages read
 - affiliate provisioning on collaboration acceptance
 
 Affiliate provisioning must keep the accepted VAY-768 idempotency key:

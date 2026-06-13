@@ -143,6 +143,57 @@
       }
     },
     {
+      "caseId": "private-chat-attachment-upload-session",
+      "description": "Collaboration chat attachments create private platform media for the caller's collaboration-side resource.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "marketplace.collaboration_chat.attachment",
+          "visibility": "private",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "creator_profile",
+            "resourceId": "creator_profile_lina"
+          },
+          "files": [
+            {
+              "clientFileId": "chat-attachment",
+              "filename": "chat.gif",
+              "contentType": "image/gif",
+              "sizeBytes": 1024
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/gif",
+            "sizeBytes": 1024,
+            "widthPx": 640,
+            "heightPx": 360
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "private",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 1,
+        "mediaObject": {
+          "purpose": "marketplace.collaboration_chat.attachment",
+          "visibility": "private",
+          "resourceProduct": "marketplace",
+          "resourceType": "collaboration",
+          "resourceId": "creator_profile_lina"
+        },
+        "requiredVariants": ["provider_original"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
       "caseId": "private-chat-attachment-rejects-public-visibility",
       "description": "Collaboration chat attachments are private only.",
       "request": {

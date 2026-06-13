@@ -6,9 +6,11 @@ import { apiClient } from "./client";
 import type { Collaboration, PaginatedResponse } from "@/lib/types";
 import type { Hotel, Creator } from "@/lib/types";
 import { buildQueryString } from "@/lib/utils";
+import { uploadPlatformMedia } from "@vayada/marketplace-shared/api/platformMedia";
 import {
   approveMarketplaceCollaborationTerms,
   buildMarketplaceCollaborationLifecycleIdempotencyKey,
+  buildMarketplaceCollaborationMessageIdempotencyKey,
   cancelMarketplaceCollaboration,
   createMarketplaceCollaboration,
   getMarketplaceCollaboration,
@@ -17,6 +19,7 @@ import {
   getMyMarketplaceCollaborations,
   rateMarketplaceCollaborationCreator,
   respondToMarketplaceCollaboration,
+  sendMarketplaceCollaborationMessage,
   toggleMarketplaceCollaborationDeliverable,
   updateMarketplaceCollaborationTerms,
   type MarketplaceCollaborationMessage,
@@ -27,6 +30,7 @@ import {
   type MarketplaceCollaborationTermsInput,
   type MarketplaceCollaborationType,
   type MarketplaceConversationSummary,
+  type MarketplaceCollaborationMessageAttachment,
 } from "@vayada/marketplace-shared/api/collaborations";
 
 // Platform deliverable types
@@ -154,6 +158,7 @@ export interface CollaborationResponse {
     | "completed"
     | "cancelled";
   creator_id: string;
+  creator_profile_id?: string;
   creator_name: string;
   creator_profile_picture: string | null;
   handle: string | null;
@@ -173,6 +178,7 @@ export interface CollaborationResponse {
     gender_split?: { male: number; female: number; other?: number } | null;
   }>;
   hotel_id: string;
+  hotel_profile_id?: string;
   hotel_name: string;
   hotel_picture?: string | null;
   hotel_location?: string | null;
@@ -241,6 +247,8 @@ export interface CollaborationResponse {
 export type DetailedCollaboration = Collaboration & {
   hotel?: Hotel;
   creator?: Creator;
+  creatorProfileId?: string;
+  hotelProfileId?: string;
   listingId?: string;
   listingName?: string;
   listingLocation?: string;
@@ -294,6 +302,7 @@ export interface MessageMetadata {
   imageUrl?: string;
   fileName?: string;
   fileSize?: number;
+  attachment?: MarketplaceCollaborationMessageAttachment;
   [key: string]: unknown;
 }
 
@@ -308,6 +317,28 @@ export interface MessageResponse {
   metadata: MessageMetadata | null;
   created_at: string;
 }
+
+export type ChatAttachmentResource =
+  | {
+      product: "marketplace";
+      resourceType: "creator_profile";
+      resourceId: string;
+      targetResourceId?: string;
+    }
+  | {
+      product: "marketplace";
+      resourceType: "hotel_listing";
+      resourceId: string;
+      targetResourceId?: string;
+    };
+
+export type ChatAttachmentUploadResponse = {
+  url: string;
+  mediaObjectId: string;
+  contentType: string;
+  sizeBytes: number;
+  originalFilename: string;
+};
 
 export const collaborationService = {
   /**
@@ -486,11 +517,33 @@ export const collaborationService = {
     collaborationId: string,
     content: string,
     contentType: "text" | "image" = "text",
+    options: {
+      side?: MarketplaceCollaborationSide;
+      attachment?: MarketplaceCollaborationMessageAttachment;
+      legacyFallback?: boolean;
+    } = {},
   ): Promise<MessageResponse> => {
-    return apiClient.post<MessageResponse>(`/collaborations/${collaborationId}/messages`, {
-      content,
-      message_type: contentType,
+    const idempotencyKey = buildMarketplaceCollaborationMessageIdempotencyKey({
+      collaborationId,
+      nonce: createClientNonce(),
     });
+    try {
+      const response = await sendMarketplaceCollaborationMessage(collaborationId, {
+        idempotencyKey,
+        side: options.side,
+        content,
+        contentType,
+        attachment: options.attachment,
+      });
+      return toLegacyMessageResponse(response.message);
+    } catch (error) {
+      const canFallback = options.legacyFallback ?? !options.attachment;
+      if (!canFallback || !isMissingMarketplaceCollaborationRoute(error)) throw error;
+      return apiClient.post<MessageResponse>(`/collaborations/${collaborationId}/messages`, {
+        content,
+        message_type: contentType,
+      });
+    }
   },
 
   /**
@@ -651,12 +704,26 @@ export const collaborationService = {
   },
 
   /**
-   * Upload an image for chat messages
+   * Upload a collaboration chat attachment through private platform media.
    */
-  uploadChatImage: async (file: File): Promise<{ url: string }> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    return apiClient.upload<{ url: string }>("/upload/image/chat", formData);
+  uploadChatAttachment: async (
+    file: File,
+    resource: ChatAttachmentResource,
+  ): Promise<ChatAttachmentUploadResponse> => {
+    const [uploaded] = await uploadPlatformMedia({
+      purpose: "marketplace.collaboration_chat.attachment",
+      visibility: "private",
+      resource,
+      files: [file],
+    });
+    if (!uploaded) throw new Error("Platform media did not return an uploaded chat attachment");
+    return {
+      url: uploaded.url,
+      mediaObjectId: uploaded.mediaId,
+      contentType: uploaded.contentType,
+      sizeBytes: uploaded.sizeBytes,
+      originalFilename: uploaded.originalFilename,
+    };
   },
 };
 
@@ -870,6 +937,8 @@ export function transformCollaborationResponse(
     id: response.id,
     hotelId: response.hotel_id,
     creatorId: response.creator_id,
+    creatorProfileId: response.creator_profile_id ?? response.creator_id,
+    hotelProfileId: response.hotel_profile_id ?? response.hotel_id,
     status: response.status || "pending",
     createdAt: new Date(response.created_at),
     updatedAt: new Date(updatedAt),
@@ -990,12 +1059,14 @@ function toLegacyCollaborationResponse(
     is_initiator: collaboration.isInitiator,
     status: collaboration.status,
     creator_id: collaboration.creatorId,
+    creator_profile_id: collaboration.creator.profileId,
     creator_name: collaboration.creator.displayName,
     creator_profile_picture: collaboration.creator.avatarUrl,
     handle: null,
     creator_location: null,
     is_verified: true,
     hotel_id: collaboration.hotelProfileId,
+    hotel_profile_id: collaboration.hotel.profileId,
     hotel_name: collaboration.hotel.displayName,
     hotel_picture: collaboration.hotel.avatarUrl,
     hotel_location: collaboration.listingLocation,
@@ -1061,9 +1132,23 @@ function toLegacyMessageResponse(message: MarketplaceCollaborationMessage): Mess
     sender_id: message.senderUserId,
     sender_name: message.senderName,
     sender_avatar: message.senderAvatarUrl,
-    content: message.content,
+    content:
+      message.content ||
+      (message.contentType === "image" ? readMessageImageUrl(message.metadata) : ""),
     content_type: message.contentType,
     metadata: message.metadata,
     created_at: message.createdAt,
   };
+}
+
+function readMessageImageUrl(metadata: Record<string, unknown> | null): string {
+  if (!metadata) return "";
+  const imageUrl = metadata.imageUrl;
+  if (typeof imageUrl === "string") return imageUrl;
+  const attachment = metadata.attachment;
+  if (typeof attachment !== "object" || attachment === null) return "";
+  const attachmentUrl = (attachment as { imageUrl?: unknown; url?: unknown }).imageUrl;
+  if (typeof attachmentUrl === "string") return attachmentUrl;
+  const url = (attachment as { imageUrl?: unknown; url?: unknown }).url;
+  return typeof url === "string" ? url : "";
 }

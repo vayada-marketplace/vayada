@@ -247,6 +247,45 @@ export type RateMarketplaceCollaborationCreatorLifecycleWriteRequest =
     comment?: string;
   };
 
+export const MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION =
+  "marketplace-collaboration-message-commands.v1" as const;
+
+export type MarketplaceCollaborationMessageCommandsContractVersion =
+  typeof MARKETPLACE_COLLABORATION_MESSAGE_COMMANDS_CONTRACT_VERSION;
+
+export type MarketplaceCollaborationMessageAttachment = {
+  mediaObjectId: string;
+  purpose: "marketplace.collaboration_chat.attachment";
+  originalFilename?: string;
+  contentType?: string;
+  sizeBytes?: number;
+};
+
+export type SendMarketplaceCollaborationMessageCommandRequest = {
+  idempotencyKey: string;
+  side?: MarketplaceCollaborationSide;
+  content?: string;
+  contentType?: Exclude<MarketplaceCollaborationMessage["contentType"], "system">;
+  attachment?: MarketplaceCollaborationMessageAttachment;
+};
+
+export type MarketplaceCollaborationMessageCommandResponse = {
+  contractVersion: MarketplaceCollaborationMessageCommandsContractVersion;
+  readContractVersion: MarketplaceCollaborationReadsContractVersion;
+  command: {
+    action: "send_message";
+    idempotencyKey: string;
+    messageId: string;
+    replayed?: boolean;
+    acceptedAt?: string;
+  };
+  message: MarketplaceCollaborationMessage;
+  sideEffects: Array<{
+    type: "marketplace.collaboration.message_stored";
+    idempotencyKey: string;
+  }>;
+};
+
 export const marketplaceCollaborationEndpoints = {
   myCollaborations: (input: MarketplaceCollaborationListInput) =>
     `/api/marketplace/collaborations/me${toCollaborationQuery(input)}`,
@@ -259,6 +298,8 @@ export const marketplaceCollaborationEndpoints = {
     input: { side?: MarketplaceCollaborationSide; before?: string },
   ) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/messages${toMessageQuery(input)}`,
+  sendMessage: (collaborationId: string) =>
+    `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/messages`,
   create: () => "/api/marketplace/collaborations",
   respond: (collaborationId: string) =>
     `/api/marketplace/collaborations/${encodeURIComponent(collaborationId)}/respond`,
@@ -307,6 +348,17 @@ export async function getMarketplaceMessages(
 ): Promise<MarketplaceCollaborationMessagesResponse> {
   return apiClient.get<MarketplaceCollaborationMessagesResponse>(
     marketplaceCollaborationEndpoints.messages(collaborationId, input),
+  );
+}
+
+export async function sendMarketplaceCollaborationMessage(
+  collaborationId: string,
+  request: SendMarketplaceCollaborationMessageCommandRequest,
+): Promise<MarketplaceCollaborationMessageCommandResponse> {
+  return apiClient.post<MarketplaceCollaborationMessageCommandResponse>(
+    marketplaceCollaborationEndpoints.sendMessage(collaborationId),
+    request,
+    toIdempotencyOptions(request.idempotencyKey),
   );
 }
 
@@ -394,6 +446,15 @@ export function buildMarketplaceCollaborationLifecycleIdempotencyKey(input: {
 }): string {
   return `marketplace.collaboration.${input.action}:${sanitizeIdempotencySegment(
     input.resourceId,
+  )}:${sanitizeIdempotencySegment(input.nonce)}:v1`;
+}
+
+export function buildMarketplaceCollaborationMessageIdempotencyKey(input: {
+  collaborationId: string;
+  nonce: string;
+}): string {
+  return `marketplace.collaboration.message:${sanitizeIdempotencySegment(
+    input.collaborationId,
   )}:${sanitizeIdempotencySegment(input.nonce)}:v1`;
 }
 

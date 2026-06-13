@@ -64,6 +64,7 @@ const uploadContractCases = JSON.parse(
 const propertyGalleryCase = contractCase("property-gallery-upload-session");
 const propertyGalleryBatchCase = contractCase("property-gallery-batch-upload-session");
 const propertyTargetDenyCase = contractCase("property-gallery-deny-unresolved-property-target");
+const privateChatUploadCase = contractCase("private-chat-attachment-upload-session");
 const privateChatVisibilityCase = contractCase("private-chat-attachment-rejects-public-visibility");
 const propertyHeroPdfCase = contractCase("property-hero-rejects-pdf");
 const marketplaceCreatorProfileCase = contractCase("marketplace-creator-profile-upload-session");
@@ -451,6 +452,67 @@ describe("platform media upload routes", () => {
     expect((response.body as ErrorResponse).code).toBe(
       privateChatVisibilityCase.expected.errorCode,
     );
+  });
+
+  it("creates private chat attachment media with provider-original variants", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const app = buildMediaApp({
+      repository,
+      permissions: ["marketplace.collaboration.review"],
+      resources: [
+        {
+          product: "marketplace",
+          resourceType: "creator_profile",
+          resourceId: "creator_profile_lina",
+          relationship: "owner",
+        },
+      ],
+    });
+
+    const create = await injectJson(app, {
+      method: "POST",
+      url: privateChatUploadCase.request.path,
+      headers: { authorization: "Bearer valid-token" },
+      payload: privateChatUploadCase.request.body,
+    });
+
+    expect(create.statusCode).toBe(privateChatUploadCase.expected.status);
+    const createBody = create.body as MediaCreateResponse;
+    expect(createBody.uploadSession.requestedVisibility).toBe(
+      privateChatUploadCase.expected.requestedVisibility,
+    );
+    expect(createBody.uploadSession.effectiveVisibility).toBe(
+      privateChatUploadCase.expected.effectiveVisibility,
+    );
+
+    const finalize = await injectJson(app, {
+      method: "POST",
+      url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        files: privateChatUploadCase.finalize!.files.map((file) => ({
+          ...file,
+          uploadTargetId: createBody.uploadTargets[0]!.uploadTargetId,
+        })),
+      },
+    });
+
+    expect(finalize.statusCode).toBe(privateChatUploadCase.expected.finalizeStatus);
+    const finalizeBody = finalize.body as MediaFinalizeResponse;
+    expect(finalizeBody.mediaObjects).toHaveLength(
+      privateChatUploadCase.expected.mediaObjectCount ?? 1,
+    );
+    expect(finalizeBody.mediaObject).toMatchObject(privateChatUploadCase.expected.mediaObject!);
+    expect(finalizeBody.mediaObject.variants.map((variant) => variant.variantName)).toEqual(
+      privateChatUploadCase.expected.requiredVariants,
+    );
+    expect(finalizeBody.mediaObject.variants[0]!.visibility).toBe("private");
+    expect(finalizeBody.mediaObject.variants[0]!.publicCdnUrl).toBeNull();
+    expect(finalizeBody.sideEffects).toEqual(privateChatUploadCase.expected.sideEffects);
+    expect(repository.auditEvents.map((event) => event.action)).toEqual([
+      "platform_media.upload_session.created",
+      "platform_media.upload_session.finalized",
+    ]);
   });
 
   it.each([
