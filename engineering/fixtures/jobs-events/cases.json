@@ -190,6 +190,53 @@
           "openedInventoryDays": 0
         }
       }
+    },
+    {
+      "caseId": "platform-media-cleanup-lifecycle-idempotency",
+      "description": "Platform media cleanup jobs use one semantic idempotency key per lifecycle candidate and do not duplicate object deletion, events, jobs, attempts, or audits on repeat runs.",
+      "input": {
+        "contractVersion": "platform-media-cleanup-jobs.v1",
+        "fixturePath": "engineering/fixtures/platform-media-cleanup/cases.json",
+        "runNames": [
+          "abandonedStagingUploads",
+          "replacedPublicImages",
+          "privateAttachmentRetention",
+          "rollbackWindowCleanup"
+        ]
+      },
+      "expected": {
+        "queueName": "platform.media.cleanup",
+        "createdNewJobs": 4,
+        "duplicateRun": {
+          "createdNewJobs": 0,
+          "attemptsAdded": 0
+        },
+        "requiredJobTypes": [
+          "platform.media.cleanup.abandoned-staging-upload",
+          "platform.media.cleanup.delete-replaced-public-image",
+          "platform.media.cleanup.private-attachment-retention",
+          "platform.media.cleanup.rollback-window-object"
+        ]
+      }
+    },
+    {
+      "caseId": "platform-media-cleanup-failure-dead-letters",
+      "description": "A platform media storage cleanup failure leaves the media object untouched and writes a failed job attempt plus dead-letter visibility for replay/manual recovery.",
+      "job": {
+        "jobType": "platform.media.cleanup.delete-replaced-public-image",
+        "idempotencyKey": "platform.media.cleanup:00000000-0000-0000-0000-000000000201:delete-replaced-public-image:2026-06-06T10:00:00.000Z:v1",
+        "failureCategory": "media_storage_delete_failed"
+      },
+      "expected": {
+        "finalStatus": "dead_lettered",
+        "attemptCount": 1,
+        "candidateLifecycleStatus": "delete_requested",
+        "deadLetter": {
+          "reasonCode": "media_storage_delete_failed",
+          "replayEligible": true,
+          "ownerPackage": "backend-events"
+        }
+      }
     }
   ]
 }
