@@ -250,7 +250,9 @@ function parseDateRange<TStart extends string, TEnd extends string>(
   startKey: TStart,
   endKey: TEnd,
 ): Parsed<Record<TStart | TEnd, string>> {
-  if (!isIsoDate(start) || !isIsoDate(end) || start > end) {
+  const parsedStart = parseIsoDate(start);
+  const parsedEnd = parseIsoDate(end);
+  if (!parsedStart || !parsedEnd || parsedStart.getTime() > parsedEnd.getTime()) {
     return {
       ok: false,
       error: {
@@ -271,7 +273,17 @@ function parseDateRange<TStart extends string, TEnd extends string>(
 }
 
 function isIsoDate(value: string | undefined): value is string {
-  return value !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  return parseIsoDate(value) !== null;
+}
+
+function parseIsoDate(value: string | undefined): Date | null {
+  if (value === undefined) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+    ? parsed
+    : null;
 }
 
 function readModelUnavailableError(): BookingDashboardError {

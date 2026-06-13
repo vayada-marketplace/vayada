@@ -142,18 +142,23 @@ export function createTargetBookingDashboardMetricsReadPort(config: {
 }
 
 function scopedPropertyCte(): string {
-  return `WITH scoped_property AS (
-    SELECT property.id AS property_id
+  return `WITH scoped_property_candidates AS (
+    SELECT property.id AS property_id, 0 AS precedence
     FROM hotel_catalog.properties property
     WHERE property.id::text = $1
-    UNION
-    SELECT source.property_id
+    UNION ALL
+    SELECT source.property_id, 1 AS precedence
     FROM hotel_catalog.property_source_links source
     WHERE source.source_system = 'booking'
       AND source.source_table = 'booking_hotels'
       AND source.source_id = $1
       AND source.relationship = 'canonical_input'
       AND source.status = 'active'
+  ),
+  scoped_property AS (
+    SELECT property_id
+    FROM scoped_property_candidates
+    ORDER BY precedence
     LIMIT 1
   )`;
 }
@@ -219,8 +224,10 @@ function sparklineSql(): string {
     SELECT
       ($2::date + floor((($3::date - $2::date + 1) * bucket_index)::numeric / 7)::int)
         AS bucket_start,
-      ($2::date + floor((($3::date - $2::date + 1) * (bucket_index + 1))::numeric / 7)::int - 1)
-        AS bucket_end
+      GREATEST(
+        ($2::date + floor((($3::date - $2::date + 1) * (bucket_index + 1))::numeric / 7)::int - 1),
+        ($2::date + floor((($3::date - $2::date + 1) * bucket_index)::numeric / 7)::int)
+      ) AS bucket_end
     FROM generate_series(0, 6) bucket_index
   )
   SELECT

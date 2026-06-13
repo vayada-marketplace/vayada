@@ -56,14 +56,14 @@ directly from that flag.
 
 Route families:
 
-| Legacy route                                                   | Target owner                                                     | Target authorization                                           |
-| -------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
-| `GET /super-admin/bookings`                                    | Platform admin read model over Booking/PMS/Finance projections   | `platform.admin.read` on platform organization                 |
-| `GET /super-admin/affiliate-payouts`                           | Platform finance read model                                      | `platform.finance.read` on platform organization               |
-| `GET /super-admin/affiliate-payouts/{affiliate_id}`            | Platform finance read model scoped to affiliate resource         | `platform.finance.read` plus affiliate payout visibility       |
-| `POST /super-admin/affiliate-payouts/{affiliate_id}/mark-paid` | Finance command, exposed through platform admin facade if needed | `platform.finance.read` plus future finance command permission |
-| `GET /platform-admin/growth`                                   | Platform growth read model over public-safe aggregates           | `platform.admin.read` on platform organization                 |
-| `PATCH /platform-admin/properties/{property_id}/status`        | Catalog/entitlement command                                      | `platform.property.status.manage` on platform organization     |
+| Legacy route                                                   | Target owner                                                     | Target authorization                                                      |
+| -------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `GET /super-admin/bookings`                                    | Platform admin read model over Booking/PMS/Finance projections   | `platform.admin.read` on platform organization                            |
+| `GET /super-admin/affiliate-payouts`                           | Platform finance read model                                      | `platform.finance.read` on platform organization                          |
+| `GET /super-admin/affiliate-payouts/{affiliate_id}`            | Platform finance read model scoped to affiliate resource         | `platform.finance.read` plus affiliate payout visibility                  |
+| `POST /super-admin/affiliate-payouts/{affiliate_id}/mark-paid` | Finance command, exposed through platform admin facade if needed | `platform.finance.command` or another explicit write-scoped finance grant |
+| `GET /platform-admin/growth`                                   | Platform growth read model over public-safe aggregates           | `platform.admin.read` on platform organization                            |
+| `PATCH /platform-admin/properties/{property_id}/status`        | Catalog/entitlement command                                      | `platform.property.status.manage` on platform organization                |
 
 Platform read models must not open legacy Booking, PMS, Marketplace, or Auth DB
 pools as normal route integration. Before cutover, a compatibility adapter may

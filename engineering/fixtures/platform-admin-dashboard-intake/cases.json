@@ -28,7 +28,7 @@
           }
         ],
         "legacyFlags": {
-          "isSuperadmin": "not_used_for_authorization"
+          "isSuperadmin": false
         }
       },
       "expected": {
