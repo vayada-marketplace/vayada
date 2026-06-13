@@ -331,6 +331,16 @@ and is not implemented by this slice.
 operational charge as settled for checkout. It is not a provider payment
 capture, invoice post, payout trigger, or finance reconciliation event.
 
+VAY-784 implements the P2c check-out command in `apps/api`.
+`POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`
+uses the PMS operations manage policy and persists `pms.booking_checkout_records`
+with inspection results, checkout notes, charge settlement snapshots, pending
+flags, and explicit finance handoff metadata. The command updates valid
+reservation assignments to `checked_out`, records PMS audit only, and keeps
+unsettled paid-charge behavior finance-owned: provider collection, invoice
+posting, payouts, reconciliation, and finance dispatch are not performed by this
+route.
+
 ## Error Categories
 
 | Category         | Status         | Codes                                                                                                                                                                      |
