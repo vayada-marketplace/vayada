@@ -84,6 +84,8 @@ export interface CreatorUpdatePayload {
   portfolio_link?: string;
   phone?: string;
   profilePicture?: string;
+  profilePictureMediaObjectId?: string;
+  profile_picture_media_object_id?: string;
   audience_size?: number;
   creator_type?: CreatorType;
   platforms?: Array<{
@@ -198,6 +200,7 @@ export interface ListingFormData {
   location: string;
   description: string;
   images: string[];
+  imageMediaObjectIds?: string[];
   accommodationType: string;
   // Authoritative editor model — array of independent offerings.
   offerings: ListingOffering[];
@@ -232,6 +235,7 @@ export function createEmptyListingFormData(): ListingFormData {
     location: "",
     description: "",
     images: [],
+    imageMediaObjectIds: [],
     accommodationType: "",
     offerings: [],
     lookingForPlatforms: [],

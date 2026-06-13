@@ -9,6 +9,7 @@ import {
   type MarketplaceCreatorReadModel,
   type MarketplacePlatformName,
 } from "@vayada/marketplace-shared/api/discovery";
+import { uploadPlatformMedia } from "@vayada/marketplace-shared/api/platformMedia";
 import { apiClient } from "./client";
 
 // Backend API response type for marketplace endpoint (snake_case from backend)
@@ -91,13 +92,23 @@ export const creatorService = {
   },
 
   /**
-   * Upload creator profile picture
-   * POST /upload/image/creator-profile
+   * Upload creator profile picture through platform media.
    */
-  uploadProfilePicture: async (file: File): Promise<{ url: string }> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    return apiClient.upload<{ url: string }>("/upload/image/creator-profile", formData);
+  uploadProfilePicture: async (
+    file: File,
+    creatorProfileId: string,
+  ): Promise<{ url: string; mediaObjectId: string }> => {
+    const [uploaded] = await uploadPlatformMedia({
+      purpose: "marketplace.creator.profile_image",
+      resource: {
+        product: "marketplace",
+        resourceType: "creator_profile",
+        resourceId: creatorProfileId,
+      },
+      files: [file],
+    });
+    if (!uploaded) throw new Error("Platform media did not return an uploaded image");
+    return { url: uploaded.url, mediaObjectId: uploaded.mediaId };
   },
 
   /**

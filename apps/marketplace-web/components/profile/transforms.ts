@@ -64,6 +64,7 @@ export function transformListingToApi(listingData: ListingFormData) {
     description: listingData.description,
     accommodation_type: listingData.accommodationType || undefined,
     images: listingData.images.filter((img) => !img.startsWith("data:")),
+    image_media_object_ids: listingData.imageMediaObjectIds || [],
     collaboration_offerings: offerings,
     creator_requirements: {
       platforms: listingData.lookingForPlatforms,

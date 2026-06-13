@@ -96,21 +96,29 @@ export function useListingManagement(
     setIsSavingListing(true);
     try {
       let imageUrls = listingFormData.images.filter((img) => !img.startsWith("data:"));
+      let imageMediaObjectIds = listingFormData.imageMediaObjectIds ?? [];
       const base64Images = listingFormData.images.filter((img) => img.startsWith("data:"));
+      const base64Files: File[] = [];
 
       if (base64Images.length > 0) {
         try {
-          const files: File[] = [];
           for (const base64 of base64Images) {
             const response = await fetch(base64);
             const blob = await response.blob();
             const file = new File([blob], "image.jpg", { type: blob.type });
-            files.push(file);
+            base64Files.push(file);
           }
 
-          const uploadResponse = await hotelService.uploadListingImages(files);
-          const newImageUrls = uploadResponse.images.map((img) => img.url);
-          imageUrls = [...imageUrls, ...newImageUrls];
+          if (editingListingId) {
+            const uploadResponse = await hotelService.uploadListingImages(
+              base64Files,
+              editingListingId,
+            );
+            const newImageUrls = uploadResponse.images.map((img) => img.url);
+            const newMediaObjectIds = uploadResponse.images.map((img) => img.mediaObjectId);
+            imageUrls = [...imageUrls, ...newImageUrls];
+            imageMediaObjectIds = [...imageMediaObjectIds, ...newMediaObjectIds];
+          }
         } catch (error: unknown) {
           const detail = error instanceof ApiErrorResponse ? error.data.detail : null;
           const message =
@@ -128,12 +136,35 @@ export function useListingManagement(
       const apiListingData = transformListingToApi({
         ...listingFormData,
         images: imageUrls,
+        imageMediaObjectIds,
       });
 
       if (editingListingId) {
         await hotelService.updateListing(editingListingId, apiListingData);
       } else {
-        await hotelService.createListing(apiListingData);
+        const createdListing = await hotelService.createListing(apiListingData);
+        if (base64Files.length > 0) {
+          try {
+            const uploadResponse = await hotelService.uploadListingImages(
+              base64Files,
+              createdListing.id,
+            );
+            imageUrls = [...imageUrls, ...uploadResponse.images.map((img) => img.url)];
+            imageMediaObjectIds = [
+              ...imageMediaObjectIds,
+              ...uploadResponse.images.map((img) => img.mediaObjectId),
+            ];
+            await hotelService.updateListing(createdListing.id, {
+              images: imageUrls,
+              image_media_object_ids: imageMediaObjectIds,
+            });
+          } catch (error) {
+            await hotelService.deleteListing(createdListing.id).catch((deleteError) => {
+              console.error("Failed to clean up listing after media upload failure:", deleteError);
+            });
+            throw error;
+          }
+        }
       }
 
       await reloadProfile();
@@ -225,12 +256,33 @@ export function useListingManagement(
     }
 
     try {
-      const uploadResponse = await hotelService.uploadListingImages(fileList);
+      if (!editingListingId) {
+        const previews = await Promise.all(
+          fileList.map(
+            (file) =>
+              new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result));
+                reader.onerror = () => reject(reader.error ?? new Error("Failed to read image"));
+                reader.readAsDataURL(file);
+              }),
+          ),
+        );
+        setListingFormData((prev) => ({
+          ...prev,
+          images: [...prev.images, ...previews],
+        }));
+        return;
+      }
+
+      const uploadResponse = await hotelService.uploadListingImages(fileList, editingListingId);
       const newImageUrls = uploadResponse.images.map((img) => img.url);
+      const newMediaObjectIds = uploadResponse.images.map((img) => img.mediaObjectId);
 
       setListingFormData((prev) => ({
         ...prev,
         images: [...prev.images, ...newImageUrls],
+        imageMediaObjectIds: [...(prev.imageMediaObjectIds ?? []), ...newMediaObjectIds],
       }));
     } catch (error: unknown) {
       const detail = error instanceof ApiErrorResponse ? error.data.detail : null;
