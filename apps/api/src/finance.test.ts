@@ -8,6 +8,9 @@ import {
 import { injectJson } from "@vayada/backend-test";
 import type {
   CancellationPolicy,
+  FinanceAffiliatePayoutSettingsPatchCommand,
+  FinanceAffiliatePayoutSettingsPatchResult,
+  FinanceAffiliatePayoutSettingsReadModel,
   FinanceCommandMeta,
   FinanceFinancialSummary,
   FinanceInvoiceDetail,
@@ -46,6 +49,7 @@ import {
 } from "./routes/finance.js";
 
 const propertyId = "f3000000-0000-0000-0000-000000000686";
+const affiliateId = "affiliate_finance_partner_686";
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 
 const financeContractCases = JSON.parse(
@@ -127,6 +131,28 @@ const cancellationPolicy: CancellationPolicy = {
   partialRefundPercent: 50,
   refundMethod: "original_payment",
   appliesTo: "direct_booking",
+  updatedAt: "2026-06-12T10:00:00.000Z",
+};
+
+const affiliatePayoutSettings: FinanceAffiliatePayoutSettingsReadModel = {
+  affiliateId,
+  marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
+  payoutsEnabled: true,
+  payoutProvider: "stripe",
+  payoutCurrency: "EUR",
+  payoutSchedule: "monthly",
+  payoutThresholdAmount: null,
+  providerAccount: {
+    providerAccountId: "acct_affiliate_target",
+    provider: "stripe",
+    status: "active",
+    onboardingStatus: "completed",
+    payoutsEnabled: true,
+  },
+  sourceFreshness: {
+    finance: "target",
+    status: "fresh",
+  },
   updatedAt: "2026-06-12T10:00:00.000Z",
 };
 
@@ -272,6 +298,30 @@ const payoutItems: FinancePayout[] = [
     failedAt: "2026-06-12T11:30:00.000Z",
     failureCode: "bank_account_restricted",
     retryCount: 2,
+  },
+];
+
+const affiliatePayoutItems: FinancePayout[] = [
+  {
+    payoutId: "affiliate_payout_2026_06",
+    ownerScope: "organization",
+    propertyId: null,
+    organizationId: "a6000000-0000-0000-0000-000000000686",
+    relatedPropertyId: propertyId,
+    guestBookingId: invoiceListItems[0]!.guestBookingId,
+    paymentId: paymentLedgerItems[0]!.paymentId,
+    payoutStatus: "scheduled",
+    amount: "350.00",
+    feeAmount: "0.00",
+    netAmount: "350.00",
+    currency: "EUR",
+    provider: "stripe",
+    providerPayoutId: null,
+    scheduledAt: "2026-06-30T09:00:00.000Z",
+    paidAt: null,
+    failedAt: null,
+    failureCode: null,
+    retryCount: 0,
   },
 ];
 
@@ -452,6 +502,60 @@ describe("finance route contracts", () => {
         /providerPayloadRaw|accountNumber|accountHolderName|sensitiveDestinationRef|stripeSecretKey|xenditApiKey|processorSecret|guestEmail/,
       );
     }
+  });
+
+  it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
+    app = buildFinanceApp({
+      permissions: ["affiliate.payout.manage"],
+      entitlements: [affiliatePayoutEntitlement()],
+    });
+
+    for (const caseId of [
+      "affiliate-payout-settings-read",
+      "affiliate-payout-settings-update",
+      "affiliate-payout-list-read",
+    ]) {
+      const contractCase = financeContractCases.cases.find(
+        (candidate) => candidate.caseId === caseId,
+      );
+      expect(contractCase, caseId).toBeDefined();
+      const method = (contractCase!.request.method ?? "GET") as "GET" | "PATCH";
+
+      const response = await injectJson<Record<string, unknown>>(app, {
+        method,
+        url: contractCase!.request.path,
+        query: queryStrings(contractCase!.request.query),
+        payload: contractCase!.request.body,
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
+      if (contractCase!.expected.itemCount !== undefined) {
+        expect(response.body.payouts, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
+      assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
+      expect(JSON.stringify(response.body), caseId).not.toMatch(
+        /referralCode|affiliateProfileEmail|accountNumber|stripeSecretKey|providerSecret|xenditApiKey/,
+      );
+    }
+  });
+
+  it("denies affiliate payout settings without the affiliate resource link", async () => {
+    app = buildFinanceApp({
+      permissions: ["affiliate.payout.manage"],
+      entitlements: [affiliatePayoutEntitlement()],
+      linkedAffiliateId: null,
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "GET",
+      url: `/api/finance/affiliates/${affiliateId}/payout-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body.code).toBe("missing_resource_access");
   });
 
   it("passes the F1g Xendit bank validation fixture without leaking raw bank data", async () => {
@@ -1659,6 +1763,106 @@ describe("finance route contracts", () => {
     );
   });
 
+  it("updates affiliate payout settings through finance tables without PMS or marketplace writes", async () => {
+    const calls: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          calls.push({ text, values });
+          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          if (text.includes("FROM identity.organization_resource_links link")) {
+            expect(text).toContain("link.product = 'affiliate'");
+            expect(text).toContain("link.resource_type = 'affiliate'");
+            if (text.includes("finance.payout_settings settings")) {
+              return {
+                rows: [
+                  {
+                    affiliateId,
+                    marketplaceOrganizationId: "a6000000-0000-0000-0000-000000000686",
+                    payoutsEnabled: true,
+                    payoutProvider: "stripe",
+                    payoutCurrency: "EUR",
+                    payoutSchedule: { type: "monthly" },
+                    payoutPreferences: {},
+                    payoutThresholdAmount: null,
+                    updatedAt: "2026-06-13T10:00:00.000Z",
+                    providerAccountId: "acct_affiliate_target",
+                    provider: "stripe",
+                    providerStatus: "active",
+                    providerOnboardingStatus: "completed",
+                    providerPayoutsEnabled: true,
+                    sourceFreshness: { finance: "target" },
+                  },
+                ] as unknown as T[],
+                rowCount: 1,
+              };
+            }
+            return {
+              rows: [{ organizationId: "a6000000-0000-0000-0000-000000000686" }] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.idempotency_keys")) {
+            expect(text).toContain("'affiliate_payout_settings_update'");
+            expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
+            return {
+              rows: [
+                { status: "completed", requestFingerprintHash: values?.[1], inserted: true },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO finance.payout_settings")) {
+            expect(text).toContain("owner_scope");
+            expect(text).toContain("'organization'");
+            return { rows: [] as T[], rowCount: 1 };
+          }
+          if (text.includes("INSERT INTO platform.product_audit_events")) {
+            expect(text).toContain("'finance.affiliate_payout_settings.updated'");
+            expect(text).toMatch(/'organization',\s+\$3::uuid,\s+NULL/);
+            return { rows: [] as T[], rowCount: 1 };
+          }
+          throw new Error(`Unexpected SQL: ${text}`);
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.updateAffiliatePayoutSettings!(
+        affiliatePayoutSettingsPatchCommand({
+          requestedAt: "2026-06-13T10:00:00.000Z",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      settings: {
+        affiliateId,
+        payoutProvider: "stripe",
+        payoutSchedule: "monthly",
+      },
+      commandMeta: {
+        sideEffects: ["audit_event"],
+        jobs: [],
+      },
+    });
+    const queryTexts = calls.map((call) => call.text);
+    expect(queryTexts).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/INSERT\s+INTO\s+pms\./i),
+        expect.stringMatching(/UPDATE\s+pms\./i),
+        expect.stringMatching(/INSERT\s+INTO\s+marketplace\./i),
+        expect.stringMatching(/UPDATE\s+marketplace\./i),
+      ]),
+    );
+  });
+
   it("passes the Finance property read denial matrix", async () => {
     const cases: Array<{
       name: string;
@@ -2075,12 +2279,45 @@ function propertyPayoutDispatchCommand(
   };
 }
 
+function affiliatePayoutSettingsPatchCommand(
+  options: {
+    requestedAt?: string;
+    payload?: Partial<FinanceAffiliatePayoutSettingsPatchCommand["payload"]>;
+  } = {},
+): FinanceAffiliatePayoutSettingsPatchCommand {
+  return {
+    commandType: "finance.affiliate_payout_settings.update",
+    commandId: "cmd-affiliate-payout-settings-001",
+    idempotencyKey: "finance-affiliate-payout-settings-686-001",
+    affiliateId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "a6000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_affiliate_payout_settings_target",
+      correlationId: "corr_affiliate_payout_settings_target",
+      reason: "Affiliate payout settings target test",
+      requestedAt: options.requestedAt ?? "2026-06-13T10:00:00.000Z",
+    },
+    payload: {
+      payoutsEnabled: true,
+      payoutProvider: "stripe",
+      payoutCurrency: "EUR",
+      payoutSchedule: "monthly",
+      ...options.payload,
+    },
+  };
+}
+
 function buildFinanceApp(
   options: {
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
+    linkedAffiliateId?: string | null;
     repository?: FinancePropertyReadRepository;
     xenditBankValidator?: FinanceXenditBankValidator;
     publicHotelProfileRepository?: PublicHotelProfileRepository | null;
@@ -2100,7 +2337,11 @@ function buildFinanceApp(
     financeXenditBankValidator: options.xenditBankValidator,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
-      repository: identityRepository(options.linkedPropertyId, options.linkedResourceType),
+      repository: identityRepository({
+        linkedPropertyId: options.linkedPropertyId,
+        linkedResourceType: options.linkedResourceType,
+        linkedAffiliateId: options.linkedAffiliateId,
+      }),
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return options.permissions ?? ["pms.finance.read"];
@@ -2187,6 +2428,31 @@ const financeRepository: FinancePropertyReadRepository = {
       offset: query.offset,
       sourceFreshness,
     };
+  },
+  async getAffiliatePayoutSettings(requestedAffiliateId) {
+    return requestedAffiliateId === affiliateId ? affiliatePayoutSettings : null;
+  },
+  async listAffiliatePayouts(requestedAffiliateId, query) {
+    if (requestedAffiliateId !== affiliateId) return null;
+    const filtered = filterAffiliatePayouts(query);
+    return {
+      payouts: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness,
+    };
+  },
+  async updateAffiliatePayoutSettings(command) {
+    if (command.affiliateId !== affiliateId) {
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "affiliate_not_found",
+        message: "Affiliate finance resource was not found.",
+      };
+    }
+    return affiliatePayoutSettingsPatchResult(command, "updated");
   },
   async listReconciliationItems(requestedPropertyId, view, query) {
     const filtered =
@@ -2439,6 +2705,34 @@ function propertyPayoutDispatchResult(
   };
 }
 
+function affiliatePayoutSettingsPatchResult(
+  command: FinanceAffiliatePayoutSettingsPatchCommand,
+  status: "updated" | "idempotent_replay",
+): FinanceAffiliatePayoutSettingsPatchResult & { ok: true } {
+  return {
+    ok: true,
+    status,
+    settings: {
+      ...affiliatePayoutSettings,
+      payoutsEnabled: command.payload.payoutsEnabled ?? affiliatePayoutSettings.payoutsEnabled,
+      payoutProvider: command.payload.payoutProvider ?? affiliatePayoutSettings.payoutProvider,
+      payoutCurrency: command.payload.payoutCurrency ?? affiliatePayoutSettings.payoutCurrency,
+      payoutSchedule: command.payload.payoutSchedule ?? affiliatePayoutSettings.payoutSchedule,
+      payoutThresholdAmount:
+        command.payload.payoutThresholdAmount !== undefined
+          ? command.payload.payoutThresholdAmount
+          : affiliatePayoutSettings.payoutThresholdAmount,
+    },
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["audit_event"],
+      outboxEvents: [],
+      jobs: [],
+    },
+  };
+}
+
 function manualPaymentValidationError(
   command: FinanceManualPaymentRecordCommand,
 ): Extract<FinanceManualPaymentRecordResult, { ok: false }> | null {
@@ -2570,6 +2864,14 @@ function filterPayouts(query: FinancePayoutListQuery): FinancePayout[] {
   });
 }
 
+function filterAffiliatePayouts(query: FinancePayoutListQuery): FinancePayout[] {
+  return affiliatePayoutItems.filter((payout) => {
+    if (query.status && payout.payoutStatus !== query.status) return false;
+    if (query.provider && payout.provider !== query.provider) return false;
+    return true;
+  });
+}
+
 function filterReconciliationItems(
   view: FinanceReconciliationViewKind,
   query: FinanceReconciliationViewQuery,
@@ -2635,9 +2937,27 @@ function directBookingFinanceEntitlement(
   };
 }
 
+function affiliatePayoutEntitlement(
+  status: ProductEntitlement["status"] = "active",
+): ProductEntitlement {
+  return {
+    product: "affiliate",
+    key: "affiliate-payouts",
+    status,
+    resource: {
+      product: "affiliate",
+      resourceType: "affiliate",
+      resourceId: affiliateId,
+    },
+  };
+}
+
 function identityRepository(
-  linkedPropertyId: string | null | undefined,
-  linkedResourceType: "pms_property" | "property" = "pms_property",
+  options: {
+    linkedPropertyId?: string | null;
+    linkedResourceType?: "pms_property" | "property";
+    linkedAffiliateId?: string | null;
+  } = {},
 ): IdentityRepository {
   return {
     async findUserByProviderUserId() {
@@ -2665,16 +2985,26 @@ function identityRepository(
       };
     },
     async findLinkedResources() {
-      if (linkedPropertyId === null) return [];
-      return [
-        {
+      const resources = [];
+      if (options.linkedPropertyId !== null) {
+        resources.push({
           product: "pms",
-          resourceType: linkedResourceType,
-          resourceId: linkedPropertyId ?? propertyId,
+          resourceType: options.linkedResourceType ?? "pms_property",
+          resourceId: options.linkedPropertyId ?? propertyId,
           relationship: "finance_manager",
           status: "active",
-        },
-      ];
+        });
+      }
+      if (options.linkedAffiliateId !== null) {
+        resources.push({
+          product: "affiliate",
+          resourceType: "affiliate",
+          resourceId: options.linkedAffiliateId ?? affiliateId,
+          relationship: "owner",
+          status: "active",
+        });
+      }
+      return [...resources];
     },
   };
 }
