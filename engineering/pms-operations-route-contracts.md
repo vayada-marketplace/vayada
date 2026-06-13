@@ -306,9 +306,40 @@ PMS route/domain code must call the port. The architecture boundary check
 blocks direct `booking.booking_guests` mutations from `pmsOperations` route code
 and PMS domain modules.
 
+VAY-782 implements the P2c checklist/inspection template subset in `apps/api`.
+`GET /api/pms/properties/:propertyId/check-in-checklist` and
+`GET /api/pms/properties/:propertyId/check-out-inspection` use the PMS
+operations read policy; the corresponding `PUT` routes use the manage policy
+and persist PMS-owned operational setup steps to
+`pms.checkin_checklist_templates` and `pms.checkout_inspection_templates`.
+Template writes validate that `steps` is an array of bounded step objects with
+stable `stepId`, required `label`, and boolean `required` state. Checkout charge
+commands are handled by VAY-783; the check-out command remains VAY-784.
+
+VAY-783 implements the P2c checkout charge operational subset in `apps/api`.
+`GET /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges`
+uses the PMS operations read policy; `POST /checkout-charges`,
+`POST /checkout-charges/:chargeId/mark-paid`, and
+`POST /checkout-charges/:chargeId/waive` use the PMS operations manage policy
+and persist only `pms.booking_checkout_charges` operational state plus PMS audit
+events. The legacy F1a guard path
+`POST /checkout-charges/:chargeId/paid` remains as a compatibility alias for
+the same operational mark-paid command. The check-out command is still VAY-784
+and is not implemented by this slice.
+
 `mark-paid` on checkout charges means a front-desk operator marked the
 operational charge as settled for checkout. It is not a provider payment
 capture, invoice post, payout trigger, or finance reconciliation event.
+
+VAY-784 implements the P2c check-out command in `apps/api`.
+`POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`
+uses the PMS operations manage policy and persists `pms.booking_checkout_records`
+with inspection results, checkout notes, charge settlement snapshots, pending
+flags, and explicit finance handoff metadata. The command updates valid
+reservation assignments to `checked_out`, records PMS audit only, and keeps
+unsettled paid-charge behavior finance-owned: provider collection, invoice
+posting, payouts, reconciliation, and finance dispatch are not performed by this
+route.
 
 ## Error Categories
 
