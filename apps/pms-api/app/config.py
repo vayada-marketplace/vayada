@@ -142,6 +142,7 @@ class Settings(BaseSettings):
     FIRECRAWL_API_KEY: str = ""
     LISTING_IMPORT_MODEL: str = "claude-sonnet-4-20250514"
     LISTING_IMPORT_MAX_CHARS: int = 180000
+    PLATFORM_MEDIA_API_URL: str = "https://api.localhost"
 
     # Environment
     ENVIRONMENT: str = "development"

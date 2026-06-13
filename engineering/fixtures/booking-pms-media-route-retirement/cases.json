@@ -1,0 +1,33 @@
+{
+  "contractVersion": "booking-pms-media-route-retirement.v1",
+  "cases": [
+    {
+      "legacyPath": "POST /admin/upload/images",
+      "owner": "booking-api",
+      "disposition": "retired",
+      "replacement": "POST /api/media/upload-sessions",
+      "purpose": "property.gallery_image"
+    },
+    {
+      "legacyPath": "POST /upload/images",
+      "owner": "pms-api",
+      "disposition": "retired",
+      "replacement": "POST /api/media/upload-sessions",
+      "purpose": "pms.room_type.media"
+    },
+    {
+      "legacyPath": "POST /admin/import/images",
+      "owner": "pms-api",
+      "disposition": "compatibility_command_replaced_side_effect",
+      "replacement": "POST /api/media/imports",
+      "purpose": "pms.import.source_image"
+    },
+    {
+      "legacyPath": "PMS import confirm image background task",
+      "owner": "pms-api",
+      "disposition": "replaced",
+      "replacement": "POST /api/media/imports",
+      "purpose": "pms.import.source_image"
+    }
+  ]
+}

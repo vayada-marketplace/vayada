@@ -1,28 +1,123 @@
 import { getAuthBearerToken } from "@/services/auth/sessionStore";
 
-const getPmsUrl = () => process.env.NEXT_PUBLIC_PMS_URL || "https://pms-api.vayada.com";
+const PLATFORM_MEDIA_API_BASE_URL =
+  process.env.NEXT_PUBLIC_PLATFORM_MEDIA_API_URL ||
+  process.env.NEXT_PUBLIC_AUTH_API_URL ||
+  "https://api.localhost";
 
-export async function uploadImages(files: File | File[]): Promise<string[]> {
+type BookingMediaPurpose = "property.hero_image" | "property.gallery_image";
+
+type UploadTarget = {
+  uploadTargetId: string;
+  clientFileId: string;
+  method: "PUT";
+  uploadUrl: string;
+  headers: Record<string, string>;
+};
+
+type UploadSessionResponse = {
+  uploadSession: { sessionId: string };
+  uploadTargets: UploadTarget[];
+};
+
+type FinalizeResponse = {
+  mediaObjects: Array<{
+    storageKey: string;
+    variants: Array<{ publicCdnUrl: string | null; storageKey: string }>;
+  }>;
+};
+
+export async function uploadImages(
+  files: File | File[],
+  purpose: BookingMediaPurpose = "property.gallery_image",
+): Promise<string[]> {
   const fileList = Array.isArray(files) ? files : [files];
-  const pmsUrl = getPmsUrl();
-  const token = getAuthBearerToken();
-  const formData = new FormData();
-  fileList.forEach((file) => formData.append("files", file));
+  if (fileList.length === 0) return [];
 
-  const res = await fetch(`${pmsUrl}/upload/images`, {
+  const token = getAuthBearerToken();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  const bookingHotelId =
+    typeof window !== "undefined"
+      ? localStorage.getItem("selectedHotelId") || "booking_hotel_current"
+      : "booking_hotel_current";
+
+  const create = await fetch(`${PLATFORM_MEDIA_API_BASE_URL}/api/media/upload-sessions`, {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: formData,
+    headers,
+    body: JSON.stringify({
+      purpose,
+      visibility: "public",
+      resource: {
+        product: "booking",
+        resourceType: "booking_hotel",
+        resourceId: bookingHotelId,
+      },
+      files: fileList.map((file, index) => ({
+        clientFileId: `file_${index + 1}`,
+        filename: file.name || `booking-image-${index + 1}.jpg`,
+        contentType: file.type || "image/jpeg",
+        sizeBytes: file.size,
+      })),
+    }),
   });
 
-  if (!res.ok) throw new Error("Upload failed");
+  if (!create.ok) throw new Error("Upload session failed");
+  const createBody = (await create.json()) as UploadSessionResponse;
 
-  const data = await res.json();
-  return (data.images || []).map((img: { url: string }) => img.url);
+  await Promise.all(
+    createBody.uploadTargets.map(async (target, index) => {
+      const file = fileList[index];
+      if (!file || isDeterministicLocalUploadTarget(target.uploadUrl)) return;
+
+      const upload = await fetch(target.uploadUrl, {
+        method: target.method,
+        headers: target.headers,
+        body: file,
+      });
+
+      if (!upload.ok) throw new Error("Upload failed");
+    }),
+  );
+
+  const finalized = await fetch(
+    `${PLATFORM_MEDIA_API_BASE_URL}/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        files: createBody.uploadTargets.map((target, index) => {
+          const file = fileList[index]!;
+          return {
+            uploadTargetId: target.uploadTargetId,
+            contentType: file.type || "image/jpeg",
+            sizeBytes: file.size,
+          };
+        }),
+      }),
+    },
+  );
+
+  if (!finalized.ok) throw new Error("Upload finalize failed");
+  const finalizedBody = (await finalized.json()) as FinalizeResponse;
+  return finalizedBody.mediaObjects.map(
+    (mediaObject) =>
+      mediaObject.variants.find((variant) => variant.publicCdnUrl)?.publicCdnUrl ??
+      mediaObject.storageKey,
+  );
 }
 
-export async function uploadSingleImage(file: File): Promise<string> {
-  const urls = await uploadImages(file);
+export async function uploadSingleImage(
+  file: File,
+  purpose: BookingMediaPurpose = "property.gallery_image",
+): Promise<string> {
+  const urls = await uploadImages(file, purpose);
   if (!urls[0]) throw new Error("No image URL returned");
   return urls[0];
+}
+
+function isDeterministicLocalUploadTarget(uploadUrl: string): boolean {
+  return uploadUrl.startsWith("https://uploads.vayada.localhost/");
 }

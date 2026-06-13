@@ -1,4 +1,5 @@
 import { pmsClient } from "../api/pmsClient";
+import { createPlatformMediaImport } from "../platform-media";
 
 export interface ExtractedRoomType {
   name: string;
@@ -33,12 +34,43 @@ export interface ListingImportResult {
   message: string;
 }
 
+export interface ListingImportImagesResult {
+  message: string;
+  importJobId?: string;
+  jobKey?: string;
+}
+
 export const importService = {
   preview: (url: string) => pmsClient.post<ListingImportPreview>("/admin/import/preview", { url }),
 
   confirm: (roomTypes: ListingImportConfirmRoomType[]) =>
     pmsClient.post<ListingImportResult>("/admin/import/confirm", { roomTypes }),
 
-  importImages: (roomTypeId: string, sourceImageUrls: string[]) =>
-    pmsClient.post("/admin/import/images", { roomTypeId, sourceImageUrls }),
+  importImages: async (
+    roomTypeId: string,
+    sourceImageUrls: string[],
+  ): Promise<ListingImportImagesResult> => {
+    if (sourceImageUrls.length === 0) return { message: "No images to import" };
+
+    const resourceId =
+      typeof window !== "undefined"
+        ? localStorage.getItem("selectedHotelId") || "pms_hotel_current"
+        : "pms_hotel_current";
+    const importJob = await createPlatformMediaImport({
+      resource: {
+        product: "pms",
+        resourceType: "pms_hotel",
+        resourceId,
+        targetResourceId: roomTypeId,
+      },
+      sourceImageUrls,
+      idempotencyKey: `media.import:pms:${roomTypeId}:listing-import:v1`,
+    });
+
+    return {
+      message: `Queued ${importJob.sourceImageCount} image import${importJob.sourceImageCount === 1 ? "" : "s"}`,
+      importJobId: importJob.importJobId,
+      jobKey: importJob.jobKey,
+    };
+  },
 };

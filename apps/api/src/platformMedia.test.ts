@@ -66,6 +66,8 @@ const propertyGalleryBatchCase = contractCase("property-gallery-batch-upload-ses
 const propertyTargetDenyCase = contractCase("property-gallery-deny-unresolved-property-target");
 const privateChatVisibilityCase = contractCase("private-chat-attachment-rejects-public-visibility");
 const propertyHeroPdfCase = contractCase("property-hero-rejects-pdf");
+const pmsRoomTypeMediaCase = contractCase("pms-room-type-media-upload-session");
+const pmsImportSourceImageCase = contractCase("pms-import-source-image-job");
 
 type MediaCreateResponse = {
   contractVersion: string;
@@ -86,6 +88,23 @@ type MediaCreateResponse = {
 type MediaFinalizeResponse = {
   mediaObject: PlatformMediaObjectRecord;
   mediaObjects: PlatformMediaObjectRecord[];
+  sideEffects: string[];
+};
+
+type MediaImportResponse = {
+  contractVersion: string;
+  importJob: {
+    importJobId: string;
+    jobKey: string;
+    purpose: string;
+    status: string;
+    sourceImageCount: number;
+    target: {
+      resourceProduct: string;
+      resourceType: string;
+      resourceId: string;
+    };
+  };
   sideEffects: string[];
 };
 
@@ -463,6 +482,98 @@ describe("platform media upload routes", () => {
 
     expect(response.statusCode).toBe(propertyHeroPdfCase.expected.status);
     expect((response.body as ErrorResponse).code).toBe(propertyHeroPdfCase.expected.errorCode);
+  });
+
+  it("creates and finalizes PMS room type media through platform media", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const app = buildMediaApp({
+      repository,
+      permissions: ["pms.operations.manage"],
+      resources: [
+        {
+          product: "pms",
+          resourceType: "pms_hotel",
+          resourceId: "pms_hotel_alpenrose",
+          relationship: "owner",
+        },
+      ],
+    });
+
+    const create = await injectJson(app, {
+      method: "POST",
+      url: pmsRoomTypeMediaCase.request.path,
+      headers: { authorization: "Bearer valid-token" },
+      payload: pmsRoomTypeMediaCase.request.body,
+    });
+
+    expect(create.statusCode).toBe(pmsRoomTypeMediaCase.expected.status);
+    const createBody = create.body as MediaCreateResponse;
+    expect(createBody.uploadTargets).toHaveLength(1);
+
+    const finalize = await injectJson(app, {
+      method: "POST",
+      url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        files: pmsRoomTypeMediaCase.finalize!.files.map((file) => ({
+          ...file,
+          uploadTargetId: createBody.uploadTargets[0]!.uploadTargetId,
+        })),
+      },
+    });
+
+    expect(finalize.statusCode).toBe(pmsRoomTypeMediaCase.expected.finalizeStatus);
+    const finalizeBody = finalize.body as MediaFinalizeResponse;
+    expect(finalizeBody.mediaObject).toMatchObject(pmsRoomTypeMediaCase.expected.mediaObject!);
+    expect(finalizeBody.mediaObject.variants.map((variant) => variant.variantName)).toEqual([
+      ...(pmsRoomTypeMediaCase.expected.requiredVariants ?? []),
+    ]);
+    expect(finalizeBody.sideEffects).toEqual(pmsRoomTypeMediaCase.expected.sideEffects);
+  });
+
+  it("queues PMS import source image jobs instead of PMS-owned downloads", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const app = buildMediaApp({
+      repository,
+      permissions: ["pms.operations.manage"],
+      resources: [
+        {
+          product: "pms",
+          resourceType: "pms_hotel",
+          resourceId: "pms_hotel_alpenrose",
+          relationship: "operator",
+        },
+      ],
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: pmsImportSourceImageCase.request.path,
+      headers: { authorization: "Bearer valid-token" },
+      payload: pmsImportSourceImageCase.request.body,
+    });
+
+    expect(response.statusCode).toBe(pmsImportSourceImageCase.expected.status);
+    const body = response.body as MediaImportResponse;
+    expect(body.contractVersion).toBe("platform-media-import.v1");
+    expect(body.importJob).toMatchObject({
+      jobKey: "media.import:pms:room_type_suite:listing-preview-1:v1",
+      purpose: "pms.import.source_image",
+      status: "pending",
+      sourceImageCount: 2,
+      target: {
+        resourceProduct: "pms",
+        resourceType: "import_job",
+        resourceId: "room_type_suite",
+      },
+    });
+    expect(body.sideEffects).toEqual(pmsImportSourceImageCase.expected.sideEffects);
+    expect(repository.importJobs.size).toBe(1);
+    expect(repository.auditEvents.at(-1)).toMatchObject({
+      action: "platform_media.import_job.created",
+      targetType: "media_import_job",
+      organizationId: "org_media",
+    });
   });
 
   it("rejects malformed file fields before signing", async () => {

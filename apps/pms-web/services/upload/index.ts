@@ -1,20 +1,25 @@
-/**
- * Image upload service — uploads files to PMS backend via multipart form data.
- */
+import { uploadPlatformMedia } from "../platform-media";
+import type { PlatformMediaResourceScope } from "../platform-media";
 
-import { getAuthBearerToken } from "../auth/sessionStore";
-
-const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
-
-export interface UploadedImage {
+export type UploadedImage = {
   url: string;
-  thumbnail_url?: string;
-  key: string;
+  platformMediaObjectId: string;
+  storageKey: string;
   width: number;
   height: number;
   size_bytes: number;
   format: string;
-}
+};
+
+export type RoomImageReference =
+  | string
+  | {
+      url: string;
+      platformMediaObjectId?: string;
+      mediaId?: string;
+      storageKey?: string;
+      altText?: string | null;
+    };
 
 export interface MultipleUploadResponse {
   images: UploadedImage[];
@@ -22,26 +27,32 @@ export interface MultipleUploadResponse {
 }
 
 export const uploadService = {
-  async uploadImages(files: File[]): Promise<MultipleUploadResponse> {
-    const token = getAuthBearerToken();
-    if (!token) throw new Error("Not authenticated");
-
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
-
-    const response = await fetch(`${PMS_BASE_URL}/upload/images`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: formData,
+  async uploadImages(
+    files: File[],
+    resource: PlatformMediaResourceScope,
+  ): Promise<MultipleUploadResponse> {
+    const uploaded = await uploadPlatformMedia({
+      purpose: "pms.room_type.media",
+      resource,
+      files,
+      visibility: "public",
     });
 
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail || `Upload failed (${response.status})`);
-    }
-
-    return response.json();
+    return {
+      images: uploaded.map((image) => ({
+        url: image.url,
+        platformMediaObjectId: image.mediaId,
+        storageKey: image.storageKey,
+        width: image.widthPx ?? 0,
+        height: image.heightPx ?? 0,
+        size_bytes: image.sizeBytes,
+        format: image.contentType,
+      })),
+      total: uploaded.length,
+    };
   },
 };
+
+export function imageReferenceUrl(image: RoomImageReference): string {
+  return typeof image === "string" ? image : image.url;
+}
