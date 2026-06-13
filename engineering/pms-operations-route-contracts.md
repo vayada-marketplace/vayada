@@ -253,6 +253,14 @@ P2 commands are private PMS operations unless the command explicitly emits a
 Booking guest-visible event. Notes are private by default and must never flow to
 public bookability, AI public profile, or guest email contracts.
 
+VAY-780 implements the P2a private notes slice in `apps/api` for list/create/delete.
+Private note responses include internal audit metadata, create/delete commands
+record PMS product audit events only, and public/guest-visible projections are
+covered by fixtures that assert note bodies, note IDs, legacy table names, and
+private-note-shaped keys such as `privateNoteId`, `privateNoteBody`,
+`bookingNotesPrivate`, and `privateNoteCount` do not appear outside the
+authorized PMS notes surface.
+
 Checkout charge payment status is operational in this contract. Provider
 collection, invoices, payouts, and reconciliation are finance-owned follow-up
 surfaces.
