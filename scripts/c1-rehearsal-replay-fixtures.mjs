@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,8 +23,8 @@ Options:
 
 Send safety:
   Dry runs never require host allowlisting.
-  --send only allows local/staging hosts by default:
-    localhost, *.localhost, 127.0.0.1, ::1, staging.*, *.staging, *.staging.*
+  --send only allows local hosts by default:
+    localhost, *.localhost, 127.0.0.1, ::1
   Set C1_REHEARSAL_ALLOW_SEND_TO_HOST=<host> to allow one exact additional host.
 
 Required env for --send:
@@ -86,6 +86,15 @@ async function loadManifest() {
   return JSON.parse(await readFile(manifestPath, "utf8"));
 }
 
+function resolveFixturePayloadPath(payloadPath) {
+  const root = resolve(fixtureDir);
+  const candidate = resolve(root, payloadPath);
+  if (!candidate.startsWith(`${root}${sep}`)) {
+    throw new Error(`Fixture payloadPath escapes fixture directory: ${payloadPath}`);
+  }
+  return candidate;
+}
+
 function selectFixtures(manifest, args) {
   if (args.all) return manifest.fixtures;
   if (args.fixtureId) {
@@ -141,10 +150,7 @@ function isAllowedSendHost(hostname) {
     normalized === "localhost" ||
     normalized.endsWith(".localhost") ||
     normalized === "127.0.0.1" ||
-    normalized === "::1" ||
-    normalized.startsWith("staging.") ||
-    normalized.endsWith(".staging") ||
-    normalized.includes(".staging.")
+    normalized === "::1"
   );
 }
 
@@ -154,15 +160,15 @@ function assertSendAllowed(baseUrl) {
 
   throw new Error(
     [
-      `Refusing --send to non-local/non-staging host "${url.hostname}".`,
-      "Use a staging/local base URL, dry-run without --send, or set",
+      `Refusing --send to non-local host "${url.hostname}".`,
+      "Use a local base URL, dry-run without --send, or set",
       "C1_REHEARSAL_ALLOW_SEND_TO_HOST=<host> for an explicit one-host override.",
     ].join(" "),
   );
 }
 
 async function replayFixture(fixture, args) {
-  const payload = await readFile(join(fixtureDir, fixture.payloadPath), "utf8");
+  const payload = await readFile(resolveFixturePayloadPath(fixture.payloadPath), "utf8");
   const url = new URL(
     fixture.endpointPath,
     args.baseUrl.endsWith("/") ? args.baseUrl : `${args.baseUrl}/`,

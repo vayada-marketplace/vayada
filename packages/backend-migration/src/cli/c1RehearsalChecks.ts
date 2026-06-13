@@ -17,7 +17,12 @@ function parseArgs(argv: string[]): {
     if (args[i] === "--connection-string" && args[i + 1]) {
       connectionString = args[++i];
     } else if (args[i] === "--lookback-minutes" && args[i + 1]) {
-      const parsed = Number.parseInt(args[++i]!, 10);
+      const raw = args[++i]!;
+      if (!/^\d+$/.test(raw)) {
+        console.error("Error: --lookback-minutes must be a positive integer.");
+        process.exit(1);
+      }
+      const parsed = Number(raw);
       if (!Number.isFinite(parsed) || parsed <= 0) {
         console.error("Error: --lookback-minutes must be a positive integer.");
         process.exit(1);

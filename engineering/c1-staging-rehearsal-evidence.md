@@ -84,13 +84,13 @@ SELECT
   jsonb_build_object(
     'job_id', job_id,
     'expected_state', 'frozen',
-    'actual_state', 'frozen'
+    'actual_state', :'actual_state'
   ),
   '{}'::jsonb,
   jsonb_build_object(
     'job_id', job_id,
     'expected_state', 'frozen',
-    'actual_state', 'frozen',
+    'actual_state', :'actual_state',
     'owner', owner,
     'rehearsal_id', :'rehearsal_id',
     'evidence_source', 'operator-confirmed-freeze'

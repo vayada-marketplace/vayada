@@ -424,6 +424,9 @@ export async function runC1RehearsalChecks(
   validateC1RehearsalCheckCoverage();
 
   const lookbackMinutes = options.lookbackMinutes ?? 24 * 60;
+  if (!Number.isInteger(lookbackMinutes) || lookbackMinutes <= 0) {
+    throw new Error("lookbackMinutes must be a positive integer.");
+  }
   const checks: C1RehearsalCheckResult[] = [];
 
   for (const check of C1_REHEARSAL_CHECKS) {
