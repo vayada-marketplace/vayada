@@ -1,0 +1,87 @@
+{
+  "caseId": "c1-staging-rehearsal-replay",
+  "description": "VAY-793 provider replay fixtures for C1 staging rehearsal evidence. These payloads are synthetic and are intended for target observe-only or controlled staging replay, not production execution.",
+  "defaultBaseUrlEnv": "C1_REHEARSAL_WEBHOOK_BASE_URL",
+  "fixtures": [
+    {
+      "id": "channex-message-created",
+      "provider": "channex",
+      "eventType": "message",
+      "endpointPath": "/webhooks/channex",
+      "payloadPath": "channex/message-created.json",
+      "expectedReceiptKey": "webhook:channex:message:prop_c1_rehearsal:msg_c1_rehearsal_001",
+      "expectedDomainEventKeys": [
+        "channex.message.ingest:prop_c1_rehearsal:thread_c1_rehearsal_001:msg_c1_rehearsal_001:v1"
+      ],
+      "expectedJobKeys": [
+        "channex.ingest-message:channel_message:msg_c1_rehearsal_001:message-created:v1"
+      ]
+    },
+    {
+      "id": "channex-booking-revision",
+      "provider": "channex",
+      "eventType": "booking",
+      "endpointPath": "/webhooks/channex",
+      "payloadPath": "channex/booking-revision.json",
+      "expectedReceiptKey": "webhook:channex:booking:prop_c1_rehearsal:chan_book_c1_rehearsal_001:7",
+      "expectedDomainEventKeys": [
+        "channex.booking.ingest:prop_c1_rehearsal:chan_book_c1_rehearsal_001:7:v1"
+      ],
+      "expectedJobKeys": [
+        "channex.ingest-booking:channel_booking:chan_book_c1_rehearsal_001:revision-7:v1"
+      ]
+    },
+    {
+      "id": "stripe-payment-intent-succeeded",
+      "provider": "stripe",
+      "eventType": "payment_intent.succeeded",
+      "endpointPath": "/webhooks/stripe",
+      "payloadPath": "stripe/payment-intent-succeeded.json",
+      "expectedReceiptKey": "webhook:stripe:evt_c1_rehearsal_pi_succeeded_001",
+      "expectedDomainEventKeys": ["payment.captured:stripe:pi_c1_rehearsal_001:24100:v1"],
+      "expectedJobKeys": [
+        "payment.reconcile-status:payment:pi_c1_rehearsal_001:stripe-event-evt_c1_rehearsal_pi_succeeded_001:v1",
+        "booking.finalize-instant:booking:book_c1_rehearsal_001:stripe-payment-intent-pi_c1_rehearsal_001:v1"
+      ]
+    },
+    {
+      "id": "stripe-connect-account-updated",
+      "provider": "stripe",
+      "eventType": "account.updated",
+      "endpointPath": "/webhooks/stripe",
+      "payloadPath": "stripe/account-updated.json",
+      "expectedReceiptKey": "webhook:stripe:evt_c1_rehearsal_account_updated_001",
+      "expectedDomainEventKeys": [
+        "finance.provider-account.updated:stripe:acct_c1_rehearsal_001:true:v1"
+      ],
+      "expectedJobKeys": [
+        "finance.reconcile-provider-account:provider_account:acct_c1_rehearsal_001:stripe-event-evt_c1_rehearsal_account_updated_001:v1"
+      ]
+    },
+    {
+      "id": "xendit-invoice-paid",
+      "provider": "xendit",
+      "eventType": "invoice.paid",
+      "endpointPath": "/webhooks/xendit",
+      "payloadPath": "xendit/invoice-paid.json",
+      "expectedReceiptKey": "webhook:xendit:invoice:inv_c1_rehearsal_001:PAID",
+      "expectedDomainEventKeys": ["payment.captured:xendit:inv_c1_rehearsal_001:24100:v1"],
+      "expectedJobKeys": [
+        "payment.reconcile-status:payment:inv_c1_rehearsal_001:xendit-status-PAID:v1",
+        "booking.finalize-instant:booking:book_c1_rehearsal_002:xendit-invoice-inv_c1_rehearsal_001:v1"
+      ]
+    },
+    {
+      "id": "xendit-payout-succeeded",
+      "provider": "xendit",
+      "eventType": "payout.succeeded",
+      "endpointPath": "/webhooks/xendit",
+      "payloadPath": "xendit/payout-succeeded.json",
+      "expectedReceiptKey": "webhook:xendit:payout:payout_c1_rehearsal_001:SUCCEEDED",
+      "expectedDomainEventKeys": ["payout.status:xendit:payout_c1_rehearsal_001:SUCCEEDED:v1"],
+      "expectedJobKeys": [
+        "finance.reconcile-payout:payout:payout_c1_rehearsal_001:xendit-status-SUCCEEDED:v1"
+      ]
+    }
+  ]
+}

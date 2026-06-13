@@ -1,0 +1,24 @@
+{
+  "event": "booking",
+  "property_id": "prop_c1_rehearsal",
+  "payload": {
+    "property_id": "prop_c1_rehearsal",
+    "booking_revision_id": "rev_c1_rehearsal_007",
+    "channel_booking_id": "chan_book_c1_rehearsal_001",
+    "revision": 7,
+    "status": "modified",
+    "guest": {
+      "name": "C1 Rehearsal Guest"
+    },
+    "arrival_date": "2026-09-12",
+    "departure_date": "2026-09-15",
+    "rooms": [
+      {
+        "room_type_id": "chan_room_c1_rehearsal_suite",
+        "rate_plan_id": "chan_rate_c1_rehearsal_standard",
+        "count": 1
+      }
+    ],
+    "updated_at": "2026-06-12T09:05:00.000Z"
+  }
+}

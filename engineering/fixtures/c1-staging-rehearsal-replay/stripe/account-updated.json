@@ -1,0 +1,21 @@
+{
+  "id": "evt_c1_rehearsal_account_updated_001",
+  "object": "event",
+  "api_version": "2026-02-26.preview",
+  "created": 1781245860,
+  "livemode": false,
+  "type": "account.updated",
+  "data": {
+    "object": {
+      "id": "acct_c1_rehearsal_001",
+      "object": "account",
+      "charges_enabled": true,
+      "payouts_enabled": true,
+      "details_submitted": true,
+      "metadata": {
+        "hotel_id": "hotel_c1_rehearsal",
+        "rehearsal": "VAY-793"
+      }
+    }
+  }
+}

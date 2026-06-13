@@ -19,6 +19,23 @@ export { rebuild, type RebuildConfig } from "./rebuild.js";
 
 export { loadFixtureCase, type FixtureLoaderConfig } from "./fixtures.js";
 
+export {
+  buildC1RehearsalReport,
+  C1_REHEARSAL_CHECKS,
+  C1_REHEARSAL_LEGACY_SCHEDULER_JOBS,
+  C1_REHEARSAL_PROVIDERS,
+  C1_REHEARSAL_REQUIRED_METRICS,
+  runC1RehearsalChecks,
+  validateC1RehearsalCheckCoverage,
+  type C1RehearsalCheckDefinition,
+  type C1RehearsalCheckOptions,
+  type C1RehearsalCheckResult,
+  type C1RehearsalLegacySchedulerJob,
+  type C1RehearsalMetricId,
+  type C1RehearsalProvider,
+  type C1RehearsalReport,
+} from "./c1RehearsalEvidence.js";
+
 export { transformFixtureCase, type TransformConfig } from "./transform.js";
 
 export {
