@@ -7,7 +7,7 @@ export type CollaborationStatus =
   | "completed"; // All deliverables finished (Historical)
 
 // The type of compensation/agreement
-export type CollaborationType = "Free Stay" | "Paid" | "Discount";
+export type CollaborationType = "Free Stay" | "Paid" | "Discount" | "Affiliate";
 
 // Individual deliverable item (e.g., 1 Instagram Post)
 export interface DeliverableItem {

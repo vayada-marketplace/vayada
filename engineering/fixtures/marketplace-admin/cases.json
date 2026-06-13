@@ -1,0 +1,99 @@
+{
+  "contractVersion": "marketplace-admin.v1",
+  "sourceVertical": "V7",
+  "cases": [
+    {
+      "caseId": "platform-org-member-lists-collaborations",
+      "description": "A platform organization member with platform.user.suspend and the platform resource link can list admin collaborations.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/admin/collaborations?page=1&pageSize=20"
+      },
+      "auth": {
+        "organizationKind": "platform",
+        "permission": "platform.user.suspend",
+        "resource": "platform:platform:vayada",
+        "relationship": "operator"
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "platform_organization_membership",
+        "mustInclude": ["collaborations[0].collaborationId", "pagination.total"]
+      }
+    },
+    {
+      "caseId": "legacy-superadmin-fallback",
+      "description": "A valid authenticated user without backfilled platform membership can use the documented legacy superadmin fallback.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/admin/collaborations"
+      },
+      "auth": {
+        "requestContext": "valid_non_platform",
+        "legacyIsSuperadmin": true
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "legacy_superadmin_fallback"
+      }
+    },
+    {
+      "caseId": "non-platform-non-superadmin-denied",
+      "description": "A valid authenticated user without platform membership and without the legacy superadmin flag is denied.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/admin/collaborations"
+      },
+      "auth": {
+        "requestContext": "valid_non_platform",
+        "legacyIsSuperadmin": false
+      },
+      "expected": {
+        "status": 403
+      }
+    },
+    {
+      "caseId": "admin-listing-write-reuses-v2-shape",
+      "description": "Admin listing writes use the V2 marketplace hotel listing request shape and return the marketplace-admin contract envelope.",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/admin/users/user_hotel/listings",
+        "body": {
+          "title": "Creator suite",
+          "listingSummary": "A suite for creator stays.",
+          "accommodationType": "hotel",
+          "rawLocationText": "Innsbruck, Austria",
+          "imageUrls": ["https://cdn.example.com/listing.jpg"],
+          "collaborationOfferings": [
+            {
+              "collaborationType": "free_stay",
+              "availabilityMonths": ["June"],
+              "platforms": ["instagram"],
+              "freeStayMinNights": 2,
+              "freeStayMaxNights": 4,
+              "paidMaxAmount": null,
+              "discountPercentage": null,
+              "commissionPercentage": null,
+              "minFollowers": 10000,
+              "currency": "EUR",
+              "termsSummary": null
+            }
+          ],
+          "creatorRequirements": {
+            "platforms": ["instagram"],
+            "targetCountries": ["AT"],
+            "targetAgeMin": 18,
+            "targetAgeMax": 45,
+            "targetAgeGroups": ["18-24"],
+            "creatorTypes": ["travel"]
+          }
+        }
+      },
+      "expected": {
+        "status": 201,
+        "authorizationMode": "platform_organization_membership",
+        "mustInclude": ["listingId", "collaborationOfferings[0].collaborationType"]
+      }
+    }
+  ]
+}

@@ -49,6 +49,7 @@ import {
 } from "./routes/finance.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
+import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import {
@@ -358,6 +359,12 @@ const app = buildApp({
   marketplaceCollaborationRepository:
     config.marketplaceDiscoverySource === "target"
       ? createPgMarketplaceCollaborationReadRepository({
+          connectionString: config.targetDatabaseUrl!,
+        })
+      : undefined,
+  marketplaceAdminRepository:
+    config.marketplaceAdminSource === "target"
+      ? createPgMarketplaceAdminRepository({
           connectionString: config.targetDatabaseUrl!,
         })
       : undefined,
