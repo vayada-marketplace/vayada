@@ -697,15 +697,17 @@
       "request": {
         "path": "/api/finance/properties/f3000000-0000-0000-0000-000000000686/reconciliation/payments",
         "query": {
-          "status": "needs_review",
+          "status": "failed",
           "limit": 50,
           "offset": 0
         }
       },
       "expected": {
         "status": 200,
+        "itemCount": 1,
         "mustInclude": [
-          "items[0].paymentId",
+          "items[0].subjectId",
+          "items[0].subjectType",
           "items[0].provider",
           "items[0].financeStatus",
           "items[0].latestReceiptStatus",
@@ -728,6 +730,7 @@
       },
       "expected": {
         "status": 200,
+        "itemCount": 1,
         "mustInclude": [
           "items[0].subjectId",
           "items[0].subjectType",
@@ -754,6 +757,7 @@
       },
       "expected": {
         "status": 200,
+        "itemCount": 1,
         "mustInclude": [
           "items[0].subjectId",
           "items[0].subjectType",

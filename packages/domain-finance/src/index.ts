@@ -231,6 +231,58 @@ export const FINANCE_RECONCILIATION_STATUSES = [
 
 export type FinanceReconciliationStatus = (typeof FINANCE_RECONCILIATION_STATUSES)[number];
 
+export const FINANCE_PAYOUT_STATUSES = [
+  "pending",
+  "scheduled",
+  "processing",
+  "paid",
+  "failed",
+  "canceled",
+  "reversed",
+] as const;
+
+export type FinancePayoutStatus = (typeof FINANCE_PAYOUT_STATUSES)[number];
+
+export const FINANCE_RECONCILIATION_RECEIPT_STATUSES = [
+  "matched",
+  "missing",
+  "stale",
+  "dead_lettered",
+  "not_applicable",
+] as const;
+
+export type FinanceReconciliationReceiptStatus =
+  (typeof FINANCE_RECONCILIATION_RECEIPT_STATUSES)[number];
+
+export const FINANCE_RECONCILIATION_JOB_STATUSES = [
+  "idle",
+  "queued",
+  "running",
+  "failed",
+  "dead_lettered",
+] as const;
+
+export type FinanceReconciliationJobStatus = (typeof FINANCE_RECONCILIATION_JOB_STATUSES)[number];
+
+export const FINANCE_RECONCILIATION_RECOMMENDED_ACTIONS = [
+  "none",
+  "enqueue_reconcile",
+  "manual_review",
+  "refresh_provider_state",
+] as const;
+
+export type FinanceReconciliationRecommendedAction =
+  (typeof FINANCE_RECONCILIATION_RECOMMENDED_ACTIONS)[number];
+
+export const FINANCE_RECONCILIATION_SUBJECT_TYPES = [
+  "payment",
+  "payout",
+  "provider_account",
+] as const;
+
+export type FinanceReconciliationSubjectType =
+  (typeof FINANCE_RECONCILIATION_SUBJECT_TYPES)[number];
+
 export type FinanceInvoiceStatusCounts = Record<FinanceInvoiceStatus, number>;
 export type FinancePaymentStatusCounts = Record<FinancePaymentStatus, number>;
 
@@ -337,6 +389,77 @@ export type FinancePaymentLedgerResponse = {
   payments: FinancePaymentLedgerItem[];
   total: number;
   counts: FinancePaymentStatusCounts;
+  limit: number;
+  offset: number;
+  sourceFreshness: FinanceJsonObject;
+};
+
+export type FinancePayout = {
+  payoutId: string;
+  ownerScope: "property" | "organization" | "platform";
+  propertyId: string | null;
+  organizationId: string | null;
+  relatedPropertyId: string | null;
+  guestBookingId: string | null;
+  paymentId: string | null;
+  payoutStatus: FinancePayoutStatus;
+  amount: FinanceDecimalAmount;
+  feeAmount: FinanceDecimalAmount;
+  netAmount: FinanceDecimalAmount;
+  currency: FinanceCurrencyCode;
+  provider: FinanceRoutePaymentProvider;
+  providerPayoutId: string | null;
+  scheduledAt: FinanceUtcDateTime | null;
+  paidAt: FinanceUtcDateTime | null;
+  failedAt: FinanceUtcDateTime | null;
+  failureCode: string | null;
+  retryCount: number;
+};
+
+export type FinancePayoutListQuery = {
+  status?: FinancePayoutStatus;
+  provider?: FinanceRoutePaymentProvider;
+  limit: number;
+  offset: number;
+};
+
+export type FinancePayoutListResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  payouts: FinancePayout[];
+  total: number;
+  limit: number;
+  offset: number;
+  sourceFreshness: FinanceJsonObject;
+};
+
+export type FinanceReconciliationItem = {
+  subjectId: string;
+  subjectType: FinanceReconciliationSubjectType;
+  provider: FinanceRoutePaymentProvider;
+  financeStatus: string;
+  providerStatus: string | null;
+  latestReceiptStatus: FinanceReconciliationReceiptStatus;
+  jobStatus: FinanceReconciliationJobStatus;
+  recommendedAction: FinanceReconciliationRecommendedAction;
+  lastReceiptAt: FinanceUtcDateTime | null;
+  lastJobAt: FinanceUtcDateTime | null;
+};
+
+export type FinanceReconciliationViewKind = "payments" | "payouts" | "provider-accounts";
+
+export type FinanceReconciliationViewQuery = {
+  status?: FinanceReconciliationReceiptStatus | FinanceReconciliationJobStatus;
+  provider?: FinanceRoutePaymentProvider;
+  limit: number;
+  offset: number;
+};
+
+export type FinanceReconciliationViewResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  items: FinanceReconciliationItem[];
+  total: number;
   limit: number;
   offset: number;
   sourceFreshness: FinanceJsonObject;
@@ -606,6 +729,17 @@ export type FinancePropertyLedgerReadRepository = {
     propertyId: FinancePropertyId,
     query: FinancePaymentLedgerQuery,
   ): Promise<Omit<FinancePaymentLedgerResponse, "contractVersion" | "propertyId">>;
+
+  listPayouts(
+    propertyId: FinancePropertyId,
+    query: FinancePayoutListQuery,
+  ): Promise<Omit<FinancePayoutListResponse, "contractVersion" | "propertyId">>;
+
+  listReconciliationItems(
+    propertyId: FinancePropertyId,
+    view: FinanceReconciliationViewKind,
+    query: FinanceReconciliationViewQuery,
+  ): Promise<Omit<FinanceReconciliationViewResponse, "contractVersion" | "propertyId">>;
 
   getInvoiceCsvExportDisposition(
     propertyId: FinancePropertyId,

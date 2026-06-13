@@ -20,6 +20,11 @@ import type {
   FinancePaymentLedgerItem,
   FinancePaymentLedgerQuery,
   FinancePaymentSettingsReadModel,
+  FinancePayout,
+  FinancePayoutListQuery,
+  FinanceReconciliationItem,
+  FinanceReconciliationViewKind,
+  FinanceReconciliationViewQuery,
   FinancePropertyReadRepository,
 } from "@vayada/domain-finance";
 import { createHash } from "node:crypto";
@@ -237,6 +242,81 @@ const paymentLedgerItems: FinancePaymentLedgerItem[] = [
   },
 ];
 
+const payoutItems: FinancePayout[] = [
+  {
+    payoutId: "payout_2026_abcd",
+    ownerScope: "property",
+    propertyId,
+    organizationId: null,
+    relatedPropertyId: null,
+    guestBookingId: invoiceListItems[0]!.guestBookingId,
+    paymentId: paymentLedgerItems[0]!.paymentId,
+    payoutStatus: "failed",
+    amount: "1000.00",
+    feeAmount: "25.00",
+    netAmount: "975.00",
+    currency: "EUR",
+    provider: "stripe",
+    providerPayoutId: "po_stripe_failed_686",
+    scheduledAt: "2026-06-12T11:00:00.000Z",
+    paidAt: null,
+    failedAt: "2026-06-12T11:30:00.000Z",
+    failureCode: "bank_account_restricted",
+    retryCount: 2,
+  },
+];
+
+const reconciliationSourceFreshness = {
+  providerReceiptsFreshAt: "2026-06-12T11:32:00.000Z",
+  jobsFreshAt: "2026-06-12T11:35:00.000Z",
+  deadLettersFreshAt: "2026-06-12T11:36:00.000Z",
+};
+
+const reconciliationItems: Record<FinanceReconciliationViewKind, FinanceReconciliationItem[]> = {
+  payments: [
+    {
+      subjectId: "pay_card_needs_review_686",
+      subjectType: "payment",
+      provider: "stripe",
+      financeStatus: "pending",
+      providerStatus: "requires_capture",
+      latestReceiptStatus: "stale",
+      jobStatus: "failed",
+      recommendedAction: "enqueue_reconcile",
+      lastReceiptAt: "2026-06-12T11:20:00.000Z",
+      lastJobAt: "2026-06-12T11:25:00.000Z",
+    },
+  ],
+  payouts: [
+    {
+      subjectId: payoutItems[0]!.payoutId,
+      subjectType: "payout",
+      provider: "stripe",
+      financeStatus: "failed",
+      providerStatus: "failed",
+      latestReceiptStatus: "dead_lettered",
+      jobStatus: "dead_lettered",
+      recommendedAction: "manual_review",
+      lastReceiptAt: "2026-06-12T11:32:00.000Z",
+      lastJobAt: "2026-06-12T11:35:00.000Z",
+    },
+  ],
+  "provider-accounts": [
+    {
+      subjectId: "acct_target_alpenrose",
+      subjectType: "provider_account",
+      provider: "stripe",
+      financeStatus: "restricted",
+      providerStatus: "currently_due",
+      latestReceiptStatus: "stale",
+      jobStatus: "queued",
+      recommendedAction: "refresh_provider_state",
+      lastReceiptAt: "2026-06-12T11:10:00.000Z",
+      lastJobAt: "2026-06-12T11:15:00.000Z",
+    },
+  ],
+};
+
 const financialSummary: FinanceFinancialSummary = {
   currency: "EUR",
   periodStart: "2026-06-01",
@@ -327,6 +407,40 @@ describe("finance route contracts", () => {
       assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
       expect(JSON.stringify(response.body), caseId).not.toMatch(
         /providerPayloadRaw|providerPaymentIntentSecret|cardFingerprint|processorFeeBreakdown|guestBirthDate|privatePmsNotes|providerPaymentIntentId|booking_guests/,
+      );
+    }
+  });
+
+  it("passes F1e payout and reconciliation fixture cases in target mode", async () => {
+    app = buildFinanceApp();
+
+    for (const caseId of [
+      "payout-list-read",
+      "payment-reconciliation-view",
+      "payout-reconciliation-view",
+      "provider-account-reconciliation-view",
+    ]) {
+      const contractCase = financeContractCases.cases.find(
+        (candidate) => candidate.caseId === caseId,
+      );
+      expect(contractCase, caseId).toBeDefined();
+
+      const response = await injectJson<Record<string, unknown>>(app, {
+        method: "GET",
+        url: contractCase!.request.path,
+        query: queryStrings(contractCase!.request.query),
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
+      if (contractCase!.expected.itemCount !== undefined) {
+        const list = caseId === "payout-list-read" ? response.body.payouts : response.body.items;
+        expect(list, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
+      assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
+      expect(JSON.stringify(response.body), caseId).not.toMatch(
+        /providerPayloadRaw|accountNumber|accountHolderName|sensitiveDestinationRef|stripeSecretKey|xenditApiKey|processorSecret|guestEmail/,
       );
     }
   });
@@ -510,9 +624,9 @@ describe("finance route contracts", () => {
       expect(
         target.calls.some((call) => call.text.includes("INSERT INTO platform.idempotency_keys")),
       ).toBe(false);
-      expect(target.calls.some((call) => call.text.includes("INSERT INTO platform.outbox_events"))).toBe(
-        false,
-      );
+      expect(
+        target.calls.some((call) => call.text.includes("INSERT INTO platform.outbox_events")),
+      ).toBe(false);
     }
   });
 
@@ -667,7 +781,7 @@ describe("finance route contracts", () => {
   it("returns empty states for finance ledger reads without treating setup as an error", async () => {
     app = buildFinanceApp({ repository: emptyFinanceRepository });
 
-    const [summary, invoices, payments] = await Promise.all([
+    const [summary, invoices, payments, payouts, reconciliation] = await Promise.all([
       injectJson(app, {
         method: "GET",
         url: `/api/finance/properties/${propertyId}/summary`,
@@ -683,6 +797,16 @@ describe("finance route contracts", () => {
         url: `/api/finance/properties/${propertyId}/payments`,
         headers: { authorization: "Bearer valid-token" },
       }),
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/payouts`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/reconciliation/payouts`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
     ]);
 
     expect(summary.body).toMatchObject({
@@ -690,6 +814,20 @@ describe("finance route contracts", () => {
     });
     expect(invoices.body).toMatchObject({ invoices: [], total: 0, counts: { partial: 0 } });
     expect(payments.body).toMatchObject({ payments: [], total: 0, counts: { paid: 0 } });
+    expect(payouts.body).toMatchObject({
+      payouts: [],
+      total: 0,
+      sourceFreshness: { finance: { status: "empty" } },
+    });
+    expect(reconciliation.body).toMatchObject({
+      items: [],
+      total: 0,
+      sourceFreshness: {
+        providerReceiptsFreshAt: null,
+        jobsFreshAt: null,
+        deadLettersFreshAt: null,
+      },
+    });
   });
 
   it("returns cancellation policy reads from the Finance repository", async () => {
@@ -911,6 +1049,238 @@ describe("finance route contracts", () => {
     await expect(repository.getPaymentSettings(propertyId)).resolves.toMatchObject({
       requiresManualReview: true,
       providerAccount: { status: "active" },
+    });
+  });
+
+  it("maps property payouts from the target Finance payout read model without destination secrets", async () => {
+    const queries: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          queries.push({ text, values });
+          expect(text).toContain("FROM finance.payouts payout");
+          expect(text).toContain("LEFT JOIN finance.payment_provider_accounts account");
+          expect(text).not.toMatch(/sensitive_destination_ref|account_number|raw_payload/i);
+          expect(text).toContain("total_count AS");
+          expect(text).not.toContain("count(*) OVER");
+          expect(values).toEqual([propertyId, "failed", "stripe", 25, 0]);
+          return {
+            rows: [
+              {
+                payoutId: "payout_2026_abcd",
+                ownerScope: "property",
+                propertyId,
+                organizationId: null,
+                relatedPropertyId: null,
+                guestBookingId: invoiceListItems[0]!.guestBookingId,
+                paymentId: paymentLedgerItems[0]!.paymentId,
+                payoutStatus: "failed",
+                amount: "1000.00",
+                feeAmount: "25.00",
+                netAmount: "975.00",
+                currency: "EUR",
+                provider: "stripe",
+                providerPayoutId: "po_stripe_failed_686",
+                scheduledAt: "2026-06-12T11:00:00.000Z",
+                paidAt: null,
+                failedAt: "2026-06-12T11:30:00.000Z",
+                failureCode: "bank_account_restricted",
+                retryCount: 2,
+                total: 1,
+                sourceFreshness,
+              },
+            ] as unknown as T[],
+          };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listPayouts!(propertyId, {
+        status: "failed",
+        provider: "stripe",
+        limit: 25,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      payouts: [
+        {
+          payoutId: "payout_2026_abcd",
+          payoutStatus: "failed",
+          provider: "stripe",
+          retryCount: 2,
+        },
+      ],
+      total: 1,
+    });
+    expect(queries).toHaveLength(1);
+  });
+
+  it("keeps payout totals stable for empty later pages", async () => {
+    const queries: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          queries.push({ text, values });
+          if (values?.length === 3) {
+            expect(text).toContain("SELECT count(*)::text AS total");
+            expect(values).toEqual([propertyId, "failed", "stripe"]);
+            return { rows: [{ total: "42" }] as unknown as T[] };
+          }
+          expect(text).toContain("total_count AS");
+          expect(values).toEqual([propertyId, "failed", "stripe", 25, 50]);
+          return { rows: [] as T[] };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listPayouts!(propertyId, {
+        status: "failed",
+        provider: "stripe",
+        limit: 25,
+        offset: 50,
+      }),
+    ).resolves.toMatchObject({
+      payouts: [],
+      total: 42,
+      limit: 25,
+      offset: 50,
+    });
+    expect(queries).toHaveLength(2);
+  });
+
+  it("maps payout reconciliation state from receipts, jobs, and dead letters", async () => {
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          expect(text).toContain("platform.external_webhook_events receipt");
+          expect(text).toContain("platform.jobs job");
+          expect(text).toContain("platform.dead_letter_events dead");
+          expect(text).toContain("SELECT job.id");
+          expect(text).toContain("receipt.normalized_domain_event_id");
+          expect(text).toContain("receipt_event.resource_id = payout.provider_payout_id");
+          expect(text).toContain("job.tenant_scope = 'external'");
+          expect(text).toContain("job.resource_id = payout.provider_payout_id");
+          expect(text).toContain("dead.job_id = job.id");
+          expect(text).toContain("total_count AS");
+          expect(text).not.toContain("count(*) OVER");
+          expect(text).not.toContain("raw_payload");
+          expect(values).toEqual([propertyId, "dead_lettered", "stripe", 50, 0]);
+          return {
+            rows: [
+              {
+                subjectId: "payout_2026_abcd",
+                subjectType: "payout",
+                provider: "stripe",
+                financeStatus: "failed",
+                providerStatus: "failed",
+                latestReceiptStatus: "dead_lettered",
+                jobStatus: "dead_lettered",
+                recommendedAction: "manual_review",
+                lastReceiptAt: "2026-06-12T11:32:00.000Z",
+                lastJobAt: "2026-06-12T11:35:00.000Z",
+                total: 1,
+                sourceFreshness: reconciliationSourceFreshness,
+              },
+            ] as unknown as T[],
+          };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listReconciliationItems!(propertyId, "payouts", {
+        status: "dead_lettered",
+        provider: "stripe",
+        limit: 50,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          subjectId: "payout_2026_abcd",
+          subjectType: "payout",
+          latestReceiptStatus: "dead_lettered",
+          jobStatus: "dead_lettered",
+          recommendedAction: "manual_review",
+        },
+      ],
+      sourceFreshness: reconciliationSourceFreshness,
+    });
+  });
+
+  it("matches provider-account reconciliation jobs using webhook job keys and provider object IDs", async () => {
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          expect(text).toContain("receipt.normalized_domain_event_id");
+          expect(text).toContain("receipt_event.resource_id = account.provider_account_id");
+          expect(text).toContain("SELECT job.id");
+          expect(text).toContain("job.tenant_scope = 'external'");
+          expect(text).toContain("job.resource_id = account.provider_account_id");
+          expect(text).toContain("finance.reconcile-provider-account:provider_account:");
+          expect(text).not.toContain("finance.provider-account.reconcile");
+          expect(text).toContain("dead.job_id = job.id");
+          expect(values).toEqual([propertyId, null, "stripe", 25, 0]);
+          return {
+            rows: [
+              {
+                subjectId: "acct_internal_686",
+                subjectType: "provider_account",
+                provider: "stripe",
+                financeStatus: "active",
+                providerStatus: "active",
+                latestReceiptStatus: "matched",
+                jobStatus: "queued",
+                recommendedAction: "none",
+                lastReceiptAt: "2026-06-12T11:32:00.000Z",
+                lastJobAt: "2026-06-12T11:35:00.000Z",
+                total: 1,
+                sourceFreshness: reconciliationSourceFreshness,
+              },
+            ] as unknown as T[],
+          };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listReconciliationItems!(propertyId, "provider-accounts", {
+        provider: "stripe",
+        limit: 25,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          subjectId: "acct_internal_686",
+          subjectType: "provider_account",
+          latestReceiptStatus: "matched",
+          jobStatus: "queued",
+        },
+      ],
+      total: 1,
     });
   });
 
@@ -1351,6 +1721,27 @@ const financeRepository: FinancePropertyReadRepository = {
       sourceFreshness,
     };
   },
+  async listPayouts(requestedPropertyId, query) {
+    const filtered = requestedPropertyId === propertyId ? filterPayouts(query) : [];
+    return {
+      payouts: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness,
+    };
+  },
+  async listReconciliationItems(requestedPropertyId, view, query) {
+    const filtered =
+      requestedPropertyId === propertyId ? filterReconciliationItems(view, query) : [];
+    return {
+      items: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness: reconciliationSourceFreshness,
+    };
+  },
   async getInvoiceCsvExportDisposition(requestedPropertyId) {
     return {
       export: {
@@ -1543,6 +1934,31 @@ function filterPayments(query: FinancePaymentLedgerQuery): FinancePaymentLedgerI
       payment.bookingReference ?? "",
       payment.reference ?? "",
     ].some((value) => value.toLowerCase().includes(search));
+  });
+}
+
+function filterPayouts(query: FinancePayoutListQuery): FinancePayout[] {
+  return payoutItems.filter((payout) => {
+    if (query.status && payout.payoutStatus !== query.status) return false;
+    if (query.provider && payout.provider !== query.provider) return false;
+    return true;
+  });
+}
+
+function filterReconciliationItems(
+  view: FinanceReconciliationViewKind,
+  query: FinanceReconciliationViewQuery,
+): FinanceReconciliationItem[] {
+  return reconciliationItems[view].filter((item) => {
+    if (
+      query.status &&
+      item.latestReceiptStatus !== query.status &&
+      item.jobStatus !== query.status
+    ) {
+      return false;
+    }
+    if (query.provider && item.provider !== query.provider) return false;
+    return true;
   });
 }
 

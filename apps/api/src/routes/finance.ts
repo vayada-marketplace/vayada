@@ -1,7 +1,11 @@
 import {
   FINANCE_INVOICE_STATUSES,
   FINANCE_PAYMENT_STATUSES,
+  FINANCE_PAYOUT_STATUSES,
+  FINANCE_RECONCILIATION_JOB_STATUSES,
+  FINANCE_RECONCILIATION_RECEIPT_STATUSES,
   FINANCE_RECONCILIATION_STATUSES,
+  FINANCE_RECONCILIATION_SUBJECT_TYPES,
   FINANCE_ROUTE_CONTRACT_VERSION,
   FINANCE_ROUTE_PAYMENT_METHODS,
   FINANCE_ROUTE_PAYMENT_PROVIDERS,
@@ -31,11 +35,21 @@ import {
   type FinancePaymentLedgerQuery,
   type FinancePaymentLedgerResponse,
   type FinancePaymentSettingsReadModel,
+  type FinancePayout,
+  type FinancePayoutListQuery,
+  type FinancePayoutListResponse,
   type FinancePaymentStatusCounts,
   type FinancePropertyReadRepository,
   type FinanceProviderAccountStatus,
   type FinanceProviderOnboardingStatus,
+  type FinanceReconciliationItem,
+  type FinanceReconciliationJobStatus,
+  type FinanceReconciliationRecommendedAction,
+  type FinanceReconciliationReceiptStatus,
   type FinanceReconciliationStatus,
+  type FinanceReconciliationViewKind,
+  type FinanceReconciliationViewQuery,
+  type FinanceReconciliationViewResponse,
   type FinanceRoutePaymentMethod,
   type FinanceRoutePaymentProvider,
 } from "@vayada/domain-finance";
@@ -190,6 +204,50 @@ type FinancePaymentLedgerRow = {
   total: string | number;
   counts: unknown;
   sourceFreshness: unknown;
+};
+
+type FinancePayoutRow = {
+  payoutId: string;
+  ownerScope: string;
+  propertyId: string | null;
+  organizationId: string | null;
+  relatedPropertyId: string | null;
+  guestBookingId: string | null;
+  paymentId: string | null;
+  payoutStatus: string;
+  amount: string;
+  feeAmount: string;
+  netAmount: string;
+  currency: string;
+  provider: string | null;
+  providerPayoutId: string | null;
+  scheduledAt: Date | string | null;
+  paidAt: Date | string | null;
+  failedAt: Date | string | null;
+  failureCode: string | null;
+  retryCount: number;
+  total: string | number;
+  sourceFreshness: unknown;
+};
+
+type FinanceReconciliationRow = {
+  subjectId: string;
+  subjectType: string;
+  provider: string | null;
+  financeStatus: string;
+  providerStatus: string | null;
+  latestReceiptStatus: string;
+  jobStatus: string;
+  recommendedAction: string;
+  lastReceiptAt: Date | string | null;
+  lastJobAt: Date | string | null;
+  total: string | number;
+  sourceFreshness: unknown;
+};
+
+type FinanceRowsWithTotal<T extends { total: string | number }> = {
+  rows: T[];
+  total: number;
 };
 
 type FinanceManualPaymentWriteRow = {
@@ -426,6 +484,48 @@ export async function registerFinanceRoutes(
   );
 
   app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/payouts",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyReadPolicy(request, reply, propertyId)) return reply;
+      const query = parsePayoutListQuery(request.query);
+      if ("statusCode" in query) {
+        reply.code(query.statusCode);
+        return query;
+      }
+
+      const result =
+        (await options.repository.listPayouts?.(propertyId, query)) ?? emptyPayoutList(query);
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        ...result,
+      } satisfies FinancePayoutListResponse;
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/reconciliation/payments",
+    async (request, reply) => {
+      return financeReconciliationView(request, reply, options.repository, "payments");
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/reconciliation/payouts",
+    async (request, reply) => {
+      return financeReconciliationView(request, reply, options.repository, "payouts");
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/reconciliation/provider-accounts",
+    async (request, reply) => {
+      return financeReconciliationView(request, reply, options.repository, "provider-accounts");
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
     "/pms/properties/:propertyId/payment-settings",
     async (request, reply) => {
       const propertyId = request.params.propertyId;
@@ -465,6 +565,30 @@ export async function registerFinanceRoutes(
       return toPublicPaymentCapabilityProjection(settings, policy);
     },
   );
+}
+
+async function financeReconciliationView(
+  request: FastifyRequest<{ Params: FinancePropertyParams }>,
+  reply: FastifyReply,
+  repository: FinancePropertyReadRepository,
+  view: FinanceReconciliationViewKind,
+): Promise<FinanceReconciliationViewResponse | FinanceValidationError | FastifyReply> {
+  const propertyId = request.params.propertyId;
+  if (!enforceFinancePropertyReadPolicy(request, reply, propertyId)) return reply;
+  const query = parseReconciliationViewQuery(request.query);
+  if ("statusCode" in query) {
+    reply.code(query.statusCode);
+    return query;
+  }
+
+  const result =
+    (await repository.listReconciliationItems?.(propertyId, view, query)) ??
+    emptyReconciliationView(query);
+  return {
+    contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+    propertyId,
+    ...result,
+  };
 }
 
 async function resolvePublicFinancePropertyId(
@@ -584,6 +708,14 @@ export function createTargetFinancePropertySettingsRepository(config: {
     async listPayments(propertyId, query) {
       const rows = await loadPaymentLedgerRows(pool, propertyId, query);
       return toPaymentLedgerResponseBody(rows, query);
+    },
+    async listPayouts(propertyId, query) {
+      const result = await loadPayoutRows(pool, propertyId, query);
+      return toPayoutListResponseBody(result, query);
+    },
+    async listReconciliationItems(propertyId, view, query) {
+      const result = await loadReconciliationRows(pool, propertyId, view, query);
+      return toReconciliationViewResponseBody(result, query);
     },
     async getInvoiceCsvExportDisposition(propertyId) {
       return {
@@ -1804,6 +1936,566 @@ async function loadPaymentLedgerRows(
   return result.rows;
 }
 
+async function loadPayoutRows(
+  pool: FinanceQueryExecutor,
+  propertyId: string,
+  query: FinancePayoutListQuery,
+): Promise<FinanceRowsWithTotal<FinancePayoutRow>> {
+  const result = await pool.query<FinancePayoutRow>(
+    `WITH payout_base AS (
+       SELECT
+         payout.id::text AS "payoutId",
+         payout.owner_scope AS "ownerScope",
+         payout.property_id::text AS "propertyId",
+         payout.organization_id::text AS "organizationId",
+         payout.related_property_id::text AS "relatedPropertyId",
+         payout.guest_booking_id::text AS "guestBookingId",
+         payout.payment_id::text AS "paymentId",
+         payout.payout_status AS "payoutStatus",
+         payout.amount::text AS amount,
+         payout.fee_amount::text AS "feeAmount",
+         payout.net_amount::text AS "netAmount",
+         payout.currency,
+         COALESCE(account.provider, 'manual') AS provider,
+         payout.provider_payout_id AS "providerPayoutId",
+         payout.scheduled_at AS "scheduledAt",
+         payout.paid_at AS "paidAt",
+         payout.failed_at AS "failedAt",
+         payout.failure_code AS "failureCode",
+         payout.retry_count AS "retryCount",
+         COALESCE(visibility.source_freshness, '{}'::jsonb) AS "sourceFreshness",
+         COALESCE(payout.scheduled_at, payout.paid_at, payout.failed_at, payout.created_at) AS "sortAt"
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.property_provider_account_id
+        AND account.property_id = payout.property_id
+       LEFT JOIN LATERAL (
+         SELECT source_freshness
+         FROM finance.finance_visibility_read_model visibility
+         WHERE visibility.property_id = payout.property_id
+           AND visibility.visibility_scope = 'property_finance'
+           AND visibility.required_permission_key = 'pms.finance.read'
+         ORDER BY visibility.projected_at DESC
+         LIMIT 1
+       ) visibility ON TRUE
+       WHERE payout.property_id = $1::uuid
+         AND payout.owner_scope = 'property'
+     ),
+     filtered AS (
+       SELECT *
+       FROM payout_base
+       WHERE ($2::text IS NULL OR "payoutStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)
+	     ),
+	     total_count AS (
+	       SELECT count(*)::text AS total
+	       FROM filtered
+	     ),
+	     page AS (
+	       SELECT *
+	       FROM filtered
+	       ORDER BY "sortAt" DESC, "payoutId" ASC
+	       LIMIT $4::integer OFFSET $5::integer
+	     )
+	     SELECT
+	       page.*,
+	       total_count.total
+	     FROM page
+	     CROSS JOIN total_count`,
+    [propertyId, query.status ?? null, query.provider ?? null, query.limit, query.offset],
+  );
+  return {
+    rows: result.rows,
+    total: await totalForPossiblyEmptyPage(pool, result.rows, query.offset, {
+      sql: payoutTotalSql(),
+      values: [propertyId, query.status ?? null, query.provider ?? null],
+    }),
+  };
+}
+
+async function loadReconciliationRows(
+  pool: FinanceQueryExecutor,
+  propertyId: string,
+  view: FinanceReconciliationViewKind,
+  query: FinanceReconciliationViewQuery,
+): Promise<FinanceRowsWithTotal<FinanceReconciliationRow>> {
+  const sql = reconciliationViewSql(view);
+  const result = await pool.query<FinanceReconciliationRow>(sql, [
+    propertyId,
+    query.status ?? null,
+    query.provider ?? null,
+    query.limit,
+    query.offset,
+  ]);
+  return {
+    rows: result.rows,
+    total: await totalForPossiblyEmptyPage(pool, result.rows, query.offset, {
+      sql: reconciliationTotalSql(view),
+      values: [propertyId, query.status ?? null, query.provider ?? null],
+    }),
+  };
+}
+
+function payoutTotalSql(): string {
+  return `WITH payout_base AS (
+       SELECT
+         payout.id::text AS "payoutId",
+         payout.payout_status AS "payoutStatus",
+         COALESCE(account.provider, 'manual') AS provider
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.property_provider_account_id
+        AND account.property_id = payout.property_id
+       WHERE payout.property_id = $1::uuid
+         AND payout.owner_scope = 'property'
+     ),
+     filtered AS (
+       SELECT *
+       FROM payout_base
+       WHERE ($2::text IS NULL OR "payoutStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)
+     )
+     SELECT count(*)::text AS total
+     FROM filtered`;
+}
+
+function reconciliationTotalSql(view: FinanceReconciliationViewKind): string {
+  return reconciliationViewSql(view, "total");
+}
+
+function reconciliationViewSql(
+  view: FinanceReconciliationViewKind,
+  mode: "page" | "total" = "page",
+): string {
+  switch (view) {
+    case "payments":
+      return reconciliationPaymentSql(mode);
+    case "payouts":
+      return reconciliationPayoutSql(mode);
+    case "provider-accounts":
+      return reconciliationProviderAccountSql(mode);
+  }
+}
+
+function reconciliationPaymentSql(mode: "page" | "total"): string {
+  return `WITH base AS (
+       SELECT
+         payment.id::text AS "subjectId",
+         'payment' AS "subjectType",
+         COALESCE(
+           account.provider,
+           CASE
+             WHEN payment.payment_method = 'bank_transfer' THEN 'bank_transfer'
+             WHEN payment.payment_method IN ('cash', 'manual_card', 'other', 'unknown') THEN 'manual'
+             ELSE 'vayada'
+           END
+         ) AS provider,
+         payment.status AS "financeStatus",
+         COALESCE(payment.payment_metadata ->> 'providerStatus', payment.status) AS "providerStatus",
+         receipt.delivery_status AS "receiptStatus",
+         receipt.received_at AS "lastReceiptAt",
+         job.status AS "rawJobStatus",
+         COALESCE(job.finished_at, job.run_after, job.created_at) AS "lastJobAt",
+         dead.created_at AS "deadLetteredAt"
+       FROM finance.payments payment
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payment.provider_account_id
+        AND account.property_id = payment.property_id
+	       LEFT JOIN LATERAL (
+	         SELECT receipt.delivery_status, receipt.received_at
+	         FROM platform.external_webhook_events receipt
+	         JOIN platform.domain_events receipt_event
+	           ON receipt_event.id = receipt.normalized_domain_event_id
+	          AND receipt_event.source_system = 'external'
+	          AND receipt_event.resource_product = 'finance'
+	          AND receipt_event.resource_type = 'payment'
+	         WHERE receipt.provider = COALESCE(account.provider, 'stripe')
+	           AND receipt_event.resource_id IN (
+	             payment.provider_transaction_id,
+	             payment.provider_payment_intent_id
+	           )
+	         ORDER BY receipt.received_at DESC
+	         LIMIT 1
+	       ) receipt ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT job.id, job.status, job.finished_at, job.run_after, job.created_at
+	         FROM platform.jobs job
+	         LEFT JOIN platform.domain_events job_event
+	           ON job_event.id = job.source_domain_event_id
+	          AND job_event.source_system = 'external'
+	          AND job_event.resource_product = 'finance'
+	          AND job_event.resource_type = 'payment'
+	         WHERE job.resource_product = 'finance'
+	           AND (
+	             (
+	               job.property_id = payment.property_id
+	               AND job.resource_type = 'payment'
+	               AND job.resource_id = payment.id::text
+	             )
+	             OR (
+	               job.tenant_scope = 'external'
+	               AND job.resource_type = 'payment'
+	               AND job.resource_id IN (
+	                 payment.provider_transaction_id,
+	                 payment.provider_payment_intent_id
+	               )
+	             )
+	             OR job_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	             OR job.job_key LIKE ('payment.reconcile-status:payment:' || payment.id::text || ':%')
+	             OR (
+	               payment.provider_transaction_id IS NOT NULL
+	               AND job.job_key LIKE ('payment.reconcile-status:payment:' || payment.provider_transaction_id || ':%')
+	             )
+	             OR (
+	               payment.provider_payment_intent_id IS NOT NULL
+	               AND job.job_key LIKE ('payment.reconcile-status:payment:' || payment.provider_payment_intent_id || ':%')
+	             )
+	           )
+	         ORDER BY job.created_at DESC
+	         LIMIT 1
+	       ) job ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT dead.created_at
+	         FROM platform.dead_letter_events dead
+	         LEFT JOIN platform.jobs dead_job
+	           ON dead_job.id = dead.job_id
+	         LEFT JOIN platform.domain_events dead_domain_event
+	           ON dead_domain_event.id = dead.domain_event_id
+	         LEFT JOIN platform.domain_events dead_job_event
+	           ON dead_job_event.id = dead_job.source_domain_event_id
+	         LEFT JOIN platform.external_webhook_events dead_receipt
+	           ON dead_receipt.id = dead.webhook_event_id
+	         LEFT JOIN platform.domain_events dead_receipt_event
+	           ON dead_receipt_event.id = dead_receipt.normalized_domain_event_id
+	         WHERE dead.resource_product = 'finance'
+	           AND (
+	             (
+	               dead.property_id = payment.property_id
+	               AND dead.resource_type = 'payment'
+	               AND dead.resource_id = payment.id::text
+	             )
+	             OR dead.job_id = job.id
+	             OR (
+	               dead.resource_type = 'payment'
+	               AND dead.resource_id IN (
+	                 payment.provider_transaction_id,
+	                 payment.provider_payment_intent_id
+	               )
+	             )
+	             OR dead_domain_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	             OR dead_job_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	             OR dead_receipt_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	           )
+	         ORDER BY dead.created_at DESC
+	         LIMIT 1
+	       ) dead ON TRUE
+       WHERE payment.property_id = $1::uuid
+         AND payment.visibility_class IN ('pms_finance', 'migration')
+     ),
+     mapped AS (
+       ${reconciliationMappedSelect()}
+       FROM base
+     ),
+     filtered AS (
+       ${reconciliationFilteredSelect()}
+     )
+	     ${reconciliationFinalSelect(mode)}`;
+}
+
+function reconciliationPayoutSql(mode: "page" | "total"): string {
+  return `WITH base AS (
+       SELECT
+         payout.id::text AS "subjectId",
+         'payout' AS "subjectType",
+         COALESCE(account.provider, 'manual') AS provider,
+         payout.payout_status AS "financeStatus",
+         COALESCE(payout.payout_metadata ->> 'providerStatus', payout.payout_status) AS "providerStatus",
+         receipt.delivery_status AS "receiptStatus",
+         receipt.received_at AS "lastReceiptAt",
+         job.status AS "rawJobStatus",
+         COALESCE(job.finished_at, job.run_after, job.created_at) AS "lastJobAt",
+         dead.created_at AS "deadLetteredAt"
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.property_provider_account_id
+        AND account.property_id = payout.property_id
+	       LEFT JOIN LATERAL (
+	         SELECT receipt.delivery_status, receipt.received_at
+	         FROM platform.external_webhook_events receipt
+	         JOIN platform.domain_events receipt_event
+	           ON receipt_event.id = receipt.normalized_domain_event_id
+	          AND receipt_event.source_system = 'external'
+	          AND receipt_event.resource_product = 'finance'
+	          AND receipt_event.resource_type = 'payout'
+	         WHERE receipt.provider = COALESCE(account.provider, 'stripe')
+	           AND receipt_event.resource_id = payout.provider_payout_id
+	         ORDER BY receipt.received_at DESC
+	         LIMIT 1
+	       ) receipt ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT job.id, job.status, job.finished_at, job.run_after, job.created_at
+	         FROM platform.jobs job
+	         LEFT JOIN platform.domain_events job_event
+	           ON job_event.id = job.source_domain_event_id
+	          AND job_event.source_system = 'external'
+	          AND job_event.resource_product = 'finance'
+	          AND job_event.resource_type = 'payout'
+	         WHERE job.resource_product = 'finance'
+	           AND (
+	             (
+	               job.property_id = payout.property_id
+	               AND job.resource_type = 'payout'
+	               AND job.resource_id = payout.id::text
+	             )
+	             OR (
+	               job.tenant_scope = 'external'
+	               AND job.resource_type = 'payout'
+	               AND job.resource_id = payout.provider_payout_id
+	             )
+	             OR job_event.resource_id = payout.provider_payout_id
+	             OR job.job_key LIKE ('finance.reconcile-payout:payout:' || payout.id::text || ':%')
+	             OR (
+	               payout.provider_payout_id IS NOT NULL
+               AND job.job_key LIKE ('finance.reconcile-payout:payout:' || payout.provider_payout_id || ':%')
+             )
+           )
+         ORDER BY job.created_at DESC
+         LIMIT 1
+	       ) job ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT dead.created_at
+	         FROM platform.dead_letter_events dead
+	         LEFT JOIN platform.jobs dead_job
+	           ON dead_job.id = dead.job_id
+	         LEFT JOIN platform.domain_events dead_domain_event
+	           ON dead_domain_event.id = dead.domain_event_id
+	         LEFT JOIN platform.domain_events dead_job_event
+	           ON dead_job_event.id = dead_job.source_domain_event_id
+	         LEFT JOIN platform.external_webhook_events dead_receipt
+	           ON dead_receipt.id = dead.webhook_event_id
+	         LEFT JOIN platform.domain_events dead_receipt_event
+	           ON dead_receipt_event.id = dead_receipt.normalized_domain_event_id
+	         WHERE dead.resource_product = 'finance'
+	           AND (
+	             (
+	               dead.property_id = payout.property_id
+	               AND dead.resource_type = 'payout'
+	               AND dead.resource_id = payout.id::text
+	             )
+	             OR dead.job_id = job.id
+	             OR (
+	               dead.resource_type = 'payout'
+	               AND dead.resource_id = payout.provider_payout_id
+	             )
+	             OR dead_domain_event.resource_id = payout.provider_payout_id
+	             OR dead_job_event.resource_id = payout.provider_payout_id
+	             OR dead_receipt_event.resource_id = payout.provider_payout_id
+	           )
+	         ORDER BY dead.created_at DESC
+	         LIMIT 1
+	       ) dead ON TRUE
+       WHERE payout.property_id = $1::uuid
+         AND payout.owner_scope = 'property'
+     ),
+     mapped AS (
+       ${reconciliationMappedSelect()}
+       FROM base
+     ),
+     filtered AS (
+       ${reconciliationFilteredSelect()}
+     )
+	     ${reconciliationFinalSelect(mode)}`;
+}
+
+function reconciliationProviderAccountSql(mode: "page" | "total"): string {
+  return `WITH base AS (
+       SELECT
+         account.id::text AS "subjectId",
+         'provider_account' AS "subjectType",
+         account.provider,
+         account.status AS "financeStatus",
+         account.account_metadata ->> 'providerStatus' AS "providerStatus",
+         receipt.delivery_status AS "receiptStatus",
+         receipt.received_at AS "lastReceiptAt",
+         job.status AS "rawJobStatus",
+         COALESCE(job.finished_at, job.run_after, job.created_at) AS "lastJobAt",
+         dead.created_at AS "deadLetteredAt"
+       FROM finance.payment_provider_accounts account
+	       LEFT JOIN LATERAL (
+	         SELECT receipt.delivery_status, receipt.received_at
+	         FROM platform.external_webhook_events receipt
+	         JOIN platform.domain_events receipt_event
+	           ON receipt_event.id = receipt.normalized_domain_event_id
+	          AND receipt_event.source_system = 'external'
+	          AND receipt_event.resource_product = 'finance'
+	          AND receipt_event.resource_type = 'provider_account'
+	         WHERE receipt.provider = account.provider
+	           AND receipt_event.resource_id = account.provider_account_id
+	         ORDER BY receipt.received_at DESC
+	         LIMIT 1
+	       ) receipt ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT job.id, job.status, job.finished_at, job.run_after, job.created_at
+	         FROM platform.jobs job
+	         LEFT JOIN platform.domain_events job_event
+	           ON job_event.id = job.source_domain_event_id
+	          AND job_event.source_system = 'external'
+	          AND job_event.resource_product = 'finance'
+	          AND job_event.resource_type = 'provider_account'
+	         WHERE job.resource_product = 'finance'
+	           AND (
+	             (
+	               job.property_id = account.property_id
+	               AND job.resource_type = 'provider_account'
+	               AND job.resource_id = account.id::text
+	             )
+	             OR (
+	               job.tenant_scope = 'external'
+	               AND job.resource_type = 'provider_account'
+	               AND job.resource_id = account.provider_account_id
+	             )
+	             OR job_event.resource_id = account.provider_account_id
+	             OR job.job_key LIKE ('finance.reconcile-provider-account:provider_account:' || account.id::text || ':%')
+	             OR (
+	               account.provider_account_id IS NOT NULL
+	               AND job.job_key LIKE ('finance.reconcile-provider-account:provider_account:' || account.provider_account_id || ':%')
+	             )
+	           )
+	         ORDER BY job.created_at DESC
+	         LIMIT 1
+	       ) job ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT dead.created_at
+	         FROM platform.dead_letter_events dead
+	         LEFT JOIN platform.jobs dead_job
+	           ON dead_job.id = dead.job_id
+	         LEFT JOIN platform.domain_events dead_domain_event
+	           ON dead_domain_event.id = dead.domain_event_id
+	         LEFT JOIN platform.domain_events dead_job_event
+	           ON dead_job_event.id = dead_job.source_domain_event_id
+	         LEFT JOIN platform.external_webhook_events dead_receipt
+	           ON dead_receipt.id = dead.webhook_event_id
+	         LEFT JOIN platform.domain_events dead_receipt_event
+	           ON dead_receipt_event.id = dead_receipt.normalized_domain_event_id
+	         WHERE dead.resource_product = 'finance'
+	           AND (
+	             (
+	               dead.property_id = account.property_id
+	               AND dead.resource_type = 'provider_account'
+	               AND dead.resource_id = account.id::text
+	             )
+	             OR dead.job_id = job.id
+	             OR (
+	               dead.resource_type = 'provider_account'
+	               AND dead.resource_id = account.provider_account_id
+	             )
+	             OR dead_domain_event.resource_id = account.provider_account_id
+	             OR dead_job_event.resource_id = account.provider_account_id
+	             OR dead_receipt_event.resource_id = account.provider_account_id
+	           )
+	         ORDER BY dead.created_at DESC
+	         LIMIT 1
+	       ) dead ON TRUE
+       WHERE account.property_id = $1::uuid
+         AND account.account_scope = 'property'
+     ),
+     mapped AS (
+       ${reconciliationMappedSelect()}
+       FROM base
+     ),
+     filtered AS (
+       ${reconciliationFilteredSelect()}
+     )
+	     ${reconciliationFinalSelect(mode)}`;
+}
+
+function reconciliationMappedSelect(): string {
+  return `SELECT
+         "subjectId",
+         "subjectType",
+         provider,
+         "financeStatus",
+         "providerStatus",
+         CASE
+           WHEN "deadLetteredAt" IS NOT NULL OR "rawJobStatus" = 'dead_lettered' THEN 'dead_lettered'
+           WHEN provider IN ('manual', 'bank_transfer', 'vayada') THEN 'not_applicable'
+           WHEN "receiptStatus" IN ('promoted', 'normalized', 'succeeded') THEN 'matched'
+           WHEN "receiptStatus" = 'dead_lettered' THEN 'dead_lettered'
+           WHEN "receiptStatus" IS NULL THEN 'missing'
+           ELSE 'stale'
+         END AS "latestReceiptStatus",
+         CASE
+           WHEN "deadLetteredAt" IS NOT NULL OR "rawJobStatus" = 'dead_lettered' THEN 'dead_lettered'
+           WHEN "rawJobStatus" IN ('pending') THEN 'queued'
+           WHEN "rawJobStatus" = 'running' THEN 'running'
+           WHEN "rawJobStatus" IN ('failed', 'canceled') THEN 'failed'
+           ELSE 'idle'
+         END AS "jobStatus",
+         CASE
+           WHEN "deadLetteredAt" IS NOT NULL OR "rawJobStatus" = 'dead_lettered' THEN 'manual_review'
+           WHEN "rawJobStatus" IN ('failed', 'canceled') THEN 'enqueue_reconcile'
+           WHEN provider IN ('manual', 'bank_transfer', 'vayada') THEN 'none'
+           WHEN "receiptStatus" IS NULL THEN 'enqueue_reconcile'
+           WHEN "receiptStatus" NOT IN ('promoted', 'normalized', 'succeeded') THEN 'refresh_provider_state'
+           ELSE 'none'
+         END AS "recommendedAction",
+         "lastReceiptAt",
+         "lastJobAt",
+         jsonb_build_object(
+           'providerReceiptsFreshAt', "lastReceiptAt",
+           'jobsFreshAt', "lastJobAt",
+           'deadLettersFreshAt', "deadLetteredAt"
+         ) AS "sourceFreshness"`;
+}
+
+function reconciliationFilteredSelect(): string {
+  return `SELECT *
+       FROM mapped
+       WHERE ($2::text IS NULL OR "latestReceiptStatus" = $2::text OR "jobStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)`;
+}
+
+function reconciliationFinalSelect(mode: "page" | "total"): string {
+  if (mode === "total") {
+    return `SELECT count(*)::text AS total FROM filtered`;
+  }
+  return `, total_count AS (
+	       SELECT count(*)::text AS total
+	       FROM filtered
+	     ),
+	     page AS (
+	       SELECT *
+	       FROM filtered
+	       ORDER BY
+	         CASE "recommendedAction"
+	           WHEN 'manual_review' THEN 0
+	           WHEN 'enqueue_reconcile' THEN 1
+	           WHEN 'refresh_provider_state' THEN 2
+	           ELSE 3
+	         END,
+	         COALESCE("lastJobAt", "lastReceiptAt") DESC NULLS LAST,
+	         "subjectId" ASC
+	       LIMIT $4::integer OFFSET $5::integer
+	     )
+	     SELECT
+	       page.*,
+	       total_count.total
+	     FROM page
+	     CROSS JOIN total_count`;
+}
+
 function toFinancePaymentSettingsReadModel(
   row: FinancePaymentSettingsRow,
 ): FinancePaymentSettingsReadModel {
@@ -1946,6 +2638,73 @@ function toPaymentLedgerItem(row: FinancePaymentLedgerRow): FinancePaymentLedger
   };
 }
 
+function toPayoutListResponseBody(
+  result: FinanceRowsWithTotal<FinancePayoutRow>,
+  query: FinancePayoutListQuery,
+): Omit<FinancePayoutListResponse, "contractVersion" | "propertyId"> {
+  const rows = result.rows;
+  return {
+    payouts: rows.map(toPayout),
+    total: result.total,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: financeJsonObject(rows[0]?.sourceFreshness),
+  };
+}
+
+function toPayout(row: FinancePayoutRow): FinancePayout {
+  return {
+    payoutId: row.payoutId,
+    ownerScope: payoutOwnerScope(row.ownerScope),
+    propertyId: row.propertyId,
+    organizationId: row.organizationId,
+    relatedPropertyId: row.relatedPropertyId,
+    guestBookingId: row.guestBookingId,
+    paymentId: row.paymentId,
+    payoutStatus: payoutStatus(row.payoutStatus),
+    amount: decimalString(row.amount),
+    feeAmount: decimalString(row.feeAmount),
+    netAmount: decimalString(row.netAmount),
+    currency: currencyCode(row.currency),
+    provider: paymentProvider(row.provider),
+    providerPayoutId: row.providerPayoutId,
+    scheduledAt: nullableUtcDateTime(row.scheduledAt),
+    paidAt: nullableUtcDateTime(row.paidAt),
+    failedAt: nullableUtcDateTime(row.failedAt),
+    failureCode: row.failureCode,
+    retryCount: row.retryCount,
+  };
+}
+
+function toReconciliationViewResponseBody(
+  result: FinanceRowsWithTotal<FinanceReconciliationRow>,
+  query: FinanceReconciliationViewQuery,
+): Omit<FinanceReconciliationViewResponse, "contractVersion" | "propertyId"> {
+  const rows = result.rows;
+  return {
+    items: rows.map(toReconciliationItem),
+    total: result.total,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: financeJsonObject(rows[0]?.sourceFreshness),
+  };
+}
+
+function toReconciliationItem(row: FinanceReconciliationRow): FinanceReconciliationItem {
+  return {
+    subjectId: row.subjectId,
+    subjectType: reconciliationSubjectType(row.subjectType),
+    provider: paymentProvider(row.provider),
+    financeStatus: row.financeStatus,
+    providerStatus: row.providerStatus,
+    latestReceiptStatus: reconciliationReceiptStatus(row.latestReceiptStatus),
+    jobStatus: reconciliationJobStatus(row.jobStatus),
+    recommendedAction: reconciliationRecommendedAction(row.recommendedAction),
+    lastReceiptAt: nullableUtcDateTime(row.lastReceiptAt),
+    lastJobAt: nullableUtcDateTime(row.lastJobAt),
+  };
+}
+
 function emptyFinancialSummary(
   propertyId: string,
 ): Omit<FinanceFinancialSummaryResponse, "contractVersion" | "propertyId"> {
@@ -1998,6 +2757,34 @@ function emptyPaymentLedger(
     limit: query.limit,
     offset: query.offset,
     sourceFreshness: { finance: { status: "empty" } },
+  };
+}
+
+function emptyPayoutList(
+  query: FinancePayoutListQuery,
+): Omit<FinancePayoutListResponse, "contractVersion" | "propertyId"> {
+  return {
+    payouts: [],
+    total: 0,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: { finance: { status: "empty" } },
+  };
+}
+
+function emptyReconciliationView(
+  query: FinanceReconciliationViewQuery,
+): Omit<FinanceReconciliationViewResponse, "contractVersion" | "propertyId"> {
+  return {
+    items: [],
+    total: 0,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: {
+      providerReceiptsFreshAt: null,
+      jobsFreshAt: null,
+      deadLettersFreshAt: null,
+    },
   };
 }
 
@@ -2064,6 +2851,45 @@ function parsePaymentLedgerQuery(
     from,
     to,
     search: cleanSearch(params.search),
+    limit: clampLimit(params.limit),
+    offset: parseOffset(params.offset),
+  };
+}
+
+function parsePayoutListQuery(query: unknown): FinancePayoutListQuery | FinanceValidationError {
+  const params = queryRecord(query);
+  const status = optionalEnum(params.status, FINANCE_PAYOUT_STATUSES);
+  if (params.status && !status) {
+    return invalidQuery("invalid_query", "Invalid payout status filter.");
+  }
+  const provider = optionalEnum(params.provider, FINANCE_ROUTE_PAYMENT_PROVIDERS);
+  if (params.provider && !provider) {
+    return invalidQuery("invalid_provider", "Invalid payout provider filter.");
+  }
+  return {
+    status,
+    provider,
+    limit: clampLimit(params.limit),
+    offset: parseOffset(params.offset),
+  };
+}
+
+function parseReconciliationViewQuery(
+  query: unknown,
+): FinanceReconciliationViewQuery | FinanceValidationError {
+  const params = queryRecord(query);
+  const receiptStatus = optionalEnum(params.status, FINANCE_RECONCILIATION_RECEIPT_STATUSES);
+  const jobStatus = optionalEnum(params.status, FINANCE_RECONCILIATION_JOB_STATUSES);
+  if (params.status && !receiptStatus && !jobStatus) {
+    return invalidQuery("invalid_query", "Invalid reconciliation status filter.");
+  }
+  const provider = optionalEnum(params.provider, FINANCE_ROUTE_PAYMENT_PROVIDERS);
+  if (params.provider && !provider) {
+    return invalidQuery("invalid_provider", "Invalid reconciliation provider filter.");
+  }
+  return {
+    status: receiptStatus ?? jobStatus,
+    provider,
     limit: clampLimit(params.limit),
     offset: parseOffset(params.offset),
   };
@@ -2591,6 +3417,12 @@ function utcDateTime(value: unknown, fallback: string): string {
   return fallback;
 }
 
+function nullableUtcDateTime(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const timestamp = utcDateTime(value, "");
+  return timestamp || null;
+}
+
 function dateOnly(value: Date | string): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return value.slice(0, 10);
@@ -2638,6 +3470,38 @@ function reconciliationStatus(value: unknown): FinanceReconciliationStatus {
   return optionalEnum(value, FINANCE_RECONCILIATION_STATUSES) ?? "pending";
 }
 
+function payoutStatus(value: unknown): FinancePayout["payoutStatus"] {
+  return optionalEnum(value, FINANCE_PAYOUT_STATUSES) ?? "pending";
+}
+
+function payoutOwnerScope(value: unknown): FinancePayout["ownerScope"] {
+  if (value === "organization" || value === "platform") return value;
+  return "property";
+}
+
+function reconciliationSubjectType(value: unknown): FinanceReconciliationItem["subjectType"] {
+  return optionalEnum(value, FINANCE_RECONCILIATION_SUBJECT_TYPES) ?? "payment";
+}
+
+function reconciliationReceiptStatus(value: unknown): FinanceReconciliationReceiptStatus {
+  return optionalEnum(value, FINANCE_RECONCILIATION_RECEIPT_STATUSES) ?? "missing";
+}
+
+function reconciliationJobStatus(value: unknown): FinanceReconciliationJobStatus {
+  return optionalEnum(value, FINANCE_RECONCILIATION_JOB_STATUSES) ?? "idle";
+}
+
+function reconciliationRecommendedAction(value: unknown): FinanceReconciliationRecommendedAction {
+  if (
+    value === "enqueue_reconcile" ||
+    value === "manual_review" ||
+    value === "refresh_provider_state"
+  ) {
+    return value;
+  }
+  return "none";
+}
+
 function invoiceStatusCounts(value: unknown = {}): FinanceInvoiceStatusCounts {
   const counts = countRecord(value);
   return Object.fromEntries(
@@ -2665,6 +3529,19 @@ function countRecord(value: unknown): Record<string, number> {
 function totalFromRows(rows: Array<{ total: string | number }>): number {
   if (rows.length === 0) return 0;
   const total = Number(rows[0]?.total ?? 0);
+  return Number.isFinite(total) ? total : 0;
+}
+
+async function totalForPossiblyEmptyPage<T extends { total: string | number }>(
+  pool: FinanceQueryExecutor,
+  rows: T[],
+  offset: number,
+  fallback: { sql: string; values: readonly unknown[] },
+): Promise<number> {
+  const pageTotal = totalFromRows(rows);
+  if (rows.length > 0 || offset === 0) return pageTotal;
+  const result = await pool.query<{ total: string }>(fallback.sql, fallback.values);
+  const total = Number(result.rows[0]?.total ?? 0);
   return Number.isFinite(total) ? total : 0;
 }
 
