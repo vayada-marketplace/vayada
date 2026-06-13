@@ -7,6 +7,15 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
+import type {
+  BookingAdditionalGuestCreateCommand,
+  BookingAdditionalGuestDeleteCommand,
+  BookingAdditionalGuestUpdateCommand,
+  BookingGuestPii,
+  BookingGuestPiiCommandMeta,
+  BookingGuestPiiPort,
+  BookingGuestPiiProjection,
+} from "@vayada/domain-booking";
 import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
 import { readFileSync } from "node:fs";
@@ -67,6 +76,11 @@ import type {
   PmsOperationsCommandRepository,
   PmsCalendarDay,
   PmsOperationalReservation,
+  PmsPrivateNote,
+  PmsPrivateNoteCommandResponse,
+  PmsPrivateNoteCreateCommand,
+  PmsPrivateNoteDeleteCommand,
+  PmsPrivateNoteDeleteResponse,
   PmsOperationsReadRepository,
   PmsRoom,
   PmsRoomBlockSummary,
@@ -78,6 +92,10 @@ type PmsOperationsTestListResponse<T> = {
   contractVersion: "pms-operations.v1";
   propertyId: string;
   items: T[];
+};
+
+type PmsOperationsTestPrivateNotesResponse = PmsOperationsTestListResponse<PmsPrivateNote> & {
+  guestBookingId: string;
 };
 
 type PmsOperationsTestDetailResponse<T> = {
@@ -133,11 +151,14 @@ const pmsOperationsContractCases = JSON.parse(
       errorCode?: string;
       message?: string;
       sideEffects?: string[];
+      mustCall?: string[];
+      mustNotWrite?: string[];
       commandMeta?: {
         contractVersion?: string;
         sideEffects?: string[];
         replayed?: boolean;
       };
+      publicPayloadMustExclude?: string[];
     };
   }>;
 };
@@ -256,6 +277,24 @@ const pmsOperationalCommandCases = Object.fromEntries(
     "no-show-command",
     "no-show-version-conflict",
   ].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
+
+const pmsPrivateNoteCases = Object.fromEntries(
+  [
+    "private-notes-excluded-from-public",
+    "private-note-create",
+    "private-note-delete",
+    "private-note-not-found",
+  ].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
+const pmsAdditionalGuestCases = Object.fromEntries(
+  ["additional-guests-booking-pii-boundary"].map((caseId) => [
     caseId,
     pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
   ]),
@@ -676,6 +715,136 @@ const pmsReservations: PmsOperationalReservation[] = [
   },
 ];
 
+const pmsPrivateNotes: PmsPrivateNote[] = [
+  {
+    noteId: "f6855900-0000-0000-0000-000000000001",
+    body: "Guest asked not to mention the anniversary surprise at check-in.",
+    authorUserId: "user_hotel_owner",
+    authorDisplayName: "owner@example.com",
+    createdAt: "2026-08-14T16:00:00.000Z",
+    auditMetadata: {
+      source: "pms",
+      createdByUserId: "user_hotel_owner",
+      createdByDisplayName: "owner@example.com",
+      createdAt: "2026-08-14T16:00:00.000Z",
+      privacyScope: "internal",
+    },
+  },
+];
+
+const bookingPrimaryGuestPii: BookingGuestPii = {
+  guestId: "f6855800-0000-0000-0000-000000000001",
+  guestBookingId: pmsReservations[0].guestBookingId,
+  role: "booker",
+  displayName: "Nora Ops",
+  firstName: "Nora",
+  lastName: "Ops",
+  email: "nora.ops@example.test",
+  phone: "+43111222333",
+  countryCode: "AT",
+  arrivalTime: "15:30",
+  specialRequests: null,
+};
+
+function createBookingGuestPiiPort(): BookingGuestPiiPort & {
+  creates: BookingAdditionalGuestCreateCommand[];
+  updates: BookingAdditionalGuestUpdateCommand[];
+  deletes: BookingAdditionalGuestDeleteCommand[];
+} {
+  const guestsByReservation = new Map<string, BookingGuestPii[]>([
+    [pmsReservations[0].guestBookingId, [bookingPrimaryGuestPii]],
+    [pmsReservations[1].guestBookingId, []],
+  ]);
+  const creates: BookingAdditionalGuestCreateCommand[] = [];
+  const updates: BookingAdditionalGuestUpdateCommand[] = [];
+  const deletes: BookingAdditionalGuestDeleteCommand[] = [];
+  const projection = (
+    propertyId: string,
+    guestBookingId: string,
+  ): BookingGuestPiiProjection | null => {
+    const guests = guestsByReservation.get(guestBookingId);
+    if (!guests) return null;
+    return {
+      propertyId,
+      guestBookingId,
+      primaryGuest: guests.find((guest) => guest.role !== "additional_guest") ?? null,
+      additionalGuests: guests.filter((guest) => guest.role === "additional_guest"),
+    };
+  };
+  const commandMeta = (
+    command:
+      | BookingAdditionalGuestCreateCommand
+      | BookingAdditionalGuestUpdateCommand
+      | BookingAdditionalGuestDeleteCommand,
+  ): BookingGuestPiiCommandMeta => ({
+    contractVersion: "booking-guest-pii.v1",
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    acceptedAt: "2026-08-14T17:10:00.000Z",
+    sideEffects: ["audit_event"],
+  });
+
+  return {
+    creates,
+    updates,
+    deletes,
+    async listGuestPiiForPmsOperations(input) {
+      expect(input.propertyId).toBe(pmsPropertyId);
+      return projection(input.propertyId, input.guestBookingId);
+    },
+    async createAdditionalGuestForPmsOperations(command) {
+      creates.push(command);
+      const guests = guestsByReservation.get(command.guestBookingId);
+      if (!guests) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "reservation_not_found",
+          message: "Booking reservation not found.",
+        };
+      }
+      const additionalGuest: BookingGuestPii = {
+        guestId: "f6855800-0000-0000-0000-000000000002",
+        guestBookingId: command.guestBookingId,
+        role: "additional_guest",
+        displayName: `${command.guest.firstName} ${command.guest.lastName}`,
+        firstName: command.guest.firstName,
+        lastName: command.guest.lastName,
+        email: command.guest.email ?? null,
+        phone: command.guest.phone ?? null,
+        countryCode: command.guest.countryCode ?? null,
+        arrivalTime: command.guest.arrivalTime ?? null,
+        specialRequests: command.guest.specialRequests ?? null,
+      };
+      guests.push(additionalGuest);
+      return {
+        ok: true,
+        additionalGuest,
+        projection: projection(command.propertyId, command.guestBookingId)!,
+        commandMeta: commandMeta(command),
+      };
+    },
+    async updateAdditionalGuestForPmsOperations(command) {
+      updates.push(command);
+      return {
+        ok: false,
+        statusCode: 404,
+        code: "additional_guest_not_found",
+        message: "Additional guest not found.",
+      };
+    },
+    async deleteAdditionalGuestForPmsOperations(command) {
+      deletes.push(command);
+      return {
+        ok: true,
+        guestId: command.guestId,
+        projection: projection(command.propertyId, command.guestBookingId)!,
+        commandMeta: commandMeta(command),
+      };
+    },
+  };
+}
+
 const pmsOperationsRepository: PmsOperationsReadRepository = {
   async listRoomsByPropertyId(propertyId) {
     expect(propertyId).toBe(pmsPropertyId);
@@ -723,21 +892,110 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   commands: Array<
     PmsAssignmentCommand | PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand
   >;
+  noteCreates: PmsPrivateNoteCreateCommand[];
+  noteDeletes: PmsPrivateNoteDeleteCommand[];
   outboxEnqueues: string[];
   auditEvents: string[];
 } {
   const commands: Array<
     PmsAssignmentCommand | PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand
   > = [];
+  const noteCreates: PmsPrivateNoteCreateCommand[] = [];
+  const noteDeletes: PmsPrivateNoteDeleteCommand[] = [];
   const outboxEnqueues: string[] = [];
   const auditEvents: string[] = [];
+  const notesByReservation = new Map<string, PmsPrivateNote[]>([
+    [pmsReservations[0].guestBookingId, structuredClone(pmsPrivateNotes)],
+    [pmsReservations[1].guestBookingId, []],
+  ]);
   const replayResponses = new Map<string, PmsAssignmentCommandResult>();
   const operationalReplayResponses = new Map<string, PmsOperationalCommandResult>();
 
   return {
     commands,
+    noteCreates,
+    noteDeletes,
     outboxEnqueues,
     auditEvents,
+    async listPrivateNotes(propertyId, guestBookingId) {
+      expect(propertyId).toBe(pmsPropertyId);
+      return notesByReservation.has(guestBookingId)
+        ? structuredClone(notesByReservation.get(guestBookingId)!)
+        : null;
+    },
+    async createPrivateNote(command) {
+      noteCreates.push(command);
+      const notes = notesByReservation.get(command.guestBookingId);
+      if (!notes) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "reservation_not_found",
+          message: "PMS reservation not found.",
+        };
+      }
+      const note: PmsPrivateNote = {
+        noteId: "f6855900-0000-0000-0000-000000000002",
+        body: command.body,
+        authorUserId: command.actorUserId,
+        authorDisplayName: command.authorDisplayName,
+        createdAt: "2026-08-14T17:00:00.000Z",
+        auditMetadata: {
+          source: "pms",
+          createdByUserId: command.actorUserId,
+          createdByDisplayName: command.authorDisplayName,
+          createdAt: "2026-08-14T17:00:00.000Z",
+          privacyScope: "internal",
+        },
+      };
+      notes.unshift(note);
+      auditEvents.push(`private_note_created:${note.noteId}`);
+      return {
+        ok: true,
+        note,
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:00:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
+    async deletePrivateNote(command) {
+      noteDeletes.push(command);
+      const notes = notesByReservation.get(command.guestBookingId);
+      if (!notes) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "reservation_not_found",
+          message: "PMS reservation not found.",
+        };
+      }
+      const index = notes.findIndex((note) => note.noteId === command.noteId);
+      if (index === -1) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "note_not_found",
+          message: "PMS private note not found.",
+        };
+      }
+      const [deleted] = notes.splice(index, 1);
+      auditEvents.push(`private_note_deleted:${deleted!.noteId}`);
+      return {
+        ok: true,
+        noteId: command.noteId,
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:05:00.000Z",
+          sideEffects: ["audit_event"],
+        },
+      };
+    },
     async executeAssignmentCommand(command) {
       commands.push(command);
 
@@ -1112,6 +1370,7 @@ function buildAuthenticatedApp(
     pmsOperationsRepository?: PmsOperationsReadRepository;
     pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
     pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
+    bookingGuestPiiPort?: BookingGuestPiiPort;
     pmsOperationsAllowedOrigins?: string[];
     linkedPmsPropertyId?: string;
   } = {},
@@ -1122,6 +1381,7 @@ function buildAuthenticatedApp(
     pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
     pmsCheckoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
     pmsOperationsCommandRepository: options.pmsOperationsCommandRepository,
+    bookingGuestPiiPort: options.bookingGuestPiiPort,
     pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
@@ -5712,7 +5972,7 @@ describe("vayada-api", () => {
     expect(preflight.headers["access-control-allow-headers"]).toBe(
       "authorization,content-type,x-hotel-id",
     );
-    expect(preflight.headers["access-control-allow-methods"]).toBe("GET,POST,PATCH,OPTIONS");
+    expect(preflight.headers["access-control-allow-methods"]).toBe("GET,POST,PATCH,DELETE,OPTIONS");
     expect(read.statusCode).toBe(200);
     expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
   });
@@ -6135,6 +6395,243 @@ describe("vayada-api", () => {
       code: "reservation_not_found",
       category: "not_found",
     });
+  });
+
+  it("lists PMS private notes only through the authorized PMS notes route", async () => {
+    const noteCase = pmsPrivateNoteCases["private-notes-excluded-from-public"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: noteCase.request.method ?? "GET",
+      url: noteCase.request.path,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const body = response.body as PmsOperationsTestPrivateNotesResponse;
+
+    expect(response.statusCode).toBe(noteCase.expected.status);
+    expect(body.items).toHaveLength(noteCase.expected.itemCount!);
+    for (const path of noteCase.expected.mustInclude ?? []) {
+      expect(readContractPath(body, path), path).not.toBeUndefined();
+    }
+    expect(body.items[0]).toMatchObject({
+      noteId: pmsPrivateNotes[0].noteId,
+      body: pmsPrivateNotes[0].body,
+      authorDisplayName: "owner@example.com",
+      auditMetadata: {
+        source: "pms",
+        privacyScope: "internal",
+      },
+    });
+
+    const publicProfilePayload = JSON.stringify(seededPublicProfile);
+    const publicQuotePayload = JSON.stringify(seededPublicQuote);
+    for (const forbidden of [
+      ...(noteCase.expected.publicPayloadMustExclude ?? []),
+      pmsPrivateNotes[0].noteId,
+      pmsPrivateNotes[0].body,
+    ]) {
+      const rawForbidden = forbidden.replace("items[].", "");
+      expect(publicProfilePayload, forbidden).not.toContain(rawForbidden);
+      expect(publicQuotePayload, forbidden).not.toContain(rawForbidden);
+    }
+    expect(findForbiddenPublicBookabilityKeys(seededPublicProfile)).toEqual([]);
+    expect(findForbiddenPublicBookabilityKeys(seededPublicQuote)).toEqual([]);
+  });
+
+  it("creates and deletes PMS private notes with audit-only command side effects", async () => {
+    const createCase = pmsPrivateNoteCases["private-note-create"]!;
+    const deleteCase = pmsPrivateNoteCases["private-note-delete"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const created = await injectJson(app, {
+      method: createCase.request.method ?? "POST",
+      url: createCase.request.path,
+      payload: createCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const createBody = created.body as PmsPrivateNoteCommandResponse;
+    const deleted = await injectJson(app, {
+      method: deleteCase.request.method ?? "DELETE",
+      url: deleteCase.request.path,
+      payload: deleteCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const deleteBody = deleted.body as PmsPrivateNoteDeleteResponse;
+
+    expect(created.statusCode).toBe(createCase.expected.status);
+    expect(createBody.note).toMatchObject({
+      body: createCase.request.body?.body,
+      authorUserId: "user_hotel_owner",
+      auditMetadata: {
+        createdByUserId: "user_hotel_owner",
+        privacyScope: "internal",
+      },
+    });
+    expect(createBody.commandMeta).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      idempotencyKey: createCase.request.body?.idempotencyKey,
+      sideEffects: createCase.expected.commandMeta?.sideEffects,
+    });
+    expect(deleted.statusCode).toBe(deleteCase.expected.status);
+    expect(deleteBody).toMatchObject({
+      noteId: "f6855900-0000-0000-0000-000000000001",
+      commandMeta: {
+        contractVersion: "pms-operations.v1",
+        idempotencyKey: deleteCase.request.body?.idempotencyKey,
+        sideEffects: deleteCase.expected.commandMeta?.sideEffects,
+      },
+    });
+    expect(commandRepository.noteCreates).toHaveLength(1);
+    expect(commandRepository.noteDeletes).toHaveLength(1);
+    expect(commandRepository.auditEvents).toEqual([
+      "private_note_created:f6855900-0000-0000-0000-000000000002",
+      "private_note_deleted:f6855900-0000-0000-0000-000000000001",
+    ]);
+    expect(commandRepository.outboxEnqueues).toEqual([]);
+  });
+
+  it("maps PMS private note not-found and manage authorization errors", async () => {
+    const missingCase = pmsPrivateNoteCases["private-note-not-found"]!;
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+
+    const missing = await injectJson(app, {
+      method: missingCase.request.method ?? "DELETE",
+      url: missingCase.request.path,
+      payload: missingCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    await app.close();
+
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+    const denied = await injectJson(app, {
+      method: "POST",
+      url: pmsPrivateNoteCases["private-note-create"]!.request.path,
+      payload: pmsPrivateNoteCases["private-note-create"]!.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(missing.statusCode).toBe(missingCase.expected.status);
+    expect(missing.body).toMatchObject({
+      code: missingCase.expected.errorCode,
+      category: "not_found",
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.body).toMatchObject({
+      code: "missing_permission",
+      category: "authorization",
+    });
+  });
+
+  it("routes PMS additional guest PII writes through the Booking-owned port", async () => {
+    const boundaryCase = pmsAdditionalGuestCases["additional-guests-booking-pii-boundary"]!;
+    const bookingGuestPiiPort = createBookingGuestPiiPort();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      bookingGuestPiiPort,
+    });
+
+    const response = await injectJson(app, {
+      method: boundaryCase.request.method ?? "POST",
+      url: boundaryCase.request.path,
+      payload: boundaryCase.request.body,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    const body = response.body as {
+      additionalGuest: BookingGuestPii;
+      reservation: PmsOperationalReservation & { additionalGuests: BookingGuestPii[] };
+      commandMeta: BookingGuestPiiCommandMeta;
+    };
+
+    expect(response.statusCode).toBe(boundaryCase.expected.status);
+    expect(bookingGuestPiiPort.creates).toHaveLength(1);
+    expect(bookingGuestPiiPort.creates[0]).toMatchObject({
+      commandId: boundaryCase.request.body?.commandId,
+      idempotencyKey: boundaryCase.request.body?.idempotencyKey,
+      audit: {
+        actorUserId: "user_hotel_owner",
+        actorOrganizationId: "org_hotel_group",
+        source: "pms_operations",
+      },
+    });
+    expect(body.additionalGuest).toMatchObject({
+      guestId: "f6855800-0000-0000-0000-000000000002",
+      role: "additional_guest",
+      firstName: "Mira",
+      email: "mira@example.test",
+    });
+    expect(body.reservation.additionalGuestCount).toBe(1);
+    expect(body.reservation.additionalGuests).toEqual([body.additionalGuest]);
+    expect(body.commandMeta).toMatchObject({
+      contractVersion: boundaryCase.expected.commandMeta?.contractVersion,
+      sideEffects: boundaryCase.expected.commandMeta?.sideEffects,
+    });
+    for (const expectedCall of boundaryCase.expected.mustCall ?? []) {
+      expect(expectedCall).toBe("BookingGuestPiiCommandPort.createAdditionalGuest");
+    }
+    for (const forbiddenWrite of boundaryCase.expected.mustNotWrite ?? []) {
+      expect(forbiddenWrite).not.toBe("pms.booking_guests");
+    }
   });
 
   it("freezes PMS checkout-charge mark-paid when the F1a finance bridge is disabled", async () => {

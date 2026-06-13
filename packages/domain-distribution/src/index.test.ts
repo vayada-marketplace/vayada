@@ -212,6 +212,24 @@ describe("@vayada/domain-distribution", () => {
     expect(findForbiddenPublicBookabilityKeys(projection)).toEqual([]);
   });
 
+  it("flags PMS private-note-shaped keys anywhere in public payloads", () => {
+    expect(
+      findForbiddenPublicBookabilityKeys({
+        hotel: {
+          privateNoteCount: 1,
+          bookingNotesPrivate: [{ privateNoteId: "note_123" }],
+          booking_notes_private: [{ privateNoteBody: "sentinel private note body" }],
+        },
+      }),
+    ).toEqual([
+      "booking_notes_private",
+      "bookingnotesprivate",
+      "privatenotebody",
+      "privatenotecount",
+      "privatenoteid",
+    ]);
+  });
+
   it("provides fixtures for every required downstream contract case", () => {
     expect(PUBLIC_BOOKABILITY_FIXTURES.map((fixture) => fixture.caseId).sort()).toEqual(
       [...PUBLIC_BOOKABILITY_FIXTURE_CASE_IDS].sort(),
