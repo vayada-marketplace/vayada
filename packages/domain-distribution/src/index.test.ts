@@ -217,6 +217,7 @@ describe("@vayada/domain-distribution", () => {
       findForbiddenPublicBookabilityKeys({
         hotel: {
           privateNoteCount: 1,
+          private_note_body: "sentinel private note body",
           bookingNotesPrivate: [{ privateNoteId: "note_123" }],
           booking_notes_private: [{ privateNoteBody: "sentinel private note body" }],
         },
@@ -224,6 +225,7 @@ describe("@vayada/domain-distribution", () => {
     ).toEqual([
       "booking_notes_private",
       "bookingnotesprivate",
+      "private_note_body",
       "privatenotebody",
       "privatenotecount",
       "privatenoteid",

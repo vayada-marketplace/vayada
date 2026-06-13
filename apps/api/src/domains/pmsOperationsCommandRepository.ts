@@ -430,7 +430,25 @@ export function createTargetPmsOperationsCommandRepository(
           acceptedAt,
         );
         if (!insertedIdempotencyKey) {
+          const existing = await findPrivateNoteCommandReplay(
+            client,
+            "private_note_create",
+            command,
+            keyHash,
+            requestFingerprintHash,
+          );
           await client.query("ROLLBACK");
+          if (existing) {
+            if (!existing.ok) return existing;
+            return existing.note
+              ? {
+                  ok: true,
+                  note: existing.note,
+                  commandMeta: existing.commandMeta,
+                  replayed: true,
+                }
+              : privateNoteConflict("Private note create replay metadata is unavailable.");
+          }
           return privateNoteConflict(
             "Idempotency key was already used for a private note command.",
           );
@@ -545,7 +563,24 @@ export function createTargetPmsOperationsCommandRepository(
           acceptedAt,
         );
         if (!insertedIdempotencyKey) {
+          const existing = await findPrivateNoteCommandReplay(
+            client,
+            "private_note_delete",
+            command,
+            keyHash,
+            requestFingerprintHash,
+          );
           await client.query("ROLLBACK");
+          if (existing) {
+            return existing.ok
+              ? {
+                  ok: true,
+                  noteId: existing.noteId,
+                  commandMeta: existing.commandMeta,
+                  replayed: true,
+                }
+              : existing;
+          }
           return privateNoteConflict(
             "Idempotency key was already used for a private note command.",
           );

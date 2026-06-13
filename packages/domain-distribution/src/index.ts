@@ -54,6 +54,7 @@ export const FORBIDDEN_PUBLIC_BOOKABILITY_KEYS = [
   "privateNoteBody",
   "privateNoteCount",
   "privateNoteId",
+  "private_note",
   "notesPrivate",
   "payout",
   "processorAccount",
