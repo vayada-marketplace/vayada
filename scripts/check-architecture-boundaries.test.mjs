@@ -257,6 +257,46 @@ test("fails when future marketplace domain code writes identity tables directly"
   }
 });
 
+test("fails when PMS operations route code writes Booking guest PII directly", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/routes/pmsOperations.ts": `
+      export async function createAdditionalGuest(db) {
+        await db.execute(sql\`insert into booking.booking_guests (first_name) values ('Mira')\`);
+      }
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /BookingGuestPiiPort/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("allows Booking-owned guest PII platform adapter to write Booking guest PII", () => {
+  const root = createFixtureRoot({
+    "apps/api/src/platform/bookingGuestPii.ts": `
+      export async function createAdditionalGuest(db) {
+        await db.execute(sql\`insert into booking.booking_guests (first_name) values ('Mira')\`);
+      }
+    `,
+    "apps/api/src/routes/pmsOperations.ts": `
+      import type { BookingGuestPiiPort } from "@vayada/domain-booking";
+      export const register = (port: BookingGuestPiiPort) => port;
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Architecture boundary check passed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ─── VAY-653: Marketplace→PMS affiliate provisioning boundary fixtures ───────────
 
 test("passes when Marketplace domain code imports only CollaborationAffiliatePort (allowed)", () => {

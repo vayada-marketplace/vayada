@@ -106,6 +106,132 @@ export type BookingDashboardMetricsReadPort = {
 
 export type BookingPrimaryGuest = PmsGuest;
 
+export type BookingGuestPiiRole = "booker" | "primary_guest" | "additional_guest";
+
+export type BookingGuestPii = {
+  guestId: string;
+  guestBookingId: string;
+  role: BookingGuestPiiRole;
+  displayName: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  countryCode: string | null;
+  arrivalTime: string | null;
+  specialRequests: string | null;
+};
+
+export type BookingGuestPiiProjection = {
+  propertyId: string;
+  guestBookingId: string;
+  primaryGuest: BookingGuestPii | null;
+  additionalGuests: readonly BookingGuestPii[];
+};
+
+export type BookingGuestPiiCommandMeta = {
+  contractVersion: "booking-guest-pii.v1";
+  commandId: string;
+  idempotencyKey: string;
+  acceptedAt: BookingUtcDateTime;
+  sideEffects: readonly ["audit_event"];
+};
+
+export type BookingGuestPiiAuditContext = {
+  actorUserId: string;
+  actorOrganizationId: string;
+  requestId: string;
+  correlationId?: string;
+  source: "pms_operations";
+  reason: string;
+};
+
+export type BookingAdditionalGuestInput = {
+  firstName: string;
+  lastName: string;
+  email?: string | null;
+  phone?: string | null;
+  countryCode?: string | null;
+  arrivalTime?: string | null;
+  specialRequests?: string | null;
+};
+
+export type BookingAdditionalGuestCreateCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  guest: BookingAdditionalGuestInput;
+  audit: BookingGuestPiiAuditContext;
+};
+
+export type BookingAdditionalGuestUpdateCommand = Omit<
+  BookingAdditionalGuestCreateCommand,
+  "guest"
+> & {
+  guestId: string;
+  guest: Partial<BookingAdditionalGuestInput>;
+};
+
+export type BookingAdditionalGuestDeleteCommand = Omit<
+  BookingAdditionalGuestCreateCommand,
+  "guest"
+> & {
+  guestId: string;
+};
+
+export type BookingGuestPiiCommandResult =
+  | {
+      ok: true;
+      additionalGuest: BookingGuestPii;
+      projection: BookingGuestPiiProjection;
+      commandMeta: BookingGuestPiiCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 404 | 409;
+      code:
+        | "invalid_guest_pii"
+        | "reservation_not_found"
+        | "additional_guest_not_found"
+        | "idempotency_conflict";
+      message: string;
+    };
+
+export type BookingGuestPiiDeleteResult =
+  | {
+      ok: true;
+      guestId: string;
+      projection: BookingGuestPiiProjection;
+      commandMeta: BookingGuestPiiCommandMeta;
+      replayed?: boolean;
+    }
+  | Exclude<BookingGuestPiiCommandResult, { ok: true }>;
+
+/**
+ * Booking-owned guest PII port for PMS operations.
+ *
+ * PMS may request an operational projection, but validation, retention,
+ * mutation, and guest-visible audit semantics stay in Booking.
+ */
+export type BookingGuestPiiPort = {
+  listGuestPiiForPmsOperations(input: {
+    propertyId: string;
+    guestBookingId: string;
+  }): Promise<BookingGuestPiiProjection | null>;
+  createAdditionalGuestForPmsOperations(
+    command: BookingAdditionalGuestCreateCommand,
+  ): Promise<BookingGuestPiiCommandResult>;
+  updateAdditionalGuestForPmsOperations(
+    command: BookingAdditionalGuestUpdateCommand,
+  ): Promise<BookingGuestPiiCommandResult>;
+  deleteAdditionalGuestForPmsOperations(
+    command: BookingAdditionalGuestDeleteCommand,
+  ): Promise<BookingGuestPiiDeleteResult>;
+  close?(): Promise<void>;
+};
+
 export type CommittedGuestBooking = {
   guestBookingId: string;
   bookingReference: string;

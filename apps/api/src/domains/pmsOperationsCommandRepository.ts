@@ -5,14 +5,28 @@ import type { PmsOperationsReadRepository } from "./pmsOperationsReadModel.js";
 import {
   PMS_OPERATIONS_CONTRACT_VERSION,
   type PmsCheckInCommand,
+  type PmsCheckOutCommand,
+  type PmsCheckOutCommandResult,
+  type PmsCheckOutRecord,
   type PmsAssignmentCommand,
   type PmsAssignmentCommandConflictCode,
   type PmsAssignmentCommandResult,
+  type PmsCheckoutCharge,
+  type PmsCheckoutChargeCommandResult,
+  type PmsCheckoutChargeCreateCommand,
+  type PmsCheckoutChargeMarkPaidCommand,
+  type PmsCheckoutChargeStatus,
+  type PmsCheckoutChargeWaiveCommand,
   type PmsCommandMeta,
   type PmsNoShowCommand,
   type PmsOperationalCommandResult,
   type PmsOperationalStatus,
   type PmsOperationalStatusCommand,
+  type PmsOperationalTemplate,
+  type PmsOperationalTemplateCommandResult,
+  type PmsOperationalTemplateKind,
+  type PmsOperationalTemplateUpdateCommand,
+  type PmsTemplateStep,
   type PmsOperationsCommandSideEffect,
   type PmsOperationsCommandRepository,
   type PmsPrivateNote,
@@ -70,7 +84,18 @@ type PmsIdempotencyRow = {
 
 type PmsOperationalCommand = PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand;
 
-type PmsOperationalCommandOperation = "status_command" | "checkin_command" | "no_show_command";
+type PmsOperationalCommandOperation =
+  | "status_command"
+  | "checkin_command"
+  | "no_show_command"
+  | "checkout_command";
+type PmsOperationalTemplateOperation =
+  | "checkin_checklist_template_update"
+  | "checkout_inspection_template_update";
+type PmsCheckoutChargeOperation =
+  | "checkout_charge_create"
+  | "checkout_charge_mark_paid"
+  | "checkout_charge_waive";
 
 const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
   string,
@@ -81,6 +106,7 @@ const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
   ["checked_in", new Set<PmsOperationalStatus>(["in_house"])],
   ["in_house", new Set<PmsOperationalStatus>(["checked_out"])],
 ]);
+
 type PmsPrivateNoteReplay = {
   commandMeta: PmsCommandMeta;
   noteId: string;
@@ -94,6 +120,42 @@ type PmsPrivateNoteRow = {
   authorDisplayName: string;
   source: "pms" | "migration" | "system";
   createdAt: Date | string;
+};
+
+type PmsOperationalTemplateRow = {
+  propertyId: string;
+  steps: unknown;
+  updatedByUserId: string | null;
+  updatedAt: Date | string;
+};
+
+type PmsCheckoutChargeRow = {
+  chargeId: string;
+  propertyId: string;
+  guestBookingId: string;
+  assignmentId: string | null;
+  label: string;
+  amountDecimal: string;
+  originalAmountDecimal: string;
+  currency: string;
+  status: PmsCheckoutChargeStatus;
+  createdByUserId: string | null;
+  createdAt: Date | string;
+  settledAt: Date | string | null;
+  waivedAt: Date | string | null;
+};
+
+type PmsCheckOutRecordRow = {
+  checkoutRecordId: string;
+  propertyId: string;
+  guestBookingId: string;
+  assignmentId: string | null;
+  completedByUserId: string | null;
+  completedAt: Date | string;
+  inspectionResults: unknown;
+  chargesSettled: unknown;
+  pendingFlags: unknown;
+  checkoutNotes: string | null;
 };
 
 export function createTargetPmsOperationsCommandRepository(
@@ -113,6 +175,193 @@ export function createTargetPmsOperationsCommandRepository(
   const now = config.now ?? (() => new Date());
 
   return {
+    async listCheckoutCharges(propertyId, guestBookingId) {
+      const client = await pool.connect();
+      try {
+        if (!(await reservationExists(client, propertyId, guestBookingId))) return null;
+        return listCheckoutCharges(client, propertyId, guestBookingId);
+      } finally {
+        client.release();
+      }
+    },
+
+    async createCheckoutCharge(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(checkoutChargeCommandFingerprint(command)));
+      const commandMeta = checkoutChargeCommandMeta(command, acceptedAt);
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findCheckoutChargeCommandReplay(
+          client,
+          "checkout_charge_create",
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+
+        if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
+          await client.query("ROLLBACK");
+          return checkoutChargeReservationNotFound(command.guestBookingId);
+        }
+        if (
+          command.assignmentId &&
+          !(await checkoutChargeAssignmentBelongsToReservation(client, command))
+        ) {
+          await client.query("ROLLBACK");
+          return checkoutChargeInvalidBody(
+            "Checkout charge assignmentId does not belong to this reservation.",
+          );
+        }
+
+        const insertedIdempotencyKey = await recordCheckoutChargeCommandIdempotency(
+          client,
+          "checkout_charge_create",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return checkoutChargeConflict(
+            "Checkout charge create idempotency key could not be reserved.",
+          );
+        }
+
+        const result = await client.query<PmsCheckoutChargeRow>(
+          `INSERT INTO pms.booking_checkout_charges (
+             property_id,
+             guest_booking_id,
+             assignment_id,
+             label,
+             amount,
+             original_amount,
+             currency,
+             status,
+             created_by_user_id,
+             created_at
+           )
+           VALUES (
+             $1::uuid,
+             $2::uuid,
+             $3::uuid,
+             $4,
+             $5::numeric,
+             $5::numeric,
+             $6,
+             'pending',
+             $7::uuid,
+             $8::timestamptz
+           )
+           RETURNING
+             id::text AS "chargeId",
+             property_id::text AS "propertyId",
+             guest_booking_id::text AS "guestBookingId",
+             assignment_id::text AS "assignmentId",
+             label,
+             amount::text AS "amountDecimal",
+             original_amount::text AS "originalAmountDecimal",
+             currency,
+             status,
+             created_by_user_id::text AS "createdByUserId",
+             created_at AS "createdAt",
+             settled_at AS "settledAt",
+             waived_at AS "waivedAt"`,
+          [
+            command.propertyId,
+            command.guestBookingId,
+            command.assignmentId ?? null,
+            command.label,
+            command.amountDecimal,
+            command.currency,
+            checkoutChargeActorUserId(command),
+            acceptedAt,
+          ],
+        );
+        const charge = toPmsCheckoutCharge(result.rows[0]!);
+
+        await insertCheckoutChargeAuditEvent(
+          client,
+          "created",
+          command,
+          charge,
+          commandMeta,
+          keyHash,
+        );
+        await completeCheckoutChargeCommandIdempotency(
+          client,
+          "checkout_charge_create",
+          command,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          charge,
+        );
+        await client.query("COMMIT");
+        return { ok: true, charge, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return checkoutChargeConflict(
+            "Checkout charge create conflicts with the current reservation state.",
+          );
+        }
+        if (isPgForeignKeyViolation(error)) {
+          return checkoutChargeInvalidBody(
+            "Checkout charge references a reservation resource that does not exist.",
+          );
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async markCheckoutChargePaid(command) {
+      return executeCheckoutChargeStateCommand(pool, now, {
+        command,
+        operation: "checkout_charge_mark_paid",
+        action: "marked_paid",
+        status: "paid",
+        mutate: async (client, acceptedAt) => {
+          const charge = await findCheckoutChargeForUpdate(client, command);
+          if (!charge) return checkoutChargeNotFound(command.chargeId);
+          if (charge.status !== "pending") {
+            return checkoutChargeInvalidTransition(charge.status, "paid");
+          }
+          return updateCheckoutChargeStatus(client, command, "paid", acceptedAt);
+        },
+      });
+    },
+
+    async waiveCheckoutCharge(command) {
+      return executeCheckoutChargeStateCommand(pool, now, {
+        command,
+        operation: "checkout_charge_waive",
+        action: "waived",
+        status: "waived",
+        mutate: async (client, acceptedAt) => {
+          const charge = await findCheckoutChargeForUpdate(client, command);
+          if (!charge) return checkoutChargeNotFound(command.chargeId);
+          if (charge.status === "waived" || charge.status === "void") {
+            return checkoutChargeInvalidTransition(charge.status, "waived");
+          }
+          return updateCheckoutChargeStatus(client, command, "waived", acceptedAt);
+        },
+      });
+    },
+
+    async executeCheckOutCommand(command) {
+      return executeCheckOutCommand(config, pool, now, command);
+    },
+
     async listPrivateNotes(propertyId, guestBookingId) {
       const client = await pool.connect();
       try {
@@ -484,10 +733,1142 @@ export function createTargetPmsOperationsCommandRepository(
         mutate: applyNoShowCommandMutation,
       });
     },
+    async getOperationalTemplate(propertyId, templateKind) {
+      const client = await pool.connect();
+      try {
+        return readOperationalTemplate(client, propertyId, templateKind);
+      } finally {
+        client.release();
+      }
+    },
+    async updateOperationalTemplate(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const operation = operationalTemplateOperation(command.templateKind);
+      const requestFingerprintHash = sha256(stableJson(command));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findOperationalTemplateCommandReplay(
+          client,
+          command,
+          operation,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+
+        const insertedIdempotencyKey = await recordOperationalTemplateCommandIdempotency(
+          client,
+          command,
+          operation,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          await client.query("ROLLBACK");
+          return operationalTemplateConflict(
+            "Operational template idempotency key could not be reserved.",
+          );
+        }
+
+        const template = await upsertOperationalTemplate(client, command, acceptedAt);
+        await insertOperationalTemplateAuditEvent(client, command, template, commandMeta, keyHash);
+        await completeOperationalTemplateCommandIdempotency(
+          client,
+          command,
+          operation,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          template,
+        );
+        await client.query("COMMIT");
+        return { ok: true, template, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return operationalTemplateConflict(
+            "Operational template update conflicts with the current template state.",
+          );
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
     async close() {
       if (ownsPool) await pool.end();
     },
   };
+}
+
+async function executeCheckoutChargeStateCommand<
+  TCommand extends PmsCheckoutChargeMarkPaidCommand | PmsCheckoutChargeWaiveCommand,
+>(
+  pool: PmsOperationsCommandPool,
+  now: () => Date,
+  options: {
+    command: TCommand;
+    operation: Exclude<PmsCheckoutChargeOperation, "checkout_charge_create">;
+    action: "marked_paid" | "waived";
+    status: Extract<PmsCheckoutChargeStatus, "paid" | "waived">;
+    mutate: (
+      client: PmsOperationsCommandClient,
+      acceptedAt: string,
+    ) => Promise<PmsCheckoutCharge | Exclude<PmsCheckoutChargeCommandResult, { ok: true }>>;
+  },
+): Promise<PmsCheckoutChargeCommandResult> {
+  const { command, operation, action, mutate } = options;
+  const client = await pool.connect();
+  const acceptedAt = now().toISOString();
+  const keyHash = sha256(command.idempotencyKey);
+  const requestFingerprintHash = sha256(stableJson(checkoutChargeCommandFingerprint(command)));
+  const commandMeta = checkoutChargeCommandMeta(command, acceptedAt);
+
+  try {
+    await client.query("BEGIN");
+    const replay = await findCheckoutChargeCommandReplay(
+      client,
+      operation,
+      command,
+      keyHash,
+      requestFingerprintHash,
+    );
+    if (replay) {
+      await client.query("ROLLBACK");
+      return replay;
+    }
+
+    if (!(await reservationExists(client, command.propertyId, command.guestBookingId))) {
+      await client.query("ROLLBACK");
+      return checkoutChargeReservationNotFound(command.guestBookingId);
+    }
+
+    const insertedIdempotencyKey = await recordCheckoutChargeCommandIdempotency(
+      client,
+      operation,
+      command,
+      keyHash,
+      requestFingerprintHash,
+      acceptedAt,
+    );
+    if (!insertedIdempotencyKey) {
+      await client.query("ROLLBACK");
+      return checkoutChargeConflict("Checkout charge idempotency key could not be reserved.");
+    }
+
+    const mutation = await mutate(client, acceptedAt);
+    if ("ok" in mutation && !mutation.ok) {
+      await client.query("ROLLBACK");
+      return mutation;
+    }
+
+    const charge = mutation as PmsCheckoutCharge;
+    await insertCheckoutChargeAuditEvent(client, action, command, charge, commandMeta, keyHash);
+    await completeCheckoutChargeCommandIdempotency(
+      client,
+      operation,
+      command,
+      keyHash,
+      commandMeta,
+      acceptedAt,
+      charge,
+    );
+    await client.query("COMMIT");
+    return { ok: true, charge, commandMeta };
+  } catch (error) {
+    await rollbackQuietly(client);
+    if (isPgUniqueViolation(error)) {
+      return checkoutChargeConflict(
+        "Checkout charge command conflicts with the current charge state.",
+      );
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function executeCheckOutCommand(
+  config: TargetPmsOperationsCommandRepositoryConfig,
+  pool: PmsOperationsCommandPool,
+  now: () => Date,
+  command: PmsCheckOutCommand,
+): Promise<PmsCheckOutCommandResult> {
+  const client = await pool.connect();
+  const acceptedAt = now().toISOString();
+  const keyHash = sha256(command.idempotencyKey);
+  const requestFingerprintHash = sha256(stableJson(checkOutCommandFingerprint(command)));
+  const commandMeta: PmsCommandMeta = {
+    contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    acceptedAt,
+    sideEffects: ["audit_event"],
+  };
+
+  try {
+    await client.query("BEGIN");
+    const replay = await findCheckOutCommandReplay(
+      config,
+      client,
+      command,
+      keyHash,
+      requestFingerprintHash,
+    );
+    if (replay) {
+      await client.query("ROLLBACK");
+      return replay;
+    }
+
+    const insertedIdempotencyKey = await recordCheckOutCommandIdempotency(
+      client,
+      command,
+      keyHash,
+      requestFingerprintHash,
+      acceptedAt,
+    );
+    if (!insertedIdempotencyKey) {
+      await client.query("ROLLBACK");
+      return checkOutConflict("Check-out command idempotency key could not be reserved.");
+    }
+
+    const sources = await findAssignmentsForOperationalCommand(client, command);
+    if (sources.length === 0) {
+      await client.query("ROLLBACK");
+      return checkOutReservationNotFound(command.guestBookingId);
+    }
+    if (
+      command.expectedVersion &&
+      sources.some((source) => !assignmentVersionMatches(source, command.expectedVersion!))
+    ) {
+      await client.query("ROLLBACK");
+      return checkOutVersionConflict("Reservation check-out version is stale.");
+    }
+    const invalidSource = sources.find((source) => source.assignmentStatus !== "in_house");
+    if (invalidSource) {
+      await client.query("ROLLBACK");
+      return checkOutInvalidTransition(invalidSource.assignmentStatus, "checked_out");
+    }
+    if (await hasExistingCheckOutRecord(client, command)) {
+      await client.query("ROLLBACK");
+      return checkOutInvalidTransition("checked_out", "checked_out");
+    }
+
+    const charges = await listCheckoutChargesForUpdate(
+      client,
+      command.propertyId,
+      command.guestBookingId,
+      command.assignmentId,
+    );
+    const chargeIds = new Set(charges.map((charge) => charge.chargeId));
+    const unknownSettledChargeId = command.chargesSettled.find(
+      (chargeId) => !chargeIds.has(chargeId),
+    );
+    if (unknownSettledChargeId) {
+      await client.query("ROLLBACK");
+      return checkOutChargeNotFound(unknownSettledChargeId);
+    }
+
+    const settledIdSet = new Set(command.chargesSettled);
+    const unsettledSettledCharge = charges.find(
+      (charge) =>
+        settledIdSet.has(charge.chargeId) && charge.status !== "paid" && charge.status !== "waived",
+    );
+    if (unsettledSettledCharge) {
+      await client.query("ROLLBACK");
+      return checkOutInvalidBody(
+        "chargesSettled may only include paid or waived checkout charges.",
+      );
+    }
+
+    const chargesSettled = charges.filter((charge) => settledIdSet.has(charge.chargeId));
+    const pendingChargeIds = charges
+      .filter((charge) => charge.status === "pending" && !settledIdSet.has(charge.chargeId))
+      .map((charge) => charge.chargeId);
+    const unsettledPaidChargeIds = charges
+      .filter((charge) => charge.status === "paid")
+      .map((charge) => charge.chargeId);
+    const pendingFlags = checkOutPendingFlags(command, pendingChargeIds, unsettledPaidChargeIds);
+
+    const checkout = await insertCheckOutRecord(client, command, {
+      acceptedAt,
+      assignmentId: command.assignmentId ?? null,
+      chargesSettled,
+      pendingFlags,
+      pendingChargeIds,
+      unsettledPaidChargeIds,
+    });
+    await updateAssignmentsOperationalStatus(client, command, sources, "checked_out");
+    await insertCheckOutAuditEvent(client, command, checkout, commandMeta, keyHash);
+    await completeCheckOutCommandIdempotency(
+      client,
+      command,
+      keyHash,
+      commandMeta,
+      acceptedAt,
+      checkout,
+      charges,
+    );
+    await client.query("COMMIT");
+
+    return checkOutResultForCommand(config, command, commandMeta, checkout, charges, false);
+  } catch (error) {
+    await rollbackQuietly(client);
+    if (isPgUniqueViolation(error)) {
+      return checkOutConflict("Check-out command conflicts with the current reservation state.");
+    }
+    if (isPgForeignKeyViolation(error)) {
+      return checkOutInvalidBody(
+        "Check-out references a reservation resource that does not exist.",
+      );
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function listCheckoutCharges(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  guestBookingId: string,
+): Promise<PmsCheckoutCharge[]> {
+  const result = await client.query<PmsCheckoutChargeRow>(
+    checkoutChargeSelectSql(
+      `WHERE charge.property_id = $1::uuid
+         AND charge.guest_booking_id = $2::uuid
+       ORDER BY charge.created_at DESC, charge.id DESC`,
+    ),
+    [propertyId, guestBookingId],
+  );
+  return result.rows.map(toPmsCheckoutCharge);
+}
+
+async function listCheckoutChargesForUpdate(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  guestBookingId: string,
+  assignmentId?: string,
+): Promise<PmsCheckoutCharge[]> {
+  const result = await client.query<PmsCheckoutChargeRow>(
+    checkoutChargeSelectSql(
+      `WHERE charge.property_id = $1::uuid
+         AND charge.guest_booking_id = $2::uuid
+         AND ($3::uuid IS NULL OR charge.assignment_id IS NULL OR charge.assignment_id = $3::uuid)
+       ORDER BY charge.created_at DESC, charge.id DESC
+       FOR UPDATE OF charge`,
+    ),
+    [propertyId, guestBookingId, assignmentId ?? null],
+  );
+  return result.rows.map(toPmsCheckoutCharge);
+}
+
+async function checkoutChargeAssignmentBelongsToReservation(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckoutChargeCreateCommand,
+): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1
+     FROM pms.operational_booking_assignments assignment
+     WHERE assignment.id = $1::uuid
+       AND assignment.property_id = $2::uuid
+       AND assignment.guest_booking_id = $3::uuid
+     LIMIT 1`,
+    [command.assignmentId, command.propertyId, command.guestBookingId],
+  );
+  return (result.rowCount ?? result.rows.length) > 0;
+}
+
+async function findCheckoutChargeForUpdate(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckoutChargeMarkPaidCommand | PmsCheckoutChargeWaiveCommand,
+): Promise<PmsCheckoutCharge | null> {
+  const result = await client.query<PmsCheckoutChargeRow>(
+    checkoutChargeSelectSql(
+      `WHERE charge.id = $1::uuid
+         AND charge.property_id = $2::uuid
+         AND charge.guest_booking_id = $3::uuid
+       FOR UPDATE OF charge`,
+    ),
+    [command.chargeId, command.propertyId, command.guestBookingId],
+  );
+  return result.rows[0] ? toPmsCheckoutCharge(result.rows[0]) : null;
+}
+
+async function updateCheckoutChargeStatus(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckoutChargeMarkPaidCommand | PmsCheckoutChargeWaiveCommand,
+  status: Extract<PmsCheckoutChargeStatus, "paid" | "waived">,
+  acceptedAt: string,
+): Promise<PmsCheckoutCharge> {
+  const result = await client.query<PmsCheckoutChargeRow>(
+    `UPDATE pms.booking_checkout_charges charge
+     SET status = $1,
+         settled_at = CASE WHEN $1 = 'paid' THEN $5::timestamptz ELSE NULL END,
+         waived_at = CASE WHEN $1 = 'waived' THEN $5::timestamptz ELSE NULL END
+     WHERE charge.id = $2::uuid
+       AND charge.property_id = $3::uuid
+       AND charge.guest_booking_id = $4::uuid
+     RETURNING
+       id::text AS "chargeId",
+       property_id::text AS "propertyId",
+       guest_booking_id::text AS "guestBookingId",
+       assignment_id::text AS "assignmentId",
+       label,
+       amount::text AS "amountDecimal",
+       original_amount::text AS "originalAmountDecimal",
+       currency,
+       status,
+       created_by_user_id::text AS "createdByUserId",
+       created_at AS "createdAt",
+       settled_at AS "settledAt",
+       waived_at AS "waivedAt"`,
+    [status, command.chargeId, command.propertyId, command.guestBookingId, acceptedAt],
+  );
+  return toPmsCheckoutCharge(result.rows[0]!);
+}
+
+function checkoutChargeSelectSql(whereClause: string): string {
+  return `SELECT
+            charge.id::text AS "chargeId",
+            charge.property_id::text AS "propertyId",
+            charge.guest_booking_id::text AS "guestBookingId",
+            charge.assignment_id::text AS "assignmentId",
+            charge.label,
+            charge.amount::text AS "amountDecimal",
+            charge.original_amount::text AS "originalAmountDecimal",
+            charge.currency,
+            charge.status,
+            charge.created_by_user_id::text AS "createdByUserId",
+            charge.created_at AS "createdAt",
+            charge.settled_at AS "settledAt",
+            charge.waived_at AS "waivedAt"
+          FROM pms.booking_checkout_charges charge
+          ${whereClause}`;
+}
+
+function toPmsCheckoutCharge(row: PmsCheckoutChargeRow): PmsCheckoutCharge {
+  return {
+    chargeId: row.chargeId,
+    propertyId: row.propertyId,
+    guestBookingId: row.guestBookingId,
+    assignmentId: row.assignmentId,
+    label: row.label,
+    amount: { amountDecimal: row.amountDecimal, currency: row.currency },
+    originalAmount: { amountDecimal: row.originalAmountDecimal, currency: row.currency },
+    status: row.status,
+    createdByUserId: row.createdByUserId,
+    createdAt: toIsoOrNull(row.createdAt)!,
+    settledAt: toIsoOrNull(row.settledAt),
+    waivedAt: toIsoOrNull(row.waivedAt),
+    operationalOwnership: {
+      owner: "pms",
+      financeSettlementOwner: "finance",
+      providerSettlement: false,
+    },
+  };
+}
+
+function toIsoOrNull(value: Date | string | null): string | null {
+  if (value === null) return null;
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function checkoutChargeCommandMeta(
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+  acceptedAt: string,
+): PmsCommandMeta {
+  return {
+    contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    acceptedAt,
+    sideEffects: ["audit_event"],
+  };
+}
+
+function checkoutChargeActorUserId(
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+): string | null {
+  return command.audit.actor.kind === "user" ? command.audit.actor.userId : null;
+}
+
+function checkoutChargeCommandFingerprint(
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+): unknown {
+  const { audit: _audit, ...fingerprint } = command;
+  return fingerprint;
+}
+
+async function findCheckoutChargeCommandReplay(
+  client: PmsOperationsCommandClient,
+  operation: PmsCheckoutChargeOperation,
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsCheckoutChargeCommandResult | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     FOR UPDATE`,
+    [operation, keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return checkoutChargeConflict(
+      "Idempotency key was used with a different checkout charge command.",
+    );
+  }
+  if (existing.status !== "completed") {
+    return checkoutChargeConflict("Checkout charge command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const charge = existing.idempotencyMetadata?.["charge"];
+  if (!isPmsCommandMeta(commandMeta) || !isPmsCheckoutCharge(charge)) {
+    return checkoutChargeConflict("Checkout charge command replay metadata is unavailable.");
+  }
+  return { ok: true, charge, commandMeta, replayed: true };
+}
+
+async function recordCheckoutChargeCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  operation: PmsCheckoutChargeOperation,
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'property',
+       $4::uuid,
+       $5,
+       $6::timestamptz + interval '24 hours',
+       $7::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      acceptedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        audit: command.audit,
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+      }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function completeCheckoutChargeCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  operation: PmsCheckoutChargeOperation,
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  charge: PmsCheckoutCharge,
+): Promise<void> {
+  const idempotencyMetadata = { commandMeta, charge };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'booking_checkout_charge',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      charge.chargeId,
+      sha256(stableJson(idempotencyMetadata)),
+      acceptedAt,
+      JSON.stringify(idempotencyMetadata),
+      operation,
+      keyHash,
+      command.propertyId,
+    ],
+  );
+}
+
+async function insertCheckoutChargeAuditEvent(
+  client: PmsOperationsCommandClient,
+  action: "created" | "marked_paid" | "waived",
+  command:
+    | PmsCheckoutChargeCreateCommand
+    | PmsCheckoutChargeMarkPaidCommand
+    | PmsCheckoutChargeWaiveCommand,
+  charge: PmsCheckoutCharge,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       secondary_resource_product,
+       secondary_resource_type,
+       secondary_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       $2,
+       1,
+       $3::timestamptz,
+       'property',
+       NULL,
+       $4::uuid,
+       $5,
+       $6::uuid,
+       'pms',
+       'booking_checkout_charge',
+       $7,
+       'booking',
+       'guest_booking',
+       $8,
+       $9,
+       $10,
+       $11::jsonb,
+       $12::jsonb,
+       $13::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.checkout_charge.${action}.property.${command.propertyId}.charge.${charge.chargeId}.key.${keyHash}.v1`,
+      `pms.checkout_charge.${action}`,
+      commandMeta.acceptedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      checkoutChargeActorUserId(command),
+      charge.chargeId,
+      command.guestBookingId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        chargeId: charge.chargeId,
+        status: charge.status,
+        amount: charge.amount,
+        financeSettlementOwner: "finance",
+      }),
+      JSON.stringify({
+        label: charge.label,
+        reason: "reason" in command ? command.reason : undefined,
+      }),
+      JSON.stringify({
+        commandMeta,
+        idempotencyKeyHash: keyHash,
+        operationalOwner: "pms",
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+        invoicePosting: false,
+        payoutTrigger: false,
+        reconciliation: false,
+      }),
+    ],
+  );
+}
+
+async function hasExistingCheckOutRecord(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+): Promise<boolean> {
+  const result = await client.query(
+    `SELECT id
+     FROM pms.booking_checkout_records
+     WHERE property_id = $1::uuid
+       AND guest_booking_id = $2::uuid
+       AND ($3::uuid IS NULL OR assignment_id = $3::uuid)
+     LIMIT 1
+     FOR UPDATE`,
+    [command.propertyId, command.guestBookingId, command.assignmentId ?? null],
+  );
+  return (result.rowCount ?? result.rows.length) > 0;
+}
+
+async function insertCheckOutRecord(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+  input: {
+    acceptedAt: string;
+    assignmentId: string | null;
+    chargesSettled: PmsCheckoutCharge[];
+    pendingFlags: string[];
+    pendingChargeIds: string[];
+    unsettledPaidChargeIds: string[];
+  },
+): Promise<PmsCheckOutRecord> {
+  const result = await client.query<PmsCheckOutRecordRow>(
+    `INSERT INTO pms.booking_checkout_records (
+       property_id,
+       guest_booking_id,
+       assignment_id,
+       completed_by_user_id,
+       completed_at,
+       inspection_results,
+       charges_settled,
+       pending_flags,
+       checkout_notes
+     )
+     VALUES (
+       $1::uuid,
+       $2::uuid,
+       $3::uuid,
+       $4::uuid,
+       $5::timestamptz,
+       $6::jsonb,
+       $7::jsonb,
+       $8::jsonb,
+       $9
+     )
+     RETURNING
+       id::text AS "checkoutRecordId",
+       property_id::text AS "propertyId",
+       guest_booking_id::text AS "guestBookingId",
+       assignment_id::text AS "assignmentId",
+       completed_by_user_id::text AS "completedByUserId",
+       completed_at AS "completedAt",
+       inspection_results AS "inspectionResults",
+       charges_settled AS "chargesSettled",
+       pending_flags AS "pendingFlags",
+       checkout_notes AS "checkoutNotes"`,
+    [
+      command.propertyId,
+      command.guestBookingId,
+      input.assignmentId,
+      checkOutActorUserId(command),
+      input.acceptedAt,
+      JSON.stringify(command.inspectionResults),
+      JSON.stringify(input.chargesSettled),
+      JSON.stringify(input.pendingFlags),
+      command.checkoutNotes ?? null,
+    ],
+  );
+  return toPmsCheckOutRecord(result.rows[0]!, {
+    pendingChargeIds: input.pendingChargeIds,
+    unsettledPaidChargeIds: input.unsettledPaidChargeIds,
+  });
+}
+
+function toPmsCheckOutRecord(
+  row: PmsCheckOutRecordRow,
+  financeHandoff: Pick<
+    PmsCheckOutRecord["financeHandoff"],
+    "pendingChargeIds" | "unsettledPaidChargeIds"
+  >,
+): PmsCheckOutRecord {
+  return {
+    checkoutRecordId: row.checkoutRecordId,
+    propertyId: row.propertyId,
+    guestBookingId: row.guestBookingId,
+    assignmentId: row.assignmentId,
+    completedByUserId: row.completedByUserId,
+    completedAt: toIsoOrNull(row.completedAt)!,
+    inspectionResults: Array.isArray(row.inspectionResults) ? row.inspectionResults : [],
+    chargesSettled: toPmsCheckoutChargeArray(row.chargesSettled),
+    pendingFlags: toStringArray(row.pendingFlags),
+    checkoutNotes: row.checkoutNotes,
+    financeHandoff: {
+      financeSettlementOwner: "finance",
+      providerSettlement: false,
+      pendingChargeIds: financeHandoff.pendingChargeIds,
+      unsettledPaidChargeIds: financeHandoff.unsettledPaidChargeIds,
+    },
+  };
+}
+
+function toPmsCheckoutChargeArray(value: unknown): PmsCheckoutCharge[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isPmsCheckoutCharge);
+}
+
+function checkOutPendingFlags(
+  command: PmsCheckOutCommand,
+  pendingChargeIds: string[],
+  unsettledPaidChargeIds: string[],
+): string[] {
+  const flags = new Set(command.pendingFlags);
+  for (const flag of inspectionPendingFlags(command.inspectionResults)) flags.add(flag);
+  if (pendingChargeIds.length > 0) flags.add("checkout_charges_unsettled");
+  if (unsettledPaidChargeIds.length > 0) flags.add("finance_settlement_handoff_required");
+  return [...flags].sort();
+}
+
+function inspectionPendingFlags(inspectionResults: unknown[]): string[] {
+  return inspectionResults.flatMap((result) => {
+    if (!result || typeof result !== "object") return [];
+    const item = result as { stepId?: unknown; status?: unknown };
+    if (typeof item.stepId !== "string" || !item.stepId.trim()) return [];
+    if (item.status === "completed") return [];
+    return [`inspection_${item.stepId.trim()}`];
+  });
+}
+
+async function findCheckOutCommandReplay(
+  config: TargetPmsOperationsCommandRepositoryConfig,
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsCheckOutCommandResult | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = 'checkout_command'
+       AND key_hash = $1
+       AND tenant_scope = 'property'
+       AND property_id = $2::uuid
+     FOR UPDATE`,
+    [keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return checkOutConflict("Idempotency key was used with a different check-out command.");
+  }
+  if (existing.status !== "completed") {
+    return checkOutConflict("Check-out command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const checkout = existing.idempotencyMetadata?.["checkout"];
+  const charges = existing.idempotencyMetadata?.["charges"];
+  if (!isPmsCommandMeta(commandMeta) || !isPmsCheckOutRecord(checkout) || !Array.isArray(charges)) {
+    return checkOutConflict("Check-out command replay metadata is unavailable.");
+  }
+  return checkOutResultForCommand(
+    config,
+    command,
+    commandMeta,
+    checkout,
+    charges.filter(isPmsCheckoutCharge),
+    true,
+  );
+}
+
+async function recordCheckOutCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       'checkout_command',
+       $1,
+       $2,
+       'in_progress',
+       'property',
+       $3::uuid,
+       $4,
+       $5::timestamptz + interval '24 hours',
+       $6::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      acceptedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        audit: command.audit,
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+      }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function completeCheckOutCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  checkout: PmsCheckOutRecord,
+  charges: PmsCheckoutCharge[],
+): Promise<void> {
+  const idempotencyMetadata = { commandMeta, checkout, charges };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'booking_checkout_record',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = 'checkout_command'
+       AND key_hash = $5
+       AND tenant_scope = 'property'
+       AND property_id = $6::uuid`,
+    [
+      checkout.checkoutRecordId,
+      sha256(stableJson(idempotencyMetadata)),
+      acceptedAt,
+      JSON.stringify(idempotencyMetadata),
+      keyHash,
+      command.propertyId,
+    ],
+  );
+}
+
+async function insertCheckOutAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsCheckOutCommand,
+  checkout: PmsCheckOutRecord,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       secondary_resource_product,
+       secondary_resource_type,
+       secondary_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       'pms.checkout.completed',
+       1,
+       $2::timestamptz,
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::uuid,
+       'pms',
+       'booking_checkout_record',
+       $6,
+       'booking',
+       'guest_booking',
+       $7,
+       $8,
+       $9,
+       $10::jsonb,
+       $11::jsonb,
+       $12::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.checkout.completed.property.${command.propertyId}.checkout.${checkout.checkoutRecordId}.key.${keyHash}.v1`,
+      commandMeta.acceptedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      checkOutActorUserId(command),
+      checkout.checkoutRecordId,
+      command.guestBookingId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        guestBookingId: command.guestBookingId,
+        checkoutRecordId: checkout.checkoutRecordId,
+        pendingFlags: checkout.pendingFlags,
+        financeSettlementOwner: "finance",
+      }),
+      JSON.stringify({
+        inspectionResults: checkout.inspectionResults,
+        chargesSettled: checkout.chargesSettled,
+        checkoutNotes: checkout.checkoutNotes,
+      }),
+      JSON.stringify({
+        commandMeta,
+        idempotencyKeyHash: keyHash,
+        operationalOwner: "pms",
+        financeSettlementOwner: "finance",
+        providerSettlement: false,
+        invoicePosting: false,
+        payoutTrigger: false,
+        reconciliation: false,
+        financeHandoff: checkout.financeHandoff,
+      }),
+    ],
+  );
+}
+
+async function checkOutResultForCommand(
+  config: TargetPmsOperationsCommandRepositoryConfig,
+  command: PmsCheckOutCommand,
+  commandMeta: PmsCommandMeta,
+  checkout: PmsCheckOutRecord,
+  charges: PmsCheckoutCharge[],
+  replayed: boolean,
+): Promise<PmsCheckOutCommandResult> {
+  const reservation = await config.readRepository.findReservationByGuestBookingId(
+    command.propertyId,
+    command.guestBookingId,
+  );
+  if (!reservation) return checkOutReservationNotFound(command.guestBookingId);
+  return {
+    ok: true,
+    reservation: {
+      ...reservation,
+      checkout: {
+        completedAt: checkout.completedAt,
+        pendingFlags: checkout.pendingFlags,
+      },
+      assignments: reservation.assignments.map((assignment) =>
+        !command.assignmentId || assignment.assignmentId === command.assignmentId
+          ? { ...assignment, assignmentStatus: "checked_out" }
+          : assignment,
+      ),
+    },
+    checkout,
+    charges,
+    commandMeta,
+    replayed,
+  };
+}
+
+function checkOutActorUserId(command: PmsCheckOutCommand): string | null {
+  return command.audit.actor.kind === "user" ? command.audit.actor.userId : null;
+}
+
+function checkOutCommandFingerprint(command: PmsCheckOutCommand): unknown {
+  const { audit: _audit, ...fingerprint } = command;
+  return fingerprint;
 }
 
 async function executeOperationalCommand<TCommand extends PmsOperationalCommand>(
@@ -630,6 +2011,305 @@ function toPmsPrivateNote(row: PmsPrivateNoteRow): PmsPrivateNote {
       privacyScope: "internal",
     },
   };
+}
+
+async function readOperationalTemplate(
+  client: PmsOperationsCommandClient,
+  propertyId: string,
+  templateKind: PmsOperationalTemplateKind,
+): Promise<PmsOperationalTemplate> {
+  const result = await client.query<PmsOperationalTemplateRow>(
+    `SELECT
+       property_id::text AS "propertyId",
+       steps,
+       updated_by_user_id::text AS "updatedByUserId",
+       updated_at AS "updatedAt"
+     FROM ${operationalTemplateTable(templateKind)}
+     WHERE property_id = $1::uuid`,
+    [propertyId],
+  );
+  const row = result.rows[0];
+  return row
+    ? toPmsOperationalTemplate(templateKind, row)
+    : {
+        propertyId,
+        templateKind,
+        steps: [],
+        updatedByUserId: null,
+        updatedAt: null,
+      };
+}
+
+async function upsertOperationalTemplate(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  acceptedAt: string,
+): Promise<PmsOperationalTemplate> {
+  const result = await client.query<PmsOperationalTemplateRow>(
+    `INSERT INTO ${operationalTemplateTable(command.templateKind)} (
+       property_id,
+       steps,
+       updated_by_user_id,
+       updated_at
+     )
+     VALUES ($1::uuid, $2::jsonb, $3::uuid, $4::timestamptz)
+     ON CONFLICT (property_id) DO UPDATE
+     SET steps = EXCLUDED.steps,
+         updated_by_user_id = EXCLUDED.updated_by_user_id,
+         updated_at = EXCLUDED.updated_at
+     RETURNING
+       property_id::text AS "propertyId",
+       steps,
+       updated_by_user_id::text AS "updatedByUserId",
+       updated_at AS "updatedAt"`,
+    [command.propertyId, JSON.stringify(command.steps), command.actorUserId, acceptedAt],
+  );
+  return toPmsOperationalTemplate(command.templateKind, result.rows[0]!);
+}
+
+function operationalTemplateTable(templateKind: PmsOperationalTemplateKind): string {
+  return templateKind === "check_in_checklist"
+    ? "pms.checkin_checklist_templates"
+    : "pms.checkout_inspection_templates";
+}
+
+function operationalTemplateOperation(
+  templateKind: PmsOperationalTemplateKind,
+): PmsOperationalTemplateOperation {
+  return templateKind === "check_in_checklist"
+    ? "checkin_checklist_template_update"
+    : "checkout_inspection_template_update";
+}
+
+function toPmsOperationalTemplate(
+  templateKind: PmsOperationalTemplateKind,
+  row: PmsOperationalTemplateRow,
+): PmsOperationalTemplate {
+  const updatedAt =
+    row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt);
+  return {
+    propertyId: row.propertyId,
+    templateKind,
+    steps: toPmsTemplateSteps(row.steps),
+    updatedByUserId: row.updatedByUserId,
+    updatedAt,
+  };
+}
+
+function toPmsTemplateSteps(value: unknown): PmsTemplateStep[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item): PmsTemplateStep | null => {
+      if (!item || typeof item !== "object") return null;
+      const step = item as Partial<PmsTemplateStep>;
+      if (typeof step.stepId !== "string" || typeof step.label !== "string") return null;
+      return {
+        stepId: step.stepId,
+        label: step.label,
+        required: step.required === true,
+      };
+    })
+    .filter((step): step is PmsTemplateStep => step !== null);
+}
+
+async function insertOperationalTemplateAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  template: PmsOperationalTemplate,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       $2,
+       1,
+       $3::timestamptz,
+       'property',
+       $4::uuid,
+       'user',
+       $5::uuid,
+       'pms',
+       'operational_template',
+       $6,
+       $7,
+       $8::jsonb,
+       $9::jsonb,
+       $10::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.${command.templateKind}.updated.property.${command.propertyId}.key.${keyHash}.v1`,
+      `pms.${command.templateKind}.updated`,
+      commandMeta.acceptedAt,
+      command.propertyId,
+      command.actorUserId,
+      command.templateKind,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        templateKind: command.templateKind,
+        stepCount: template.steps.length,
+      }),
+      JSON.stringify({ steps: template.steps }),
+      JSON.stringify({
+        commandMeta,
+        idempotencyKeyHash: keyHash,
+        targetOwner: operationalTemplateTable(command.templateKind),
+      }),
+    ],
+  );
+}
+
+async function findOperationalTemplateCommandReplay(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  operation: PmsOperationalTemplateOperation,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsOperationalTemplateCommandResult | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     FOR UPDATE`,
+    [operation, keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return operationalTemplateConflict(
+      "Idempotency key was used with a different operational template command.",
+    );
+  }
+  if (existing.status !== "completed") {
+    return operationalTemplateConflict("Operational template command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const template = existing.idempotencyMetadata?.["template"];
+  if (!isPmsCommandMeta(commandMeta) || !isPmsOperationalTemplate(template)) {
+    return operationalTemplateConflict(
+      "Operational template command replay metadata is unavailable.",
+    );
+  }
+  return { ok: true, template, commandMeta };
+}
+
+async function recordOperationalTemplateCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  operation: PmsOperationalTemplateOperation,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'property',
+       $4::uuid,
+       $5,
+       $6::timestamptz + interval '24 hours',
+       $7::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.commandId,
+      acceptedAt,
+      JSON.stringify({ commandId: command.commandId, templateKind: command.templateKind }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function completeOperationalTemplateCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  command: PmsOperationalTemplateUpdateCommand,
+  operation: PmsOperationalTemplateOperation,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  template: PmsOperationalTemplate,
+): Promise<void> {
+  const idempotencyMetadata = { commandMeta, template };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'operational_template',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      command.templateKind,
+      sha256(stableJson(idempotencyMetadata)),
+      acceptedAt,
+      JSON.stringify(idempotencyMetadata),
+      operation,
+      keyHash,
+      command.propertyId,
+    ],
+  );
 }
 
 async function findPrivateNoteCommandReplay(
@@ -1328,9 +3008,10 @@ async function findAssignmentForCommand(
 
 async function findAssignmentsForOperationalCommand(
   client: PmsOperationsCommandClient,
-  command: PmsOperationalCommand,
+  command: PmsOperationalCommand | PmsCheckOutCommand,
 ): Promise<PmsAssignmentRow[]> {
-  const assignmentId = "stepResults" in command ? command.assignmentId : undefined;
+  const assignmentId =
+    "stepResults" in command || "inspectionResults" in command ? command.assignmentId : undefined;
   const result = await client.query<PmsAssignmentRow>(
     `SELECT
        id::text AS "assignmentId",
@@ -1362,7 +3043,7 @@ async function findAssignmentsForOperationalCommand(
 
 async function updateAssignmentsOperationalStatus(
   client: PmsOperationsCommandClient,
-  command: PmsOperationalCommand,
+  command: PmsOperationalCommand | PmsCheckOutCommand,
   sources: PmsAssignmentRow[],
   status: PmsOperationalStatus,
 ): Promise<void> {
@@ -1963,6 +3644,132 @@ function privateNoteConflict(
   };
 }
 
+function operationalTemplateConflict(
+  message: string,
+): Exclude<PmsOperationalTemplateCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "idempotency_conflict",
+    message,
+  };
+}
+
+function checkoutChargeReservationNotFound(
+  guestBookingId: string,
+): Exclude<PmsCheckoutChargeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "reservation_not_found",
+    message: `PMS reservation ${guestBookingId} was not found.`,
+  };
+}
+
+function checkoutChargeNotFound(
+  chargeId: string,
+): Exclude<PmsCheckoutChargeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "charge_not_found",
+    message: `PMS checkout charge ${chargeId} was not found.`,
+  };
+}
+
+function checkoutChargeConflict(
+  message: string,
+): Exclude<PmsCheckoutChargeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "idempotency_conflict",
+    message,
+  };
+}
+
+function checkoutChargeInvalidBody(
+  message: string,
+): Exclude<PmsCheckoutChargeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_body",
+    message,
+  };
+}
+
+function checkoutChargeInvalidTransition(
+  fromStatus: string,
+  toStatus: string,
+): Exclude<PmsCheckoutChargeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_status_transition",
+    message: `Cannot transition PMS checkout charge from ${fromStatus} to ${toStatus}.`,
+  };
+}
+
+function checkOutReservationNotFound(
+  guestBookingId: string,
+): Exclude<PmsCheckOutCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "reservation_not_found",
+    message: `PMS reservation ${guestBookingId} was not found.`,
+  };
+}
+
+function checkOutChargeNotFound(chargeId: string): Exclude<PmsCheckOutCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "charge_not_found",
+    message: `PMS checkout charge ${chargeId} was not found.`,
+  };
+}
+
+function checkOutConflict(message: string): Exclude<PmsCheckOutCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "idempotency_conflict",
+    message,
+  };
+}
+
+function checkOutVersionConflict(message: string): Exclude<PmsCheckOutCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "version_conflict",
+    message,
+  };
+}
+
+function checkOutInvalidBody(message: string): Exclude<PmsCheckOutCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_body",
+    message,
+  };
+}
+
+function checkOutInvalidTransition(
+  fromStatus: string,
+  toStatus: string,
+): Exclude<PmsCheckOutCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_status_transition",
+    message: `Cannot transition PMS reservation from ${fromStatus} to ${toStatus}.`,
+  };
+}
+
 function isPmsCommandMeta(value: unknown): value is PmsCommandMeta {
   return (
     !!value &&
@@ -1997,6 +3804,76 @@ function isPmsPrivateNote(value: unknown): value is PmsPrivateNote {
   );
 }
 
+function isPmsOperationalTemplate(value: unknown): value is PmsOperationalTemplate {
+  if (!value || typeof value !== "object") return false;
+  const template = value as PmsOperationalTemplate;
+  return (
+    typeof template.propertyId === "string" &&
+    (template.templateKind === "check_in_checklist" ||
+      template.templateKind === "check_out_inspection") &&
+    Array.isArray(template.steps) &&
+    (template.updatedByUserId === null || typeof template.updatedByUserId === "string") &&
+    (template.updatedAt === null || typeof template.updatedAt === "string")
+  );
+}
+
+function isPmsCheckoutCharge(value: unknown): value is PmsCheckoutCharge {
+  if (!value || typeof value !== "object") return false;
+  const charge = value as PmsCheckoutCharge;
+  return (
+    typeof charge.chargeId === "string" &&
+    typeof charge.propertyId === "string" &&
+    typeof charge.guestBookingId === "string" &&
+    (charge.assignmentId === null || typeof charge.assignmentId === "string") &&
+    typeof charge.label === "string" &&
+    !!charge.amount &&
+    typeof charge.amount.amountDecimal === "string" &&
+    typeof charge.amount.currency === "string" &&
+    !!charge.originalAmount &&
+    typeof charge.originalAmount.amountDecimal === "string" &&
+    typeof charge.originalAmount.currency === "string" &&
+    (charge.status === "pending" ||
+      charge.status === "paid" ||
+      charge.status === "waived" ||
+      charge.status === "void") &&
+    (charge.createdByUserId === null || typeof charge.createdByUserId === "string") &&
+    typeof charge.createdAt === "string" &&
+    (charge.settledAt === null || typeof charge.settledAt === "string") &&
+    (charge.waivedAt === null || typeof charge.waivedAt === "string") &&
+    charge.operationalOwnership?.owner === "pms" &&
+    charge.operationalOwnership.financeSettlementOwner === "finance" &&
+    charge.operationalOwnership.providerSettlement === false
+  );
+}
+
+function isPmsCheckOutRecord(value: unknown): value is PmsCheckOutRecord {
+  if (!value || typeof value !== "object") return false;
+  const checkout = value as PmsCheckOutRecord;
+  return (
+    typeof checkout.checkoutRecordId === "string" &&
+    typeof checkout.propertyId === "string" &&
+    typeof checkout.guestBookingId === "string" &&
+    (checkout.assignmentId === null || typeof checkout.assignmentId === "string") &&
+    (checkout.completedByUserId === null || typeof checkout.completedByUserId === "string") &&
+    typeof checkout.completedAt === "string" &&
+    Array.isArray(checkout.inspectionResults) &&
+    Array.isArray(checkout.chargesSettled) &&
+    Array.isArray(checkout.pendingFlags) &&
+    (checkout.checkoutNotes === null || typeof checkout.checkoutNotes === "string") &&
+    checkout.financeHandoff?.financeSettlementOwner === "finance" &&
+    checkout.financeHandoff.providerSettlement === false &&
+    Array.isArray(checkout.financeHandoff.pendingChargeIds) &&
+    Array.isArray(checkout.financeHandoff.unsettledPaidChargeIds)
+  );
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
 function stableJson(value: unknown): string {
   return JSON.stringify(sortJsonValue(value));
 }
@@ -2025,4 +3902,8 @@ async function rollbackQuietly(client: PmsOperationsCommandClient): Promise<void
 
 function isPgUniqueViolation(error: unknown): boolean {
   return !!error && typeof error === "object" && (error as { code?: string }).code === "23505";
+}
+
+function isPgForeignKeyViolation(error: unknown): boolean {
+  return !!error && typeof error === "object" && (error as { code?: string }).code === "23503";
 }

@@ -1,8 +1,21 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type {
+  BookingAdditionalGuestCreateCommand,
+  BookingAdditionalGuestDeleteCommand,
+  BookingAdditionalGuestInput,
+  BookingAdditionalGuestUpdateCommand,
+  BookingGuestPii,
+  BookingGuestPiiCommandMeta,
+  BookingGuestPiiCommandResult,
+  BookingGuestPiiDeleteResult,
+  BookingGuestPiiPort,
+  BookingGuestPiiProjection,
+} from "@vayada/domain-booking";
+import type {
   PmsCalendarDay,
   PmsOperationsReadRepository,
   PmsOperationalReservation,
+  PmsMoney,
   PmsReservationListFilters,
   PmsRoomBlockSummary,
   PmsRoom,
@@ -79,14 +92,19 @@ export type PmsReservationListResponse = {
 export type PmsReservationDetailResponse = {
   contractVersion: PmsOperationsContractVersion;
   propertyId: string;
-  item: PmsOperationalReservation;
+  item: PmsOperationalReservationDetail;
   sourceFreshness: PmsSourceFreshness;
+};
+
+export type PmsOperationalReservationDetail = PmsOperationalReservation & {
+  additionalGuests?: readonly BookingGuestPii[];
 };
 
 export type PmsAssignmentCommandAction = "assign" | "move" | "unassign" | "swap";
 export type PmsOperationsCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
 export type PmsAssignmentCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
 export type PmsPrivateNoteSource = "pms" | "migration" | "system";
+export type PmsCheckoutChargeStatus = "pending" | "paid" | "waived" | "void";
 
 export type PmsCommandMeta = {
   contractVersion: PmsOperationsContractVersion;
@@ -125,6 +143,61 @@ export type PmsPrivateNote = {
   authorDisplayName: string;
   createdAt: string;
   auditMetadata: PmsPrivateNoteAuditMetadata;
+};
+
+export type PmsTemplateStep = {
+  stepId: string;
+  label: string;
+  required: boolean;
+};
+
+export type PmsOperationalTemplateKind = "check_in_checklist" | "check_out_inspection";
+
+export type PmsOperationalTemplate = {
+  propertyId: string;
+  templateKind: PmsOperationalTemplateKind;
+  steps: PmsTemplateStep[];
+  updatedByUserId: string | null;
+  updatedAt: string | null;
+};
+
+export type PmsCheckoutCharge = {
+  chargeId: string;
+  propertyId: string;
+  guestBookingId: string;
+  assignmentId: string | null;
+  label: string;
+  amount: PmsMoney;
+  originalAmount: PmsMoney;
+  status: PmsCheckoutChargeStatus;
+  createdByUserId: string | null;
+  createdAt: string;
+  settledAt: string | null;
+  waivedAt: string | null;
+  operationalOwnership: {
+    owner: "pms";
+    financeSettlementOwner: "finance";
+    providerSettlement: false;
+  };
+};
+
+export type PmsCheckOutRecord = {
+  checkoutRecordId: string;
+  propertyId: string;
+  guestBookingId: string;
+  assignmentId: string | null;
+  completedByUserId: string | null;
+  completedAt: string;
+  inspectionResults: unknown[];
+  chargesSettled: PmsCheckoutCharge[];
+  pendingFlags: string[];
+  checkoutNotes: string | null;
+  financeHandoff: {
+    financeSettlementOwner: "finance";
+    providerSettlement: false;
+    pendingChargeIds: string[];
+    unsettledPaidChargeIds: string[];
+  };
 };
 
 export type PmsAssignmentCommandRequest = {
@@ -190,6 +263,20 @@ export type PmsNoShowCommand = {
   audit: PmsOperationsCommandAudit;
 };
 
+export type PmsCheckOutCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  expectedVersion?: string;
+  assignmentId?: string;
+  inspectionResults: unknown[];
+  chargesSettled: string[];
+  pendingFlags: string[];
+  checkoutNotes?: string;
+  audit: PmsOperationsCommandAudit;
+};
+
 export type PmsPrivateNoteCreateCommand = PmsPrivateNoteCreateRequest & {
   propertyId: string;
   guestBookingId: string;
@@ -204,6 +291,40 @@ export type PmsPrivateNoteDeleteCommand = PmsPrivateNoteDeleteRequest & {
   actorUserId: string;
 };
 
+export type PmsOperationalTemplateUpdateCommand = {
+  propertyId: string;
+  templateKind: PmsOperationalTemplateKind;
+  commandId: string;
+  idempotencyKey: string;
+  steps: PmsTemplateStep[];
+  actorUserId: string;
+};
+
+export type PmsCheckoutChargeCreateCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  assignmentId?: string;
+  label: string;
+  amountDecimal: string;
+  currency: string;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsCheckoutChargeMarkPaidCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  chargeId: string;
+  commandId: string;
+  idempotencyKey: string;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsCheckoutChargeWaiveCommand = PmsCheckoutChargeMarkPaidCommand & {
+  reason?: string;
+};
+
 export type PmsAssignmentCommandResponse = {
   contractVersion: PmsOperationsContractVersion;
   propertyId: string;
@@ -212,6 +333,31 @@ export type PmsAssignmentCommandResponse = {
 };
 
 export type PmsOperationsCommandResponse = PmsAssignmentCommandResponse;
+
+export type PmsAdditionalGuestsResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  items: readonly BookingGuestPii[];
+};
+
+export type PmsAdditionalGuestCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  additionalGuest: BookingGuestPii;
+  reservation: PmsOperationalReservationDetail;
+  commandMeta: BookingGuestPiiCommandMeta;
+};
+
+export type PmsAdditionalGuestDeleteResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  guestId: string;
+  reservation: PmsOperationalReservationDetail;
+  commandMeta: BookingGuestPiiCommandMeta;
+};
 
 export type PmsPrivateNotesResponse = {
   contractVersion: PmsOperationsContractVersion;
@@ -233,6 +379,41 @@ export type PmsPrivateNoteDeleteResponse = {
   propertyId: string;
   guestBookingId: string;
   noteId: string;
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsOperationalTemplateResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  template: PmsOperationalTemplate;
+};
+
+export type PmsOperationalTemplateCommandResponse = PmsOperationalTemplateResponse & {
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsCheckoutChargesResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  items: PmsCheckoutCharge[];
+};
+
+export type PmsCheckoutChargeCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  charge: PmsCheckoutCharge;
+  commandMeta: PmsCommandMeta;
+};
+
+export type PmsCheckOutCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  guestBookingId: string;
+  reservation: PmsOperationalReservation;
+  checkout: PmsCheckOutRecord;
+  charges: PmsCheckoutCharge[];
   commandMeta: PmsCommandMeta;
 };
 
@@ -272,7 +453,7 @@ export type PmsOperationalCommandResult =
   | {
       ok: false;
       statusCode: 400;
-      code: "invalid_status_transition";
+      code: "invalid_body" | "invalid_status_transition";
       message: string;
     }
   | {
@@ -316,6 +497,73 @@ export type PmsPrivateNoteDeleteResult =
       message: string;
     };
 
+export type PmsOperationalTemplateCommandResult =
+  | {
+      ok: true;
+      template: PmsOperationalTemplate;
+      commandMeta: PmsCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "idempotency_conflict";
+      message: string;
+    };
+
+export type PmsCheckoutChargeCommandResult =
+  | {
+      ok: true;
+      charge: PmsCheckoutCharge;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "invalid_body" | "invalid_status_transition";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 404;
+      code: "reservation_not_found" | "charge_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "idempotency_conflict";
+      message: string;
+    };
+
+export type PmsCheckOutCommandResult =
+  | {
+      ok: true;
+      reservation: PmsOperationalReservation;
+      checkout: PmsCheckOutRecord;
+      charges: PmsCheckoutCharge[];
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "invalid_body" | "invalid_status_transition";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 404;
+      code: "reservation_not_found" | "charge_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "version_conflict" | "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
@@ -326,6 +574,27 @@ export type PmsOperationsCommandRepository = {
   listPrivateNotes(propertyId: string, guestBookingId: string): Promise<PmsPrivateNote[] | null>;
   createPrivateNote(command: PmsPrivateNoteCreateCommand): Promise<PmsPrivateNoteCommandResult>;
   deletePrivateNote(command: PmsPrivateNoteDeleteCommand): Promise<PmsPrivateNoteDeleteResult>;
+  getOperationalTemplate(
+    propertyId: string,
+    templateKind: PmsOperationalTemplateKind,
+  ): Promise<PmsOperationalTemplate>;
+  updateOperationalTemplate(
+    command: PmsOperationalTemplateUpdateCommand,
+  ): Promise<PmsOperationalTemplateCommandResult>;
+  listCheckoutCharges(
+    propertyId: string,
+    guestBookingId: string,
+  ): Promise<PmsCheckoutCharge[] | null>;
+  createCheckoutCharge(
+    command: PmsCheckoutChargeCreateCommand,
+  ): Promise<PmsCheckoutChargeCommandResult>;
+  markCheckoutChargePaid(
+    command: PmsCheckoutChargeMarkPaidCommand,
+  ): Promise<PmsCheckoutChargeCommandResult>;
+  waiveCheckoutCharge(
+    command: PmsCheckoutChargeWaiveCommand,
+  ): Promise<PmsCheckoutChargeCommandResult>;
+  executeCheckOutCommand(command: PmsCheckOutCommand): Promise<PmsCheckOutCommandResult>;
   close?(): Promise<void>;
 };
 
@@ -333,6 +602,7 @@ export type PmsOperationsRoutesOptions = {
   repository: PmsOperationsReadRepository;
   checkoutChargeMarkPaidFreezeEnabled?: boolean;
   commandRepository?: PmsOperationsCommandRepository;
+  bookingGuestPiiPort?: BookingGuestPiiPort;
   allowedOrigins?: string[];
 };
 
@@ -350,6 +620,10 @@ type PmsReservationParams = PmsPropertyParams & {
 
 type PmsPrivateNoteParams = PmsReservationParams & {
   noteId: string;
+};
+
+type PmsAdditionalGuestParams = PmsReservationParams & {
+  guestId: string;
 };
 
 type PmsCheckoutChargeParams = PmsReservationParams & {
@@ -380,6 +654,28 @@ type PmsCheckoutChargeMarkPaidBody = {
   idempotencyKey?: unknown;
 };
 
+type PmsCheckoutChargeCommandBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  assignmentId?: unknown;
+  label?: unknown;
+  amountDecimal?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  reason?: unknown;
+};
+
+type PmsCheckOutCommandBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  expectedVersion?: unknown;
+  assignmentId?: unknown;
+  inspectionResults?: unknown;
+  chargesSettled?: unknown;
+  pendingFlags?: unknown;
+  checkoutNotes?: unknown;
+};
+
 type PmsOperationsErrorCategory =
   | "authentication"
   | "authorization"
@@ -399,12 +695,15 @@ type PmsOperationsErrorCode =
   | "invalid_body"
   | "invalid_date_range"
   | "invalid_status_transition"
+  | "invalid_guest_pii"
   | "finance_bridge_required"
   | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found"
-  | "note_not_found";
+  | "additional_guest_not_found"
+  | "note_not_found"
+  | "charge_not_found";
 
 type PmsOperationsError = {
   statusCode: 400 | 401 | 403 | 404 | 409 | 500;
@@ -421,23 +720,27 @@ type PmsOperationsAuthorizationErrorCode = Exclude<
   | "invalid_body"
   | "invalid_date_range"
   | "invalid_status_transition"
+  | "invalid_guest_pii"
   | "finance_bridge_required"
   | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found"
+  | "additional_guest_not_found"
   | "note_not_found"
+  | "charge_not_found"
 >;
 
 export async function registerPmsOperationsRoutes(
   app: FastifyInstance,
   options: PmsOperationsRoutesOptions,
 ): Promise<void> {
-  const { repository, commandRepository } = options;
+  const { repository, commandRepository, bookingGuestPiiPort } = options;
 
   app.addHook("onClose", async () => {
     await repository.close?.();
     await commandRepository?.close?.();
+    await bookingGuestPiiPort?.close?.();
   });
 
   for (const path of [
@@ -450,7 +753,15 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations/:guestBookingId",
     "/properties/:propertyId/reservations/:guestBookingId/notes",
     "/properties/:propertyId/reservations/:guestBookingId/notes/:noteId",
+    "/properties/:propertyId/reservations/:guestBookingId/additional-guests",
+    "/properties/:propertyId/reservations/:guestBookingId/additional-guests/:guestId",
+    "/properties/:propertyId/check-in-checklist",
+    "/properties/:propertyId/check-out-inspection",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid",
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/waive",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
+    "/properties/:propertyId/reservations/:guestBookingId/check-out",
     "/properties/:propertyId/reservations/:guestBookingId/assignments",
     "/properties/:propertyId/reservations/:guestBookingId/status",
     "/properties/:propertyId/reservations/:guestBookingId/check-in",
@@ -713,7 +1024,12 @@ export async function registerPmsOperationsRoutes(
         return {
           contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
           propertyId,
-          item,
+          item: await withAdditionalGuestProjection(
+            item,
+            bookingGuestPiiPort,
+            propertyId,
+            guestBookingId,
+          ),
           sourceFreshness: {},
         } satisfies PmsReservationDetailResponse;
       } catch {
@@ -725,33 +1041,210 @@ export async function registerPmsOperationsRoutes(
     },
   );
 
-  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
-    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
-    async (request, reply) => {
-      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
-        return sendPmsOperationsError(reply, {
-          statusCode: 403,
-          code: "missing_permission",
-          category: "authorization",
-          message: "PMS operations origin is not allowed.",
+  if (bookingGuestPiiPort) {
+    app.get<{ Params: PmsReservationParams }>(
+      "/properties/:propertyId/reservations/:guestBookingId/additional-guests",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+        const projection = await bookingGuestPiiPort.listGuestPiiForPmsOperations({
+          propertyId,
+          guestBookingId,
         });
-      }
-      const { propertyId } = request.params;
-      if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+        if (!projection) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 404,
+            code: "reservation_not_found",
+            category: "not_found",
+            message: "PMS reservation not found.",
+          });
+        }
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          items: projection.additionalGuests,
+        } satisfies PmsAdditionalGuestsResponse;
+      },
+    );
 
-      const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
-      if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
+    app.post<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/additional-guests",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
 
-      const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
-      if (freezeEnabled) {
-        return sendPmsOperationsError(reply, {
-          statusCode: 409,
-          code: "finance_bridge_required",
-          category: "conflict",
-          message: "Finance settlement bridge is required before marking checkout charges paid.",
-        });
-      }
+        const command = toAdditionalGuestCreateCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
 
+        const result = await bookingGuestPiiPort.createAdditionalGuestForPmsOperations(
+          command.value,
+        );
+        if (!result.ok) return sendBookingGuestPiiCommandError(reply, result);
+
+        const reservation = await reservationWithAdditionalGuestProjection(
+          repository,
+          propertyId,
+          guestBookingId,
+          result.projection,
+        );
+        if (!reservation) return sendPmsOperationsError(reply, reservationNotFoundError());
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          additionalGuest: result.additionalGuest,
+          reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsAdditionalGuestCommandResponse;
+      },
+    );
+
+    app.patch<{ Params: PmsAdditionalGuestParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/additional-guests/:guestId",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId, guestId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toAdditionalGuestUpdateCommand(
+          propertyId,
+          guestBookingId,
+          guestId,
+          request,
+        );
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await bookingGuestPiiPort.updateAdditionalGuestForPmsOperations(
+          command.value,
+        );
+        if (!result.ok) return sendBookingGuestPiiCommandError(reply, result);
+
+        const reservation = await reservationWithAdditionalGuestProjection(
+          repository,
+          propertyId,
+          guestBookingId,
+          result.projection,
+        );
+        if (!reservation) return sendPmsOperationsError(reply, reservationNotFoundError());
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          additionalGuest: result.additionalGuest,
+          reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsAdditionalGuestCommandResponse;
+      },
+    );
+
+    app.delete<{ Params: PmsAdditionalGuestParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/additional-guests/:guestId",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId, guestId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toAdditionalGuestDeleteCommand(
+          propertyId,
+          guestBookingId,
+          guestId,
+          request,
+        );
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await bookingGuestPiiPort.deleteAdditionalGuestForPmsOperations(
+          command.value,
+        );
+        if (!result.ok) return sendBookingGuestPiiCommandError(reply, result);
+
+        const reservation = await reservationWithAdditionalGuestProjection(
+          repository,
+          propertyId,
+          guestBookingId,
+          result.projection,
+        );
+        if (!reservation) return sendPmsOperationsError(reply, reservationNotFoundError());
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          guestId: result.guestId,
+          reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsAdditionalGuestDeleteResponse;
+      },
+    );
+  }
+
+  async function handleCheckoutChargeMarkPaid(
+    request: FastifyRequest<{
+      Params: PmsCheckoutChargeParams;
+      Body: PmsCheckoutChargeMarkPaidBody;
+    }>,
+    reply: FastifyReply,
+  ): Promise<FastifyReply | PmsCheckoutChargeCommandResponse> {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+    const { propertyId, guestBookingId, chargeId } = request.params;
+    if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+    const commandInput = toCheckoutChargeMarkPaidCommandMetadata(request.body);
+    if ("error" in commandInput) return sendPmsOperationsError(reply, commandInput.error);
+
+    const freezeEnabled = options.checkoutChargeMarkPaidFreezeEnabled ?? true;
+    if (freezeEnabled) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 409,
+        code: "finance_bridge_required",
+        category: "conflict",
+        message: "Finance settlement bridge is required before marking checkout charges paid.",
+      });
+    }
+    if (!isUuid(chargeId))
+      return sendPmsOperationsError(reply, invalidBody("chargeId must be a UUID."));
+
+    if (!commandRepository) {
       return sendPmsOperationsError(reply, {
         statusCode: 500,
         code: "read_model_unavailable",
@@ -759,10 +1252,251 @@ export async function registerPmsOperationsRoutes(
         message:
           "PMS checkout charge mark-paid must be wired to a durable command service before the freeze can be disabled.",
       });
-    },
+    }
+
+    const result = await commandRepository.markCheckoutChargePaid({
+      propertyId,
+      guestBookingId,
+      chargeId,
+      ...commandInput.value,
+      audit: pmsOperationsCommandAudit(
+        request,
+        commandInput.value.commandId,
+        "Mark checkout charge paid",
+      ),
+    });
+    if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
+
+    return {
+      contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+      propertyId,
+      guestBookingId,
+      charge: result.charge,
+      commandMeta: result.commandMeta,
+    } satisfies PmsCheckoutChargeCommandResponse;
+  }
+
+  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
+    handleCheckoutChargeMarkPaid,
+  );
+
+  app.post<{ Params: PmsCheckoutChargeParams; Body: PmsCheckoutChargeMarkPaidBody }>(
+    "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/mark-paid",
+    handleCheckoutChargeMarkPaid,
   );
 
   if (commandRepository) {
+    app.get<{ Params: PmsReservationParams }>(
+      "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+        try {
+          const charges = await commandRepository.listCheckoutCharges(propertyId, guestBookingId);
+          if (!charges) return sendPmsOperationsError(reply, reservationNotFoundError());
+
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            guestBookingId,
+            items: charges,
+          } satisfies PmsCheckoutChargesResponse;
+        } catch {
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable("PMS checkout charges read model is unavailable."),
+          );
+        }
+      },
+    );
+
+    app.post<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckoutChargeCreateCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.createCheckoutCharge(command.value);
+        if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          charge: result.charge,
+          commandMeta: result.commandMeta,
+        } satisfies PmsCheckoutChargeCommandResponse;
+      },
+    );
+
+    app.post<{ Params: PmsCheckoutChargeParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/waive",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId, chargeId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckoutChargeWaiveCommand(propertyId, guestBookingId, chargeId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.waiveCheckoutCharge(command.value);
+        if (!result.ok) return sendPmsCheckoutChargeCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          charge: result.charge,
+          commandMeta: result.commandMeta,
+        } satisfies PmsCheckoutChargeCommandResponse;
+      },
+    );
+
+    app.post<{ Params: PmsReservationParams; Body: PmsCheckOutCommandBody }>(
+      "/properties/:propertyId/reservations/:guestBookingId/check-out",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckOutCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.executeCheckOutCommand(command.value);
+        if (!result.ok) return sendPmsCheckOutCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          guestBookingId,
+          reservation: result.reservation,
+          checkout: result.checkout,
+          charges: result.charges,
+          commandMeta: result.commandMeta,
+        } satisfies PmsCheckOutCommandResponse;
+      },
+    );
+  }
+
+  if (commandRepository) {
+    for (const templateRoute of [
+      {
+        path: "/properties/:propertyId/check-in-checklist",
+        templateKind: "check_in_checklist",
+        unavailableMessage: "PMS check-in checklist template read model is unavailable.",
+      },
+      {
+        path: "/properties/:propertyId/check-out-inspection",
+        templateKind: "check_out_inspection",
+        unavailableMessage: "PMS check-out inspection template read model is unavailable.",
+      },
+    ] as const) {
+      app.get<{ Params: PmsPropertyParams }>(templateRoute.path, async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId } = request.params;
+        if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+        try {
+          const template = await commandRepository.getOperationalTemplate(
+            propertyId,
+            templateRoute.templateKind,
+          );
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            template,
+          } satisfies PmsOperationalTemplateResponse;
+        } catch {
+          return sendPmsOperationsError(
+            reply,
+            readModelUnavailable(templateRoute.unavailableMessage),
+          );
+        }
+      });
+
+      app.put<{ Params: PmsPropertyParams; Body: unknown }>(
+        templateRoute.path,
+        async (request, reply) => {
+          if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+            return sendPmsOperationsError(reply, {
+              statusCode: 403,
+              code: "missing_permission",
+              category: "authorization",
+              message: "PMS operations origin is not allowed.",
+            });
+          }
+          const { propertyId } = request.params;
+          if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+          const command = toOperationalTemplateUpdateCommand(
+            propertyId,
+            templateRoute.templateKind,
+            request,
+          );
+          if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+          const result = await commandRepository.updateOperationalTemplate(command.value);
+          if (!result.ok) {
+            return sendPmsOperationsError(reply, {
+              statusCode: result.statusCode,
+              code: result.code,
+              category: "conflict",
+              message: result.message,
+            });
+          }
+
+          return {
+            contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+            propertyId,
+            template: result.template,
+            commandMeta: result.commandMeta,
+          } satisfies PmsOperationalTemplateCommandResponse;
+        },
+      );
+    }
+
     app.get<{ Params: PmsReservationParams }>(
       "/properties/:propertyId/reservations/:guestBookingId/notes",
       async (request, reply) => {
@@ -1089,6 +1823,66 @@ function sendPmsOperationalCommandError(
   });
 }
 
+function sendPmsCheckoutChargeCommandError(
+  reply: FastifyReply,
+  result: Exclude<PmsCheckoutChargeCommandResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
+    message: result.message,
+  });
+}
+
+function sendPmsCheckOutCommandError(
+  reply: FastifyReply,
+  result: Exclude<PmsCheckOutCommandResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
+    message: result.message,
+  });
+}
+
+function sendBookingGuestPiiCommandError(
+  reply: FastifyReply,
+  result: Exclude<BookingGuestPiiCommandResult | BookingGuestPiiDeleteResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
+    message: result.message,
+  });
+}
+
+function reservationNotFoundError(): PmsOperationsError {
+  return {
+    statusCode: 404,
+    code: "reservation_not_found",
+    category: "not_found",
+    message: "PMS reservation not found.",
+  };
+}
+
 function writePmsOperationsCorsHeaders(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -1100,7 +1894,7 @@ function writePmsOperationsCorsHeaders(
   reply
     .header("Access-Control-Allow-Origin", origin)
     .header("Access-Control-Allow-Headers", "authorization,content-type,x-hotel-id")
-    .header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS")
+    .header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
     .header("Vary", "Origin");
   return true;
 }
@@ -1113,8 +1907,10 @@ function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaid
       };
     }
   | { error: PmsOperationsError } {
-  const commandId = nonEmptyString(body.commandId);
-  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const raw = objectBody(body);
+  if (!raw) return { error: invalidBody("Checkout charge mark-paid body must be an object.") };
+  const commandId = nonEmptyString(raw.commandId);
+  const idempotencyKey = nonEmptyString(raw.idempotencyKey);
   if (!commandId || !idempotencyKey) {
     return { error: invalidBody("Checkout charge mark-paid requires command metadata.") };
   }
@@ -1125,6 +1921,93 @@ function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaid
       idempotencyKey,
     },
   };
+}
+
+function toCheckoutChargeCreateCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsCheckoutChargeCreateCommand } | { error: PmsOperationsError } {
+  const metadata = toCheckoutChargeCommandMetadata(request.body, "Checkout charge create");
+  if ("error" in metadata) return metadata;
+  const raw = metadata.body;
+  const assignmentId = optionalStringField(raw.assignmentId);
+  const label = stringField(raw.label);
+  const amountDecimal = stringField(raw.amountDecimal) ?? stringField(raw.amount);
+  const currency = stringField(raw.currency)?.toUpperCase();
+
+  if (assignmentId && !isUuid(assignmentId)) {
+    return { error: invalidBody("assignmentId must be a UUID.") };
+  }
+  if (!label || label.length > 200) {
+    return { error: invalidBody("Checkout charge create requires a label up to 200 characters.") };
+  }
+  if (!amountDecimal || !isMoneyAmount(amountDecimal)) {
+    return { error: invalidBody("Checkout charge create requires a valid amountDecimal.") };
+  }
+  if (!currency || !/^[A-Z]{3}$/.test(currency)) {
+    return { error: invalidBody("Checkout charge create requires a three-letter currency.") };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      assignmentId,
+      label,
+      amountDecimal,
+      currency,
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Create checkout charge"),
+    },
+  };
+}
+
+function toCheckoutChargeWaiveCommand(
+  propertyId: string,
+  guestBookingId: string,
+  chargeId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsCheckoutChargeWaiveCommand } | { error: PmsOperationsError } {
+  if (!isUuid(chargeId)) return { error: invalidBody("chargeId must be a UUID.") };
+  const metadata = toCheckoutChargeCommandMetadata(request.body, "Checkout charge waive");
+  if ("error" in metadata) return metadata;
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      chargeId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      reason: optionalStringField(metadata.body.reason),
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Waive checkout charge"),
+    },
+  };
+}
+
+function toCheckoutChargeCommandMetadata(
+  body: unknown,
+  commandName: string,
+):
+  | {
+      body: Record<string, unknown>;
+      value: { commandId: string; idempotencyKey: string };
+    }
+  | { error: PmsOperationsError } {
+  const raw = objectBody(body);
+  if (!raw) return { error: invalidBody(`${commandName} body must be an object.`) };
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody(`${commandName} requires commandId and idempotencyKey.`) };
+  }
+  return { body: raw, value: { commandId, idempotencyKey } };
+}
+
+function isMoneyAmount(value: string): boolean {
+  return /^(0|[1-9]\d{0,12})(\.\d{1,2})?$/.test(value);
 }
 
 function invalidBody(message: string): PmsOperationsError {
@@ -1175,6 +2058,87 @@ function toPrivateNoteCreateCommand(
   };
 }
 
+function toOperationalTemplateUpdateCommand(
+  propertyId: string,
+  templateKind: PmsOperationalTemplateKind,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsOperationalTemplateUpdateCommand } | { error: PmsOperationsError } {
+  const body = objectBody(request.body);
+  if (!body) return { error: invalidBody("Template update body must be an object.") };
+
+  const commandId = stringField(body.commandId);
+  const idempotencyKey = stringField(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody("Template update requires commandId and idempotencyKey.") };
+  }
+
+  const steps = toOperationalTemplateSteps(body.steps);
+  if ("error" in steps) return steps;
+
+  return {
+    value: {
+      propertyId,
+      templateKind,
+      commandId,
+      idempotencyKey,
+      steps: steps.value,
+      actorUserId: request.authContext!.actor.internalUserId,
+    },
+  };
+}
+
+function toOperationalTemplateSteps(
+  value: unknown,
+): { value: PmsTemplateStep[] } | { error: PmsOperationsError } {
+  if (!Array.isArray(value)) {
+    return { error: invalidBody("Template steps must be an array.") };
+  }
+  if (value.length > 50) {
+    return { error: invalidBody("Template steps cannot exceed 50 items.") };
+  }
+
+  const steps: PmsTemplateStep[] = [];
+  const seenStepIds = new Set<string>();
+  for (const [index, item] of value.entries()) {
+    const raw = objectBody(item);
+    if (!raw) {
+      return { error: invalidBody(`Template step ${index + 1} must be an object.`) };
+    }
+
+    const stepId = stringField(raw.stepId);
+    const label = stringField(raw.label);
+    if (!stepId) {
+      return { error: invalidBody(`Template step ${index + 1} requires stepId.`) };
+    }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,99}$/.test(stepId)) {
+      return {
+        error: invalidBody(
+          `Template step ${index + 1} stepId must use letters, numbers, dots, underscores, colons, or hyphens.`,
+        ),
+      };
+    }
+    if (seenStepIds.has(stepId)) {
+      return { error: invalidBody(`Template stepId ${stepId} is duplicated.`) };
+    }
+    if (!label) {
+      return { error: invalidBody(`Template step ${index + 1} requires label.`) };
+    }
+    if (label.length > 200) {
+      return {
+        error: invalidBody(`Template step ${index + 1} label cannot exceed 200 characters.`),
+      };
+    }
+    if (raw.required !== undefined && typeof raw.required !== "boolean") {
+      return { error: invalidBody(`Template step ${index + 1} required must be a boolean.`) };
+    }
+
+    seenStepIds.add(stepId);
+    steps.push({ stepId, label, required: raw.required === true });
+  }
+
+  return { value: steps };
+}
+
 function toPrivateNoteDeleteCommand(
   propertyId: string,
   guestBookingId: string,
@@ -1206,10 +2170,181 @@ function toPrivateNoteDeleteCommand(
   };
 }
 
+function toAdditionalGuestCreateCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: BookingAdditionalGuestCreateCommand } | { error: PmsOperationsError } {
+  const metadata = toBookingGuestPiiCommandMetadata(request.body, "Additional guest create");
+  if ("error" in metadata) return metadata;
+  const guest = toAdditionalGuestInput(metadata.body.guest, true);
+  if ("error" in guest) return guest;
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      guest: guest.value,
+      audit: bookingGuestPiiAudit(request, metadata.value.commandId, "Create additional guest"),
+    },
+  };
+}
+
+function toAdditionalGuestUpdateCommand(
+  propertyId: string,
+  guestBookingId: string,
+  guestId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: BookingAdditionalGuestUpdateCommand } | { error: PmsOperationsError } {
+  if (!isUuid(guestId)) return { error: invalidBody("guestId must be a UUID.") };
+
+  const metadata = toBookingGuestPiiCommandMetadata(request.body, "Additional guest update");
+  if ("error" in metadata) return metadata;
+  const guest = toAdditionalGuestInput(metadata.body.guest, false);
+  if ("error" in guest) return guest;
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      guestId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      guest: guest.value,
+      audit: bookingGuestPiiAudit(request, metadata.value.commandId, "Update additional guest"),
+    },
+  };
+}
+
+function toAdditionalGuestDeleteCommand(
+  propertyId: string,
+  guestBookingId: string,
+  guestId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: BookingAdditionalGuestDeleteCommand } | { error: PmsOperationsError } {
+  if (!isUuid(guestId)) return { error: invalidBody("guestId must be a UUID.") };
+
+  const metadata = toBookingGuestPiiCommandMetadata(request.body, "Additional guest delete");
+  if ("error" in metadata) return metadata;
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      guestId,
+      commandId: metadata.value.commandId,
+      idempotencyKey: metadata.value.idempotencyKey,
+      audit: bookingGuestPiiAudit(request, metadata.value.commandId, "Delete additional guest"),
+    },
+  };
+}
+
+function toBookingGuestPiiCommandMetadata(
+  body: unknown,
+  commandName: string,
+):
+  | {
+      body: Record<string, unknown>;
+      value: { commandId: string; idempotencyKey: string };
+    }
+  | { error: PmsOperationsError } {
+  const raw = objectBody(body);
+  if (!raw) return { error: invalidBody(`${commandName} body must be an object.`) };
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody(`${commandName} requires commandId and idempotencyKey.`) };
+  }
+  return { body: raw, value: { commandId, idempotencyKey } };
+}
+
+function toAdditionalGuestInput(
+  value: unknown,
+  requireNames: boolean,
+): { value: BookingAdditionalGuestInput } | { error: PmsOperationsError } {
+  const raw = objectBody(value);
+  if (!raw) return { error: invalidBody("Additional guest payload must include a guest object.") };
+
+  const guest: BookingAdditionalGuestInput = {
+    firstName: stringField(raw.firstName) ?? "",
+    lastName: stringField(raw.lastName) ?? "",
+    email: nullableStringField(raw.email),
+    phone: nullableStringField(raw.phone),
+    countryCode: nullableStringField(raw.countryCode),
+    arrivalTime: nullableStringField(raw.arrivalTime),
+    specialRequests: nullableStringField(raw.specialRequests),
+  };
+
+  if (requireNames && (!guest.firstName || !guest.lastName)) {
+    return { error: invalidBody("Additional guest requires firstName and lastName.") };
+  }
+  if (!requireNames) {
+    const suppliedKeys = Object.keys(raw).filter((key) =>
+      [
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "countryCode",
+        "arrivalTime",
+        "specialRequests",
+      ].includes(key),
+    );
+    if (suppliedKeys.length === 0) {
+      return { error: invalidBody("Additional guest update requires at least one guest field.") };
+    }
+    return {
+      value: Object.fromEntries(
+        Object.entries(guest).filter(([key]) => suppliedKeys.includes(key)),
+      ) as BookingAdditionalGuestInput,
+    };
+  }
+
+  return { value: guest };
+}
+
 function objectBody(body: unknown): Record<string, unknown> | undefined {
   return body && typeof body === "object" && !Array.isArray(body)
     ? (body as Record<string, unknown>)
     : undefined;
+}
+
+async function withAdditionalGuestProjection(
+  reservation: PmsOperationalReservation,
+  bookingGuestPiiPort: BookingGuestPiiPort | undefined,
+  propertyId: string,
+  guestBookingId: string,
+): Promise<PmsOperationalReservationDetail> {
+  if (!bookingGuestPiiPort) return reservation;
+  const projection = await bookingGuestPiiPort.listGuestPiiForPmsOperations({
+    propertyId,
+    guestBookingId,
+  });
+  return applyAdditionalGuestProjection(reservation, projection);
+}
+
+async function reservationWithAdditionalGuestProjection(
+  repository: PmsOperationsReadRepository,
+  propertyId: string,
+  guestBookingId: string,
+  projection: BookingGuestPiiProjection,
+): Promise<PmsOperationalReservationDetail | null> {
+  const reservation = await repository.findReservationByGuestBookingId(propertyId, guestBookingId);
+  return reservation ? applyAdditionalGuestProjection(reservation, projection) : null;
+}
+
+function applyAdditionalGuestProjection(
+  reservation: PmsOperationalReservation,
+  projection: BookingGuestPiiProjection | null,
+): PmsOperationalReservationDetail {
+  if (!projection) return { ...reservation, additionalGuests: [] };
+  return {
+    ...reservation,
+    additionalGuestCount: projection.additionalGuests.length,
+    additionalGuests: projection.additionalGuests,
+  };
 }
 
 function readModelUnavailable(message: string): PmsOperationsError {
@@ -1463,6 +2598,53 @@ function toCheckInCommand(
   };
 }
 
+function toCheckOutCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: PmsCheckOutCommandBody }>,
+): { value: PmsCheckOutCommand } | { error: PmsOperationsError } {
+  const metadata = toOperationalCommandMetadata(request.body, "Check-out command");
+  if ("error" in metadata) return metadata;
+  const raw = request.body as Record<string, unknown>;
+  const assignmentId = optionalStringField(raw.assignmentId);
+  const checkoutNotes = optionalStringField(raw.checkoutNotes);
+
+  if (assignmentId && !isUuid(assignmentId)) {
+    return { error: invalidBody("assignmentId must be a UUID.") };
+  }
+  if (!Array.isArray(raw.inspectionResults)) {
+    return { error: invalidBody("Check-out command requires inspectionResults as an array.") };
+  }
+  if (!Array.isArray(raw.chargesSettled)) {
+    return { error: invalidBody("Check-out command requires chargesSettled as an array.") };
+  }
+  if (
+    !raw.chargesSettled.every(
+      (chargeId): chargeId is string => typeof chargeId === "string" && isUuid(chargeId.trim()),
+    )
+  ) {
+    return { error: invalidBody("chargesSettled entries must be UUIDs.") };
+  }
+  const chargesSettled = raw.chargesSettled.map((chargeId) => chargeId.trim());
+  if (checkoutNotes && checkoutNotes.length > 5000) {
+    return { error: invalidBody("checkoutNotes must be 5000 characters or fewer.") };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      ...metadata.value,
+      assignmentId,
+      inspectionResults: raw.inspectionResults,
+      chargesSettled,
+      pendingFlags: toStringArray(raw.pendingFlags),
+      checkoutNotes,
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Check out guest"),
+    },
+  };
+}
+
 function toNoShowCommand(
   propertyId: string,
   guestBookingId: string,
@@ -1536,6 +2718,22 @@ function pmsOperationsCommandAudit(
     correlationId: authContext?.audit.correlationId,
     reason,
     requestedAt: authContext?.audit.receivedAt ?? now,
+  };
+}
+
+function bookingGuestPiiAudit(
+  request: FastifyRequest,
+  commandId: string,
+  reason: string,
+): BookingAdditionalGuestCreateCommand["audit"] {
+  const authContext = request.authContext!;
+  return {
+    actorUserId: authContext.actor.internalUserId,
+    actorOrganizationId: authContext.selectedOrganization.organizationId,
+    requestId: authContext.audit.requestId,
+    correlationId: authContext.audit.correlationId ?? commandId,
+    source: "pms_operations",
+    reason,
   };
 }
 

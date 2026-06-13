@@ -378,6 +378,104 @@ describe("@vayada/domain-booking dashboard metrics read model contract", () => {
   });
 });
 
+describe("@vayada/domain-booking guest PII port contract", () => {
+  it("BookingGuestPiiPort is satisfied by a Booking-owned in-memory adapter", async () => {
+    const projection = {
+      propertyId: "prop_alpenrose",
+      guestBookingId: "guest_booking_123",
+      primaryGuest: {
+        guestId: "guest_primary",
+        guestBookingId: "guest_booking_123",
+        role: "booker" as const,
+        displayName: "Nora Example",
+        firstName: "Nora",
+        lastName: "Example",
+        email: "nora@example.test",
+        phone: null,
+        countryCode: "CH",
+        arrivalTime: null,
+        specialRequests: null,
+      },
+      additionalGuests: [],
+    };
+    const stub: import("./index.js").BookingGuestPiiPort = {
+      async listGuestPiiForPmsOperations() {
+        return projection;
+      },
+      async createAdditionalGuestForPmsOperations(command) {
+        const additionalGuest = {
+          guestId: "guest_additional",
+          guestBookingId: command.guestBookingId,
+          role: "additional_guest" as const,
+          displayName: `${command.guest.firstName} ${command.guest.lastName}`,
+          firstName: command.guest.firstName,
+          lastName: command.guest.lastName,
+          email: command.guest.email ?? null,
+          phone: command.guest.phone ?? null,
+          countryCode: command.guest.countryCode ?? null,
+          arrivalTime: command.guest.arrivalTime ?? null,
+          specialRequests: command.guest.specialRequests ?? null,
+        };
+        return {
+          ok: true,
+          additionalGuest,
+          projection: { ...projection, additionalGuests: [additionalGuest] },
+          commandMeta: {
+            contractVersion: "booking-guest-pii.v1",
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            acceptedAt: "2026-08-14T17:10:00.000Z",
+            sideEffects: ["audit_event"],
+          },
+        };
+      },
+      async updateAdditionalGuestForPmsOperations(command) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "additional_guest_not_found",
+          message: `Additional guest ${command.guestId} was not found.`,
+        };
+      },
+      async deleteAdditionalGuestForPmsOperations(command) {
+        return {
+          ok: true,
+          guestId: command.guestId,
+          projection,
+          commandMeta: {
+            contractVersion: "booking-guest-pii.v1",
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            acceptedAt: "2026-08-14T17:15:00.000Z",
+            sideEffects: ["audit_event"],
+          },
+        };
+      },
+    };
+
+    const result = await stub.createAdditionalGuestForPmsOperations({
+      propertyId: "prop_alpenrose",
+      guestBookingId: "guest_booking_123",
+      commandId: "cmd_additional_guest",
+      idempotencyKey: "pms-additional-guest-001",
+      guest: { firstName: "Mira", lastName: "Example", email: "mira@example.test" },
+      audit: {
+        actorUserId: "user_hotel_owner",
+        actorOrganizationId: "org_hotel_group",
+        requestId: "req_123",
+        source: "pms_operations",
+        reason: "PMS additional guest update",
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.additionalGuest.role).toBe("additional_guest");
+    expect(result.projection.additionalGuests).toHaveLength(1);
+    expect(result.commandMeta.contractVersion).toBe("booking-guest-pii.v1");
+  });
+});
+
 function fakeMetrics(): BookingDashboardMetricsReadModel {
   return {
     propertyId: "prop_alpenrose",

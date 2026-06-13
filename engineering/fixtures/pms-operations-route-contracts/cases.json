@@ -588,7 +588,28 @@
         "mustCall": ["BookingGuestPiiCommandPort.createAdditionalGuest"],
         "mustNotWrite": ["pms.* guest PII table", "booking.booking_guests via PMS SQL"],
         "mustInclude": ["reservation.additionalGuestCount", "additionalGuest.guestId"],
+        "commandMeta": {
+          "contractVersion": "booking-guest-pii.v1",
+          "sideEffects": ["audit_event"]
+        },
         "piiOwnership": "Booking owns validation, retention, and guest-visible audit rules."
+      }
+    },
+    {
+      "caseId": "checklist-template-read",
+      "description": "Check-in checklist template reads expose PMS-owned operational setup steps.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-in-checklist",
+        "method": "GET"
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "template.steps[0].stepId",
+          "template.steps[0].label",
+          "template.updatedAt"
+        ],
+        "targetOwner": "pms.checkin_checklist_templates"
       }
     },
     {
@@ -613,6 +634,23 @@
       }
     },
     {
+      "caseId": "inspection-template-read",
+      "description": "Check-out inspection template reads expose PMS-owned operational setup steps.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-out-inspection",
+        "method": "GET"
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "template.steps[0].stepId",
+          "template.steps[0].label",
+          "template.updatedAt"
+        ],
+        "targetOwner": "pms.checkout_inspection_templates"
+      }
+    },
+    {
       "caseId": "inspection-template-write",
       "description": "Check-out inspection template writes persist PMS-owned operational setup steps.",
       "request": {
@@ -634,8 +672,63 @@
       }
     },
     {
+      "caseId": "template-validation-non-array",
+      "description": "Template writes reject non-array step payloads.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-in-checklist",
+        "method": "PUT",
+        "body": {
+          "commandId": "cmd-checklist-template-invalid-non-array",
+          "idempotencyKey": "pms-checklist-template-invalid-non-array",
+          "steps": { "stepId": "passport", "label": "Verify passport" }
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_body"
+      }
+    },
+    {
+      "caseId": "template-validation-oversized",
+      "description": "Template writes reject oversized step arrays.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-in-checklist",
+        "method": "PUT",
+        "body": {
+          "commandId": "cmd-checklist-template-invalid-oversized",
+          "idempotencyKey": "pms-checklist-template-invalid-oversized",
+          "steps": [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            47, 48, 49, 50, 51
+          ]
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_body"
+      }
+    },
+    {
+      "caseId": "template-validation-missing-label",
+      "description": "Template writes reject step objects without labels.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/check-out-inspection",
+        "method": "PUT",
+        "body": {
+          "commandId": "cmd-inspection-template-invalid-missing-label",
+          "idempotencyKey": "pms-inspection-template-invalid-missing-label",
+          "steps": [{ "stepId": "damage", "required": true }]
+        }
+      },
+      "expected": {
+        "status": 400,
+        "errorCode": "invalid_body"
+      }
+    },
+    {
       "caseId": "checkout-charge-create-mark-paid-waive",
-      "description": "Checkout charge operations update PMS operational charge state without finance provider side effects.",
+      "description": "Checkout charge operations update PMS operational charge state without finance provider settlement, invoice, payout, or reconciliation ownership.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/checkout-charges",
         "method": "POST",
@@ -648,19 +741,34 @@
         }
       },
       "alsoExercises": [
+        "GET /checkout-charges",
         "POST /checkout-charges/:chargeId/mark-paid",
         "POST /checkout-charges/:chargeId/waive"
       ],
       "expected": {
         "status": 200,
-        "mustInclude": ["charge.chargeId", "charge.status", "commandMeta.sideEffects"],
+        "mustInclude": [
+          "charge.chargeId",
+          "charge.status",
+          "charge.operationalOwnership.owner",
+          "charge.operationalOwnership.financeSettlementOwner",
+          "charge.operationalOwnership.providerSettlement",
+          "commandMeta.sideEffects"
+        ],
         "enums": { "charge.status": ["pending", "paid", "waived", "void"] },
-        "mustNotCall": ["payment provider capture", "invoice posting", "payout dispatcher"]
+        "financeOwnership": "PMS owns checkout charge operational state only; finance owns provider collection, manual settlement contracts, invoices, payouts, reconciliation, and payout dispatch.",
+        "mustNotCall": [
+          "payment provider capture",
+          "invoice posting",
+          "payout dispatcher",
+          "finance reconciliation"
+        ],
+        "mustNotWrite": ["finance.payments", "finance.payouts", "platform.outbox_events"]
       }
     },
     {
       "caseId": "checkout-charges-and-checkout",
-      "description": "Checkout charge commands update operational charge state without claiming finance settlement ownership.",
+      "description": "Check-out creates a PMS checkout record, snapshots paid operational charges, updates assignment status, and hands finance-owned settlement forward without dispatching finance work.",
       "request": {
         "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
         "method": "POST",
@@ -678,10 +786,47 @@
         "mustInclude": [
           "reservation.checkout.completedAt",
           "reservation.checkout.pendingFlags",
+          "reservation.assignments[0].assignmentStatus",
+          "checkout.inspectionResults",
+          "checkout.chargesSettled",
+          "checkout.financeHandoff.financeSettlementOwner",
           "charges[0].status",
           "commandMeta.sideEffects"
         ],
-        "financeOwnership": "Payment provider collection, invoice posting, and payouts are out of scope for this command."
+        "financeOwnership": "Payment provider collection, invoice posting, payouts, and reconciliation are out of scope for this command.",
+        "mustNotCall": [
+          "payment provider capture",
+          "invoice posting",
+          "payout dispatcher",
+          "finance reconciliation"
+        ],
+        "mustNotWrite": ["finance.payments", "finance.payouts", "platform.outbox_events"]
+      }
+    },
+    {
+      "caseId": "checkout-pending-flags",
+      "description": "Check-out persists explicit pending flags and records finance handoff metadata when paid operational charges still require finance-owned settlement handling.",
+      "request": {
+        "path": "/api/pms/properties/f6853000-0000-0000-0000-000000000001/reservations/f6854000-0000-0000-0000-000000000001/check-out",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-checkout-pending-001",
+          "idempotencyKey": "pms-checkout-pending-001",
+          "expectedVersion": "reservation-v7",
+          "inspectionResults": [{ "stepId": "minibar", "status": "completed" }],
+          "chargesSettled": [],
+          "pendingFlags": ["manual_review"],
+          "checkoutNotes": "Guest departed while finance settlement remains owner-controlled."
+        }
+      },
+      "expected": {
+        "status": 200,
+        "mustInclude": [
+          "reservation.checkout.pendingFlags",
+          "checkout.pendingFlags",
+          "checkout.financeHandoff.unsettledPaidChargeIds"
+        ],
+        "mustNotWrite": ["finance.payments", "finance.payouts", "platform.outbox_events"]
       }
     },
     {

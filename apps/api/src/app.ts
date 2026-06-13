@@ -1,5 +1,6 @@
 import { backendAuthPlugin, type BackendAuthPluginOptions } from "@vayada/backend-auth";
 import type { IdentityLifecycleCommandBus } from "@vayada/backend-auth";
+import type { BookingGuestPiiPort } from "@vayada/domain-booking";
 import {
   createAuthorizationResolver,
   type EntitlementRepository,
@@ -96,6 +97,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   pmsOperationsRepository?: PmsOperationsReadRepository;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
+  bookingGuestPiiPort?: BookingGuestPiiPort;
   pmsOperationsAllowedOrigins?: string[];
   bookingDashboardMetricsReadPort?: BookingRoutesOptions["dashboardMetricsReadPort"];
   bookingSettingsRepository?: BookingSettingsReadRepository;
@@ -270,6 +272,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       repository: options.pmsOperationsRepository,
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
+      bookingGuestPiiPort: options.bookingGuestPiiPort,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
