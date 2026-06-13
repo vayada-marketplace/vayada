@@ -20,7 +20,18 @@ import type {
   FinancePaymentLedgerItem,
   FinancePaymentLedgerQuery,
   FinancePaymentSettingsReadModel,
+  FinancePayout,
+  FinancePayoutListQuery,
+  FinanceReconciliationItem,
+  FinanceReconciliationViewKind,
+  FinanceReconciliationViewQuery,
   FinancePropertyReadRepository,
+  FinanceProviderAccountCommandResult,
+  FinanceStripeConnectProvider,
+  CreateStripeProviderAccountCommand,
+  IssueStripeOnboardingLinkCommand,
+  FinanceXenditPayoutReconciliationCommand,
+  FinanceXenditPayoutReconciliationResult,
 } from "@vayada/domain-finance";
 import { createHash } from "node:crypto";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
@@ -32,10 +43,13 @@ import { buildApp } from "./app.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import {
   createTargetFinancePropertySettingsRepository,
+  type FinanceXenditBankValidator,
   type FinancePublicHotelPropertyResolver,
 } from "./routes/finance.js";
 
 const propertyId = "f3000000-0000-0000-0000-000000000686";
+const affiliateId = "affiliate_finance_partner_686";
+const affiliateOrganizationId = "f2000000-0000-0000-0000-000000000686";
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
 
 const financeContractCases = JSON.parse(
@@ -58,7 +72,11 @@ const financeContractCases = JSON.parse(
       stableOrdering?: string;
       mustInclude?: string[];
       mustExclude?: string[];
+      mustNotWrite?: string[];
       errorCode?: string;
+      providerAccountId?: string;
+      legacyDisposition?: string;
+      job?: { jobType: string; idempotencyKey: string };
       commandMeta?: { sideEffects?: string[] };
       enums?: Record<string, string[]>;
     };
@@ -237,6 +255,81 @@ const paymentLedgerItems: FinancePaymentLedgerItem[] = [
   },
 ];
 
+const payoutItems: FinancePayout[] = [
+  {
+    payoutId: "payout_2026_abcd",
+    ownerScope: "property",
+    propertyId,
+    organizationId: null,
+    relatedPropertyId: null,
+    guestBookingId: invoiceListItems[0]!.guestBookingId,
+    paymentId: paymentLedgerItems[0]!.paymentId,
+    payoutStatus: "failed",
+    amount: "1000.00",
+    feeAmount: "25.00",
+    netAmount: "975.00",
+    currency: "EUR",
+    provider: "stripe",
+    providerPayoutId: "po_stripe_failed_686",
+    scheduledAt: "2026-06-12T11:00:00.000Z",
+    paidAt: null,
+    failedAt: "2026-06-12T11:30:00.000Z",
+    failureCode: "bank_account_restricted",
+    retryCount: 2,
+  },
+];
+
+const reconciliationSourceFreshness = {
+  providerReceiptsFreshAt: "2026-06-12T11:32:00.000Z",
+  jobsFreshAt: "2026-06-12T11:35:00.000Z",
+  deadLettersFreshAt: "2026-06-12T11:36:00.000Z",
+};
+
+const reconciliationItems: Record<FinanceReconciliationViewKind, FinanceReconciliationItem[]> = {
+  payments: [
+    {
+      subjectId: "pay_card_needs_review_686",
+      subjectType: "payment",
+      provider: "stripe",
+      financeStatus: "pending",
+      providerStatus: "requires_capture",
+      latestReceiptStatus: "stale",
+      jobStatus: "failed",
+      recommendedAction: "enqueue_reconcile",
+      lastReceiptAt: "2026-06-12T11:20:00.000Z",
+      lastJobAt: "2026-06-12T11:25:00.000Z",
+    },
+  ],
+  payouts: [
+    {
+      subjectId: payoutItems[0]!.payoutId,
+      subjectType: "payout",
+      provider: "stripe",
+      financeStatus: "failed",
+      providerStatus: "failed",
+      latestReceiptStatus: "dead_lettered",
+      jobStatus: "dead_lettered",
+      recommendedAction: "manual_review",
+      lastReceiptAt: "2026-06-12T11:32:00.000Z",
+      lastJobAt: "2026-06-12T11:35:00.000Z",
+    },
+  ],
+  "provider-accounts": [
+    {
+      subjectId: "acct_target_alpenrose",
+      subjectType: "provider_account",
+      provider: "stripe",
+      financeStatus: "restricted",
+      providerStatus: "currently_due",
+      latestReceiptStatus: "stale",
+      jobStatus: "queued",
+      recommendedAction: "refresh_provider_state",
+      lastReceiptAt: "2026-06-12T11:10:00.000Z",
+      lastJobAt: "2026-06-12T11:15:00.000Z",
+    },
+  ],
+};
+
 const financialSummary: FinanceFinancialSummary = {
   currency: "EUR",
   periodStart: "2026-06-01",
@@ -329,6 +422,284 @@ describe("finance route contracts", () => {
         /providerPayloadRaw|providerPaymentIntentSecret|cardFingerprint|processorFeeBreakdown|guestBirthDate|privatePmsNotes|providerPaymentIntentId|booking_guests/,
       );
     }
+  });
+
+  it("passes F1e payout and reconciliation fixture cases in target mode", async () => {
+    app = buildFinanceApp();
+
+    for (const caseId of [
+      "payout-list-read",
+      "payment-reconciliation-view",
+      "payout-reconciliation-view",
+      "provider-account-reconciliation-view",
+    ]) {
+      const contractCase = financeContractCases.cases.find(
+        (candidate) => candidate.caseId === caseId,
+      );
+      expect(contractCase, caseId).toBeDefined();
+
+      const response = await injectJson<Record<string, unknown>>(app, {
+        method: "GET",
+        url: contractCase!.request.path,
+        query: queryStrings(contractCase!.request.query),
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode, caseId).toBe(contractCase!.expected.status);
+      if (contractCase!.expected.itemCount !== undefined) {
+        const list = caseId === "payout-list-read" ? response.body.payouts : response.body.items;
+        expect(list, caseId).toHaveLength(contractCase!.expected.itemCount);
+      }
+      assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], caseId);
+      assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], caseId);
+      expect(JSON.stringify(response.body), caseId).not.toMatch(
+        /providerPayloadRaw|accountNumber|accountHolderName|sensitiveDestinationRef|stripeSecretKey|xenditApiKey|processorSecret|guestEmail/,
+      );
+    }
+  });
+
+  it("passes F1f Stripe property and affiliate onboarding fixture cases without duplicate accounts", async () => {
+    const propertyRepository = stripeProviderAccountRepository();
+    app = buildFinanceApp({
+      repository: propertyRepository,
+      permissions: financeManagePermissions(),
+    });
+    const propertyCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "stripe-property-onboarding-idempotent",
+    );
+    expect(propertyCase).toBeDefined();
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: propertyCase!.request.path,
+      payload: propertyCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: propertyCase!.request.path,
+      payload: propertyCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(propertyCase!.expected.status);
+    expect(replay.statusCode).toBe(propertyCase!.expected.status);
+    expect(first.body.providerAccountId).toBe(propertyCase!.expected.providerAccountId);
+    expect(replay.body.providerAccountId).toBe(first.body.providerAccountId);
+    expect(readContractPath(replay.body, "commandMeta.idempotencyKey")).toBe(
+      "finance-stripe-property-f300686",
+    );
+    assertIncludes(first.body, propertyCase!.expected.mustInclude ?? [], propertyCase!.caseId);
+    assertExcludes(first.body, propertyCase!.expected.mustExclude ?? [], propertyCase!.caseId);
+    expect(propertyRepository.providerCreateCount).toBe(1);
+    await app.close();
+    app = null;
+
+    const affiliateRepository = stripeProviderAccountRepository();
+    app = buildAffiliateFinanceApp({ repository: affiliateRepository });
+    const affiliateCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "stripe-affiliate-onboarding-boundary",
+    );
+    expect(affiliateCase).toBeDefined();
+
+    const affiliateResponse = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: affiliateCase!.request.path,
+      payload: affiliateCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(affiliateResponse.statusCode).toBe(affiliateCase!.expected.status);
+    expect(affiliateResponse.body.providerAccountId).toBe(
+      affiliateCase!.expected.providerAccountId,
+    );
+    expect(JSON.stringify(affiliateResponse.body)).not.toMatch(
+      /referralCode|booking_web_affiliates|stripeSecretKey/,
+    );
+    expect(affiliateRepository.providerCreateCount).toBe(1);
+  });
+
+  it("preserves the VAY-774 affiliate onboarding-link facade shape", async () => {
+    const repository = stripeProviderAccountRepository();
+    repository.seedAffiliateProviderAccount();
+    app = buildAffiliateFinanceApp({ repository });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: `/api/finance/affiliates/${affiliateId}/provider-accounts/f7100000-0000-0000-0000-000000000686/onboarding-link`,
+      payload: {
+        commandId: "cmd-stripe-affiliate-link-001",
+        idempotencyKey: "finance-stripe-affiliate-link-686",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      onboardingUrl: "https://connect.stripe.test/onboard/acct_affiliate_686/2",
+    });
+  });
+
+  it("compensates when Stripe succeeds but the target provider-account write fails", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool({ failInsert: true });
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+
+    const result = await repository.createStripeProviderAccount!(
+      stripePropertyTargetCommand({
+        idempotencyKey: "finance-stripe-property-compensation",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      statusCode: 500,
+      code: "write_unavailable",
+    });
+    expect(provider.createAccountCount).toBe(1);
+    expect(provider.compensationCount).toBe(1);
+    expect(target.requiredCall("UPDATE platform.idempotency_keys").values?.[1]).toEqual(
+      expect.stringContaining("compensation"),
+    );
+  });
+
+  it("persists target Stripe provider accounts by owner scope and replays without duplicate provider accounts", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+
+    const first = await repository.createStripeProviderAccount!(stripePropertyTargetCommand());
+    target.existingAccount = {
+      providerAccountId: first.ok ? first.response.providerAccountId : "",
+      providerAccountRef: first.ok ? first.response.providerAccountRef : "",
+      status: "setup_incomplete",
+      onboardingStatus: "invited",
+      onboardingUrl: first.ok ? first.response.onboardingUrl : null,
+    };
+    const replay = await repository.createStripeProviderAccount!(stripePropertyTargetCommand());
+
+    expect(first.ok).toBe(true);
+    expect(replay.ok).toBe(true);
+    if (!first.ok || !replay.ok) throw new Error("Unexpected Stripe provider-account failure");
+    expect(replay.response.providerAccountId).toBe(first.response.providerAccountId);
+    expect(provider.createAccountCount).toBe(1);
+
+    const idempotencyInsert = target.requiredCall("INSERT INTO platform.idempotency_keys");
+    expect(idempotencyInsert.text).toMatch(/'finance'/);
+    expect(idempotencyInsert.values?.[3]).toBe("property");
+    const accountInsert = target.requiredCall("INSERT INTO finance.payment_provider_accounts");
+    expect(accountInsert.values?.[0]).toBe(propertyId);
+    expect(accountInsert.values?.[1]).toBeNull();
+    expect(accountInsert.values?.[2]).toBe("property");
+  });
+
+  it("passes the F1g Xendit bank validation fixture without leaking raw bank data", async () => {
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "xendit-bank-validation",
+    );
+    expect(contractCase).toBeDefined();
+    const validator: FinanceXenditBankValidator = {
+      async validateBankAccount(input) {
+        expect(input).toMatchObject({
+          channelCode: "ID_BCA",
+          accountNumber: "1234567890",
+          accountHolderName: "Alpenrose Hotel GmbH",
+          idempotencyKey: "finance-xendit-bank-validation-f300686",
+        });
+        return {
+          status: "valid",
+          accountHolderName: "Alpenrose Hotel GmbH",
+          providerReference: "xbi_686",
+        };
+      },
+    };
+    app = buildFinanceApp({
+      permissions: financeManagePermissions(),
+      xenditBankValidator: validator,
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], contractCase!.caseId);
+    expect(response.body).toMatchObject({
+      provider: "xendit",
+      validation: {
+        status: "valid",
+        maskedAccountNumber: "******7890",
+        accountHolderName: "Alpenrose Hotel GmbH",
+      },
+      commandMeta: {
+        idempotencyKey: "finance-xendit-bank-validation-f300686",
+        sideEffects: ["provider_validation", "audit_event"],
+        jobs: [],
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toContain("1234567890");
+  });
+
+  it("passes the F1g Xendit payout reconciliation enqueue fixture idempotently", async () => {
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "payout-reconciliation-enqueues-job",
+    );
+    expect(contractCase).toBeDefined();
+    const repository = xenditPayoutReconciliationRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(contractCase!.expected.status);
+    expect(replay.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(first.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    expect(first.body).toMatchObject({
+      job: contractCase!.expected.job,
+      legacyDisposition: contractCase!.expected.legacyDisposition,
+      commandMeta: {
+        idempotencyKey: "finance-reconcile-xendit-payouts-f300686-2026-06-12",
+        sideEffects: ["reconciliation_job", "audit_event"],
+        jobs: [{ status: "queued" }],
+      },
+    });
+    expect(replay.body).toMatchObject({
+      job: {
+        idempotencyKey:
+          "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1",
+        status: "idempotent_replay",
+      },
+      commandMeta: {
+        jobs: [{ status: "idempotent_replay" }],
+      },
+    });
+    assertExcludes(first.body, contractCase!.expected.mustNotWrite ?? [], contractCase!.caseId);
+    expect(repository.enqueueCount).toBe(1);
   });
 
   it("passes the F1d manual payment record fixture in target mode", async () => {
@@ -510,9 +881,9 @@ describe("finance route contracts", () => {
       expect(
         target.calls.some((call) => call.text.includes("INSERT INTO platform.idempotency_keys")),
       ).toBe(false);
-      expect(target.calls.some((call) => call.text.includes("INSERT INTO platform.outbox_events"))).toBe(
-        false,
-      );
+      expect(
+        target.calls.some((call) => call.text.includes("INSERT INTO platform.outbox_events")),
+      ).toBe(false);
     }
   });
 
@@ -667,7 +1038,7 @@ describe("finance route contracts", () => {
   it("returns empty states for finance ledger reads without treating setup as an error", async () => {
     app = buildFinanceApp({ repository: emptyFinanceRepository });
 
-    const [summary, invoices, payments] = await Promise.all([
+    const [summary, invoices, payments, payouts, reconciliation] = await Promise.all([
       injectJson(app, {
         method: "GET",
         url: `/api/finance/properties/${propertyId}/summary`,
@@ -683,6 +1054,16 @@ describe("finance route contracts", () => {
         url: `/api/finance/properties/${propertyId}/payments`,
         headers: { authorization: "Bearer valid-token" },
       }),
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/payouts`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
+      injectJson(app, {
+        method: "GET",
+        url: `/api/finance/properties/${propertyId}/reconciliation/payouts`,
+        headers: { authorization: "Bearer valid-token" },
+      }),
     ]);
 
     expect(summary.body).toMatchObject({
@@ -690,6 +1071,20 @@ describe("finance route contracts", () => {
     });
     expect(invoices.body).toMatchObject({ invoices: [], total: 0, counts: { partial: 0 } });
     expect(payments.body).toMatchObject({ payments: [], total: 0, counts: { paid: 0 } });
+    expect(payouts.body).toMatchObject({
+      payouts: [],
+      total: 0,
+      sourceFreshness: { finance: { status: "empty" } },
+    });
+    expect(reconciliation.body).toMatchObject({
+      items: [],
+      total: 0,
+      sourceFreshness: {
+        providerReceiptsFreshAt: null,
+        jobsFreshAt: null,
+        deadLettersFreshAt: null,
+      },
+    });
   });
 
   it("returns cancellation policy reads from the Finance repository", async () => {
@@ -912,6 +1307,312 @@ describe("finance route contracts", () => {
       requiresManualReview: true,
       providerAccount: { status: "active" },
     });
+  });
+
+  it("maps property payouts from the target Finance payout read model without destination secrets", async () => {
+    const queries: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          queries.push({ text, values });
+          expect(text).toContain("FROM finance.payouts payout");
+          expect(text).toContain("LEFT JOIN finance.payment_provider_accounts account");
+          expect(text).not.toMatch(/sensitive_destination_ref|account_number|raw_payload/i);
+          expect(text).toContain("total_count AS");
+          expect(text).not.toContain("count(*) OVER");
+          expect(values).toEqual([propertyId, "failed", "stripe", 25, 0]);
+          return {
+            rows: [
+              {
+                payoutId: "payout_2026_abcd",
+                ownerScope: "property",
+                propertyId,
+                organizationId: null,
+                relatedPropertyId: null,
+                guestBookingId: invoiceListItems[0]!.guestBookingId,
+                paymentId: paymentLedgerItems[0]!.paymentId,
+                payoutStatus: "failed",
+                amount: "1000.00",
+                feeAmount: "25.00",
+                netAmount: "975.00",
+                currency: "EUR",
+                provider: "stripe",
+                providerPayoutId: "po_stripe_failed_686",
+                scheduledAt: "2026-06-12T11:00:00.000Z",
+                paidAt: null,
+                failedAt: "2026-06-12T11:30:00.000Z",
+                failureCode: "bank_account_restricted",
+                retryCount: 2,
+                total: 1,
+                sourceFreshness,
+              },
+            ] as unknown as T[],
+          };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listPayouts!(propertyId, {
+        status: "failed",
+        provider: "stripe",
+        limit: 25,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      payouts: [
+        {
+          payoutId: "payout_2026_abcd",
+          payoutStatus: "failed",
+          provider: "stripe",
+          retryCount: 2,
+        },
+      ],
+      total: 1,
+    });
+    expect(queries).toHaveLength(1);
+  });
+
+  it("keeps payout totals stable for empty later pages", async () => {
+    const queries: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          queries.push({ text, values });
+          if (values?.length === 3) {
+            expect(text).toContain("SELECT count(*)::text AS total");
+            expect(values).toEqual([propertyId, "failed", "stripe"]);
+            return { rows: [{ total: "42" }] as unknown as T[] };
+          }
+          expect(text).toContain("total_count AS");
+          expect(values).toEqual([propertyId, "failed", "stripe", 25, 50]);
+          return { rows: [] as T[] };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listPayouts!(propertyId, {
+        status: "failed",
+        provider: "stripe",
+        limit: 25,
+        offset: 50,
+      }),
+    ).resolves.toMatchObject({
+      payouts: [],
+      total: 42,
+      limit: 25,
+      offset: 50,
+    });
+    expect(queries).toHaveLength(2);
+  });
+
+  it("maps payout reconciliation state from receipts, jobs, and dead letters", async () => {
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          expect(text).toContain("platform.external_webhook_events receipt");
+          expect(text).toContain("platform.jobs job");
+          expect(text).toContain("platform.dead_letter_events dead");
+          expect(text).toContain("SELECT job.id");
+          expect(text).toContain("receipt.normalized_domain_event_id");
+          expect(text).toContain("receipt_event.resource_id = payout.provider_payout_id");
+          expect(text).toContain("job.tenant_scope = 'external'");
+          expect(text).toContain("job.resource_id = payout.provider_payout_id");
+          expect(text).toContain("dead.job_id = job.id");
+          expect(text).toContain("total_count AS");
+          expect(text).not.toContain("count(*) OVER");
+          expect(text).not.toContain("raw_payload");
+          expect(values).toEqual([propertyId, "dead_lettered", "stripe", 50, 0]);
+          return {
+            rows: [
+              {
+                subjectId: "payout_2026_abcd",
+                subjectType: "payout",
+                provider: "stripe",
+                financeStatus: "failed",
+                providerStatus: "failed",
+                latestReceiptStatus: "dead_lettered",
+                jobStatus: "dead_lettered",
+                recommendedAction: "manual_review",
+                lastReceiptAt: "2026-06-12T11:32:00.000Z",
+                lastJobAt: "2026-06-12T11:35:00.000Z",
+                total: 1,
+                sourceFreshness: reconciliationSourceFreshness,
+              },
+            ] as unknown as T[],
+          };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listReconciliationItems!(propertyId, "payouts", {
+        status: "dead_lettered",
+        provider: "stripe",
+        limit: 50,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          subjectId: "payout_2026_abcd",
+          subjectType: "payout",
+          latestReceiptStatus: "dead_lettered",
+          jobStatus: "dead_lettered",
+          recommendedAction: "manual_review",
+        },
+      ],
+      sourceFreshness: reconciliationSourceFreshness,
+    });
+  });
+
+  it("matches provider-account reconciliation jobs using webhook job keys and provider object IDs", async () => {
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          expect(text).toContain("receipt.normalized_domain_event_id");
+          expect(text).toContain("receipt_event.resource_id = account.provider_account_id");
+          expect(text).toContain("SELECT job.id");
+          expect(text).toContain("job.tenant_scope = 'external'");
+          expect(text).toContain("job.resource_id = account.provider_account_id");
+          expect(text).toContain("finance.reconcile-provider-account:provider_account:");
+          expect(text).not.toContain("finance.provider-account.reconcile");
+          expect(text).toContain("dead.job_id = job.id");
+          expect(values).toEqual([propertyId, null, "stripe", 25, 0]);
+          return {
+            rows: [
+              {
+                subjectId: "acct_internal_686",
+                subjectType: "provider_account",
+                provider: "stripe",
+                financeStatus: "active",
+                providerStatus: "active",
+                latestReceiptStatus: "matched",
+                jobStatus: "queued",
+                recommendedAction: "none",
+                lastReceiptAt: "2026-06-12T11:32:00.000Z",
+                lastJobAt: "2026-06-12T11:35:00.000Z",
+                total: 1,
+                sourceFreshness: reconciliationSourceFreshness,
+              },
+            ] as unknown as T[],
+          };
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.listReconciliationItems!(propertyId, "provider-accounts", {
+        provider: "stripe",
+        limit: 25,
+        offset: 0,
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          subjectId: "acct_internal_686",
+          subjectType: "provider_account",
+          latestReceiptStatus: "matched",
+          jobStatus: "queued",
+        },
+      ],
+      total: 1,
+    });
+  });
+
+  it("enqueues Xendit payout reconciliation through platform jobs without legacy payout writes", async () => {
+    const calls: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          calls.push({ text, values });
+          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          if (text.includes("INSERT INTO platform.idempotency_keys")) {
+            expect(text).toContain("'xendit_payout_reconciliation'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+            expect(values?.[2]).toBe(propertyId);
+            return {
+              rows: [
+                {
+                  status: "completed",
+                  requestFingerprintHash: values?.[1],
+                },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.jobs")) {
+            expect(text).toContain("'finance-reconciliation'");
+            expect(text).toContain("'finance.reconcile-payout'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$2::uuid/);
+            expect(values?.[0]).toBe(
+              `finance.reconcile-payout:property:${propertyId}:xendit-manual-2026-06-12:v1`,
+            );
+            expect(values?.[1]).toBe(propertyId);
+            return {
+              rows: [{ jobId: "job_reconcile_xendit_686", replay: false }] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.product_audit_events")) {
+            expect(text).toContain("'finance.xendit_payouts.reconcile_requested'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+            expect(values?.[2]).toBe(propertyId);
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          throw new Error(`Unexpected SQL: ${text}`);
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.enqueueXenditPayoutReconciliation!(
+        xenditPayoutReconciliationCommand({
+          requestedAt: "2026-06-12T12:00:00.000Z",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      job: {
+        jobType: "finance.reconcile-payout",
+        idempotencyKey:
+          "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1",
+        status: "queued",
+      },
+      legacyDisposition:
+        "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal",
+    });
+    expect(calls.map((call) => call.text)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/UPDATE\s+payouts/i)]),
+    );
   });
 
   it("passes the Finance property read denial matrix", async () => {
@@ -1187,6 +1888,168 @@ function targetManualPaymentRows<T extends QueryResultRow>(
   return [];
 }
 
+function targetStripeProviderAccountPool(options: { failInsert?: boolean } = {}): {
+  calls: QueryCall[];
+  existingAccount: FinanceProviderAccountRowFixture | null;
+  pool: {
+    connect(): Promise<{
+      query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rows: T[]; rowCount: number }>;
+      release(): void;
+    }>;
+    query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: readonly unknown[],
+    ): Promise<{ rows: T[]; rowCount: number }>;
+    end(): Promise<void>;
+  };
+  requiredCall(fragment: string): QueryCall;
+} {
+  const state: {
+    calls: QueryCall[];
+    existingAccount: FinanceProviderAccountRowFixture | null;
+  } = {
+    calls: [],
+    existingAccount: null,
+  };
+
+  const query = async <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[]; rowCount: number }> => {
+    state.calls.push({ text, values });
+    if (text.includes("SELECT") && text.includes("FROM platform.idempotency_keys")) {
+      return { rows: [] as T[], rowCount: 0 };
+    }
+    if (text.includes("FROM finance.payment_provider_accounts")) {
+      const rows = state.existingAccount ? [state.existingAccount as unknown as T] : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (text.includes("INSERT INTO platform.idempotency_keys")) {
+      return {
+        rows: [{ requestFingerprintHash: String(values?.[2]) } as unknown as T],
+        rowCount: 1,
+      };
+    }
+    if (text.includes("INSERT INTO finance.payment_provider_accounts")) {
+      if (options.failInsert) {
+        throw new Error("simulated provider-account insert failure");
+      }
+      const account: FinanceProviderAccountRowFixture = {
+        providerAccountId: "f7000000-0000-0000-0000-000000000686",
+        providerAccountRef: "acct_target_property_686",
+        status: "setup_incomplete",
+        onboardingStatus: "invited",
+        onboardingUrl: "https://connect.stripe.test/onboard/acct_target_property_686/1",
+      };
+      state.existingAccount = account;
+      return { rows: [account as unknown as T], rowCount: 1 };
+    }
+    if (text.includes("UPDATE finance.payment_provider_accounts")) {
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    if (text.includes("UPDATE platform.idempotency_keys")) {
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    return { rows: [] as T[], rowCount: 0 };
+  };
+
+  const client = { query, release() {} };
+  const result = {
+    get calls() {
+      return state.calls;
+    },
+    get existingAccount() {
+      return state.existingAccount;
+    },
+    set existingAccount(account: FinanceProviderAccountRowFixture | null) {
+      state.existingAccount = account;
+    },
+    pool: {
+      async connect() {
+        return client;
+      },
+      query,
+      async end() {},
+    },
+    requiredCall(fragment: string) {
+      const call = state.calls.find((candidate) => candidate.text.includes(fragment));
+      expect(call, fragment).toBeDefined();
+      return call!;
+    },
+  };
+  return result;
+}
+
+type FinanceProviderAccountRowFixture = {
+  providerAccountId: string;
+  providerAccountRef: string;
+  status: string;
+  onboardingStatus: string;
+  onboardingUrl: string | null;
+};
+
+function fakeStripeConnectProvider(): FinanceStripeConnectProvider & {
+  createAccountCount: number;
+  compensationCount: number;
+} {
+  let createAccountCount = 0;
+  let compensationCount = 0;
+  const provider: FinanceStripeConnectProvider & {
+    createAccountCount: number;
+    compensationCount: number;
+  } = {
+    get createAccountCount() {
+      return createAccountCount;
+    },
+    get compensationCount() {
+      return compensationCount;
+    },
+    async createAccount() {
+      createAccountCount += 1;
+      return {
+        providerAccountRef: "acct_target_property_686",
+        onboardingUrl: "https://connect.stripe.test/onboard/acct_target_property_686/1",
+      };
+    },
+    async createOnboardingLink(request) {
+      return `https://connect.stripe.test/onboard/${request.providerAccountRef}/2`;
+    },
+    async compensateAccountCreation() {
+      compensationCount += 1;
+    },
+  };
+  return provider;
+}
+
+function stripePropertyTargetCommand(
+  options: { idempotencyKey?: string } = {},
+): CreateStripeProviderAccountCommand {
+  return {
+    commandType: "finance.provider_account.stripe.create",
+    commandId: "cmd-stripe-property-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-stripe-property-f300686",
+    propertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: affiliateOrganizationId,
+      },
+      requestId: "req_stripe_property_target",
+      correlationId: "corr_stripe_property_target",
+      reason: "Stripe property account target test",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+    },
+    payload: {
+      email: "owner@example.test",
+      country: "AT",
+    },
+  };
+}
+
 function financeInvoiceRowFixture(
   overrides: Partial<FinanceInvoiceRowFixture> = {},
 ): FinanceInvoiceRowFixture {
@@ -1250,6 +2113,38 @@ function manualPaymentTargetCommand(
   };
 }
 
+function xenditPayoutReconciliationCommand(
+  options: {
+    propertyId?: string;
+    idempotencyKey?: string;
+    requestedAt?: string;
+    payload?: Partial<FinanceXenditPayoutReconciliationCommand["payload"]>;
+  } = {},
+): FinanceXenditPayoutReconciliationCommand {
+  const commandPropertyId = options.propertyId ?? propertyId;
+  return {
+    commandType: "finance.xendit_payouts.reconcile",
+    commandId: "cmd-xendit-reconcile-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-reconcile-xendit-payouts-f300686-2026-06-12",
+    propertyId: commandPropertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "f2000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_xendit_reconcile_target",
+      correlationId: "corr_xendit_reconcile_target",
+      reason: "Xendit payout reconciliation target test",
+      requestedAt: options.requestedAt ?? "2026-06-12T12:00:00.000Z",
+    },
+    payload: {
+      olderThanMinutes: 0,
+      ...options.payload,
+    },
+  };
+}
+
 function buildFinanceApp(
   options: {
     permissions?: PermissionKey[];
@@ -1257,6 +2152,7 @@ function buildFinanceApp(
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
     repository?: FinancePropertyReadRepository;
+    xenditBankValidator?: FinanceXenditBankValidator;
     publicHotelProfileRepository?: PublicHotelProfileRepository | null;
     financePublicHotelProfileRepository?: PublicHotelProfileRepository;
     financePublicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
@@ -1271,6 +2167,7 @@ function buildFinanceApp(
     financePublicHotelProfileRepository: options.financePublicHotelProfileRepository,
     financePublicHotelPropertyResolver: options.financePublicHotelPropertyResolver,
     financeRepository: options.repository ?? financeRepository,
+    financeXenditBankValidator: options.xenditBankValidator,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository(options.linkedPropertyId, options.linkedResourceType),
@@ -1282,6 +2179,40 @@ function buildFinanceApp(
       entitlementRepository: {
         async findEntitlementsForContext() {
           return options.entitlements ?? [pmsFinanceEntitlement()];
+        },
+      },
+    },
+  });
+}
+
+function buildAffiliateFinanceApp(options: {
+  repository: FinancePropertyReadRepository;
+}): ReturnType<typeof buildApp> {
+  return buildApp({
+    logger: false,
+    financeRepository: options.repository,
+    auth: {
+      verifier: createFakeVerifier(new Map([["valid-token", session]])),
+      repository: affiliateIdentityRepository(),
+      rolePermissionRepository: {
+        async findPermissionsForRole() {
+          return ["affiliate.payout.manage"];
+        },
+      },
+      entitlementRepository: {
+        async findEntitlementsForContext() {
+          return [
+            {
+              product: "affiliate",
+              key: "affiliate-payouts",
+              status: "active",
+              resource: {
+                product: "affiliate",
+                resourceType: "affiliate",
+                resourceId: affiliateId,
+              },
+            },
+          ];
         },
       },
     },
@@ -1349,6 +2280,27 @@ const financeRepository: FinancePropertyReadRepository = {
       limit: query.limit,
       offset: query.offset,
       sourceFreshness,
+    };
+  },
+  async listPayouts(requestedPropertyId, query) {
+    const filtered = requestedPropertyId === propertyId ? filterPayouts(query) : [];
+    return {
+      payouts: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness,
+    };
+  },
+  async listReconciliationItems(requestedPropertyId, view, query) {
+    const filtered =
+      requestedPropertyId === propertyId ? filterReconciliationItems(view, query) : [];
+    return {
+      items: filtered.slice(query.offset, query.offset + query.limit),
+      total: filtered.length,
+      limit: query.limit,
+      offset: query.offset,
+      sourceFreshness: reconciliationSourceFreshness,
     };
   },
   async getInvoiceCsvExportDisposition(requestedPropertyId) {
@@ -1421,6 +2373,185 @@ function manualPaymentRepository(): FinancePropertyReadRepository & {
     },
   };
   return repository;
+}
+
+function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
+  providerCreateCount: number;
+  seedAffiliateProviderAccount(): void;
+} {
+  const accounts = new Map<string, FinanceProviderAccountCommandResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & {
+    providerCreateCount: number;
+    seedAffiliateProviderAccount(): void;
+  } = {
+    ...financeRepository,
+    providerCreateCount: 0,
+    seedAffiliateProviderAccount() {
+      const command = stripeAffiliateCommand();
+      const result = stripeProviderAccountResult(command, "f7100000-0000-0000-0000-000000000686");
+      accounts.set("affiliate", result);
+    },
+    async createStripeProviderAccount(command) {
+      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const existing = accounts.get(ownerKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "existing_owner_account",
+          response: {
+            ...existing.response,
+            commandMeta: stripeProviderAccountCommandMeta(command),
+          },
+        };
+      }
+      repository.providerCreateCount += 1;
+      const providerAccountId =
+        ownerKey === "property"
+          ? "f7000000-0000-0000-0000-000000000686"
+          : "f7100000-0000-0000-0000-000000000686";
+      const result = stripeProviderAccountResult(command, providerAccountId);
+      accounts.set(ownerKey, result);
+      return result;
+    },
+    async issueStripeOnboardingLink(command) {
+      const ownerKey = "propertyId" in command ? "property" : "affiliate";
+      const existing = accounts.get(ownerKey);
+      if (!existing || existing.response.providerAccountId !== command.payload.providerAccountId) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "provider_account_not_found",
+          message: "Finance provider account was not found.",
+        };
+      }
+      const providerAccountRef = existing.response.providerAccountRef;
+      return {
+        ok: true,
+        status: "created",
+        response: {
+          ...existing.response,
+          onboardingUrl: `https://connect.stripe.test/onboard/${providerAccountRef}/2`,
+          commandMeta: stripeProviderAccountCommandMeta(command),
+        },
+      };
+    },
+  };
+  return repository;
+}
+
+function xenditPayoutReconciliationRepository(): FinancePropertyReadRepository & {
+  enqueueCount: number;
+} {
+  const records = new Map<string, FinanceXenditPayoutReconciliationResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & { enqueueCount: number } = {
+    ...financeRepository,
+    enqueueCount: 0,
+    async enqueueXenditPayoutReconciliation(command) {
+      const existing = records.get(command.idempotencyKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "idempotent_replay",
+          job: { ...existing.job, status: "idempotent_replay" },
+          commandMeta: {
+            ...existing.commandMeta,
+            jobs: existing.commandMeta.jobs.map((job) => ({
+              ...job,
+              status: "idempotent_replay",
+            })),
+          },
+        };
+      }
+      repository.enqueueCount += 1;
+      const result = xenditPayoutReconciliationResult(command, "queued");
+      records.set(command.idempotencyKey, result);
+      return result;
+    },
+  };
+  return repository;
+}
+
+function stripeProviderAccountResult(
+  command: CreateStripeProviderAccountCommand,
+  providerAccountId: string,
+): FinanceProviderAccountCommandResult & { ok: true } {
+  const providerAccountRef = "propertyId" in command ? "acct_property_686" : "acct_affiliate_686";
+  return {
+    ok: true,
+    status: "created",
+    response: {
+      contractVersion: "finance-route-contracts.v1",
+      providerAccountId,
+      provider: "stripe",
+      providerAccountRef,
+      status: "setup_incomplete",
+      onboardingStatus: "invited",
+      onboardingUrl: `https://connect.stripe.test/onboard/${providerAccountRef}/1`,
+      commandMeta: stripeProviderAccountCommandMeta(command),
+    },
+  };
+}
+
+function stripeProviderAccountCommandMeta(
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+): Extract<FinanceProviderAccountCommandResult, { ok: true }>["response"]["commandMeta"] {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: ["audit_event", "reconciliation_job"],
+    outboxEvents: [],
+    jobs: [],
+  };
+}
+
+function stripeAffiliateCommand(): CreateStripeProviderAccountCommand {
+  return {
+    commandType: "finance.provider_account.stripe.create",
+    commandId: "cmd-stripe-affiliate-001",
+    idempotencyKey: "finance-stripe-affiliate-686",
+    affiliateId,
+    organizationId: affiliateOrganizationId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "user_affiliate",
+        organizationId: affiliateOrganizationId,
+      },
+      requestId: "req_stripe_affiliate",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+      reason: "Affiliate Stripe Connect test",
+    },
+    payload: {
+      email: "affiliate@example.test",
+      country: "AT",
+    },
+  };
+}
+
+function xenditPayoutReconciliationResult(
+  command: FinanceXenditPayoutReconciliationCommand,
+  status: "queued" | "idempotent_replay",
+): FinanceXenditPayoutReconciliationResult & { ok: true } {
+  const job = {
+    jobType: "finance.reconcile-payout",
+    idempotencyKey:
+      "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1",
+    status,
+  } as const;
+  return {
+    ok: true,
+    status,
+    job,
+    legacyDisposition:
+      "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal",
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["reconciliation_job", "audit_event"],
+      outboxEvents: [],
+      jobs: [job],
+    },
+  };
 }
 
 function manualPaymentValidationError(
@@ -1546,6 +2677,31 @@ function filterPayments(query: FinancePaymentLedgerQuery): FinancePaymentLedgerI
   });
 }
 
+function filterPayouts(query: FinancePayoutListQuery): FinancePayout[] {
+  return payoutItems.filter((payout) => {
+    if (query.status && payout.payoutStatus !== query.status) return false;
+    if (query.provider && payout.provider !== query.provider) return false;
+    return true;
+  });
+}
+
+function filterReconciliationItems(
+  view: FinanceReconciliationViewKind,
+  query: FinanceReconciliationViewQuery,
+): FinanceReconciliationItem[] {
+  return reconciliationItems[view].filter((item) => {
+    if (
+      query.status &&
+      item.latestReceiptStatus !== query.status &&
+      item.jobStatus !== query.status
+    ) {
+      return false;
+    }
+    if (query.provider && item.provider !== query.provider) return false;
+    return true;
+  });
+}
+
 function invoiceCounts(invoices: FinanceInvoiceListItem[]): FinanceInvoiceStatusCounts {
   return {
     draft: invoices.filter((invoice) => invoice.status === "draft").length,
@@ -1631,6 +2787,46 @@ function identityRepository(
           resourceType: linkedResourceType,
           resourceId: linkedPropertyId ?? propertyId,
           relationship: "finance_manager",
+          status: "active",
+        },
+      ];
+    },
+  };
+}
+
+function affiliateIdentityRepository(): IdentityRepository {
+  return {
+    async findUserByProviderUserId() {
+      return {
+        userId: "user_affiliate",
+        email: "affiliate@example.test",
+        status: "active",
+      };
+    },
+    async findOrganizationByWorkosOrgId() {
+      return {
+        organizationId: affiliateOrganizationId,
+        workosOrgId: "workos_finance_org",
+        kind: "affiliate_partner",
+        status: "active",
+      };
+    },
+    async findActiveMembership() {
+      return {
+        membershipId: "membership_affiliate",
+        status: "active",
+        roleKey: "affiliate_owner",
+        workosMembershipId: "membership_workos_affiliate",
+        workosRoleSlugs: ["affiliate_owner"],
+      };
+    },
+    async findLinkedResources() {
+      return [
+        {
+          product: "affiliate",
+          resourceType: "affiliate",
+          resourceId: affiliateId,
+          relationship: "owner",
           status: "active",
         },
       ];

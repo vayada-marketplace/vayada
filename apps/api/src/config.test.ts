@@ -143,16 +143,17 @@ describe("api config", () => {
   });
 
   it("loads provider webhook secrets and per-provider intake modes", () => {
-    expect(
-      loadConfig({
-        STRIPE_WEBHOOK_SECRET: "stripe-secret",
-        XENDIT_WEBHOOK_SECRET: "xendit-secret",
-        CHANNEX_WEBHOOK_SECRET: "channex-secret",
-        STRIPE_WEBHOOK_INTAKE_MODE: "mutating",
-        XENDIT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
-        CHANNEX_WEBHOOK_INTAKE_MODE: "observe_only",
-      }).providerWebhooks,
-    ).toEqual({
+    const config = loadConfig({
+      STRIPE_WEBHOOK_SECRET: "stripe-secret",
+      XENDIT_WEBHOOK_SECRET: "xendit-secret",
+      CHANNEX_WEBHOOK_SECRET: "channex-secret",
+      STRIPE_WEBHOOK_INTAKE_MODE: "mutating",
+      XENDIT_WEBHOOK_INTAKE_MODE: "ack_only_with_receipt",
+      CHANNEX_WEBHOOK_INTAKE_MODE: "observe_only",
+      XENDIT_SECRET_KEY: "xendit-api-secret",
+    });
+
+    expect(config.providerWebhooks).toEqual({
       stripeSecret: "stripe-secret",
       xenditSecret: "xendit-secret",
       channexSecret: "channex-secret",
@@ -160,6 +161,15 @@ describe("api config", () => {
       xenditMode: "ack_only_with_receipt",
       channexMode: "observe_only",
     });
+    expect(config.xenditSecretKey).toBe("xendit-api-secret");
+  });
+
+  it("loads Xendit bank-validation secret independently of webhook intake", () => {
+    expect(
+      loadConfig({
+        XENDIT_SECRET_KEY: "xendit-api-secret",
+      }).xenditSecretKey,
+    ).toBe("xendit-api-secret");
   });
 
   it("rejects unsupported provider webhook intake modes", () => {

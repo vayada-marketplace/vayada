@@ -572,7 +572,7 @@ describe("FinanceCommandBus", () => {
           status: "accepted",
           commandId: command.commandId,
           idempotencyKey: command.idempotencyKey,
-          propertyId: command.propertyId,
+          propertyId: "propertyId" in command ? command.propertyId : "",
         };
       },
     };
@@ -639,7 +639,7 @@ describe("UpdateAddOnPriceCommand", () => {
           status: "accepted",
           commandId: command.commandId,
           idempotencyKey: command.idempotencyKey,
-          propertyId: command.propertyId,
+          propertyId: "propertyId" in command ? command.propertyId : "",
         };
       },
     };

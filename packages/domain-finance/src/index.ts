@@ -76,6 +76,15 @@ export const FINANCE_ROUTE_PAYMENT_PROVIDERS = [
 
 export type FinanceRoutePaymentProvider = (typeof FINANCE_ROUTE_PAYMENT_PROVIDERS)[number];
 
+export const FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS = [
+  "audit_event",
+  "reconciliation_job",
+  "provider_compensation",
+] as const;
+
+export type FinanceProviderAccountCommandSideEffect =
+  (typeof FINANCE_PROVIDER_ACCOUNT_COMMAND_SIDE_EFFECTS)[number];
+
 export const FINANCE_ROUTE_PAYMENT_METHODS = [
   "card",
   "pay_at_property",
@@ -231,6 +240,58 @@ export const FINANCE_RECONCILIATION_STATUSES = [
 
 export type FinanceReconciliationStatus = (typeof FINANCE_RECONCILIATION_STATUSES)[number];
 
+export const FINANCE_PAYOUT_STATUSES = [
+  "pending",
+  "scheduled",
+  "processing",
+  "paid",
+  "failed",
+  "canceled",
+  "reversed",
+] as const;
+
+export type FinancePayoutStatus = (typeof FINANCE_PAYOUT_STATUSES)[number];
+
+export const FINANCE_RECONCILIATION_RECEIPT_STATUSES = [
+  "matched",
+  "missing",
+  "stale",
+  "dead_lettered",
+  "not_applicable",
+] as const;
+
+export type FinanceReconciliationReceiptStatus =
+  (typeof FINANCE_RECONCILIATION_RECEIPT_STATUSES)[number];
+
+export const FINANCE_RECONCILIATION_JOB_STATUSES = [
+  "idle",
+  "queued",
+  "running",
+  "failed",
+  "dead_lettered",
+] as const;
+
+export type FinanceReconciliationJobStatus = (typeof FINANCE_RECONCILIATION_JOB_STATUSES)[number];
+
+export const FINANCE_RECONCILIATION_RECOMMENDED_ACTIONS = [
+  "none",
+  "enqueue_reconcile",
+  "manual_review",
+  "refresh_provider_state",
+] as const;
+
+export type FinanceReconciliationRecommendedAction =
+  (typeof FINANCE_RECONCILIATION_RECOMMENDED_ACTIONS)[number];
+
+export const FINANCE_RECONCILIATION_SUBJECT_TYPES = [
+  "payment",
+  "payout",
+  "provider_account",
+] as const;
+
+export type FinanceReconciliationSubjectType =
+  (typeof FINANCE_RECONCILIATION_SUBJECT_TYPES)[number];
+
 export type FinanceInvoiceStatusCounts = Record<FinanceInvoiceStatus, number>;
 export type FinancePaymentStatusCounts = Record<FinancePaymentStatus, number>;
 
@@ -342,6 +403,77 @@ export type FinancePaymentLedgerResponse = {
   sourceFreshness: FinanceJsonObject;
 };
 
+export type FinancePayout = {
+  payoutId: string;
+  ownerScope: "property" | "organization" | "platform";
+  propertyId: string | null;
+  organizationId: string | null;
+  relatedPropertyId: string | null;
+  guestBookingId: string | null;
+  paymentId: string | null;
+  payoutStatus: FinancePayoutStatus;
+  amount: FinanceDecimalAmount;
+  feeAmount: FinanceDecimalAmount;
+  netAmount: FinanceDecimalAmount;
+  currency: FinanceCurrencyCode;
+  provider: FinanceRoutePaymentProvider;
+  providerPayoutId: string | null;
+  scheduledAt: FinanceUtcDateTime | null;
+  paidAt: FinanceUtcDateTime | null;
+  failedAt: FinanceUtcDateTime | null;
+  failureCode: string | null;
+  retryCount: number;
+};
+
+export type FinancePayoutListQuery = {
+  status?: FinancePayoutStatus;
+  provider?: FinanceRoutePaymentProvider;
+  limit: number;
+  offset: number;
+};
+
+export type FinancePayoutListResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  payouts: FinancePayout[];
+  total: number;
+  limit: number;
+  offset: number;
+  sourceFreshness: FinanceJsonObject;
+};
+
+export type FinanceReconciliationItem = {
+  subjectId: string;
+  subjectType: FinanceReconciliationSubjectType;
+  provider: FinanceRoutePaymentProvider;
+  financeStatus: string;
+  providerStatus: string | null;
+  latestReceiptStatus: FinanceReconciliationReceiptStatus;
+  jobStatus: FinanceReconciliationJobStatus;
+  recommendedAction: FinanceReconciliationRecommendedAction;
+  lastReceiptAt: FinanceUtcDateTime | null;
+  lastJobAt: FinanceUtcDateTime | null;
+};
+
+export type FinanceReconciliationViewKind = "payments" | "payouts" | "provider-accounts";
+
+export type FinanceReconciliationViewQuery = {
+  status?: FinanceReconciliationReceiptStatus | FinanceReconciliationJobStatus;
+  provider?: FinanceRoutePaymentProvider;
+  limit: number;
+  offset: number;
+};
+
+export type FinanceReconciliationViewResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  items: FinanceReconciliationItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  sourceFreshness: FinanceJsonObject;
+};
+
 export const FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS = [
   "audit_event",
   "booking_projection_refresh",
@@ -350,24 +482,221 @@ export const FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS = [
 
 export type FinanceManualPaymentSideEffect = (typeof FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS)[number];
 
+export const FINANCE_COMMAND_SIDE_EFFECTS = [
+  ...FINANCE_MANUAL_PAYMENT_SIDE_EFFECTS,
+  "provider_validation",
+  "reconciliation_job",
+] as const;
+
+export type FinanceCommandSideEffect = (typeof FINANCE_COMMAND_SIDE_EFFECTS)[number];
+
 export type FinanceProjectionRefreshJob = {
   jobType: "booking.projection-refresh" | "pms.projection-refresh";
   idempotencyKey: string;
   status: "queued" | "idempotent_replay";
 };
 
+export type FinanceReconcilePayoutJob = {
+  jobType: "finance.reconcile-payout";
+  idempotencyKey: string;
+  status: "queued" | "idempotent_replay";
+};
+
+export type FinanceCommandJob = FinanceProjectionRefreshJob | FinanceReconcilePayoutJob;
+
 export type FinanceCommandMeta = {
   commandId: string;
   idempotencyKey: string;
-  sideEffects: FinanceManualPaymentSideEffect[];
+  sideEffects: FinanceCommandSideEffect[];
   outboxEvents: string[];
-  jobs: FinanceProjectionRefreshJob[];
+  jobs: FinanceCommandJob[];
+};
+
+export type FinanceProviderAccountCommandMeta = Omit<FinanceCommandMeta, "sideEffects"> & {
+  sideEffects: FinanceProviderAccountCommandSideEffect[];
 };
 
 export type FinanceManualPaymentRecordResponse = {
   contractVersion: FinanceContractVersion;
   propertyId: FinancePropertyId;
   invoice: FinanceInvoiceDetail;
+  commandMeta: FinanceCommandMeta;
+};
+
+export type FinanceProviderAccountOwnerScope = "property" | "affiliate";
+
+export type FinanceProviderAccountOwner =
+  | {
+      ownerScope: "property";
+      propertyId: FinancePropertyId;
+      organizationId: string | null;
+    }
+  | {
+      ownerScope: "affiliate";
+      affiliateId: string;
+      organizationId: string;
+    };
+
+export type CreateStripeProviderAccountPayload = {
+  email: string;
+  country: string;
+};
+
+export type CreateStripePropertyAccountCommand = FinanceCommandBase<
+  "finance.provider_account.stripe.create",
+  CreateStripeProviderAccountPayload
+>;
+
+export type CreateStripeAffiliateAccountCommand = Omit<
+  FinanceCommandBase<"finance.provider_account.stripe.create", CreateStripeProviderAccountPayload>,
+  "propertyId"
+> & {
+  affiliateId: string;
+  organizationId: string;
+};
+
+export type CreateStripeProviderAccountCommand =
+  | CreateStripePropertyAccountCommand
+  | CreateStripeAffiliateAccountCommand;
+
+export type IssueStripeOnboardingLinkPayload = {
+  providerAccountId: string;
+};
+
+export type IssueStripePropertyOnboardingLinkCommand = FinanceCommandBase<
+  "finance.provider_account.stripe.onboarding_link.issue",
+  IssueStripeOnboardingLinkPayload
+>;
+
+export type IssueStripeAffiliateOnboardingLinkCommand = Omit<
+  FinanceCommandBase<
+    "finance.provider_account.stripe.onboarding_link.issue",
+    IssueStripeOnboardingLinkPayload
+  >,
+  "propertyId"
+> & {
+  affiliateId: string;
+  organizationId: string;
+};
+
+export type IssueStripeOnboardingLinkCommand =
+  | IssueStripePropertyOnboardingLinkCommand
+  | IssueStripeAffiliateOnboardingLinkCommand;
+
+export type FinanceProviderAccountCommandResponse = {
+  contractVersion: FinanceContractVersion;
+  providerAccountId: string;
+  provider: "stripe" | "xendit";
+  providerAccountRef: string;
+  status: FinanceProviderAccountStatus;
+  onboardingStatus: FinanceProviderOnboardingStatus;
+  onboardingUrl: string;
+  commandMeta: FinanceProviderAccountCommandMeta;
+};
+
+export type FinanceProviderAccountCommandResult =
+  | {
+      ok: true;
+      status: "created" | "idempotent_replay" | "existing_owner_account";
+      response: FinanceProviderAccountCommandResponse;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 404 | 409 | 500 | 502;
+      code:
+        | "invalid_command"
+        | "provider_account_not_found"
+        | "idempotency_conflict"
+        | "write_unavailable"
+        | "provider_unavailable"
+        | "provider_rejected";
+      message: string;
+    };
+
+export type StripeConnectAccountCreateRequest = {
+  owner: FinanceProviderAccountOwner;
+  email: string;
+  country: string;
+  idempotencyKey: string;
+};
+
+export type StripeConnectOnboardingLinkRequest = {
+  owner: FinanceProviderAccountOwner;
+  providerAccountRef: string;
+  idempotencyKey: string;
+};
+
+export type StripeConnectCompensationRequest = {
+  owner: FinanceProviderAccountOwner;
+  providerAccountRef: string;
+  reason: "db_write_failed";
+  idempotencyKey: string;
+};
+
+export type StripeConnectProviderAccount = {
+  providerAccountRef: string;
+  onboardingUrl: string;
+};
+
+export type FinanceStripeConnectProvider = {
+  createAccount(request: StripeConnectAccountCreateRequest): Promise<StripeConnectProviderAccount>;
+  createOnboardingLink(request: StripeConnectOnboardingLinkRequest): Promise<string>;
+  compensateAccountCreation?(request: StripeConnectCompensationRequest): Promise<void>;
+};
+
+export type XenditBankValidationPayload = {
+  channelCode: string;
+  accountNumber: string;
+  accountHolderName: string;
+};
+
+export type FinanceXenditBankValidationCommand = FinanceCommandBase<
+  "finance.xendit_bank_account.validate",
+  XenditBankValidationPayload
+>;
+
+export type FinanceXenditBankValidationResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  provider: "xendit";
+  validation: {
+    status: "valid" | "invalid" | "unknown";
+    maskedAccountNumber: string;
+    accountHolderName: string | null;
+    providerReference: string | null;
+  };
+  commandMeta: FinanceCommandMeta;
+};
+
+export type FinanceXenditPayoutReconciliationPayload = {
+  olderThanMinutes: number;
+};
+
+export type FinanceXenditPayoutReconciliationCommand = FinanceCommandBase<
+  "finance.xendit_payouts.reconcile",
+  FinanceXenditPayoutReconciliationPayload
+>;
+
+export type FinanceXenditPayoutReconciliationResult =
+  | {
+      ok: true;
+      status: "queued" | "idempotent_replay";
+      job: Extract<FinanceCommandJob, { jobType: "finance.reconcile-payout" }>;
+      legacyDisposition: string;
+      commandMeta: FinanceCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 409 | 500;
+      code: "invalid_command" | "idempotency_conflict" | "write_unavailable";
+      message: string;
+    };
+
+export type FinanceXenditPayoutReconciliationResponse = {
+  contractVersion: FinanceContractVersion;
+  propertyId: FinancePropertyId;
+  job: Extract<FinanceCommandJob, { jobType: "finance.reconcile-payout" }>;
+  legacyDisposition: string;
   commandMeta: FinanceCommandMeta;
 };
 
@@ -607,6 +936,17 @@ export type FinancePropertyLedgerReadRepository = {
     query: FinancePaymentLedgerQuery,
   ): Promise<Omit<FinancePaymentLedgerResponse, "contractVersion" | "propertyId">>;
 
+  listPayouts(
+    propertyId: FinancePropertyId,
+    query: FinancePayoutListQuery,
+  ): Promise<Omit<FinancePayoutListResponse, "contractVersion" | "propertyId">>;
+
+  listReconciliationItems(
+    propertyId: FinancePropertyId,
+    view: FinanceReconciliationViewKind,
+    query: FinanceReconciliationViewQuery,
+  ): Promise<Omit<FinanceReconciliationViewResponse, "contractVersion" | "propertyId">>;
+
   getInvoiceCsvExportDisposition(
     propertyId: FinancePropertyId,
     query: FinanceInvoiceListQuery,
@@ -636,6 +976,17 @@ export type FinancePropertyCommandRepository = {
   recordManualPayment(
     command: FinanceManualPaymentRecordCommand,
   ): Promise<FinanceManualPaymentRecordResult>;
+
+  createStripeProviderAccount(
+    command: CreateStripeProviderAccountCommand,
+  ): Promise<FinanceProviderAccountCommandResult>;
+
+  issueStripeOnboardingLink(
+    command: IssueStripeOnboardingLinkCommand,
+  ): Promise<FinanceProviderAccountCommandResult>;
+  enqueueXenditPayoutReconciliation(
+    command: FinanceXenditPayoutReconciliationCommand,
+  ): Promise<FinanceXenditPayoutReconciliationResult>;
 };
 
 export type FinancePropertyReadRepository = FinancePropertySettingsReadRepository &
@@ -896,6 +1247,8 @@ export type FinanceCommand =
   | UpdateBillingPlanCommand
   | UpdateAddOnPriceCommand
   | FinanceManualPaymentRecordCommand
+  | CreateStripeProviderAccountCommand
+  | IssueStripeOnboardingLinkCommand
   | SettleManualCheckoutChargeCommand;
 
 export const financeCommandTypes = [
@@ -905,6 +1258,8 @@ export const financeCommandTypes = [
   "finance.billing.plan.update",
   "finance.add_on.price.update",
   "finance.manual_payment.record",
+  "finance.provider_account.stripe.create",
+  "finance.provider_account.stripe.onboarding_link.issue",
   "finance.checkout_charge.settle_manual",
 ] as const satisfies readonly FinanceCommand["commandType"][];
 

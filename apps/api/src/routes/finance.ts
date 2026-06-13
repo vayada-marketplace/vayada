@@ -1,7 +1,11 @@
 import {
   FINANCE_INVOICE_STATUSES,
   FINANCE_PAYMENT_STATUSES,
+  FINANCE_PAYOUT_STATUSES,
+  FINANCE_RECONCILIATION_JOB_STATUSES,
+  FINANCE_RECONCILIATION_RECEIPT_STATUSES,
   FINANCE_RECONCILIATION_STATUSES,
+  FINANCE_RECONCILIATION_SUBJECT_TYPES,
   FINANCE_ROUTE_CONTRACT_VERSION,
   FINANCE_ROUTE_PAYMENT_METHODS,
   FINANCE_ROUTE_PAYMENT_PROVIDERS,
@@ -11,6 +15,8 @@ import {
   toFinancePaymentSettingsResponse,
   toPublicPaymentCapabilityProjection,
   type CancellationPolicy,
+  type CreateStripeProviderAccountCommand,
+  type FinanceCommandAudit,
   type FinanceCommandMeta,
   type FinanceFinancialSummaryResponse,
   type FinanceInvoiceCsvExportResponse,
@@ -31,15 +37,37 @@ import {
   type FinancePaymentLedgerQuery,
   type FinancePaymentLedgerResponse,
   type FinancePaymentSettingsReadModel,
+  type FinancePayout,
+  type FinancePayoutListQuery,
+  type FinancePayoutListResponse,
+  type FinanceProviderAccountCommandMeta,
+  type FinanceProviderAccountCommandResponse,
+  type FinanceProviderAccountCommandResult,
   type FinancePaymentStatusCounts,
   type FinancePropertyReadRepository,
   type FinanceProviderAccountStatus,
   type FinanceProviderOnboardingStatus,
+  type FinanceReconciliationItem,
+  type FinanceReconciliationJobStatus,
+  type FinanceReconciliationRecommendedAction,
+  type FinanceReconciliationReceiptStatus,
   type FinanceReconciliationStatus,
+  type FinanceReconciliationViewKind,
+  type FinanceReconciliationViewQuery,
+  type FinanceReconciliationViewResponse,
   type FinanceRoutePaymentMethod,
   type FinanceRoutePaymentProvider,
+  type FinanceStripeConnectProvider,
+  type IssueStripeOnboardingLinkCommand,
+  type FinanceXenditBankValidationCommand,
+  type FinanceXenditBankValidationResponse,
+  type FinanceXenditPayoutReconciliationCommand,
+  type FinanceXenditPayoutReconciliationResult,
+  type FinanceXenditPayoutReconciliationResponse,
 } from "@vayada/domain-finance";
+import { requireAuthContext, type RequestContext } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
@@ -51,6 +79,19 @@ const MANUAL_PAYMENT_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
   "booking_projection_refresh",
   "pms_projection_refresh",
 ];
+
+const XENDIT_BANK_VALIDATION_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "provider_validation",
+  "audit_event",
+];
+
+const XENDIT_PAYOUT_RECONCILIATION_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = [
+  "reconciliation_job",
+  "audit_event",
+];
+
+const XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION =
+  "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal";
 
 type FinanceQueryExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(
@@ -74,10 +115,39 @@ type FinancePropertySettingsWriteClient = {
 
 export type FinanceRoutesOptions = {
   repository: FinancePropertyReadRepository;
+  xenditBankValidator?: FinanceXenditBankValidator;
   publicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   closePublicHotelProfileRepository?: boolean;
 };
+
+export type FinanceXenditBankValidator = {
+  validateBankAccount(input: {
+    channelCode: string;
+    accountNumber: string;
+    accountHolderName: string;
+    idempotencyKey: string;
+  }): Promise<{
+    status: "valid" | "invalid" | "unknown";
+    accountHolderName: string | null;
+    providerReference: string | null;
+  }>;
+};
+
+type FinanceXenditBankValidatorFetch = (
+  input: string,
+  init?: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+  },
+) => Promise<{
+  ok: boolean;
+  status: number;
+  text(): Promise<string>;
+  json(): Promise<unknown>;
+}>;
 
 export type FinancePublicHotelPropertyResolver = {
   findPropertyIdBySlug(slug: string): Promise<string | null>;
@@ -92,8 +162,20 @@ type FinancePropertyParams = {
   propertyId: string;
 };
 
+type FinanceAffiliateParams = {
+  affiliateId: string;
+};
+
 type FinanceInvoiceParams = FinancePropertyParams & {
   invoiceId: string;
+};
+
+type FinanceProviderAccountParams = FinancePropertyParams & {
+  providerAccountId: string;
+};
+
+type FinanceAffiliateProviderAccountParams = FinanceAffiliateParams & {
+  providerAccountId: string;
 };
 
 type BookingWebHotelParams = {
@@ -192,6 +274,58 @@ type FinancePaymentLedgerRow = {
   sourceFreshness: unknown;
 };
 
+type FinancePayoutRow = {
+  payoutId: string;
+  ownerScope: string;
+  propertyId: string | null;
+  organizationId: string | null;
+  relatedPropertyId: string | null;
+  guestBookingId: string | null;
+  paymentId: string | null;
+  payoutStatus: string;
+  amount: string;
+  feeAmount: string;
+  netAmount: string;
+  currency: string;
+  provider: string | null;
+  providerPayoutId: string | null;
+  scheduledAt: Date | string | null;
+  paidAt: Date | string | null;
+  failedAt: Date | string | null;
+  failureCode: string | null;
+  retryCount: number;
+  total: string | number;
+  sourceFreshness: unknown;
+};
+
+type FinanceReconciliationRow = {
+  subjectId: string;
+  subjectType: string;
+  provider: string | null;
+  financeStatus: string;
+  providerStatus: string | null;
+  latestReceiptStatus: string;
+  jobStatus: string;
+  recommendedAction: string;
+  lastReceiptAt: Date | string | null;
+  lastJobAt: Date | string | null;
+  total: string | number;
+  sourceFreshness: unknown;
+};
+
+type FinanceProviderAccountRow = {
+  providerAccountId: string;
+  providerAccountRef: string;
+  status: string;
+  onboardingStatus: string;
+  onboardingUrl: string | null;
+};
+
+type FinanceRowsWithTotal<T extends { total: string | number }> = {
+  rows: T[];
+  total: number;
+};
+
 type FinanceManualPaymentWriteRow = {
   paymentId: string;
   replay: boolean;
@@ -227,9 +361,16 @@ type FinanceValidationError = {
 };
 
 type FinanceCommandError = {
-  statusCode: 400 | 404 | 409 | 500 | 501;
-  code: "invalid_command" | "invoice_not_found" | "idempotency_conflict" | "write_unavailable";
-  category: "validation" | "not_found" | "conflict" | "write_model";
+  statusCode: 400 | 404 | 409 | 500 | 501 | 502;
+  code:
+    | "invalid_command"
+    | "invoice_not_found"
+    | "provider_account_not_found"
+    | "idempotency_conflict"
+    | "write_unavailable"
+    | "provider_unavailable"
+    | "provider_rejected";
+  category: "validation" | "not_found" | "conflict" | "write_model" | "provider";
   message: string;
 };
 
@@ -240,6 +381,32 @@ type ManualPaymentBody = {
   currency?: unknown;
   paymentMethod?: unknown;
   reference?: unknown;
+};
+
+type StripeProviderAccountBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  email?: unknown;
+  country?: unknown;
+};
+
+type OnboardingLinkBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+};
+
+type XenditBankValidationBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  channelCode?: unknown;
+  accountNumber?: unknown;
+  accountHolderName?: unknown;
+};
+
+type XenditPayoutReconciliationBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  olderThanMinutes?: unknown;
 };
 
 export async function registerFinanceRoutes(
@@ -404,6 +571,151 @@ export async function registerFinanceRoutes(
     },
   );
 
+  app.post<{ Params: FinancePropertyParams; Body: StripeProviderAccountBody }>(
+    "/finance/properties/:propertyId/provider-accounts/stripe",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+
+      if (!options.repository.createStripeProviderAccount) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance Stripe provider-account writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toStripePropertyAccountCommand(request, propertyId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.createStripeProviderAccount(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      reply.code(200);
+      return result.response;
+    },
+  );
+
+  app.post<{ Params: FinanceProviderAccountParams; Body: OnboardingLinkBody }>(
+    "/finance/properties/:propertyId/provider-accounts/:providerAccountId/onboarding-link",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+
+      if (!options.repository.issueStripeOnboardingLink) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance Stripe onboarding-link writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toStripePropertyOnboardingLinkCommand(
+        request,
+        propertyId,
+        request.params.providerAccountId,
+      );
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.issueStripeOnboardingLink(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      return result.response;
+    },
+  );
+
+  app.post<{ Params: FinanceAffiliateParams; Body: StripeProviderAccountBody }>(
+    "/finance/affiliates/:affiliateId/provider-accounts/stripe",
+    async (request, reply) => {
+      const affiliateId = request.params.affiliateId;
+      const context = enforceFinanceAffiliateWritePolicy(request, reply, affiliateId);
+      if (!context) return reply;
+
+      if (!options.repository.createStripeProviderAccount) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance Stripe affiliate provider-account writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toStripeAffiliateAccountCommand(request, affiliateId, context);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.createStripeProviderAccount(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      reply.code(200);
+      return result.response;
+    },
+  );
+
+  app.post<{ Params: FinanceAffiliateProviderAccountParams; Body: OnboardingLinkBody }>(
+    "/finance/affiliates/:affiliateId/provider-accounts/:providerAccountId/onboarding-link",
+    async (request, reply) => {
+      const affiliateId = request.params.affiliateId;
+      const context = enforceFinanceAffiliateWritePolicy(request, reply, affiliateId);
+      if (!context) return reply;
+
+      if (!options.repository.issueStripeOnboardingLink) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance Stripe affiliate onboarding-link writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toStripeAffiliateOnboardingLinkCommand(
+        request,
+        affiliateId,
+        request.params.providerAccountId,
+        context,
+      );
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.issueStripeOnboardingLink(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      return { onboardingUrl: result.response.onboardingUrl };
+    },
+  );
+
   app.get<{ Params: FinancePropertyParams }>(
     "/finance/properties/:propertyId/payments",
     async (request, reply) => {
@@ -422,6 +734,146 @@ export async function registerFinanceRoutes(
         propertyId,
         ...result,
       } satisfies FinancePaymentLedgerResponse;
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/payouts",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyReadPolicy(request, reply, propertyId)) return reply;
+      const query = parsePayoutListQuery(request.query);
+      if ("statusCode" in query) {
+        reply.code(query.statusCode);
+        return query;
+      }
+
+      const result =
+        (await options.repository.listPayouts?.(propertyId, query)) ?? emptyPayoutList(query);
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        ...result,
+      } satisfies FinancePayoutListResponse;
+    },
+  );
+
+  app.post<{ Params: FinancePropertyParams; Body: XenditBankValidationBody }>(
+    "/finance/properties/:propertyId/provider-accounts/xendit/bank-validation",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+      if (!options.xenditBankValidator) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Xendit bank validation is not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toXenditBankValidationCommand(request, propertyId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      let validation: Awaited<ReturnType<FinanceXenditBankValidator["validateBankAccount"]>>;
+      try {
+        validation = await options.xenditBankValidator.validateBankAccount({
+          channelCode: parsed.payload.channelCode,
+          accountNumber: parsed.payload.accountNumber,
+          accountHolderName: parsed.payload.accountHolderName,
+          idempotencyKey: parsed.idempotencyKey,
+        });
+      } catch (error) {
+        reply.code(400);
+        return {
+          statusCode: 400,
+          code: "invalid_command",
+          category: "validation",
+          message: error instanceof Error ? error.message : "Xendit bank validation failed.",
+        } satisfies FinanceCommandError;
+      }
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        provider: "xendit",
+        validation: {
+          status: validation.status,
+          maskedAccountNumber: maskAccountNumber(parsed.payload.accountNumber),
+          accountHolderName: validation.accountHolderName,
+          providerReference: validation.providerReference,
+        },
+        commandMeta: {
+          commandId: parsed.commandId,
+          idempotencyKey: parsed.idempotencyKey,
+          sideEffects: [...XENDIT_BANK_VALIDATION_SIDE_EFFECTS],
+          outboxEvents: [],
+          jobs: [],
+        },
+      } satisfies FinanceXenditBankValidationResponse;
+    },
+  );
+
+  app.post<{ Params: FinancePropertyParams; Body: XenditPayoutReconciliationBody }>(
+    "/finance/properties/:propertyId/reconciliation/xendit-payouts",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+      if (!options.repository.enqueueXenditPayoutReconciliation) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance payout reconciliation writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toXenditPayoutReconciliationCommand(request, propertyId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.enqueueXenditPayoutReconciliation(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      reply.code(202);
+      return {
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        propertyId,
+        job: result.job,
+        legacyDisposition: result.legacyDisposition,
+        commandMeta: result.commandMeta,
+      } satisfies FinanceXenditPayoutReconciliationResponse;
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/reconciliation/payments",
+    async (request, reply) => {
+      return financeReconciliationView(request, reply, options.repository, "payments");
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/reconciliation/payouts",
+    async (request, reply) => {
+      return financeReconciliationView(request, reply, options.repository, "payouts");
+    },
+  );
+
+  app.get<{ Params: FinancePropertyParams }>(
+    "/finance/properties/:propertyId/reconciliation/provider-accounts",
+    async (request, reply) => {
+      return financeReconciliationView(request, reply, options.repository, "provider-accounts");
     },
   );
 
@@ -465,6 +917,30 @@ export async function registerFinanceRoutes(
       return toPublicPaymentCapabilityProjection(settings, policy);
     },
   );
+}
+
+async function financeReconciliationView(
+  request: FastifyRequest<{ Params: FinancePropertyParams }>,
+  reply: FastifyReply,
+  repository: FinancePropertyReadRepository,
+  view: FinanceReconciliationViewKind,
+): Promise<FinanceReconciliationViewResponse | FinanceValidationError | FastifyReply> {
+  const propertyId = request.params.propertyId;
+  if (!enforceFinancePropertyReadPolicy(request, reply, propertyId)) return reply;
+  const query = parseReconciliationViewQuery(request.query);
+  if ("statusCode" in query) {
+    reply.code(query.statusCode);
+    return query;
+  }
+
+  const result =
+    (await repository.listReconciliationItems?.(propertyId, view, query)) ??
+    emptyReconciliationView(query);
+  return {
+    contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+    propertyId,
+    ...result,
+  };
 }
 
 async function resolvePublicFinancePropertyId(
@@ -514,10 +990,59 @@ export function createTargetFinancePublicHotelPropertyResolver(config: {
   };
 }
 
+export function createXenditBankValidator(config: {
+  secretKey: string;
+  endpoint?: string;
+  timeoutMs?: number;
+  fetch?: FinanceXenditBankValidatorFetch;
+}): FinanceXenditBankValidator {
+  const endpoint = config.endpoint ?? "https://api.xendit.co/bank_account_data/inquiries";
+  const fetchImpl = config.fetch ?? globalThis.fetch;
+  return {
+    async validateBankAccount(input) {
+      if (!config.secretKey.trim()) {
+        throw new Error("XENDIT_SECRET_KEY is required for bank validation.");
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), config.timeoutMs ?? 15_000);
+      try {
+        const response = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${Buffer.from(`${config.secretKey}:`).toString("base64")}`,
+            "Content-Type": "application/json",
+            "Idempotency-Key": input.idempotencyKey,
+          },
+          body: JSON.stringify({
+            bank_code: input.channelCode.replace(/^ID_/, ""),
+            account_number: input.accountNumber,
+          }),
+          signal: controller.signal,
+        });
+        const responseText = await response.text();
+        if (!response.ok) {
+          throw new Error(`Xendit bank validation failed with status ${response.status}.`);
+        }
+        const data = parseJsonObject(responseText);
+        return {
+          status: xenditValidationStatus(optionalString(data, "status")),
+          accountHolderName:
+            optionalString(data, "account_holder") ?? optionalString(data, "accountHolder") ?? null,
+          providerReference:
+            optionalString(data, "id") ?? optionalString(data, "reference_id") ?? null,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  };
+}
+
 export function createTargetFinancePropertySettingsRepository(config: {
   connectionString: string;
   max?: number;
   pool?: FinancePropertySettingsReadPool;
+  stripeConnectProvider?: FinanceStripeConnectProvider;
 }): FinancePropertyReadRepository {
   const pool: FinancePropertySettingsReadPool =
     config.pool ??
@@ -585,6 +1110,14 @@ export function createTargetFinancePropertySettingsRepository(config: {
       const rows = await loadPaymentLedgerRows(pool, propertyId, query);
       return toPaymentLedgerResponseBody(rows, query);
     },
+    async listPayouts(propertyId, query) {
+      const result = await loadPayoutRows(pool, propertyId, query);
+      return toPayoutListResponseBody(result, query);
+    },
+    async listReconciliationItems(propertyId, view, query) {
+      const result = await loadReconciliationRows(pool, propertyId, view, query);
+      return toReconciliationViewResponseBody(result, query);
+    },
     async getInvoiceCsvExportDisposition(propertyId) {
       return {
         export: {
@@ -618,6 +1151,67 @@ export function createTargetFinancePropertySettingsRepository(config: {
         if (ownsTransaction) client.release?.();
       }
     },
+    async createStripeProviderAccount(command) {
+      if (!config.stripeConnectProvider) {
+        return {
+          ok: false,
+          statusCode: 502,
+          code: "provider_unavailable",
+          message: "Stripe Connect onboarding is not configured.",
+        };
+      }
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        return await createStripeProviderAccountInClient(
+          client,
+          command,
+          config.stripeConnectProvider,
+        );
+      } catch (error) {
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
+    async issueStripeOnboardingLink(command) {
+      if (!config.stripeConnectProvider) {
+        return {
+          ok: false,
+          statusCode: 502,
+          code: "provider_unavailable",
+          message: "Stripe Connect onboarding is not configured.",
+        };
+      }
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        return await issueStripeOnboardingLinkInClient(
+          client,
+          command,
+          config.stripeConnectProvider,
+        );
+      } catch (error) {
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
+    async enqueueXenditPayoutReconciliation(command) {
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        if (ownsTransaction) await client.query("BEGIN");
+        const result = await enqueueXenditPayoutReconciliationInClient(client, command);
+        if (ownsTransaction) await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        if (ownsTransaction) await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
     async close() {
       await pool.end();
     },
@@ -637,6 +1231,582 @@ async function checkoutFinanceWriteClient(
       return { ...result, rowCount: result.rows.length };
     },
   };
+}
+
+async function createStripeProviderAccountInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: CreateStripeProviderAccountCommand,
+  provider: FinanceStripeConnectProvider,
+): Promise<FinanceProviderAccountCommandResult> {
+  const owner = financeProviderAccountOwner(command);
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(stableJson({ owner, payload: command.payload }));
+  const existingIdempotency = await loadProviderAccountIdempotency(
+    client,
+    command,
+    "stripe_provider_account_create",
+    keyHash,
+  );
+  if (existingIdempotency && existingIdempotency.requestFingerprintHash !== fingerprint) {
+    return providerAccountCommandConflict(
+      "Idempotency key was already used with a different Stripe provider-account payload.",
+    );
+  }
+
+  const existingAccount = await loadStripeProviderAccountByOwner(client, owner);
+  if (existingAccount) {
+    const onboardingUrl = await provider.createOnboardingLink({
+      owner,
+      providerAccountRef: existingAccount.providerAccountRef,
+      idempotencyKey: stripeProviderIdempotencyKey(owner, keyHash, "onboarding-link"),
+    });
+    await updateStripeProviderAccountOnboardingUrl(
+      client,
+      existingAccount.providerAccountId,
+      onboardingUrl,
+    );
+    await reserveProviderAccountIdempotency(
+      client,
+      command,
+      "stripe_provider_account_create",
+      keyHash,
+      fingerprint,
+    );
+    const response = providerAccountCommandResponse(
+      existingAccount,
+      onboardingUrl,
+      buildProviderAccountCommandMeta(command, keyHash),
+    );
+    await completeProviderAccountIdempotency(
+      client,
+      command,
+      "stripe_provider_account_create",
+      keyHash,
+      fingerprint,
+      response,
+    );
+    return { ok: true, status: "existing_owner_account", response };
+  }
+
+  const idempotencyError = await reserveProviderAccountIdempotency(
+    client,
+    command,
+    "stripe_provider_account_create",
+    keyHash,
+    fingerprint,
+  );
+  if (idempotencyError) return idempotencyError;
+
+  const providerAccount = await provider.createAccount({
+    owner,
+    email: command.payload.email,
+    country: command.payload.country,
+    idempotencyKey: stripeProviderIdempotencyKey(owner, keyHash, "account"),
+  });
+
+  let insertedAccount: FinanceProviderAccountRow;
+  try {
+    insertedAccount = await insertStripeProviderAccount(client, command, providerAccount);
+  } catch (error) {
+    await provider.compensateAccountCreation?.({
+      owner,
+      providerAccountRef: providerAccount.providerAccountRef,
+      reason: "db_write_failed",
+      idempotencyKey: stripeProviderIdempotencyKey(owner, keyHash, "compensate"),
+    });
+    await markProviderAccountIdempotencyFailed(
+      client,
+      command,
+      "stripe_provider_account_create",
+      keyHash,
+      error instanceof Error ? error.message : "finance provider-account write failed",
+    );
+    return {
+      ok: false,
+      statusCode: 500,
+      code: "write_unavailable",
+      message:
+        "Finance provider-account write failed after Stripe account creation; compensation was attempted.",
+    };
+  }
+
+  const response = providerAccountCommandResponse(
+    insertedAccount,
+    providerAccount.onboardingUrl,
+    buildProviderAccountCommandMeta(command, keyHash),
+  );
+  await completeProviderAccountIdempotency(
+    client,
+    command,
+    "stripe_provider_account_create",
+    keyHash,
+    fingerprint,
+    response,
+  );
+  return { ok: true, status: "created", response };
+}
+
+async function issueStripeOnboardingLinkInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: IssueStripeOnboardingLinkCommand,
+  provider: FinanceStripeConnectProvider,
+): Promise<FinanceProviderAccountCommandResult> {
+  const owner = financeProviderAccountOwner(command);
+  const account = await loadStripeProviderAccountById(
+    client,
+    command.payload.providerAccountId,
+    owner,
+  );
+  if (!account) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "provider_account_not_found",
+      message: "Finance provider account was not found.",
+    };
+  }
+
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(stableJson({ owner, payload: command.payload }));
+  const existingIdempotency = await loadProviderAccountIdempotency(
+    client,
+    command,
+    "stripe_onboarding_link_issue",
+    keyHash,
+  );
+  if (existingIdempotency && existingIdempotency.requestFingerprintHash !== fingerprint) {
+    return providerAccountCommandConflict(
+      "Idempotency key was already used with a different Stripe onboarding-link payload.",
+    );
+  }
+  const idempotencyError = await reserveProviderAccountIdempotency(
+    client,
+    command,
+    "stripe_onboarding_link_issue",
+    keyHash,
+    fingerprint,
+  );
+  if (idempotencyError) return idempotencyError;
+
+  const onboardingUrl = await provider.createOnboardingLink({
+    owner,
+    providerAccountRef: account.providerAccountRef,
+    idempotencyKey: stripeProviderIdempotencyKey(owner, keyHash, "onboarding-link"),
+  });
+  await updateStripeProviderAccountOnboardingUrl(client, account.providerAccountId, onboardingUrl);
+  const response = providerAccountCommandResponse(
+    account,
+    onboardingUrl,
+    buildProviderAccountCommandMeta(command, keyHash),
+  );
+  await completeProviderAccountIdempotency(
+    client,
+    command,
+    "stripe_onboarding_link_issue",
+    keyHash,
+    fingerprint,
+    response,
+  );
+  return {
+    ok: true,
+    status: existingIdempotency ? "idempotent_replay" : "created",
+    response,
+  };
+}
+
+function financeProviderAccountOwner(
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+): Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"] {
+  if ("propertyId" in command) {
+    return {
+      ownerScope: "property",
+      propertyId: command.propertyId,
+      organizationId:
+        command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+    };
+  }
+  return {
+    ownerScope: "affiliate",
+    affiliateId: command.affiliateId,
+    organizationId: command.organizationId,
+  };
+}
+
+async function loadStripeProviderAccountByOwner(
+  client: FinancePropertySettingsWriteClient,
+  owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
+): Promise<FinanceProviderAccountRow | null> {
+  if (owner.ownerScope === "property") {
+    const result = await client.query<FinanceProviderAccountRow>(
+      `SELECT
+         id::text AS "providerAccountId",
+         provider_account_id AS "providerAccountRef",
+         status,
+         onboarding_status AS "onboardingStatus",
+         account_metadata ->> 'onboardingUrl' AS "onboardingUrl"
+       FROM finance.payment_provider_accounts
+       WHERE account_scope = 'property'
+         AND provider = 'stripe'
+         AND property_id = $1::uuid
+       ORDER BY created_at ASC
+       LIMIT 1`,
+      [owner.propertyId],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  const result = await client.query<FinanceProviderAccountRow>(
+    `SELECT
+       id::text AS "providerAccountId",
+       provider_account_id AS "providerAccountRef",
+       status,
+       onboarding_status AS "onboardingStatus",
+       account_metadata ->> 'onboardingUrl' AS "onboardingUrl"
+     FROM finance.payment_provider_accounts
+     WHERE account_scope = 'organization'
+       AND provider = 'stripe'
+       AND organization_id = $1::uuid
+       AND account_metadata ->> 'affiliateId' = $2
+     ORDER BY created_at ASC
+     LIMIT 1`,
+    [owner.organizationId, owner.affiliateId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function loadStripeProviderAccountById(
+  client: FinancePropertySettingsWriteClient,
+  providerAccountId: string,
+  owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
+): Promise<FinanceProviderAccountRow | null> {
+  const ownerAccount = await loadStripeProviderAccountByOwner(client, owner);
+  return ownerAccount?.providerAccountId === providerAccountId ? ownerAccount : null;
+}
+
+async function insertStripeProviderAccount(
+  client: FinancePropertySettingsWriteClient,
+  command: CreateStripeProviderAccountCommand,
+  providerAccount: { providerAccountRef: string; onboardingUrl: string },
+): Promise<FinanceProviderAccountRow> {
+  const owner = financeProviderAccountOwner(command);
+  const accountMetadata =
+    owner.ownerScope === "affiliate"
+      ? {
+          affiliateId: owner.affiliateId,
+          commandId: command.commandId,
+          onboardingUrl: providerAccount.onboardingUrl,
+        }
+      : {
+          commandId: command.commandId,
+          onboardingUrl: providerAccount.onboardingUrl,
+        };
+  const result = await client.query<FinanceProviderAccountRow>(
+    `WITH inserted AS (
+       INSERT INTO finance.payment_provider_accounts (
+         property_id,
+         organization_id,
+         account_scope,
+         provider,
+         provider_account_id,
+         status,
+         onboarding_status,
+         charges_enabled,
+         payouts_enabled,
+         default_currency,
+         capabilities,
+         account_metadata,
+         created_at,
+         updated_at
+       )
+       VALUES (
+         $1::uuid,
+         $2::uuid,
+         $3,
+         'stripe',
+         $4,
+         'setup_incomplete',
+         'invited',
+         false,
+         false,
+         upper($5),
+         ARRAY['card_payments', 'transfers'],
+         $6::jsonb,
+         $7::timestamptz,
+         $7::timestamptz
+       )
+       ON CONFLICT (provider, provider_account_id) WHERE provider_account_id IS NOT NULL
+       DO UPDATE SET
+         onboarding_status = 'invited',
+         account_metadata = finance.payment_provider_accounts.account_metadata || EXCLUDED.account_metadata,
+         updated_at = EXCLUDED.updated_at
+       RETURNING
+         id::text AS "providerAccountId",
+         provider_account_id AS "providerAccountRef",
+         status,
+         onboarding_status AS "onboardingStatus",
+         account_metadata ->> 'onboardingUrl' AS "onboardingUrl"
+     )
+     SELECT * FROM inserted`,
+    [
+      owner.ownerScope === "property" ? owner.propertyId : null,
+      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+      owner.ownerScope === "property" ? "property" : "organization",
+      providerAccount.providerAccountRef,
+      command.payload.country,
+      JSON.stringify(accountMetadata),
+      command.audit.requestedAt,
+    ],
+  );
+  return result.rows[0]!;
+}
+
+async function updateStripeProviderAccountOnboardingUrl(
+  client: FinancePropertySettingsWriteClient,
+  providerAccountId: string,
+  onboardingUrl: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE finance.payment_provider_accounts
+     SET onboarding_status = 'invited',
+         account_metadata = account_metadata || $2::jsonb,
+         updated_at = now()
+     WHERE id = $1::uuid`,
+    [providerAccountId, JSON.stringify({ onboardingUrl })],
+  );
+}
+
+async function loadProviderAccountIdempotency(
+  client: FinancePropertySettingsWriteClient,
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+  operation: "stripe_provider_account_create" | "stripe_onboarding_link_issue",
+  keyHash: string,
+): Promise<FinanceManualPaymentIdempotencyRow | null> {
+  const owner = financeProviderAccountOwner(command);
+  const result = await client.query<FinanceManualPaymentIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'finance'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = $3
+       AND (($3 = 'property' AND property_id = $4::uuid)
+         OR ($3 = 'organization' AND organization_id = $5::uuid))
+     LIMIT 1`,
+    [
+      operation,
+      keyHash,
+      owner.ownerScope === "property" ? "property" : "organization",
+      owner.ownerScope === "property" ? owner.propertyId : null,
+      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+    ],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function reserveProviderAccountIdempotency(
+  client: FinancePropertySettingsWriteClient,
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+  operation: "stripe_provider_account_create" | "stripe_onboarding_link_issue",
+  keyHash: string,
+  fingerprint: string,
+): Promise<Extract<FinanceProviderAccountCommandResult, { ok: false }> | null> {
+  const owner = financeProviderAccountOwner(command);
+  const result = await client.query<{
+    requestFingerprintHash: string;
+  }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       organization_id,
+       property_id,
+       correlation_id,
+       first_seen_at,
+       last_seen_at,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'finance',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       $4,
+       $5::uuid,
+       $6::uuid,
+       $7,
+       $8::timestamptz,
+       $8::timestamptz,
+       $8::timestamptz + interval '24 hours',
+       $9::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key)
+     DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+     RETURNING request_fingerprint_hash AS "requestFingerprintHash"`,
+    [
+      operation,
+      keyHash,
+      fingerprint,
+      owner.ownerScope === "property" ? "property" : "organization",
+      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+      owner.ownerScope === "property" ? owner.propertyId : null,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.audit.requestedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        owner,
+        provider: "stripe",
+      }),
+    ],
+  );
+  if (result.rows[0]?.requestFingerprintHash !== fingerprint) {
+    return providerAccountCommandConflict(
+      "Idempotency key was already used with a different Stripe provider-account payload.",
+    );
+  }
+  return null;
+}
+
+async function completeProviderAccountIdempotency(
+  client: FinancePropertySettingsWriteClient,
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+  operation: "stripe_provider_account_create" | "stripe_onboarding_link_issue",
+  keyHash: string,
+  fingerprint: string,
+  response: FinanceProviderAccountCommandResponse,
+): Promise<void> {
+  const owner = financeProviderAccountOwner(command);
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         request_fingerprint_hash = $1,
+         response_status_code = 200,
+         response_resource_product = 'finance',
+         response_resource_type = 'payment_provider_account',
+         response_resource_id = $2,
+         response_body_hash = $3,
+         completed_at = $4::timestamptz,
+         last_seen_at = $4::timestamptz,
+         idempotency_metadata = idempotency_metadata || $5::jsonb
+     WHERE operation_scope = 'finance'
+       AND operation = $6
+       AND key_hash = $7
+       AND tenant_scope = $8
+       AND (($8 = 'property' AND property_id = $9::uuid)
+         OR ($8 = 'organization' AND organization_id = $10::uuid))`,
+    [
+      fingerprint,
+      response.providerAccountId,
+      sha256(stableJson(response)),
+      command.audit.requestedAt,
+      JSON.stringify({
+        commandMeta: response.commandMeta,
+        providerAccountRef: response.providerAccountRef,
+      }),
+      operation,
+      keyHash,
+      owner.ownerScope === "property" ? "property" : "organization",
+      owner.ownerScope === "property" ? owner.propertyId : null,
+      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+    ],
+  );
+}
+
+async function markProviderAccountIdempotencyFailed(
+  client: FinancePropertySettingsWriteClient,
+  command: CreateStripeProviderAccountCommand,
+  operation: "stripe_provider_account_create",
+  keyHash: string,
+  message: string,
+): Promise<void> {
+  const owner = financeProviderAccountOwner(command);
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'failed',
+         last_seen_at = $1::timestamptz,
+         idempotency_metadata = idempotency_metadata || $2::jsonb
+     WHERE operation_scope = 'finance'
+       AND operation = $3
+       AND key_hash = $4
+       AND tenant_scope = $5
+       AND (($5 = 'property' AND property_id = $6::uuid)
+         OR ($5 = 'organization' AND organization_id = $7::uuid))`,
+    [
+      command.audit.requestedAt,
+      JSON.stringify({ compensation: "attempted", error: message }),
+      operation,
+      keyHash,
+      owner.ownerScope === "property" ? "property" : "organization",
+      owner.ownerScope === "property" ? owner.propertyId : null,
+      owner.ownerScope === "affiliate" ? owner.organizationId : null,
+    ],
+  );
+}
+
+function buildProviderAccountCommandMeta(
+  command: CreateStripeProviderAccountCommand | IssueStripeOnboardingLinkCommand,
+  keyHash: string,
+): FinanceProviderAccountCommandMeta {
+  const owner = financeProviderAccountOwner(command);
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: ["audit_event", "reconciliation_job"],
+    outboxEvents: [],
+    jobs: [
+      {
+        jobType: "pms.projection-refresh",
+        idempotencyKey: `finance.reconcile-provider-account:${owner.ownerScope}:${owner.ownerScope === "property" ? owner.propertyId : owner.affiliateId}:stripe:${keyHash}:v1`,
+        status: "queued",
+      },
+    ],
+  };
+}
+
+function providerAccountCommandResponse(
+  account: FinanceProviderAccountRow,
+  onboardingUrl: string,
+  commandMeta: FinanceProviderAccountCommandMeta,
+): FinanceProviderAccountCommandResponse {
+  return {
+    contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+    providerAccountId: account.providerAccountId,
+    provider: "stripe",
+    providerAccountRef: account.providerAccountRef,
+    status: providerAccountStatus(account.status),
+    onboardingStatus: providerOnboardingStatus(account.onboardingStatus),
+    onboardingUrl,
+    commandMeta,
+  };
+}
+
+function providerAccountCommandConflict(
+  message: string,
+): Extract<FinanceProviderAccountCommandResult, { ok: false }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code: "idempotency_conflict",
+    message,
+  };
+}
+
+function stripeProviderIdempotencyKey(
+  owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
+  keyHash: string,
+  purpose: "account" | "onboarding-link" | "compensate",
+): string {
+  const ownerKey =
+    owner.ownerScope === "property"
+      ? `property:${owner.propertyId}`
+      : `affiliate:${owner.affiliateId}:organization:${owner.organizationId}`;
+  return `finance.stripe-connect.${purpose}:${ownerKey}:key:${keyHash}:v1`;
 }
 
 async function recordManualPaymentInClient(
@@ -772,6 +1942,161 @@ async function recordManualPaymentInClient(
     ok: true,
     status: payment.replay ? "idempotent_replay" : "created",
     invoice: updatedInvoice,
+    commandMeta,
+  };
+}
+
+async function enqueueXenditPayoutReconciliationInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceXenditPayoutReconciliationCommand,
+): Promise<FinanceXenditPayoutReconciliationResult> {
+  if (command.payload.olderThanMinutes < 0 || command.payload.olderThanMinutes > 10080) {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: "invalid_command",
+      message: "olderThanMinutes must be between 0 and 10080.",
+    };
+  }
+
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(stableJson(command.payload));
+  const requestedAt = command.audit.requestedAt;
+  const jobKey = buildXenditPayoutReconciliationJobKey(command);
+  const idempotency = await client.query<{
+    status: string;
+    requestFingerprintHash: string;
+  }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       organization_id,
+       property_id,
+       correlation_id,
+       first_seen_at,
+       last_seen_at,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'finance',
+       'xendit_payout_reconciliation',
+       $1,
+       $2,
+       'completed',
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::timestamptz,
+       $5::timestamptz,
+       $5::timestamptz + interval '24 hours',
+       $6::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key)
+     DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
+     RETURNING
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash"`,
+    [
+      keyHash,
+      fingerprint,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      requestedAt,
+      JSON.stringify({
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        provider: "xendit",
+        olderThanMinutes: command.payload.olderThanMinutes,
+        legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
+      }),
+    ],
+  );
+  const idempotencyRow = idempotency.rows[0];
+  if (idempotencyRow && idempotencyRow.requestFingerprintHash !== fingerprint) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message: "Idempotency key was already used with a different reconciliation payload.",
+    };
+  }
+
+  const job = await client.query<{ jobId: string; replay: boolean }>(
+    `WITH inserted AS (
+       INSERT INTO platform.jobs (
+         job_key,
+         queue_name,
+         job_type,
+         tenant_scope,
+         organization_id,
+         property_id,
+         resource_product,
+         resource_type,
+         resource_id,
+         correlation_id,
+         idempotency_key_hash,
+         payload,
+         job_metadata
+       )
+       VALUES (
+         $1,
+         'finance-reconciliation',
+         'finance.reconcile-payout',
+         'property',
+         NULL,
+         $2::uuid,
+         'finance',
+         'payout',
+         $2,
+         $3,
+         $4,
+         $5::jsonb,
+         $6::jsonb
+       )
+       ON CONFLICT (queue_name, job_key) DO NOTHING
+       RETURNING id::text AS "jobId", false AS replay
+     )
+     SELECT "jobId", replay FROM inserted
+     UNION ALL
+     SELECT id::text AS "jobId", true AS replay
+     FROM platform.jobs
+     WHERE queue_name = 'finance-reconciliation'
+       AND job_key = $1
+     LIMIT 1`,
+    [
+      jobKey,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      keyHash,
+      JSON.stringify({
+        provider: "xendit",
+        propertyId: command.propertyId,
+        olderThanMinutes: command.payload.olderThanMinutes,
+        requestedAt,
+      }),
+      JSON.stringify({
+        commandId: command.commandId,
+        legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
+      }),
+    ],
+  );
+  const replay = Boolean(job.rows[0]?.replay);
+  const commandMeta = buildXenditPayoutReconciliationCommandMeta(command, replay);
+  await recordXenditPayoutReconciliationAuditEvent(client, command, keyHash, jobKey, requestedAt);
+  return {
+    ok: true,
+    status: replay ? "idempotent_replay" : "queued",
+    job: commandMeta.jobs[0] as Extract<
+      FinanceCommandMeta["jobs"][number],
+      { jobType: "finance.reconcile-payout" }
+    >,
+    legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
     commandMeta,
   };
 }
@@ -1038,6 +2363,39 @@ function buildManualPaymentCommandMeta(
   };
 }
 
+function buildXenditPayoutReconciliationCommandMeta(
+  command: FinanceXenditPayoutReconciliationCommand,
+  replay: boolean,
+): FinanceCommandMeta {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: [...XENDIT_PAYOUT_RECONCILIATION_SIDE_EFFECTS],
+    outboxEvents: [],
+    jobs: [
+      {
+        jobType: "finance.reconcile-payout",
+        idempotencyKey: buildXenditPayoutReconciliationJobKey(command),
+        status: replay ? "idempotent_replay" : "queued",
+      },
+    ],
+  };
+}
+
+function buildXenditPayoutReconciliationJobKey(
+  command: FinanceXenditPayoutReconciliationCommand,
+): string {
+  return `finance.reconcile-payout:property:${command.propertyId}:xendit-manual-${xenditPayoutReconciliationWindow(command)}:v1`;
+}
+
+function xenditPayoutReconciliationWindow(
+  command: FinanceXenditPayoutReconciliationCommand,
+): string {
+  const dateMatch = /\b\d{4}-\d{2}-\d{2}\b/.exec(command.idempotencyKey);
+  if (dateMatch) return dateMatch[0];
+  return `key-${sha256(command.idempotencyKey).slice(0, 12)}`;
+}
+
 function manualPaymentScopedPersistenceKey(
   propertyId: string,
   keyHash: string,
@@ -1238,6 +2596,77 @@ async function enqueueManualPaymentOutboxEvents(
       .outboxEventId,
     pms: result.rows.find((row) => row.destination === "pms.projection-refresh")!.outboxEventId,
   };
+}
+
+async function recordXenditPayoutReconciliationAuditEvent(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceXenditPayoutReconciliationCommand,
+  keyHash: string,
+  jobKey: string,
+  recordedAt: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       payload,
+       audit_metadata,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'finance',
+       'finance.xendit_payouts.reconcile_requested',
+       1,
+       $2::timestamptz,
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::uuid,
+       'finance',
+       'payout',
+       $3,
+       $6,
+       $7,
+       $8::jsonb,
+       $9::jsonb,
+       'confidential'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `finance.xendit-payout-reconciliation.audit.property.${command.propertyId}.key.${keyHash}.v1`,
+      recordedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        provider: "xendit",
+        olderThanMinutes: command.payload.olderThanMinutes,
+        jobKey,
+      }),
+      JSON.stringify({
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        legacyDisposition: XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION,
+      }),
+    ],
+  );
 }
 
 async function enqueueManualPaymentJobs(
@@ -1804,6 +3233,566 @@ async function loadPaymentLedgerRows(
   return result.rows;
 }
 
+async function loadPayoutRows(
+  pool: FinanceQueryExecutor,
+  propertyId: string,
+  query: FinancePayoutListQuery,
+): Promise<FinanceRowsWithTotal<FinancePayoutRow>> {
+  const result = await pool.query<FinancePayoutRow>(
+    `WITH payout_base AS (
+       SELECT
+         payout.id::text AS "payoutId",
+         payout.owner_scope AS "ownerScope",
+         payout.property_id::text AS "propertyId",
+         payout.organization_id::text AS "organizationId",
+         payout.related_property_id::text AS "relatedPropertyId",
+         payout.guest_booking_id::text AS "guestBookingId",
+         payout.payment_id::text AS "paymentId",
+         payout.payout_status AS "payoutStatus",
+         payout.amount::text AS amount,
+         payout.fee_amount::text AS "feeAmount",
+         payout.net_amount::text AS "netAmount",
+         payout.currency,
+         COALESCE(account.provider, 'manual') AS provider,
+         payout.provider_payout_id AS "providerPayoutId",
+         payout.scheduled_at AS "scheduledAt",
+         payout.paid_at AS "paidAt",
+         payout.failed_at AS "failedAt",
+         payout.failure_code AS "failureCode",
+         payout.retry_count AS "retryCount",
+         COALESCE(visibility.source_freshness, '{}'::jsonb) AS "sourceFreshness",
+         COALESCE(payout.scheduled_at, payout.paid_at, payout.failed_at, payout.created_at) AS "sortAt"
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.property_provider_account_id
+        AND account.property_id = payout.property_id
+       LEFT JOIN LATERAL (
+         SELECT source_freshness
+         FROM finance.finance_visibility_read_model visibility
+         WHERE visibility.property_id = payout.property_id
+           AND visibility.visibility_scope = 'property_finance'
+           AND visibility.required_permission_key = 'pms.finance.read'
+         ORDER BY visibility.projected_at DESC
+         LIMIT 1
+       ) visibility ON TRUE
+       WHERE payout.property_id = $1::uuid
+         AND payout.owner_scope = 'property'
+     ),
+     filtered AS (
+       SELECT *
+       FROM payout_base
+       WHERE ($2::text IS NULL OR "payoutStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)
+	     ),
+	     total_count AS (
+	       SELECT count(*)::text AS total
+	       FROM filtered
+	     ),
+	     page AS (
+	       SELECT *
+	       FROM filtered
+	       ORDER BY "sortAt" DESC, "payoutId" ASC
+	       LIMIT $4::integer OFFSET $5::integer
+	     )
+	     SELECT
+	       page.*,
+	       total_count.total
+	     FROM page
+	     CROSS JOIN total_count`,
+    [propertyId, query.status ?? null, query.provider ?? null, query.limit, query.offset],
+  );
+  return {
+    rows: result.rows,
+    total: await totalForPossiblyEmptyPage(pool, result.rows, query.offset, {
+      sql: payoutTotalSql(),
+      values: [propertyId, query.status ?? null, query.provider ?? null],
+    }),
+  };
+}
+
+async function loadReconciliationRows(
+  pool: FinanceQueryExecutor,
+  propertyId: string,
+  view: FinanceReconciliationViewKind,
+  query: FinanceReconciliationViewQuery,
+): Promise<FinanceRowsWithTotal<FinanceReconciliationRow>> {
+  const sql = reconciliationViewSql(view);
+  const result = await pool.query<FinanceReconciliationRow>(sql, [
+    propertyId,
+    query.status ?? null,
+    query.provider ?? null,
+    query.limit,
+    query.offset,
+  ]);
+  return {
+    rows: result.rows,
+    total: await totalForPossiblyEmptyPage(pool, result.rows, query.offset, {
+      sql: reconciliationTotalSql(view),
+      values: [propertyId, query.status ?? null, query.provider ?? null],
+    }),
+  };
+}
+
+function payoutTotalSql(): string {
+  return `WITH payout_base AS (
+       SELECT
+         payout.id::text AS "payoutId",
+         payout.payout_status AS "payoutStatus",
+         COALESCE(account.provider, 'manual') AS provider
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.property_provider_account_id
+        AND account.property_id = payout.property_id
+       WHERE payout.property_id = $1::uuid
+         AND payout.owner_scope = 'property'
+     ),
+     filtered AS (
+       SELECT *
+       FROM payout_base
+       WHERE ($2::text IS NULL OR "payoutStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)
+     )
+     SELECT count(*)::text AS total
+     FROM filtered`;
+}
+
+function reconciliationTotalSql(view: FinanceReconciliationViewKind): string {
+  return reconciliationViewSql(view, "total");
+}
+
+function reconciliationViewSql(
+  view: FinanceReconciliationViewKind,
+  mode: "page" | "total" = "page",
+): string {
+  switch (view) {
+    case "payments":
+      return reconciliationPaymentSql(mode);
+    case "payouts":
+      return reconciliationPayoutSql(mode);
+    case "provider-accounts":
+      return reconciliationProviderAccountSql(mode);
+  }
+}
+
+function reconciliationPaymentSql(mode: "page" | "total"): string {
+  return `WITH base AS (
+       SELECT
+         payment.id::text AS "subjectId",
+         'payment' AS "subjectType",
+         COALESCE(
+           account.provider,
+           CASE
+             WHEN payment.payment_method = 'bank_transfer' THEN 'bank_transfer'
+             WHEN payment.payment_method IN ('cash', 'manual_card', 'other', 'unknown') THEN 'manual'
+             ELSE 'vayada'
+           END
+         ) AS provider,
+         payment.status AS "financeStatus",
+         COALESCE(payment.payment_metadata ->> 'providerStatus', payment.status) AS "providerStatus",
+         receipt.delivery_status AS "receiptStatus",
+         receipt.received_at AS "lastReceiptAt",
+         job.status AS "rawJobStatus",
+         COALESCE(job.finished_at, job.run_after, job.created_at) AS "lastJobAt",
+         dead.created_at AS "deadLetteredAt"
+       FROM finance.payments payment
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payment.provider_account_id
+        AND account.property_id = payment.property_id
+	       LEFT JOIN LATERAL (
+	         SELECT receipt.delivery_status, receipt.received_at
+	         FROM platform.external_webhook_events receipt
+	         JOIN platform.domain_events receipt_event
+	           ON receipt_event.id = receipt.normalized_domain_event_id
+	          AND receipt_event.source_system = 'external'
+	          AND receipt_event.resource_product = 'finance'
+	          AND receipt_event.resource_type = 'payment'
+	         WHERE receipt.provider = COALESCE(account.provider, 'stripe')
+	           AND receipt_event.resource_id IN (
+	             payment.provider_transaction_id,
+	             payment.provider_payment_intent_id
+	           )
+	         ORDER BY receipt.received_at DESC
+	         LIMIT 1
+	       ) receipt ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT job.id, job.status, job.finished_at, job.run_after, job.created_at
+	         FROM platform.jobs job
+	         LEFT JOIN platform.domain_events job_event
+	           ON job_event.id = job.source_domain_event_id
+	          AND job_event.source_system = 'external'
+	          AND job_event.resource_product = 'finance'
+	          AND job_event.resource_type = 'payment'
+	         WHERE job.resource_product = 'finance'
+	           AND (
+	             (
+	               job.property_id = payment.property_id
+	               AND job.resource_type = 'payment'
+	               AND job.resource_id = payment.id::text
+	             )
+	             OR (
+	               job.tenant_scope = 'external'
+	               AND job.resource_type = 'payment'
+	               AND job.resource_id IN (
+	                 payment.provider_transaction_id,
+	                 payment.provider_payment_intent_id
+	               )
+	             )
+	             OR job_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	             OR job.job_key LIKE ('payment.reconcile-status:payment:' || payment.id::text || ':%')
+	             OR (
+	               payment.provider_transaction_id IS NOT NULL
+	               AND job.job_key LIKE ('payment.reconcile-status:payment:' || payment.provider_transaction_id || ':%')
+	             )
+	             OR (
+	               payment.provider_payment_intent_id IS NOT NULL
+	               AND job.job_key LIKE ('payment.reconcile-status:payment:' || payment.provider_payment_intent_id || ':%')
+	             )
+	           )
+	         ORDER BY job.created_at DESC
+	         LIMIT 1
+	       ) job ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT dead.created_at
+	         FROM platform.dead_letter_events dead
+	         LEFT JOIN platform.jobs dead_job
+	           ON dead_job.id = dead.job_id
+	         LEFT JOIN platform.domain_events dead_domain_event
+	           ON dead_domain_event.id = dead.domain_event_id
+	         LEFT JOIN platform.domain_events dead_job_event
+	           ON dead_job_event.id = dead_job.source_domain_event_id
+	         LEFT JOIN platform.external_webhook_events dead_receipt
+	           ON dead_receipt.id = dead.webhook_event_id
+	         LEFT JOIN platform.domain_events dead_receipt_event
+	           ON dead_receipt_event.id = dead_receipt.normalized_domain_event_id
+	         WHERE dead.resource_product = 'finance'
+	           AND (
+	             (
+	               dead.property_id = payment.property_id
+	               AND dead.resource_type = 'payment'
+	               AND dead.resource_id = payment.id::text
+	             )
+	             OR dead.job_id = job.id
+	             OR (
+	               dead.resource_type = 'payment'
+	               AND dead.resource_id IN (
+	                 payment.provider_transaction_id,
+	                 payment.provider_payment_intent_id
+	               )
+	             )
+	             OR dead_domain_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	             OR dead_job_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	             OR dead_receipt_event.resource_id IN (
+	               payment.provider_transaction_id,
+	               payment.provider_payment_intent_id
+	             )
+	           )
+	         ORDER BY dead.created_at DESC
+	         LIMIT 1
+	       ) dead ON TRUE
+       WHERE payment.property_id = $1::uuid
+         AND payment.visibility_class IN ('pms_finance', 'migration')
+     ),
+     mapped AS (
+       ${reconciliationMappedSelect()}
+       FROM base
+     ),
+     filtered AS (
+       ${reconciliationFilteredSelect()}
+     )
+	     ${reconciliationFinalSelect(mode)}`;
+}
+
+function reconciliationPayoutSql(mode: "page" | "total"): string {
+  return `WITH base AS (
+       SELECT
+         payout.id::text AS "subjectId",
+         'payout' AS "subjectType",
+         COALESCE(account.provider, 'manual') AS provider,
+         payout.payout_status AS "financeStatus",
+         COALESCE(payout.payout_metadata ->> 'providerStatus', payout.payout_status) AS "providerStatus",
+         receipt.delivery_status AS "receiptStatus",
+         receipt.received_at AS "lastReceiptAt",
+         job.status AS "rawJobStatus",
+         COALESCE(job.finished_at, job.run_after, job.created_at) AS "lastJobAt",
+         dead.created_at AS "deadLetteredAt"
+       FROM finance.payouts payout
+       LEFT JOIN finance.payment_provider_accounts account
+         ON account.id = payout.property_provider_account_id
+        AND account.property_id = payout.property_id
+	       LEFT JOIN LATERAL (
+	         SELECT receipt.delivery_status, receipt.received_at
+	         FROM platform.external_webhook_events receipt
+	         JOIN platform.domain_events receipt_event
+	           ON receipt_event.id = receipt.normalized_domain_event_id
+	          AND receipt_event.source_system = 'external'
+	          AND receipt_event.resource_product = 'finance'
+	          AND receipt_event.resource_type = 'payout'
+	         WHERE receipt.provider = COALESCE(account.provider, 'stripe')
+	           AND receipt_event.resource_id = payout.provider_payout_id
+	         ORDER BY receipt.received_at DESC
+	         LIMIT 1
+	       ) receipt ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT job.id, job.status, job.finished_at, job.run_after, job.created_at
+	         FROM platform.jobs job
+	         LEFT JOIN platform.domain_events job_event
+	           ON job_event.id = job.source_domain_event_id
+	          AND job_event.source_system = 'external'
+	          AND job_event.resource_product = 'finance'
+	          AND job_event.resource_type = 'payout'
+	         WHERE job.resource_product = 'finance'
+	           AND (
+	             (
+	               job.property_id = payout.property_id
+	               AND job.resource_type = 'payout'
+	               AND job.resource_id = payout.id::text
+	             )
+	             OR (
+	               job.tenant_scope = 'external'
+	               AND job.resource_type = 'payout'
+	               AND job.resource_id = payout.provider_payout_id
+	             )
+	             OR job_event.resource_id = payout.provider_payout_id
+	             OR job.job_key LIKE ('finance.reconcile-payout:payout:' || payout.id::text || ':%')
+	             OR (
+	               payout.provider_payout_id IS NOT NULL
+               AND job.job_key LIKE ('finance.reconcile-payout:payout:' || payout.provider_payout_id || ':%')
+             )
+           )
+         ORDER BY job.created_at DESC
+         LIMIT 1
+	       ) job ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT dead.created_at
+	         FROM platform.dead_letter_events dead
+	         LEFT JOIN platform.jobs dead_job
+	           ON dead_job.id = dead.job_id
+	         LEFT JOIN platform.domain_events dead_domain_event
+	           ON dead_domain_event.id = dead.domain_event_id
+	         LEFT JOIN platform.domain_events dead_job_event
+	           ON dead_job_event.id = dead_job.source_domain_event_id
+	         LEFT JOIN platform.external_webhook_events dead_receipt
+	           ON dead_receipt.id = dead.webhook_event_id
+	         LEFT JOIN platform.domain_events dead_receipt_event
+	           ON dead_receipt_event.id = dead_receipt.normalized_domain_event_id
+	         WHERE dead.resource_product = 'finance'
+	           AND (
+	             (
+	               dead.property_id = payout.property_id
+	               AND dead.resource_type = 'payout'
+	               AND dead.resource_id = payout.id::text
+	             )
+	             OR dead.job_id = job.id
+	             OR (
+	               dead.resource_type = 'payout'
+	               AND dead.resource_id = payout.provider_payout_id
+	             )
+	             OR dead_domain_event.resource_id = payout.provider_payout_id
+	             OR dead_job_event.resource_id = payout.provider_payout_id
+	             OR dead_receipt_event.resource_id = payout.provider_payout_id
+	           )
+	         ORDER BY dead.created_at DESC
+	         LIMIT 1
+	       ) dead ON TRUE
+       WHERE payout.property_id = $1::uuid
+         AND payout.owner_scope = 'property'
+     ),
+     mapped AS (
+       ${reconciliationMappedSelect()}
+       FROM base
+     ),
+     filtered AS (
+       ${reconciliationFilteredSelect()}
+     )
+	     ${reconciliationFinalSelect(mode)}`;
+}
+
+function reconciliationProviderAccountSql(mode: "page" | "total"): string {
+  return `WITH base AS (
+       SELECT
+         account.id::text AS "subjectId",
+         'provider_account' AS "subjectType",
+         account.provider,
+         account.status AS "financeStatus",
+         account.account_metadata ->> 'providerStatus' AS "providerStatus",
+         receipt.delivery_status AS "receiptStatus",
+         receipt.received_at AS "lastReceiptAt",
+         job.status AS "rawJobStatus",
+         COALESCE(job.finished_at, job.run_after, job.created_at) AS "lastJobAt",
+         dead.created_at AS "deadLetteredAt"
+       FROM finance.payment_provider_accounts account
+	       LEFT JOIN LATERAL (
+	         SELECT receipt.delivery_status, receipt.received_at
+	         FROM platform.external_webhook_events receipt
+	         JOIN platform.domain_events receipt_event
+	           ON receipt_event.id = receipt.normalized_domain_event_id
+	          AND receipt_event.source_system = 'external'
+	          AND receipt_event.resource_product = 'finance'
+	          AND receipt_event.resource_type = 'provider_account'
+	         WHERE receipt.provider = account.provider
+	           AND receipt_event.resource_id = account.provider_account_id
+	         ORDER BY receipt.received_at DESC
+	         LIMIT 1
+	       ) receipt ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT job.id, job.status, job.finished_at, job.run_after, job.created_at
+	         FROM platform.jobs job
+	         LEFT JOIN platform.domain_events job_event
+	           ON job_event.id = job.source_domain_event_id
+	          AND job_event.source_system = 'external'
+	          AND job_event.resource_product = 'finance'
+	          AND job_event.resource_type = 'provider_account'
+	         WHERE job.resource_product = 'finance'
+	           AND (
+	             (
+	               job.property_id = account.property_id
+	               AND job.resource_type = 'provider_account'
+	               AND job.resource_id = account.id::text
+	             )
+	             OR (
+	               job.tenant_scope = 'external'
+	               AND job.resource_type = 'provider_account'
+	               AND job.resource_id = account.provider_account_id
+	             )
+	             OR job_event.resource_id = account.provider_account_id
+	             OR job.job_key LIKE ('finance.reconcile-provider-account:provider_account:' || account.id::text || ':%')
+	             OR (
+	               account.provider_account_id IS NOT NULL
+	               AND job.job_key LIKE ('finance.reconcile-provider-account:provider_account:' || account.provider_account_id || ':%')
+	             )
+	           )
+	         ORDER BY job.created_at DESC
+	         LIMIT 1
+	       ) job ON TRUE
+	       LEFT JOIN LATERAL (
+	         SELECT dead.created_at
+	         FROM platform.dead_letter_events dead
+	         LEFT JOIN platform.jobs dead_job
+	           ON dead_job.id = dead.job_id
+	         LEFT JOIN platform.domain_events dead_domain_event
+	           ON dead_domain_event.id = dead.domain_event_id
+	         LEFT JOIN platform.domain_events dead_job_event
+	           ON dead_job_event.id = dead_job.source_domain_event_id
+	         LEFT JOIN platform.external_webhook_events dead_receipt
+	           ON dead_receipt.id = dead.webhook_event_id
+	         LEFT JOIN platform.domain_events dead_receipt_event
+	           ON dead_receipt_event.id = dead_receipt.normalized_domain_event_id
+	         WHERE dead.resource_product = 'finance'
+	           AND (
+	             (
+	               dead.property_id = account.property_id
+	               AND dead.resource_type = 'provider_account'
+	               AND dead.resource_id = account.id::text
+	             )
+	             OR dead.job_id = job.id
+	             OR (
+	               dead.resource_type = 'provider_account'
+	               AND dead.resource_id = account.provider_account_id
+	             )
+	             OR dead_domain_event.resource_id = account.provider_account_id
+	             OR dead_job_event.resource_id = account.provider_account_id
+	             OR dead_receipt_event.resource_id = account.provider_account_id
+	           )
+	         ORDER BY dead.created_at DESC
+	         LIMIT 1
+	       ) dead ON TRUE
+       WHERE account.property_id = $1::uuid
+         AND account.account_scope = 'property'
+     ),
+     mapped AS (
+       ${reconciliationMappedSelect()}
+       FROM base
+     ),
+     filtered AS (
+       ${reconciliationFilteredSelect()}
+     )
+	     ${reconciliationFinalSelect(mode)}`;
+}
+
+function reconciliationMappedSelect(): string {
+  return `SELECT
+         "subjectId",
+         "subjectType",
+         provider,
+         "financeStatus",
+         "providerStatus",
+         CASE
+           WHEN "deadLetteredAt" IS NOT NULL OR "rawJobStatus" = 'dead_lettered' THEN 'dead_lettered'
+           WHEN provider IN ('manual', 'bank_transfer', 'vayada') THEN 'not_applicable'
+           WHEN "receiptStatus" IN ('promoted', 'normalized', 'succeeded') THEN 'matched'
+           WHEN "receiptStatus" = 'dead_lettered' THEN 'dead_lettered'
+           WHEN "receiptStatus" IS NULL THEN 'missing'
+           ELSE 'stale'
+         END AS "latestReceiptStatus",
+         CASE
+           WHEN "deadLetteredAt" IS NOT NULL OR "rawJobStatus" = 'dead_lettered' THEN 'dead_lettered'
+           WHEN "rawJobStatus" IN ('pending') THEN 'queued'
+           WHEN "rawJobStatus" = 'running' THEN 'running'
+           WHEN "rawJobStatus" IN ('failed', 'canceled') THEN 'failed'
+           ELSE 'idle'
+         END AS "jobStatus",
+         CASE
+           WHEN "deadLetteredAt" IS NOT NULL OR "rawJobStatus" = 'dead_lettered' THEN 'manual_review'
+           WHEN "rawJobStatus" IN ('failed', 'canceled') THEN 'enqueue_reconcile'
+           WHEN provider IN ('manual', 'bank_transfer', 'vayada') THEN 'none'
+           WHEN "receiptStatus" IS NULL THEN 'enqueue_reconcile'
+           WHEN "receiptStatus" NOT IN ('promoted', 'normalized', 'succeeded') THEN 'refresh_provider_state'
+           ELSE 'none'
+         END AS "recommendedAction",
+         "lastReceiptAt",
+         "lastJobAt",
+         jsonb_build_object(
+           'providerReceiptsFreshAt', "lastReceiptAt",
+           'jobsFreshAt', "lastJobAt",
+           'deadLettersFreshAt', "deadLetteredAt"
+         ) AS "sourceFreshness"`;
+}
+
+function reconciliationFilteredSelect(): string {
+  return `SELECT *
+       FROM mapped
+       WHERE ($2::text IS NULL OR "latestReceiptStatus" = $2::text OR "jobStatus" = $2::text)
+         AND ($3::text IS NULL OR provider = $3::text)`;
+}
+
+function reconciliationFinalSelect(mode: "page" | "total"): string {
+  if (mode === "total") {
+    return `SELECT count(*)::text AS total FROM filtered`;
+  }
+  return `, total_count AS (
+	       SELECT count(*)::text AS total
+	       FROM filtered
+	     ),
+	     page AS (
+	       SELECT *
+	       FROM filtered
+	       ORDER BY
+	         CASE "recommendedAction"
+	           WHEN 'manual_review' THEN 0
+	           WHEN 'enqueue_reconcile' THEN 1
+	           WHEN 'refresh_provider_state' THEN 2
+	           ELSE 3
+	         END,
+	         COALESCE("lastJobAt", "lastReceiptAt") DESC NULLS LAST,
+	         "subjectId" ASC
+	       LIMIT $4::integer OFFSET $5::integer
+	     )
+	     SELECT
+	       page.*,
+	       total_count.total
+	     FROM page
+	     CROSS JOIN total_count`;
+}
+
 function toFinancePaymentSettingsReadModel(
   row: FinancePaymentSettingsRow,
 ): FinancePaymentSettingsReadModel {
@@ -1946,6 +3935,73 @@ function toPaymentLedgerItem(row: FinancePaymentLedgerRow): FinancePaymentLedger
   };
 }
 
+function toPayoutListResponseBody(
+  result: FinanceRowsWithTotal<FinancePayoutRow>,
+  query: FinancePayoutListQuery,
+): Omit<FinancePayoutListResponse, "contractVersion" | "propertyId"> {
+  const rows = result.rows;
+  return {
+    payouts: rows.map(toPayout),
+    total: result.total,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: financeJsonObject(rows[0]?.sourceFreshness),
+  };
+}
+
+function toPayout(row: FinancePayoutRow): FinancePayout {
+  return {
+    payoutId: row.payoutId,
+    ownerScope: payoutOwnerScope(row.ownerScope),
+    propertyId: row.propertyId,
+    organizationId: row.organizationId,
+    relatedPropertyId: row.relatedPropertyId,
+    guestBookingId: row.guestBookingId,
+    paymentId: row.paymentId,
+    payoutStatus: payoutStatus(row.payoutStatus),
+    amount: decimalString(row.amount),
+    feeAmount: decimalString(row.feeAmount),
+    netAmount: decimalString(row.netAmount),
+    currency: currencyCode(row.currency),
+    provider: paymentProvider(row.provider),
+    providerPayoutId: row.providerPayoutId,
+    scheduledAt: nullableUtcDateTime(row.scheduledAt),
+    paidAt: nullableUtcDateTime(row.paidAt),
+    failedAt: nullableUtcDateTime(row.failedAt),
+    failureCode: row.failureCode,
+    retryCount: row.retryCount,
+  };
+}
+
+function toReconciliationViewResponseBody(
+  result: FinanceRowsWithTotal<FinanceReconciliationRow>,
+  query: FinanceReconciliationViewQuery,
+): Omit<FinanceReconciliationViewResponse, "contractVersion" | "propertyId"> {
+  const rows = result.rows;
+  return {
+    items: rows.map(toReconciliationItem),
+    total: result.total,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: financeJsonObject(rows[0]?.sourceFreshness),
+  };
+}
+
+function toReconciliationItem(row: FinanceReconciliationRow): FinanceReconciliationItem {
+  return {
+    subjectId: row.subjectId,
+    subjectType: reconciliationSubjectType(row.subjectType),
+    provider: paymentProvider(row.provider),
+    financeStatus: row.financeStatus,
+    providerStatus: row.providerStatus,
+    latestReceiptStatus: reconciliationReceiptStatus(row.latestReceiptStatus),
+    jobStatus: reconciliationJobStatus(row.jobStatus),
+    recommendedAction: reconciliationRecommendedAction(row.recommendedAction),
+    lastReceiptAt: nullableUtcDateTime(row.lastReceiptAt),
+    lastJobAt: nullableUtcDateTime(row.lastJobAt),
+  };
+}
+
 function emptyFinancialSummary(
   propertyId: string,
 ): Omit<FinanceFinancialSummaryResponse, "contractVersion" | "propertyId"> {
@@ -1998,6 +4054,34 @@ function emptyPaymentLedger(
     limit: query.limit,
     offset: query.offset,
     sourceFreshness: { finance: { status: "empty" } },
+  };
+}
+
+function emptyPayoutList(
+  query: FinancePayoutListQuery,
+): Omit<FinancePayoutListResponse, "contractVersion" | "propertyId"> {
+  return {
+    payouts: [],
+    total: 0,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: { finance: { status: "empty" } },
+  };
+}
+
+function emptyReconciliationView(
+  query: FinanceReconciliationViewQuery,
+): Omit<FinanceReconciliationViewResponse, "contractVersion" | "propertyId"> {
+  return {
+    items: [],
+    total: 0,
+    limit: query.limit,
+    offset: query.offset,
+    sourceFreshness: {
+      providerReceiptsFreshAt: null,
+      jobsFreshAt: null,
+      deadLettersFreshAt: null,
+    },
   };
 }
 
@@ -2069,6 +4153,45 @@ function parsePaymentLedgerQuery(
   };
 }
 
+function parsePayoutListQuery(query: unknown): FinancePayoutListQuery | FinanceValidationError {
+  const params = queryRecord(query);
+  const status = optionalEnum(params.status, FINANCE_PAYOUT_STATUSES);
+  if (params.status && !status) {
+    return invalidQuery("invalid_query", "Invalid payout status filter.");
+  }
+  const provider = optionalEnum(params.provider, FINANCE_ROUTE_PAYMENT_PROVIDERS);
+  if (params.provider && !provider) {
+    return invalidQuery("invalid_provider", "Invalid payout provider filter.");
+  }
+  return {
+    status,
+    provider,
+    limit: clampLimit(params.limit),
+    offset: parseOffset(params.offset),
+  };
+}
+
+function parseReconciliationViewQuery(
+  query: unknown,
+): FinanceReconciliationViewQuery | FinanceValidationError {
+  const params = queryRecord(query);
+  const receiptStatus = optionalEnum(params.status, FINANCE_RECONCILIATION_RECEIPT_STATUSES);
+  const jobStatus = optionalEnum(params.status, FINANCE_RECONCILIATION_JOB_STATUSES);
+  if (params.status && !receiptStatus && !jobStatus) {
+    return invalidQuery("invalid_query", "Invalid reconciliation status filter.");
+  }
+  const provider = optionalEnum(params.provider, FINANCE_ROUTE_PAYMENT_PROVIDERS);
+  if (params.provider && !provider) {
+    return invalidQuery("invalid_provider", "Invalid reconciliation provider filter.");
+  }
+  return {
+    status: receiptStatus ?? jobStatus,
+    provider,
+    limit: clampLimit(params.limit),
+    offset: parseOffset(params.offset),
+  };
+}
+
 function toManualPaymentCommand(
   request: FastifyRequest<{ Body: ManualPaymentBody }>,
   propertyId: string,
@@ -2130,6 +4253,250 @@ function toManualPaymentCommand(
   };
 }
 
+function toStripePropertyAccountCommand(
+  request: FastifyRequest<{ Body: StripeProviderAccountBody }>,
+  propertyId: string,
+): CreateStripeProviderAccountCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const base = parseStripeProviderAccountBody(body);
+  if ("statusCode" in base) return base;
+  return {
+    commandType: "finance.provider_account.stripe.create",
+    commandId: base.commandId,
+    idempotencyKey: base.idempotencyKey,
+    propertyId,
+    audit: financeCommandAudit(request, "Create or replay property Stripe Connect account"),
+    payload: {
+      email: base.email,
+      country: base.country,
+    },
+  };
+}
+
+function toStripeAffiliateAccountCommand(
+  request: FastifyRequest<{ Body: StripeProviderAccountBody }>,
+  affiliateId: string,
+  context: RequestContext,
+): CreateStripeProviderAccountCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const base = parseStripeProviderAccountBody(body);
+  if ("statusCode" in base) return base;
+  return {
+    commandType: "finance.provider_account.stripe.create",
+    commandId: base.commandId,
+    idempotencyKey: base.idempotencyKey,
+    affiliateId,
+    organizationId: context.selectedOrganization.organizationId,
+    audit: financeCommandAudit(request, "Create or replay affiliate Stripe Connect account"),
+    payload: {
+      email: base.email,
+      country: base.country,
+    },
+  };
+}
+
+function toStripePropertyOnboardingLinkCommand(
+  request: FastifyRequest<{ Body: OnboardingLinkBody }>,
+  propertyId: string,
+  providerAccountId: string,
+): IssueStripeOnboardingLinkCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return invalidQuery(
+      "invalid_body",
+      "Stripe onboarding-link command requires commandId and idempotencyKey.",
+    );
+  }
+  return {
+    commandType: "finance.provider_account.stripe.onboarding_link.issue",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: financeCommandAudit(request, "Issue property Stripe Connect onboarding link"),
+    payload: { providerAccountId },
+  };
+}
+
+function toStripeAffiliateOnboardingLinkCommand(
+  request: FastifyRequest<{ Body: OnboardingLinkBody }>,
+  affiliateId: string,
+  providerAccountId: string,
+  context: RequestContext,
+): IssueStripeOnboardingLinkCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return invalidQuery(
+      "invalid_body",
+      "Stripe affiliate onboarding-link command requires commandId and idempotencyKey.",
+    );
+  }
+  return {
+    commandType: "finance.provider_account.stripe.onboarding_link.issue",
+    commandId,
+    idempotencyKey,
+    affiliateId,
+    organizationId: context.selectedOrganization.organizationId,
+    audit: financeCommandAudit(request, "Issue affiliate Stripe Connect onboarding link"),
+    payload: { providerAccountId },
+  };
+}
+
+function parseStripeProviderAccountBody(body: StripeProviderAccountBody):
+  | {
+      commandId: string;
+      idempotencyKey: string;
+      email: string;
+      country: string;
+    }
+  | FinanceValidationError {
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const email = emailBodyString(body.email);
+  const country = countryBodyString(body.country);
+  if (!commandId || !idempotencyKey || !email || !country) {
+    return invalidQuery(
+      "invalid_body",
+      "Stripe provider-account command requires commandId, idempotencyKey, email, and country.",
+    );
+  }
+  return { commandId, idempotencyKey, email, country };
+}
+
+function financeCommandAudit(request: FastifyRequest, reason: string): FinanceCommandAudit {
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    actor: authContext
+      ? {
+          kind: "user",
+          userId: authContext.actor.internalUserId,
+          organizationId: authContext.selectedOrganization.organizationId,
+        }
+      : { kind: "system", service: "apps/api" },
+    requestId: authContext?.audit.requestId ?? `req_${Date.now()}`,
+    correlationId: authContext?.audit.correlationId,
+    reason,
+    requestedAt: authContext?.audit.receivedAt ?? now,
+  };
+}
+
+function emailBodyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const email = value.trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : undefined;
+}
+
+function countryBodyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const country = value.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(country) ? country : undefined;
+}
+
+function toXenditBankValidationCommand(
+  request: FastifyRequest<{ Body: XenditBankValidationBody }>,
+  propertyId: string,
+): FinanceXenditBankValidationCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const channelCode = nonEmptyString(body.channelCode);
+  const accountNumber = nonEmptyString(body.accountNumber);
+  const accountHolderName = nonEmptyString(body.accountHolderName);
+
+  if (!commandId || !idempotencyKey || !channelCode || !accountNumber || !accountHolderName) {
+    return invalidQuery(
+      "invalid_body",
+      "Xendit bank validation requires commandId, idempotencyKey, channelCode, accountNumber, and accountHolderName.",
+    );
+  }
+  if (!/^ID_[A-Z0-9_]{2,32}$/.test(channelCode)) {
+    return invalidQuery("invalid_body", "Xendit channelCode must be an ID_* bank channel code.");
+  }
+  if (!/^[0-9]{4,34}$/.test(accountNumber)) {
+    return invalidQuery("invalid_body", "Xendit accountNumber must contain 4 to 34 digits.");
+  }
+
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    commandType: "finance.xendit_bank_account.validate",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: {
+      actor: authContext
+        ? {
+            kind: "user",
+            userId: authContext.actor.internalUserId,
+            organizationId: authContext.selectedOrganization.organizationId,
+          }
+        : { kind: "system", service: "apps/api" },
+      requestId: authContext?.audit.requestId ?? commandId,
+      correlationId: authContext?.audit.correlationId,
+      reason: "Validate Xendit payout bank destination",
+      requestedAt: authContext?.audit.receivedAt ?? now,
+    },
+    payload: {
+      channelCode,
+      accountNumber,
+      accountHolderName,
+    },
+  };
+}
+
+function toXenditPayoutReconciliationCommand(
+  request: FastifyRequest<{ Body: XenditPayoutReconciliationBody }>,
+  propertyId: string,
+): FinanceXenditPayoutReconciliationCommand | FinanceValidationError {
+  const body = request.body ?? {};
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  const olderThanMinutes = integerBodyNumber(body.olderThanMinutes);
+
+  if (!commandId || !idempotencyKey || olderThanMinutes === undefined) {
+    return invalidQuery(
+      "invalid_body",
+      "Xendit payout reconciliation requires commandId, idempotencyKey, and olderThanMinutes.",
+    );
+  }
+
+  const now = new Date().toISOString();
+  const authContext = request.authContext;
+  return {
+    commandType: "finance.xendit_payouts.reconcile",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: {
+      actor: authContext
+        ? {
+            kind: "user",
+            userId: authContext.actor.internalUserId,
+            organizationId: authContext.selectedOrganization.organizationId,
+          }
+        : { kind: "system", service: "apps/api" },
+      requestId: authContext?.audit.requestId ?? commandId,
+      correlationId: authContext?.audit.correlationId,
+      reason: "Manually enqueue Xendit payout status reconciliation",
+      requestedAt: authContext?.audit.receivedAt ?? now,
+    },
+    payload: {
+      olderThanMinutes,
+    },
+  };
+}
+
+function integerBodyNumber(value: unknown): number | undefined {
+  const numberValue =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isInteger(numberValue) || numberValue < 0 || numberValue > 10080) return undefined;
+  return numberValue;
+}
+
 function decimalBodyString(value: unknown): string | undefined {
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const text = String(value).trim();
@@ -2165,7 +4532,17 @@ function nullableTrimmedString(value: unknown): string | null | undefined {
   return trimmed ? trimmed : null;
 }
 
-function toFinanceCommandError(result: Extract<FinanceManualPaymentRecordResult, { ok: false }>) {
+function maskAccountNumber(accountNumber: string): string {
+  const visibleTail = accountNumber.slice(-4);
+  return `${"*".repeat(Math.max(0, accountNumber.length - 4))}${visibleTail}`;
+}
+
+function toFinanceCommandError(
+  result:
+    | Extract<FinanceManualPaymentRecordResult, { ok: false }>
+    | Extract<FinanceProviderAccountCommandResult, { ok: false }>
+    | Extract<FinanceXenditPayoutReconciliationResult, { ok: false }>,
+) {
   return {
     statusCode: result.statusCode,
     code: result.code,
@@ -2174,9 +4551,11 @@ function toFinanceCommandError(result: Extract<FinanceManualPaymentRecordResult,
         ? "not_found"
         : result.statusCode === 409
           ? "conflict"
-          : result.statusCode === 400
-            ? "validation"
-            : "write_model",
+          : result.statusCode === 502
+            ? "provider"
+            : result.statusCode === 400
+              ? "validation"
+              : "write_model",
     message: result.message,
   } satisfies FinanceCommandError;
 }
@@ -2212,6 +4591,39 @@ function enforceFinancePropertyWritePolicy(
     if (!accessError) throw error;
     reply.code(accessError.statusCode).send(accessError);
     return false;
+  }
+}
+
+function enforceFinanceAffiliateWritePolicy(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  affiliateId: string,
+): RequestContext | null {
+  try {
+    enforceRoutePolicy(request, {
+      permission: "affiliate.payout.manage",
+      entitlement: {
+        product: "affiliate",
+        key: "affiliate-payouts",
+        resource: {
+          product: "affiliate",
+          resourceType: "affiliate",
+          resourceId: affiliateId,
+        },
+      },
+      resource: {
+        product: "affiliate",
+        resourceType: "affiliate",
+        resourceId: affiliateId,
+        allowedRelationships: ["owner", "finance_manager"],
+      },
+    });
+    return requireAuthContext(request);
+  } catch (error) {
+    const accessError = toFinanceAccessError(error, request, affiliateId);
+    if (!accessError) throw error;
+    reply.code(accessError.statusCode).send(accessError);
+    return null;
   }
 }
 
@@ -2566,6 +4978,31 @@ function financeJsonObject(value: unknown): FinanceJsonObject {
   );
 }
 
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function optionalString(value: Record<string, unknown>, key: string): string | undefined {
+  const entry = value[key];
+  return typeof entry === "string" && entry.trim() ? entry.trim() : undefined;
+}
+
+function xenditValidationStatus(value: string | undefined): "valid" | "invalid" | "unknown" {
+  const normalized = value?.toLowerCase();
+  if (normalized === "success" || normalized === "valid" || normalized === "found") return "valid";
+  if (normalized === "failed" || normalized === "invalid" || normalized === "not_found") {
+    return "invalid";
+  }
+  return "unknown";
+}
+
 function toFinanceJsonValue(value: unknown): FinanceJsonObject[string] | undefined {
   if (
     value === null ||
@@ -2589,6 +5026,12 @@ function utcDateTime(value: unknown, fallback: string): string {
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "string" && value.trim()) return value;
   return fallback;
+}
+
+function nullableUtcDateTime(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const timestamp = utcDateTime(value, "");
+  return timestamp || null;
 }
 
 function dateOnly(value: Date | string): string {
@@ -2638,6 +5081,38 @@ function reconciliationStatus(value: unknown): FinanceReconciliationStatus {
   return optionalEnum(value, FINANCE_RECONCILIATION_STATUSES) ?? "pending";
 }
 
+function payoutStatus(value: unknown): FinancePayout["payoutStatus"] {
+  return optionalEnum(value, FINANCE_PAYOUT_STATUSES) ?? "pending";
+}
+
+function payoutOwnerScope(value: unknown): FinancePayout["ownerScope"] {
+  if (value === "organization" || value === "platform") return value;
+  return "property";
+}
+
+function reconciliationSubjectType(value: unknown): FinanceReconciliationItem["subjectType"] {
+  return optionalEnum(value, FINANCE_RECONCILIATION_SUBJECT_TYPES) ?? "payment";
+}
+
+function reconciliationReceiptStatus(value: unknown): FinanceReconciliationReceiptStatus {
+  return optionalEnum(value, FINANCE_RECONCILIATION_RECEIPT_STATUSES) ?? "missing";
+}
+
+function reconciliationJobStatus(value: unknown): FinanceReconciliationJobStatus {
+  return optionalEnum(value, FINANCE_RECONCILIATION_JOB_STATUSES) ?? "idle";
+}
+
+function reconciliationRecommendedAction(value: unknown): FinanceReconciliationRecommendedAction {
+  if (
+    value === "enqueue_reconcile" ||
+    value === "manual_review" ||
+    value === "refresh_provider_state"
+  ) {
+    return value;
+  }
+  return "none";
+}
+
 function invoiceStatusCounts(value: unknown = {}): FinanceInvoiceStatusCounts {
   const counts = countRecord(value);
   return Object.fromEntries(
@@ -2665,6 +5140,19 @@ function countRecord(value: unknown): Record<string, number> {
 function totalFromRows(rows: Array<{ total: string | number }>): number {
   if (rows.length === 0) return 0;
   const total = Number(rows[0]?.total ?? 0);
+  return Number.isFinite(total) ? total : 0;
+}
+
+async function totalForPossiblyEmptyPage<T extends { total: string | number }>(
+  pool: FinanceQueryExecutor,
+  rows: T[],
+  offset: number,
+  fallback: { sql: string; values: readonly unknown[] },
+): Promise<number> {
+  const pageTotal = totalFromRows(rows);
+  if (rows.length > 0 || offset === 0) return pageTotal;
+  const result = await pool.query<{ total: string }>(fallback.sql, fallback.values);
+  const total = Number(result.rows[0]?.total ?? 0);
   return Number.isFinite(total) ? total : 0;
 }
 
