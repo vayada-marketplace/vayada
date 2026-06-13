@@ -88,6 +88,7 @@ export type ApiConfig = {
   bookingWebEventSink: BookingWebEventSink;
   bookingHostBase?: string;
   providerWebhooks: ProviderWebhookConfig;
+  xenditSecretKey?: string;
 };
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -397,5 +398,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     bookingWebEventSink,
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     providerWebhooks: loadProviderWebhookConfig(env),
+    xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
   };
 }

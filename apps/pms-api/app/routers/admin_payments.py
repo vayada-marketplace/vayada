@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.dependencies import require_hotel_admin
 from app.models.payment import (
@@ -24,6 +24,7 @@ from app.services.currency_service import (
     decimals_for_currency,
     get_exchange_rate,
 )
+from app.services.finance_payout_cutover import guard_xendit_payout_reconciliation_route
 from app.services.hotel_identity_service import get_currency as get_be_currency
 from app.services.xendit_service import XenditError
 from app.utils import get_hotel_id
@@ -428,10 +429,18 @@ async def validate_xendit_bank_account(
 
 @router.post("/xendit/reconcile-payouts")
 async def reconcile_xendit_payouts(
+    request: Request,
     user_id: str = Depends(require_hotel_admin),
 ):
     """Manually reconcile all Xendit payouts stuck in 'processing' for this hotel."""
     hotel_id = await get_hotel_id(user_id)
+    proxy_response = await guard_xendit_payout_reconciliation_route(
+        request,
+        property_id=hotel_id,
+    )
+    if proxy_response:
+        return proxy_response
+
     from app.repositories.payout_repo import PayoutRepository
 
     stale = await PayoutRepository.list_processing_xendit(older_than_minutes=0)

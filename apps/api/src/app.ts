@@ -66,6 +66,7 @@ import {
   registerFinanceRoutes,
   type FinancePublicHotelPropertyResolver,
   type FinanceRoutesOptions,
+  type FinanceXenditBankValidator,
 } from "./routes/finance.js";
 import {
   registerPlatformMediaRoutes,
@@ -122,6 +123,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
   financeRepository?: FinanceRoutesOptions["repository"];
+  financeXenditBankValidator?: FinanceXenditBankValidator;
   financePublicHotelProfileRepository?: PublicHotelProfileRepository;
   financePublicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
   platformMedia?: PlatformMediaRoutesOptions;
@@ -253,6 +255,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerFinanceRoutes, {
       prefix: "/api",
       repository: options.financeRepository,
+      xenditBankValidator: options.financeXenditBankValidator,
       publicHotelPropertyResolver: options.financePublicHotelPropertyResolver,
       publicHotelProfileRepository: financePublicHotelProfileRepository,
       closePublicHotelProfileRepository:
