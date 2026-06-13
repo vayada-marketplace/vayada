@@ -55,6 +55,7 @@ export type PermissionKey =
   | "pms.booking.update"
   | "pms.finance.read"
   | "marketplace.collaboration.read"
+  | "marketplace.collaboration.write"
   | "marketplace.collaboration.review"
   | "marketplace.profile.manage"
   | "marketplace.trip.read"
