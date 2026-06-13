@@ -205,6 +205,8 @@ type PmsOperationalReservation = {
   checkout: { completedAt: PmsUtcDateTime | null; pendingFlags: string[] };
   privateNoteCount: number;
   additionalGuestCount: number;
+  // Present on reservation detail when the Booking guest PII port is wired.
+  additionalGuests?: BookingGuestPii[];
 };
 ```
 
@@ -253,6 +255,14 @@ P2 commands are private PMS operations unless the command explicitly emits a
 Booking guest-visible event. Notes are private by default and must never flow to
 public bookability, AI public profile, or guest email contracts.
 
+VAY-780 implements the P2a private notes slice in `apps/api` for list/create/delete.
+Private note responses include internal audit metadata, create/delete commands
+record PMS product audit events only, and public/guest-visible projections are
+covered by fixtures that assert note bodies, note IDs, legacy table names, and
+private-note-shaped keys such as `privateNoteId`, `privateNoteBody`,
+`bookingNotesPrivate`, and `privateNoteCount` do not appear outside the
+authorized PMS notes surface.
+
 Checkout charge payment status is operational in this contract. Provider
 collection, invoices, payouts, and reconciliation are finance-owned follow-up
 surfaces.
@@ -264,21 +274,84 @@ owns validation, retention, and guest-visible audit rules. PMS may project the
 result onto reservation detail; it must not write `booking.booking_guests`
 directly or duplicate guest PII into PMS tables.
 
+VAY-781 implements the Booking guest PII boundary for `apps/api`. The contract
+is exported from `@vayada/domain-booking` as `BookingGuestPiiPort`:
+
+```ts
+type BookingGuestPii = {
+  guestId: string;
+  guestBookingId: string;
+  role: "booker" | "primary_guest" | "additional_guest";
+  displayName: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  countryCode: string | null;
+  arrivalTime: string | null;
+  specialRequests: string | null;
+};
+
+type BookingGuestPiiPort = {
+  listGuestPiiForPmsOperations(query): Promise<BookingGuestPiiProjection | null>;
+  createAdditionalGuestForPmsOperations(command): Promise<BookingGuestPiiCommandResult>;
+  updateAdditionalGuestForPmsOperations(command): Promise<BookingGuestPiiCommandResult>;
+  deleteAdditionalGuestForPmsOperations(command): Promise<BookingGuestPiiDeleteResult>;
+};
+```
+
+The target adapter lives under the Booking/platform boundary and is the only
+new TypeScript code in this slice allowed to mutate `booking.booking_guests`.
+PMS route/domain code must call the port. The architecture boundary check
+blocks direct `booking.booking_guests` mutations from `pmsOperations` route code
+and PMS domain modules.
+
+VAY-782 implements the P2c checklist/inspection template subset in `apps/api`.
+`GET /api/pms/properties/:propertyId/check-in-checklist` and
+`GET /api/pms/properties/:propertyId/check-out-inspection` use the PMS
+operations read policy; the corresponding `PUT` routes use the manage policy
+and persist PMS-owned operational setup steps to
+`pms.checkin_checklist_templates` and `pms.checkout_inspection_templates`.
+Template writes validate that `steps` is an array of bounded step objects with
+stable `stepId`, required `label`, and boolean `required` state. Checkout charge
+commands are handled by VAY-783; the check-out command remains VAY-784.
+
+VAY-783 implements the P2c checkout charge operational subset in `apps/api`.
+`GET /api/pms/properties/:propertyId/reservations/:guestBookingId/checkout-charges`
+uses the PMS operations read policy; `POST /checkout-charges`,
+`POST /checkout-charges/:chargeId/mark-paid`, and
+`POST /checkout-charges/:chargeId/waive` use the PMS operations manage policy
+and persist only `pms.booking_checkout_charges` operational state plus PMS audit
+events. The legacy F1a guard path
+`POST /checkout-charges/:chargeId/paid` remains as a compatibility alias for
+the same operational mark-paid command. The check-out command is still VAY-784
+and is not implemented by this slice.
+
 `mark-paid` on checkout charges means a front-desk operator marked the
 operational charge as settled for checkout. It is not a provider payment
 capture, invoice post, payout trigger, or finance reconciliation event.
 
+VAY-784 implements the P2c check-out command in `apps/api`.
+`POST /api/pms/properties/:propertyId/reservations/:guestBookingId/check-out`
+uses the PMS operations manage policy and persists `pms.booking_checkout_records`
+with inspection results, checkout notes, charge settlement snapshots, pending
+flags, and explicit finance handoff metadata. The command updates valid
+reservation assignments to `checked_out`, records PMS audit only, and keeps
+unsettled paid-charge behavior finance-owned: provider collection, invoice
+posting, payouts, reconciliation, and finance dispatch are not performed by this
+route.
+
 ## Error Categories
 
-| Category         | Status         | Codes                                                                                                                                        |
-| ---------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `authentication` | `401`          | `unauthenticated`, `invalid_token`                                                                                                           |
-| `authorization`  | `403`          | `missing_permission`, `missing_entitlement`, `inactive_entitlement`, `missing_resource_access`                                               |
-| `validation`     | `400`          | `invalid_query`, `invalid_body`, `invalid_date_range`, `invalid_status_transition`                                                           |
-| `conflict`       | `409`          | `version_conflict`, `room_unavailable`, `assignment_conflict`, `idempotency_conflict`                                                        |
-| `not_found`      | `404`          | `room_not_found`, `room_type_not_found`, `reservation_not_found`, `block_not_found`, `note_not_found`, `guest_not_found`, `charge_not_found` |
-| `read_model`     | `500`          | `read_model_unavailable`                                                                                                                     |
-| `side_effect`    | `202` or `500` | `side_effect_queued`, `side_effect_failed`                                                                                                   |
+| Category         | Status         | Codes                                                                                                                                                                      |
+| ---------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `authentication` | `401`          | `unauthenticated`, `invalid_token`                                                                                                                                         |
+| `authorization`  | `403`          | `missing_permission`, `missing_entitlement`, `inactive_entitlement`, `missing_resource_access`                                                                             |
+| `validation`     | `400`          | `invalid_query`, `invalid_body`, `invalid_date_range`, `invalid_status_transition`, `invalid_guest_pii`                                                                    |
+| `conflict`       | `409`          | `version_conflict`, `room_unavailable`, `assignment_conflict`, `idempotency_conflict`                                                                                      |
+| `not_found`      | `404`          | `room_not_found`, `room_type_not_found`, `reservation_not_found`, `block_not_found`, `note_not_found`, `guest_not_found`, `additional_guest_not_found`, `charge_not_found` |
+| `read_model`     | `500`          | `read_model_unavailable`                                                                                                                                                   |
+| `side_effect`    | `202` or `500` | `side_effect_queued`, `side_effect_failed`                                                                                                                                 |
 
 Commands that durably persist but queue asynchronous side effects may return
 `202` with `side_effect_queued`. They must still return the accepted command

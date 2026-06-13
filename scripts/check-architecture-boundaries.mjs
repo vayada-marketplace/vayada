@@ -129,6 +129,20 @@ const checks = [
     ],
   },
   {
+    name: "PMS operations must not write Booking guest PII tables directly",
+    roots: ["apps/api/src/routes", "apps/api/src/domains/pms"],
+    include: (filePath) =>
+      /(^|[/\\])pmsOperations\.tsx?$/.test(filePath) ||
+      filePath.includes(`${path.sep}domains${path.sep}pms${path.sep}`),
+    rules: [
+      forbiddenPattern(
+        "Booking guest PII table mutation",
+        bookingGuestPiiMutationPattern(),
+        "call the BookingGuestPiiPort instead of mutating booking.booking_guests from PMS code",
+      ),
+    ],
+  },
+  {
     name: "Target product domains must not write identity tables directly",
     roots: [
       "apps/api/src/routes",
@@ -366,6 +380,14 @@ function identitySqlMutationPattern() {
 function identityQueryBuilderMutationPattern() {
   return new RegExp(
     String.raw`\b(?:insertInto|updateTable|deleteFrom)\(\s*["'\`](?:${identityTablePatternSource()})["'\`]`,
+    "i",
+  );
+}
+
+function bookingGuestPiiMutationPattern() {
+  const table = String.raw`booking\s*\.\s*booking_guests`;
+  return new RegExp(
+    String.raw`\b(?:insert\s+into|update|delete\s+from)\s+${table}\b|\b(?:insertInto|updateTable|deleteFrom)\(\s*["'\`]booking\.booking_guests["'\`]`,
     "i",
   );
 }

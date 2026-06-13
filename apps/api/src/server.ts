@@ -9,6 +9,7 @@ import { type ApiConfig, loadConfig } from "./config.js";
 import { createOpenAIAskModel } from "./platform/askIntelligence.js";
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
+import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
@@ -169,6 +170,13 @@ const bookingWebCheckoutAdapter =
 const pmsOperationsRepository =
   config.pmsOperationsSource === "target"
     ? createTargetPmsOperationsReadRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
+const bookingGuestPiiPort =
+  config.pmsOperationsSource === "target"
+    ? createTargetBookingGuestPiiPort({
         connectionString: config.targetDatabaseUrl!,
       })
     : undefined;
@@ -341,6 +349,7 @@ const app = buildApp({
   bookingDashboardMetricsReadPort,
   pmsOperationsRepository,
   pmsOperationsCommandRepository,
+  bookingGuestPiiPort,
   financeRepository,
   financeXenditBankValidator: xenditBankValidator,
   financePublicHotelProfileRepository,
