@@ -308,7 +308,9 @@ export async function runFinancePropertyPayoutDispatcher(
       continue;
     }
 
-    const providerResult = await provider.dispatchPropertyPayout(candidate, context);
+    const providerResult = await providerPayoutResultFromDispatch(() =>
+      provider.dispatchPropertyPayout(candidate, context),
+    );
     const attempt = buildProviderAttempt(candidate, providerResult, context);
     attempts.push(attempt);
     await store.recordProviderAttempt(attempt);
@@ -386,7 +388,9 @@ export async function runFinanceAffiliatePayoutDispatcher(
       continue;
     }
 
-    const providerResult = await provider.dispatchAffiliatePayout(candidate, context);
+    const providerResult = await providerPayoutResultFromDispatch(() =>
+      provider.dispatchAffiliatePayout(candidate, context),
+    );
     const attempt = buildAffiliateProviderAttempt(candidate, providerResult, context);
     attempts.push(attempt);
     await store.recordProviderAttempt(attempt);
@@ -517,6 +521,21 @@ export function buildAffiliatePayoutDispatchJobKey(input: {
   return `finance.dispatch-affiliate-payout:affiliate:${input.affiliateId}:payout:${input.payoutId}:v1`;
 }
 
+async function providerPayoutResultFromDispatch(
+  dispatch: () => Promise<FinancePayoutProviderResult>,
+): Promise<FinancePayoutProviderResult> {
+  try {
+    return await dispatch();
+  } catch (error) {
+    return {
+      ok: false,
+      retryable: true,
+      errorCategory: "network_timeout",
+      message: error instanceof Error ? error.message : "Payout provider dispatch failed.",
+    };
+  }
+}
+
 async function selectDuePropertyPayoutDispatchCandidates(
   db: Queryable,
   now: Date,
@@ -550,6 +569,11 @@ async function selectDuePropertyPayoutDispatchCandidates(
       AND account.provider IN ('stripe', 'xendit')
       AND account.status = 'active'
       AND account.payouts_enabled = TRUE
+     JOIN platform.jobs dispatch_job
+       ON dispatch_job.queue_name = 'finance-property-payout-dispatch'
+      AND dispatch_job.job_key = 'finance.dispatch-property-payout:property:' || payout.property_id::text || ':payout:' || payout.id::text || ':v1'
+      AND dispatch_job.status = 'pending'
+      AND dispatch_job.run_after <= $1::timestamptz
      LEFT JOIN LATERAL (
        SELECT COUNT(*) AS blockers
        FROM platform.jobs job
@@ -599,7 +623,7 @@ async function selectDueAffiliatePayoutDispatchCandidates(
   const result = await db.query<AffiliatePayoutCandidateRow>(
     `SELECT
        payout.id::text AS "payoutId",
-       link.resource_id AS "affiliateId",
+       COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId') AS "affiliateId",
        payout.organization_id::text AS "organizationId",
        payout.amount::text,
        payout.currency,
@@ -616,15 +640,21 @@ async function selectDueAffiliatePayoutDispatchCandidates(
          AS "notificationAuditReady",
        payout.provider_payout_id AS "providerPayoutId"
      FROM finance.payouts payout
-     LEFT JOIN identity.organization_resource_links link
-       ON link.organization_id = payout.organization_id
-      AND link.product = 'affiliate'
-      AND link.resource_type = 'affiliate'
-      AND link.status = 'active'
      LEFT JOIN finance.payout_settings settings
        ON settings.id = payout.payout_setting_id
       AND settings.organization_id = payout.organization_id
       AND settings.owner_scope = 'organization'
+     LEFT JOIN identity.organization_resource_links link
+       ON link.organization_id = payout.organization_id
+      AND link.product = 'affiliate'
+      AND link.resource_type = 'affiliate'
+      AND link.resource_id = COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId')
+      AND link.status = 'active'
+     JOIN platform.jobs dispatch_job
+       ON dispatch_job.queue_name = 'finance-affiliate-payout-dispatch'
+      AND dispatch_job.job_key = 'finance.dispatch-affiliate-payout:affiliate:' || COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId') || ':payout:' || payout.id::text || ':v1'
+      AND dispatch_job.status = 'pending'
+      AND dispatch_job.run_after <= $1::timestamptz
      LEFT JOIN finance.payment_provider_accounts account
        ON account.id = payout.organization_provider_account_id
       AND account.organization_id = payout.organization_id
@@ -664,7 +694,7 @@ async function insertProviderAttempt(
   db: Queryable,
   attempt: FinancePayoutProviderAttemptRecord,
 ): Promise<void> {
-  await db.query(
+  const result = await db.query(
     `INSERT INTO platform.job_attempts (
        job_id,
        attempt_number,
@@ -710,6 +740,11 @@ async function insertProviderAttempt(
       attempt.queueName,
     ],
   );
+  if ((result.rowCount ?? 0) === 0) {
+    throw new Error(
+      `Missing ${attempt.queueName} platform job for payout provider attempt ${attempt.idempotencyKey}.`,
+    );
+  }
 }
 
 async function claimPropertyPayoutDispatch(

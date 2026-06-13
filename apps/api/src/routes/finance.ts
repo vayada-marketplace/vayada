@@ -2237,6 +2237,11 @@ async function enqueueXenditPayoutReconciliationInClient(
        organization_id,
        property_id,
        correlation_id,
+       response_status_code,
+       response_resource_product,
+       response_resource_type,
+       response_resource_id,
+       completed_at,
        first_seen_at,
        last_seen_at,
        expires_at,
@@ -2252,10 +2257,15 @@ async function enqueueXenditPayoutReconciliationInClient(
        NULL,
        $3::uuid,
        $4,
+       202,
+       'finance',
+       'payout',
+       $6,
+       $5::timestamptz,
        $5::timestamptz,
        $5::timestamptz,
        $5::timestamptz + interval '24 hours',
-       $6::jsonb
+       $7::jsonb
      )
      ON CONFLICT (operation_scope, operation, key_hash, scope_key)
      DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
@@ -2268,6 +2278,7 @@ async function enqueueXenditPayoutReconciliationInClient(
       command.propertyId,
       command.audit.correlationId ?? command.audit.requestId,
       requestedAt,
+      command.propertyId,
       JSON.stringify({
         commandId: command.commandId,
         idempotencyKey: command.idempotencyKey,
@@ -2382,6 +2393,11 @@ async function enqueuePropertyPayoutDispatchInClient(
        organization_id,
        property_id,
        correlation_id,
+       response_status_code,
+       response_resource_product,
+       response_resource_type,
+       response_resource_id,
+       completed_at,
        first_seen_at,
        last_seen_at,
        expires_at,
@@ -2397,10 +2413,15 @@ async function enqueuePropertyPayoutDispatchInClient(
        NULL,
        $3::uuid,
        $4,
+       202,
+       'finance',
+       'payout',
+       $6,
+       $5::timestamptz,
        $5::timestamptz,
        $5::timestamptz,
        $5::timestamptz + interval '24 hours',
-       $6::jsonb
+       $7::jsonb
      )
      ON CONFLICT (operation_scope, operation, key_hash, scope_key)
      DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
@@ -2413,6 +2434,7 @@ async function enqueuePropertyPayoutDispatchInClient(
       command.propertyId,
       command.audit.correlationId ?? command.audit.requestId,
       requestedAt,
+      command.payload.payoutId,
       JSON.stringify({
         commandId: command.commandId,
         idempotencyKey: command.idempotencyKey,
@@ -2563,6 +2585,11 @@ async function updateAffiliatePayoutSettingsInClient(
        organization_id,
        property_id,
        correlation_id,
+       response_status_code,
+       response_resource_product,
+       response_resource_type,
+       response_resource_id,
+       completed_at,
        first_seen_at,
        last_seen_at,
        expires_at,
@@ -2578,10 +2605,15 @@ async function updateAffiliatePayoutSettingsInClient(
        $3::uuid,
        NULL,
        $4,
+       200,
+       'finance',
+       'affiliate_payout_settings',
+       $6,
+       $5::timestamptz,
        $5::timestamptz,
        $5::timestamptz,
        $5::timestamptz + interval '24 hours',
-       $6::jsonb
+       $7::jsonb
      )
      ON CONFLICT (operation_scope, operation, key_hash, scope_key)
      DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at
@@ -2595,6 +2627,7 @@ async function updateAffiliatePayoutSettingsInClient(
       affiliateResource.organizationId,
       command.audit.correlationId ?? command.audit.requestId,
       requestedAt,
+      command.affiliateId,
       JSON.stringify({
         commandId: command.commandId,
         idempotencyKey: command.idempotencyKey,
@@ -2686,6 +2719,7 @@ async function upsertAffiliatePayoutSettings(
        FROM finance.payout_settings
        WHERE owner_scope = 'organization'
          AND organization_id = $1::uuid
+         AND payout_preferences ->> 'affiliateId' = $8
        ORDER BY updated_at DESC, id
        LIMIT 1
      ),
@@ -2741,6 +2775,7 @@ async function upsertAffiliatePayoutSettings(
         updatedByCommandId: command.commandId,
       }),
       command.audit.requestedAt,
+      command.affiliateId,
     ],
   );
 }
@@ -3959,6 +3994,7 @@ async function loadAffiliatePayoutSettingsRow(
      LEFT JOIN finance.payout_settings settings
        ON settings.organization_id = link.organization_id
       AND settings.owner_scope = 'organization'
+      AND settings.payout_preferences ->> 'affiliateId' = link.resource_id
      LEFT JOIN finance.payment_provider_accounts account
        ON account.id = settings.organization_provider_account_id
       AND account.organization_id = settings.organization_id
@@ -4382,6 +4418,7 @@ async function loadAffiliatePayoutRows(
        ) visibility ON TRUE
        WHERE payout.organization_id = $2::uuid
          AND payout.owner_scope = 'organization'
+         AND COALESCE(payout.payout_metadata ->> 'affiliateId', payout.payout_metadata ->> 'affiliate_id') = $1
      ),
      filtered AS (
        SELECT *
@@ -4417,7 +4454,7 @@ async function loadAffiliatePayoutRows(
     rows: result.rows,
     total: await totalForPossiblyEmptyPage(pool, result.rows, query.offset, {
       sql: affiliatePayoutTotalSql(),
-      values: [organizationId, query.status ?? null, query.provider ?? null],
+      values: [affiliateId, organizationId, query.status ?? null, query.provider ?? null],
     }),
   };
 }
@@ -4455,14 +4492,15 @@ function affiliatePayoutTotalSql(): string {
          ON account.id = payout.organization_provider_account_id
         AND account.organization_id = payout.organization_id
         AND account.account_scope = 'organization'
-       WHERE payout.organization_id = $1::uuid
+       WHERE payout.organization_id = $2::uuid
          AND payout.owner_scope = 'organization'
+         AND COALESCE(payout.payout_metadata ->> 'affiliateId', payout.payout_metadata ->> 'affiliate_id') = $1
      ),
      filtered AS (
        SELECT *
        FROM payout_base
-       WHERE ($2::text IS NULL OR "payoutStatus" = $2::text)
-         AND ($3::text IS NULL OR provider = $3::text)
+       WHERE ($3::text IS NULL OR "payoutStatus" = $3::text)
+         AND ($4::text IS NULL OR provider = $4::text)
      )
      SELECT count(*)::text AS total
      FROM filtered`;
