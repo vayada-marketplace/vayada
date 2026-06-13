@@ -264,11 +264,19 @@ export function useCreatorProfile(
       const audienceSize = platforms.reduce((sum, p) => sum + p.followers, 0);
 
       let profilePictureUrl: string | undefined = undefined;
+      let profilePictureMediaObjectId: string | undefined = undefined;
       if (creatorProfilePictureFile) {
         try {
-          const uploadResponse =
-            await creatorService.uploadProfilePicture(creatorProfilePictureFile);
+          const profileId = creatorProfile?.id;
+          if (!profileId) {
+            throw new Error("Creator profile ID is required to upload profile media.");
+          }
+          const uploadResponse = await creatorService.uploadProfilePicture(
+            creatorProfilePictureFile,
+            profileId,
+          );
           profilePictureUrl = uploadResponse.url;
+          profilePictureMediaObjectId = uploadResponse.mediaObjectId;
         } catch (error: unknown) {
           const detail = error instanceof ApiErrorResponse ? error.data.detail : null;
           const message =
@@ -300,6 +308,10 @@ export function useCreatorProfile(
           }),
         ...(profilePictureUrl && {
           profilePicture: profilePictureUrl,
+        }),
+        ...(profilePictureMediaObjectId && {
+          profilePictureMediaObjectId,
+          profile_picture_media_object_id: profilePictureMediaObjectId,
         }),
       };
 

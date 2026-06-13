@@ -66,6 +66,8 @@ const propertyGalleryBatchCase = contractCase("property-gallery-batch-upload-ses
 const propertyTargetDenyCase = contractCase("property-gallery-deny-unresolved-property-target");
 const privateChatVisibilityCase = contractCase("private-chat-attachment-rejects-public-visibility");
 const propertyHeroPdfCase = contractCase("property-hero-rejects-pdf");
+const marketplaceCreatorProfileCase = contractCase("marketplace-creator-profile-upload-session");
+const marketplaceListingGalleryCase = contractCase("marketplace-listing-gallery-upload-session");
 
 type MediaCreateResponse = {
   contractVersion: string;
@@ -449,6 +451,129 @@ describe("platform media upload routes", () => {
     expect((response.body as ErrorResponse).code).toBe(
       privateChatVisibilityCase.expected.errorCode,
     );
+  });
+
+  it.each([
+    {
+      contractCase: marketplaceCreatorProfileCase,
+      resources: [
+        {
+          product: "marketplace" as const,
+          resourceType: "creator_profile" as const,
+          resourceId: "creator_profile_lina",
+          relationship: "owner" as const,
+        },
+      ],
+    },
+    {
+      contractCase: marketplaceListingGalleryCase,
+      resources: [
+        {
+          product: "marketplace" as const,
+          resourceType: "hotel_listing" as const,
+          resourceId: "listing_alpenrose",
+          relationship: "owner" as const,
+        },
+      ],
+    },
+  ])(
+    "creates and finalizes marketplace media for $contractCase.caseId",
+    async ({ contractCase, resources }) => {
+      const repository = createInMemoryPlatformMediaRepository();
+      const app = buildMediaApp({
+        repository,
+        permissions: ["marketplace.profile.manage"],
+        resources,
+      });
+
+      const create = await injectJson(app, {
+        method: "POST",
+        url: contractCase.request.path,
+        headers: { authorization: "Bearer valid-token" },
+        payload: contractCase.request.body,
+      });
+      const createBody = create.body as MediaCreateResponse;
+
+      expect(create.statusCode).toBe(contractCase.expected.status);
+      expect(createBody.uploadSession.requestedVisibility).toBe(
+        contractCase.expected.requestedVisibility,
+      );
+      expect(createBody.uploadTargets).toHaveLength(contractCase.expected.mediaObjectCount ?? 1);
+
+      const finalize = await injectJson(app, {
+        method: "POST",
+        url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+        headers: { authorization: "Bearer valid-token" },
+        payload: {
+          files: contractCase.finalize!.files.map((file, index) => ({
+            ...file,
+            uploadTargetId: createBody.uploadTargets[index]!.uploadTargetId,
+          })),
+        },
+      });
+
+      expect(finalize.statusCode).toBe(contractCase.expected.finalizeStatus);
+      const finalizeBody = finalize.body as MediaFinalizeResponse;
+      expect(finalizeBody.mediaObjects).toHaveLength(contractCase.expected.mediaObjectCount ?? 1);
+      expect(finalizeBody.mediaObject).toMatchObject(contractCase.expected.mediaObject!);
+      expect(finalizeBody.mediaObject.mediaId).toBeTruthy();
+      expect(finalizeBody.mediaObject.variants.map((variant) => variant.variantName)).toEqual([
+        ...(contractCase.expected.requiredVariants ?? []),
+      ]);
+      expect(finalizeBody.sideEffects).toEqual(contractCase.expected.sideEffects);
+    },
+  );
+
+  it("allows marketplace hotel profile owners to create property hero media sessions", async () => {
+    const app = buildMediaApp({
+      permissions: ["marketplace.profile.manage"],
+      resources: [
+        {
+          product: "marketplace",
+          resourceType: "hotel_profile",
+          resourceId: "hotel_profile_alpenrose",
+          relationship: "owner",
+        },
+      ],
+      targetResolver: {
+        async resolveTarget({ request, policy }) {
+          return {
+            ok: true,
+            target: {
+              resourceProduct: policy.targetResourceProduct,
+              resourceType: policy.targetResourceType,
+              resourceId: request.resource.targetResourceId ?? request.resource.resourceId,
+            },
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/media/upload-sessions",
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        purpose: "property.hero_image",
+        visibility: "public",
+        resource: {
+          product: "marketplace",
+          resourceType: "hotel_profile",
+          resourceId: "hotel_profile_alpenrose",
+          targetResourceId: "property_alpenrose",
+        },
+        files: [
+          {
+            clientFileId: "hero",
+            filename: "hero.webp",
+            contentType: "image/webp",
+            sizeBytes: 1024,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
   });
 
   it("rejects unsupported content types before signing", async () => {

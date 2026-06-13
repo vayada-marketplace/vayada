@@ -16,6 +16,10 @@ import {
   type MarketplaceOfferingSummary,
   type MarketplacePlatformName,
 } from "@vayada/marketplace-shared/api/discovery";
+import {
+  uploadPlatformMedia,
+  type PlatformMediaUploadResult,
+} from "@vayada/marketplace-shared/api/platformMedia";
 import { apiClient } from "./client";
 
 // Backend API response type for marketplace endpoint (snake_case)
@@ -71,6 +75,8 @@ export interface UpdateHotelProfileRequest {
   website?: string;
   phone?: string;
   picture?: string | null; // allow clearing or replacing
+  pictureMediaObjectId?: string | null;
+  picture_media_object_id?: string | null;
 }
 
 export interface CreateListingRequest {
@@ -79,6 +85,7 @@ export interface CreateListingRequest {
   description: string;
   accommodation_type?: string;
   images?: string[];
+  image_media_object_ids?: string[];
   collaboration_offerings: Array<{
     collaboration_type: "Free Stay" | "Paid" | "Discount" | "Affiliate";
     availability_months: string[];
@@ -103,11 +110,17 @@ export type UpdateListingRequest = Partial<CreateListingRequest>;
 
 export interface UploadPictureResponse {
   url: string;
+  mediaObjectId?: string;
 }
 
 export interface UploadImagesResponse {
   urls: string[];
+  mediaObjectIds?: string[];
 }
+
+export type PlatformImageUploadResponse = PlatformMediaUploadResult & {
+  mediaObjectId: string;
+};
 
 export const hotelService = {
   /**
@@ -167,43 +180,33 @@ export const hotelService = {
   },
 
   /**
-   * Upload hotel profile picture (recommended flow)
-   * POST /upload/image/hotel-profile
-   * Returns URL and metadata to include in profile update
+   * Upload hotel profile picture through platform media.
+   * Returns media metadata to include in the profile update command.
    */
   uploadProfileImage: async (
     file: File,
-  ): Promise<{
-    url: string;
-    thumbnail_url?: string;
-    key?: string;
-    width?: number;
-    height?: number;
-    size_bytes?: number;
-    format?: string;
-  }> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    return apiClient.upload<{
-      url: string;
-      thumbnail_url?: string;
-      key?: string;
-      width?: number;
-      height?: number;
-      size_bytes?: number;
-      format?: string;
-    }>("/upload/image/hotel-profile", formData);
+    profileId: string,
+  ): Promise<PlatformImageUploadResponse> => {
+    const [uploaded] = await uploadPlatformMedia({
+      purpose: "property.hero_image",
+      resource: {
+        product: "marketplace",
+        resourceType: "hotel_profile",
+        resourceId: profileId,
+        targetResourceId: profileId,
+      },
+      files: [file],
+    });
+    if (!uploaded) throw new Error("Platform media did not return an uploaded image");
+    return { ...uploaded, mediaObjectId: uploaded.mediaId };
   },
 
   /**
-   * Upload hotel profile picture (legacy method)
-   * POST /hotels/me/upload-picture
-   * @deprecated Use uploadProfileImage() instead (recommended flow)
+   * @deprecated Use uploadProfileImage(file, profileId) so the upload can be
+   * scoped to the marketplace hotel profile resource.
    */
-  uploadPicture: async (file: File): Promise<UploadPictureResponse> => {
-    const formData = new FormData();
-    formData.append("picture", file);
-    return apiClient.upload<UploadPictureResponse>("/hotels/me/upload-picture", formData);
+  uploadPicture: async (): Promise<UploadPictureResponse> => {
+    throw new Error("uploadPicture is retired; use uploadProfileImage(file, profileId)");
   },
 
   /**
@@ -231,35 +234,43 @@ export const hotelService = {
   },
 
   /**
-   * Upload listing images (standalone - before creating/updating listing)
-   * POST /upload/images/listing
-   * Returns array of image URLs to include in listing creation/update
+   * Upload listing images through platform media.
+   * Returns media IDs and URLs to include in listing create/update commands.
    */
-  uploadListingImages: async (files: File[]): Promise<{ images: Array<{ url: string }> }> => {
-    const formData = new FormData();
-    files.forEach((file) => {
-      formData.append("files", file);
+  uploadListingImages: async (
+    files: File[],
+    listingId: string,
+  ): Promise<{ images: Array<{ url: string; mediaObjectId: string }> }> => {
+    const uploaded = await uploadPlatformMedia({
+      purpose: "marketplace.listing.gallery",
+      resource: {
+        product: "marketplace",
+        resourceType: "hotel_listing",
+        resourceId: listingId,
+      },
+      files,
     });
-    return apiClient.upload<{ images: Array<{ url: string }> }>("/upload/images/listing", formData);
+    return {
+      images: uploaded.map((image) => ({
+        url: image.url,
+        mediaObjectId: image.mediaId,
+      })),
+    };
   },
 
   /**
-   * Upload listing images to existing listing (legacy method)
-   * POST /hotels/me/listings/:id/upload-images
-   * @deprecated Use uploadListingImages() and include URLs in listing update instead
+   * @deprecated Use uploadListingImages(files, id) and include media IDs in
+   * the listing update command instead.
    */
   uploadListingImagesToExisting: async (
     id: string,
     files: File[],
   ): Promise<UploadImagesResponse> => {
-    const formData = new FormData();
-    files.forEach((file) => {
-      formData.append("images", file);
-    });
-    return apiClient.upload<UploadImagesResponse>(
-      `/hotels/me/listings/${id}/upload-images`,
-      formData,
-    );
+    const uploaded = await hotelService.uploadListingImages(files, id);
+    return {
+      urls: uploaded.images.map((image) => image.url),
+      mediaObjectIds: uploaded.images.map((image) => image.mediaObjectId),
+    };
   },
 
   // Legacy methods (kept for backward compatibility)

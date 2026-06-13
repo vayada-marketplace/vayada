@@ -196,6 +196,122 @@
         "status": 400,
         "errorCode": "unsupported_media_type"
       }
+    },
+    {
+      "caseId": "marketplace-creator-profile-upload-session",
+      "description": "Creator profile image uploads use the marketplace creator profile resource and return a platform media object ID.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "marketplace.creator.profile_image",
+          "visibility": "public",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "creator_profile",
+            "resourceId": "creator_profile_lina"
+          },
+          "files": [
+            {
+              "clientFileId": "profile",
+              "filename": "lina.webp",
+              "contentType": "image/webp",
+              "sizeBytes": 1024
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/webp",
+            "sizeBytes": 1024,
+            "widthPx": 800,
+            "heightPx": 800
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 1,
+        "mediaObject": {
+          "purpose": "marketplace.creator.profile_image",
+          "resourceProduct": "marketplace",
+          "resourceType": "creator_profile",
+          "resourceId": "creator_profile_lina",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
+    },
+    {
+      "caseId": "marketplace-listing-gallery-upload-session",
+      "description": "Marketplace listing galleries batch through platform media and return one media object per file.",
+      "request": {
+        "path": "/api/media/upload-sessions",
+        "method": "POST",
+        "body": {
+          "purpose": "marketplace.listing.gallery",
+          "visibility": "public",
+          "resource": {
+            "product": "marketplace",
+            "resourceType": "hotel_listing",
+            "resourceId": "listing_alpenrose"
+          },
+          "files": [
+            {
+              "clientFileId": "suite",
+              "filename": "suite.jpg",
+              "contentType": "image/jpeg",
+              "sizeBytes": 2048
+            },
+            {
+              "clientFileId": "spa",
+              "filename": "spa.png",
+              "contentType": "image/png",
+              "sizeBytes": 4096
+            }
+          ]
+        }
+      },
+      "finalize": {
+        "files": [
+          {
+            "contentType": "image/jpeg",
+            "sizeBytes": 2048,
+            "widthPx": 1600,
+            "heightPx": 1000
+          },
+          {
+            "contentType": "image/png",
+            "sizeBytes": 4096,
+            "widthPx": 1200,
+            "heightPx": 900
+          }
+        ]
+      },
+      "expected": {
+        "status": 201,
+        "requestedVisibility": "public",
+        "effectiveVisibility": "private",
+        "finalizeStatus": 200,
+        "mediaObjectCount": 2,
+        "mediaObject": {
+          "purpose": "marketplace.listing.gallery",
+          "resourceProduct": "marketplace",
+          "resourceType": "hotel_listing",
+          "resourceId": "listing_alpenrose",
+          "approvalStatus": "pending_domain_approval",
+          "lifecycleStatus": "staged"
+        },
+        "requiredVariants": ["original_safe", "large", "thumbnail", "blur_preview"],
+        "sideEffects": ["variant_generation", "audit_event"]
+      }
     }
   ]
 }
