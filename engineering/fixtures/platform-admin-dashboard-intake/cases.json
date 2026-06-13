@@ -1,0 +1,177 @@
+{
+  "contractVersion": "pl1-non-media.v1",
+  "cases": [
+    {
+      "caseId": "platform-admin-authorization-allows-platform-membership",
+      "description": "Platform admin reads are authorized by platform organization membership, permission, and platform resource link.",
+      "request": {
+        "path": "/api/platform/admin/growth",
+        "method": "GET"
+      },
+      "context": {
+        "selectedOrganization": {
+          "kind": "platform",
+          "organizationId": "org_platform"
+        },
+        "membership": {
+          "status": "active",
+          "roleKey": "platform_admin",
+          "permissions": ["platform.admin.read"]
+        },
+        "linkedResources": [
+          {
+            "product": "platform",
+            "resourceType": "platform",
+            "resourceId": "vayada",
+            "relationship": "operator",
+            "status": "active"
+          }
+        ],
+        "legacyFlags": {
+          "isSuperadmin": false
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationPrimitive": "platform_organization_membership",
+        "mustNotDependOn": ["users.is_superadmin", "users.type", "legacy_jwt_user_type"]
+      }
+    },
+    {
+      "caseId": "platform-admin-denies-superadmin-without-platform-membership",
+      "description": "The legacy superadmin flag alone is not enough for target TypeScript platform routes.",
+      "request": {
+        "path": "/api/platform/admin/growth",
+        "method": "GET"
+      },
+      "context": {
+        "selectedOrganization": {
+          "kind": "hotel_group",
+          "organizationId": "org_hotel_group"
+        },
+        "membership": {
+          "status": "active",
+          "roleKey": "hotel_owner",
+          "permissions": ["platform.admin.read"]
+        },
+        "linkedResources": [],
+        "legacyFlags": {
+          "isSuperadmin": true
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_resource_access"
+      }
+    },
+    {
+      "caseId": "booking-dashboard-stats-read",
+      "description": "Booking dashboard stats read from the Booking metrics read port without PMS database access.",
+      "request": {
+        "path": "/api/booking/properties/prop_alpenrose/dashboard/stats",
+        "method": "GET",
+        "query": {
+          "periodStart": "2026-06-01",
+          "periodEnd": "2026-06-30",
+          "previousPeriodStart": "2026-05-01",
+          "previousPeriodEnd": "2026-05-31"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "contractVersion": "booking-dashboard.v1",
+        "mustInclude": [
+          "metrics.current.totalRevenue",
+          "metrics.current.bookingCount",
+          "metrics.previous.totalRevenue",
+          "metrics.nextArrivalDate",
+          "metrics.liveSinceDate"
+        ],
+        "mustNotOpen": ["PMS_DATABASE_URL", "legacy pms bookings table"],
+        "mustExclude": ["guestEmail", "guestPhone", "privatePmsNotes"]
+      }
+    },
+    {
+      "caseId": "booking-dashboard-source-mix-read",
+      "description": "Booking source mix uses the Booking metrics read port and returns stable source buckets.",
+      "request": {
+        "path": "/api/booking/properties/prop_alpenrose/dashboard/bookings-by-source",
+        "method": "GET",
+        "query": {
+          "periodStart": "2026-06-01",
+          "periodEnd": "2026-06-30"
+        }
+      },
+      "expected": {
+        "status": 200,
+        "contractVersion": "booking-dashboard.v1",
+        "mustInclude": [
+          "sourceMix.items[0].source",
+          "sourceMix.items[0].revenue",
+          "sourceMix.items[0].bookingCount",
+          "sourceMix.items[0].revenueSharePercent"
+        ],
+        "shareTolerancePercent": 0.1
+      }
+    },
+    {
+      "caseId": "booking-dashboard-event-read-model-follow-up",
+      "description": "Conversion funnel and page views wait for a target read model over platform domain events.",
+      "legacyRoutes": ["/admin/dashboard/conversion-funnel", "/admin/dashboard/page-views"],
+      "targetDisposition": {
+        "owner": "booking_metrics_read_model",
+        "source": "platform.domain_events",
+        "eventTypes": ["booking_web.page_view", "booking_web.search", "booking_web.checkout_step"],
+        "implementedInThisSlice": false
+      },
+      "expected": {
+        "mustNotForwardTo": ["booking-api POST /api/events"],
+        "followUpRequired": true
+      }
+    },
+    {
+      "caseId": "public-contact-intake-enqueues-email-job",
+      "description": "Public contact submissions persist durable intake before email delivery.",
+      "input": {
+        "name": "Ada Lovelace",
+        "email": "ada@example.test",
+        "phone": "+49123456789",
+        "company": "Analytical Stays",
+        "country": "DE",
+        "userType": "hotel",
+        "message": "I would like to learn more about Vayada."
+      },
+      "expected": {
+        "domainEvent": {
+          "eventType": "platform.contact_submission.received",
+          "privacyScope": "private",
+          "redactedPayloadFields": ["name", "company", "country", "userType"],
+          "privatePayloadFields": ["email", "phone", "message"]
+        },
+        "job": {
+          "jobType": "email.platform-contact-notification",
+          "idempotencyKeyPattern": "email.platform-contact-notification:contact:<fingerprint>:<window>:v1"
+        },
+        "mustNotCallInline": ["SMTP", "SES"]
+      }
+    },
+    {
+      "caseId": "pms-import-confirm-non-media-boundary",
+      "description": "PMS import confirm is idempotent and auditable, while image import remains media-track work.",
+      "request": {
+        "path": "/api/pms/properties/prop_alpenrose/imports/confirm",
+        "method": "POST",
+        "body": {
+          "commandId": "cmd-import-confirm-001",
+          "idempotencyKey": "pms-import-confirm:property:prop_alpenrose:batch:batch_001:v1",
+          "previewId": "preview_001"
+        }
+      },
+      "expected": {
+        "status": 202,
+        "sideEffects": ["domain_event", "import_job", "audit_event"],
+        "mustNotHandle": ["image_download", "object_storage_write", "media_variant_generation"]
+      }
+    }
+  ]
+}

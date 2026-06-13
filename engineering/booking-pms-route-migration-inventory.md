@@ -305,7 +305,10 @@ controls is not enough for staging rehearsal.
 10. **PL1: Platform admin, imports, media, and analytics**
     Replace platform/super-admin routes, import workflows, media upload routes,
     Booking dashboards, and telemetry with target read models, platform media,
-    and jobs/events intake.
+    and jobs/events intake. Non-media platform admin, dashboard, import, and
+    contact-intake scope is pinned in
+    [`Platform admin, dashboard, and intake contract`](platform-admin-dashboard-intake-contract.md);
+    platform media remains in the platform media track.
 
 Auth routes (`/auth/*`) cut over on the WorkOS track and can run in parallel,
 but no product vertical is considered rehearsal-ready until its frontend uses

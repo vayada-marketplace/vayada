@@ -8,6 +8,7 @@ import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
 import { createOpenAIAskModel } from "./platform/askIntelligence.js";
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
+import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
 import { createPgIdentityLifecycleCommandBus } from "./platform/identityLifecycle.js";
 import { createPgProductAuditSink } from "./platform/productAudit.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
@@ -130,6 +131,13 @@ const bookingReservationsRepository =
           connectionString: config.bookingReservationsReadDatabaseUrl,
         })
       : undefined;
+
+const bookingDashboardMetricsReadPort =
+  config.bookingReservationsSource === "target" && config.targetDatabaseUrl
+    ? createTargetBookingDashboardMetricsReadPort({
+        connectionString: config.targetDatabaseUrl,
+      })
+    : undefined;
 
 const publicHotelQuoteRepository =
   publicHotelProfileRepository && config.publicBookabilitySource === "target"
@@ -330,6 +338,7 @@ const app = buildApp({
         }
       : undefined,
   bookingReservationsRepository,
+  bookingDashboardMetricsReadPort,
   pmsOperationsRepository,
   pmsOperationsCommandRepository,
   financeRepository,

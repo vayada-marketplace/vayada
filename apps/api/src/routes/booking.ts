@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  registerBookingDashboardRoutes,
+  type BookingDashboardRoutesOptions,
+} from "./bookingDashboard.js";
+import {
   registerBookingReservationRoutes,
   type BookingReservationsReadRepository,
 } from "./bookingReservations.js";
@@ -17,6 +21,7 @@ type BookingHotelParams = {
 };
 
 export type BookingRoutesOptions = {
+  dashboardMetricsReadPort?: BookingDashboardRoutesOptions["metricsReadPort"];
   reservationsRepository?: BookingReservationsReadRepository;
   settingsRepository?: BookingSettingsReadRepository;
   settingsWriteRepository?: BookingSettingsWriteRepository;
@@ -38,6 +43,12 @@ export async function registerBookingRoutes(
 
   if (options.reservationsRepository) {
     await registerBookingReservationRoutes(app, options.reservationsRepository);
+  }
+
+  if (options.dashboardMetricsReadPort) {
+    await registerBookingDashboardRoutes(app, {
+      metricsReadPort: options.dashboardMetricsReadPort,
+    });
   }
 
   app.get<{ Params: BookingHotelParams }>("/hotels/:hotelId/policy-check", async (request) => {
