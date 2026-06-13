@@ -1,0 +1,14 @@
+{
+  "id": "inv_c1_rehearsal_001",
+  "external_id": "book_c1_rehearsal_002",
+  "user_id": "xendit_user_c1_rehearsal",
+  "status": "PAID",
+  "merchant_name": "Vayada C1 Rehearsal",
+  "amount": 24100,
+  "paid_amount": 24100,
+  "currency": "IDR",
+  "payment_method": "EWALLET",
+  "payment_channel": "OVO",
+  "paid_at": "2026-06-12T09:10:00.000Z",
+  "updated": "2026-06-12T09:10:00.000Z"
+}

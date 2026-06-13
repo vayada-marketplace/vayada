@@ -19,6 +19,7 @@
     "target:migrate": "tsx src/cli/migrate.ts",
     "target:rebuild": "tsx src/cli/rebuild.ts",
     "target:parity": "tsx src/cli/parity.ts",
+    "target:c1-rehearsal:checks": "tsx src/cli/c1RehearsalChecks.ts",
     "target:workos:backfill": "tsx src/cli/workosBackfill.ts",
     "target:fixtures:smoke": "tsx src/cli/smoke.ts"
   },

@@ -1,0 +1,14 @@
+{
+  "event": "payout.succeeded",
+  "business_id": "business_c1_rehearsal",
+  "created": "2026-06-12T09:15:00.000Z",
+  "data": {
+    "id": "payout_c1_rehearsal_001",
+    "reference_id": "hotel-payout_c1_rehearsal_001",
+    "status": "SUCCEEDED",
+    "amount": 1200000,
+    "currency": "IDR",
+    "channel_code": "ID_BCA",
+    "description": "Synthetic C1 staging rehearsal payout callback"
+  }
+}

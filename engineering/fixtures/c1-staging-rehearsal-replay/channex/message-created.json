@@ -1,0 +1,18 @@
+{
+  "event": "message",
+  "property_id": "prop_c1_rehearsal",
+  "payload": {
+    "property_id": "prop_c1_rehearsal",
+    "thread_id": "thread_c1_rehearsal_001",
+    "message_id": "msg_c1_rehearsal_001",
+    "source_message_id": "msg_c1_rehearsal_001",
+    "channel": "booking_com",
+    "channel_booking_id": "chan_book_c1_rehearsal_001",
+    "sender": {
+      "type": "guest",
+      "name": "C1 Rehearsal Guest"
+    },
+    "body": "Synthetic C1 staging rehearsal message fixture.",
+    "created_at": "2026-06-12T09:00:00.000Z"
+  }
+}

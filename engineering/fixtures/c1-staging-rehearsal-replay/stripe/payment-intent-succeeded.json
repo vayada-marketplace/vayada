@@ -1,0 +1,40 @@
+{
+  "id": "evt_c1_rehearsal_pi_succeeded_001",
+  "object": "event",
+  "api_version": "2026-02-26.preview",
+  "created": 1781245800,
+  "livemode": false,
+  "type": "payment_intent.succeeded",
+  "data": {
+    "object": {
+      "id": "pi_c1_rehearsal_001",
+      "object": "payment_intent",
+      "amount": 24100,
+      "amount_received": 24100,
+      "currency": "eur",
+      "status": "succeeded",
+      "metadata": {
+        "booking_id": "book_c1_rehearsal_001",
+        "payment_id": "pay_c1_rehearsal_001",
+        "rehearsal": "VAY-793"
+      },
+      "charges": {
+        "object": "list",
+        "data": [
+          {
+            "id": "ch_c1_rehearsal_001",
+            "object": "charge",
+            "paid": true,
+            "payment_method_details": {
+              "type": "card",
+              "card": {
+                "brand": "visa",
+                "last4": "4242"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
