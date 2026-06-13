@@ -41,6 +41,10 @@ import {
   type MarketplaceDiscoveryReadRepository,
 } from "./routes/marketplaceDiscovery.js";
 import {
+  registerMarketplaceCollaborationRoutes,
+  type MarketplaceCollaborationReadRepository,
+} from "./routes/marketplaceCollaborations.js";
+import {
   registerIdentityAdminUserRoutes,
   type IdentityAdminUsersReadRepository,
   type IdentityAdminUserRoutesOptions,
@@ -95,6 +99,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
+  marketplaceCollaborationRepository?: MarketplaceCollaborationReadRepository;
   identityPrivacyRepository?: IdentityPrivacyRepository;
   identityLifecycleCommandBus?: IdentityLifecycleCommandBus;
   identityAdminUsersReadRepository?: IdentityAdminUsersReadRepository;
@@ -216,6 +221,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       prefix: "/api/marketplace",
       repository: options.marketplaceDiscoveryRepository,
       allowedOrigins: options.marketplaceDiscoveryAllowedOrigins,
+    });
+  }
+  if (options.marketplaceCollaborationRepository) {
+    app.register(registerMarketplaceCollaborationRoutes, {
+      prefix: "/api/marketplace",
+      repository: options.marketplaceCollaborationRepository,
     });
   }
   if (options.identityPrivacyRepository) {

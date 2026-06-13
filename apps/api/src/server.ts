@@ -47,6 +47,7 @@ import {
   createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
+import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 
@@ -336,6 +337,12 @@ const app = buildApp({
   marketplaceDiscoveryRepository:
     config.marketplaceDiscoverySource === "target"
       ? createPgMarketplaceDiscoveryReadRepository({
+          connectionString: config.targetDatabaseUrl!,
+        })
+      : undefined,
+  marketplaceCollaborationRepository:
+    config.marketplaceDiscoverySource === "target"
+      ? createPgMarketplaceCollaborationReadRepository({
           connectionString: config.targetDatabaseUrl!,
         })
       : undefined,
