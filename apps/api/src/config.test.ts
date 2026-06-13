@@ -495,6 +495,35 @@ describe("api config", () => {
     ).toBe("booking.localhost");
   });
 
+  it("keeps platform media serving inactive by default", () => {
+    expect(loadConfig({}).platformMediaServing).toBeUndefined();
+  });
+
+  it("loads platform media serving cutover config", () => {
+    expect(
+      loadConfig({
+        PLATFORM_MEDIA_BUCKET: "vayada-media-staging",
+        PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.staging.vayada.com",
+        PLATFORM_MEDIA_CDN_ORIGIN_HOST: "vayada-media-staging.s3.us-east-1.amazonaws.com",
+      }).platformMediaServing,
+    ).toMatchObject({
+      bucketName: "vayada-media-staging",
+      cdnBaseUrl: "https://cdn.staging.vayada.com",
+      cdnOriginHost: "vayada-media-staging.s3.us-east-1.amazonaws.com",
+      publicPathPrefix: "media",
+      privateDownloadTtlSeconds: 300,
+      privateDownloadMaxTtlSeconds: 900,
+    });
+  });
+
+  it("rejects partial platform media serving config", () => {
+    expect(() =>
+      loadConfig({
+        PLATFORM_MEDIA_CDN_BASE_URL: "https://cdn.vayada.com",
+      }),
+    ).toThrow("Incomplete platform media serving config");
+  });
+
   it("keeps Ask Intelligence on the fixture provider by default", () => {
     expect(loadConfig({}).askIntelligence).toEqual({ provider: "fixture" });
     expect(

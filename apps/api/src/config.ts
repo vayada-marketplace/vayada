@@ -1,5 +1,10 @@
 import { loadServerConfig } from "@vayada/backend-config";
 
+import {
+  loadPlatformMediaServingConfig,
+  type PlatformMediaServingConfig,
+} from "./platform/mediaServing.js";
+
 export type ApiAuthConfig = {
   databaseUrl: string;
   workosJwksUrl: string;
@@ -82,6 +87,7 @@ export type ApiConfig = {
   bookingWebLegacyCheckoutCommandProxyEnabled: boolean;
   bookingWebEventSink: BookingWebEventSink;
   bookingHostBase?: string;
+  platformMediaServing?: PlatformMediaServingConfig;
   providerWebhooks: ProviderWebhookConfig;
 };
 
@@ -383,6 +389,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ),
     bookingWebEventSink,
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
+    platformMediaServing: loadPlatformMediaServingConfig(env),
     providerWebhooks: loadProviderWebhookConfig(env),
   };
 }
