@@ -30,6 +30,8 @@ import type {
   FinanceStripeConnectProvider,
   CreateStripeProviderAccountCommand,
   IssueStripeOnboardingLinkCommand,
+  FinanceXenditPayoutReconciliationCommand,
+  FinanceXenditPayoutReconciliationResult,
 } from "@vayada/domain-finance";
 import { createHash } from "node:crypto";
 import type { PublicBookabilityProfileProjection } from "@vayada/domain-distribution";
@@ -41,6 +43,7 @@ import { buildApp } from "./app.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import {
   createTargetFinancePropertySettingsRepository,
+  type FinanceXenditBankValidator,
   type FinancePublicHotelPropertyResolver,
 } from "./routes/finance.js";
 
@@ -69,8 +72,11 @@ const financeContractCases = JSON.parse(
       stableOrdering?: string;
       mustInclude?: string[];
       mustExclude?: string[];
+      mustNotWrite?: string[];
       errorCode?: string;
       providerAccountId?: string;
+      legacyDisposition?: string;
+      job?: { jobType: string; idempotencyKey: string };
       commandMeta?: { sideEffects?: string[] };
       enums?: Record<string, string[]>;
     };
@@ -593,6 +599,107 @@ describe("finance route contracts", () => {
     expect(accountInsert.values?.[0]).toBe(propertyId);
     expect(accountInsert.values?.[1]).toBeNull();
     expect(accountInsert.values?.[2]).toBe("property");
+  });
+
+  it("passes the F1g Xendit bank validation fixture without leaking raw bank data", async () => {
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "xendit-bank-validation",
+    );
+    expect(contractCase).toBeDefined();
+    const validator: FinanceXenditBankValidator = {
+      async validateBankAccount(input) {
+        expect(input).toMatchObject({
+          channelCode: "ID_BCA",
+          accountNumber: "1234567890",
+          accountHolderName: "Alpenrose Hotel GmbH",
+          idempotencyKey: "finance-xendit-bank-validation-f300686",
+        });
+        return {
+          status: "valid",
+          accountHolderName: "Alpenrose Hotel GmbH",
+          providerReference: "xbi_686",
+        };
+      },
+    };
+    app = buildFinanceApp({
+      permissions: financeManagePermissions(),
+      xenditBankValidator: validator,
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(response.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    assertExcludes(response.body, contractCase!.expected.mustExclude ?? [], contractCase!.caseId);
+    expect(response.body).toMatchObject({
+      provider: "xendit",
+      validation: {
+        status: "valid",
+        maskedAccountNumber: "******7890",
+        accountHolderName: "Alpenrose Hotel GmbH",
+      },
+      commandMeta: {
+        idempotencyKey: "finance-xendit-bank-validation-f300686",
+        sideEffects: ["provider_validation", "audit_event"],
+        jobs: [],
+      },
+    });
+    expect(JSON.stringify(response.body)).not.toContain("1234567890");
+  });
+
+  it("passes the F1g Xendit payout reconciliation enqueue fixture idempotently", async () => {
+    const contractCase = financeContractCases.cases.find(
+      (candidate) => candidate.caseId === "payout-reconciliation-enqueues-job",
+    );
+    expect(contractCase).toBeDefined();
+    const repository = xenditPayoutReconciliationRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: contractCase!.request.path,
+      payload: contractCase!.request.body,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(contractCase!.expected.status);
+    expect(replay.statusCode).toBe(contractCase!.expected.status);
+    assertIncludes(first.body, contractCase!.expected.mustInclude ?? [], contractCase!.caseId);
+    expect(first.body).toMatchObject({
+      job: contractCase!.expected.job,
+      legacyDisposition: contractCase!.expected.legacyDisposition,
+      commandMeta: {
+        idempotencyKey: "finance-reconcile-xendit-payouts-f300686-2026-06-12",
+        sideEffects: ["reconciliation_job", "audit_event"],
+        jobs: [{ status: "queued" }],
+      },
+    });
+    expect(replay.body).toMatchObject({
+      job: {
+        idempotencyKey:
+          "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1",
+        status: "idempotent_replay",
+      },
+      commandMeta: {
+        jobs: [{ status: "idempotent_replay" }],
+      },
+    });
+    assertExcludes(first.body, contractCase!.expected.mustNotWrite ?? [], contractCase!.caseId);
+    expect(repository.enqueueCount).toBe(1);
   });
 
   it("passes the F1d manual payment record fixture in target mode", async () => {
@@ -1434,6 +1541,80 @@ describe("finance route contracts", () => {
     });
   });
 
+  it("enqueues Xendit payout reconciliation through platform jobs without legacy payout writes", async () => {
+    const calls: QueryCall[] = [];
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: {
+        async query<T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) {
+          calls.push({ text, values });
+          if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          if (text.includes("INSERT INTO platform.idempotency_keys")) {
+            expect(text).toContain("'xendit_payout_reconciliation'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+            expect(values?.[2]).toBe(propertyId);
+            return {
+              rows: [
+                {
+                  status: "completed",
+                  requestFingerprintHash: values?.[1],
+                },
+              ] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.jobs")) {
+            expect(text).toContain("'finance-reconciliation'");
+            expect(text).toContain("'finance.reconcile-payout'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$2::uuid/);
+            expect(values?.[0]).toBe(
+              `finance.reconcile-payout:property:${propertyId}:xendit-manual-2026-06-12:v1`,
+            );
+            expect(values?.[1]).toBe(propertyId);
+            return {
+              rows: [{ jobId: "job_reconcile_xendit_686", replay: false }] as unknown as T[],
+              rowCount: 1,
+            };
+          }
+          if (text.includes("INSERT INTO platform.product_audit_events")) {
+            expect(text).toContain("'finance.xendit_payouts.reconcile_requested'");
+            expect(text).toMatch(/'property',\s+NULL,\s+\$3::uuid/);
+            expect(values?.[2]).toBe(propertyId);
+            return { rows: [] as T[], rowCount: 0 };
+          }
+          throw new Error(`Unexpected SQL: ${text}`);
+        },
+        async end() {},
+      },
+    });
+
+    await expect(
+      repository.enqueueXenditPayoutReconciliation!(
+        xenditPayoutReconciliationCommand({
+          requestedAt: "2026-06-12T12:00:00.000Z",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      job: {
+        jobType: "finance.reconcile-payout",
+        idempotencyKey:
+          "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1",
+        status: "queued",
+      },
+      legacyDisposition:
+        "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal",
+    });
+    expect(calls.map((call) => call.text)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/UPDATE\s+payouts/i)]),
+    );
+  });
+
   it("passes the Finance property read denial matrix", async () => {
     const cases: Array<{
       name: string;
@@ -1932,6 +2113,38 @@ function manualPaymentTargetCommand(
   };
 }
 
+function xenditPayoutReconciliationCommand(
+  options: {
+    propertyId?: string;
+    idempotencyKey?: string;
+    requestedAt?: string;
+    payload?: Partial<FinanceXenditPayoutReconciliationCommand["payload"]>;
+  } = {},
+): FinanceXenditPayoutReconciliationCommand {
+  const commandPropertyId = options.propertyId ?? propertyId;
+  return {
+    commandType: "finance.xendit_payouts.reconcile",
+    commandId: "cmd-xendit-reconcile-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-reconcile-xendit-payouts-f300686-2026-06-12",
+    propertyId: commandPropertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "f2000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_xendit_reconcile_target",
+      correlationId: "corr_xendit_reconcile_target",
+      reason: "Xendit payout reconciliation target test",
+      requestedAt: options.requestedAt ?? "2026-06-12T12:00:00.000Z",
+    },
+    payload: {
+      olderThanMinutes: 0,
+      ...options.payload,
+    },
+  };
+}
+
 function buildFinanceApp(
   options: {
     permissions?: PermissionKey[];
@@ -1939,6 +2152,7 @@ function buildFinanceApp(
     linkedPropertyId?: string | null;
     linkedResourceType?: "pms_property" | "property";
     repository?: FinancePropertyReadRepository;
+    xenditBankValidator?: FinanceXenditBankValidator;
     publicHotelProfileRepository?: PublicHotelProfileRepository | null;
     financePublicHotelProfileRepository?: PublicHotelProfileRepository;
     financePublicHotelPropertyResolver?: FinancePublicHotelPropertyResolver;
@@ -1953,6 +2167,7 @@ function buildFinanceApp(
     financePublicHotelProfileRepository: options.financePublicHotelProfileRepository,
     financePublicHotelPropertyResolver: options.financePublicHotelPropertyResolver,
     financeRepository: options.repository ?? financeRepository,
+    financeXenditBankValidator: options.xenditBankValidator,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepository(options.linkedPropertyId, options.linkedResourceType),
@@ -2224,6 +2439,38 @@ function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
   return repository;
 }
 
+function xenditPayoutReconciliationRepository(): FinancePropertyReadRepository & {
+  enqueueCount: number;
+} {
+  const records = new Map<string, FinanceXenditPayoutReconciliationResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & { enqueueCount: number } = {
+    ...financeRepository,
+    enqueueCount: 0,
+    async enqueueXenditPayoutReconciliation(command) {
+      const existing = records.get(command.idempotencyKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "idempotent_replay",
+          job: { ...existing.job, status: "idempotent_replay" },
+          commandMeta: {
+            ...existing.commandMeta,
+            jobs: existing.commandMeta.jobs.map((job) => ({
+              ...job,
+              status: "idempotent_replay",
+            })),
+          },
+        };
+      }
+      repository.enqueueCount += 1;
+      const result = xenditPayoutReconciliationResult(command, "queued");
+      records.set(command.idempotencyKey, result);
+      return result;
+    },
+  };
+  return repository;
+}
+
 function stripeProviderAccountResult(
   command: CreateStripeProviderAccountCommand,
   providerAccountId: string,
@@ -2277,6 +2524,32 @@ function stripeAffiliateCommand(): CreateStripeProviderAccountCommand {
     payload: {
       email: "affiliate@example.test",
       country: "AT",
+    },
+  };
+}
+
+function xenditPayoutReconciliationResult(
+  command: FinanceXenditPayoutReconciliationCommand,
+  status: "queued" | "idempotent_replay",
+): FinanceXenditPayoutReconciliationResult & { ok: true } {
+  const job = {
+    jobType: "finance.reconcile-payout",
+    idempotencyKey:
+      "finance.reconcile-payout:property:f3000000-0000-0000-0000-000000000686:xendit-manual-2026-06-12:v1",
+    status,
+  } as const;
+  return {
+    ok: true,
+    status,
+    job,
+    legacyDisposition:
+      "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal",
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["reconciliation_job", "audit_event"],
+      outboxEvents: [],
+      jobs: [job],
     },
   };
 }

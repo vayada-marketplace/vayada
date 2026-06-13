@@ -44,6 +44,7 @@ import {
 import {
   createTargetFinancePropertySettingsRepository,
   createTargetFinancePublicHotelPropertyResolver,
+  createXenditBankValidator,
 } from "./routes/finance.js";
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
@@ -187,6 +188,12 @@ const financePublicHotelPropertyResolver =
       })
     : undefined;
 
+const xenditBankValidator = config.xenditSecretKey
+  ? createXenditBankValidator({
+      secretKey: config.xenditSecretKey,
+    })
+  : undefined;
+
 const askModelProvider =
   config.askIntelligence.provider === "openai"
     ? await createOpenAIAskModel(config.askIntelligence)
@@ -319,6 +326,7 @@ const app = buildApp({
   pmsOperationsRepository,
   pmsOperationsCommandRepository,
   financeRepository,
+  financeXenditBankValidator: xenditBankValidator,
   financePublicHotelProfileRepository,
   financePublicHotelPropertyResolver,
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
