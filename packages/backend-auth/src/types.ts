@@ -40,6 +40,9 @@ export type ResourceRelationship =
   | "billing_account";
 
 export type PermissionKey =
+  | "platform.admin.read"
+  | "platform.finance.read"
+  | "platform.property.status.manage"
   | "platform.user.suspend"
   | "intelligence.ask.read"
   | "booking.settings.manage"

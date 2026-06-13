@@ -25,7 +25,7 @@ import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAskRoutes } from "./routes/ask.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
-import { registerBookingRoutes } from "./routes/booking.js";
+import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
 import {
   registerWorkosWebhookRoutes,
   type WorkosWebhookRoutesOptions,
@@ -93,6 +93,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
   pmsOperationsAllowedOrigins?: string[];
+  bookingDashboardMetricsReadPort?: BookingRoutesOptions["dashboardMetricsReadPort"];
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
@@ -246,6 +247,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
   app.register(registerBookingRoutes, {
     prefix: "/api/booking",
+    dashboardMetricsReadPort: options.bookingDashboardMetricsReadPort,
     reservationsRepository: options.bookingReservationsRepository,
     settingsRepository: options.bookingSettingsRepository,
     settingsWriteRepository: options.bookingSettingsWriteRepository,

@@ -191,7 +191,12 @@ const platformContext: RequestContext = {
     roleKey: "platform_admin",
     workosMembershipId: "om_platform",
     workosRoleSlugs: ["platform_admin"],
-    permissions: ["platform.user.suspend"],
+    permissions: [
+      "platform.admin.read",
+      "platform.finance.read",
+      "platform.property.status.manage",
+      "platform.user.suspend",
+    ],
   },
   linkedResources: [
     {
@@ -342,6 +347,40 @@ export const requestContextFixtureCases: RequestContextFixtureCase[] = [
     },
     expected: "denied",
     reason: "finance data needs a hotel resource link and explicit finance permission",
+  },
+  {
+    name: "platform admin can read platform admin dashboards through platform scope",
+    scope: "platform",
+    context: platformContext,
+    requirement: {
+      permission: "platform.admin.read",
+      resource: {
+        product: "platform",
+        resourceType: "platform",
+        resourceId: "vayada",
+        allowedRelationships: ["operator"],
+      },
+    },
+    expected: "allowed",
+    reason:
+      "platform admin dashboard reads require platform organization membership, permission, and platform resource link",
+  },
+  {
+    name: "platform admin can manage property status through platform scope",
+    scope: "platform",
+    context: platformContext,
+    requirement: {
+      permission: "platform.property.status.manage",
+      resource: {
+        product: "platform",
+        resourceType: "platform",
+        resourceId: "vayada",
+        allowedRelationships: ["operator"],
+      },
+    },
+    expected: "allowed",
+    reason:
+      "platform property moderation/status commands are platform-scoped rather than hotel-owner-scoped",
   },
   {
     name: "platform admin can suspend users through platform scope",
