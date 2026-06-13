@@ -54,6 +54,8 @@ export type PermissionKey =
   | "marketplace.collaboration.read"
   | "marketplace.collaboration.review"
   | "marketplace.profile.manage"
+  | "marketplace.trip.read"
+  | "marketplace.trip.manage"
   | "affiliate.payout.manage";
 
 export type EntitlementStatus = "active" | "suspended" | "expired";

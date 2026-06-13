@@ -1,0 +1,230 @@
+{
+  "contractVersion": "marketplace-trips-external.v1",
+  "cases": [
+    {
+      "caseId": "trips-list-linked-creator",
+      "description": "A creator workspace with marketplace.trip.read and an owner link to the creator profile can read its trip list.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_lina",
+          "permission": "marketplace.trip.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "creator_workspace_resource_link",
+        "mustInclude": [
+          "items[0].tripId",
+          "items[0].creatorProfileId",
+          "items[0].organizationId",
+          "items[0].name",
+          "items[0].startDate",
+          "items[0].endDate",
+          "items[0].externalCollaborations[0].externalCollaborationId",
+          "items[0].externalCollaborations[0].hotelName"
+        ],
+        "mustExclude": [
+          "creator_id",
+          "creatorId",
+          "user_id",
+          "userId",
+          "owner_user_id",
+          "ownerUserId",
+          "email",
+          "workosOrgId",
+          "membershipId"
+        ]
+      }
+    },
+    {
+      "caseId": "trip-detail-linked-creator",
+      "description": "A creator workspace can read a single trip only when the trip belongs to its linked creator profile.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips/trip_bali_2026",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_lina",
+          "permission": "marketplace.trip.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "creator_workspace_resource_link",
+        "tripId": "trip_bali_2026",
+        "creatorProfileId": "creator_profile_lina"
+      }
+    },
+    {
+      "caseId": "external-list-linked-creator",
+      "description": "A creator workspace can read external collaborations scoped to its creator profile.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips/external-collaborations",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_lina",
+          "permission": "marketplace.trip.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 200,
+        "authorizationMode": "creator_workspace_resource_link",
+        "mustInclude": [
+          "items[0].externalCollaborationId",
+          "items[0].creatorProfileId",
+          "items[0].tripId",
+          "items[0].title",
+          "items[0].collaborationType",
+          "items[0].deliverablesSummary"
+        ]
+      }
+    },
+    {
+      "caseId": "trips-deny-wrong-org-kind",
+      "description": "A hotel-group organization cannot read creator workspace trips even with the trip permission.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips",
+        "auth": {
+          "organizationKind": "hotel_group",
+          "organizationId": "org_hotel_alpenrose",
+          "permission": "marketplace.trip.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "hotel_listing",
+              "resourceId": "hotel_listing_alpenrose",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "forbidden",
+        "messageIncludes": "creator workspace"
+      }
+    },
+    {
+      "caseId": "trips-deny-missing-link",
+      "description": "A creator workspace with marketplace.trip.read but no creator-profile link is denied.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_unlinked",
+          "permission": "marketplace.trip.read",
+          "linkedResources": []
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_creator_resource_link"
+      }
+    },
+    {
+      "caseId": "trips-deny-missing-permission",
+      "description": "A creator workspace with the resource link but without marketplace.trip.read is denied before data access.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_lina",
+          "permission": null,
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "missing_permission"
+      }
+    },
+    {
+      "caseId": "trips-deny-ambiguous-creator-link",
+      "description": "A creator workspace with multiple active creator-profile links is denied until the selected creator profile is explicit.",
+      "request": {
+        "method": "GET",
+        "path": "/api/marketplace/trips",
+        "auth": {
+          "organizationKind": "creator_workspace",
+          "organizationId": "org_creator_multi",
+          "permission": "marketplace.trip.read",
+          "linkedResources": [
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_lina",
+              "relationship": "owner"
+            },
+            {
+              "product": "marketplace",
+              "resourceType": "creator_profile",
+              "resourceId": "creator_profile_other",
+              "relationship": "owner"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": 403,
+        "errorCode": "forbidden",
+        "messageIncludes": "exactly one"
+      }
+    },
+    {
+      "caseId": "trip-write-validation",
+      "description": "The follow-up write slice rejects invalid date ordering, missing required text, and unknown external collaboration types.",
+      "request": {
+        "method": "POST",
+        "path": "/api/marketplace/trips/external-collaborations",
+        "body": {
+          "title": " ",
+          "collaborationType": "sponsored_blog",
+          "startDate": "2026-09-20",
+          "endDate": "2026-09-10"
+        }
+      },
+      "expected": {
+        "status": 422,
+        "errorCode": "invalid_body"
+      }
+    }
+  ]
+}

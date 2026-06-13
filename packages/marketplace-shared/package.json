@@ -11,6 +11,7 @@
     "./api/collaborations": "./src/api/collaborations.ts",
     "./api/discovery": "./src/api/discovery.ts",
     "./api/platformMedia": "./src/api/platformMedia.ts",
-    "./api/privacy": "./src/api/privacy.ts"
+    "./api/privacy": "./src/api/privacy.ts",
+    "./api/trips": "./src/api/trips.ts"
   }
 }

@@ -2,6 +2,20 @@
  * Trip and External Collaboration API service
  */
 import { apiClient } from "./client";
+import {
+  createMarketplaceExternalCollaboration,
+  createMarketplaceTrip,
+  deleteMarketplaceExternalCollaboration,
+  deleteMarketplaceTrip,
+  getMarketplaceTrip,
+  listMarketplaceExternalCollaborations,
+  listMarketplaceTrips,
+  updateMarketplaceExternalCollaboration,
+  updateMarketplaceTrip,
+  type MarketplaceExternalCollaboration,
+  type MarketplaceExternalCollaborationType,
+  type MarketplaceTrip,
+} from "@vayada/marketplace-shared/api/trips";
 
 export interface TripResponse {
   id: string;
@@ -77,35 +91,77 @@ export const tripService = {
    * Create a new trip
    */
   createTrip: async (data: CreateTripRequest): Promise<TripResponse> => {
-    return apiClient.post<TripResponse>("/trips", data);
+    try {
+      return toLegacyTripResponse(
+        await createMarketplaceTrip({
+          name: data.name,
+          locationText: data.location,
+          startDate: data.start_date,
+          endDate: data.end_date,
+          notes: data.notes,
+        }),
+      );
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.post<TripResponse>("/trips", data);
+    }
   },
 
   /**
    * List all trips for the current creator
    */
   listTrips: async (): Promise<TripResponse[]> => {
-    return apiClient.get<TripResponse[]>("/trips");
+    try {
+      const response = await listMarketplaceTrips();
+      return response.items.map(toLegacyTripResponse);
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.get<TripResponse[]>("/trips");
+    }
   },
 
   /**
    * Get a trip by ID
    */
   getTrip: async (tripId: string): Promise<TripResponse> => {
-    return apiClient.get<TripResponse>(`/trips/${tripId}`);
+    try {
+      return toLegacyTripResponse(await getMarketplaceTrip(tripId));
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.get<TripResponse>(`/trips/${tripId}`);
+    }
   },
 
   /**
    * Update a trip
    */
   updateTrip: async (tripId: string, data: UpdateTripRequest): Promise<TripResponse> => {
-    return apiClient.put<TripResponse>(`/trips/${tripId}`, data);
+    try {
+      return toLegacyTripResponse(
+        await updateMarketplaceTrip(tripId, {
+          name: data.name,
+          locationText: data.location,
+          startDate: data.start_date,
+          endDate: data.end_date,
+          notes: data.notes,
+        }),
+      );
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.put<TripResponse>(`/trips/${tripId}`, data);
+    }
   },
 
   /**
    * Delete a trip
    */
   deleteTrip: async (tripId: string): Promise<void> => {
-    return apiClient.delete<void>(`/trips/${tripId}`);
+    try {
+      return await deleteMarketplaceTrip(tripId);
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.delete<void>(`/trips/${tripId}`);
+    }
   },
 
   /**
@@ -114,14 +170,37 @@ export const tripService = {
   createExternalCollaboration: async (
     data: CreateExternalCollaborationRequest,
   ): Promise<ExternalCollaborationResponse> => {
-    return apiClient.post<ExternalCollaborationResponse>("/trips/external-collaborations", data);
+    try {
+      return toLegacyExternalCollaborationResponse(
+        await createMarketplaceExternalCollaboration({
+          tripId: data.trip_id,
+          title: data.title,
+          hotelName: data.hotel_name,
+          locationText: data.location,
+          collaborationType: toTargetExternalCollaborationType(data.collaboration_type),
+          startDate: data.start_date,
+          endDate: data.end_date,
+          deliverablesSummary: data.deliverables,
+          notes: data.notes,
+        }),
+      );
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.post<ExternalCollaborationResponse>("/trips/external-collaborations", data);
+    }
   },
 
   /**
    * List all external collaborations for the current creator
    */
   listExternalCollaborations: async (): Promise<ExternalCollaborationResponse[]> => {
-    return apiClient.get<ExternalCollaborationResponse[]>("/trips/external-collaborations");
+    try {
+      const response = await listMarketplaceExternalCollaborations();
+      return response.items.map(toLegacyExternalCollaborationResponse);
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.get<ExternalCollaborationResponse[]>("/trips/external-collaborations");
+    }
   },
 
   /**
@@ -131,16 +210,128 @@ export const tripService = {
     collabId: string,
     data: UpdateExternalCollaborationRequest,
   ): Promise<ExternalCollaborationResponse> => {
-    return apiClient.put<ExternalCollaborationResponse>(
-      `/trips/external-collaborations/${collabId}`,
-      data,
-    );
+    try {
+      return toLegacyExternalCollaborationResponse(
+        await updateMarketplaceExternalCollaboration(collabId, {
+          tripId: data.trip_id,
+          title: data.title,
+          hotelName: data.hotel_name,
+          locationText: data.location,
+          collaborationType: toTargetExternalCollaborationType(data.collaboration_type),
+          startDate: data.start_date,
+          endDate: data.end_date,
+          deliverablesSummary: data.deliverables,
+          notes: data.notes,
+        }),
+      );
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.put<ExternalCollaborationResponse>(
+        `/trips/external-collaborations/${collabId}`,
+        data,
+      );
+    }
   },
 
   /**
    * Delete an external collaboration
    */
   deleteExternalCollaboration: async (collabId: string): Promise<void> => {
-    return apiClient.delete<void>(`/trips/external-collaborations/${collabId}`);
+    try {
+      return await deleteMarketplaceExternalCollaboration(collabId);
+    } catch (error) {
+      if (!isMissingMarketplaceTripRoute(error)) throw error;
+      return apiClient.delete<void>(`/trips/external-collaborations/${collabId}`);
+    }
   },
 };
+
+function toLegacyTripResponse(trip: MarketplaceTrip): TripResponse {
+  return {
+    id: trip.tripId,
+    creator_id: trip.creatorProfileId,
+    name: trip.name,
+    location: trip.locationText,
+    start_date: trip.startDate,
+    end_date: trip.endDate,
+    notes: trip.notes,
+    created_at: trip.createdAt,
+    updated_at: trip.updatedAt,
+    external_collaborations: trip.externalCollaborations.map(toLegacyExternalCollaborationResponse),
+  };
+}
+
+function toLegacyExternalCollaborationResponse(
+  collaboration: MarketplaceExternalCollaboration,
+): ExternalCollaborationResponse {
+  return {
+    id: collaboration.externalCollaborationId,
+    creator_id: collaboration.creatorProfileId,
+    trip_id: collaboration.tripId,
+    title: collaboration.title,
+    hotel_name: collaboration.hotelName,
+    location: collaboration.locationText,
+    collaboration_type: toLegacyExternalCollaborationType(collaboration.collaborationType),
+    start_date: collaboration.startDate,
+    end_date: collaboration.endDate,
+    deliverables: collaboration.deliverablesSummary,
+    notes: collaboration.notes,
+    created_at: collaboration.createdAt,
+    updated_at: collaboration.updatedAt,
+  };
+}
+
+function toTargetExternalCollaborationType(
+  value?: CreateExternalCollaborationRequest["collaboration_type"],
+): MarketplaceExternalCollaborationType | null | undefined {
+  if (value === undefined) return undefined;
+  switch (value) {
+    case "Custom / External":
+      return "custom_external";
+    case "Paid":
+      return "paid";
+    case "Free Stay":
+      return "free_stay";
+    default:
+      return null;
+  }
+}
+
+function toLegacyExternalCollaborationType(
+  value: MarketplaceExternalCollaborationType | null,
+): ExternalCollaborationResponse["collaboration_type"] {
+  switch (value) {
+    case "custom_external":
+      return "Custom / External";
+    case "paid":
+      return "Paid";
+    case "free_stay":
+      return "Free Stay";
+    case "affiliate":
+      return "Affiliate";
+    case "other":
+      return "Other";
+    default:
+      return null;
+  }
+}
+
+function isMissingMarketplaceTripRoute(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("status" in error)) return false;
+  if ((error as { status: unknown }).status !== 404) return false;
+
+  const data = (error as { data?: unknown }).data;
+  if (!data || typeof data !== "object") return false;
+  if ("code" in data) return false;
+
+  const detail = (data as { detail?: unknown }).detail;
+  if (detail === "Not Found") return true;
+
+  const fastifyError = data as { error?: unknown; message?: unknown };
+  return (
+    fastifyError.error === "Not Found" &&
+    typeof fastifyError.message === "string" &&
+    fastifyError.message.startsWith("Route ") &&
+    fastifyError.message.includes("/api/marketplace/trips")
+  );
+}
