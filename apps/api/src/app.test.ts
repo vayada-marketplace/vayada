@@ -58,8 +58,12 @@ import {
 } from "./routes/bookingReservations.js";
 import type {
   PmsAssignmentCommand,
-  PmsAssignmentCommandResponse,
   PmsAssignmentCommandResult,
+  PmsCheckInCommand,
+  PmsNoShowCommand,
+  PmsOperationalCommandResult,
+  PmsOperationalStatusCommand,
+  PmsOperationsCommandResponse,
   PmsOperationsCommandRepository,
   PmsCalendarDay,
   PmsOperationalReservation,
@@ -238,6 +242,19 @@ const pmsAssignmentCommandCases = Object.fromEntries(
     "assignment-command-version-conflict",
     "assignment-command-assignment-conflict",
     "assignment-command-idempotency-replay",
+  ].map((caseId) => [
+    caseId,
+    pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
+  ]),
+);
+const pmsOperationalCommandCases = Object.fromEntries(
+  [
+    "checkin-command",
+    "operational-status-transition",
+    "operational-status-invalid-transition",
+    "operational-status-version-conflict",
+    "no-show-command",
+    "no-show-version-conflict",
   ].map((caseId) => [
     caseId,
     pmsOperationsContractCases.cases.find((testCase) => testCase.caseId === caseId)!,
@@ -703,16 +720,24 @@ const pmsOperationsRepository: PmsOperationsReadRepository = {
 };
 
 function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository & {
-  commands: PmsAssignmentCommand[];
+  commands: Array<
+    PmsAssignmentCommand | PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand
+  >;
   outboxEnqueues: string[];
+  auditEvents: string[];
 } {
-  const commands: PmsAssignmentCommand[] = [];
+  const commands: Array<
+    PmsAssignmentCommand | PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand
+  > = [];
   const outboxEnqueues: string[] = [];
+  const auditEvents: string[] = [];
   const replayResponses = new Map<string, PmsAssignmentCommandResult>();
+  const operationalReplayResponses = new Map<string, PmsOperationalCommandResult>();
 
   return {
     commands,
     outboxEnqueues,
+    auditEvents,
     async executeAssignmentCommand(command) {
       commands.push(command);
 
@@ -738,7 +763,54 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
       outboxEnqueues.push(`calendar_refresh:${command.guestBookingId}`);
       return result;
     },
+    async executeOperationalStatusCommand(command) {
+      commands.push(command);
+      return executeOperationalTestCommand(
+        command,
+        operationalReplayResponses,
+        auditEvents,
+        reservationForOperationalStatusCommand,
+      );
+    },
+    async executeCheckInCommand(command) {
+      commands.push(command);
+      return executeOperationalTestCommand(
+        command,
+        operationalReplayResponses,
+        auditEvents,
+        reservationForCheckInCommand,
+      );
+    },
+    async executeNoShowCommand(command) {
+      commands.push(command);
+      return executeOperationalTestCommand(
+        command,
+        operationalReplayResponses,
+        auditEvents,
+        reservationForNoShowCommand,
+      );
+    },
   };
+}
+
+function executeOperationalTestCommand<
+  TCommand extends PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand,
+>(
+  command: TCommand,
+  replayResponses: Map<string, PmsOperationalCommandResult>,
+  auditEvents: string[],
+  mutate: (command: TCommand) => PmsOperationalCommandResult,
+): PmsOperationalCommandResult {
+  const replay = replayResponses.get(command.idempotencyKey);
+  if (replay) return replay;
+
+  const conflict = operationalCommandConflict(command);
+  if (conflict) return conflict;
+
+  const result = mutate(command);
+  replayResponses.set(command.idempotencyKey, result);
+  auditEvents.push(`audit_event:${command.guestBookingId}:${command.commandId}`);
+  return result;
 }
 
 function assignmentCommandConflict(
@@ -766,6 +838,28 @@ function assignmentCommandConflict(
       statusCode: 409,
       code: "assignment_conflict",
       message: "Target assignment does not belong to this reservation.",
+    };
+  }
+  return undefined;
+}
+
+function operationalCommandConflict(
+  command: PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand,
+): Exclude<PmsOperationalCommandResult, { ok: true }> | undefined {
+  if (command.expectedVersion === "reservation-v6") {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "version_conflict",
+      message: "Reservation operational version is stale.",
+    };
+  }
+  if ("status" in command && command.status === "checked_out") {
+    return {
+      ok: false,
+      statusCode: 400,
+      code: "invalid_status_transition",
+      message: "Cannot transition PMS reservation from assigned to checked_out.",
     };
   }
   return undefined;
@@ -813,6 +907,68 @@ function reservationForAssignmentCommand(command: PmsAssignmentCommand): PmsOper
   assignment.assignmentStatus = "assigned";
   assignment.assignedAt = "2026-08-14T16:00:00.000Z";
   return reservation;
+}
+
+function reservationForOperationalStatusCommand(
+  command: PmsOperationalStatusCommand,
+): PmsOperationalCommandResult {
+  const reservation = cloneOperationalReservation(command);
+  reservation.status = command.status;
+  for (const assignment of reservation.assignments) {
+    assignment.assignmentStatus = command.status;
+  }
+  return acceptedOperationalCommand(command, reservation);
+}
+
+function reservationForCheckInCommand(command: PmsCheckInCommand): PmsOperationalCommandResult {
+  const reservation = cloneOperationalReservation(command);
+  reservation.status = "checked_in";
+  reservation.checkin = {
+    completedAt: "2026-08-15T15:45:00.000Z",
+    pendingFlags: command.pendingFlags,
+  };
+  for (const assignment of reservation.assignments) {
+    assignment.assignmentStatus = "checked_in";
+  }
+  return acceptedOperationalCommand(command, reservation);
+}
+
+function reservationForNoShowCommand(command: PmsNoShowCommand): PmsOperationalCommandResult {
+  const reservation = cloneOperationalReservation(command);
+  reservation.status = "no_show";
+  for (const assignment of reservation.assignments) {
+    assignment.assignmentStatus = "released";
+    assignment.roomId = null;
+    assignment.roomNumber = null;
+    assignment.assignedAt = null;
+  }
+  return acceptedOperationalCommand(command, reservation);
+}
+
+function cloneOperationalReservation(
+  command: PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand,
+): PmsOperationalReservation {
+  const base =
+    pmsReservations.find((reservation) => reservation.guestBookingId === command.guestBookingId) ??
+    pmsReservations[0];
+  return structuredClone(base);
+}
+
+function acceptedOperationalCommand(
+  command: PmsOperationalStatusCommand | PmsCheckInCommand | PmsNoShowCommand,
+  reservation: PmsOperationalReservation,
+): PmsOperationalCommandResult {
+  return {
+    ok: true,
+    reservation,
+    commandMeta: {
+      contractVersion: "pms-operations.v1",
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      acceptedAt: "2026-08-15T15:45:00.000Z",
+      sideEffects: ["audit_event"],
+    },
+  };
 }
 
 const seededPublicProfile = PUBLIC_BOOKABILITY_FIXTURES.find(
@@ -5675,6 +5831,54 @@ describe("vayada-api", () => {
     expect(result.items[0]?.sourceFreshness).toEqual({ pms: { status: "fresh" } });
   });
 
+  it("builds status-filtered PMS reservation count queries with assignment payload status data", async () => {
+    const queries: Array<{ text: string; values?: unknown[] }> = [];
+    const pool: PmsOperationsReadPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: unknown[],
+      ): Promise<QueryResult<T>> {
+        queries.push({ text, values });
+        const isCountQuery = text.includes("COUNT(*)::text AS total");
+        if (isCountQuery) {
+          expect(values).toEqual([pmsPropertyId, "no_show"]);
+          expect(text).toContain("assignment.assignment_payload");
+          expect(text).toContain("primary_assignment.assignment_payload ->> 'operationalStatus'");
+          return {
+            command: "SELECT",
+            rowCount: 1,
+            oid: 0,
+            fields: [],
+            rows: [{ total: "0" }] as unknown as T[],
+          };
+        }
+        expect(values).toEqual([pmsPropertyId, "no_show", 25, 0]);
+        expect(text).toContain("SELECT assignment.*");
+        return {
+          command: "SELECT",
+          rowCount: 0,
+          oid: 0,
+          fields: [],
+          rows: [] as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPmsOperationsReadRepository({
+      connectionString: "postgresql://pms-operations-read",
+      pool,
+    });
+
+    const result = await repository.listReservationsByPropertyId(pmsPropertyId, {
+      status: "no_show",
+      limit: 25,
+      offset: 0,
+    });
+
+    expect(result).toMatchObject({ items: [], total: 0 });
+    expect(queries).toHaveLength(2);
+  });
+
   it("rejects PMS calendar ranges over the documented maximum", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.read"],
@@ -5993,7 +6197,7 @@ describe("vayada-api", () => {
           authorization: "Bearer valid-token",
         },
       });
-      const body = response.body as PmsAssignmentCommandResponse;
+      const body = response.body as PmsOperationsCommandResponse;
 
       expect(response.statusCode, caseId).toBe(commandCase.expected.status);
       expect(body.contractVersion, caseId).toBe("pms-operations.v1");
@@ -6008,12 +6212,11 @@ describe("vayada-api", () => {
       );
     }
 
-    expect(commandRepository.commands.map((command) => command.action)).toEqual([
-      "assign",
-      "move",
-      "unassign",
-      "swap",
-    ]);
+    expect(
+      commandRepository.commands
+        .filter((command): command is PmsAssignmentCommand => "action" in command)
+        .map((command) => command.action),
+    ).toEqual(["assign", "move", "unassign", "swap"]);
     expect(commandRepository.outboxEnqueues).toHaveLength(4);
   });
 
@@ -6096,6 +6299,133 @@ describe("vayada-api", () => {
     expect(commandRepository.outboxEnqueues).toHaveLength(1);
   });
 
+  it("executes PMS check-in, operational status, and no-show commands with audit metadata", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    for (const caseId of ["checkin-command", "operational-status-transition", "no-show-command"]) {
+      const commandCase = pmsOperationalCommandCases[caseId]!;
+      const response = await injectJson(app, {
+        method: commandCase.request.method ?? "POST",
+        url: commandCase.request.path,
+        payload: commandCase.request.body,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+      const body = response.body as PmsOperationsCommandResponse;
+
+      expect(response.statusCode, caseId).toBe(commandCase.expected.status);
+      expect(body.contractVersion, caseId).toBe("pms-operations.v1");
+      expect(body.commandMeta, caseId).toMatchObject({
+        contractVersion: "pms-operations.v1",
+        idempotencyKey: commandCase.request.body?.idempotencyKey,
+        sideEffects: ["audit_event"],
+      });
+      for (const path of commandCase.expected.mustInclude ?? []) {
+        expect(readContractPath(body, path), `${caseId}: ${path}`).not.toBeUndefined();
+      }
+    }
+
+    const [checkInCommand, statusCommand, noShowCommand] = commandRepository.commands.slice(-3);
+    expect(checkInCommand).toMatchObject({
+      commandId: "cmd-checkin-001",
+      audit: {
+        actor: { kind: "user", userId: "user_hotel_owner", organizationId: "org_hotel_group" },
+      },
+    });
+    expect(statusCommand).toMatchObject({ commandId: "cmd-status-001", status: "in_house" });
+    expect(noShowCommand).toMatchObject({
+      commandId: "cmd-no-show-001",
+      reason: "guest did not arrive",
+    });
+    expect(commandRepository.auditEvents).toHaveLength(3);
+  });
+
+  it("rejects assignment-scoped PMS no-show commands", async () => {
+    const commandCase = pmsOperationalCommandCases["no-show-command"]!;
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: commandCase.request.path,
+      payload: {
+        ...commandCase.request.body,
+        assignmentId: "f6855500-0000-0000-0000-000000000001",
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      statusCode: 400,
+      code: "invalid_body",
+    });
+    expect(commandRepository.commands).toHaveLength(0);
+    expect(commandRepository.auditEvents).toHaveLength(0);
+  });
+
+  it("maps PMS operational invalid status transitions and version conflicts", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    for (const caseId of [
+      "operational-status-invalid-transition",
+      "operational-status-version-conflict",
+      "no-show-version-conflict",
+    ]) {
+      const commandCase = pmsOperationalCommandCases[caseId]!;
+      const response = await injectJson(app, {
+        method: commandCase.request.method ?? "POST",
+        url: commandCase.request.path,
+        payload: commandCase.request.body,
+        headers: {
+          authorization: "Bearer valid-token",
+        },
+      });
+
+      expect(response.statusCode, caseId).toBe(commandCase.expected.status);
+      expect(response.body, caseId).toMatchObject({
+        code: commandCase.expected.errorCode,
+      });
+    }
+
+    expect(commandRepository.auditEvents).toEqual([]);
+  });
+
   it("rejects PMS operations reads with an invalid token", async () => {
     app = buildAuthenticatedApp();
 
@@ -6133,44 +6463,56 @@ describe("vayada-api", () => {
         resourceId: pmsPropertyId,
       },
     };
-    const pmsAuthorizationCases: PmsAuthorizationRuntimeCase[] = [
-      {
-        condition: "missing auth",
-        appOptions: {},
-        requestHeaders: undefined,
-      },
-      {
-        condition: "missing permission",
-        appOptions: { permissions: [] },
-        requestHeaders: { authorization: "Bearer valid-token" },
-      },
-      {
-        condition: "missing entitlement",
-        appOptions: { permissions: ["pms.operations.read"], entitlements: [] },
-        requestHeaders: { authorization: "Bearer valid-token" },
-      },
-      {
-        condition: "inactive entitlement",
-        appOptions: {
-          permissions: ["pms.operations.read"],
-          entitlements: [{ ...pmsEntitlement, status: "suspended" as const }],
+    function authorizationCases(permission: PermissionKey): PmsAuthorizationRuntimeCase[] {
+      const commandOptions =
+        permission === "pms.operations.manage"
+          ? { pmsOperationsCommandRepository: createPmsOperationsCommandRepository() }
+          : {};
+      return [
+        {
+          condition: "missing auth",
+          appOptions: commandOptions,
+          requestHeaders: undefined,
         },
-        requestHeaders: { authorization: "Bearer valid-token" },
-      },
-      {
-        condition: "missing linked property",
-        appOptions: {
-          permissions: ["pms.operations.read"],
-          entitlements: [pmsEntitlement],
-          linkedPmsPropertyId: "f6853000-0000-0000-0000-000000000099",
+        {
+          condition: "missing permission",
+          appOptions: { ...commandOptions, permissions: [] },
+          requestHeaders: { authorization: "Bearer valid-token" },
         },
-        requestHeaders: { authorization: "Bearer valid-token" },
-      },
-    ];
+        {
+          condition: "missing entitlement",
+          appOptions: { ...commandOptions, permissions: [permission], entitlements: [] },
+          requestHeaders: { authorization: "Bearer valid-token" },
+        },
+        {
+          condition: "inactive entitlement",
+          appOptions: {
+            ...commandOptions,
+            permissions: [permission],
+            entitlements: [{ ...pmsEntitlement, status: "suspended" as const }],
+          },
+          requestHeaders: { authorization: "Bearer valid-token" },
+        },
+        {
+          condition: "missing linked property",
+          appOptions: {
+            ...commandOptions,
+            permissions: [permission],
+            entitlements: [pmsEntitlement],
+            linkedPmsPropertyId: "f6853000-0000-0000-0000-000000000099",
+          },
+          requestHeaders: { authorization: "Bearer valid-token" },
+        },
+      ];
+    }
 
-    expect(pmsAuthorizationDenialCases).toHaveLength(3);
+    expect(pmsAuthorizationDenialCases).toHaveLength(4);
 
     for (const denialCase of pmsAuthorizationDenialCases) {
+      const requestMethod = denialCase.request.method ?? "GET";
+      const requiredPermission: PermissionKey =
+        requestMethod === "GET" ? "pms.operations.read" : "pms.operations.manage";
+      const pmsAuthorizationCases = authorizationCases(requiredPermission);
       for (const matrixCase of denialCase.expected.denials ?? []) {
         const runtimeCase = pmsAuthorizationCases.find(
           (candidate) => candidate.condition === matrixCase.condition,
@@ -6180,8 +6522,9 @@ describe("vayada-api", () => {
 
         app = buildAuthenticatedApp(runtimeCase!.appOptions);
         const response = await injectJson(app, {
-          method: "GET",
+          method: requestMethod,
           ...pmsOperationsRequestOptions(denialCase.request),
+          payload: denialCase.request.body,
           headers: runtimeCase!.requestHeaders,
         });
         await app.close();

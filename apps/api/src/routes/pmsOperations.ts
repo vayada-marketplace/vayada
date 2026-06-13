@@ -84,14 +84,28 @@ export type PmsReservationDetailResponse = {
 };
 
 export type PmsAssignmentCommandAction = "assign" | "move" | "unassign" | "swap";
-export type PmsAssignmentCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
+export type PmsOperationsCommandSideEffect = "calendar_refresh" | "ari_changed" | "audit_event";
 
 export type PmsCommandMeta = {
   contractVersion: PmsOperationsContractVersion;
   commandId: string;
   idempotencyKey: string;
   acceptedAt: string;
-  sideEffects: PmsAssignmentCommandSideEffect[];
+  sideEffects: PmsOperationsCommandSideEffect[];
+};
+
+export type PmsOperationsCommandAudit = {
+  actor:
+    | {
+        kind: "user";
+        userId: string;
+        organizationId: string;
+      }
+    | { kind: "system"; service: "apps/api" };
+  requestId: string;
+  correlationId?: string;
+  reason: string;
+  requestedAt: string;
 };
 
 export type PmsAssignmentCommandRequest = {
@@ -112,7 +126,41 @@ export type PmsAssignmentCommand = PmsAssignmentCommandRequest & {
   action: PmsAssignmentCommandAction;
 };
 
-export type PmsAssignmentCommandResponse = {
+export type PmsOperationalStatus = "assigned" | "checked_in" | "in_house" | "checked_out";
+
+export type PmsOperationalStatusCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  expectedVersion?: string;
+  status: PmsOperationalStatus;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsCheckInCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  expectedVersion?: string;
+  assignmentId?: string;
+  stepResults: unknown[];
+  pendingFlags: string[];
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsNoShowCommand = {
+  propertyId: string;
+  guestBookingId: string;
+  commandId: string;
+  idempotencyKey: string;
+  expectedVersion?: string;
+  reason?: string;
+  audit: PmsOperationsCommandAudit;
+};
+
+export type PmsOperationsCommandResponse = {
   contractVersion: PmsOperationsContractVersion;
   propertyId: string;
   reservation: PmsOperationalReservation;
@@ -145,8 +193,39 @@ export type PmsAssignmentCommandResult =
       message: string;
     };
 
+export type PmsOperationalCommandResult =
+  | {
+      ok: true;
+      reservation: PmsOperationalReservation;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "invalid_status_transition";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 404;
+      code: "reservation_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "version_conflict" | "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
+  executeOperationalStatusCommand(
+    command: PmsOperationalStatusCommand,
+  ): Promise<PmsOperationalCommandResult>;
+  executeCheckInCommand(command: PmsCheckInCommand): Promise<PmsOperationalCommandResult>;
+  executeNoShowCommand(command: PmsNoShowCommand): Promise<PmsOperationalCommandResult>;
   close?(): Promise<void>;
 };
 
@@ -215,6 +294,7 @@ type PmsOperationsErrorCode =
   | "invalid_query"
   | "invalid_body"
   | "invalid_date_range"
+  | "invalid_status_transition"
   | "finance_bridge_required"
   | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
@@ -235,6 +315,7 @@ type PmsOperationsAuthorizationErrorCode = Exclude<
   | "invalid_query"
   | "invalid_body"
   | "invalid_date_range"
+  | "invalid_status_transition"
   | "finance_bridge_required"
   | PmsAssignmentCommandConflictCode
   | "read_model_unavailable"
@@ -263,6 +344,9 @@ export async function registerPmsOperationsRoutes(
     "/properties/:propertyId/reservations/:guestBookingId",
     "/properties/:propertyId/reservations/:guestBookingId/checkout-charges/:chargeId/paid",
     "/properties/:propertyId/reservations/:guestBookingId/assignments",
+    "/properties/:propertyId/reservations/:guestBookingId/status",
+    "/properties/:propertyId/reservations/:guestBookingId/check-in",
+    "/properties/:propertyId/reservations/:guestBookingId/no-show",
   ]) {
     app.options(path, async (request, reply) => {
       if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
@@ -603,7 +687,94 @@ export async function registerPmsOperationsRoutes(
           propertyId,
           reservation: result.reservation,
           commandMeta: result.commandMeta,
-        } satisfies PmsAssignmentCommandResponse;
+        } satisfies PmsOperationsCommandResponse;
+      },
+    );
+
+    app.patch<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/status",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toOperationalStatusCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.executeOperationalStatusCommand(command.value);
+        if (!result.ok) return sendPmsOperationalCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          reservation: result.reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsOperationsCommandResponse;
+      },
+    );
+
+    app.post<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/check-in",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toCheckInCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.executeCheckInCommand(command.value);
+        if (!result.ok) return sendPmsOperationalCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          reservation: result.reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsOperationsCommandResponse;
+      },
+    );
+
+    app.post<{ Params: PmsReservationParams; Body: unknown }>(
+      "/properties/:propertyId/reservations/:guestBookingId/no-show",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, guestBookingId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toNoShowCommand(propertyId, guestBookingId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.executeNoShowCommand(command.value);
+        if (!result.ok) return sendPmsOperationalCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          reservation: result.reservation,
+          commandMeta: result.commandMeta,
+        } satisfies PmsOperationsCommandResponse;
       },
     );
   }
@@ -677,6 +848,23 @@ function enforcePmsOperationsManagePolicy(
 
 function sendPmsOperationsError(reply: FastifyReply, error: PmsOperationsError): FastifyReply {
   return reply.status(error.statusCode).send(error);
+}
+
+function sendPmsOperationalCommandError(
+  reply: FastifyReply,
+  result: Exclude<PmsOperationalCommandResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
+    message: result.message,
+  });
 }
 
 function writePmsOperationsCorsHeaders(
@@ -931,6 +1119,141 @@ function toAssignmentCommand(
   };
 }
 
+function toOperationalStatusCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsOperationalStatusCommand } | { error: PmsOperationsError } {
+  const metadata = toOperationalCommandMetadata(request.body, "Operational status command");
+  if ("error" in metadata) return metadata;
+  const raw = request.body as Record<string, unknown>;
+  const status = optionalStringField(raw.status);
+  if (!isOperationalStatus(status)) {
+    return { error: invalidBody("Operational status command requires a valid status.") };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      ...metadata.value,
+      status,
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Update PMS status"),
+    },
+  };
+}
+
+function toCheckInCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsCheckInCommand } | { error: PmsOperationsError } {
+  const metadata = toOperationalCommandMetadata(request.body, "Check-in command");
+  if ("error" in metadata) return metadata;
+  const raw = request.body as Record<string, unknown>;
+  const assignmentId = optionalStringField(raw.assignmentId);
+  if (assignmentId && !isUuid(assignmentId)) {
+    return { error: invalidBody("assignmentId must be a UUID.") };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      ...metadata.value,
+      assignmentId,
+      stepResults: Array.isArray(raw.stepResults) ? raw.stepResults : [],
+      pendingFlags: toStringArray(raw.pendingFlags),
+      audit: pmsOperationsCommandAudit(request, metadata.value.commandId, "Check in guest"),
+    },
+  };
+}
+
+function toNoShowCommand(
+  propertyId: string,
+  guestBookingId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsNoShowCommand } | { error: PmsOperationsError } {
+  const metadata = toOperationalCommandMetadata(request.body, "No-show command");
+  if ("error" in metadata) return metadata;
+  const raw = request.body as Record<string, unknown>;
+  const assignmentId = optionalStringField(raw.assignmentId);
+  if (assignmentId) {
+    return {
+      error: invalidBody("No-show commands are reservation-wide and do not accept assignmentId."),
+    };
+  }
+
+  return {
+    value: {
+      propertyId,
+      guestBookingId,
+      ...metadata.value,
+      reason: optionalStringField(raw.reason),
+      audit: pmsOperationsCommandAudit(
+        request,
+        metadata.value.commandId,
+        "Mark reservation no-show",
+      ),
+    },
+  };
+}
+
+function toOperationalCommandMetadata(
+  body: unknown,
+  commandName: string,
+):
+  | { value: { commandId: string; idempotencyKey: string; expectedVersion?: string } }
+  | { error: PmsOperationsError } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { error: invalidBody(`${commandName} body must be an object.`) };
+  }
+  const raw = body as Record<string, unknown>;
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody(`${commandName} requires commandId and idempotencyKey.`) };
+  }
+  return {
+    value: {
+      commandId,
+      idempotencyKey,
+      expectedVersion: optionalStringField(raw.expectedVersion),
+    },
+  };
+}
+
+function pmsOperationsCommandAudit(
+  request: FastifyRequest,
+  commandId: string,
+  reason: string,
+): PmsOperationsCommandAudit {
+  const authContext = request.authContext;
+  const now = new Date().toISOString();
+  return {
+    actor: authContext
+      ? {
+          kind: "user",
+          userId: authContext.actor.internalUserId,
+          organizationId: authContext.selectedOrganization.organizationId,
+        }
+      : { kind: "system", service: "apps/api" },
+    requestId: authContext?.audit.requestId ?? commandId,
+    correlationId: authContext?.audit.correlationId,
+    reason,
+    requestedAt: authContext?.audit.receivedAt ?? now,
+  };
+}
+
+function isOperationalStatus(value: string | undefined): value is PmsOperationalStatus {
+  return (
+    value === "assigned" ||
+    value === "checked_in" ||
+    value === "in_house" ||
+    value === "checked_out"
+  );
+}
+
 function inferAssignmentAction(
   raw: Record<string, unknown>,
   explicitAction: string | undefined,
@@ -977,6 +1300,13 @@ function optionalPositiveInteger(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
 }
 
 function isUuid(value: string): boolean {
