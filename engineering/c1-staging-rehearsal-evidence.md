@@ -148,3 +148,162 @@ Use `--twice` during rehearsal to prove duplicate provider delivery creates one
 receipt, one normalized domain event, and no duplicate jobs. The script prints
 the expected receipt, domain-event, and job keys for each fixture so the dashboard
 report can be compared with the replay output.
+
+## VAY-794 local execution record
+
+Recorded on 2026-06-14 from branch
+`flamurmaliqi2811/vay-794-execute-c1-staging-rehearsal-and-record-gono-go-evidence`.
+This is local tooling evidence only; it does not replace the staging provider
+dashboard exports, operator freeze approvals, live replay output, rollback proof,
+or go/no-go sign-off required by VAY-794.
+
+### Commands run
+
+Fixture inventory:
+
+```bash
+node scripts/c1-rehearsal-replay-fixtures.mjs --list
+```
+
+Result: passed. The command listed six synthetic replay fixtures:
+
+| Fixture                           | Provider  | Event type                 |
+| --------------------------------- | --------- | -------------------------- |
+| `channex-message-created`         | `channex` | `message`                  |
+| `channex-booking-revision`        | `channex` | `booking`                  |
+| `stripe-payment-intent-succeeded` | `stripe`  | `payment_intent.succeeded` |
+| `stripe-connect-account-updated`  | `stripe`  | `account.updated`          |
+| `xendit-invoice-paid`             | `xendit`  | `invoice.paid`             |
+| `xendit-payout-succeeded`         | `xendit`  | `payout.succeeded`         |
+
+Duplicate dry-run replay:
+
+```bash
+C1_REHEARSAL_WEBHOOK_BASE_URL=http://localhost:8000 \
+  node scripts/c1-rehearsal-replay-fixtures.mjs --all --twice
+```
+
+Result: passed. The command printed two dry-run POST attempts per fixture and
+redacted provider auth headers. Expected idempotency evidence emitted by the
+script:
+
+| Fixture                           | Expected receipt key                                                     | Expected domain event keys                                                                 | Expected job keys                                                                                                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `channex-message-created`         | `webhook:channex:message:prop_c1_rehearsal:msg_c1_rehearsal_001`         | `channex.message.ingest:prop_c1_rehearsal:thread_c1_rehearsal_001:msg_c1_rehearsal_001:v1` | `channex.ingest-message:channel_message:msg_c1_rehearsal_001:message-created:v1`                                                                                                                                |
+| `channex-booking-revision`        | `webhook:channex:booking:prop_c1_rehearsal:chan_book_c1_rehearsal_001:7` | `channex.booking.ingest:prop_c1_rehearsal:chan_book_c1_rehearsal_001:7:v1`                 | `channex.ingest-booking:channel_booking:chan_book_c1_rehearsal_001:revision-7:v1`                                                                                                                               |
+| `stripe-payment-intent-succeeded` | `webhook:stripe:evt_c1_rehearsal_pi_succeeded_001`                       | `payment.captured:stripe:pi_c1_rehearsal_001:24100:v1`                                     | `payment.reconcile-status:payment:pi_c1_rehearsal_001:stripe-event-evt_c1_rehearsal_pi_succeeded_001:v1`; `booking.finalize-instant:booking:book_c1_rehearsal_001:stripe-payment-intent-pi_c1_rehearsal_001:v1` |
+| `stripe-connect-account-updated`  | `webhook:stripe:evt_c1_rehearsal_account_updated_001`                    | `finance.provider-account.updated:stripe:acct_c1_rehearsal_001:true:v1`                    | `finance.reconcile-provider-account:provider_account:acct_c1_rehearsal_001:stripe-event-evt_c1_rehearsal_account_updated_001:v1`                                                                                |
+| `xendit-invoice-paid`             | `webhook:xendit:invoice:inv_c1_rehearsal_001:PAID`                       | `payment.captured:xendit:inv_c1_rehearsal_001:24100:v1`                                    | `payment.reconcile-status:payment:inv_c1_rehearsal_001:xendit-status-PAID:v1`; `booking.finalize-instant:booking:book_c1_rehearsal_002:xendit-invoice-inv_c1_rehearsal_001:v1`                                  |
+| `xendit-payout-succeeded`         | `webhook:xendit:payout:payout_c1_rehearsal_001:SUCCEEDED`                | `payout.status:xendit:payout_c1_rehearsal_001:SUCCEEDED:v1`                                | `finance.reconcile-payout:payout:payout_c1_rehearsal_001:xendit-status-SUCCEEDED:v1`                                                                                                                            |
+
+C1 evidence unit coverage:
+
+```bash
+npm --workspace @vayada/backend-migration run test -- c1RehearsalEvidence
+```
+
+Result: passed. Vitest reported 1 file passed, 4 tests passed.
+
+Backend migration typecheck:
+
+```bash
+npm --workspace @vayada/backend-migration run typecheck
+```
+
+Result: passed.
+
+Parity harness unit coverage:
+
+```bash
+npm --workspace @vayada/backend-migration run test -- parity registry platformJobsEventsAudit
+```
+
+Result: passed. Vitest reported 5 files passed, 9 tests passed, 6 skipped.
+
+### Staging-only evidence not executed locally
+
+`TARGET_DATABASE_URL` was not set in the local environment, so the staging
+dashboard/check command was not executed:
+
+```bash
+TARGET_DATABASE_URL=<target-staging-database-url> \
+  npm --workspace @vayada/backend-migration run target:c1-rehearsal:checks -- \
+  --lookback-minutes 1440 \
+  --pretty
+```
+
+The generic target parity CLI also requires `TARGET_DATABASE_URL` or
+`--connection-string`, so no real staging parity report was produced locally.
+
+Remaining VAY-794 evidence still required from staging:
+
+- provider endpoint exports for Channex, Stripe, and Xendit;
+- target dashboard/check report with `provider_receipt_counts`,
+  `provider_dedupe_hits`, `job_lag_by_provider_domain`,
+  `job_failures_by_provider_domain`, `dead_letters_by_provider_domain`, and
+  `legacy_scheduler_frozen_state`;
+- operator-approved scheduler freeze rows for the nine legacy PMS scheduler jobs;
+- live or controlled staging replay using `--send --twice` with provider secrets;
+- rollback proof for at least one provider;
+- go/no-go decision with named owners.
+
+### AWS secret discovery
+
+Recorded on 2026-06-14 after refreshing AWS login for account `269416271598`
+in region `eu-west-1`. Secret values were not printed or committed.
+
+Secrets Manager names visible in this account:
+
+- `vayada/database-url`
+- `vayada/auth-database-url`
+- `vayada/cors-origins`
+- `vayada/jwt-secret`
+- `vayada/aws-access-key-id`
+- `vayada/aws-secret-access-key`
+- `vayada/smtp-user`
+- `vayada/smtp-password`
+
+SSM Parameter Store names visible under `/vayada/prod`:
+
+- `/vayada/prod/db-auth-url`
+- `/vayada/prod/db-auth-url-ssl`
+- `/vayada/prod/db-booking-url`
+- `/vayada/prod/db-marketplace-url`
+- `/vayada/prod/db-pms-url`
+- `/vayada/prod/db-pms-url-ssl`
+- `/vayada/prod/stripe-webhook-secret`
+- `/vayada/prod/channex-api-key`
+- plus non-rehearsal provider/runtime parameters.
+
+Active and recent ECS task definitions reference
+`/vayada/prod/stripe-webhook-secret` as `STRIPE_WEBHOOK_SECRET`, but no
+matching deployed reference was found for `XENDIT_WEBHOOK_SECRET`,
+`CHANNEX_WEBHOOK_SECRET`, or `TARGET_DATABASE_URL`.
+
+No `/vayada/staging` SSM parameters, staging Secrets Manager names, staging ECS
+cluster, or staging RDS instance were visible in this account/region. Direct
+read-only connection attempts to the candidate database URLs timed out from the
+local machine, and ECS Exec is disabled on the running Fargate tasks, so the C1
+dashboard command could not be run inside the VPC from this environment.
+
+Terraform source check: cloned `vayada-marketplace/vayada-platform` locally and
+searched `infra/` plus `docs/environments.md`. The platform Terraform defines
+SSM parameters only under `/vayada/prod/` in `infra/ssm.tf`; it does not define
+`/vayada/staging/*`, `TARGET_DATABASE_URL`, `XENDIT_WEBHOOK_SECRET`, or
+`CHANNEX_WEBHOOK_SECRET`. `infra/ecs.tf` wires PMS backend secrets for
+`DATABASE_URL`, `AUTH_DATABASE_URL`, `BOOKING_ENGINE_DATABASE_URL`,
+`JWT_SECRET_KEY`, SMTP, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+`CHANNEX_API_KEY`, `ANTHROPIC_API_KEY`, and `FIRECRAWL_API_KEY`; it does not
+wire the missing C1 rehearsal values.
+
+Manual/out-of-band location check: active ECS task definitions were inspected
+for environment and secret names containing Xendit, Channex, webhook, target,
+secret, or token. Only `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`,
+`CHANNEX_API_KEY`, and `CHANNEX_API_BASE_URL` were present for PMS. GitHub repo,
+environment, and organization secret-name listings for `vayada` and
+`vayada-platform` did not show `XENDIT_WEBHOOK_SECRET`,
+`CHANNEX_WEBHOOK_SECRET`, or `TARGET_DATABASE_URL`; `vayada-platform` only has
+Terraform input secrets for the currently defined `/vayada/prod/*` parameters.
+App Runner service runtime env/secret names also had no matching webhook or
+target database entries. Local dotenv files only contain example placeholders
+for these variable names.
