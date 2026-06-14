@@ -128,7 +128,9 @@ export default function SetupPage() {
     setFeatureInput,
     roomFileInputRef,
     uploadingRoomImages,
+    roomImageUploadError,
     handleRoomImageUpload,
+    handleRoomImageFiles,
     setupAddons,
     setSetupAddons,
     benefits,
@@ -1018,7 +1020,9 @@ export default function SetupPage() {
           setFeatureInput={setFeatureInput}
           roomFileInputRef={roomFileInputRef}
           uploadingRoomImages={uploadingRoomImages}
+          roomImageUploadError={roomImageUploadError}
           handleRoomImageUpload={handleRoomImageUpload}
+          handleRoomImageFiles={handleRoomImageFiles}
           currency={currency}
           error={error}
           canProceed={canProceed()}
