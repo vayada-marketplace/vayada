@@ -249,61 +249,28 @@ Remaining VAY-794 evidence still required from staging:
 
 ### AWS secret discovery
 
-Recorded on 2026-06-14 after refreshing AWS login for account `269416271598`
-in region `eu-west-1`. Secret values were not printed or committed.
+Recorded on 2026-06-14 after refreshing AWS access. Secret values were not
+printed or committed.
 
-Secrets Manager names visible in this account:
+Discovery scope:
 
-- `vayada/database-url`
-- `vayada/auth-database-url`
-- `vayada/cors-origins`
-- `vayada/jwt-secret`
-- `vayada/aws-access-key-id`
-- `vayada/aws-secret-access-key`
-- `vayada/smtp-user`
-- `vayada/smtp-password`
+- AWS Secrets Manager and SSM Parameter Store names across the configured
+  deployment account and common regions.
+- Active and recent ECS task definitions for application-level environment and
+  secret references.
+- GitHub repository, environment, and organization secret-name listings for the
+  app and platform repositories.
+- App Runner runtime environment and secret names.
+- The platform Terraform source and environment documentation.
+- Local dotenv files, limited to variable-name matching.
 
-SSM Parameter Store names visible under `/vayada/prod`:
+High-level finding: the current deployed runtime exposes the application-level
+values needed for the existing Stripe webhook and Channex API integration, but
+no managed staging/rehearsal runtime path was found for `TARGET_DATABASE_URL`,
+`XENDIT_WEBHOOK_SECRET`, or `CHANNEX_WEBHOOK_SECRET`. The platform Terraform
+source also does not define the missing C1 rehearsal variables or a staging
+secret namespace.
 
-- `/vayada/prod/db-auth-url`
-- `/vayada/prod/db-auth-url-ssl`
-- `/vayada/prod/db-booking-url`
-- `/vayada/prod/db-marketplace-url`
-- `/vayada/prod/db-pms-url`
-- `/vayada/prod/db-pms-url-ssl`
-- `/vayada/prod/stripe-webhook-secret`
-- `/vayada/prod/channex-api-key`
-- plus non-rehearsal provider/runtime parameters.
-
-Active and recent ECS task definitions reference
-`/vayada/prod/stripe-webhook-secret` as `STRIPE_WEBHOOK_SECRET`, but no
-matching deployed reference was found for `XENDIT_WEBHOOK_SECRET`,
-`CHANNEX_WEBHOOK_SECRET`, or `TARGET_DATABASE_URL`.
-
-No `/vayada/staging` SSM parameters, staging Secrets Manager names, staging ECS
-cluster, or staging RDS instance were visible in this account/region. Direct
-read-only connection attempts to the candidate database URLs timed out from the
-local machine, and ECS Exec is disabled on the running Fargate tasks, so the C1
-dashboard command could not be run inside the VPC from this environment.
-
-Terraform source check: cloned `vayada-marketplace/vayada-platform` locally and
-searched `infra/` plus `docs/environments.md`. The platform Terraform defines
-SSM parameters only under `/vayada/prod/` in `infra/ssm.tf`; it does not define
-`/vayada/staging/*`, `TARGET_DATABASE_URL`, `XENDIT_WEBHOOK_SECRET`, or
-`CHANNEX_WEBHOOK_SECRET`. `infra/ecs.tf` wires PMS backend secrets for
-`DATABASE_URL`, `AUTH_DATABASE_URL`, `BOOKING_ENGINE_DATABASE_URL`,
-`JWT_SECRET_KEY`, SMTP, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-`CHANNEX_API_KEY`, `ANTHROPIC_API_KEY`, and `FIRECRAWL_API_KEY`; it does not
-wire the missing C1 rehearsal values.
-
-Manual/out-of-band location check: active ECS task definitions were inspected
-for environment and secret names containing Xendit, Channex, webhook, target,
-secret, or token. Only `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`,
-`CHANNEX_API_KEY`, and `CHANNEX_API_BASE_URL` were present for PMS. GitHub repo,
-environment, and organization secret-name listings for `vayada` and
-`vayada-platform` did not show `XENDIT_WEBHOOK_SECRET`,
-`CHANNEX_WEBHOOK_SECRET`, or `TARGET_DATABASE_URL`; `vayada-platform` only has
-Terraform input secrets for the currently defined `/vayada/prod/*` parameters.
-App Runner service runtime env/secret names also had no matching webhook or
-target database entries. Local dotenv files only contain example placeholders
-for these variable names.
+Direct read-only connection attempts to candidate database URLs timed out from
+the local machine, and ECS Exec is disabled on the running Fargate tasks, so the
+C1 dashboard command could not be run inside the VPC from this environment.
