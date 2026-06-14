@@ -220,20 +220,45 @@ npm --workspace @vayada/backend-migration run test -- parity registry platformJo
 
 Result: passed. Vitest reported 5 files passed, 9 tests passed, 6 skipped.
 
-### Staging-only evidence not executed locally
+### Staging runtime attempt on 2026-06-14
 
-`TARGET_DATABASE_URL` was not set in the local environment, so the staging
-dashboard/check command was not executed:
+After the platform secret-ownership work, the target database URL was loaded
+from AWS Secrets Manager without printing the value and the staging
+dashboard/check command was attempted:
 
 ```bash
-TARGET_DATABASE_URL=<target-staging-database-url> \
-  npm --workspace @vayada/backend-migration run target:c1-rehearsal:checks -- \
+TARGET_DATABASE_URL="$(aws secretsmanager get-secret-value \
+  --region eu-west-1 \
+  --secret-id vayada/database-url \
+  --query SecretString \
+  --output text)" \
+npm --workspace @vayada/backend-migration run target:c1-rehearsal:checks -- \
   --lookback-minutes 1440 \
   --pretty
 ```
 
-The generic target parity CLI also requires `TARGET_DATABASE_URL` or
-`--connection-string`, so no real staging parity report was produced locally.
+Result: failed before producing a report. The command reached the database
+connection step but timed out connecting to the target database host on port
+5432 from the local operator environment.
+
+Additional runtime checks:
+
+- The deployed `vayada-backend-service` task definition exposes
+  `DATABASE_URL`, `JWT_SECRET_KEY`, auth, SMTP, CORS, and AWS runtime secrets,
+  but does not expose `STRIPE_WEBHOOK_SECRET`, `XENDIT_WEBHOOK_SECRET`, or
+  `CHANNEX_WEBHOOK_SECRET`.
+- The deployed `vayada-pms-backend-service` task definition exposes
+  `STRIPE_WEBHOOK_SECRET` and `CHANNEX_API_KEY`, but no
+  `XENDIT_WEBHOOK_SECRET` or `CHANNEX_WEBHOOK_SECRET`.
+- AWS SSM Parameter Store currently has no parameters under `/vayada/staging/`
+  in `eu-west-1`.
+- GitHub Actions now has workflow wiring for the staging rehearsal Terraform
+  variables, but the repository secret-name listing does not show the
+  corresponding staging values yet.
+
+No live `--send --twice` provider replay was executed because the target runtime
+does not currently have matching provider webhook secrets and the rehearsal SSM
+parameters have not been created with real values.
 
 Remaining VAY-794 evidence still required from staging:
 
