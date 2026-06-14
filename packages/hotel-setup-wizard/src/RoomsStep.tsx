@@ -623,7 +623,9 @@ interface RoomsStepProps {
   setFeatureInput: (v: string) => void;
   roomFileInputRef: RefObject<HTMLInputElement>;
   uploadingRoomImages: boolean;
+  roomImageUploadError?: string;
   handleRoomImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleRoomImageFiles?: (files: File[]) => void;
   currency: string;
   error: string;
   canProceed: boolean;
@@ -641,7 +643,9 @@ export default function RoomsStep({
   setActiveRoomTab,
   roomFileInputRef,
   uploadingRoomImages,
+  roomImageUploadError,
   handleRoomImageUpload,
+  handleRoomImageFiles,
   currency,
   error,
   canProceed,
@@ -2832,7 +2836,22 @@ export default function RoomsStep({
                   )}
 
                   <button
+                    type="button"
                     onClick={() => roomFileInputRef.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "copy";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (uploadingRoomImages) return;
+                      const files = Array.from(e.dataTransfer.files).filter((file) =>
+                        file.type.startsWith("image/"),
+                      );
+                      if (files.length > 0) {
+                        handleRoomImageFiles?.(files);
+                      }
+                    }}
                     disabled={uploadingRoomImages}
                     className="w-full border-2 border-dashed border-gray-300 rounded-xl py-8 flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-gray-400 hover:bg-gray-50/50 transition-colors"
                   >
@@ -2869,6 +2888,10 @@ export default function RoomsStep({
                     onChange={handleRoomImageUpload}
                     className="hidden"
                   />
+
+                  {roomImageUploadError && (
+                    <p className="text-[11px] font-medium text-red-600">{roomImageUploadError}</p>
+                  )}
 
                   <p className="text-[10px] text-gray-400">
                     Shown in: room listing card (left side) · &quot;View Details&quot; modal with

@@ -58,6 +58,7 @@ export function useSetupWizardState({
   const [featureInput, setFeatureInput] = useState("");
   const roomFileInputRef = useRef<HTMLInputElement>(null);
   const [uploadingRoomImages, setUploadingRoomImages] = useState(false);
+  const [roomImageUploadError, setRoomImageUploadError] = useState("");
 
   const [setupAddons, setSetupAddons] = useState<SetupAddon[]>([]);
   const [benefits, setBenefits] = useState<string[]>([]);
@@ -116,16 +117,22 @@ export function useSetupWizardState({
   };
 
   const handleRoomImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    await handleRoomImageFiles(Array.from(e.target.files ?? []));
+  };
+
+  const handleRoomImageFiles = async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
     try {
+      setRoomImageUploadError("");
       setUploadingRoomImages(true);
-      const urls = await uploadImages(Array.from(files));
+      const urls = await uploadImages(imageFiles);
       setRooms((prev) =>
         prev.map((r, i) => (i === activeRoomIndex ? { ...r, images: [...r.images, ...urls] } : r)),
       );
     } catch (err) {
       console.error("Room image upload failed:", err);
+      setRoomImageUploadError("Room image upload failed. Please try again.");
     } finally {
       setUploadingRoomImages(false);
       if (roomFileInputRef.current) roomFileInputRef.current.value = "";
@@ -133,6 +140,7 @@ export function useSetupWizardState({
   };
 
   const reset = () => {
+    setRoomImageUploadError("");
     setPropertyName("");
     setCity("");
     setCountry("");
@@ -187,63 +195,116 @@ export function useSetupWizardState({
   };
 
   return {
-    propertyName, setPropertyName,
-    city, setCity,
-    country, setCountry,
-    address, setAddress,
-    reservationEmail, setReservationEmail,
-    phoneNumber, setPhoneNumber,
-    whatsapp, setWhatsapp,
-    instagram, setInstagram,
-    facebook, setFacebook,
-    tiktok, setTiktok,
-    youtube, setYoutube,
-    currency, setCurrency,
-    defaultLanguage, setDefaultLanguage,
-    supportedCurrencies, setSupportedCurrencies,
-    supportedLanguages, setSupportedLanguages,
-    heroImage, setHeroImage,
-    primaryColor, setPrimaryColor,
-    accentColor, setAccentColor,
-    selectedFont, setSelectedFont,
-    propertyDescription, setPropertyDescription,
-    bookingFilters, setBookingFilters,
+    propertyName,
+    setPropertyName,
+    city,
+    setCity,
+    country,
+    setCountry,
+    address,
+    setAddress,
+    reservationEmail,
+    setReservationEmail,
+    phoneNumber,
+    setPhoneNumber,
+    whatsapp,
+    setWhatsapp,
+    instagram,
+    setInstagram,
+    facebook,
+    setFacebook,
+    tiktok,
+    setTiktok,
+    youtube,
+    setYoutube,
+    currency,
+    setCurrency,
+    defaultLanguage,
+    setDefaultLanguage,
+    supportedCurrencies,
+    setSupportedCurrencies,
+    supportedLanguages,
+    setSupportedLanguages,
+    heroImage,
+    setHeroImage,
+    primaryColor,
+    setPrimaryColor,
+    accentColor,
+    setAccentColor,
+    selectedFont,
+    setSelectedFont,
+    propertyDescription,
+    setPropertyDescription,
+    bookingFilters,
+    setBookingFilters,
     fileInputRef,
     uploading,
     handleImageUpload,
-    rooms, setRooms,
-    activeRoomIndex, setActiveRoomIndex,
-    activeRoomTab, setActiveRoomTab,
-    amenityInput, setAmenityInput,
-    featureInput, setFeatureInput,
+    rooms,
+    setRooms,
+    activeRoomIndex,
+    setActiveRoomIndex,
+    activeRoomTab,
+    setActiveRoomTab,
+    amenityInput,
+    setAmenityInput,
+    featureInput,
+    setFeatureInput,
     roomFileInputRef,
     uploadingRoomImages,
+    roomImageUploadError,
     handleRoomImageUpload,
-    setupAddons, setSetupAddons,
-    benefits, setBenefits,
-    lastMinuteConfig, setLastMinuteConfig,
-    checkInFrom, setCheckInFrom,
-    checkInUntil, setCheckInUntil,
-    checkOutFrom, setCheckOutFrom,
-    checkOutUntil, setCheckOutUntil,
-    payAtHotel, setPayAtHotel,
-    payAtHotelMethods, setPayAtHotelMethods,
-    onlineCardPayment, setOnlineCardPayment,
-    bankTransfer, setBankTransfer,
-    payoutAccountHolder, setPayoutAccountHolder,
-    payoutAccountType, setPayoutAccountType,
-    payoutIban, setPayoutIban,
-    payoutAccountNumber, setPayoutAccountNumber,
-    payoutBankName, setPayoutBankName,
-    payoutSwift, setPayoutSwift,
-    specialRequests, setSpecialRequests,
-    estimatedArrivalTime, setEstimatedArrivalTime,
-    numberOfGuests, setNumberOfGuests,
-    enableReferAGuest, setEnableReferAGuest,
-    paymentProvider, setPaymentProvider,
-    xenditChannelCode, setXenditChannelCode,
-    xenditAccountNumber, setXenditAccountNumber,
-    xenditAccountHolderName, setXenditAccountHolderName,
+    handleRoomImageFiles,
+    setupAddons,
+    setSetupAddons,
+    benefits,
+    setBenefits,
+    lastMinuteConfig,
+    setLastMinuteConfig,
+    checkInFrom,
+    setCheckInFrom,
+    checkInUntil,
+    setCheckInUntil,
+    checkOutFrom,
+    setCheckOutFrom,
+    checkOutUntil,
+    setCheckOutUntil,
+    payAtHotel,
+    setPayAtHotel,
+    payAtHotelMethods,
+    setPayAtHotelMethods,
+    onlineCardPayment,
+    setOnlineCardPayment,
+    bankTransfer,
+    setBankTransfer,
+    payoutAccountHolder,
+    setPayoutAccountHolder,
+    payoutAccountType,
+    setPayoutAccountType,
+    payoutIban,
+    setPayoutIban,
+    payoutAccountNumber,
+    setPayoutAccountNumber,
+    payoutBankName,
+    setPayoutBankName,
+    payoutSwift,
+    setPayoutSwift,
+    specialRequests,
+    setSpecialRequests,
+    estimatedArrivalTime,
+    setEstimatedArrivalTime,
+    numberOfGuests,
+    setNumberOfGuests,
+    enableReferAGuest,
+    setEnableReferAGuest,
+    paymentProvider,
+    setPaymentProvider,
+    xenditChannelCode,
+    setXenditChannelCode,
+    xenditAccountNumber,
+    setXenditAccountNumber,
+    xenditAccountHolderName,
+    setXenditAccountHolderName,
     reset,
   };
 }
