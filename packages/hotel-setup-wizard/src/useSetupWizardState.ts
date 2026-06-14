@@ -140,6 +140,7 @@ export function useSetupWizardState({
   };
 
   const reset = () => {
+    setRoomImageUploadError("");
     setPropertyName("");
     setCity("");
     setCountry("");
