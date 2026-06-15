@@ -14,7 +14,7 @@ export type UploadedImage = {
 export type RoomImageReference =
   | string
   | {
-      url: string;
+      url?: string | null;
       platformMediaObjectId?: string;
       mediaId?: string;
       storageKey?: string;
@@ -38,21 +38,37 @@ export const uploadService = {
       visibility: "public",
     });
 
+    const images = uploaded.flatMap((image) =>
+      image?.url
+        ? [
+            {
+              url: image.url,
+              platformMediaObjectId: image.mediaId,
+              storageKey: image.storageKey,
+              width: image.widthPx ?? 0,
+              height: image.heightPx ?? 0,
+              size_bytes: image.sizeBytes,
+              format: image.contentType,
+            },
+          ]
+        : [],
+    );
+
     return {
-      images: uploaded.map((image) => ({
-        url: image.url,
-        platformMediaObjectId: image.mediaId,
-        storageKey: image.storageKey,
-        width: image.widthPx ?? 0,
-        height: image.heightPx ?? 0,
-        size_bytes: image.sizeBytes,
-        format: image.contentType,
-      })),
-      total: uploaded.length,
+      images,
+      total: images.length,
     };
   },
 };
 
-export function imageReferenceUrl(image: RoomImageReference): string {
-  return typeof image === "string" ? image : image.url;
+export function imageReferenceUrl(image: RoomImageReference | null | undefined): string {
+  if (!image) return "";
+  if (typeof image === "string") return image;
+  return image.url ?? "";
+}
+
+export function isRoomImageReference(
+  image: RoomImageReference | null | undefined,
+): image is RoomImageReference {
+  return imageReferenceUrl(image).trim().length > 0;
 }

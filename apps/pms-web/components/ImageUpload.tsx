@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { XMarkIcon, PhotoIcon, ArrowUpTrayIcon } from "@heroicons/react/24/outline";
-import { imageReferenceUrl, uploadService } from "@/services/upload";
+import { imageReferenceUrl, isRoomImageReference, uploadService } from "@/services/upload";
 import type { RoomImageReference, UploadedImage } from "@/services/upload";
 import type { PlatformMediaResourceScope } from "@/services/platform-media";
 
@@ -37,6 +37,7 @@ export default function ImageUpload({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const validImages = useMemo(() => images.filter(isRoomImageReference), [images]);
 
   const handleFileSelect = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -48,7 +49,7 @@ export default function ImageUpload({
       const fileArray = Array.from(files);
 
       // Validate count
-      if (images.length + fileArray.length > maxImages) {
+      if (validImages.length + fileArray.length > maxImages) {
         setError(`Maximum ${maxImages} images allowed`);
         e.target.value = "";
         return;
@@ -76,7 +77,7 @@ export default function ImageUpload({
           platformMediaObjectId: img.platformMediaObjectId,
           storageKey: img.storageKey,
         }));
-        onChange([...images, ...newImages]);
+        onChange([...validImages, ...newImages]);
       } catch (err: any) {
         setError(err.message || "Upload failed");
       } finally {
@@ -84,15 +85,15 @@ export default function ImageUpload({
         e.target.value = "";
       }
     },
-    [images, onChange, maxImages, maxSizeMB, mediaResource],
+    [validImages, onChange, maxImages, maxSizeMB, mediaResource],
   );
 
   const removeImage = useCallback(
     (index: number) => {
-      const updated = images.filter((_, i) => i !== index);
+      const updated = validImages.filter((_, i) => i !== index);
       onChange(updated);
     },
-    [images, onChange],
+    [validImages, onChange],
   );
 
   const handleDragStart = useCallback((index: number) => {
@@ -112,14 +113,14 @@ export default function ImageUpload({
         setOverIndex(null);
         return;
       }
-      const reordered = [...images];
+      const reordered = [...validImages];
       const [moved] = reordered.splice(dragIndex, 1);
       reordered.splice(dropIndex, 0, moved);
       onChange(reordered);
       setDragIndex(null);
       setOverIndex(null);
     },
-    [dragIndex, images, onChange],
+    [dragIndex, validImages, onChange],
   );
 
   const handleDragEnd = useCallback(() => {
@@ -136,9 +137,9 @@ export default function ImageUpload({
       )}
 
       {/* Image grid */}
-      {images.length > 0 && (
+      {validImages.length > 0 && (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-          {images.map((image, i) => {
+          {validImages.map((image, i) => {
             const url = imageReferenceUrl(image);
             return (
               <div
@@ -180,7 +181,7 @@ export default function ImageUpload({
       )}
 
       {/* Upload zone */}
-      {images.length < maxImages && (
+      {validImages.length < maxImages && (
         <div
           onClick={() => !uploading && fileInputRef.current?.click()}
           className={`
@@ -199,17 +200,17 @@ export default function ImageUpload({
           ) : (
             <>
               <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center mb-2">
-                {images.length === 0 ? (
+                {validImages.length === 0 ? (
                   <PhotoIcon className="w-5 h-5 text-gray-400" />
                 ) : (
                   <ArrowUpTrayIcon className="w-5 h-5 text-gray-400" />
                 )}
               </div>
               <p className={`text-gray-700 font-medium ${compact ? "text-[12px]" : "text-sm"}`}>
-                {images.length === 0 ? "Upload room images" : "Add more images"}
+                {validImages.length === 0 ? "Upload room images" : "Add more images"}
               </p>
               <p className={`text-gray-400 mt-0.5 ${compact ? "text-[11px]" : "text-xs"}`}>
-                JPG, PNG, WebP up to {maxSizeMB}MB ({images.length}/{maxImages})
+                JPG, PNG, WebP up to {maxSizeMB}MB ({validImages.length}/{maxImages})
               </p>
             </>
           )}
