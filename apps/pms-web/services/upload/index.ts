@@ -105,14 +105,11 @@ async function uploadLegacyMarketplaceImages(files: File[]): Promise<MultipleUpl
     headers["X-Hotel-Id"] = hotelId;
   }
 
-  const response = await fetch(
-    `${LEGACY_IMAGE_UPLOAD_API_BASE_URL}/upload/images?prefix=pms-room-types`,
-    {
-      method: "POST",
-      headers,
-      body: formData,
-    },
-  );
+  const response = await fetch(`${LEGACY_IMAGE_UPLOAD_API_BASE_URL}/upload/images/listing`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
 
   const body = await parseUploadResponseBody(response);
   if (!response.ok) {
