@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-06-15T20:21:42.538Z",
+  "provider": "stripe",
+  "exportStatus": "ok",
+  "source": "Stripe API GET /v1/webhook_endpoints?limit=100",
+  "signingSecretSource": "AWS SSM /vayada/prod/stripe-webhook-secret and /vayada/staging/stripe-webhook-secret; values are not retrievable from Stripe and are not printed",
+  "endpoints": [
+    {
+      "id": "we_1TEEq8HtaQeEOmq28UeQ3Y7f",
+      "url": "https://pms-api.vayada.com/webhooks/stripe",
+      "status": "enabled",
+      "enabled_events": [
+        "payment_intent.amount_capturable_updated",
+        "payment_intent.succeeded",
+        "payment_intent.canceled",
+        "payment_intent.payment_failed",
+        "account.updated"
+      ],
+      "api_version": "2026-02-25.clover",
+      "livemode": true,
+      "metadata": {},
+      "application": null,
+      "description": "PMS backend webhook for payment events",
+      "created": 1774296764
+    }
+  ]
+}

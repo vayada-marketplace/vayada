@@ -1,0 +1,33 @@
+{
+  "generatedAt": "2026-06-15T20:24:02.373Z",
+  "source": "GET https://pms-api.vayada.com/health",
+  "status": 200,
+  "body": {
+    "status": "ok",
+    "service": "pms",
+    "scheduler": {
+      "enabled": true,
+      "running": true,
+      "configuration_valid": true,
+      "active_job_count": 9,
+      "frozen_job_count": 0,
+      "unknown_job_count": 0
+    },
+    "cutover": {
+      "legacyProviderWebhooks": {
+        "stripe": {
+          "mode": "mutating",
+          "proxyTargetConfigured": false
+        },
+        "xendit": {
+          "mode": "mutating",
+          "proxyTargetConfigured": false
+        },
+        "channex": {
+          "mode": "mutating",
+          "proxyTargetConfigured": false
+        }
+      }
+    }
+  }
+}
