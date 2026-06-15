@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-06-15T20:21:42.538Z",
+  "provider": "channex",
+  "exportStatus": "ok",
+  "source": "Channex API GET /api/v1/webhooks",
+  "webhookSecretSource": "AWS SSM /vayada/staging/channex-webhook-secret for rehearsal; production runtime currently has no CHANNEX_WEBHOOK_SECRET managed parameter",
+  "webhooks": []
+}

@@ -460,3 +460,99 @@ cutover-plan gates are completed:
 - exercise rollback for at least one provider path;
 - rerun the dashboard after freeze rows exist;
 - record named owner sign-off for go/no-go.
+
+### Provider exports and live freeze check on 2026-06-15
+
+Provider configuration was exported through managed provider/runtime access
+without printing secrets. Redacted artifacts are committed under
+`engineering/evidence/vay-794/`:
+
+```text
+channex-webhook-export-2026-06-15.json
+pms-runtime-health-2026-06-15.json
+stripe-webhook-export-2026-06-15.json
+xendit-webhook-export-2026-06-15.json
+```
+
+Stripe export:
+
+- source: Stripe API `GET /v1/webhook_endpoints?limit=100`;
+- result: one enabled live endpoint;
+- endpoint id: `we_1TEEq8HtaQeEOmq28UeQ3Y7f`;
+- endpoint URL: `https://pms-api.vayada.com/webhooks/stripe`;
+- enabled events:
+  - `payment_intent.amount_capturable_updated`;
+  - `payment_intent.succeeded`;
+  - `payment_intent.canceled`;
+  - `payment_intent.payment_failed`;
+  - `account.updated`;
+- API version: `2026-02-25.clover`;
+- signing secret: present in AWS SSM at
+  `/vayada/prod/stripe-webhook-secret` and copied to
+  `/vayada/staging/stripe-webhook-secret` for replay; value not printed or
+  committed.
+
+Channex export:
+
+- source: Channex API `GET /api/v1/webhooks`;
+- result: no webhooks currently returned for the configured production Channex
+  API key;
+- no global `event_mask="message"` webhook is currently active through the
+  exported Channex account configuration;
+- rehearsal Channex token is managed at
+  `/vayada/staging/channex-webhook-secret`; value not printed or committed.
+
+Xendit export:
+
+- result: blocked by missing real API/runtime configuration;
+- no `XENDIT_SECRET_KEY` or production `XENDIT_WEBHOOK_SECRET` exists in the
+  discovered AWS SSM/Secrets Manager runtime namespace;
+- only `/vayada/staging/xendit-webhook-secret` exists, and it is a generated C1
+  replay placeholder;
+- platform ECS Terraform does not inject Xendit secrets into the deployed
+  production services.
+
+Live PMS runtime freeze check:
+
+```bash
+curl https://pms-api.vayada.com/health
+```
+
+Result: passed as an HTTP call but failed the rehearsal freeze gate. The
+deployed production PMS runtime reported:
+
+- scheduler enabled: `true`;
+- scheduler running: `true`;
+- active legacy scheduler jobs: `9`;
+- frozen legacy scheduler jobs: `0`;
+- legacy provider webhook modes:
+  - Stripe: `mutating`;
+  - Xendit: `mutating`;
+  - Channex: `mutating`.
+
+This means the scheduler-freeze and legacy-webhook-drain phases have **not**
+been executed in a valid staging/production-like runtime. No
+`platform.product_audit_events` scheduler-freeze rows were inserted, because the
+observed runtime state does not support marking the nine legacy scheduler jobs
+as frozen, disabled, or blocked.
+
+Abort-before-switch rollback evidence:
+
+- the temporary target `apps/api` runtime used for replay stayed in
+  `observe_only` mode;
+- provider dashboards were not switched to the temporary target endpoint;
+- controlled replay completed against target, then the temporary target API task
+  was stopped and its temporary inbound security group was deleted;
+- Stripe provider export after the replay still shows the live Stripe endpoint
+  pointing at the legacy PMS URL, so the abort-before-switch path returned the
+  environment to legacy-only provider delivery.
+
+Updated VAY-794 status: **no-go / incomplete**. Provider export evidence and an
+abort-before-switch rollback proof now exist. The remaining hard blockers are:
+
+- no frozen staging legacy scheduler runtime exists yet;
+- no operator-approved freeze rows exist for the nine legacy PMS scheduler jobs;
+- Xendit is not configured with real production/staging API secrets, so only
+  synthetic replay evidence exists;
+- final dashboard cannot pass until freeze rows exist;
+- named owner sign-off is still missing.

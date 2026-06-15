@@ -1,0 +1,10 @@
+{
+  "generatedAt": "2026-06-15T20:21:42.538Z",
+  "provider": "xendit",
+  "exportStatus": "blocked_missing_api_key",
+  "evidence": [
+    "No XENDIT_SECRET_KEY or XENDIT_WEBHOOK_SECRET is present in production SSM Parameter Store or Secrets Manager.",
+    "Only /vayada/staging/xendit-webhook-secret exists, and it is a generated replay placeholder for C1 fixture signing.",
+    "Current platform ECS Terraform does not inject Xendit secrets into deployed production services."
+  ]
+}
