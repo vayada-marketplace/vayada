@@ -1,9 +1,7 @@
 import { ApiClient, ApiErrorResponse } from "../api/client";
 
 const PLATFORM_MEDIA_API_BASE_URL =
-  process.env.NEXT_PUBLIC_PLATFORM_MEDIA_API_URL ||
-  process.env.NEXT_PUBLIC_AUTH_API_URL ||
-  "https://api.localhost";
+  process.env.NEXT_PUBLIC_PLATFORM_MEDIA_API_URL || "https://api.localhost";
 
 const platformMediaClient = new ApiClient(PLATFORM_MEDIA_API_BASE_URL);
 
