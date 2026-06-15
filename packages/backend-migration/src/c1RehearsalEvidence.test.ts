@@ -9,6 +9,7 @@ import {
   C1_REHEARSAL_LEGACY_SCHEDULER_JOBS,
   C1_REHEARSAL_PROVIDERS,
   C1_REHEARSAL_REQUIRED_METRICS,
+  runC1RehearsalChecks,
   validateC1RehearsalCheckCoverage,
   type C1RehearsalCheckResult,
 } from "./c1RehearsalEvidence.js";
@@ -87,6 +88,26 @@ describe("C1 rehearsal evidence checks", () => {
     expect(check?.sql).toContain("dead_letter.outbox_event_id");
     expect(check?.sql).toContain("dead_letter.domain_event_id");
     expect(check?.sql).toContain("job.source_domain_event_id");
+  });
+
+  it("passes lookback parameters only to checks that use them", async () => {
+    const calls: Array<{ sql: string; params: unknown[] | undefined }> = [];
+    const client = {
+      async query(sql: string, params?: unknown[]) {
+        calls.push({ sql, params });
+        return { rows: [] };
+      },
+    };
+
+    await runC1RehearsalChecks(client as unknown as Parameters<typeof runC1RehearsalChecks>[0], {
+      lookbackMinutes: 60,
+      now: new Date("2026-06-12T00:00:00.000Z"),
+    });
+
+    expect(calls).toHaveLength(C1_REHEARSAL_CHECKS.length);
+    for (const [index, check] of C1_REHEARSAL_CHECKS.entries()) {
+      expect(calls[index]?.params).toEqual(check.sql.includes("$1") ? [60] : []);
+    }
   });
 
   it("ships replay fixtures for Channex, Stripe, and Xendit with expected idempotency keys", async () => {
