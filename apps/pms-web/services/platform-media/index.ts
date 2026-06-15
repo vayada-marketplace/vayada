@@ -5,6 +5,10 @@ const PLATFORM_MEDIA_API_BASE_URL =
 
 const platformMediaClient = new ApiClient(PLATFORM_MEDIA_API_BASE_URL);
 
+export function shouldUseLegacyMarketplaceImageUpload(): boolean {
+  return PLATFORM_MEDIA_API_BASE_URL === "https://api.vayada.com";
+}
+
 export type PlatformMediaPurpose = "pms.room_type.media" | "pms.import.source_image";
 
 export type PlatformMediaResourceScope = {
