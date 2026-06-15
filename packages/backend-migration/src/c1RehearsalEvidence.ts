@@ -189,7 +189,7 @@ export const C1_REHEARSAL_CHECKS: C1RehearsalCheckDefinition[] = [
     purpose:
       "Shows failed, timed-out, and dead-lettered target job attempts by provider and domain.",
     sql: `
-      WITH failed_jobs AS (
+      WITH scoped_failed_jobs AS (
         SELECT
           COALESCE(
             NULLIF(job.job_metadata->>'provider', ''),
@@ -203,8 +203,7 @@ export const C1_REHEARSAL_CHECKS: C1RehearsalCheckDefinition[] = [
           job.resource_product AS domain,
           COALESCE(attempt.status, job.status) AS failure_status,
           COALESCE(attempt.error_type, job.status) AS error_type,
-          COUNT(*)::INTEGER AS failure_count,
-          MAX(COALESCE(attempt.finished_at, job.finished_at, job.updated_at)) AS latest_failure_at
+          COALESCE(attempt.finished_at, job.finished_at, job.updated_at) AS failure_at
         FROM platform.jobs job
         LEFT JOIN platform.job_attempts attempt
           ON attempt.job_id = job.id
@@ -215,7 +214,17 @@ export const C1_REHEARSAL_CHECKS: C1RehearsalCheckDefinition[] = [
           )
           AND COALESCE(attempt.finished_at, job.finished_at, job.updated_at, job.created_at)
             >= now() - ($1::INTEGER * INTERVAL '1 minute')
-        GROUP BY provider, job.resource_product, failure_status, error_type
+      ),
+      failed_jobs AS (
+        SELECT
+          provider,
+          domain,
+          failure_status,
+          error_type,
+          COUNT(*)::INTEGER AS failure_count,
+          MAX(failure_at) AS latest_failure_at
+        FROM scoped_failed_jobs
+        GROUP BY provider, domain, failure_status, error_type
       )
       SELECT *
       FROM failed_jobs
@@ -229,7 +238,7 @@ export const C1_REHEARSAL_CHECKS: C1RehearsalCheckDefinition[] = [
     purpose:
       "Shows open/resolved dead-letter volume by provider, domain, and dead-letter source kind.",
     sql: `
-      WITH dead_letters AS (
+      WITH scoped_dead_letters AS (
         SELECT
           COALESCE(
             webhook.provider,
@@ -311,8 +320,7 @@ export const C1_REHEARSAL_CHECKS: C1RehearsalCheckDefinition[] = [
           dead_letter.source_kind,
           dead_letter.recovery_status,
           dead_letter.reason_code,
-          COUNT(*)::INTEGER AS dead_letter_count,
-          MAX(dead_letter.created_at) AS latest_dead_letter_at
+          dead_letter.created_at
         FROM platform.dead_letter_events dead_letter
         LEFT JOIN platform.external_webhook_events webhook
           ON webhook.id = dead_letter.webhook_event_id
@@ -333,12 +341,18 @@ export const C1_REHEARSAL_CHECKS: C1RehearsalCheckDefinition[] = [
           ON job_domain_event.id = job.source_domain_event_id
          AND job_domain_event.scope_key = job.scope_key
         WHERE dead_letter.created_at >= now() - ($1::INTEGER * INTERVAL '1 minute')
-        GROUP BY
+      ),
+      dead_letters AS (
+        SELECT
           provider,
           domain,
-          dead_letter.source_kind,
-          dead_letter.recovery_status,
-          dead_letter.reason_code
+          source_kind,
+          recovery_status,
+          reason_code,
+          COUNT(*)::INTEGER AS dead_letter_count,
+          MAX(created_at) AS latest_dead_letter_at
+        FROM scoped_dead_letters
+        GROUP BY provider, domain, source_kind, recovery_status, reason_code
       )
       SELECT *
       FROM dead_letters
@@ -430,7 +444,8 @@ export async function runC1RehearsalChecks(
   const checks: C1RehearsalCheckResult[] = [];
 
   for (const check of C1_REHEARSAL_CHECKS) {
-    const result = await client.query(check.sql, [lookbackMinutes]);
+    const queryParams = check.sql.includes("$1") ? [lookbackMinutes] : [];
+    const result = await client.query(check.sql, queryParams);
     checks.push({
       id: check.id,
       title: check.title,

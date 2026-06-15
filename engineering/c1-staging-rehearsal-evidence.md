@@ -260,13 +260,61 @@ No live `--send --twice` provider replay was executed because the target runtime
 does not currently have matching provider webhook secrets and the rehearsal SSM
 parameters have not been created with real values.
 
+### Target staging database setup on 2026-06-15
+
+A separate logical target database was created on the existing AWS RDS instance
+for C1 rehearsal isolation:
+
+- database: `vayada_target_staging`;
+- user: `vayada_target_staging_user`;
+- master connection stored in AWS Secrets Manager as `vayada/rds-master-url`;
+- target connection stored in AWS Secrets Manager as
+  `vayada/target-staging-database-url`;
+- `vayada-platform` GitHub Actions secret
+  `TF_VAR_STAGING_TARGET_DATABASE_URL` set to the target connection string.
+
+The local operator IP was temporarily allowed to reach the RDS security group on
+port 5432 for setup and validation, then the temporary ingress rule was revoked.
+
+Target migrations were applied with the staging environment ledger:
+
+```bash
+TARGET_DATABASE_URL=<target-staging-database-url> \
+  npm --workspace @vayada/backend-migration run target:migrate -- --env staging
+```
+
+Result: passed. Migrations `0001` through `0017` were applied. The target
+database now contains these target schemas:
+
+```text
+booking, distribution, finance, hotel_catalog, identity, intelligence,
+marketplace, platform, pms
+```
+
+The C1 rehearsal dashboard command was then run against the migrated target
+database:
+
+```bash
+TARGET_DATABASE_URL=<target-staging-database-url> \
+  npm --workspace @vayada/backend-migration run target:c1-rehearsal:checks -- \
+  --lookback-minutes 1440 \
+  --pretty
+```
+
+Result: passed and produced a baseline report. Since no provider replay or
+scheduler freeze evidence has been recorded into the new target database yet,
+the report showed:
+
+- empty rows for provider receipts, dedupe hits, job lag, job failures, and
+  dead letters;
+- `missingProviders`: `channex`, `stripe`, `xendit`;
+- all nine legacy scheduler jobs present in
+  `missingFrozenSchedulerJobs`.
+
 Remaining VAY-794 evidence still required from staging:
 
 - provider endpoint exports for Channex, Stripe, and Xendit;
-- target dashboard/check report with `provider_receipt_counts`,
-  `provider_dedupe_hits`, `job_lag_by_provider_domain`,
-  `job_failures_by_provider_domain`, `dead_letters_by_provider_domain`, and
-  `legacy_scheduler_frozen_state`;
+- target dashboard/check report after freeze evidence and replay receipts exist;
 - operator-approved scheduler freeze rows for the nine legacy PMS scheduler jobs;
 - live or controlled staging replay using `--send --twice` with provider secrets;
 - rollback proof for at least one provider;
