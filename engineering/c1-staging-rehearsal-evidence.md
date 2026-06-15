@@ -347,3 +347,116 @@ secret namespace.
 Direct read-only connection attempts to candidate database URLs timed out from
 the local machine, and ECS Exec is disabled on the running Fargate tasks, so the
 C1 dashboard command could not be run inside the VPC from this environment.
+
+### Managed staging secrets and controlled replay on 2026-06-15
+
+The platform repository now manages the C1 staging rehearsal SSM parameters.
+Secret values were loaded from AWS SSM/GitHub Actions without printing them.
+
+Terraform apply:
+
+```text
+https://github.com/vayada-marketplace/vayada-platform/actions/runs/27571357112
+```
+
+Result: passed. AWS SSM Parameter Store now contains these managed SecureString
+parameters in `eu-west-1`:
+
+```text
+/vayada/staging/channex-webhook-secret
+/vayada/staging/stripe-webhook-secret
+/vayada/staging/target-database-url
+/vayada/staging/xendit-webhook-secret
+```
+
+The target RDS endpoint is private and does not accept local operator TCP
+traffic, so the dashboard command was run as an ECS one-off task inside the VPC.
+The first ECS dashboard task used log stream
+`/ecs/vayada-c1-rehearsal-checks:ecs/checks/f787bcfed7794855843dedd9ba0cb655`.
+
+```bash
+TARGET_DATABASE_URL=<ssm:/vayada/staging/target-database-url> \
+  npm --workspace @vayada/backend-migration run target:c1-rehearsal:checks -- \
+  --lookback-minutes 1440 \
+  --pretty
+```
+
+Result: passed. Baseline report generated at
+`2026-06-15T19:52:58.974Z`:
+
+- no provider receipt rows yet;
+- no provider dedupe-hit rows yet;
+- `missingProviders`: `channex`, `stripe`, and `xendit`;
+- all nine legacy scheduler freeze rows were missing.
+
+A temporary target `apps/api` runtime was then run as an ECS one-off task in
+`observe_only` mode for all three providers. The runtime received only these
+runtime values from SSM:
+
+```text
+TARGET_DATABASE_URL
+STRIPE_WEBHOOK_SECRET
+XENDIT_WEBHOOK_SECRET
+CHANNEX_WEBHOOK_SECRET
+```
+
+The replay was executed from the operator machine against that temporary target
+runtime:
+
+```bash
+C1_REHEARSAL_WEBHOOK_BASE_URL=http://<temporary-ecs-public-ip>:8003 \
+C1_REHEARSAL_ALLOW_SEND_TO_HOST=<temporary-ecs-public-ip> \
+STRIPE_WEBHOOK_SECRET=<ssm:/vayada/staging/stripe-webhook-secret> \
+XENDIT_WEBHOOK_SECRET=<ssm:/vayada/staging/xendit-webhook-secret> \
+CHANNEX_WEBHOOK_SECRET=<ssm:/vayada/staging/channex-webhook-secret> \
+  node scripts/c1-rehearsal-replay-fixtures.mjs --all --twice --send
+```
+
+Result: passed. All six fixture sends returned HTTP 200. First delivery returned
+`observed`; duplicate delivery returned `duplicate_observed`:
+
+| Fixture                           | Provider  | First attempt | Duplicate attempt    |
+| --------------------------------- | --------- | ------------- | -------------------- |
+| `channex-message-created`         | `channex` | `observed`    | `duplicate_observed` |
+| `channex-booking-revision`        | `channex` | `observed`    | `duplicate_observed` |
+| `stripe-payment-intent-succeeded` | `stripe`  | `observed`    | `duplicate_observed` |
+| `stripe-connect-account-updated`  | `stripe`  | `observed`    | `duplicate_observed` |
+| `xendit-invoice-paid`             | `xendit`  | `observed`    | `duplicate_observed` |
+| `xendit-payout-succeeded`         | `xendit`  | `observed`    | `duplicate_observed` |
+
+The post-replay ECS dashboard task used log stream
+`/ecs/vayada-c1-rehearsal-checks:ecs/checks/0aacca9cbadd42bfa89aa181ca214efd`.
+
+Result: passed. Report generated at `2026-06-15T19:58:24.873Z`:
+
+- `providersCovered`: `channex`, `stripe`, `xendit`;
+- `missingProviders`: none;
+- provider receipt counts: one observed receipt for each fixture event type;
+- provider dedupe hits:
+  - Channex: two idempotency keys, two dedupe hits;
+  - Stripe: two idempotency keys, two dedupe hits;
+  - Xendit: two idempotency keys, two dedupe hits;
+- job lag, job failure, and dead-letter rows were empty;
+- all nine legacy scheduler freeze rows were still missing.
+
+Temporary infrastructure cleanup:
+
+- the temporary target API ECS task was stopped after replay;
+- the temporary replay security group allowing operator access to port 8003 was
+  deleted;
+- temporary ECS task definitions were deregistered;
+- the temporary ECR repository used for the rehearsal image was deleted;
+- CloudWatch log groups were retained for evidence.
+
+Current VAY-794 go/no-go status: **no-go / incomplete**. The managed secret
+path, target DB access path, controlled provider replay, and duplicate receipt
+dedupe evidence now exist. The rehearsal still cannot pass until the remaining
+cutover-plan gates are completed:
+
+- export and attach provider dashboard configuration for Channex, Stripe, and
+  Xendit;
+- record operator-approved freeze evidence rows for all nine legacy PMS
+  scheduler jobs;
+- exercise rollback for at least one provider path;
+- rerun the dashboard after freeze rows exist;
+- record named owner sign-off for go/no-go.
