@@ -469,6 +469,7 @@ without printing secrets. Redacted artifacts are committed under
 
 ```text
 channex-webhook-export-2026-06-15.json
+frozen-pms-one-off-task-attempts-2026-06-15.json
 pms-runtime-health-2026-06-15.json
 stripe-webhook-export-2026-06-15.json
 xendit-webhook-export-2026-06-15.json
@@ -535,6 +536,51 @@ been executed in a valid staging/production-like runtime. No
 `platform.product_audit_events` scheduler-freeze rows were inserted, because the
 observed runtime state does not support marking the nine legacy scheduler jobs
 as frozen, disabled, or blocked.
+
+Temporary frozen PMS one-off task attempts:
+
+- source artifact:
+  `engineering/evidence/vay-794/frozen-pms-one-off-task-attempts-2026-06-15.json`;
+- goal: run the current production PMS backend image as an ECS one-off task with
+  scheduler disabled and all legacy provider webhook modes set to
+  `ack_only_with_receipt`;
+- requested freeze overrides:
+  - `PMS_SCHEDULER_ENABLED=false`;
+  - `PMS_LEGACY_STRIPE_WEBHOOK_MODE=ack_only_with_receipt`;
+  - `PMS_LEGACY_XENDIT_WEBHOOK_MODE=ack_only_with_receipt`;
+  - `PMS_LEGACY_CHANNEX_WEBHOOK_MODE=ack_only_with_receipt`;
+  - `CHANNEX_ADMIN_DEFAULT_MODE=disabled`;
+  - `FINANCE_XENDIT_PAYOUT_RECONCILIATION_LEGACY_MODE=disabled`;
+- deployed service observation: the service is healthy, but ECS is running task
+  definition `vayada-pms-backend:176`; task definition `178` is primary with
+  zero running tasks;
+- non-SSL one-off attempts using the production PMS database URL failed before
+  `/health` because RDS rejected the new task private IP with
+  `no pg_hba.conf entry ... no encryption`;
+- SSL one-off attempts using both `/vayada/prod/db-pms-url-ssl` and a temporary
+  SecureString derived from `/vayada/prod/db-pms-url` plus `sslmode=require`
+  failed before `/health` with `Invalid database password`;
+- the final live-image SSL attempt used image
+  `269416271598.dkr.ecr.eu-west-1.amazonaws.com/vayada-pms-backend:301ad02b4fa760fd7ea676db7475847db9f3f82d`
+  and task definition `vayada-vay-794-frozen-pms:3`, but exited before serving
+  health.
+
+Temporary resource cleanup after the attempts:
+
+- temporary ECS task definitions `vayada-vay-794-frozen-pms:1`, `:2`, and `:3`
+  were deregistered;
+- temporary SSM parameter
+  `/vayada/staging/vay-794-temp-pms-db-url-ssl` was deleted;
+- temporary inline IAM policy
+  `ecsTaskExecutionRole/vay-794-temp-pms-db-url-ssl-read` was deleted;
+- temporary security group `sg-077bd9c81444a9d75` was deleted;
+- CloudWatch log streams under `/ecs/vayada-pms-backend` were retained for
+  audit evidence.
+
+Conclusion: this path did not produce valid frozen scheduler evidence. The next
+valid unblock is a dedicated staging legacy PMS runtime, or a managed production
+freeze window, with database connectivity configured so the PMS app can boot
+with scheduler and webhook freeze flags before `/health` evidence is captured.
 
 Abort-before-switch rollback evidence:
 

@@ -1,0 +1,107 @@
+{
+  "recordedAt": "2026-06-15",
+  "purpose": "VAY-794 temporary frozen PMS runtime proof attempt",
+  "cluster": "vayada-backend-cluster",
+  "service": "vayada-pms-backend-service",
+  "productionRuntime": {
+    "publicHealthUrl": "https://pms-api.vayada.com/health",
+    "runningTaskDefinition": "vayada-pms-backend:176",
+    "primaryTaskDefinitionWithZeroRunningTasks": "vayada-pms-backend:178",
+    "liveImage": "269416271598.dkr.ecr.eu-west-1.amazonaws.com/vayada-pms-backend:301ad02b4fa760fd7ea676db7475847db9f3f82d",
+    "liveHealthSummary": {
+      "schedulerEnabled": true,
+      "schedulerRunning": true,
+      "activeJobCount": 9,
+      "frozenJobCount": 0,
+      "legacyProviderWebhookModes": {
+        "stripe": "mutating",
+        "xendit": "mutating",
+        "channex": "mutating"
+      }
+    }
+  },
+  "requestedFrozenOverrides": {
+    "PMS_SCHEDULER_ENABLED": "false",
+    "PMS_LEGACY_STRIPE_WEBHOOK_MODE": "ack_only_with_receipt",
+    "PMS_LEGACY_XENDIT_WEBHOOK_MODE": "ack_only_with_receipt",
+    "PMS_LEGACY_CHANNEX_WEBHOOK_MODE": "ack_only_with_receipt",
+    "CHANNEX_ADMIN_DEFAULT_MODE": "disabled",
+    "FINANCE_XENDIT_PAYOUT_RECONCILIATION_LEGACY_MODE": "disabled"
+  },
+  "attempts": [
+    {
+      "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/289ae43bdafd46caa7e118180af87b2c",
+      "taskDefinition": "vayada-pms-backend:178",
+      "databaseUrlSource": "arn:aws:ssm:eu-west-1:269416271598:parameter/vayada/prod/db-pms-url",
+      "result": "failed_before_health",
+      "containerExitCode": 1,
+      "cloudWatchLogGroup": "/ecs/vayada-pms-backend",
+      "cloudWatchLogStream": "ecs/vayada-pms-backend/289ae43bdafd46caa7e118180af87b2c",
+      "redactedFailure": "Database connection error: no pg_hba.conf entry for host \"172.31.19.194\", user \"vayada_pms_user\", database \"vayada_pms_db\", no encryption"
+    },
+    {
+      "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/45cf2516936745ae9d6d5cecb5281f56",
+      "taskDefinition": "vayada-vay-794-frozen-pms:1",
+      "databaseUrlSource": "arn:aws:ssm:eu-west-1:269416271598:parameter/vayada/prod/db-pms-url-ssl",
+      "result": "failed_before_health",
+      "containerExitCode": 1,
+      "cloudWatchLogGroup": "/ecs/vayada-pms-backend",
+      "cloudWatchLogStream": "ecs/vayada-pms-backend/45cf2516936745ae9d6d5cecb5281f56",
+      "redactedFailure": "Invalid database password. Check your DATABASE_URL in .env"
+    },
+    {
+      "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/0c5f152f905844e1810be7b8f35f7a68",
+      "taskDefinition": "vayada-vay-794-frozen-pms:2",
+      "databaseUrlSource": "arn:aws:ssm:eu-west-1:269416271598:parameter/vayada/staging/vay-794-temp-pms-db-url-ssl",
+      "result": "failed_before_container_start",
+      "cloudWatchLogGroup": "/ecs/vayada-pms-backend",
+      "redactedFailure": "ecsTaskExecutionRole lacked ssm:GetParameters for the temporary SSL database URL parameter"
+    },
+    {
+      "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/fcccf2504dee40b79b1f2db976e138fa",
+      "taskDefinition": "vayada-vay-794-frozen-pms:2",
+      "databaseUrlSource": "arn:aws:ssm:eu-west-1:269416271598:parameter/vayada/staging/vay-794-temp-pms-db-url-ssl",
+      "result": "failed_before_health",
+      "containerExitCode": 1,
+      "cloudWatchLogGroup": "/ecs/vayada-pms-backend",
+      "cloudWatchLogStream": "ecs/vayada-pms-backend/fcccf2504dee40b79b1f2db976e138fa",
+      "redactedFailure": "Invalid database password. Check your DATABASE_URL in .env"
+    },
+    {
+      "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/6421d8786c7d44c3b3c3bc71b975515f",
+      "taskDefinition": "vayada-pms-backend:176",
+      "containerImage": "269416271598.dkr.ecr.eu-west-1.amazonaws.com/vayada-pms-backend:301ad02b4fa760fd7ea676db7475847db9f3f82d",
+      "databaseUrlSource": "arn:aws:ssm:eu-west-1:269416271598:parameter/vayada/prod/db-pms-url",
+      "privateIp": "172.31.37.41",
+      "result": "failed_before_health",
+      "containerExitCode": 1,
+      "cloudWatchLogGroup": "/ecs/vayada-pms-backend",
+      "cloudWatchLogStream": "ecs/vayada-pms-backend/6421d8786c7d44c3b3c3bc71b975515f",
+      "redactedFailure": "Database connection error: no pg_hba.conf entry for host \"172.31.37.41\", user \"vayada_pms_user\", database \"vayada_pms_db\", no encryption"
+    },
+    {
+      "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/9078fcf2ff184cd885ca2e6ec0e82a56",
+      "taskDefinition": "vayada-vay-794-frozen-pms:3",
+      "containerImage": "269416271598.dkr.ecr.eu-west-1.amazonaws.com/vayada-pms-backend:301ad02b4fa760fd7ea676db7475847db9f3f82d",
+      "databaseUrlSource": "arn:aws:ssm:eu-west-1:269416271598:parameter/vayada/staging/vay-794-temp-pms-db-url-ssl",
+      "privateIp": "172.31.26.58",
+      "result": "failed_before_health",
+      "containerExitCode": 1,
+      "cloudWatchLogGroup": "/ecs/vayada-pms-backend",
+      "cloudWatchLogStream": "ecs/vayada-pms-backend/9078fcf2ff184cd885ca2e6ec0e82a56",
+      "redactedFailure": "Invalid database password. Check your DATABASE_URL in .env"
+    }
+  ],
+  "cleanup": {
+    "temporaryIamPolicyDeleted": true,
+    "temporarySsmParameterDeleted": true,
+    "temporarySecurityGroupDeleted": true,
+    "temporaryTaskDefinitionsDeregistered": [
+      "vayada-vay-794-frozen-pms:1",
+      "vayada-vay-794-frozen-pms:2",
+      "vayada-vay-794-frozen-pms:3"
+    ],
+    "cloudWatchLogsRetained": true
+  },
+  "conclusion": "No temporary frozen PMS health proof was obtained. Ad hoc PMS tasks cannot currently boot against the production PMS database: non-SSL URLs are rejected by RDS pg_hba for new task IPs, while SSL URL variants fail password authentication before the app exposes /health."
+}
