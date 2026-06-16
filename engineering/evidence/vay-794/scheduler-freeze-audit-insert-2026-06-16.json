@@ -1,0 +1,17 @@
+{
+  "recordedAt": "2026-06-16T16:28:18Z",
+  "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/5fe3108f0aa24cd6a11a49d524764265",
+  "logGroup": "/ecs/vayada-c1-rehearsal-checks",
+  "logStream": "ecs/checks/5fe3108f0aa24cd6a11a49d524764265",
+  "rehearsalId": "c1-staging-rehearsal-20260616",
+  "result": {
+    "insertedOrAlreadyPresent": 9,
+    "freezeRowsForRehearsal": 9
+  },
+  "evidenceSource": "staging-pms-api-health",
+  "cleanup": {
+    "temporaryTaskDefinitionDeregistered": true,
+    "temporaryEcrRepositoryDeleted": true,
+    "cloudWatchLogsRetained": true
+  }
+}
