@@ -18,9 +18,14 @@ describe("uploadImages", () => {
     const { setAuthKitSession, setLegacyCompatibilityToken } =
       await import("@/services/auth/sessionStore");
     const { uploadSingleImage } = await import("./uploadImage");
+    const authKitToken = unsignedJwt({
+      resources: {
+        "booking:booking_hotel": ["booking_hotel_alpenrose"],
+      },
+    });
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
-      expect(headers.get("authorization")).toBe("Bearer authkit-token");
+      expect(headers.get("authorization")).toBe(`Bearer ${authKitToken}`);
 
       if (url === "https://api.localhost/api/media/upload-sessions") {
         expect(JSON.parse(String(init?.body))).toMatchObject({
@@ -66,21 +71,14 @@ describe("uploadImages", () => {
     vi.stubGlobal("fetch", fetch);
 
     setAuthKitSession({
-      accessToken: "authkit-token",
+      accessToken: authKitToken,
       user: {
         id: "user_1",
         email: "owner@example.com",
         status: "active",
       },
     });
-    setLegacyCompatibilityToken(
-      unsignedJwt({
-        resources: {
-          "booking:booking_hotel": ["booking_hotel_alpenrose"],
-        },
-      }),
-      900,
-    );
+    setLegacyCompatibilityToken("legacy-token", 900);
 
     await expect(
       uploadSingleImage(new File(["image"], "room.jpg", { type: "image/jpeg" })),
@@ -151,9 +149,8 @@ describe("uploadImages", () => {
         images: [
           { url: "https://api.vayada.com/static/listings/room-1.jpg" },
           { url: "https://api.vayada.com/static/listings/room-2.jpg" },
-          { key: "listing/missing-url.jpg" },
         ],
-        total: 3,
+        total: 2,
       });
     });
     vi.stubGlobal("fetch", fetch);
@@ -171,6 +168,53 @@ describe("uploadImages", () => {
     ]);
 
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails legacy hero uploads when the response does not include a URL", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://api.vayada.com");
+
+    const { setLegacyCompatibilityToken } = await import("@/services/auth/sessionStore");
+    const { uploadSingleImage } = await import("./uploadImage");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ key: "hotel-profile/hero.jpg" })),
+    );
+
+    setLegacyCompatibilityToken("legacy-token", 900);
+
+    await expect(
+      uploadSingleImage(
+        new File(["image"], "hero.jpg", { type: "image/jpeg" }),
+        "property.hero_image",
+      ),
+    ).rejects.toThrow("Upload failed: no image URL returned");
+  });
+
+  it("fails legacy gallery uploads when any uploaded image has no URL", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://api.vayada.com");
+
+    const { setLegacyCompatibilityToken } = await import("@/services/auth/sessionStore");
+    const { uploadImages } = await import("./uploadImage");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          images: [
+            { url: "https://api.vayada.com/static/listings/room-1.jpg" },
+            { key: "listing/missing-url.jpg" },
+          ],
+        }),
+      ),
+    );
+
+    setLegacyCompatibilityToken("legacy-token", 900);
+
+    await expect(
+      uploadImages([
+        new File(["image"], "room-1.jpg", { type: "image/jpeg" }),
+        new File(["image"], "room-2.jpg", { type: "image/jpeg" }),
+      ]),
+    ).rejects.toThrow("Upload failed: no image URL returned");
   });
 });
 

@@ -165,7 +165,7 @@ async function uploadLegacyMarketplaceImages(
 
     if (!response.ok) throw new Error(await readMediaError(response, "Upload failed"));
     const body = (await response.json()) as LegacyImageUploadResponse;
-    return body.url ? [body.url] : [];
+    return [getLegacyImageUrl(body)];
   }
 
   const formData = new FormData();
@@ -179,7 +179,8 @@ async function uploadLegacyMarketplaceImages(
 
   if (!response.ok) throw new Error(await readMediaError(response, "Upload failed"));
   const body = (await response.json()) as LegacyMultipleImageUploadResponse;
-  return (body.images ?? []).map((image) => image.url).filter((url): url is string => Boolean(url));
+  if (!Array.isArray(body.images)) throw new Error("Upload failed: no image URLs returned");
+  return body.images.map((image) => getLegacyImageUrl(image));
 }
 
 function shouldUseLegacyMarketplaceImageUpload(): boolean {
@@ -188,6 +189,11 @@ function shouldUseLegacyMarketplaceImageUpload(): boolean {
 
 function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function getLegacyImageUrl(image: LegacyImageUploadResponse): string {
+  if (typeof image.url === "string" && image.url.trim()) return image.url;
+  throw new Error("Upload failed: no image URL returned");
 }
 
 function getBookingHotelUploadResourceId(): string {

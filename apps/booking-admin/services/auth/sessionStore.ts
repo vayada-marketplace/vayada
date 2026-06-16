@@ -118,7 +118,7 @@ export function getAuthBearerToken(): string | null {
 }
 
 export function getScopedBookingHotelIds(): string[] {
-  const token = getAuthBearerToken();
+  const token = getAuthKitAccessToken() ?? getAuthBearerToken();
   if (!token) return [];
 
   const payload = decodeJwtPayload(token);
