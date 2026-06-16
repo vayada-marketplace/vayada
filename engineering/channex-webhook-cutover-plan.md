@@ -27,6 +27,13 @@ cutover plan for future finance/payment usage, but it is not a VAY-794 blocker
 until real Xendit production or staging webhook/API runtime configuration is
 confirmed.
 
+VAY-794 rollback decision recorded on 2026-06-16: the C1 staging rehearsal may
+pass with abort-before-switch rollback evidence if target intake, replay,
+dedupe, freeze, dashboard, provider export, cleanup, and owner sign-off evidence
+are recorded. This decision does not authorize production provider endpoint
+switching; production cutover still requires the Phase 3 switch window and
+rollback coverage below.
+
 This plan does not implement target webhook intake, Channex route ports,
 scheduler controls, or provider configuration changes.
 
@@ -395,8 +402,13 @@ The staging rehearsal passes only if all of these are true:
 9. Booking rehearsal proves payment-driven instant-book finalization,
    cancellation/expiry sweeps, and guest notification jobs use stable
    idempotency keys.
-10. Rollback is rehearsed for at least one provider by switching back to legacy
-    URL/mode and proving target does not continue mutating.
+10. Rollback is rehearsed for at least one provider. For VAY-794 staging
+    rehearsal evidence, an abort-before-switch rollback proof is acceptable when
+    provider dashboards stay pointed at legacy, target remains non-mutating, the
+    target runtime is stopped or disabled after replay, and exports prove legacy
+    remains the live delivery path. Production cutover requires the stronger
+    roll-back-during-switch path if a provider dashboard endpoint is actually
+    changed.
 11. Dashboards show provider receipt counts, dedupe hits, dead letters, and job
     lag by provider/domain.
 
