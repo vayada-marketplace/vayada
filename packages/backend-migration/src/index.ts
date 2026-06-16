@@ -25,6 +25,7 @@ export {
   C1_REHEARSAL_LEGACY_SCHEDULER_JOBS,
   C1_REHEARSAL_PROVIDERS,
   C1_REHEARSAL_REQUIRED_METRICS,
+  C1_REHEARSAL_REQUIRED_PROVIDERS,
   runC1RehearsalChecks,
   validateC1RehearsalCheckCoverage,
   type C1RehearsalCheckDefinition,

@@ -21,6 +21,12 @@ The C1 surface includes:
 - Legacy scheduler jobs that mutate booking, payout, Channex, or inventory
   state from `apps/pms-api/app/services/scheduler.py`.
 
+VAY-794 scope decision recorded on 2026-06-16: the active C1 staging rehearsal
+provider gate is Channex plus Stripe. Xendit remains described in this broader
+cutover plan for future finance/payment usage, but it is not a VAY-794 blocker
+until real Xendit production or staging webhook/API runtime configuration is
+confirmed.
+
 This plan does not implement target webhook intake, Channex route ports,
 scheduler controls, or provider configuration changes.
 
@@ -366,7 +372,9 @@ The staging rehearsal passes only if all of these are true:
    has a documented provider freeze with owner, start time, end time, and
    rollback owner.
 2. Target `observe_only` intake verifies provider authentication and writes raw
-   receipts for Stripe, Xendit, and Channex.
+   receipts for the active provider gate: Stripe and Channex. Xendit synthetic
+   replay may be retained as non-blocking evidence until real runtime usage is
+   confirmed.
 3. Replaying the same provider sample twice creates one receipt, one normalized
    domain event, and no duplicate jobs.
 4. Receipt lifecycle tests prove observe-only duplicate delivery,
@@ -381,8 +389,9 @@ The staging rehearsal passes only if all of these are true:
 7. Channex rehearsal proves one of:
    - target intake receives live Channex events idempotently; or
    - Channex is frozen and no global webhook/message/feed mutation is expected.
-8. Finance rehearsal proves Stripe and Xendit callbacks cannot double-mark a
-   payment or payout when old and new URLs both receive retries.
+8. Finance rehearsal proves Stripe callbacks cannot double-mark a payment or
+   payout when old and new URLs both receive retries. Xendit has the same
+   requirement only if it is reintroduced into the active cutover scope.
 9. Booking rehearsal proves payment-driven instant-book finalization,
    cancellation/expiry sweeps, and guest notification jobs use stable
    idempotency keys.
