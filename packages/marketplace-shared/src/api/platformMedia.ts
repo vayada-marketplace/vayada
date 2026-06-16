@@ -209,9 +209,13 @@ async function uploadLegacyMarketplaceImages(input: {
   }
 
   const data = body as LegacyMultipleImageUploadResponse;
-  return (data.images ?? []).flatMap((image, index) =>
+  const uploaded = (data.images ?? []).flatMap((image, index) =>
     legacyImageToPlatformMediaResult(image, input.files[index]),
   );
+  if (uploaded.length !== input.files.length) {
+    throw new ApiErrorResponse(502, { detail: "Not all images were uploaded" });
+  }
+  return uploaded;
 }
 
 function legacyEndpointForPurpose(purpose: PlatformMediaPurpose): {
@@ -267,6 +271,8 @@ function legacyUploadErrorDetail(body: unknown): string | undefined {
 }
 
 function shouldUseLegacyMarketplaceImageUpload(): boolean {
+  // Temporary production rollback: keep all current file uploads on the legacy FastAPI backend
+  // until the platform media API is deployed behind a production host and cut over deliberately.
   return true;
 }
 
