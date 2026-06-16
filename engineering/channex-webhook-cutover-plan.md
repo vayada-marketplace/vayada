@@ -3,7 +3,9 @@
 _VAY-772 cutover record. Builds on
 [`booking-pms-route-migration-inventory.md`](booking-pms-route-migration-inventory.md),
 [`jobs-events-contract.md`](jobs-events-contract.md), and
-[`target-schema-ownership-map.md`](target-schema-ownership-map.md)._
+[`target-schema-ownership-map.md`](target-schema-ownership-map.md). Channex event
+selection is recorded in
+[`channex-webhook-event-strategy.md`](channex-webhook-event-strategy.md)._
 
 ## Purpose
 
