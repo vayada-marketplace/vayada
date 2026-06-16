@@ -312,7 +312,7 @@ the report showed:
 
 Remaining VAY-794 evidence still required from staging:
 
-- provider endpoint exports for Channex, Stripe, and Xendit;
+- provider endpoint exports for Channex and Stripe;
 - target dashboard/check report after freeze evidence and replay receipts exist;
 - operator-approved scheduler freeze rows for the nine legacy PMS scheduler jobs;
 - live or controlled staging replay using `--send --twice` with provider secrets;
@@ -452,8 +452,7 @@ The managed secret path, target DB access path, controlled provider replay, and
 duplicate receipt dedupe evidence existed. The rehearsal still could not pass
 until the remaining cutover-plan gates were completed:
 
-- export and attach provider dashboard configuration for Channex, Stripe, and
-  Xendit;
+- export and attach provider dashboard configuration for Channex and Stripe;
 - record operator-approved freeze evidence rows for all nine legacy PMS
   scheduler jobs;
 - exercise rollback for at least one provider path;
@@ -514,6 +513,16 @@ Xendit export:
   replay placeholder;
 - platform ECS Terraform does not inject Xendit secrets into the deployed
   production services.
+
+Xendit VAY-794 disposition recorded on 2026-06-16:
+
+- Xendit is removed from the active VAY-794 go/no-go provider scope because no
+  real production or staging Xendit webhook/API runtime configuration has been
+  found;
+- the existing Xendit replay rows remain useful synthetic coverage of the target
+  intake/idempotency path, but they are not required for VAY-794 sign-off;
+- future Xendit cutover work should use VAY-840 or a successor issue once real
+  Xendit usage and provider credentials are confirmed.
 
 Live PMS runtime freeze check:
 
@@ -601,8 +610,9 @@ existed, but the remaining hard blockers were:
 
 - no frozen staging legacy scheduler runtime exists yet;
 - no operator-approved freeze rows exist for the nine legacy PMS scheduler jobs;
-- Xendit is not configured with real production/staging API secrets, so only
-  synthetic replay evidence exists;
+- Xendit still lacked real production/staging API secrets, so only synthetic
+  replay evidence existed; this was later removed from the active VAY-794
+  go/no-go provider scope;
 - final dashboard cannot pass until freeze rows exist;
 - named owner sign-off is still missing.
 
@@ -705,8 +715,10 @@ Temporary runner cleanup after the final dashboard pass:
 Updated VAY-794 status: **dashboard and freeze evidence gates passed, final
 go/no-go still requires owner sign-off**. The remaining caveats are:
 
-- Xendit evidence is still synthetic replay because no real Xendit production or
-  staging API/runtime configuration has been found;
 - provider dashboards were not switched to the temporary target endpoint during
   this abort-before-switch rehearsal path;
 - named owner go/no-go sign-off has not yet been recorded.
+
+Xendit is no longer a VAY-794 blocker. It remains represented by synthetic replay
+evidence only and is deferred to VAY-840 or a successor issue if real Xendit
+runtime usage is confirmed.

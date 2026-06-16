@@ -4,6 +4,11 @@ export const C1_REHEARSAL_PROVIDERS = ["channex", "stripe", "xendit"] as const;
 
 export type C1RehearsalProvider = (typeof C1_REHEARSAL_PROVIDERS)[number];
 
+export const C1_REHEARSAL_REQUIRED_PROVIDERS = [
+  "channex",
+  "stripe",
+] as const satisfies readonly C1RehearsalProvider[];
+
 export const C1_REHEARSAL_REQUIRED_METRICS = [
   "provider_receipt_counts",
   "provider_dedupe_hits",
@@ -493,7 +498,7 @@ export function buildC1RehearsalReport(input: {
     ...input,
     summary: {
       providersCovered: C1_REHEARSAL_PROVIDERS.filter((provider) => providersCovered.has(provider)),
-      missingProviders: C1_REHEARSAL_PROVIDERS.filter(
+      missingProviders: C1_REHEARSAL_REQUIRED_PROVIDERS.filter(
         (provider) => !providersCovered.has(provider),
       ),
       metricsCovered,

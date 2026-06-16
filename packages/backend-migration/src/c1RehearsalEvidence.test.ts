@@ -8,6 +8,7 @@ import {
   C1_REHEARSAL_CHECKS,
   C1_REHEARSAL_LEGACY_SCHEDULER_JOBS,
   C1_REHEARSAL_PROVIDERS,
+  C1_REHEARSAL_REQUIRED_PROVIDERS,
   C1_REHEARSAL_REQUIRED_METRICS,
   runC1RehearsalChecks,
   validateC1RehearsalCheckCoverage,
@@ -69,6 +70,33 @@ describe("C1 rehearsal evidence checks", () => {
     expect(report.summary.missingFrozenSchedulerJobs).toEqual([
       C1_REHEARSAL_LEGACY_SCHEDULER_JOBS[C1_REHEARSAL_LEGACY_SCHEDULER_JOBS.length - 1],
     ]);
+  });
+
+  it("does not require Xendit coverage for the VAY-794 go/no-go provider gate", () => {
+    const checks: C1RehearsalCheckResult[] = [
+      {
+        id: "provider_receipt_counts",
+        title: "Provider Receipt Counts",
+        rows: C1_REHEARSAL_REQUIRED_PROVIDERS.map((provider) => ({ provider })),
+      },
+      {
+        id: "legacy_scheduler_frozen_state",
+        title: "Legacy Scheduler Frozen-State Checks",
+        rows: C1_REHEARSAL_LEGACY_SCHEDULER_JOBS.map((job) => ({
+          job_id: job,
+          evidence_status: "passed",
+        })),
+      },
+    ];
+
+    const report = buildC1RehearsalReport({
+      generatedAt: "2026-06-16T00:00:00.000Z",
+      lookbackMinutes: 60,
+      checks,
+    });
+
+    expect(report.summary.providersCovered).toEqual([...C1_REHEARSAL_REQUIRED_PROVIDERS]);
+    expect(report.summary.missingProviders).toEqual([]);
   });
 
   it("covers all dead-letter source kinds and derives provider from receipt/job/event metadata", () => {
