@@ -1,0 +1,216 @@
+{
+  "recordedAt": "2026-06-16T16:29:24Z",
+  "task": "arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/abf0fcb9cad9490cbcd5179d25156350",
+  "logGroup": "/ecs/vayada-c1-rehearsal-checks",
+  "logStream": "ecs/checks/abf0fcb9cad9490cbcd5179d25156350",
+  "report": {
+    "generatedAt": "2026-06-16T16:29:24.543Z",
+    "lookbackMinutes": 1440,
+    "checks": [
+      {
+        "id": "provider_receipt_counts",
+        "title": "Provider Receipt Counts",
+        "rows": [
+          {
+            "provider": "channex",
+            "event_type": "booking",
+            "delivery_status": "observed",
+            "domain": "external",
+            "receipt_count": 1,
+            "first_received_at": "2026-06-15T19:57:38.902Z",
+            "last_received_at": "2026-06-15T19:57:38.902Z"
+          },
+          {
+            "provider": "channex",
+            "event_type": "message",
+            "delivery_status": "observed",
+            "domain": "external",
+            "receipt_count": 1,
+            "first_received_at": "2026-06-15T19:57:38.655Z",
+            "last_received_at": "2026-06-15T19:57:38.655Z"
+          },
+          {
+            "provider": "stripe",
+            "event_type": "account.updated",
+            "delivery_status": "observed",
+            "domain": "external",
+            "receipt_count": 1,
+            "first_received_at": "2026-06-15T19:57:39.171Z",
+            "last_received_at": "2026-06-15T19:57:39.171Z"
+          },
+          {
+            "provider": "stripe",
+            "event_type": "payment_intent.succeeded",
+            "delivery_status": "observed",
+            "domain": "external",
+            "receipt_count": 1,
+            "first_received_at": "2026-06-15T19:57:39.063Z",
+            "last_received_at": "2026-06-15T19:57:39.063Z"
+          },
+          {
+            "provider": "xendit",
+            "event_type": "invoice.callback",
+            "delivery_status": "observed",
+            "domain": "external",
+            "receipt_count": 1,
+            "first_received_at": "2026-06-15T19:57:39.279Z",
+            "last_received_at": "2026-06-15T19:57:39.279Z"
+          },
+          {
+            "provider": "xendit",
+            "event_type": "payout.succeeded",
+            "delivery_status": "observed",
+            "domain": "external",
+            "receipt_count": 1,
+            "first_received_at": "2026-06-15T19:57:39.381Z",
+            "last_received_at": "2026-06-15T19:57:39.381Z"
+          }
+        ]
+      },
+      {
+        "id": "provider_dedupe_hits",
+        "title": "Provider Dedupe Hits",
+        "rows": [
+          {
+            "provider": "channex",
+            "domain": "platform",
+            "operation": "external_webhook_receipt",
+            "status": "completed",
+            "idempotency_key_count": 2,
+            "dedupe_hit_count": 2,
+            "first_seen_at": "2026-06-15T19:57:38.655Z",
+            "last_seen_at": "2026-06-15T19:57:39.008Z"
+          },
+          {
+            "provider": "stripe",
+            "domain": "platform",
+            "operation": "external_webhook_receipt",
+            "status": "completed",
+            "idempotency_key_count": 2,
+            "dedupe_hit_count": 2,
+            "first_seen_at": "2026-06-15T19:57:39.063Z",
+            "last_seen_at": "2026-06-15T19:57:39.225Z"
+          },
+          {
+            "provider": "xendit",
+            "domain": "platform",
+            "operation": "external_webhook_receipt",
+            "status": "completed",
+            "idempotency_key_count": 2,
+            "dedupe_hit_count": 2,
+            "first_seen_at": "2026-06-15T19:57:39.279Z",
+            "last_seen_at": "2026-06-15T19:57:39.431Z"
+          }
+        ]
+      },
+      {
+        "id": "job_lag_by_provider_domain",
+        "title": "Job Lag By Provider And Domain",
+        "rows": []
+      },
+      {
+        "id": "job_failures_by_provider_domain",
+        "title": "Job Failures By Provider And Domain",
+        "rows": []
+      },
+      {
+        "id": "dead_letters_by_provider_domain",
+        "title": "Dead Letters By Provider And Domain",
+        "rows": []
+      },
+      {
+        "id": "legacy_scheduler_frozen_state",
+        "title": "Legacy Scheduler Frozen-State Checks",
+        "rows": [
+          {
+            "job_id": "advance_calendar_auto_open_windows",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "PMS operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "cancel_stale_unpaid_bookings",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "PMS operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "cleanup_expired_drafts",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "PMS operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "expire_pending_bookings",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "PMS operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "full_channex_ari_sync",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "PMS operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "poll_channex_bookings",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "PMS operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "poll_xendit_processing_payouts",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "Finance operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "process_affiliate_payouts",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "Finance operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          },
+          {
+            "job_id": "process_property_payouts",
+            "expected_state": "frozen",
+            "actual_state": "frozen",
+            "owner": "Finance operator",
+            "last_checked_at": "2026-06-16T16:28:18.171Z",
+            "evidence_status": "passed"
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "providersCovered": ["channex", "stripe", "xendit"],
+      "missingProviders": [],
+      "metricsCovered": [
+        "provider_receipt_counts",
+        "provider_dedupe_hits",
+        "job_lag_by_provider_domain",
+        "job_failures_by_provider_domain",
+        "dead_letters_by_provider_domain",
+        "legacy_scheduler_frozen_state"
+      ],
+      "missingMetrics": [],
+      "missingFrozenSchedulerJobs": [],
+      "unfrozenSchedulerJobs": []
+    }
+  }
+}

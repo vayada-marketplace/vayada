@@ -1,8 +1,7 @@
 # C1 staging rehearsal evidence tooling
 
-_VAY-793. This prepares dashboards/checks and replay fixtures for the C1
-staging rehearsal. It does not execute the VAY-794 rehearsal or record go/no-go
-evidence._
+_Originally created for VAY-793 dashboard/check tooling and replay fixtures.
+VAY-794 rehearsal evidence is appended below as each staging gate is executed._
 
 ## Dashboard/check command
 
@@ -448,10 +447,10 @@ Temporary infrastructure cleanup:
 - the temporary ECR repository used for the rehearsal image was deleted;
 - CloudWatch log groups were retained for evidence.
 
-Current VAY-794 go/no-go status: **no-go / incomplete**. The managed secret
-path, target DB access path, controlled provider replay, and duplicate receipt
-dedupe evidence now exist. The rehearsal still cannot pass until the remaining
-cutover-plan gates are completed:
+VAY-794 go/no-go status after the 2026-06-15 replay: **no-go / incomplete**.
+The managed secret path, target DB access path, controlled provider replay, and
+duplicate receipt dedupe evidence existed. The rehearsal still could not pass
+until the remaining cutover-plan gates were completed:
 
 - export and attach provider dashboard configuration for Channex, Stripe, and
   Xendit;
@@ -471,7 +470,10 @@ without printing secrets. Redacted artifacts are committed under
 channex-webhook-export-2026-06-15.json
 frozen-pms-one-off-task-attempts-2026-06-15.json
 pms-runtime-health-2026-06-15.json
+scheduler-freeze-audit-insert-2026-06-16.json
+staging-pms-runtime-health-2026-06-16.json
 stripe-webhook-export-2026-06-15.json
+target-dashboard-after-freeze-2026-06-16.json
 xendit-webhook-export-2026-06-15.json
 ```
 
@@ -593,8 +595,9 @@ Abort-before-switch rollback evidence:
   pointing at the legacy PMS URL, so the abort-before-switch path returned the
   environment to legacy-only provider delivery.
 
-Updated VAY-794 status: **no-go / incomplete**. Provider export evidence and an
-abort-before-switch rollback proof now exist. The remaining hard blockers are:
+VAY-794 status after the 2026-06-15 one-off task attempts: **no-go /
+incomplete**. Provider export evidence and an abort-before-switch rollback proof
+existed, but the remaining hard blockers were:
 
 - no frozen staging legacy scheduler runtime exists yet;
 - no operator-approved freeze rows exist for the nine legacy PMS scheduler jobs;
@@ -602,3 +605,108 @@ abort-before-switch rollback proof now exist. The remaining hard blockers are:
   synthetic replay evidence exists;
 - final dashboard cannot pass until freeze rows exist;
 - named owner sign-off is still missing.
+
+### Managed staging PMS freeze proof on 2026-06-16
+
+The dedicated frozen staging PMS runtime was provisioned through
+`vayada-platform` and verified after the earlier one-off ECS path failed.
+
+Platform changes:
+
+- PR: `https://github.com/vayada-marketplace/vayada-platform/pull/6`;
+- follow-up permission fix:
+  `https://github.com/vayada-marketplace/vayada-platform/pull/7`;
+- successful Terraform apply:
+  `https://github.com/vayada-marketplace/vayada-platform/actions/runs/27578245703`;
+- staging service: `vayada-staging-pms-backend-service`;
+- task definition:
+  `arn:aws:ecs:eu-west-1:269416271598:task-definition/vayada-staging-pms-backend:1`;
+- service state after apply: desired `1`, running `1`, pending `0`;
+- target group state: healthy.
+
+The staging runtime uses a separate logical PMS database,
+`vayada_pms_staging`, with the connection stored in
+`/vayada/staging/pms-database-url`. The runtime starts with:
+
+- `PMS_SCHEDULER_ENABLED=false`;
+- `PMS_LEGACY_WEBHOOK_MODE=ack_only_with_receipt`;
+- `PMS_LEGACY_STRIPE_WEBHOOK_MODE=ack_only_with_receipt`;
+- `PMS_LEGACY_XENDIT_WEBHOOK_MODE=ack_only_with_receipt`;
+- `PMS_LEGACY_CHANNEX_WEBHOOK_MODE=ack_only_with_receipt`;
+- `CHANNEX_ADMIN_DEFAULT_MODE=disabled`;
+- `FINANCE_XENDIT_PAYOUT_RECONCILIATION_LEGACY_MODE=disabled`.
+
+Health proof:
+
+```bash
+curl --connect-to staging-pms-api.vayada.com:443:vayada-backend-alb-709536928.eu-west-1.elb.amazonaws.com:443 \
+  https://staging-pms-api.vayada.com/health
+```
+
+Result: passed. The health payload is committed as
+`engineering/evidence/vay-794/staging-pms-runtime-health-2026-06-16.json` and
+reported:
+
+- scheduler enabled: `false`;
+- scheduler running: `false`;
+- scheduler configuration valid: `true`;
+- active legacy scheduler jobs: `0`;
+- frozen legacy scheduler jobs: `9`;
+- unknown scheduler jobs: `0`;
+- legacy provider webhook modes:
+  - Stripe: `ack_only_with_receipt`;
+  - Xendit: `ack_only_with_receipt`;
+  - Channex: `ack_only_with_receipt`.
+
+Scheduler-freeze audit rows were then inserted into the target database from an
+ECS one-off task inside the VPC. Artifact:
+`engineering/evidence/vay-794/scheduler-freeze-audit-insert-2026-06-16.json`.
+
+Result:
+
+- rehearsal id: `c1-staging-rehearsal-20260616`;
+- freeze rows inserted or already present: `9`;
+- freeze rows present for rehearsal: `9`;
+- evidence source: `staging-pms-api-health`;
+- all rows use `actual_state=frozen`.
+
+The final C1 dashboard check was rerun from ECS task
+`arn:aws:ecs:eu-west-1:269416271598:task/vayada-backend-cluster/abf0fcb9cad9490cbcd5179d25156350`
+with log stream
+`/ecs/vayada-c1-rehearsal-checks:ecs/checks/abf0fcb9cad9490cbcd5179d25156350`.
+Artifact:
+`engineering/evidence/vay-794/target-dashboard-after-freeze-2026-06-16.json`.
+
+Result: passed. Report generated at `2026-06-16T16:29:24.543Z`:
+
+- `providersCovered`: `channex`, `stripe`, `xendit`;
+- `missingProviders`: none;
+- provider receipt counts: one observed receipt for each of the six replay
+  fixture event types;
+- provider dedupe hits:
+  - Channex: two idempotency keys, two dedupe hits;
+  - Stripe: two idempotency keys, two dedupe hits;
+  - Xendit: two idempotency keys, two dedupe hits;
+- job lag rows: none;
+- job failure rows: none;
+- dead-letter rows: none;
+- all nine legacy scheduler rows reported `evidence_status=passed`;
+- `missingFrozenSchedulerJobs`: none;
+- `unfrozenSchedulerJobs`: none;
+- `missingMetrics`: none.
+
+Temporary runner cleanup after the final dashboard pass:
+
+- temporary task definition `vayada-c1-rehearsal-checks:2` was deregistered;
+- temporary ECR repository `vayada-c1-rehearsal-checks` was deleted;
+- CloudWatch log group `/ecs/vayada-c1-rehearsal-checks` was retained for
+  evidence.
+
+Updated VAY-794 status: **dashboard and freeze evidence gates passed, final
+go/no-go still requires owner sign-off**. The remaining caveats are:
+
+- Xendit evidence is still synthetic replay because no real Xendit production or
+  staging API/runtime configuration has been found;
+- provider dashboards were not switched to the temporary target endpoint during
+  this abort-before-switch rehearsal path;
+- named owner go/no-go sign-off has not yet been recorded.

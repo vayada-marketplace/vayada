@@ -1,0 +1,49 @@
+{
+  "recordedAt": "2026-06-16T16:27:00Z",
+  "source": "https://staging-pms-api.vayada.com/health",
+  "verificationPath": "curl --connect-to staging-pms-api.vayada.com:443:vayada-backend-alb-709536928.eu-west-1.elb.amazonaws.com:443 https://staging-pms-api.vayada.com/health",
+  "service": "vayada-staging-pms-backend-service",
+  "taskDefinition": "arn:aws:ecs:eu-west-1:269416271598:task-definition/vayada-staging-pms-backend:1",
+  "serviceState": {
+    "status": "ACTIVE",
+    "desired": 1,
+    "running": 1,
+    "pending": 0,
+    "rolloutState": "COMPLETED"
+  },
+  "targetGroupHealth": [
+    {
+      "target": "172.31.34.40",
+      "port": 8002,
+      "state": "healthy"
+    }
+  ],
+  "health": {
+    "status": "ok",
+    "service": "pms",
+    "scheduler": {
+      "enabled": false,
+      "running": false,
+      "configuration_valid": true,
+      "active_job_count": 0,
+      "frozen_job_count": 9,
+      "unknown_job_count": 0
+    },
+    "cutover": {
+      "legacyProviderWebhooks": {
+        "stripe": {
+          "mode": "ack_only_with_receipt",
+          "proxyTargetConfigured": false
+        },
+        "xendit": {
+          "mode": "ack_only_with_receipt",
+          "proxyTargetConfigured": false
+        },
+        "channex": {
+          "mode": "ack_only_with_receipt",
+          "proxyTargetConfigured": false
+        }
+      }
+    }
+  }
+}
