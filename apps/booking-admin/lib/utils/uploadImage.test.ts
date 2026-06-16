@@ -9,7 +9,7 @@ describe("uploadImages", () => {
     vi.resetModules();
   });
 
-  it("uses the AuthKit token and scoped hotel id when setup has no selected hotel", async () => {
+  it("uses the legacy listing upload endpoint even when platform media is configured", async () => {
     vi.stubEnv("NEXT_PUBLIC_PLATFORM_MEDIA_API_URL", "https://api.localhost");
     const window = createWindowWithStorage();
     vi.stubGlobal("window", window);
@@ -17,56 +17,23 @@ describe("uploadImages", () => {
 
     const { setAuthKitSession, setLegacyCompatibilityToken } =
       await import("@/services/auth/sessionStore");
-    const { uploadSingleImage } = await import("./uploadImage");
+    const { uploadImages } = await import("./uploadImage");
     const authKitToken = unsignedJwt({
       resources: {
         "booking:booking_hotel": ["booking_hotel_alpenrose"],
       },
     });
     const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://api.vayada.com/upload/images/listing");
       const headers = new Headers(init?.headers);
-      expect(headers.get("authorization")).toBe(`Bearer ${authKitToken}`);
-
-      if (url === "https://api.localhost/api/media/upload-sessions") {
-        expect(JSON.parse(String(init?.body))).toMatchObject({
-          purpose: "property.gallery_image",
-          resource: {
-            product: "booking",
-            resourceType: "booking_hotel",
-            resourceId: "booking_hotel_alpenrose",
-          },
-        });
-        return jsonResponse({
-          uploadSession: { sessionId: "session_1" },
-          uploadTargets: [
-            {
-              uploadTargetId: "target_1",
-              clientFileId: "file_1",
-              method: "PUT",
-              uploadUrl: "https://uploads.vayada.localhost/target_1",
-              headers: {},
-            },
-          ],
-        });
-      }
-
-      if (url === "https://api.localhost/api/media/upload-sessions/session_1/finalize") {
-        return jsonResponse({
-          mediaObjects: [
-            {
-              storageKey: "media/room.jpg",
-              variants: [
-                {
-                  publicCdnUrl: "https://cdn.vayada.localhost/media/room-large.jpg",
-                  storageKey: "media/room-large.jpg",
-                },
-              ],
-            },
-          ],
-        });
-      }
-
-      throw new Error(`Unexpected fetch ${url}`);
+      expect(headers.get("authorization")).toBe("Bearer legacy-token");
+      expect(headers.get("content-type")).toBeNull();
+      expect(init?.method).toBe("POST");
+      expect(init?.body).toBeInstanceOf(FormData);
+      return jsonResponse({
+        images: [{ url: "https://api.vayada.com/static/listings/room.jpg" }],
+        total: 1,
+      });
     });
     vi.stubGlobal("fetch", fetch);
 
@@ -81,10 +48,10 @@ describe("uploadImages", () => {
     setLegacyCompatibilityToken("legacy-token", 900);
 
     await expect(
-      uploadSingleImage(new File(["image"], "room.jpg", { type: "image/jpeg" })),
-    ).resolves.toBe("https://cdn.vayada.localhost/media/room-large.jpg");
+      uploadImages(new File(["image"], "room.jpg", { type: "image/jpeg" })),
+    ).resolves.toEqual(["https://api.vayada.com/static/listings/room.jpg"]);
 
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("uses the legacy hotel-profile upload endpoint for production hero images", async () => {

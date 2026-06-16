@@ -1,5 +1,8 @@
 import { pmsClient } from "../api/pmsClient";
-import { createPlatformMediaImport } from "../platform-media";
+import {
+  createPlatformMediaImport,
+  shouldUseLegacyMarketplaceImageUpload,
+} from "../platform-media";
 
 export interface ExtractedRoomType {
   name: string;
@@ -51,6 +54,10 @@ export const importService = {
     sourceImageUrls: string[],
   ): Promise<ListingImportImagesResult> => {
     if (sourceImageUrls.length === 0) return { message: "No images to import" };
+
+    if (shouldUseLegacyMarketplaceImageUpload()) {
+      return { message: "Image import is not available on the legacy media backend" };
+    }
 
     const resourceId =
       typeof window !== "undefined"

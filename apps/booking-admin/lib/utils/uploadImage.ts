@@ -184,7 +184,7 @@ async function uploadLegacyMarketplaceImages(
 }
 
 function shouldUseLegacyMarketplaceImageUpload(): boolean {
-  return stripTrailingSlash(PLATFORM_MEDIA_API_BASE_URL) === "https://api.vayada.com";
+  return true;
 }
 
 function stripTrailingSlash(value: string): string {

@@ -1,7 +1,6 @@
 import logging
 from urllib.parse import urlparse
 
-import httpx
 from firecrawl import FirecrawlApp
 
 from app.config import settings
@@ -93,32 +92,8 @@ async def create_platform_media_import_job(
     pms_hotel_id: str,
     room_type_id: str,
 ) -> dict:
-    """Queue a platform media import job for external room images.
-
-    PMS owns the room-type command and media reference, but platform media owns
-    external source downloads, validation, storage, and import job lifecycle.
-    """
+    """Skip external image import while production uses the legacy media backend."""
     if not image_urls:
         return {"message": "No images to import"}
 
-    payload = {
-        "purpose": "pms.import.source_image",
-        "resource": {
-            "product": "pms",
-            "resourceType": "pms_hotel",
-            "resourceId": pms_hotel_id,
-            "targetResourceId": room_type_id,
-        },
-        "sourceImageUrls": image_urls,
-        "idempotencyKey": f"media.import:pms:{room_type_id}:listing-import:v1",
-    }
-
-    headers = {"Authorization": auth_header} if auth_header else {}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(
-            f"{settings.PLATFORM_MEDIA_API_URL.rstrip('/')}/api/media/imports",
-            json=payload,
-            headers=headers,
-        )
-    response.raise_for_status()
-    return response.json()
+    return {"message": "Image import is not available on the legacy media backend"}
