@@ -15,6 +15,35 @@ from app.utils import parse_jsonb
 logger = logging.getLogger(__name__)
 
 
+def _room_image_url(image: object) -> str | None:
+    if isinstance(image, str):
+        url = image.strip()
+        return url or None
+
+    if isinstance(image, dict):
+        for key in ("url", "publicCdnUrl", "public_cdn_url"):
+            value = image.get(key)
+            if isinstance(value, str):
+                url = value.strip()
+                if url:
+                    return url
+
+    return None
+
+
+def _public_room_image_urls(value: object) -> list[str]:
+    images = parse_jsonb(value)
+    if not isinstance(images, list):
+        return []
+
+    urls: list[str] = []
+    for image in images:
+        url = _room_image_url(image)
+        if url:
+            urls.append(url)
+    return urls
+
+
 def resolve_last_minute_discount(
     hotel_config: dict | None,
     room_config: dict | None,
@@ -246,7 +275,7 @@ async def get_rooms_for_guest(
                 latitude=float(room["latitude"]) if room.get("latitude") is not None else None,
                 longitude=float(room["longitude"]) if room.get("longitude") is not None else None,
                 amenities=parse_jsonb(room["amenities"]),
-                images=parse_jsonb(room["images"]),
+                images=_public_room_image_urls(room["images"]),
                 bed_type=room["bed_type"],
                 remaining_rooms=remaining,
                 features=parse_jsonb(room["features"]),

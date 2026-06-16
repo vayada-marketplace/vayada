@@ -33,7 +33,7 @@ os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test-secret-key")
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta, timezone
-from typing import Dict, Optional
+from typing import Any
 from unittest.mock import patch
 
 import bcrypt
@@ -345,6 +345,7 @@ async def create_test_room_type(
     is_active: bool = True,
     non_refundable_rate: float | None = None,
     non_refundable_enabled: bool = False,
+    images: list[Any] | None = None,
 ) -> dict:
     """Create a room type in the PMS database."""
     import json
@@ -374,7 +375,7 @@ async def create_test_room_type(
         non_refundable_rate,
         "EUR",
         json.dumps(["WiFi", "Minibar"]),
-        json.dumps([]),
+        json.dumps(images or []),
         "King",
         json.dumps(["Mountain View"]),
         total_rooms,

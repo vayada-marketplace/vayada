@@ -1,9 +1,17 @@
-import { getAuthBearerToken } from "@/services/auth/sessionStore";
+import {
+  getAuthBearerToken,
+  getAuthKitAccessToken,
+  getScopedBookingHotelIds,
+} from "@/services/auth/sessionStore";
 
 const PLATFORM_MEDIA_API_BASE_URL =
   process.env.NEXT_PUBLIC_PLATFORM_MEDIA_API_URL ||
   process.env.NEXT_PUBLIC_AUTH_API_URL ||
   "https://api.localhost";
+const LEGACY_IMAGE_UPLOAD_API_BASE_URL =
+  process.env.NEXT_PUBLIC_MARKETPLACE_API_URL ||
+  process.env.NEXT_PUBLIC_AUTH_API_URL ||
+  "https://api.vayada.com";
 
 type BookingMediaPurpose = "property.hero_image" | "property.gallery_image";
 
@@ -27,6 +35,21 @@ type FinalizeResponse = {
   }>;
 };
 
+type LegacyImageUploadResponse = {
+  url?: string;
+  thumbnail_url?: string | null;
+  key?: string;
+  width?: number;
+  height?: number;
+  size_bytes?: number;
+  format?: string;
+};
+
+type LegacyMultipleImageUploadResponse = {
+  images?: LegacyImageUploadResponse[];
+  total?: number;
+};
+
 export async function uploadImages(
   files: File | File[],
   purpose: BookingMediaPurpose = "property.gallery_image",
@@ -34,15 +57,16 @@ export async function uploadImages(
   const fileList = Array.isArray(files) ? files : [files];
   if (fileList.length === 0) return [];
 
-  const token = getAuthBearerToken();
+  if (shouldUseLegacyMarketplaceImageUpload()) {
+    return uploadLegacyMarketplaceImages(fileList, purpose);
+  }
+
+  const token = getAuthKitAccessToken() ?? getAuthBearerToken();
   const headers = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
-  const bookingHotelId =
-    typeof window !== "undefined"
-      ? localStorage.getItem("selectedHotelId") || "booking_hotel_current"
-      : "booking_hotel_current";
+  const bookingHotelId = getBookingHotelUploadResourceId();
 
   const create = await fetch(`${PLATFORM_MEDIA_API_BASE_URL}/api/media/upload-sessions`, {
     method: "POST",
@@ -64,7 +88,7 @@ export async function uploadImages(
     }),
   });
 
-  if (!create.ok) throw new Error("Upload session failed");
+  if (!create.ok) throw new Error(await readMediaError(create, "Upload session failed"));
   const createBody = (await create.json()) as UploadSessionResponse;
 
   await Promise.all(
@@ -100,7 +124,7 @@ export async function uploadImages(
     },
   );
 
-  if (!finalized.ok) throw new Error("Upload finalize failed");
+  if (!finalized.ok) throw new Error(await readMediaError(finalized, "Upload finalize failed"));
   const finalizedBody = (await finalized.json()) as FinalizeResponse;
   return finalizedBody.mediaObjects.map(
     (mediaObject) =>
@@ -120,4 +144,78 @@ export async function uploadSingleImage(
 
 function isDeterministicLocalUploadTarget(uploadUrl: string): boolean {
   return uploadUrl.startsWith("https://uploads.vayada.localhost/");
+}
+
+async function uploadLegacyMarketplaceImages(
+  fileList: File[],
+  purpose: BookingMediaPurpose,
+): Promise<string[]> {
+  const token = getAuthBearerToken() ?? getAuthKitAccessToken();
+  if (!token) throw new Error("Not authenticated");
+
+  if (purpose === "property.hero_image" && fileList.length === 1) {
+    const formData = new FormData();
+    formData.append("file", fileList[0]!);
+    const legacyBaseUrl = stripTrailingSlash(LEGACY_IMAGE_UPLOAD_API_BASE_URL);
+    const response = await fetch(`${legacyBaseUrl}/upload/image/hotel-profile`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    });
+
+    if (!response.ok) throw new Error(await readMediaError(response, "Upload failed"));
+    const body = (await response.json()) as LegacyImageUploadResponse;
+    return [getLegacyImageUrl(body)];
+  }
+
+  const formData = new FormData();
+  fileList.forEach((file) => formData.append("files", file));
+  const legacyBaseUrl = stripTrailingSlash(LEGACY_IMAGE_UPLOAD_API_BASE_URL);
+  const response = await fetch(`${legacyBaseUrl}/upload/images/listing`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  if (!response.ok) throw new Error(await readMediaError(response, "Upload failed"));
+  const body = (await response.json()) as LegacyMultipleImageUploadResponse;
+  if (!Array.isArray(body.images)) throw new Error("Upload failed: no image URLs returned");
+  return body.images.map((image) => getLegacyImageUrl(image));
+}
+
+function shouldUseLegacyMarketplaceImageUpload(): boolean {
+  return true;
+}
+
+function stripTrailingSlash(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function getLegacyImageUrl(image: LegacyImageUploadResponse): string {
+  if (typeof image.url === "string" && image.url.trim()) return image.url;
+  throw new Error("Upload failed: no image URL returned");
+}
+
+function getBookingHotelUploadResourceId(): string {
+  if (typeof window !== "undefined") {
+    const selectedHotelId = localStorage.getItem("selectedHotelId");
+    if (selectedHotelId) return selectedHotelId;
+  }
+
+  const scopedHotelId = getScopedBookingHotelIds()[0];
+  if (scopedHotelId) return scopedHotelId;
+
+  return "booking_hotel_current";
+}
+
+async function readMediaError(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { message?: unknown; error?: unknown; code?: unknown };
+    if (typeof body.message === "string") return body.message;
+    if (typeof body.error === "string") return body.error;
+    if (typeof body.code === "string") return body.code;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
 }

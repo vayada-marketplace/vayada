@@ -35,13 +35,13 @@ async def import_preview(
     try:
         preview = await extract_listing_data(data.url)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Failed to extract listing from %s: %s", data.url, e)
         raise HTTPException(
             status_code=422,
             detail="Could not extract data from this listing. The page may have blocked our request or the format is not supported.",
-        )
+        ) from e
 
     if not preview.room_types:
         raise HTTPException(
@@ -91,13 +91,14 @@ async def import_confirm(
 
         if rt.source_image_urls:
             try:
-                await create_platform_media_import_job(
+                import_result = await create_platform_media_import_job(
                     rt.source_image_urls,
                     auth_header,
                     hotel_id,
                     room_type_id,
                 )
-                queued_image_imports += 1
+                if import_result.get("importJob"):
+                    queued_image_imports += 1
             except Exception as e:
                 failed_image_imports += 1
                 logger.warning(
@@ -140,6 +141,13 @@ async def import_images(
         data.room_type_id,
     )
     import_job = result.get("importJob", {})
+    if not import_job:
+        return {
+            "message": result.get("message", "Image import was not queued"),
+            "import_job_id": None,
+            "job_key": None,
+        }
+
     return {
         "message": f"Queued {len(data.source_image_urls)} image import job in platform media",
         "import_job_id": import_job.get("importJobId"),

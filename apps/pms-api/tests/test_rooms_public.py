@@ -29,6 +29,35 @@ class TestPublicRooms:
         assert rooms[0]["name"] == "Deluxe Suite"
         assert rooms[0]["remainingRooms"] == 5
 
+    async def test_get_rooms_normalizes_image_references(self, client, cleanup_database):
+        user = await create_test_user()
+        hotel = await create_test_hotel(str(user["id"]))
+        await create_test_room_type(
+            str(hotel["id"]),
+            images=[
+                {
+                    "url": "https://api.vayada.com/static/rooms/room-1.jpg",
+                    "storageKey": "pms-room-types/room-1.jpg",
+                },
+                "https://api.vayada.com/static/rooms/room-2.jpg",
+                {"publicCdnUrl": "https://cdn.vayada.com/rooms/room-3.jpg"},
+                {"storageKey": "pms-room-types/missing-url.jpg"},
+                None,
+                "",
+            ],
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
+
+        assert resp.status_code == 200
+        rooms = resp.json()
+        assert len(rooms) == 1
+        assert rooms[0]["images"] == [
+            "https://api.vayada.com/static/rooms/room-1.jpg",
+            "https://api.vayada.com/static/rooms/room-2.jpg",
+            "https://cdn.vayada.com/rooms/room-3.jpg",
+        ]
+
     async def test_get_rooms_unknown_slug(self, client, init_database):
         resp = await client.get("/api/hotels/nonexistent-slug-xyz/rooms")
         assert resp.status_code == 200
