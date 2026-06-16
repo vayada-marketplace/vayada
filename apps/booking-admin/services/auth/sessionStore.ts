@@ -105,12 +105,28 @@ export function getAuthCsrfToken(): string | null {
   return authKitSession?.csrfToken ?? null;
 }
 
+export function getAuthKitAccessToken(): string | null {
+  return authKitSession?.accessToken ?? null;
+}
+
 export function getAuthBearerToken(): string | null {
   if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
     return legacyCompatibilityToken.token;
   }
   if (authKitSession) return null;
   return getLegacyPasswordToken();
+}
+
+export function getScopedBookingHotelIds(): string[] {
+  const token = getAuthBearerToken();
+  if (!token) return [];
+
+  const payload = decodeJwtPayload(token);
+  const resources = isRecord(payload?.resources) ? payload.resources : null;
+  const bookingHotelIds = resources?.["booking:booking_hotel"];
+  return Array.isArray(bookingHotelIds)
+    ? bookingHotelIds.filter((resourceId): resourceId is string => typeof resourceId === "string")
+    : [];
 }
 
 export function getLegacyPasswordToken(): string | null {
@@ -142,4 +158,21 @@ export function hasHotelAccessMarker(): boolean {
   return (
     localStorage.getItem("userType") === "hotel" || localStorage.getItem("isSuperAdmin") === "true"
   );
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const encodedPayload = token.split(".")[1];
+  if (!encodedPayload || typeof globalThis.atob !== "function") return null;
+
+  try {
+    const normalized = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+    return JSON.parse(globalThis.atob(padded)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

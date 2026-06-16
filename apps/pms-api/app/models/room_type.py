@@ -624,7 +624,7 @@ class RoomTypeResponse(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     amenities: list[str]
-    images: list[RoomImageReference]
+    images: list[str]
     bed_type: str
     remaining_rooms: int
     features: list[str]
