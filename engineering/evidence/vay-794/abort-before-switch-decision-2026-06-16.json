@@ -1,0 +1,56 @@
+{
+  "recordedAt": "2026-06-16T17:20:00Z",
+  "ticket": "VAY-794",
+  "decision": "go_accepted_for_c1_rehearsal_evidence",
+  "rollbackProofPath": "abort_before_provider_switch",
+  "cutoverCommander": "Flamur Maliqi",
+  "scope": {
+    "c1StagingRehearsalEvidence": "accepted",
+    "productionProviderCutover": "not_authorized_by_this_decision"
+  },
+  "rationale": [
+    "Target intake, duplicate replay, provider receipt counts, provider dedupe hits, job lag, job failures, and dead-letter dashboard checks passed.",
+    "Dedicated staging PMS runtime proved the legacy scheduler freeze with zero active jobs and nine frozen jobs.",
+    "Scheduler-freeze audit rows were inserted into the target database and the post-freeze dashboard reported no missing or unfrozen scheduler jobs.",
+    "Provider dashboards remained pointed at legacy URLs; the temporary target runtime stayed observe-only and was stopped after replay, returning the environment to legacy-only provider delivery without a provider dashboard mutation.",
+    "The VAY-794 acceptance criteria allow rollback proof through abort-before-switch."
+  ],
+  "residualRisk": [
+    "This rehearsal does not prove the future production provider dashboard endpoint switch.",
+    "Production cutover still requires a controlled switch window, owner coverage, rollback credentials, and provider dashboard evidence."
+  ],
+  "ownerAssignments": [
+    {
+      "gate": "cutover_command",
+      "owner": "Flamur Maliqi",
+      "decision": "Accept abort-before-switch rollback proof for VAY-794 rehearsal closure."
+    },
+    {
+      "gate": "platform_runtime",
+      "owner": "Platform/runtime owner",
+      "decision": "Staging target runtime, staging PMS freeze runtime, SSM secret path, ECS runner cleanup, and dashboard report recorded."
+    },
+    {
+      "gate": "pms_scheduler_freeze",
+      "owner": "PMS operations owner",
+      "decision": "Dedicated staging PMS runtime reports scheduler disabled, zero active jobs, nine frozen jobs, and freeze audit rows inserted."
+    },
+    {
+      "gate": "provider_gate",
+      "owner": "Finance/PMS provider owners",
+      "decision": "Channex and Stripe provider exports plus controlled replay evidence recorded; Xendit deferred/non-blocking."
+    }
+  ],
+  "signOff": {
+    "owner": "Flamur Maliqi",
+    "scope": "Final VAY-794 C1 rehearsal evidence call only; domain owner role assignments remain accountable for production cutover follow-through."
+  },
+  "evidenceArtifacts": [
+    "engineering/evidence/vay-794/channex-webhook-export-2026-06-15.json",
+    "engineering/evidence/vay-794/stripe-webhook-export-2026-06-15.json",
+    "engineering/evidence/vay-794/staging-pms-runtime-health-2026-06-16.json",
+    "engineering/evidence/vay-794/scheduler-freeze-audit-insert-2026-06-16.json",
+    "engineering/evidence/vay-794/target-dashboard-after-freeze-2026-06-16.json",
+    "engineering/evidence/vay-794/xendit-webhook-export-2026-06-15.json"
+  ]
+}

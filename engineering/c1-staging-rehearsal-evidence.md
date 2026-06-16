@@ -467,6 +467,7 @@ without printing secrets. Redacted artifacts are committed under
 
 ```text
 channex-webhook-export-2026-06-15.json
+abort-before-switch-decision-2026-06-16.json
 frozen-pms-one-off-task-attempts-2026-06-15.json
 pms-runtime-health-2026-06-15.json
 scheduler-freeze-audit-insert-2026-06-16.json
@@ -712,12 +713,40 @@ Temporary runner cleanup after the final dashboard pass:
 - CloudWatch log group `/ecs/vayada-c1-rehearsal-checks` was retained for
   evidence.
 
-Updated VAY-794 status: **dashboard and freeze evidence gates passed, final
-go/no-go still requires owner sign-off**. The remaining caveats are:
+### C1 rehearsal go/no-go decision on 2026-06-16
+
+The cutover commander accepted the abort-before-switch path as sufficient
+rollback proof for VAY-794 rehearsal closure. Evidence artifact:
+`engineering/evidence/vay-794/abort-before-switch-decision-2026-06-16.json`.
+
+Decision scope:
+
+- VAY-794 C1 staging rehearsal evidence: **go / accepted**;
+- production provider cutover: **not authorized by this rehearsal decision**;
+- production cutover still requires a controlled provider switch window with the
+  same owner coverage and rollback access described in
+  `engineering/channex-webhook-cutover-plan.md`.
+
+Owner assignments and sign-off:
+
+The final VAY-794 rehearsal call is signed by the cutover commander. Domain rows
+below record assigned owner roles for evidence accountability and production
+cutover follow-through.
+
+| Gate                                      | Owner                       | Decision                                                                                                                      |
+| ----------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Cutover command / final C1 rehearsal call | Flamur Maliqi               | Accept abort-before-switch rollback proof for VAY-794 rehearsal closure.                                                      |
+| Platform/runtime evidence                 | Platform/runtime owner      | Staging target runtime, staging PMS freeze runtime, SSM secret path, ECS runner cleanup, and dashboard report are recorded.   |
+| PMS scheduler freeze                      | PMS operations owner        | Dedicated staging PMS runtime reports scheduler disabled, zero active jobs, nine frozen jobs, and freeze audit rows inserted. |
+| Provider gate                             | Finance/PMS provider owners | Channex and Stripe provider exports plus controlled replay evidence are recorded; Xendit is deferred/non-blocking.            |
+
+Final VAY-794 rehearsal status: **go / accepted for C1 rehearsal evidence**.
+The residual production-cutover caveat is:
 
 - provider dashboards were not switched to the temporary target endpoint during
-  this abort-before-switch rehearsal path;
-- named owner go/no-go sign-off has not yet been recorded.
+  this rehearsal. That is accepted for VAY-794 because rollback proof used the
+  abort-before-switch path, but it does not prove the future production endpoint
+  switch itself.
 
 Xendit is no longer a VAY-794 blocker. It remains represented by synthetic replay
 evidence only and is deferred to VAY-840 or a successor issue if real Xendit
