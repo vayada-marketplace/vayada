@@ -2246,6 +2246,49 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(body)).toEqual([]);
   });
 
+  it("reflects booking-web CORS origins on public hotel routes", async () => {
+    app = buildApp({
+      logger: false,
+      publicHotelProfileRepository,
+      publicHotelQuoteRepository,
+    });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: "/api/booking-web/hotels/hotel-alpenrose",
+      headers: {
+        origin: "https://hotel-alpenrose.booking.vayada.com",
+        "access-control-request-method": "GET",
+      },
+    });
+    const read = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose",
+      headers: {
+        origin: "https://hotel-alpenrose.booking.vayada.com",
+      },
+    });
+    const denied = await app.inject({
+      method: "GET",
+      url: "/api/booking-web/hotels/hotel-alpenrose",
+      headers: {
+        origin: "https://example.com",
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe(
+      "https://hotel-alpenrose.booking.vayada.com",
+    );
+    expect(preflight.headers["access-control-allow-methods"]).toBe("GET,POST,OPTIONS");
+    expect(read.statusCode).toBe(200);
+    expect(read.headers["access-control-allow-origin"]).toBe(
+      "https://hotel-alpenrose.booking.vayada.com",
+    );
+    expect(denied.statusCode).toBe(200);
+    expect(denied.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
   it("returns Booking Web offers from the public quote contract", async () => {
     app = buildApp({
       logger: false,

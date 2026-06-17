@@ -11,7 +11,7 @@ import {
   type PublicBookabilityQuoteProjection,
 } from "@vayada/domain-distribution";
 import { createHash } from "node:crypto";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
 import {
@@ -345,6 +345,15 @@ export async function registerBookingWebPublicRoutes(
       pmsPublicApiUrl: options.pmsPublicApiUrl,
       fetch: fetchImpl,
     });
+
+  app.addHook("onRequest", async (request, reply) => {
+    writeBookingWebCorsHeaders(request, reply);
+  });
+
+  app.options("/*", async (_request, reply) => {
+    reply.code(204);
+    return reply.send();
+  });
 
   if (options.calendarRepository) {
     app.addHook("onClose", async () => {
@@ -799,6 +808,41 @@ export async function registerBookingWebPublicRoutes(
       },
     );
   }
+}
+
+function writeBookingWebCorsHeaders(request: FastifyRequest, reply: FastifyReply): void {
+  const origin = request.headers.origin;
+  if (!isAllowedBookingWebOrigin(origin)) {
+    reply.header("Vary", "Origin");
+    return;
+  }
+
+  reply.header("Access-Control-Allow-Origin", origin);
+  reply.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  reply.header(
+    "Access-Control-Allow-Headers",
+    "content-type,idempotency-key,x-vayada-session-id,x-vayada-request-id",
+  );
+  reply.header("Access-Control-Max-Age", "600");
+  reply.header("Vary", "Origin");
+}
+
+function isAllowedBookingWebOrigin(origin: unknown): origin is string {
+  if (typeof origin !== "string") return false;
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase();
+  return (
+    host === "booking.vayada.com" ||
+    host.endsWith(".booking.vayada.com") ||
+    host === "booking.localhost" ||
+    host.endsWith(".booking.localhost")
+  );
 }
 
 export function createTargetBookingWebCalendarRepository(config: {
