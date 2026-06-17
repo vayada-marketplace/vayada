@@ -21,7 +21,7 @@ Airbnb request flows, reviews, and channel lifecycle events. It also describes
 booking webhooks as a trigger to pull a booking revision/feed, and warns that
 webhook calls can arrive out of order, especially for ARI changes. Source:
 `https://docs.channex.io/api-v.1-documentation/webhook-collection`, accessed
-2026-06-16.
+2026-06-17.
 
 ## Current Vayada State
 
@@ -108,7 +108,7 @@ payloads as hints and pull the revision/feed before mutation. Disabling
 - Domain event key:
   `channex.message.ingest:<property_id>:<thread_id>:<source_message_id>:v1`.
 - Job key:
-  `channex.ingest-message:channel_message:<source_message_id>:<semantic_action>:v1`.
+  `channex.ingest-message:channel_message:<property_id>:<source_message_id>:v1`.
 - Owner: PMS channel-connectivity.
 - Target behavior: ingest or update PMS message/thread state idempotently.
 
@@ -119,7 +119,7 @@ payloads as hints and pull the revision/feed before mutation. Disabling
 - Domain event key:
   `channex.booking.ingest:<property_id>:<channel_booking_id>:<revision>:v1`.
 - Job key:
-  `channex.ingest-booking:channel_booking:<channel_booking_id>:revision-<revision>:v1`.
+  `channex.ingest-booking:channel_booking:<property_id>:<channel_booking_id>:revision-<revision>:v1`.
 - Owner: PMS channel-connectivity.
 - Target behavior: enqueue a durable inbound revision job that pulls the
   revision/feed from Channex, then processes create/modify/cancel idempotently.
