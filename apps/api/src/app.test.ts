@@ -4190,6 +4190,96 @@ describe("vayada-api", () => {
     expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
   });
 
+  it("builds target public quotes from offer snapshots when no quote read model exists", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: PublicHotelQuoteReadPool = {
+      async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
+        queries.push({ text, values });
+        if (queries.length === 1) {
+          return { rows: [] as unknown as T[] };
+        }
+        return {
+          rows: [
+            {
+              publicOfferKey: "rt:deluxe:flex",
+              roomTypeId: "room_deluxe",
+              ratePlanId: "rate_flexible",
+              roomSummary: { name: "Deluxe Double Room" },
+              rateSummary: { refundable: true },
+              occupancy: { maxAdults: 2, maxChildren: 1 },
+              publicPolicy: { cancellation: "Free cancellation" },
+              paymentOptions: ["card", "pay_at_property"],
+              availableRooms: "2",
+              roomTotal: "540.00",
+              taxesAndFees: "54.00",
+              discounts: "0.00",
+              currency: "EUR",
+              sourceFreshness: {
+                sources: [{ owner: "pms", status: "fresh" }],
+              },
+              generatedAt: "2026-06-09T09:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPublicHotelQuoteRepository({
+      connectionString: "postgresql://target-db",
+      profileRepository: publicHotelProfileRepository,
+      pool,
+      now: () => new Date("2026-06-09T09:00:00.000Z"),
+    });
+
+    const quote = await repository.findQuoteBySlug("hotel-alpenrose", {
+      check_in: "2026-09-12",
+      check_out: "2026-09-15",
+      adults: "2",
+      children: "0",
+      rooms: "1",
+      currency: "EUR",
+      locale: "en",
+    });
+
+    expect(quote).toMatchObject({
+      status: "bookable",
+      quote: {
+        offers: [
+          {
+            offerId: "rt:deluxe:flex",
+            roomTypeId: "room_deluxe",
+            ratePlanId: "rate_flexible",
+            name: "Deluxe Double Room",
+            availableRooms: 2,
+            paymentOptions: ["card", "pay_at_property"],
+            totals: {
+              roomTotal: 540,
+              taxesAndFees: 54,
+              grandTotal: 594,
+            },
+          },
+        ],
+      },
+      freshness: {
+        status: "fresh",
+      },
+    });
+    expect(queries).toHaveLength(2);
+    expect(queries[0]?.text).toContain("distribution.public_quote_read_models");
+    expect(queries[1]?.text).toContain("distribution.public_room_offer_snapshots");
+    expect(queries[1]?.values).toEqual([
+      "hotel-alpenrose",
+      "2026-09-12",
+      "2026-09-15",
+      "EUR",
+      2,
+      0,
+      1,
+      3,
+    ]);
+    expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
+  });
+
   it("builds target offer fallback booking URLs from the hotel booking base URL", async () => {
     const customDomainProfile = {
       ...seededPublicProfile,

@@ -72,6 +72,23 @@ type TargetPublicHotelQuoteRow = {
   expiresAt: Date | string;
 };
 
+type TargetRoomOfferSnapshotQuoteRow = {
+  publicOfferKey: string;
+  roomTypeId: string;
+  ratePlanId: string | null;
+  roomSummary: unknown;
+  rateSummary: unknown;
+  occupancy: unknown;
+  publicPolicy: unknown;
+  paymentOptions: string[];
+  availableRooms: string | number;
+  roomTotal: string | number;
+  taxesAndFees: string | number;
+  discounts: string | number;
+  currency: string;
+  generatedAt: Date | string | null;
+};
+
 type PmsPublicRoomType = {
   id: string;
   name: string;
@@ -245,7 +262,11 @@ export function createTargetPublicHotelQuoteRepository(config: {
 
         const row = result.rows[0];
         if (!row) {
-          return toUnavailablePublicHotelQuoteProjection(profile.hotel, query, requestedAt);
+          return quoteFromTargetOfferSnapshots(pool, {
+            hotel: profile.hotel,
+            request: parsed.request,
+            requestedAt,
+          });
         }
 
         return toTargetPublicHotelQuoteProjection(profile.hotel, parsed.request, row);
@@ -256,6 +277,157 @@ export function createTargetPublicHotelQuoteRepository(config: {
     async close() {
       await pool.end();
     },
+  };
+}
+
+async function quoteFromTargetOfferSnapshots(
+  pool: PublicHotelQuoteReadPool,
+  config: {
+    hotel: PublicBookabilityHotelProfile;
+    request: PublicBookabilityQuoteRequest;
+    requestedAt: Date;
+  },
+): Promise<PublicBookabilityQuoteProjection> {
+  const generatedAt = config.requestedAt.toISOString();
+  const result = await pool.query<TargetRoomOfferSnapshotQuoteRow>(
+    `SELECT
+       offer.public_offer_key AS "publicOfferKey",
+       offer.room_type_id::text AS "roomTypeId",
+       offer.rate_plan_id::text AS "ratePlanId",
+       (array_agg(offer.room_summary ORDER BY offer.stay_date))[1] AS "roomSummary",
+       (array_agg(offer.rate_summary ORDER BY offer.stay_date))[1] AS "rateSummary",
+       (array_agg(offer.occupancy ORDER BY offer.stay_date))[1] AS occupancy,
+       (array_agg(offer.public_policy ORDER BY offer.stay_date))[1] AS "publicPolicy",
+       (array_agg(offer.payment_options ORDER BY offer.stay_date))[1] AS "paymentOptions",
+       MIN(offer.available_rooms) AS "availableRooms",
+       SUM(offer.base_price_amount) * $7::int AS "roomTotal",
+       SUM(offer.taxes_and_fees_amount) * $7::int AS "taxesAndFees",
+       SUM(offer.discounts_amount) * $7::int AS discounts,
+       offer.currency,
+       MAX(offer.generated_at) AS "generatedAt"
+     FROM distribution.public_room_offer_snapshots offer
+     JOIN distribution.public_hotel_bookability_profiles profile
+       ON profile.property_id = offer.property_id
+     WHERE profile.canonical_slug = $1
+       AND offer.stay_date >= $2::date
+       AND offer.stay_date < $3::date
+       AND offer.currency = $4
+       AND offer.sellable_publicly = TRUE
+       AND offer.availability_status IN ('available', 'limited')
+       AND COALESCE((offer.occupancy ->> 'maxAdults')::int, $5::int) >= $5::int
+       AND COALESCE((offer.occupancy ->> 'maxChildren')::int, $6::int) >= $6::int
+     GROUP BY offer.public_offer_key, offer.room_type_id, offer.rate_plan_id, offer.currency
+     HAVING COUNT(DISTINCT offer.stay_date) = $8::int
+        AND MIN(offer.available_rooms) >= $7::int
+     ORDER BY SUM(offer.base_price_amount), offer.public_offer_key
+     LIMIT 20`,
+    [
+      config.hotel.slug,
+      config.request.checkIn,
+      config.request.checkOut,
+      config.request.currency,
+      config.request.adults,
+      config.request.children,
+      config.request.rooms,
+      config.request.nights,
+    ],
+  );
+
+  const offers = result.rows.map((row) => snapshotOfferInput(row));
+  const offerPolicies = result.rows.map((row) => snapshotOfferPolicy(row));
+  const quoteId = buildPublicQuoteId(config.request);
+  const expiresAt = new Date(config.requestedAt.getTime() + 15 * 60 * 1_000).toISOString();
+  const latestGeneratedAt =
+    result.rows
+      .map((row) => toIsoDateTime(row.generatedAt))
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? generatedAt;
+
+  return buildPublicBookabilityQuoteProjection(latestGeneratedAt, {
+    request: config.request,
+    hotelCatalog: { lastUpdatedAt: latestGeneratedAt },
+    booking: { lastUpdatedAt: latestGeneratedAt, offerPolicies },
+    pms: {
+      availabilityReady: true,
+      lastUpdatedAt: latestGeneratedAt,
+      offers,
+    },
+    finance: {
+      lastUpdatedAt: latestGeneratedAt,
+      publicPaymentOptions: publicPaymentOptionsForQuote(config.hotel, offers),
+      supportedCurrencies: config.hotel.supportedCurrencies,
+    },
+    bookingWeb: {
+      offerBookingUrlBase: `${config.hotel.bookingBaseUrl}/${config.request.locale}/book`,
+      deepLink:
+        offers.length > 0
+          ? buildPublicQuoteDeepLink(config.hotel, config.request, quoteId, expiresAt)
+          : null,
+    },
+    quote: {
+      quoteId,
+      quoteHash: buildPublicQuoteHash(config.request, offers),
+      expiresAt,
+      priceGuarantee: offers.length > 0 ? "expires_at" : "none",
+    },
+  });
+}
+
+function snapshotOfferInput(
+  row: TargetRoomOfferSnapshotQuoteRow,
+): PublicBookabilityAvailabilityOfferInput {
+  const roomSummary = objectValue(row.roomSummary);
+  const rateSummary = objectValue(row.rateSummary);
+  const occupancy = objectValue(row.occupancy);
+  const roomTotal = moneyValue(row.roomTotal) ?? 0;
+  const taxesAndFees = moneyValue(row.taxesAndFees) ?? 0;
+  const discounts = moneyValue(row.discounts) ?? 0;
+
+  return {
+    offerId: row.publicOfferKey,
+    roomTypeId: row.roomTypeId,
+    ratePlanId: row.ratePlanId,
+    name: stringValue(roomSummary["name"]) ?? row.publicOfferKey,
+    occupancy: {
+      maxAdults: integerValue(occupancy["maxAdults"], 1),
+      maxChildren: integerValue(occupancy["maxChildren"], 0),
+    },
+    availableRooms: integerLikeValue(row.availableRooms, 0),
+    refundable: booleanValue(rateSummary["refundable"]) ?? true,
+    mealPlan: stringValue(rateSummary["mealPlan"]),
+    paymentOptions: paymentOptionsArray(row.paymentOptions),
+    totals: {
+      currency: row.currency,
+      roomTotal,
+      taxesAndFees,
+      discounts,
+      grandTotal: roundMoney(roomTotal + taxesAndFees - discounts),
+    },
+  };
+}
+
+function integerLikeValue(value: unknown, fallback: number): number {
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) ? parsed : fallback;
+  }
+  return integerValue(value, fallback);
+}
+
+function snapshotOfferPolicy(
+  row: TargetRoomOfferSnapshotQuoteRow,
+): PublicBookabilityBookingOfferPolicyInput {
+  const policy = objectValue(row.publicPolicy);
+  return {
+    roomTypeId: row.roomTypeId,
+    ratePlanId: row.ratePlanId,
+    cancellation: stringValue(policy["cancellation"]),
+    deposit:
+      stringValue(policy["deposit"]) ??
+      (Object.keys(objectValue(policy["deposit"])).length > 0
+        ? JSON.stringify(objectValue(policy["deposit"]))
+        : null),
   };
 }
 
