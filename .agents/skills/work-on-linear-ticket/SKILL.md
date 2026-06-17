@@ -5,11 +5,11 @@ description: Use when picking up a Vayada Linear ticket to implement. Covers the
 
 # Working on a Vayada Linear ticket
 
-This skill covers the full implementation lifecycle for a Vayada ticket: from loading context through opening a PR. Follow the seven steps in order; do not skip or reorder them.
+This skill covers the full implementation lifecycle for a Vayada ticket: from loading context through opening a PR. Follow the eight steps in order; do not skip or reorder them.
 
 The per-stack commands, validation expectations, and shipping conventions referenced here live in `AGENTS.md`. The full Linear operating model (status transitions, agent rules, label semantics) lives in `engineering/linear-workspace.md`. This skill surfaces the workflow — it does not duplicate those docs.
 
-## Seven-step workflow
+## Eight-step workflow
 
 ### 1. Load context
 
@@ -58,6 +58,7 @@ Work through the acceptance criteria one at a time.
 
 - Treat each AC as a testable statement of done — do not mark work complete until the criterion is actually met.
 - Defer to `AGENTS.md` for per-stack commands (FastAPI, Next.js, workspace builds).
+- Apply Ponytail constraints while implementing: prefer the smallest correct change, existing code, stdlib, native platform features, and already-installed dependencies before adding abstractions or dependencies.
 - Do not expand scope beyond the ticket. If you discover adjacent work that should be done, open a follow-up Linear issue rather than pulling it into this PR.
 - Keep commits focused and descriptive. Each commit message should explain _why_, not just what changed.
 
@@ -77,13 +78,26 @@ Playwright currently covers `landing` and `booking-web`; VAY-568 tracks expandin
 
 If a check cannot be run locally (missing env, secrets, infra), say so explicitly — do not claim success.
 
-### 6. Adversarial review
+### 6. Ponytail complexity pass
+
+Before adversarial review, inspect the current diff for over-engineering.
+
+If the Ponytail plugin is available, invoke `@ponytail-review` or `/ponytail-review`. If it is not available in the current tool, do the pass manually using the same questions:
+
+- Can any code, file, wrapper, abstraction, option, or dependency be deleted?
+- Can existing code, stdlib, platform APIs, or installed dependencies replace new code?
+- Did the implementation add behavior outside the acceptance criteria?
+- Can tests or validation stay proportional without losing coverage of meaningful risk?
+
+Fix valid simplifications, then rerun any checks affected by the change. Do not let this pass remove acceptance criteria, trust-boundary validation, security controls, accessibility basics, data-loss prevention, required tests, browser checks, migration safety, or adversarial review.
+
+### 7. Adversarial review
 
 Before opening a PR, run `.agents/skills/adversarial-review/SKILL.md`.
 
 For non-trivial changes, use an independent subagent when available and provide only the ticket context, changed files, diff, and validation results. Fix any valid findings, rerun the relevant checks, and include the review outcome in the PR risk or validation notes.
 
-### 7. PR
+### 8. PR
 
 When all checks pass:
 
@@ -102,6 +116,7 @@ Do not move the ticket to Done yourself. See `engineering/linear-workspace.md` �
 - **Skipping status transitions.** Not setting In Progress leaves teammates blind to active work. Not keeping it In Progress after the PR is open signals false completion. Always set In Progress before touching code; never set Done.
 - **Scope creep.** Fixing adjacent issues, refactoring nearby code, or adding "while I'm here" improvements dilutes the PR, complicates review, and risks regressions. Open a follow-up ticket for anything outside the ACs.
 - **Claiming verification without running checks.** A dev server starting is not a passing build. State exactly which commands you ran and what they returned.
+- **Treating Ponytail as verification.** Ponytail is a complexity pass, not proof of correctness. It runs after verification and before adversarial review, and valid simplifications require rerunning affected checks.
 - **Skipping adversarial review.** Verification shows the code passes expected checks; the adversarial pass looks for missed acceptance criteria, hidden regressions, and risk that the expected checks did not cover.
 - **Amending a published commit.** If a pre-commit hook fails, fix the issue and create a new commit — do not `--amend` a commit that has already been pushed.
 
