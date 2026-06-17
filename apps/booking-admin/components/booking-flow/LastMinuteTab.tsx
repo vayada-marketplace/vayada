@@ -17,18 +17,41 @@ interface LastMinuteConfig {
   tiers: Tier[];
 }
 
+const EMPTY_CONFIG: LastMinuteConfig = {
+  enabled: false,
+  stackWithPromo: false,
+  tiers: [],
+};
+
 const DEFAULT_TIERS: Tier[] = [
   { daysBeforeMin: 7, daysBeforeMax: 13, discountPercent: 10 },
   { daysBeforeMin: 3, daysBeforeMax: 6, discountPercent: 20 },
   { daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 },
 ];
 
+function normalizeLastMinuteConfig(config: LastMinuteConfig | null | undefined): LastMinuteConfig {
+  if (!config?.enabled) {
+    return { ...EMPTY_CONFIG };
+  }
+
+  return {
+    enabled: true,
+    stackWithPromo: Boolean(config.stackWithPromo),
+    tiers: Array.isArray(config.tiers)
+      ? config.tiers
+          .filter((tier) => Number(tier.discountPercent) > 0)
+          .map((tier) => ({
+            daysBeforeMin: Math.max(0, Number(tier.daysBeforeMin) || 0),
+            daysBeforeMax:
+              tier.daysBeforeMax == null ? null : Math.max(0, Number(tier.daysBeforeMax) || 0),
+            discountPercent: Math.min(90, Math.max(1, Number(tier.discountPercent) || 0)),
+          }))
+      : [],
+  };
+}
+
 export default function LastMinuteTab() {
-  const [config, setConfig] = useState<LastMinuteConfig>({
-    enabled: false,
-    stackWithPromo: false,
-    tiers: [],
-  });
+  const [config, setConfig] = useState<LastMinuteConfig>(EMPTY_CONFIG);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(
@@ -39,9 +62,7 @@ export default function LastMinuteTab() {
     pmsClient
       .get<{ last_minute_discount: LastMinuteConfig | null }>("/admin/hotel")
       .then((hotel) => {
-        if (hotel.last_minute_discount) {
-          setConfig(hotel.last_minute_discount);
-        }
+        setConfig(normalizeLastMinuteConfig(hotel.last_minute_discount));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -51,9 +72,11 @@ export default function LastMinuteTab() {
     setSaving(true);
     setFeedback(null);
     try {
+      const payload = normalizeLastMinuteConfig(config);
       await pmsClient.patch("/admin/hotel", {
-        last_minute_discount: config,
+        last_minute_discount: payload,
       });
+      setConfig(payload);
       setFeedback({ type: "success", message: "Last-minute discount settings saved" });
     } catch {
       setFeedback({ type: "error", message: "Failed to save settings" });
@@ -116,7 +139,9 @@ export default function LastMinuteTab() {
           </div>
           <button
             type="button"
-            onClick={() => setConfig((prev) => ({ ...prev, enabled: !prev.enabled }))}
+            onClick={() =>
+              setConfig((prev) => (prev.enabled ? { ...EMPTY_CONFIG } : { ...prev, enabled: true }))
+            }
             className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${config.enabled ? "bg-primary-500" : "bg-gray-300"}`}
           >
             <div

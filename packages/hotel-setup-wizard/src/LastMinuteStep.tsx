@@ -91,7 +91,11 @@ export default function LastMinuteStep({
             </div>
             <button
               type="button"
-              onClick={() => setConfig({ ...config, enabled: !config.enabled })}
+              onClick={() =>
+                setConfig(
+                  config.enabled ? createEmptyLastMinuteConfig() : { ...config, enabled: true },
+                )
+              }
               className={`relative w-10 h-[22px] rounded-full transition-colors shrink-0 ${config.enabled ? "bg-primary-500" : "bg-gray-300"}`}
             >
               <div
