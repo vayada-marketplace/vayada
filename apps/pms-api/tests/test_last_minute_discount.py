@@ -7,6 +7,7 @@ Pins the contract that the hotel-level ``enabled`` flag is the master switch
 from datetime import date
 
 import pytest
+from app.routers.admin import _normalize_last_minute_discount
 from app.services import room_type_service
 from app.services.room_type_service import resolve_last_minute_discount
 
@@ -78,6 +79,37 @@ class TestResolveLastMinuteDiscount:
         }
         assert resolve_last_minute_discount(cfg, None, days_before=100) == 5
         assert resolve_last_minute_discount(cfg, None, days_before=6) is None
+
+
+def test_normalize_last_minute_discount_clears_disabled_tiers():
+    assert _normalize_last_minute_discount(
+        {
+            "enabled": False,
+            "stackWithPromo": True,
+            "tiers": [{"daysBeforeMin": 0, "daysBeforeMax": 2, "discountPercent": 30}],
+        }
+    ) == {"enabled": False, "stackWithPromo": False, "tiers": []}
+
+
+def test_normalize_last_minute_discount_keeps_enabled_valid_tiers():
+    assert _normalize_last_minute_discount(
+        {
+            "enabled": True,
+            "stackWithPromo": True,
+            "tiers": [
+                {"daysBeforeMin": "0", "daysBeforeMax": "2", "discountPercent": "30"},
+                {"daysBeforeMin": 7, "daysBeforeMax": None, "discountPercent": 0},
+                {"daysBeforeMin": 14, "daysBeforeMax": None, "discountPercent": 99},
+            ],
+        }
+    ) == {
+        "enabled": True,
+        "stackWithPromo": True,
+        "tiers": [
+            {"daysBeforeMin": 0, "daysBeforeMax": 2, "discountPercent": 30},
+            {"daysBeforeMin": 14, "daysBeforeMax": None, "discountPercent": 90},
+        ],
+    }
 
 
 @pytest.mark.asyncio

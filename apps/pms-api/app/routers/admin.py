@@ -30,6 +30,38 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+def _normalize_last_minute_discount(value):
+    if not isinstance(value, dict) or not value.get("enabled"):
+        return {"enabled": False, "stackWithPromo": False, "tiers": []}
+
+    tiers = []
+    for tier in value.get("tiers") or []:
+        if not isinstance(tier, dict):
+            continue
+        try:
+            days_before_min = max(0, int(tier.get("daysBeforeMin") or 0))
+            raw_max = tier.get("daysBeforeMax")
+            days_before_max = None if raw_max is None else max(0, int(raw_max))
+            discount_percent = int(tier.get("discountPercent") or 0)
+        except (TypeError, ValueError):
+            continue
+        if discount_percent <= 0:
+            continue
+        tiers.append(
+            {
+                "daysBeforeMin": days_before_min,
+                "daysBeforeMax": days_before_max,
+                "discountPercent": min(discount_percent, 90),
+            }
+        )
+
+    return {
+        "enabled": True,
+        "stackWithPromo": bool(value.get("stackWithPromo", False)),
+        "tiers": tiers,
+    }
+
+
 def _hotel_response(
     row: dict, slug: str = None, name: str = None, contact_email: str = None
 ) -> HotelResponse:
@@ -214,6 +246,10 @@ async def update_hotel(
 ):
     """Update hotel details (slug, name, email, last_minute_discount, etc.)."""
     hotel_id = await get_hotel_id(user_id)
+    if "last_minute_discount" in data:
+        data["last_minute_discount"] = _normalize_last_minute_discount(
+            data.get("last_minute_discount")
+        )
     same_day_changed = (
         "same_day_bookings_enabled" in data
         or "sameDayBookingsEnabled" in data
