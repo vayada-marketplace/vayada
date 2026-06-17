@@ -54,7 +54,8 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL || 'https://api.vayada.com' }}
+            NEXT_PUBLIC_API_URL=https://target-api.vayada.com
+            NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=https://target-api.vayada.com
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
           cache-from: type=gha

@@ -46,9 +46,10 @@ jobs:
       - name: Build and push Docker image
         run: |
           docker build \
-            --build-arg NEXT_PUBLIC_API_URL=https://booking-api.vayada.com \
-            --build-arg NEXT_PUBLIC_AUTH_API_URL=https://api.vayada.com \
-            --build-arg NEXT_PUBLIC_PMS_URL=https://pms-api.vayada.com \
+            --build-arg NEXT_PUBLIC_API_URL=https://target-api.vayada.com \
+            --build-arg NEXT_PUBLIC_AUTH_API_URL=https://target-api.vayada.com \
+            --build-arg NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=https://target-api.vayada.com \
+            --build-arg NEXT_PUBLIC_PMS_URL=https://target-api.vayada.com \
             -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest \
             -t ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
             -f ${{ env.APP_DIR }}/Dockerfile \
