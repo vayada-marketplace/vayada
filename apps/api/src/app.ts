@@ -26,6 +26,10 @@ import { registerAiHotelQuoteRoutes } from "./routes/aiHotelQuotes.js";
 import { registerAiHotelRoutes } from "./routes/aiHotels.js";
 import { registerAskRoutes } from "./routes/ask.js";
 import { registerAuthSessionRoutes } from "./routes/authSession.js";
+import {
+  registerBookingAdminCompatRoutes,
+  type BookingAdminCompatRoutesOptions,
+} from "./routes/bookingAdminCompat.js";
 import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
 import {
   registerWorkosWebhookRoutes,
@@ -114,6 +118,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
+  bookingAdminCompat?: BookingAdminCompatRoutesOptions;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
   marketplaceDiscoveryRepository?: MarketplaceDiscoveryReadRepository;
@@ -285,6 +290,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     settingsWriteRepository: options.bookingSettingsWriteRepository,
     guestFormSettingsSync: options.bookingGuestFormSettingsSync,
   });
+  if (options.bookingAdminCompat) {
+    app.register(registerBookingAdminCompatRoutes, {
+      prefix: "/admin",
+      ...options.bookingAdminCompat,
+    });
+  }
   if (options.pmsOperationsRepository) {
     app.register(registerPmsLegacyAdminRoutes, {
       prefix: "/admin",

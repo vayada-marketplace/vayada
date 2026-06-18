@@ -1722,6 +1722,7 @@ function buildAuthenticatedApp(
     pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
     bookingGuestPiiPort?: BookingGuestPiiPort;
     pmsOperationsAllowedOrigins?: string[];
+    bookingAdminCompatAllowedOrigins?: string[];
     linkedPmsPropertyId?: string;
   } = {},
 ): ReturnType<typeof buildApp> {
@@ -1737,6 +1738,9 @@ function buildAuthenticatedApp(
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
     bookingGuestFormSettingsSync: options.guestFormSettingsSync,
+    bookingAdminCompat: options.bookingAdminCompatAllowedOrigins
+      ? { allowedOrigins: options.bookingAdminCompatAllowedOrigins }
+      : undefined,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: identityRepositoryWithResources(
@@ -1812,6 +1816,55 @@ describe("vayada-api", () => {
       group: "booking",
       status: "ok",
     });
+  });
+
+  it("supports next booking-admin setup status compatibility with CORS", async () => {
+    app = buildAuthenticatedApp({
+      bookingAdminCompatAllowedOrigins: ["https://next-booking-admin.vayada.com"],
+    });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: "/admin/settings/setup-status",
+      headers: {
+        origin: "https://next-booking-admin.vayada.com",
+        "access-control-request-method": "GET",
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
+
+    const status = await injectJson(app, {
+      method: "GET",
+      url: "/admin/settings/setup-status",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(status.body).toMatchObject({ setup_complete: true, missing_fields: [] });
+
+    const hotels = await injectJson<unknown[]>(app, {
+      method: "GET",
+      url: "/admin/hotels",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(hotels.statusCode).toBe(200);
+    expect(hotels.body).toEqual([
+      {
+        id: "booking_hotel_alpenrose",
+        name: "booking_hotel_alpenrose",
+        slug: "booking_hotel_alpenrose",
+        location: "",
+        country: "",
+      },
+    ]);
   });
 
   it("does not expose booking addon settings until a read model is configured", async () => {

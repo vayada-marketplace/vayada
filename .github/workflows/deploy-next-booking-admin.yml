@@ -46,7 +46,7 @@ jobs:
             --build-arg NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${{ env.NEXT_API_URL }} \
             --build-arg NEXT_PUBLIC_PMS_URL=${{ env.NEXT_API_URL }} \
             --build-arg NEXT_PUBLIC_PMS_FRONTEND_URL=https://next-pms.vayada.com \
-            --build-arg NEXT_PUBLIC_MARKETPLACE_API_URL=${{ env.NEXT_API_URL }} \
+            --build-arg NEXT_PUBLIC_MARKETPLACE_API_URL=https://api.vayada.com \
             --build-arg NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com \
             --build-arg NEXT_PUBLIC_BOOKING_URL_TEMPLATE=https://{slug}.next-booking.vayada.com \
             --build-arg NEXT_PUBLIC_BOOKING_RESERVATIONS_ENABLED=true \
