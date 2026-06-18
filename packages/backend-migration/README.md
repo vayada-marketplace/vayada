@@ -45,3 +45,32 @@ track:
 
 Product fixtures that later migrate Booking, Marketplace, or PMS media URLs
 should reuse `platformMediaChecks` instead of creating ad hoc media assertions.
+
+## WorkOS Backfill
+
+Use `--email` for one-user migration smoke tests:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL=<legacy auth database url> \
+  WORKOS_API_KEY=<workos api key> \
+  npm --workspace @vayada/backend-migration run target:workos:backfill -- \
+    --email user@example.com \
+    --dry-run
+```
+
+Apply mode requires the printed cohort key as a confirmation guard:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL=<legacy auth database url> \
+  WORKOS_API_KEY=<workos api key> \
+  npm --workspace @vayada/backend-migration run target:workos:backfill -- \
+    --email user@example.com \
+    --apply \
+    --confirm email:user@example.com
+```
+
+Use `--cohort-manifest <path>` for reviewed batch cohorts.
+Omit `WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL` to migrate identities without
+importing legacy bcrypt password hashes.
