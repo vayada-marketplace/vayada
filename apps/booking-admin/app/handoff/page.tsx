@@ -53,7 +53,7 @@ export default function HandoffPage() {
       // the dashboard, even if some metadata (contact_phone, address)
       // is still empty. Blocking them over that would kick them to the
       // setup wizard on every login which is user-hostile.
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://booking-api.vayada.com";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
       (async () => {
         try {
           if (safeRedirect) {

@@ -1,7 +1,6 @@
 import {
   getAuthBearerToken,
   getAuthKitAccessToken,
-  getLegacyCompatibilityToken,
   getScopedBookingHotelIds,
 } from "@/services/auth/sessionStore";
 
@@ -9,10 +8,6 @@ const PLATFORM_MEDIA_API_BASE_URL =
   process.env.NEXT_PUBLIC_PLATFORM_MEDIA_API_URL ||
   process.env.NEXT_PUBLIC_AUTH_API_URL ||
   "https://api.localhost";
-const LEGACY_IMAGE_UPLOAD_API_BASE_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_API_URL ||
-  process.env.NEXT_PUBLIC_AUTH_API_URL ||
-  "https://api.vayada.com";
 
 type BookingMediaPurpose = "property.hero_image" | "property.gallery_image";
 
@@ -36,31 +31,12 @@ type FinalizeResponse = {
   }>;
 };
 
-type LegacyImageUploadResponse = {
-  url?: string;
-  thumbnail_url?: string | null;
-  key?: string;
-  width?: number;
-  height?: number;
-  size_bytes?: number;
-  format?: string;
-};
-
-type LegacyMultipleImageUploadResponse = {
-  images?: LegacyImageUploadResponse[];
-  total?: number;
-};
-
 export async function uploadImages(
   files: File | File[],
   purpose: BookingMediaPurpose = "property.gallery_image",
 ): Promise<string[]> {
   const fileList = Array.isArray(files) ? files : [files];
   if (fileList.length === 0) return [];
-
-  if (shouldUseLegacyMarketplaceImageUpload()) {
-    return uploadLegacyMarketplaceImages(fileList, purpose);
-  }
 
   const token = getAuthKitAccessToken() ?? getAuthBearerToken();
   const headers = {
@@ -145,56 +121,6 @@ export async function uploadSingleImage(
 
 function isDeterministicLocalUploadTarget(uploadUrl: string): boolean {
   return uploadUrl.startsWith("https://uploads.vayada.localhost/");
-}
-
-async function uploadLegacyMarketplaceImages(
-  fileList: File[],
-  purpose: BookingMediaPurpose,
-): Promise<string[]> {
-  const token = getLegacyCompatibilityToken() ?? getAuthBearerToken() ?? getAuthKitAccessToken();
-  if (!token) throw new Error("Not authenticated");
-
-  if (purpose === "property.hero_image" && fileList.length === 1) {
-    const formData = new FormData();
-    formData.append("file", fileList[0]!);
-    const legacyBaseUrl = stripTrailingSlash(LEGACY_IMAGE_UPLOAD_API_BASE_URL);
-    const response = await fetch(`${legacyBaseUrl}/upload/image/hotel-profile`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-
-    if (!response.ok) throw new Error(await readMediaError(response, "Upload failed"));
-    const body = (await response.json()) as LegacyImageUploadResponse;
-    return [getLegacyImageUrl(body)];
-  }
-
-  const formData = new FormData();
-  fileList.forEach((file) => formData.append("files", file));
-  const legacyBaseUrl = stripTrailingSlash(LEGACY_IMAGE_UPLOAD_API_BASE_URL);
-  const response = await fetch(`${legacyBaseUrl}/upload/images/listing`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: formData,
-  });
-
-  if (!response.ok) throw new Error(await readMediaError(response, "Upload failed"));
-  const body = (await response.json()) as LegacyMultipleImageUploadResponse;
-  if (!Array.isArray(body.images)) throw new Error("Upload failed: no image URLs returned");
-  return body.images.map((image) => getLegacyImageUrl(image));
-}
-
-function shouldUseLegacyMarketplaceImageUpload(): boolean {
-  return true;
-}
-
-function stripTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, "");
-}
-
-function getLegacyImageUrl(image: LegacyImageUploadResponse): string {
-  if (typeof image.url === "string" && image.url.trim()) return image.url;
-  throw new Error("Upload failed: no image URL returned");
 }
 
 function getBookingHotelUploadResourceId(): string {

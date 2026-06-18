@@ -13,7 +13,6 @@ import {
   isAuthKitLoginEnabled,
   isLegacyPasswordFallbackEnabled,
   setAuthKitSession,
-  setLegacyCompatibilityToken,
   setLegacyPasswordSession,
   type AuthKitSessionResponse,
 } from "./sessionStore";
@@ -59,12 +58,6 @@ export interface RegisterResponse {
   status: string;
 }
 
-type CompatibilityTokenResponse = {
-  accessToken: string;
-  expiresIn: number;
-  tokenType: "Bearer";
-};
-
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
     ...options,
@@ -88,17 +81,6 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   }
 
   return body as T;
-}
-
-async function attachBookingCompatibilityToken(): Promise<void> {
-  const csrfToken = getAuthCsrfToken();
-  if (!csrfToken) return;
-
-  const response = await authFetch<CompatibilityTokenResponse>("/auth/compat/booking-admin-token", {
-    method: "POST",
-    headers: { "x-vayada-csrf": csrfToken },
-  });
-  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
 }
 
 function storeLegacyLoginResponse(response: LoginResponse): void {
@@ -143,7 +125,6 @@ export const authService = {
         : await authFetch<AuthKitSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
 
     setAuthKitSession(response);
-    await attachBookingCompatibilityToken();
     return response;
   },
 

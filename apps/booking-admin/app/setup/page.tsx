@@ -561,7 +561,7 @@ export default function SetupPage() {
       if (appliedInviteCode) {
         try {
           const token = localStorage.getItem("access_token");
-          await fetch(`${MARKETPLACE_API_URL}/api/invite-codes/${appliedInviteCode}/redeem`, {
+          await fetch(`${API_URL}/api/invite-codes/${appliedInviteCode}/redeem`, {
             method: "POST",
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           });
@@ -638,17 +638,17 @@ export default function SetupPage() {
     </div>
   );
 
-  const MARKETPLACE_API_URL =
-    process.env.NEXT_PUBLIC_MARKETPLACE_API_URL || "https://api.vayada.com";
+  const API_URL =
+    process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_AUTH_API_URL ||
+    "https://api.localhost";
 
   const applyInviteCode = async () => {
     if (!inviteCode.trim()) return;
     setInviteError("");
     setApplyingInvite(true);
     try {
-      const res = await fetch(
-        `${MARKETPLACE_API_URL}/api/invite-codes/${inviteCode.trim().toUpperCase()}`,
-      );
+      const res = await fetch(`${API_URL}/api/invite-codes/${inviteCode.trim().toUpperCase()}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         setInviteError(err.detail || "Invalid invite code");
