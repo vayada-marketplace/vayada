@@ -53,6 +53,9 @@ export function setLegacyCompatibilityToken(token: string, expiresIn: number): v
     token,
     expiresAt: Date.now() + expiresIn * 1000,
   };
+  if (typeof window === "undefined") return;
+  localStorage.setItem(LEGACY_TOKEN_KEY, token);
+  localStorage.setItem(LEGACY_EXPIRES_AT_KEY, String(legacyCompatibilityToken.expiresAt));
 }
 
 export function setLegacyPasswordSession(input: {
