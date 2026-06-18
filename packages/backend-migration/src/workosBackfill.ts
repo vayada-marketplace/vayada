@@ -733,7 +733,12 @@ function emptyCounter(): BackfillCounter {
 }
 
 function normalizedRoleSlugs(membership: WorkosBackfillMembership): string[] {
-  return Array.from(new Set([membership.roleKey].filter(Boolean)));
+  return [workosRoleSlug(membership.roleKey)];
+}
+
+function workosRoleSlug(roleKey: string): string {
+  if (roleKey === "owner" || roleKey === "hotel_owner") return "admin";
+  return roleKey;
 }
 
 function sameStringSet(left: string[], right: string[]): boolean {

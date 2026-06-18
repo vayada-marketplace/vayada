@@ -116,7 +116,7 @@ describe("runWorkosBackfill", () => {
       expect.objectContaining({
         membershipId: "membership_internal",
         workosMembershipId: "om_workos_created_1",
-        roleSlugs: ["hotel_owner"],
+        roleSlugs: ["admin"],
       }),
     ]);
     expect(summary.parity).toEqual({
@@ -133,7 +133,7 @@ describe("runWorkosBackfill", () => {
     const repository = createMemoryRepository({
       users: [user({ passwordHash: TEST_BCRYPT_HASH, passwordHashType: "bcrypt" })],
       organizations: [organization()],
-      memberships: [membership({ workosRoleSlugs: ["hotel_owner", "booking_manager"] })],
+      memberships: [membership({ workosRoleSlugs: ["admin", "booking_manager"] })],
     });
     const workos = createMemoryWorkosClient({
       existingUsersByExternalId: new Map([["user_internal", "user_workos_existing"]]),
@@ -162,7 +162,7 @@ describe("runWorkosBackfill", () => {
       {
         userId: "user_workos_existing",
         organizationId: "org_workos_existing",
-        roleSlugs: ["hotel_owner"],
+        roleSlugs: ["admin"],
       },
     ]);
   });
@@ -192,7 +192,7 @@ describe("runWorkosBackfill", () => {
     expect(summary.memberships).toMatchObject({ created: 0, linkedExisting: 1, skipped: 0 });
     expect(workos.createdMemberships).toEqual([]);
     expect(workos.updatedMemberships).toEqual([
-      { membershipId: "om_workos_existing", roleSlugs: ["hotel_owner"] },
+      { membershipId: "om_workos_existing", roleSlugs: ["admin"] },
     ]);
     expect(repository.linkedMemberships).toEqual([
       expect.objectContaining({
@@ -229,7 +229,7 @@ describe("runWorkosBackfill", () => {
       {
         userId: "user_workos_existing",
         organizationId: "org_workos_existing",
-        roleSlugs: ["hotel_owner"],
+        roleSlugs: ["admin"],
       },
     ]);
     expect(repository.linkedMemberships).toEqual([
@@ -244,9 +244,7 @@ describe("runWorkosBackfill", () => {
     const repository = createMemoryRepository({
       users: [user({ workosUserId: "user_workos_existing" })],
       organizations: [organization({ workosOrgId: "org_workos_existing" })],
-      memberships: [
-        membership({ workosMembershipId: "om_existing", workosRoleSlugs: ["hotel_owner"] }),
-      ],
+      memberships: [membership({ workosMembershipId: "om_existing", workosRoleSlugs: ["admin"] })],
     });
     const workos = createMemoryWorkosClient({
       usersById: new Map([["user_workos_existing", { externalId: "user_internal" }]]),
@@ -286,9 +284,7 @@ describe("runWorkosBackfill", () => {
           workosExternalId: "org_internal",
         }),
       ],
-      memberships: [
-        membership({ workosMembershipId: "om_existing", workosRoleSlugs: ["hotel_owner"] }),
-      ],
+      memberships: [membership({ workosMembershipId: "om_existing", workosRoleSlugs: ["admin"] })],
     });
 
     const summary = await runWorkosBackfill({
@@ -322,9 +318,7 @@ describe("runWorkosBackfill", () => {
           workosExternalId: "org_second",
         }),
       ],
-      memberships: [
-        membership({ workosMembershipId: "om_existing", workosRoleSlugs: ["hotel_owner"] }),
-      ],
+      memberships: [membership({ workosMembershipId: "om_existing", workosRoleSlugs: ["admin"] })],
     });
 
     const summary = await runWorkosBackfill({
@@ -380,13 +374,13 @@ describe("runWorkosBackfill", () => {
     });
 
     expect(workos.updatedMemberships).toEqual([
-      { membershipId: "om_workos_existing", roleSlugs: ["hotel_owner"] },
+      { membershipId: "om_workos_existing", roleSlugs: ["admin"] },
     ]);
     expect(repository.linkedMemberships).toEqual([
       expect.objectContaining({
         membershipId: "membership_internal",
         workosMembershipId: "om_workos_existing",
-        roleSlugs: ["hotel_owner"],
+        roleSlugs: ["admin"],
       }),
     ]);
     expect(summary.parity).toEqual({
@@ -419,7 +413,7 @@ describe("runWorkosBackfill", () => {
             userId: "user_other",
             organizationId: "org_workos_existing",
             status: "active",
-            roleSlugs: ["hotel_owner"],
+            roleSlugs: ["admin"],
           },
         ],
       ]),
@@ -761,7 +755,7 @@ function createMemoryWorkosClient(
           id: membershipId,
           userId: "user_workos_existing",
           organizationId: "org_workos_existing",
-          roleSlugs: ["hotel_owner"],
+          roleSlugs: ["admin"],
           status: "active",
         };
       }
