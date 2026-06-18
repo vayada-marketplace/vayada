@@ -198,7 +198,7 @@ function createSdkBackfillClient(apiKey: string): WorkosBackfillClient {
       const membership = await workos.userManagement.createOrganizationMembership({
         userId: input.userId,
         organizationId: input.organizationId,
-        roleSlugs: input.roleSlugs,
+        ...membershipRoleInput(input.roleSlugs),
       });
       return {
         id: membership.id,
@@ -223,7 +223,7 @@ function createSdkBackfillClient(apiKey: string): WorkosBackfillClient {
     },
     async updateOrganizationMembershipRoles(membershipId, roleSlugs) {
       const membership = await workos.userManagement.updateOrganizationMembership(membershipId, {
-        roleSlugs,
+        ...membershipRoleInput(roleSlugs),
       });
       return {
         id: membership.id,
@@ -247,6 +247,10 @@ function createSdkBackfillClient(apiKey: string): WorkosBackfillClient {
       };
     },
   };
+}
+
+function membershipRoleInput(roleSlugs: string[]): { roleSlug?: string; roleSlugs?: string[] } {
+  return roleSlugs.length === 1 ? { roleSlug: roleSlugs[0] } : { roleSlugs };
 }
 
 function membershipRoleSlugs(
