@@ -1865,6 +1865,51 @@ describe("vayada-api", () => {
         country: "",
       },
     ]);
+
+    for (const url of [
+      "/admin/settings/property",
+      "/admin/dashboard/stats?range=today",
+      "/admin/dashboard/bookings-by-source?range=today",
+      "/admin/dashboard/conversion-funnel?range=today",
+      "/admin/dashboard/sparklines?range=today",
+      "/admin/dashboard/page-views?week_offset=0",
+    ]) {
+      const response = await app.inject({
+        method: "OPTIONS",
+        url,
+        headers: {
+          origin: "https://next-booking-admin.vayada.com",
+          "access-control-request-method": "GET",
+        },
+      });
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-origin"]).toBe(
+        "https://next-booking-admin.vayada.com",
+      );
+    }
+
+    const property = await injectJson<{ id: string; property_name: string }>(app, {
+      method: "GET",
+      url: "/admin/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(property.statusCode).toBe(200);
+    expect(property.body.id).toBe("booking_hotel_alpenrose");
+    expect(property.body.property_name).toBe("booking_hotel_alpenrose");
+
+    const stats = await injectJson<{ revenue: number; bookings: number }>(app, {
+      method: "GET",
+      url: "/admin/dashboard/stats?range=today",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(stats.statusCode).toBe(200);
+    expect(stats.body).toMatchObject({ revenue: 0, bookings: 0 });
   });
 
   it("does not expose booking addon settings until a read model is configured", async () => {
