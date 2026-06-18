@@ -110,10 +110,10 @@ export function getAuthKitAccessToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
+  if (authKitSession) return authKitSession.accessToken;
   if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
     return legacyCompatibilityToken.token;
   }
-  if (authKitSession) return null;
   return getLegacyPasswordToken();
 }
 
