@@ -296,7 +296,7 @@ const app = buildApp({
               legacyJwtUserType: "hotel",
               requiredResourceLink: {
                 product: "pms",
-                resourceType: "pms_hotel",
+                resourceType: "pms_property",
               },
             },
             "affiliate-dashboard": {
