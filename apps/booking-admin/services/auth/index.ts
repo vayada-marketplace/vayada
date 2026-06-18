@@ -70,7 +70,7 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
     ...options,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...(options.headers as Record<string, string> | undefined),
     },
   });
