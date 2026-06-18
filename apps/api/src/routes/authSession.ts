@@ -102,6 +102,13 @@ const SESSION_COOKIE = "vayada_workos_session";
 const STATE_COOKIE = "vayada_workos_state";
 const CSRF_COOKIE = "vayada_auth_csrf";
 const DEFAULT_SURFACE: AuthSurface = "platform-admin";
+const MAX_PENDING_AUTH_STATES = 5;
+
+type AuthStateContext = {
+  state: string;
+  surface: AuthSurface;
+  returnTo?: string;
+};
 
 export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptions> = async (
   app: FastifyInstance,
@@ -134,11 +141,21 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
             secure: options.cookieSecure,
             domain: options.cookieDomain,
           }),
-          serializeCookie(STATE_COOKIE, encodeStateCookie({ state, surface, returnTo }), {
-            maxAge: 600,
-            secure: options.cookieSecure,
-            domain: options.cookieDomain,
-          }),
+          serializeCookie(
+            STATE_COOKIE,
+            encodeStateCookie(
+              addStateContext(decodeStateCookies(readCookies(request, STATE_COOKIE)), {
+                state,
+                surface,
+                returnTo,
+              }),
+            ),
+            {
+              maxAge: 600,
+              secure: options.cookieSecure,
+              domain: options.cookieDomain,
+            },
+          ),
         ],
       })
       .redirect(authorizationUrl);
@@ -174,8 +191,10 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         message: query.error_description ?? query.error,
       });
     }
-    const stateContext = decodeStateCookie(readCookie(request, STATE_COOKIE));
-    if (!query.code || !query.state || !stateContext || query.state !== stateContext.state) {
+    const stateContext = decodeStateCookies(readCookies(request, STATE_COOKIE)).find(
+      (candidate) => candidate.state === query.state,
+    );
+    if (!query.code || !query.state || !stateContext) {
       return reply.code(400).send({
         error: "invalid_auth_state",
         message: "AuthKit callback state is missing or invalid.",
@@ -418,34 +437,46 @@ function validateReturnTo(rawReturnTo: string, allowedOrigins: string[]): string
   return url.toString();
 }
 
-function encodeStateCookie(input: {
-  state: string;
-  surface: AuthSurface;
-  returnTo?: string;
-}): string {
+function addStateContext(existing: AuthStateContext[], next: AuthStateContext): AuthStateContext[] {
+  return [...existing.filter((candidate) => candidate.state !== next.state), next].slice(
+    -MAX_PENDING_AUTH_STATES,
+  );
+}
+
+function encodeStateCookie(input: AuthStateContext[]): string {
   return `v1.${Buffer.from(JSON.stringify(input)).toString("base64url")}`;
 }
 
-function decodeStateCookie(value: string | undefined): {
-  state: string;
-  surface: AuthSurface;
-  returnTo?: string;
-} | null {
-  if (!value) return null;
+function decodeStateCookies(values: string[]): AuthStateContext[] {
+  return values.flatMap(decodeStateCookie);
+}
+
+function decodeStateCookie(value: string | undefined): AuthStateContext[] {
+  if (!value) return [];
   if (!value.startsWith("v1.")) {
-    return { state: value, surface: DEFAULT_SURFACE };
+    return [{ state: value, surface: DEFAULT_SURFACE }];
   }
   try {
-    const parsed = JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8")) as {
-      state?: unknown;
-      surface?: unknown;
-      returnTo?: unknown;
-    };
-    if (typeof parsed.state !== "string") return null;
+    const parsed = JSON.parse(Buffer.from(value.slice(3), "base64url").toString("utf8"));
+    const candidates = Array.isArray(parsed) ? parsed : [parsed];
+    return candidates.flatMap((candidate) => {
+      const stateContext = parseStateContext(candidate);
+      return stateContext ? [stateContext] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+function parseStateContext(candidate: unknown): AuthStateContext | null {
+  if (!candidate || typeof candidate !== "object") return null;
+  const raw = candidate as { state?: unknown; surface?: unknown; returnTo?: unknown };
+  if (typeof raw.state !== "string") return null;
+  try {
     return {
-      state: parsed.state,
-      surface: parseSurface(typeof parsed.surface === "string" ? parsed.surface : undefined),
-      returnTo: typeof parsed.returnTo === "string" ? parsed.returnTo : undefined,
+      state: raw.state,
+      surface: parseSurface(typeof raw.surface === "string" ? raw.surface : undefined),
+      returnTo: typeof raw.returnTo === "string" ? raw.returnTo : undefined,
     };
   } catch {
     return null;
@@ -732,16 +763,21 @@ function base64Url(value: string): string {
 }
 
 function readCookie(request: FastifyRequest, name: string): string | undefined {
+  return readCookies(request, name)[0];
+}
+
+function readCookies(request: FastifyRequest, name: string): string[] {
   const header = request.headers.cookie;
-  if (!header) return undefined;
+  if (!header) return [];
   const cookies = header.split(";").map((part) => part.trim());
+  const values: string[] = [];
   for (const cookie of cookies) {
     const [cookieName, ...rawValue] = cookie.split("=");
     if (cookieName === name) {
-      return decodeURIComponent(rawValue.join("="));
+      values.push(decodeURIComponent(rawValue.join("=")));
     }
   }
-  return undefined;
+  return values;
 }
 
 function serializeCookie(
