@@ -6462,6 +6462,84 @@ describe("vayada-api", () => {
     expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
   });
 
+  it("allows PMS Web setup-status compatibility checks from configured origins", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url: "/admin/setup-status",
+      headers: {
+        origin: "https://pms.localhost",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "authorization,content-type,x-hotel-id",
+      },
+    });
+    const read = await app.inject({
+      method: "GET",
+      url: "/admin/setup-status",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    expect(read.statusCode).toBe(200);
+    expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    expect(read.json()).toMatchObject({
+      registered: true,
+      setupComplete: true,
+      setup_complete: true,
+      roomCount: expect.any(Number),
+      room_count: expect.any(Number),
+    });
+  });
+
+  it("returns a structured PMS setup-status error when the read model is unavailable", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsRepository: {
+        ...pmsOperationsRepository,
+        async listRoomTypesByPropertyId() {
+          throw new Error("read model unavailable");
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/admin/setup-status",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "PMS room types read model is unavailable.",
+    });
+  });
+
   it("returns PMS room-type detail through the P1a route contract", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.read"],

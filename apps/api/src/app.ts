@@ -89,7 +89,10 @@ import {
   registerPlatformContactIntakeRoutes,
   type PlatformContactIntakeRoutesOptions,
 } from "./routes/platformContactIntake.js";
-import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
+import {
+  registerPmsLegacyAdminRoutes,
+  registerPmsOperationsRoutes,
+} from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -283,6 +286,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     guestFormSettingsSync: options.bookingGuestFormSettingsSync,
   });
   if (options.pmsOperationsRepository) {
+    app.register(registerPmsLegacyAdminRoutes, {
+      prefix: "/admin",
+      repository: options.pmsOperationsRepository,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
     app.register(registerPmsOperationsRoutes, {
       prefix: "/api/pms",
       repository: options.pmsOperationsRepository,
