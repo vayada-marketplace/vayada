@@ -60,6 +60,14 @@ type PropertySettings = {
   points_of_interest?: unknown[];
 };
 
+type ModuleActivation = {
+  moduleId: string;
+  isActive: boolean;
+  activatedAt: string | null;
+  deactivatedAt: string | null;
+  updatedAt: string;
+};
+
 export async function registerBookingAdminCompatRoutes(
   app: FastifyInstance,
   options: BookingAdminCompatRoutesOptions = {},
@@ -76,6 +84,8 @@ export async function registerBookingAdminCompatRoutes(
   app.options("/dashboard/conversion-funnel", async (_request, reply) => reply.code(204).send());
   app.options("/dashboard/sparklines", async (_request, reply) => reply.code(204).send());
   app.options("/dashboard/page-views", async (_request, reply) => reply.code(204).send());
+  app.options("/module-activations", async (_request, reply) => reply.code(204).send());
+  app.options("/module-activations/:moduleId", async (_request, reply) => reply.code(204).send());
 
   app.get("/settings/setup-status", async (request) => {
     const hotels = getLinkedBookingHotels(request);
@@ -136,6 +146,20 @@ export async function registerBookingAdminCompatRoutes(
       has_previous_data: false,
     };
   });
+
+  app.get("/module-activations", async (request) => {
+    const [hotel] = getLinkedBookingHotels(request);
+    return {
+      hotelId: hotel?.id ?? "booking_hotel",
+      activeModules: [],
+      activations: [],
+    };
+  });
+
+  app.patch<{ Params: { moduleId: string }; Body: { isActive?: boolean } }>(
+    "/module-activations/:moduleId",
+    async (request) => toModuleActivation(request.params.moduleId, request.body?.isActive === true),
+  );
 
   app.post("/hotels", async (_request, reply) =>
     reply.code(501).send({
@@ -215,6 +239,17 @@ function toPropertySettings(hotel: HotelSummary | undefined): PropertySettings {
   };
 }
 
+function toModuleActivation(moduleId: string, isActive: boolean): ModuleActivation {
+  const now = new Date().toISOString();
+  return {
+    moduleId,
+    isActive,
+    activatedAt: isActive ? now : null,
+    deactivatedAt: isActive ? null : now,
+    updatedAt: now,
+  };
+}
+
 function writeCompatCorsHeaders(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -225,6 +260,6 @@ function writeCompatCorsHeaders(
   if (!origin || !allowedOrigins.includes(origin)) return;
   reply
     .header("Access-Control-Allow-Origin", origin)
-    .header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-    .header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    .header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Hotel-Id")
+    .header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
 }

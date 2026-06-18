@@ -1873,6 +1873,7 @@ describe("vayada-api", () => {
       "/admin/dashboard/conversion-funnel?range=today",
       "/admin/dashboard/sparklines?range=today",
       "/admin/dashboard/page-views?week_offset=0",
+      "/admin/module-activations",
     ]) {
       const response = await app.inject({
         method: "OPTIONS",
@@ -1880,12 +1881,14 @@ describe("vayada-api", () => {
         headers: {
           origin: "https://next-booking-admin.vayada.com",
           "access-control-request-method": "GET",
+          "access-control-request-headers": "authorization,content-type,x-hotel-id",
         },
       });
       expect(response.statusCode).toBe(204);
       expect(response.headers["access-control-allow-origin"]).toBe(
         "https://next-booking-admin.vayada.com",
       );
+      expect(response.headers["access-control-allow-headers"]).toContain("X-Hotel-Id");
     }
 
     const property = await injectJson<{ id: string; property_name: string }>(app, {
@@ -1910,6 +1913,22 @@ describe("vayada-api", () => {
     });
     expect(stats.statusCode).toBe(200);
     expect(stats.body).toMatchObject({ revenue: 0, bookings: 0 });
+
+    const modules = await injectJson<{ hotelId: string; activeModules: string[] }>(app, {
+      method: "GET",
+      url: "/admin/module-activations",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+        "x-hotel-id": "booking_hotel_alpenrose",
+      },
+    });
+    expect(modules.statusCode).toBe(200);
+    expect(modules.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      activeModules: [],
+      activations: [],
+    });
   });
 
   it("does not expose booking addon settings until a read model is configured", async () => {
