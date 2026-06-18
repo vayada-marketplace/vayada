@@ -10,6 +10,8 @@ export type WorkosBackfillUser = {
   emailVerified: boolean;
   workosUserId: string | null;
   workosIdentityCount: number;
+  passwordHash: string | null;
+  passwordHashType: "bcrypt" | null;
 };
 
 export type WorkosBackfillOrganization = {
@@ -72,12 +74,19 @@ export type WorkosBackfillClient = {
     externalId: string,
   ): Promise<{ id: string; externalId: string | null } | null>;
   updateUserExternalId(userId: string, externalId: string): Promise<void>;
+  updateUserPasswordHash(
+    userId: string,
+    passwordHash: string,
+    passwordHashType: "bcrypt",
+  ): Promise<void>;
   createUser(input: {
     email: string;
     name?: string;
     emailVerified: boolean;
     externalId: string;
     metadata: Record<string, string>;
+    passwordHash?: string;
+    passwordHashType?: "bcrypt";
   }): Promise<{ id: string; externalId: string | null }>;
   getOrganization(
     organizationId: string,
@@ -190,18 +199,10 @@ export async function runWorkosBackfill(
       continue;
     }
 
-    const workosUser =
-      existing ??
-      (await workos.createUser({
-        email: user.email,
-        name: user.name ?? undefined,
-        emailVerified: user.emailVerified,
-        externalId: user.id,
-        metadata: {
-          vayada_user_id: user.id,
-          source: "vayada-backfill",
-        },
-      }));
+    const workosUser = existing ?? (await workos.createUser(createWorkosUserInput(user)));
+    if (existing && user.passwordHash && user.passwordHashType) {
+      await workos.updateUserPasswordHash(existing.id, user.passwordHash, user.passwordHashType);
+    }
     existing ? summary.users.linkedExisting++ : summary.users.created++;
     workosUserIds.set(user.id, workosUser.id);
     await config.repository.linkUser({
@@ -357,11 +358,59 @@ export async function runWorkosBackfill(
   return summary;
 }
 
+function createWorkosUserInput(user: WorkosBackfillUser) {
+  return {
+    email: user.email,
+    name: user.name ?? undefined,
+    emailVerified: user.emailVerified,
+    externalId: user.id,
+    metadata: {
+      vayada_user_id: user.id,
+      source: "vayada-backfill",
+    },
+    passwordHash: user.passwordHash ?? undefined,
+    passwordHashType: user.passwordHashType ?? undefined,
+  };
+}
+
+export function createWorkosBackfillCohortForEmail(
+  source: WorkosBackfillSource,
+  email: string,
+): WorkosBackfillCohort {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw new Error("WorkOS backfill email is required.");
+  }
+
+  const users = source.users.filter((user) => user.email.toLowerCase() === normalizedEmail);
+  if (users.length === 0) {
+    throw new Error(`No target identity user found for email ${email}.`);
+  }
+  if (users.length > 1) {
+    throw new Error(`Multiple target identity users found for email ${email}.`);
+  }
+
+  const user = users[0];
+  const memberships = source.memberships.filter((membership) => membership.userId === user.id);
+  return {
+    key: `email:${user.email}`,
+    userIds: [user.id],
+    organizationIds: Array.from(
+      new Set(memberships.map((membership) => membership.organizationId)),
+    ),
+    membershipIds: memberships.map((membership) => membership.id),
+  };
+}
+
 export function createPgWorkosBackfillRepository(config: {
   connectionString: string;
+  legacyAuthConnectionString?: string;
   max?: number;
 }): WorkosBackfillRepository {
   const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
+  const legacyAuthPool = config.legacyAuthConnectionString
+    ? new pg.Pool({ connectionString: config.legacyAuthConnectionString, max: config.max })
+    : null;
 
   return {
     async loadSource() {
@@ -390,7 +439,9 @@ export function createPgWorkosBackfillRepository(config: {
                SELECT count(*)::int
                FROM identity.external_identities
                WHERE user_id = users.id AND provider = 'workos'
-             ) AS "workosIdentityCount"
+             ) AS "workosIdentityCount",
+             NULL::text AS "passwordHash",
+             NULL::text AS "passwordHashType"
            FROM identity.users users
            ORDER BY users.id`,
         ),
@@ -421,7 +472,7 @@ export function createPgWorkosBackfillRepository(config: {
       ]);
 
       return {
-        users: users.rows,
+        users: await attachLegacyPasswordHashes(users.rows, legacyAuthPool),
         organizations: organizations.rows,
         memberships: memberships.rows,
       };
@@ -555,6 +606,38 @@ export function createPgWorkosBackfillRepository(config: {
       });
     },
   };
+}
+
+async function attachLegacyPasswordHashes(
+  users: WorkosBackfillUser[],
+  legacyAuthPool: pg.Pool | null,
+): Promise<WorkosBackfillUser[]> {
+  if (!legacyAuthPool || users.length === 0) return users;
+
+  const { rows } = await legacyAuthPool.query<{ id: string; passwordHash: string | null }>(
+    `SELECT
+       id::text,
+       CASE
+         WHEN password_hash LIKE '$2a$%'
+           OR password_hash LIKE '$2b$%'
+           OR password_hash LIKE '$2y$%'
+         THEN password_hash
+         ELSE NULL
+       END AS "passwordHash"
+     FROM users
+     WHERE id = ANY($1::uuid[])`,
+    [users.map((user) => user.id)],
+  );
+  const passwordHashes = new Map(rows.map((row) => [row.id, row.passwordHash]));
+
+  return users.map((user) => {
+    const passwordHash = passwordHashes.get(user.id) ?? null;
+    return {
+      ...user,
+      passwordHash,
+      passwordHashType: passwordHash ? "bcrypt" : null,
+    };
+  });
 }
 
 async function insertReconciliationEvent(

@@ -1,13 +1,41 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createWorkosBackfillCohortForEmail,
   runWorkosBackfill,
   type WorkosBackfillClient,
   type WorkosBackfillRepository,
   type WorkosBackfillSource,
 } from "./workosBackfill.js";
 
+const TEST_BCRYPT_HASH = "$2b$12$abcdefghijklmnopqrstuuJ/lL7AGas7gSUzwl3hBRMaGQJ2dAU1y";
+
 describe("runWorkosBackfill", () => {
+  it("builds a one-user cohort from email and includes that user's memberships", () => {
+    const source = {
+      users: [
+        user({ email: "Owner@Example.com" }),
+        user({ id: "user_outside", email: "outside@example.com" }),
+      ],
+      organizations: [organization()],
+      memberships: [
+        membership(),
+        membership({
+          id: "membership_outside",
+          userId: "user_outside",
+          organizationId: "org_internal",
+        }),
+      ],
+    };
+
+    expect(createWorkosBackfillCohortForEmail(source, "owner@example.com")).toEqual({
+      key: "email:Owner@Example.com",
+      userIds: ["user_internal"],
+      organizationIds: ["org_internal"],
+      membershipIds: ["membership_internal"],
+    });
+  });
+
   it("summarizes dry-run work without calling WorkOS or writing local links", async () => {
     const repository = createMemoryRepository({
       users: [user()],
@@ -47,7 +75,7 @@ describe("runWorkosBackfill", () => {
 
   it("creates missing WorkOS users, organizations, and active memberships", async () => {
     const repository = createMemoryRepository({
-      users: [user()],
+      users: [user({ passwordHash: TEST_BCRYPT_HASH, passwordHashType: "bcrypt" })],
       organizations: [organization()],
       memberships: [membership()],
     });
@@ -61,6 +89,14 @@ describe("runWorkosBackfill", () => {
     });
 
     expect(summary.users.created).toBe(1);
+    expect(workos.createdUsers).toEqual([
+      {
+        email: "owner@example.com",
+        externalId: "user_internal",
+        passwordHash: TEST_BCRYPT_HASH,
+        passwordHashType: "bcrypt",
+      },
+    ]);
     expect(summary.organizations.created).toBe(1);
     expect(summary.memberships.created).toBe(1);
     expect(repository.linkedUsers).toEqual([
@@ -95,7 +131,7 @@ describe("runWorkosBackfill", () => {
 
   it("links existing WorkOS resources by external ID before creating memberships", async () => {
     const repository = createMemoryRepository({
-      users: [user()],
+      users: [user({ passwordHash: TEST_BCRYPT_HASH, passwordHashType: "bcrypt" })],
       organizations: [organization()],
       memberships: [membership({ workosRoleSlugs: ["hotel_owner", "booking_manager"] })],
     });
@@ -114,6 +150,13 @@ describe("runWorkosBackfill", () => {
     expect(summary.users).toMatchObject({ created: 0, linkedExisting: 1, skipped: 0 });
     expect(summary.organizations).toMatchObject({ created: 0, linkedExisting: 1, skipped: 0 });
     expect(workos.createdUsers).toEqual([]);
+    expect(workos.updatedUserPasswordHashes).toEqual([
+      {
+        userId: "user_workos_existing",
+        passwordHash: TEST_BCRYPT_HASH,
+        passwordHashType: "bcrypt",
+      },
+    ]);
     expect(workos.createdOrganizations).toEqual([]);
     expect(workos.createdMemberships).toEqual([
       {
@@ -495,6 +538,8 @@ function user(overrides: Partial<WorkosBackfillSource["users"][number]> = {}) {
     emailVerified: true,
     workosUserId: null,
     workosIdentityCount: 0,
+    passwordHash: null,
+    passwordHashType: null,
     ...overrides,
   };
   if (overrides.workosUserId && overrides.workosIdentityCount === undefined) {
@@ -606,22 +651,34 @@ function createMemoryWorkosClient(
     organizationsById?: Map<string, { externalId: string | null }>;
   } = {},
 ) {
-  const createdUsers: Array<{ email: string; externalId: string }> = [];
+  const createdUsers: Array<{
+    email: string;
+    externalId: string;
+    passwordHash?: string;
+    passwordHashType?: "bcrypt";
+  }> = [];
   const createdOrganizations: Array<{ name: string; externalId: string }> = [];
   const createdMemberships: Array<{ userId: string; organizationId: string; roleSlugs: string[] }> =
     [];
   const updatedMemberships: Array<{ membershipId: string; roleSlugs: string[] }> = [];
+  const updatedUserPasswordHashes: Array<{
+    userId: string;
+    passwordHash: string;
+    passwordHashType: "bcrypt";
+  }> = [];
 
   const workos: WorkosBackfillClient & {
     createdUsers: typeof createdUsers;
     createdOrganizations: typeof createdOrganizations;
     createdMemberships: typeof createdMemberships;
     updatedMemberships: typeof updatedMemberships;
+    updatedUserPasswordHashes: typeof updatedUserPasswordHashes;
   } = {
     createdUsers,
     createdOrganizations,
     createdMemberships,
     updatedMemberships,
+    updatedUserPasswordHashes,
     async getUserByExternalId(externalId) {
       const id = config.existingUsersByExternalId?.get(externalId);
       return id ? { id, externalId } : null;
@@ -633,6 +690,9 @@ function createMemoryWorkosClient(
       return null;
     },
     async updateUserExternalId() {},
+    async updateUserPasswordHash(userId, passwordHash, passwordHashType) {
+      updatedUserPasswordHashes.push({ userId, passwordHash, passwordHashType });
+    },
     async getOrganization(organizationId) {
       const organization = config.organizationsById?.get(organizationId);
       if (organization) return { id: organizationId, externalId: organization.externalId };
@@ -642,7 +702,12 @@ function createMemoryWorkosClient(
       return null;
     },
     async createUser(input) {
-      createdUsers.push({ email: input.email, externalId: input.externalId });
+      createdUsers.push({
+        email: input.email,
+        externalId: input.externalId,
+        passwordHash: input.passwordHash,
+        passwordHashType: input.passwordHashType,
+      });
       return { id: `user_workos_created_${createdUsers.length}`, externalId: input.externalId };
     },
     async getOrganizationByExternalId(externalId) {

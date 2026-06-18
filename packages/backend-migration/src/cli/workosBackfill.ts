@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { WorkOS } from "@workos-inc/node";
 
 import {
+  createWorkosBackfillCohortForEmail,
   createPgWorkosBackfillRepository,
   runWorkosBackfill,
   type WorkosBackfillClient,
@@ -15,15 +16,19 @@ import {
 function parseArgs(argv: string[]): {
   mode: WorkosBackfillMode;
   connectionString: string;
+  legacyAuthConnectionString: string;
   workosApiKey: string;
-  cohortManifestPath: string;
+  cohortManifestPath?: string;
+  email?: string;
   confirm: string;
 } {
   const args = argv.slice(2);
   let mode: WorkosBackfillMode = "dry-run";
   let connectionString = process.env["TARGET_DATABASE_URL"] ?? "";
+  let legacyAuthConnectionString = process.env["WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL"] ?? "";
   let workosApiKey = process.env["WORKOS_API_KEY"] ?? "";
   let cohortManifestPath = "";
+  let email = "";
   let confirm = "";
 
   for (let i = 0; i < args.length; i++) {
@@ -34,26 +39,48 @@ function parseArgs(argv: string[]): {
       mode = "apply";
     } else if (arg === "--connection-string" && args[i + 1]) {
       connectionString = args[++i];
+    } else if (arg === "--legacy-auth-connection-string" && args[i + 1]) {
+      legacyAuthConnectionString = args[++i];
     } else if (arg === "--cohort-manifest" && args[i + 1]) {
       cohortManifestPath = args[++i];
+    } else if (arg === "--email" && args[i + 1]) {
+      email = args[++i];
     } else if (arg === "--confirm" && args[i + 1]) {
       confirm = args[++i];
     }
   }
 
-  return { mode, connectionString, workosApiKey, cohortManifestPath, confirm };
+  return {
+    mode,
+    connectionString,
+    legacyAuthConnectionString,
+    workosApiKey,
+    cohortManifestPath: cohortManifestPath || undefined,
+    email: email || undefined,
+    confirm,
+  };
 }
 
-const { mode, connectionString, workosApiKey, cohortManifestPath, confirm } = parseArgs(
-  process.argv,
-);
+const {
+  mode,
+  connectionString,
+  legacyAuthConnectionString,
+  workosApiKey,
+  cohortManifestPath,
+  email,
+  confirm,
+} = parseArgs(process.argv);
 
 if (!connectionString) {
   console.error("Error: TARGET_DATABASE_URL or --connection-string is required.");
   process.exit(1);
 }
-if (!cohortManifestPath) {
-  console.error("Error: --cohort-manifest is required.");
+if (!cohortManifestPath && !email) {
+  console.error("Error: --cohort-manifest or --email is required.");
+  process.exit(1);
+}
+if (cohortManifestPath && email) {
+  console.error("Error: pass only one of --cohort-manifest or --email.");
   process.exit(1);
 }
 if (mode === "apply" && !workosApiKey) {
@@ -61,7 +88,13 @@ if (mode === "apply" && !workosApiKey) {
   process.exit(1);
 }
 
-const cohort = await loadCohortManifest(cohortManifestPath);
+const repository = createPgWorkosBackfillRepository({
+  connectionString,
+  legacyAuthConnectionString,
+});
+const cohort = cohortManifestPath
+  ? await loadCohortManifest(cohortManifestPath)
+  : createWorkosBackfillCohortForEmail(await repository.loadSource(), email!);
 if (mode === "apply" && confirm !== cohort.key) {
   console.error(`Error: --apply requires --confirm ${cohort.key}.`);
   process.exit(1);
@@ -69,8 +102,10 @@ if (mode === "apply" && confirm !== cohort.key) {
 
 console.log(`WorkOS backfill target cohort: ${cohort.key}`);
 console.log(`Database URL host: ${safeDatabaseTarget(connectionString)}`);
+if (legacyAuthConnectionString) {
+  console.log(`Legacy auth DB host: ${safeDatabaseTarget(legacyAuthConnectionString)}`);
+}
 
-const repository = createPgWorkosBackfillRepository({ connectionString });
 const summary = await runWorkosBackfill({
   mode,
   cohort,
@@ -109,6 +144,9 @@ function createSdkBackfillClient(apiKey: string): WorkosBackfillClient {
     async updateUserExternalId(userId, externalId) {
       await workos.userManagement.updateUser({ userId, externalId });
     },
+    async updateUserPasswordHash(userId, passwordHash, passwordHashType) {
+      await workos.userManagement.updateUser({ userId, passwordHash, passwordHashType });
+    },
     async createUser(input) {
       const user = await workos.userManagement.createUser({
         email: input.email,
@@ -116,6 +154,8 @@ function createSdkBackfillClient(apiKey: string): WorkosBackfillClient {
         emailVerified: input.emailVerified,
         externalId: input.externalId,
         metadata: input.metadata,
+        passwordHash: input.passwordHash,
+        passwordHashType: input.passwordHashType,
       });
       return { id: user.id, externalId: user.externalId };
     },
