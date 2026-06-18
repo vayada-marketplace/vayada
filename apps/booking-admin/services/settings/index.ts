@@ -1,4 +1,11 @@
-import { apiClient } from "../api/client";
+import { ApiClient, apiClient } from "../api/client";
+
+const legacyBookingApiClient = new ApiClient(
+  process.env.NEXT_PUBLIC_LEGACY_BOOKING_API_URL ||
+    process.env.NEXT_PUBLIC_MARKETPLACE_API_URL ||
+    "https://api.vayada.com",
+  { preferLegacyCompatibilityToken: true },
+);
 
 export interface PropertySettings {
   // booking_hotels.id — unified across both backend databases after
@@ -225,7 +232,7 @@ export const settingsService = {
   // to localStorage.selectedHotelId so subsequent wizard calls carry
   // the correct X-Hotel-Id header.
   createHotel: (data: PropertySettingsUpdate) =>
-    apiClient.post<PropertySettings>("/admin/hotels", data),
+    legacyBookingApiClient.post<PropertySettings>("/admin/hotels", data),
 
   changePassword: (current_password: string, new_password: string) =>
     apiClient.post("/auth/change-password", { current_password, new_password }),
@@ -242,13 +249,14 @@ export const settingsService = {
   getDesignSettings: () => apiClient.get<DesignSettings>("/admin/settings/design"),
 
   updateDesignSettings: (data: DesignSettingsUpdate) =>
-    apiClient.patch<DesignSettings>("/admin/settings/design", data),
+    legacyBookingApiClient.patch<DesignSettings>("/admin/settings/design", data),
 
   getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
 
   listAddons: () => apiClient.get<AddonItem[]>("/admin/addons"),
 
-  createAddon: (data: Omit<AddonItem, "id">) => apiClient.post<AddonItem>("/admin/addons", data),
+  createAddon: (data: Omit<AddonItem, "id">) =>
+    legacyBookingApiClient.post<AddonItem>("/admin/addons", data),
 
   updateAddon: (id: string, data: Partial<AddonItem>) =>
     apiClient.patch<AddonItem>(`/admin/addons/${id}`, data),
@@ -263,7 +271,7 @@ export const settingsService = {
   listPromoCodes: () => apiClient.get<PromoCodeItem[]>("/admin/promo-codes"),
 
   createPromoCode: (data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">) =>
-    apiClient.post<PromoCodeItem>("/admin/promo-codes", data),
+    legacyBookingApiClient.post<PromoCodeItem>("/admin/promo-codes", data),
 
   updatePromoCode: (id: string, data: Partial<PromoCodeItem>) =>
     apiClient.patch<PromoCodeItem>(`/admin/promo-codes/${id}`, data),

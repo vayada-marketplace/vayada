@@ -2,7 +2,11 @@
  * API client configuration
  */
 
-import { clearAuthData, getAuthBearerToken } from "../auth/sessionStore";
+import {
+  clearAuthData,
+  getAuthBearerToken,
+  getLegacyCompatibilityToken,
+} from "../auth/sessionStore";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 
@@ -36,9 +40,14 @@ export class ApiErrorResponse extends Error {
 
 export class ApiClient {
   private baseURL: string;
+  private preferLegacyCompatibilityToken: boolean;
 
-  constructor(baseURL: string = API_BASE_URL) {
+  constructor(
+    baseURL: string = API_BASE_URL,
+    options: { preferLegacyCompatibilityToken?: boolean } = {},
+  ) {
     this.baseURL = baseURL;
+    this.preferLegacyCompatibilityToken = options.preferLegacyCompatibilityToken === true;
   }
 
   /**
@@ -71,7 +80,11 @@ export class ApiClient {
       "/auth/validate-token",
       "/auth/verify-email-change",
     ];
-    const token = publicAuthEndpoints.includes(endpoint) ? null : getAuthBearerToken();
+    const token = publicAuthEndpoints.includes(endpoint)
+      ? null
+      : this.preferLegacyCompatibilityToken
+        ? (getLegacyCompatibilityToken() ?? getAuthBearerToken())
+        : getAuthBearerToken();
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

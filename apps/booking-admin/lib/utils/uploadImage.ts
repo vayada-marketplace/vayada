@@ -1,6 +1,7 @@
 import {
   getAuthBearerToken,
   getAuthKitAccessToken,
+  getLegacyCompatibilityToken,
   getScopedBookingHotelIds,
 } from "@/services/auth/sessionStore";
 
@@ -150,7 +151,7 @@ async function uploadLegacyMarketplaceImages(
   fileList: File[],
   purpose: BookingMediaPurpose,
 ): Promise<string[]> {
-  const token = getAuthBearerToken() ?? getAuthKitAccessToken();
+  const token = getLegacyCompatibilityToken() ?? getAuthBearerToken() ?? getAuthKitAccessToken();
   if (!token) throw new Error("Not authenticated");
 
   if (purpose === "property.hero_image" && fileList.length === 1) {
