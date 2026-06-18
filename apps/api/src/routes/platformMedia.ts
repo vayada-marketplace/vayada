@@ -285,6 +285,7 @@ export type PlatformMediaRoutesOptions = {
   signer: PlatformMediaUploadSigner;
   targetResolver: PlatformMediaTargetResolver;
   finalizer: PlatformMediaUploadFinalizer;
+  allowedOrigins?: string[];
   bucketName?: string;
   now?: () => Date;
 };
@@ -478,10 +479,21 @@ export async function registerPlatformMediaRoutes(
 ): Promise<void> {
   const bucketName = options.bucketName ?? "vayada-media-local";
   const now = options.now ?? (() => new Date());
-
   app.addHook("onClose", async () => {
     await options.repository.close?.();
   });
+
+  app.addHook("onRequest", async (request, reply) => {
+    reply.header("Vary", "Origin");
+    const origin = request.headers.origin;
+    if (origin && options.allowedOrigins?.includes(origin)) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      reply.header("Access-Control-Allow-Methods", "POST, OPTIONS");
+    }
+  });
+
+  app.options("/*", async (_request, reply) => reply.status(204).send());
 
   app.post<{ Body: PlatformMediaUploadSessionRequest }>(
     "/upload-sessions",
@@ -1462,9 +1474,7 @@ function isSupportedSourceImageUrl(value: string): boolean {
     if (url.protocol !== "https:" && url.protocol !== "http:") return false;
     const extension = filenameExtension(url.pathname);
     if (extension === null) return true;
-    return (
-      purposePolicies["pms.import.source_image"].allowedExtensions.includes(extension)
-    );
+    return purposePolicies["pms.import.source_image"].allowedExtensions.includes(extension);
   } catch {
     return false;
   }

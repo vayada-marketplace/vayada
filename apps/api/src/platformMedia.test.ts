@@ -115,6 +115,46 @@ type ErrorResponse = {
 };
 
 describe("platform media upload routes", () => {
+  it("allows browser preflight requests from configured admin origins", async () => {
+    const app = buildMediaApp({ allowedOrigins: ["https://admin.booking.localhost"] });
+
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/api/media/upload-sessions",
+      headers: {
+        origin: "https://admin.booking.localhost",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,content-type",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://admin.booking.localhost");
+    expect(response.headers["access-control-allow-headers"]).toBe("Authorization, Content-Type");
+    expect(response.headers["access-control-allow-methods"]).toBe("POST, OPTIONS");
+    expect(response.headers.vary).toBe("Origin");
+  });
+
+  it("omits CORS allow headers for unconfigured origins", async () => {
+    const app = buildMediaApp({ allowedOrigins: ["https://admin.booking.localhost"] });
+
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/api/media/upload-sessions",
+      headers: {
+        origin: "https://admin.example.test",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization,content-type",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(response.headers["access-control-allow-headers"]).toBeUndefined();
+    expect(response.headers["access-control-allow-methods"]).toBeUndefined();
+    expect(response.headers.vary).toBe("Origin");
+  });
+
   it("creates a signed property upload session and finalizes it with inspected private variants", async () => {
     const repository = createInMemoryPlatformMediaRepository();
     const app = buildMediaApp({ repository });
@@ -821,6 +861,7 @@ function buildMediaApp(
     }>;
     targetResolver?: PlatformMediaTargetResolver;
     finalizer?: PlatformMediaUploadFinalizer;
+    allowedOrigins?: string[];
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
@@ -830,6 +871,7 @@ function buildMediaApp(
       signer: createDeterministicPlatformMediaUploadSigner(),
       targetResolver: options.targetResolver ?? propertyMediaTargetResolver,
       finalizer: options.finalizer ?? createDeterministicPlatformMediaFinalizer(),
+      allowedOrigins: options.allowedOrigins,
       now: () => new Date("2026-06-12T12:00:00.000Z"),
     },
     auth: {
