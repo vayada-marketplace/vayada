@@ -128,14 +128,19 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     });
 
     reply
-      .header(
-        "set-cookie",
-        serializeCookie(STATE_COOKIE, encodeStateCookie({ state, surface, returnTo }), {
-          maxAge: 600,
-          secure: options.cookieSecure,
-          domain: options.cookieDomain,
-        }),
-      )
+      .headers({
+        "set-cookie": [
+          ...clearHostOnlyCookies([STATE_COOKIE, SESSION_COOKIE, CSRF_COOKIE], {
+            secure: options.cookieSecure,
+            domain: options.cookieDomain,
+          }),
+          serializeCookie(STATE_COOKIE, encodeStateCookie({ state, surface, returnTo }), {
+            maxAge: 600,
+            secure: options.cookieSecure,
+            domain: options.cookieDomain,
+          }),
+        ],
+      })
       .redirect(authorizationUrl);
   });
 
@@ -754,6 +759,19 @@ function serializeCookie(
   if (options.secure) parts.push("Secure");
   if (options.domain) parts.push(`Domain=${options.domain}`);
   return parts.join("; ");
+}
+
+function clearHostOnlyCookies(
+  names: string[],
+  options: { secure: boolean; domain?: string },
+): string[] {
+  if (!options.domain) return [];
+  return names.map((name) =>
+    serializeCookie(name, "", {
+      maxAge: 0,
+      secure: options.secure,
+    }),
+  );
 }
 
 function toAuthError(error: unknown) {
