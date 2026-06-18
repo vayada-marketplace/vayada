@@ -109,12 +109,16 @@ export function getAuthKitAccessToken(): string | null {
   return authKitSession?.accessToken ?? null;
 }
 
-export function getAuthBearerToken(): string | null {
-  if (authKitSession) return authKitSession.accessToken;
+export function getLegacyCompatibilityToken(): string | null {
   if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
     return legacyCompatibilityToken.token;
   }
   return getLegacyPasswordToken();
+}
+
+export function getAuthBearerToken(): string | null {
+  if (authKitSession) return authKitSession.accessToken;
+  return getLegacyCompatibilityToken();
 }
 
 export function getScopedBookingHotelIds(): string[] {
