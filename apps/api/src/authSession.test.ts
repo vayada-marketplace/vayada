@@ -54,7 +54,9 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(302);
     expect(response.headers.location).toContain("https://auth.workos.test/authorize?");
     expect(response.headers.location).toContain("login_hint=admin%40example.com");
-    expect(response.headers["set-cookie"]).toContain("vayada_workos_state=");
+    expect(response.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([expect.stringContaining("vayada_workos_state=")]),
+    );
   });
 
   it("completes callback for an existing linked user and emits login audit", async () => {
@@ -99,6 +101,26 @@ describe("AuthKit session routes", () => {
         workosUserId: "user_workos_platform",
       }),
     ]);
+  });
+
+  it("accepts callback state from duplicate cookies with multiple pending login attempts", async () => {
+    app = buildAuthSessionApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=older-callback-state",
+      headers: {
+        cookie: `vayada_workos_state=stale-callback-state; vayada_workos_state=${encodeTestStateCookie(
+          [
+            { state: "older-callback-state", surface: "platform-admin" },
+            { state: "newer-callback-state", surface: "platform-admin" },
+          ],
+        )}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().user.id).toBe("user_platform_admin");
   });
 
   it("redirects to the configured frontend success URL after callback when enabled", async () => {
@@ -766,6 +788,12 @@ function createAuthKitClient(overrides: Partial<AuthKitClient> = {}): AuthKitCli
     async updateUserExternalId() {},
     ...overrides,
   };
+}
+
+function encodeTestStateCookie(
+  input: Array<{ state: string; surface?: string; returnTo?: string }>,
+): string {
+  return `v1.${Buffer.from(JSON.stringify(input)).toString("base64url")}`;
 }
 
 function createIdentityRepository(
