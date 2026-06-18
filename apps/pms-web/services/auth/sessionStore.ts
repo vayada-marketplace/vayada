@@ -53,6 +53,9 @@ export function setLegacyCompatibilityToken(token: string, expiresIn: number): v
     token,
     expiresAt: Date.now() + expiresIn * 1000,
   };
+  if (typeof window === "undefined") return;
+  localStorage.setItem(LEGACY_TOKEN_KEY, token);
+  localStorage.setItem(LEGACY_EXPIRES_AT_KEY, String(legacyCompatibilityToken.expiresAt));
 }
 
 export function setLegacyPasswordSession(input: {
@@ -100,10 +103,10 @@ export function getAuthCsrfToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
+  if (authKitSession?.accessToken) return authKitSession.accessToken;
   if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
     return legacyCompatibilityToken.token;
   }
-  if (authKitSession) return null;
   return getLegacyPasswordToken();
 }
 

@@ -1,18 +1,17 @@
 import { expect, test } from "@playwright/test";
-import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("pms-web smoke", () => {
-  test("login page redirects to AuthKit", async ({ page }, testInfo) => {
-    const assertHealthy = watchPageHealth(page, testInfo);
+  test("login page redirects to hosted auth", async ({ request }) => {
+    const response = await request.get("/login", { maxRedirects: 0 });
 
-    await page.goto("/login");
+    expect(response.status()).toBe(307);
 
-    await expect(page.getByRole("heading", { name: /vayada PMS/i, level: 1 })).toBeVisible();
-    await expect(page.getByText(/redirecting to sign in/i)).toBeVisible();
-    await expect(page.getByLabel(/email address/i)).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /continue with workos/i })).toHaveCount(0);
-    await expect(page.getByRole("link", { name: /use legacy password fallback/i })).toHaveCount(0);
+    const hostedLoginUrl = new URL(response.headers().location ?? "");
+    expect(hostedLoginUrl.pathname).toBe("/auth/workos/login");
+    expect(hostedLoginUrl.searchParams.get("surface")).toBe("pms-web");
 
-    await assertHealthy();
+    const returnTo = new URL(hostedLoginUrl.searchParams.get("return_to") ?? "");
+    expect(returnTo.pathname).toBe("/login");
+    expect(returnTo.searchParams.get("auth")).toBe("callback");
   });
 });
