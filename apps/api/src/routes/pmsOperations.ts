@@ -22,6 +22,7 @@ import type {
   PmsRoomType,
   PmsSourceFreshness,
 } from "../domains/pmsOperationsReadModel.js";
+import { requireAuthContext } from "@vayada/backend-auth";
 import { enforceRoutePolicy } from "./policy.js";
 
 export const PMS_OPERATIONS_CONTRACT_VERSION = "pms-operations.v1" as const;
@@ -604,6 +605,14 @@ export type PmsOperationsRoutesOptions = {
   commandRepository?: PmsOperationsCommandRepository;
   bookingGuestPiiPort?: BookingGuestPiiPort;
   allowedOrigins?: string[];
+};
+
+export type PmsLegacySetupStatusResponse = {
+  registered: boolean;
+  setupComplete: boolean;
+  setup_complete: boolean;
+  roomCount: number;
+  room_count: number;
 };
 
 type PmsPropertyParams = {
@@ -1734,6 +1743,78 @@ export async function registerPmsOperationsRoutes(
       },
     );
   }
+}
+
+export async function registerPmsLegacyAdminRoutes(
+  app: FastifyInstance,
+  options: Pick<PmsOperationsRoutesOptions, "repository" | "allowedOrigins">,
+): Promise<void> {
+  app.options("/setup-status", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+    return reply.code(204).send();
+  });
+
+  app.get("/setup-status", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getLegacyPmsPropertyId(request);
+    if (!propertyId) {
+      return {
+        registered: false,
+        setupComplete: false,
+        setup_complete: false,
+        roomCount: 0,
+        room_count: 0,
+      } satisfies PmsLegacySetupStatusResponse;
+    }
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    try {
+      const result = await options.repository.listRoomTypesByPropertyId(propertyId);
+      const roomCount = result.items.length;
+      const setupComplete = roomCount > 0;
+      return {
+        registered: true,
+        setupComplete,
+        setup_complete: setupComplete,
+        roomCount,
+        room_count: roomCount,
+      } satisfies PmsLegacySetupStatusResponse;
+    } catch {
+      return sendPmsOperationsError(
+        reply,
+        readModelUnavailable("PMS room types read model is unavailable."),
+      );
+    }
+  });
+}
+
+function getLegacyPmsPropertyId(request: FastifyRequest): string | null {
+  const header = request.headers["x-hotel-id"];
+  if (typeof header === "string" && header.length > 0) return header;
+  const context = requireAuthContext(request);
+  return (
+    context.linkedResources.find(
+      (resource) =>
+        resource.status === "active" &&
+        resource.product === "pms" &&
+        resource.resourceType === "pms_property",
+    )?.resourceId ?? null
+  );
 }
 
 function enforcePmsOperationsReadPolicy(
