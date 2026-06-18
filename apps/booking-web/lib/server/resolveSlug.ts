@@ -51,7 +51,8 @@ async function resolveSlugFromHostUncached(hostname: string): Promise<string | n
   const isLocalhost = host === "localhost" || host.startsWith("127.0.0.1") || host === "::1";
   if (isLocalhost) return undefined;
 
-  const isSubdomain = host.endsWith(".booking.vayada.com");
+  const isSubdomain =
+    host.endsWith(".booking.vayada.com") || host.endsWith(".next-booking.vayada.com");
   if (isSubdomain) {
     const parts = host.split(".");
     const sub = parts.length >= 3 && parts[0] !== "www" ? parts[0] : null;

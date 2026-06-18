@@ -152,7 +152,7 @@ export function HotelProvider({
         // subdomain so address-bar copy/share uses the new name.
         if (typeof window !== "undefined" && hotelData?.slug && hotelData.slug !== slug) {
           const host = window.location.hostname;
-          if (host.endsWith(".booking.vayada.com")) {
+          if (host.endsWith(".booking.vayada.com") || host.endsWith(".next-booking.vayada.com")) {
             const parts = host.split(".");
             if (parts[0] === slug) {
               parts[0] = hotelData.slug;
