@@ -470,6 +470,77 @@ describe("AuthKit session routes", () => {
     expect(response.json().message).toContain("booking/booking_hotel resource link");
   });
 
+  it("mints a PMS compatibility token scoped to the selected PMS property", async () => {
+    const pmsSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_group",
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(pmsSession),
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_hotel",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [
+          {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: "property_alpenrose",
+            relationship: "operator",
+            status: "active",
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          legacyJwtSecret: "legacy-pms-secret",
+          legacyJwtUserType: "hotel",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/pms-web-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(readJwtPayload(response.json().accessToken)).toMatchObject({
+      sub: "user_platform_admin",
+      email: "admin@example.com",
+      type: "hotel",
+      org: "org_hotel_group",
+      surface: "pms-web",
+      resources: {
+        "pms:pms_property": ["property_alpenrose"],
+      },
+    });
+  });
+
   it("mints an affiliate-scoped compatibility token for an affiliate-partner session", async () => {
     const auditEvents: ProductAuditEvent[] = [];
     const affiliateSession: AuthKitSession = {
