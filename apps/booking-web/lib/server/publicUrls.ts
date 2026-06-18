@@ -86,6 +86,7 @@ export function getCanonicalHostRedirectUrl(
 export function isFallbackBookingHost(hostname: string): boolean {
   const host = normalizeRequestHost(hostname);
   return (
+    host.endsWith(".next-booking.vayada.com") ||
     host.endsWith(".booking.vayada.com") ||
     host.endsWith(".booking.localhost") ||
     host.endsWith(".localhost")
@@ -99,6 +100,7 @@ function fallbackHostForSlug(slug: string, requestHost: string): string {
 
   if (host.endsWith(".booking.localhost")) return `${slug}.booking.localhost${portSuffix}`;
   if (host.endsWith(".localhost")) return `${slug}.localhost${portSuffix}`;
+  if (host.endsWith(".next-booking.vayada.com")) return `${slug}.next-booking.vayada.com`;
 
   return `${slug}.booking.vayada.com`;
 }

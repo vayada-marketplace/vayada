@@ -26,7 +26,11 @@ function getKnownSubdomainSlug(hostname: string): string | null {
   const host = normalizeHost(hostname);
   const parts = host.split(".");
 
-  if (host.endsWith(".booking.vayada.com") || host.endsWith(".booking.localhost")) {
+  if (
+    host.endsWith(".booking.vayada.com") ||
+    host.endsWith(".next-booking.vayada.com") ||
+    host.endsWith(".booking.localhost")
+  ) {
     return parts.length >= 3 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0] : null;
   }
 
@@ -55,7 +59,10 @@ export default async function middleware(request: NextRequest) {
 
   if (
     !isLocalHost(hostname) &&
-    (knownSlug || (!hostname.includes("localhost") && !hostname.endsWith(".booking.vayada.com")))
+    (knownSlug ||
+      (!hostname.includes("localhost") &&
+        !hostname.endsWith(".booking.vayada.com") &&
+        !hostname.endsWith(".next-booking.vayada.com")))
   ) {
     hostResolution = await fetchHostResolution(hostname);
     slug = hostResolution?.slug || knownSlug;
