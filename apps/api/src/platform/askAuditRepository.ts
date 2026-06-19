@@ -10,8 +10,8 @@ export type AskAuditPool = {
 };
 
 type ResolvedAskScope = {
-  propertyId: string;
-  resourceLinkId: string | null;
+  resourceScope: "property" | "organization";
+  propertyId: string | null;
 };
 
 type IdRow = {
@@ -72,13 +72,15 @@ async function resolveScope(
   record: AskAuditRecord,
 ): Promise<ResolvedAskScope> {
   if (!record.actorInternalUserId || !record.organizationId || !record.bookingHotelId) {
-    throw new Error("Ask audit persistence requires actor, organization, and booking hotel scope");
+    if (record.actorInternalUserId && record.organizationId && !record.bookingHotelId) {
+      return { resourceScope: "organization", propertyId: null };
+    }
+    throw new Error("Ask audit persistence requires an authenticated actor and organization scope");
   }
 
-  const result = await client.query<ResolvedAskScope>(
+  const result = await client.query<{ propertyId: string }>(
     `SELECT
-        source.property_id::text AS "propertyId",
-        resource_link.id::text AS "resourceLinkId"
+        source.property_id::text AS "propertyId"
      FROM identity.organization_resource_links resource_link
      JOIN hotel_catalog.property_source_links source
        ON source.source_system = 'booking'
@@ -100,7 +102,7 @@ async function resolveScope(
   if (!row) {
     throw new Error("Ask audit persistence could not resolve booking hotel target property");
   }
-  return row;
+  return { resourceScope: "property", propertyId: row.propertyId };
 }
 
 async function upsertConversation(
@@ -117,7 +119,7 @@ async function upsertConversation(
        )
      VALUES (
          $1, $2::uuid, $3::uuid, $4::uuid,
-         $5::uuid, 'property', $6, 'standard',
+         NULL, $5, $6, 'standard',
          $7::timestamptz, 'confidential', $8::jsonb
        )
      ON CONFLICT (conversation_key) DO UPDATE
@@ -129,10 +131,10 @@ async function upsertConversation(
       record.actorInternalUserId,
       record.organizationId,
       scope.propertyId,
-      scope.resourceLinkId,
+      scope.resourceScope,
       record.scope.locale ?? "en",
       record.generatedAt,
-      json({
+      auditJson({
         requestId: record.requestId,
         bookingHotelId: record.bookingHotelId,
       }),
@@ -160,12 +162,12 @@ async function insertRun(
        )
      VALUES (
          $1, $2::uuid, $3::uuid, $4::uuid,
-         $5::uuid, 'property', $6, $7,
-         $8, $9, $10,
-         'intelligence.ask.read', $11, $12,
-         $13, $14, $15, $16,
-         $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb,
-         $21::jsonb, $22::timestamptz, $23::timestamptz, $24
+         $5::uuid, $6, $7, $8,
+         $9, $10, $11,
+         'intelligence.ask.read', $12, $13,
+         $14, $15, $16, $17,
+         $18::jsonb, $19::jsonb, $20::jsonb, $21::jsonb,
+         $22::jsonb, $23::timestamptz, $24::timestamptz, $25
        )
      RETURNING id::text AS id`,
     [
@@ -174,6 +176,7 @@ async function insertRun(
       record.actorInternalUserId,
       record.organizationId,
       scope.propertyId,
+      scope.resourceScope,
       record.requestId,
       record.traceId,
       redactText(record.question),
@@ -185,11 +188,11 @@ async function insertRun(
       record.modelName,
       record.promptVersion ?? "ask-route-preflight.v1",
       record.answerSchemaVersion ?? "ask-answer-schema.v1",
-      json(toolPlan(record)),
-      json(record.unavailableData),
-      json(record.caveats),
-      json(record.usage ?? {}),
-      json(costMetadata(record)),
+      auditJson(toolPlan(record)),
+      auditJson(record.unavailableData),
+      auditJson(record.caveats),
+      auditJson(record.usage ?? {}),
+      auditJson(costMetadata(record)),
       startedAt(record),
       record.generatedAt,
       record.latencyMs,
@@ -214,34 +217,29 @@ async function insertToolCalls(
            input_scope, filters, evidence_references,
            unavailable_data, result_summary, finished_at
          )
-       SELECT
+       VALUES (
            $1::uuid, $2::uuid, $3, 'v1', $4,
-           'property', $5::uuid, $6::uuid,
-           $7, $8, $9,
-           $10::jsonb, $11::jsonb, $12::jsonb,
-           $13::jsonb, $14::jsonb, $15::timestamptz
-       WHERE EXISTS (
-         SELECT 1
-         FROM intelligence.ai_evidence_catalog catalog
-         WHERE catalog.tool_id = $3
-           AND catalog.tool_version = 'v1'
-           AND catalog.primary_required_permission_key = $7
+           $5, $6::uuid, $7::uuid,
+           $8, $9, $10,
+           $11::jsonb, $12::jsonb, $13::jsonb,
+           $14::jsonb, $15::jsonb, $16::timestamptz
        )`,
       [
         crypto.randomUUID(),
         runId,
         result.toolId,
         index + 1,
+        scope.resourceScope,
         record.organizationId,
         scope.propertyId,
         primaryPermission(result),
         authorizationStatus(result),
         result.status,
-        json(result.inputScope),
-        json(result.filters),
-        json(result.evidence.map((entry) => evidenceReference(entry, result))),
-        json(result.unavailableData),
-        json({
+        auditJson(result.inputScope),
+        auditJson(result.filters),
+        auditJson(result.evidence.map((entry) => evidenceReference(entry, result))),
+        auditJson(result.unavailableData),
+        auditJson({
           toolCallId: result.toolCallId,
           evidenceIds: result.evidence.map((entry) => entry.evidenceId),
           bookingHotelId: record.bookingHotelId,
@@ -270,10 +268,10 @@ async function insertAnswerAudit(
        )
      VALUES (
          $1, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
-         'property', $6, $7, $8,
-         $9, $10, $11::jsonb, $12::jsonb,
-         $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
-         'guest_pii_excluded', 'confidential', $17::jsonb
+         $6, $7, $8, $9,
+         $10, $11, $12::jsonb, $13::jsonb,
+         $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb,
+         'guest_pii_excluded', 'confidential', $18::jsonb
        )`,
     [
       record.answerId,
@@ -281,18 +279,19 @@ async function insertAnswerAudit(
       conversationId,
       record.organizationId,
       scope.propertyId,
+      scope.resourceScope,
       record.contractVersion,
       record.status,
       record.confidence.level,
       questionHash(record.question),
       redactText(record.summary),
-      json(generatedAnswer(record)),
-      json(answerEvidenceReferences(record)),
-      json(materialClaims(record)),
-      json(record.suggestedActions),
-      json(record.unavailableData),
-      json(record.caveats),
-      json(answerAuditMetadata(record)),
+      auditJson(generatedAnswer(record)),
+      auditJson(answerEvidenceReferences(record)),
+      auditJson(materialClaims(record)),
+      auditJson(record.suggestedActions),
+      auditJson(record.unavailableData),
+      auditJson(record.caveats),
+      auditJson(answerAuditMetadata(record)),
     ],
   );
 }
@@ -425,6 +424,11 @@ function questionHash(question: string): string {
 }
 
 function redactText(value: string): string {
+  const redacted = redactAuditString(value);
+  return redacted.trim() || "[empty question]";
+}
+
+function redactAuditString(value: string): string {
   let redacted = value
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
     .replace(/\+?\d[\d\s().-]{7,}\d/g, "[redacted-phone]")
@@ -439,7 +443,16 @@ function redactText(value: string): string {
   ) {
     redacted = "[redacted database query request]";
   }
-  return redacted.trim() || "[empty question]";
+  return redacted;
+}
+
+function redactAuditJson(value: unknown): unknown {
+  if (typeof value === "string") return redactAuditString(value);
+  if (Array.isArray(value)) return value.map(redactAuditJson);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, redactAuditJson(entry)]),
+  );
 }
 
 function startedAt(record: AskAuditRecord): string {
@@ -448,8 +461,8 @@ function startedAt(record: AskAuditRecord): string {
   return new Date(finished.getTime() - record.latencyMs).toISOString();
 }
 
-function json(value: unknown): string {
-  return JSON.stringify(value);
+function auditJson(value: unknown): string {
+  return JSON.stringify(redactAuditJson(value));
 }
 
 async function rollbackQuietly(client: Pick<AskAuditClient, "query">): Promise<void> {

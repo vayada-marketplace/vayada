@@ -10,7 +10,6 @@ import {
 const ACTOR_ID = "f8541000-0000-0000-0000-000000000001";
 const ORGANIZATION_ID = "f8542000-0000-0000-0000-000000000001";
 const PROPERTY_ID = "f8543000-0000-0000-0000-000000000001";
-const RESOURCE_LINK_ID = "f8542200-0000-0000-0000-000000000001";
 const CONVERSATION_ID = "f8545000-0000-0000-0000-000000000001";
 const RUN_ID = "f8545100-0000-0000-0000-000000000001";
 const BOOKING_HOTEL_ID = "booking_hotel_audit_alpenrose";
@@ -43,6 +42,20 @@ describe("createPgAskAuditRepository", () => {
     );
     expect(releases.count).toBe(1);
 
+    const conversationQuery = queryContaining(
+      queries,
+      "INSERT INTO intelligence.ask_conversations",
+    );
+    expect(conversationQuery.values?.[3]).toBe(PROPERTY_ID);
+    expect(conversationQuery.text).toContain("NULL, $5");
+    expect(conversationQuery.values?.[4]).toBe("property");
+    expect(queryContaining(queries, "INSERT INTO intelligence.ask_runs").values?.[5]).toBe(
+      "property",
+    );
+    const toolCallQuery = queryContaining(queries, "INSERT INTO intelligence.ask_tool_calls");
+    expect(toolCallQuery.text).not.toContain("WHERE EXISTS");
+    expect(toolCallQuery.values?.[4]).toBe("property");
+
     const serializedValues = JSON.stringify(queries.map((query) => query.values));
     expect(serializedValues).toContain("req_854");
     expect(serializedValues).toContain(ACTOR_ID);
@@ -54,9 +67,62 @@ describe("createPgAskAuditRepository", () => {
     expect(serializedValues).toContain("inputTokens");
     expect(serializedValues).toContain("120");
     expect(serializedValues).toContain("[redacted-email]");
+    expect(serializedValues).toContain("[redacted-phone]");
     expect(serializedValues).not.toContain("guest@example.com");
+    expect(serializedValues).not.toContain("guest.block@example.com");
+    expect(serializedValues).not.toContain("+49 3012345678");
+  });
+
+  it("persists organization-scope Ask audit rows without resolving a booking hotel", async () => {
+    const { pool, queries } = createRecordingPool();
+    const repository = createPgAskAuditRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    await repository.recordAskRun({
+      ...auditRecord(),
+      bookingHotelId: null,
+      scope: { organizationId: ORGANIZATION_ID },
+      status: "needs_clarification",
+      summary: "Ask needs a selected hotel.",
+      blocks: [],
+      toolPlan: null,
+      toolResults: [],
+      toolCallIds: [],
+      deniedToolCallIds: [],
+      evidenceIds: [],
+      evidenceReferences: [],
+      unavailableData: [{ unavailableDataId: "missing_scope", reason: "missing_scope" }],
+      confidence: { level: "unknown", reasons: ["missing_scope"] },
+      suggestedActions: [],
+      followUpQuestions: ["Which hotel should I inspect?"],
+    });
+
+    expect(queries.map((query) => query.text).join("\n")).not.toContain(
+      "FROM identity.organization_resource_links resource_link",
+    );
+    const conversationQuery = queryContaining(
+      queries,
+      "INSERT INTO intelligence.ask_conversations",
+    );
+    expect(conversationQuery.values?.[3]).toBeNull();
+    expect(conversationQuery.text).toContain("NULL, $5");
+    expect(conversationQuery.values?.[4]).toBe("organization");
+    expect(queryContaining(queries, "INSERT INTO intelligence.ask_runs").values?.[5]).toBe(
+      "organization",
+    );
+    expect(queryContaining(queries, "INSERT INTO intelligence.ask_answer_audits").values?.[5]).toBe(
+      "organization",
+    );
   });
 });
+
+function queryContaining(queries: QueryCall[], pattern: string): QueryCall {
+  const query = queries.find((entry) => entry.text.includes(pattern));
+  if (!query) throw new Error(`Missing query containing ${pattern}`);
+  return query;
+}
 
 function createRecordingPool(): {
   pool: AskAuditPool;
@@ -70,7 +136,7 @@ function createRecordingPool(): {
       queries.push({ text, values });
       if (text.includes("FROM identity.organization_resource_links resource_link")) {
         return {
-          rows: [{ propertyId: PROPERTY_ID, resourceLinkId: RESOURCE_LINK_ID }],
+          rows: [{ propertyId: PROPERTY_ID }],
           rowCount: 1,
         };
       }
@@ -122,6 +188,7 @@ function auditRecord(): AskAuditRecord {
       {
         type: "metric",
         metricKey: "booking.direct_booking_share",
+        label: "Guest guest.block@example.com asked for +49 3012345678",
         value: 62.5,
         unit: "percentage",
         evidenceIds: ["ev_booking_direct_share"],
@@ -199,12 +266,12 @@ function auditRecord(): AskAuditRecord {
         reason: "provider_unavailable",
       },
     ],
-    caveats: [],
+    caveats: [{ label: "Do not include guest.block@example.com in the answer." }],
     confidence: { level: "low", reasons: ["tool_failures"] },
     suggestedActions: [
       {
         type: "view_report",
-        label: "View the underlying report",
+        label: "View the underlying report for +49 3012345678",
         evidenceIds: ["ev_booking_direct_share"],
       },
     ],
