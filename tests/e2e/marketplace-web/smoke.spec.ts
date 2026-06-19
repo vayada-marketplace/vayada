@@ -8,7 +8,7 @@ test.describe("marketplace-web smoke", () => {
     await page.goto("/login");
 
     await expect(page.getByRole("heading", { name: /sign in/i, level: 1 })).toBeVisible();
-    await expect(page.getByLabel(/email address/i)).toBeVisible();
+    await expect(page.getByLabel(/email address/i)).toHaveCount(0);
     await expect(page.getByLabel(/password/i)).toHaveCount(0);
     await expect(page.getByRole("button", { name: /continue with workos/i })).toBeVisible();
 
