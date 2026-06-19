@@ -22,19 +22,15 @@ function LoginContent() {
     let redirectPath: string = ROUTES.MARKETPLACE;
 
     if (userType === "creator" || userType === "hotel") {
-      try {
-        const profileStatus = await checkProfileStatus(userType);
-        const decision = getPostLoginProfileRedirect(userType, profileStatus);
-        redirectPath = decision.redirectPath;
-        if (decision.profileComplete !== null) {
-          localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, String(decision.profileComplete));
-        }
-        if (redirectPath === ROUTES.PROFILE_COMPLETE) {
-          router.push(redirectPath);
-          return;
-        }
-      } catch (error) {
-        console.error("Failed to check profile status:", error);
+      const profileStatus = await checkProfileStatus(userType);
+      const decision = getPostLoginProfileRedirect(userType, profileStatus);
+      redirectPath = decision.redirectPath;
+      if (decision.profileComplete !== null) {
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, String(decision.profileComplete));
+      }
+      if (redirectPath === ROUTES.PROFILE_COMPLETE) {
+        router.push(redirectPath);
+        return;
       }
     }
 

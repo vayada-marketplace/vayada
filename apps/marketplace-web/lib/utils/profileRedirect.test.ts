@@ -34,6 +34,16 @@ describe("getPostLoginProfileRedirect", () => {
     });
   });
 
+  it.each(["hotel", "creator"] as const)(
+    "treats missing %s profile status as incomplete",
+    (userType) => {
+      expect(getPostLoginProfileRedirect(userType, null)).toEqual({
+        redirectPath: ROUTES.PROFILE_COMPLETE,
+        profileComplete: false,
+      });
+    },
+  );
+
   it("does not persist profile completion state for users outside marketplace profiles", () => {
     expect(getPostLoginProfileRedirect(null, null)).toEqual({
       redirectPath: ROUTES.MARKETPLACE,
