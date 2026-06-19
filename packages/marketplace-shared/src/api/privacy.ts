@@ -1,4 +1,4 @@
-import { ApiErrorResponse } from "./client";
+import { ApiErrorResponse, getApiBearerToken } from "./client";
 
 const IDENTITY_PRIVACY_API_BASE_URL =
   process.env.NEXT_PUBLIC_IDENTITY_API_URL ??
@@ -247,6 +247,5 @@ function readErrorMessage(status: number, body: unknown): string {
 }
 
 function readAccessToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("access_token");
+  return getApiBearerToken();
 }

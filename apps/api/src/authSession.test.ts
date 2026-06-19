@@ -661,6 +661,73 @@ describe("AuthKit session routes", () => {
     );
   });
 
+  it("returns a marketplace session for creator workspace organizations", async () => {
+    const marketplaceSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_creator_workspace",
+      user: {
+        ...session.user,
+        id: "user_workos_creator",
+        email: "creator@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://marketplace.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return marketplaceSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(marketplaceSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_creator",
+          email: "creator@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_creator_workspace",
+          workosOrgId: "org_workos_creator_workspace",
+          kind: "creator_workspace",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_creator",
+          status: "active",
+          roleKey: "creator_owner",
+          workosMembershipId: "om_creator",
+          workosRoleSlugs: ["creator_owner"],
+        }),
+      }),
+      surfacePolicies: {
+        "marketplace-web": {
+          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+          logoutReturnUrl: "https://marketplace.localhost/login",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/session?surface=marketplace-web",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://marketplace.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      accessToken: "workos-access-token",
+      organizationId: "org_workos_creator_workspace",
+      organizationKind: "creator_workspace",
+      user: {
+        id: "user_creator",
+        email: "creator@example.com",
+      },
+    });
+  });
+
   it("clears the sealed session and returns the WorkOS logout URL", async () => {
     const auditEvents: ProductAuditEvent[] = [];
     app = buildAuthSessionApp({
@@ -696,6 +763,37 @@ describe("AuthKit session routes", () => {
     ]);
   });
 
+  it("uses a validated logout return_to for product surfaces", async () => {
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://marketplace.localhost"],
+      surfacePolicies: {
+        "marketplace-web": {
+          requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/logout",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://marketplace.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+      payload: {
+        surface: "marketplace-web",
+        return_to: "https://marketplace.localhost/login",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      logoutUrl:
+        "https://auth.workos.test/logout?return_to=https%3A%2F%2Fmarketplace.localhost%2Flogin",
+    });
+  });
+
   it("rejects refresh when CSRF header is missing", async () => {
     app = buildAuthSessionApp();
 
@@ -725,7 +823,7 @@ function buildAuthSessionApp(
     allowedOrigins?: string[];
     surfacePolicies?: Partial<
       Record<
-        "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard",
+        "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard" | "marketplace-web",
         AuthSurfacePolicy
       >
     >;

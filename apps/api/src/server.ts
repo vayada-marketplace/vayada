@@ -315,6 +315,12 @@ const app = buildApp({
                 resourceType: "affiliate",
               },
             },
+            "marketplace-web": {
+              requiredOrganizationKind: ["creator_workspace", "hotel_group"],
+              callbackReturnUrl: config.authSession.authMarketplaceWebSuccessUrl,
+              logoutReturnUrl:
+                config.authSession.authMarketplaceWebLogoutUrl ?? config.authSession.authLogoutUrl,
+            },
           },
           cookieSecure: config.authSession.authCookieSecure,
           cookieDomain: config.authSession.authCookieDomain,

@@ -33,6 +33,8 @@ export type ApiAuthSessionConfig = {
   authAffiliateDashboardSuccessUrl?: string;
   authAffiliateDashboardLogoutUrl?: string;
   authLegacyAffiliatePmsJwtSecret?: string;
+  authMarketplaceWebSuccessUrl?: string;
+  authMarketplaceWebLogoutUrl?: string;
 };
 
 export type ApiAskIntelligenceConfig =
@@ -220,6 +222,8 @@ function loadAuthSessionConfig(env: NodeJS.ProcessEnv): ApiAuthSessionConfig | u
     authAffiliateDashboardSuccessUrl: readOptionalEnv(env, "AUTH_AFFILIATE_DASHBOARD_SUCCESS_URL"),
     authAffiliateDashboardLogoutUrl: readOptionalEnv(env, "AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL"),
     authLegacyAffiliatePmsJwtSecret: readOptionalEnv(env, "AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET"),
+    authMarketplaceWebSuccessUrl: readOptionalEnv(env, "AUTH_MARKETPLACE_WEB_SUCCESS_URL"),
+    authMarketplaceWebLogoutUrl: readOptionalEnv(env, "AUTH_MARKETPLACE_WEB_LOGOUT_URL"),
   };
 }
 

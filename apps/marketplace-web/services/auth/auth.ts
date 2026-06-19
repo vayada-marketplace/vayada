@@ -5,9 +5,46 @@
 import { apiClient, ApiErrorResponse } from "../api/client";
 import type { RegisterRequest, RegisterResponse, LoginRequest, LoginResponse } from "@/lib/types";
 import { STORAGE_KEYS } from "@/lib/constants";
+import {
+  clearAuthData,
+  currentUserType,
+  getAuthBearerToken,
+  getAuthCsrfToken,
+  hasAuthenticatedSession,
+  isAuthKitLoginEnabled,
+  setAuthKitSession,
+  type AuthKitSessionResponse,
+} from "./sessionStore";
 
 const TOKEN_KEY = "access_token";
 const EXPIRES_AT_KEY = "token_expires_at";
+const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
+const AUTH_SURFACE = "marketplace-web";
+
+async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers as Record<string, string> | undefined),
+    },
+  });
+
+  const contentType = response.headers.get("content-type");
+  const body =
+    contentType?.includes("application/json") && response.status !== 204
+      ? await response.json()
+      : null;
+
+  if (!response.ok) {
+    throw new ApiErrorResponse(response.status, {
+      detail: body?.message ?? body?.error ?? "Authentication request failed",
+    });
+  }
+
+  return body as T;
+}
 
 /**
  * Store JWT token and expiration time
@@ -58,7 +95,7 @@ function storeUserData(data: {
 /**
  * Clear all auth data from localStorage
  */
-function clearAuthData(): void {
+function clearLegacyAuthData(): void {
   if (typeof window === "undefined") return;
 
   localStorage.removeItem(TOKEN_KEY);
@@ -87,7 +124,7 @@ function getToken(): string | null {
   if (!token || !expiresAt) return null;
 
   if (Date.now() >= parseInt(expiresAt)) {
-    clearAuthData();
+    clearLegacyAuthData();
     return null;
   }
 
@@ -95,6 +132,49 @@ function getToken(): string | null {
 }
 
 export const authService = {
+  isAuthKitEnabled: isAuthKitLoginEnabled,
+
+  startHostedLogin: (loginHint?: string): void => {
+    if (typeof window === "undefined") return;
+
+    const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
+    url.searchParams.set("surface", AUTH_SURFACE);
+    url.searchParams.set("return_to", `${window.location.origin}/login?auth=callback`);
+    if (loginHint) url.searchParams.set("login_hint", loginHint);
+    window.location.href = url.toString();
+  },
+
+  refreshSession: async (organizationId?: string): Promise<AuthKitSessionResponse> => {
+    const csrfToken = getAuthCsrfToken();
+    const response =
+      organizationId && csrfToken
+        ? await authFetch<AuthKitSessionResponse>("/auth/session/refresh", {
+            method: "POST",
+            headers: { "x-vayada-csrf": csrfToken },
+            body: JSON.stringify({ organizationId, surface: AUTH_SURFACE }),
+          })
+        : await authFetch<AuthKitSessionResponse>(
+            `/auth/session?${new URLSearchParams({
+              surface: AUTH_SURFACE,
+              ...(organizationId ? { organizationId } : {}),
+            }).toString()}`,
+          );
+
+    setAuthKitSession(response);
+    return response;
+  },
+
+  ensureSession: async (): Promise<boolean> => {
+    if (hasAuthenticatedSession()) return true;
+    try {
+      await authService.refreshSession();
+      return true;
+    } catch {
+      clearAuthData();
+      return false;
+    }
+  },
+
   /**
    * Register user
    */
@@ -151,12 +231,31 @@ export const authService = {
   /**
    * Logout user
    */
-  logout: (): void => {
-    clearAuthData();
+  logout: async (): Promise<void> => {
+    const csrfToken = getAuthCsrfToken();
+    let logoutUrl = "/login";
+
+    if (isAuthKitLoginEnabled() && csrfToken) {
+      try {
+        const response = await authFetch<{ logoutUrl: string }>("/auth/logout", {
+          method: "POST",
+          headers: { "x-vayada-csrf": csrfToken },
+          body: JSON.stringify({
+            surface: AUTH_SURFACE,
+            return_to:
+              typeof window !== "undefined" ? `${window.location.origin}/login` : undefined,
+          }),
+        });
+        logoutUrl = response.logoutUrl;
+      } catch {
+        logoutUrl = "/login";
+      }
+    }
 
     if (typeof window !== "undefined") {
-      window.location.href = "/login";
+      window.location.href = logoutUrl;
     }
+    clearAuthData();
   },
 
   /**
@@ -164,8 +263,10 @@ export const authService = {
    */
   getCurrentUser: async () => {
     try {
-      const response = await apiClient.get<LoginResponse>("/auth/me");
-      return response;
+      if (isAuthKitLoginEnabled()) {
+        return await authService.refreshSession();
+      }
+      return await apiClient.get<LoginResponse>("/auth/me");
     } catch (error) {
       if (error instanceof ApiErrorResponse) {
         throw error;
@@ -178,15 +279,17 @@ export const authService = {
    * Check if user is logged in (has valid token)
    */
   isLoggedIn: (): boolean => {
-    return getToken() !== null;
+    return hasAuthenticatedSession() || getToken() !== null;
   },
 
   /**
    * Get token if available and not expired
    */
   getToken: (): string | null => {
-    return getToken();
+    return getAuthBearerToken() ?? getToken();
   },
+
+  getUserType: () => currentUserType(),
 
   /**
    * Request password reset
