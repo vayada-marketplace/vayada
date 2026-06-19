@@ -106,6 +106,7 @@ export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolv
 type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   auth?: ApiAuthOptions;
   authSession?: AuthSessionRouteOptions;
+  browserAllowedOrigins?: string[];
   workosWebhooks?: WorkosWebhookRoutesOptions;
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
@@ -166,6 +167,8 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       level: process.env.LOG_LEVEL ?? "info",
     },
   });
+
+  registerBrowserCors(app, options.browserAllowedOrigins ?? []);
 
   if (options.auth) {
     const { rolePermissionRepository, entitlementRepository, ...authOptions } = options.auth;
@@ -339,4 +342,30 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   }
 
   return app;
+}
+
+function registerBrowserCors(app: FastifyInstance, allowedOrigins: string[]): void {
+  const allowedOriginSet = new Set(allowedOrigins);
+  if (allowedOriginSet.size === 0) return;
+
+  app.addHook("onRequest", async (request, reply) => {
+    const origin = request.headers.origin;
+    if (!origin || !allowedOriginSet.has(origin)) return;
+
+    reply
+      .header("Vary", "Origin")
+      .header("Access-Control-Allow-Origin", origin)
+      .header("Access-Control-Allow-Credentials", "true")
+      .header(
+        "Access-Control-Allow-Headers",
+        request.headers["access-control-request-headers"] ??
+          "authorization,content-type,x-hotel-id,x-vayada-csrf",
+      )
+      .header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+      .header("Access-Control-Max-Age", "600");
+
+    if (request.method === "OPTIONS") {
+      return reply.code(204).send();
+    }
+  });
 }

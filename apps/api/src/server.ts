@@ -247,6 +247,7 @@ const bookingWebAffiliateHotelResolver =
 
 const app = buildApp({
   auth: buildAuthOptions(config.auth),
+  browserAllowedOrigins: config.authSession?.authAllowedOrigins ?? [],
   authSession:
     config.auth && config.authSession
       ? {
