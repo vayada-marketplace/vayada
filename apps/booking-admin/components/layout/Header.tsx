@@ -16,6 +16,12 @@ import ManagePropertiesModal from "./ManagePropertiesModal";
 
 const BOOKING_URL_TEMPLATE =
   process.env.NEXT_PUBLIC_BOOKING_URL_TEMPLATE || "https://{slug}.booking.vayada.com";
+const SELECTED_HOTEL_CHANGED_EVENT = "booking-admin:selected-hotel-changed";
+
+function storeSelectedHotelId(hotelId: string): void {
+  localStorage.setItem("selectedHotelId", hotelId);
+  window.dispatchEvent(new Event(SELECTED_HOTEL_CHANGED_EVENT));
+}
 
 export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) {
   const router = useRouter();
@@ -69,7 +75,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
           const saved = list.find((h) => h.id === savedId);
           const selected = saved || list[0];
           setSelectedHotel(selected);
-          localStorage.setItem("selectedHotelId", selected.id);
+          storeSelectedHotelId(selected.id);
         }
       })
       .catch(() => {});
@@ -170,7 +176,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                       key={hotel.id}
                       onClick={() => {
                         if (!isSelected) {
-                          localStorage.setItem("selectedHotelId", hotel.id);
+                          storeSelectedHotelId(hotel.id);
                           window.location.reload();
                         }
                         setDropdownOpen(false);
