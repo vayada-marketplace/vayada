@@ -39,6 +39,8 @@ export {
 
 export { transformFixtureCase, type TransformConfig } from "./transform.js";
 
+export { normalizePgConnectionString } from "./pgConnection.js";
+
 export {
   runParityChecks,
   type ParityCheckSeverity,
@@ -62,3 +64,12 @@ export {
   type WorkosBackfillSummary,
   type WorkosBackfillUser,
 } from "./workosBackfill.js";
+
+export {
+  findWorkosLinkAuditBlockers,
+  runWorkosLinkAudit,
+  WorkosLinkAuditError,
+  type WorkosLinkAuditMetric,
+  type WorkosLinkAuditResourceLinkCount,
+  type WorkosLinkAuditResult,
+} from "./workosLinkAudit.js";

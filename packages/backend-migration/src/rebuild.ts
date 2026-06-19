@@ -8,6 +8,7 @@ import {
   type RunnerConfig,
   type RunResult,
 } from "./runner.js";
+import { normalizePgConnectionString } from "./pgConnection.js";
 import { transformFixtureCase } from "./transform.js";
 
 export type RebuildConfig = RunnerConfig & {
@@ -36,7 +37,9 @@ export async function rebuild(config: RebuildConfig): Promise<RunResult> {
     throw new Error("fixtureCase and fixturesDir must both be provided or both omitted.");
   }
 
-  const client = new pg.Client({ connectionString: config.connectionString });
+  const client = new pg.Client({
+    connectionString: normalizePgConnectionString(config.connectionString),
+  });
   await client.connect();
 
   try {

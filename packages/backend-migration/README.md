@@ -48,6 +48,17 @@ should reuse `platformMediaChecks` instead of creating ad hoc media assertions.
 
 ## WorkOS Backfill
 
+Audit the migrated target identity/resource links before a backfill:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:workos:audit
+```
+
+The audit exits non-zero when target identity tables are missing or when active
+users, organizations, memberships, or required owner resource links are not
+ready for AuthKit.
+
 Use `--email` for one-user migration smoke tests:
 
 ```bash

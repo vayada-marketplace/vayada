@@ -56,6 +56,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=https://target-api.vayada.com
             NEXT_PUBLIC_AUTH_API_URL=https://target-api.vayada.com
+            NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}

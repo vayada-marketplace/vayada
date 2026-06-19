@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import pg from "pg";
 
+import { normalizePgConnectionString } from "../pgConnection.js";
 import { runC1RehearsalChecks } from "../c1RehearsalEvidence.js";
 
 function parseArgs(argv: string[]): {
@@ -45,7 +46,7 @@ function parseArgs(argv: string[]): {
 }
 
 const { connectionString, lookbackMinutes, pretty } = parseArgs(process.argv);
-const client = new pg.Client({ connectionString });
+const client = new pg.Client({ connectionString: normalizePgConnectionString(connectionString) });
 
 try {
   await client.connect();
