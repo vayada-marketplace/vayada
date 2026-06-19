@@ -83,6 +83,8 @@ function buildAskApp(
     auditRepository?: AskAuditTestRepository;
     askModel?: Model;
     askBudgets?: AskRoutesOptions["budgets"];
+    roleKey?: string;
+    resourceRelationship?: "owner" | "operator";
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
@@ -92,7 +94,26 @@ function buildAskApp(
     askBudgets: options.askBudgets,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
-      repository: identityRepository,
+      repository: {
+        ...identityRepository,
+        async findActiveMembership(...args) {
+          const membership = await identityRepository.findActiveMembership(...args);
+          if (!membership) return null;
+          return {
+            ...membership,
+            roleKey: options.roleKey ?? membership.roleKey,
+            workosRoleSlugs: [options.roleKey ?? membership.roleKey],
+          };
+        },
+        async findLinkedResources(...args) {
+          const resources = await identityRepository.findLinkedResources(...args);
+          return resources.map((resource) =>
+            resource.product === "booking" && resource.resourceType === "booking_hotel"
+              ? { ...resource, relationship: options.resourceRelationship ?? resource.relationship }
+              : resource,
+          );
+        },
+      },
       rolePermissionRepository: {
         async findPermissionsForRole() {
           return (
@@ -206,7 +227,7 @@ function askRoleGrantSeedSql(): string {
   return readFileSync(path, "utf8");
 }
 
-function expectAskOwnerSeedGrants(roleKey: "hotel_owner" | "owner"): void {
+function expectAskOwnerSeedGrants(roleKey: "hotel_owner" | "owner" | "operator"): void {
   const sql = askRoleGrantSeedSql();
   for (const permission of askOwnerPermissions) {
     expect(sql).toMatch(new RegExp(`\\('hotel_group',\\s*'${roleKey}',\\s*'${permission}'\\)`));
@@ -336,6 +357,27 @@ describe("Ask Intelligence route", () => {
         }),
       ]),
     );
+  });
+
+  it("allows seeded hotel operator grants to call Ask for an operator-linked booking hotel", async () => {
+    expectAskOwnerSeedGrants("operator");
+    app = buildAskApp({
+      permissions: askOwnerPermissions,
+      roleKey: "operator",
+      resourceRelationship: "operator",
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("answered");
+    expect(response.body.scope.bookingHotelId).toBe("booking_hotel_alpenrose");
   });
 
   it("answers booking source mix through the runtime evidence tool plan", async () => {

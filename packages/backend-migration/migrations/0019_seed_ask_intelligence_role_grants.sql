@@ -15,5 +15,8 @@ INSERT INTO identity.role_permission_grants (organization_kind, role_key, permis
   ('hotel_group', 'hotel_owner', 'booking.settings.read'),
   ('hotel_group', 'owner',       'intelligence.ask.read'),
   ('hotel_group', 'owner',       'booking.analytics.read'),
-  ('hotel_group', 'owner',       'booking.settings.read')
+  ('hotel_group', 'owner',       'booking.settings.read'),
+  ('hotel_group', 'operator',    'intelligence.ask.read'),
+  ('hotel_group', 'operator',    'booking.analytics.read'),
+  ('hotel_group', 'operator',    'booking.settings.read')
 ON CONFLICT (organization_kind, role_key, permission_key) DO NOTHING;
