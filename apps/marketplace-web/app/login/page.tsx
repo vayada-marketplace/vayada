@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
 import { authService } from "@/services/auth";
 import { checkProfileStatus } from "@/lib/utils";
+import { getPostLoginProfileRedirect } from "@/lib/utils/profileRedirect";
 import type { UserType } from "@/lib/types";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 
@@ -18,14 +19,18 @@ function LoginContent() {
 
   const redirectAfterLogin = useCallback(async () => {
     const userType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
+    let redirectPath: string = ROUTES.MARKETPLACE;
+
     if (userType === "creator" || userType === "hotel") {
       try {
         const profileStatus = await checkProfileStatus(userType);
-        if (profileStatus && profileStatus.profile_complete) {
-          localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
-        } else {
-          localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
-          router.push(ROUTES.PROFILE_COMPLETE);
+        const decision = getPostLoginProfileRedirect(userType, profileStatus);
+        redirectPath = decision.redirectPath;
+        if (decision.profileComplete !== null) {
+          localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, String(decision.profileComplete));
+        }
+        if (redirectPath === ROUTES.PROFILE_COMPLETE) {
+          router.push(redirectPath);
           return;
         }
       } catch (error) {
@@ -33,7 +38,7 @@ function LoginContent() {
       }
     }
 
-    router.push(ROUTES.MARKETPLACE);
+    router.push(redirectPath);
   }, [router]);
 
   useEffect(() => {
