@@ -8,10 +8,16 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
+import { AskEvidenceUnavailableError } from "@vayada/domain-intelligence";
 import { Usage, type Model, type ModelRequest, type ModelResponse } from "@openai/agents";
 import { afterEach, describe, expect, it } from "vitest";
+import type { QueryResultRow } from "pg";
 
 import { buildApp } from "./app.js";
+import {
+  createTargetAskEvidenceRepository,
+  type AskEvidenceReadPool,
+} from "./platform/askEvidenceRepository.js";
 import {
   createInMemoryAskAuditRepository,
   type AskAnswer,
@@ -85,6 +91,7 @@ function buildAskApp(
     askBudgets?: AskRoutesOptions["budgets"];
     roleKey?: string;
     resourceRelationship?: "owner" | "operator";
+    askEvidenceRepository?: AskRoutesOptions["evidenceRepository"];
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
@@ -92,6 +99,7 @@ function buildAskApp(
     askAuditRepository: options.auditRepository ?? createInMemoryAskAuditRepository(),
     askModel: options.askModel,
     askBudgets: options.askBudgets,
+    askEvidenceRepository: options.askEvidenceRepository,
     auth: {
       verifier: createFakeVerifier(new Map([["valid-token", session]])),
       repository: {
@@ -181,6 +189,178 @@ function askPayload(overrides: Partial<Record<"question" | "scope", unknown>> = 
     },
     ...overrides,
   };
+}
+
+type TargetAskEvidencePool = AskEvidenceReadPool & {
+  calls: { text: string; values?: readonly unknown[] }[];
+};
+
+function targetAskEvidencePool(
+  options: {
+    metricRows?: QueryResultRow[];
+    setupRows?: QueryResultRow[];
+    fail?: boolean;
+    missingCatalog?: boolean;
+    missingCatalogToolIds?: string[];
+  } = {},
+): TargetAskEvidencePool {
+  const calls: TargetAskEvidencePool["calls"] = [];
+  const metricRows = options.metricRows ?? targetMetricRows();
+  const setupRows = options.setupRows ?? targetSetupRows();
+
+  return {
+    calls,
+    async query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: readonly unknown[],
+    ) {
+      calls.push({ text, values });
+      if (options.fail) throw new Error("target ask evidence unavailable");
+      if (text.includes("intelligence.metric_snapshot_runs")) {
+        const metricKeys = Array.isArray(values?.[0]) ? values[0] : [];
+        return queryRows<T>(
+          metricRows.filter((row) => metricKeys.includes(String(row["metricKey"]))),
+        );
+      }
+      if (text.includes("intelligence.setup_completeness_snapshots")) {
+        return queryRows<T>(setupRows);
+      }
+      if (text.includes("intelligence.ai_evidence_catalog")) {
+        const requestedToolIds = Array.isArray(values?.[0])
+          ? values[0].map((value) => String(value))
+          : typeof values?.[0] === "string"
+            ? [values[0]]
+            : [];
+        const missingRequestedTool = requestedToolIds.some((toolId) =>
+          options.missingCatalogToolIds?.includes(toolId),
+        );
+        return queryRows<T>(
+          options.missingCatalog || missingRequestedTool ? [] : [{ active: true }],
+        );
+      }
+      return queryRows<T>([]);
+    },
+    async end() {},
+  };
+}
+
+function queryRows<T extends QueryResultRow>(items: QueryResultRow[]): { rows: T[] } {
+  return { rows: items as T[] };
+}
+
+function targetAskEvidenceRepository(pool: AskEvidenceReadPool) {
+  return createTargetAskEvidenceRepository({
+    connectionString: "postgresql://target-db",
+    pool,
+  });
+}
+
+function targetMetricRows(
+  overrides: Partial<{
+    directShareFreshnessStatus: string;
+    directShareQuality: string;
+  }> = {},
+): QueryResultRow[] {
+  return [
+    targetMetricRow({
+      id: "target_direct_share",
+      snapshotKey: "intelligence.booking_direct_share.target.2026_06",
+      metricKey: "booking.direct_booking_share",
+      freshnessStatus: overrides.directShareFreshnessStatus ?? "fresh",
+      quality: overrides.directShareQuality ?? "complete",
+      sampleSize: 48,
+      aggregateId: "booking-direct-share-target-june",
+      valueSummary: {
+        directSharePct: 64.2,
+        previousDirectSharePct: 58.1,
+        includedBookingCount: 48,
+      },
+      filters: { dateRange: "2026-06", channels: ["direct", "partner"] },
+    }),
+    targetMetricRow({
+      id: "target_gross_revenue",
+      snapshotKey: "intelligence.booking_gross_revenue.target.2026_06",
+      metricKey: "booking.gross_booking_revenue",
+      sampleSize: 48,
+      aggregateId: "booking-gross-revenue-target-june",
+      valueSummary: { grossRevenue: 21950, currency: "EUR" },
+      filters: { dateRange: "2026-06", currency: "EUR" },
+    }),
+    targetMetricRow({
+      id: "target_adr",
+      snapshotKey: "intelligence.booking_adr.target.2026_06",
+      metricKey: "booking.average_daily_rate",
+      sampleSize: 42,
+      aggregateId: "booking-adr-target-june",
+      valueSummary: { averageDailyRate: 157, currency: "EUR" },
+      filters: { dateRange: "2026-06", currency: "EUR" },
+    }),
+    targetMetricRow({
+      id: "target_source_mix",
+      snapshotKey: "intelligence.booking_source_mix.target.2026_06",
+      metricKey: "booking.booking_source_mix",
+      sampleSize: 48,
+      aggregateId: "booking-source-mix-target-june",
+      valueSummary: {
+        topSource: "direct",
+        directBookings: 31,
+        otaBookings: 17,
+      },
+      filters: { dateRange: "2026-06", channels: ["direct", "ota"] },
+    }),
+  ];
+}
+
+function targetMetricRow(overrides: QueryResultRow): QueryResultRow {
+  return {
+    sourceOwner: "booking",
+    sourceView: "direct_booking_summary_read_model",
+    product: "booking",
+    requestedResourceId: "booking_hotel_alpenrose",
+    resourceType: "booking_hotel",
+    generatedAt: "2026-06-09T08:30:00Z",
+    sourceFreshAt: "2026-06-09T08:25:00Z",
+    freshnessStatus: "fresh",
+    quality: "complete",
+    ...overrides,
+  };
+}
+
+function targetSetupRows(): QueryResultRow[] {
+  return [
+    {
+      id: "target_setup_overall",
+      snapshotKey: "intelligence.setup_overall.target.2026_06_09",
+      requestedResourceId: "booking_hotel_alpenrose",
+      resourceType: "booking_hotel",
+      setupArea: "overall",
+      completionStatus: "complete",
+      completenessScore: "100.00",
+      sourceSnapshotAt: "2026-06-09T08:40:00Z",
+      sourceFreshAt: "2026-06-09T08:38:00Z",
+      freshnessStatus: "fresh",
+      missingItems: [],
+      blockingItems: [],
+      staleItems: [],
+      sourceFreshness: { hotel_catalog: { status: "fresh" } },
+    },
+    {
+      id: "target_setup_payment",
+      snapshotKey: "intelligence.setup_payment.target.2026_06_09",
+      requestedResourceId: "booking_hotel_alpenrose",
+      resourceType: "booking_hotel",
+      setupArea: "payment",
+      completionStatus: "incomplete",
+      completenessScore: "70.00",
+      sourceSnapshotAt: "2026-06-09T08:40:00Z",
+      sourceFreshAt: "2026-06-09T08:38:00Z",
+      freshnessStatus: "fresh",
+      missingItems: [{ itemKey: "deposit_policy", label: "Deposit policy needs confirmation" }],
+      blockingItems: [{ itemKey: "online_payment", label: "Online payment activation is pending" }],
+      staleItems: [],
+      sourceFreshness: { booking: { status: "fresh" } },
+    },
+  ];
 }
 
 function expectValidAskAnswerEnvelope(answer: AskAnswer): void {
@@ -281,6 +461,76 @@ describe("Ask Intelligence route", () => {
   afterEach(async () => {
     await app?.close();
     app = null;
+  });
+
+  it("queries target evidence by selected organization and exact metric filters", async () => {
+    const targetPool = targetAskEvidencePool({ metricRows: [], setupRows: [] });
+    const repository = targetAskEvidenceRepository(targetPool);
+
+    await repository.findMetricEvidence({
+      metricKeys: ["booking.direct_booking_share"],
+      organizationId: "org_hotel_group",
+      resourceId: "booking_hotel_alpenrose",
+      dateRange: { from: "2026-06-01", to: "2026-06-30" },
+      filters: { currency: "EUR" },
+    });
+
+    const metricCall = targetPool.calls.find((call) =>
+      call.text.includes("intelligence.metric_snapshot_runs"),
+    );
+
+    expect(metricCall?.values).toEqual([
+      ["booking.direct_booking_share"],
+      "booking_hotel_alpenrose",
+      "org_hotel_group",
+      "2026-06-01",
+      "2026-06-30",
+      ["get_booking_performance"],
+      JSON.stringify({ currency: "EUR" }),
+    ]);
+    expect(metricCall?.text).toContain("snapshot.organization_id = $3::uuid");
+    expect(metricCall?.text).toContain("snapshot.period_start = $4::date");
+    expect(metricCall?.text).toContain("snapshot.period_end = $5::date");
+    expect(metricCall?.text).toContain("snapshot.filters @> $7::jsonb");
+    expect(metricCall?.text).toContain("expires_at <= now()");
+    expect(metricCall?.text).toContain("freshness_slo_seconds");
+  });
+
+  it("checks target setup evidence catalog entries per requested tool", async () => {
+    const targetPool = targetAskEvidencePool({
+      missingCatalogToolIds: ["get_setup_gaps"],
+    });
+    const repository = targetAskEvidenceRepository(targetPool);
+
+    await expect(
+      repository.findSetupEvidence({
+        toolId: "get_setup_gaps",
+        organizationId: "org_hotel_group",
+        resourceId: "booking_hotel_alpenrose",
+        filters: {},
+      }),
+    ).rejects.toBeInstanceOf(AskEvidenceUnavailableError);
+    await expect(
+      repository.findSetupEvidence({
+        toolId: "get_hotel_settings_summary",
+        organizationId: "org_hotel_group",
+        resourceId: "booking_hotel_alpenrose",
+        filters: {},
+      }),
+    ).resolves.toHaveLength(2);
+
+    const setupCall = targetPool.calls.find((call) =>
+      call.text.includes("intelligence.setup_completeness_snapshots"),
+    );
+
+    expect(setupCall?.values).toEqual([
+      "booking_hotel_alpenrose",
+      "org_hotel_group",
+      "get_hotel_settings_summary",
+    ]);
+    expect(setupCall?.text).toContain("setup.organization_id = $2::uuid");
+    expect(setupCall?.text).toContain("catalog.tool_id = $3::text");
+    expect(setupCall?.text).toContain("freshness_slo_seconds");
   });
 
   it("returns an answered AskAnswer envelope for fixture-backed booking performance", async () => {
@@ -481,6 +731,211 @@ describe("Ask Intelligence route", () => {
       status: "partial",
       toolCallIds: expect.arrayContaining(["ask_tool_call_1_get_setup_gaps"]),
       evidenceIds: expect.arrayContaining(["ev_setup_payment_gap"]),
+    });
+  });
+
+  it("answers from target evidence rows when the target repository is configured", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    const targetPool = targetAskEvidencePool();
+    app = buildAskApp({
+      auditRepository,
+      askEvidenceRepository: targetAskEvidenceRepository(targetPool),
+    });
+
+    const performance = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(performance.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(performance.body);
+    expect(performance.body.status).toBe("answered");
+    expect(performance.body.evidenceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          evidenceId: "metric_target_direct_share",
+          toolId: "get_booking_performance",
+          sourceView: "direct_booking_summary_read_model",
+          metricKey: "booking.direct_booking_share",
+          aggregateId: "booking-direct-share-target-june",
+        }),
+        expect.objectContaining({
+          evidenceId: "metric_target_source_mix",
+          toolId: "get_booking_source_mix",
+          metricKey: "booking.booking_source_mix",
+        }),
+      ]),
+    );
+
+    const setup = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload({ question: "What setup gaps should I fix?" }),
+    });
+
+    expect(setup.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(setup.body);
+    expect(setup.body.status).toBe("partial");
+    expect(setup.body.evidenceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          evidenceId: "setup_target_setup_payment",
+          sourceOwner: "intelligence",
+          sourceView: "setup_completeness_snapshots",
+          metricKey: "hotel_catalog.setup_completeness_score",
+          quality: "partial",
+        }),
+      ]),
+    );
+    expect(
+      targetPool.calls.some((call) => call.text.includes("intelligence.ai_evidence_catalog")),
+    ).toBe(true);
+    expect(targetPool.calls.some((call) => /FROM\s+booking_hotels\b/i.test(call.text))).toBe(false);
+  });
+
+  it("returns structured unavailable data when target evidence rows are empty", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({
+      auditRepository,
+      askEvidenceRepository: targetAskEvidenceRepository(
+        targetAskEvidencePool({ metricRows: [], setupRows: [] }),
+      ),
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("unavailable");
+    expect(response.body.evidenceReferences).toEqual([]);
+    expect(response.body.unavailableData).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "empty_result",
+          requestedToolId: "get_booking_performance",
+        }),
+      ]),
+    );
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "unavailable",
+      evidenceIds: [],
+    });
+  });
+
+  it("returns source-not-in-catalog when target catalog rows are missing", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({
+      auditRepository,
+      askEvidenceRepository: targetAskEvidenceRepository(
+        targetAskEvidencePool({ missingCatalog: true }),
+      ),
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("unavailable");
+    expect(response.body.evidenceReferences).toEqual([]);
+    expect(response.body.unavailableData).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "source_not_in_catalog",
+          requestedToolId: "get_booking_performance",
+        }),
+      ]),
+    );
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "unavailable",
+      evidenceIds: [],
+    });
+  });
+
+  it("returns a stale-source partial answer for stale target evidence", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({
+      auditRepository,
+      askEvidenceRepository: targetAskEvidenceRepository(
+        targetAskEvidencePool({
+          metricRows: targetMetricRows({
+            directShareFreshnessStatus: "stale",
+            directShareQuality: "stale",
+          }),
+          setupRows: [],
+        }),
+      ),
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("partial");
+    expect(response.body.evidenceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          evidenceId: "metric_target_direct_share",
+          freshness: expect.objectContaining({ status: "stale" }),
+          quality: "stale",
+        }),
+      ]),
+    );
+    expect(response.body.unavailableData).toEqual(
+      expect.arrayContaining([expect.objectContaining({ reason: "stale_source" })]),
+    );
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "partial",
+      evidenceIds: expect.arrayContaining(["metric_target_direct_share"]),
+    });
+  });
+
+  it("returns structured source-unavailable data when the target repository fails", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({
+      auditRepository,
+      askEvidenceRepository: targetAskEvidenceRepository(targetAskEvidencePool({ fail: true })),
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("unavailable");
+    expect(response.body.evidenceReferences).toEqual([]);
+    expect(response.body.unavailableData).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "source_unavailable",
+          requestedToolId: "get_booking_performance",
+        }),
+      ]),
+    );
+    expect(auditRepository.records[0]).toMatchObject({
+      status: "unavailable",
+      evidenceIds: [],
     });
   });
 

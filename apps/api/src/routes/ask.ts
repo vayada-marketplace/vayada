@@ -83,6 +83,7 @@ export async function registerAskRoutes(
     options.modelMetadata ??
     (options.model ? null : { provider: "fixture", model: "deterministic-ask-route-fixture.v1" });
   app.addHook("onClose", async () => auditRepository.close?.());
+  app.addHook("onClose", async () => evidenceRepository.close?.());
 
   app.post<{ Body: unknown }>("/ask", async (request, reply) => {
     let baseContext: RequestContext;

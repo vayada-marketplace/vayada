@@ -48,6 +48,7 @@ export type ApiAskIntelligenceConfig =
       project?: string;
     };
 
+export type AskIntelligenceEvidenceSource = "fixture" | "target";
 export type PublicHotelProfileSource = "legacy" | "target";
 export type BookingDomainResolutionSource = "legacy" | "target";
 export type PublicBookabilitySource = "legacy" | "target";
@@ -74,6 +75,7 @@ export type ApiConfig = {
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   askIntelligence: ApiAskIntelligenceConfig;
+  askIntelligenceEvidenceSource: AskIntelligenceEvidenceSource;
   targetDatabaseUrl?: string;
   bookingDatabaseUrl?: string;
   bookingReservationsSource: "legacy" | "target";
@@ -332,6 +334,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     "disabled",
   );
   const financeSource = readSourceEnv(env, "FINANCE_SOURCE", ["legacy", "target"], "legacy");
+  const askIntelligenceEvidenceSource = readSourceEnv(
+    env,
+    "ASK_INTELLIGENCE_EVIDENCE_SOURCE",
+    ["fixture", "target"],
+    "fixture",
+  );
   const bookingWebEventSink = readSourceEnv(
     env,
     "BOOKING_WEB_EVENT_SINK",
@@ -357,6 +365,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   }
   if (financeSource === "target" && !targetDatabaseUrl) {
     throw new Error("FINANCE_SOURCE=target requires TARGET_DATABASE_URL");
+  }
+  if (askIntelligenceEvidenceSource === "target" && !targetDatabaseUrl) {
+    throw new Error("ASK_INTELLIGENCE_EVIDENCE_SOURCE=target requires TARGET_DATABASE_URL");
   }
   if (publicHotelProfileSource === "target" && !targetDatabaseUrl) {
     throw new Error("PUBLIC_HOTEL_PROFILE_SOURCE=target requires TARGET_DATABASE_URL");
@@ -384,6 +395,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     auth,
     authSession,
     askIntelligence: loadAskIntelligenceConfig(env),
+    askIntelligenceEvidenceSource,
     targetDatabaseUrl,
     bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
     bookingReservationsSource: readSourceEnv(

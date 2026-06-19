@@ -39,6 +39,7 @@ export {
   type AskLoopBudgets,
 } from "./budgets.js";
 export {
+  AskEvidenceUnavailableError,
   type AskEvidenceEntry,
   type AskEvidenceRepository,
   type AskEvidenceToolId,

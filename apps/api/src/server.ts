@@ -8,6 +8,7 @@ import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
 import { createPgAskAuditRepository } from "./platform/askAuditRepository.js";
 import { createOpenAIAskModel } from "./platform/askIntelligence.js";
+import { createTargetAskEvidenceRepository } from "./platform/askEvidenceRepository.js";
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
 import { createTargetBookingGuestPiiPort } from "./platform/bookingGuestPii.js";
@@ -226,6 +227,13 @@ const askModelProvider =
     ? await createOpenAIAskModel(config.askIntelligence)
     : undefined;
 
+const askEvidenceRepository =
+  config.askIntelligenceEvidenceSource === "target"
+    ? createTargetAskEvidenceRepository({
+        connectionString: config.targetDatabaseUrl!,
+      })
+    : undefined;
+
 const providerWebhookSecrets = {
   stripe: config.providerWebhooks.stripeSecret,
   xendit: config.providerWebhooks.xenditSecret,
@@ -435,6 +443,7 @@ const app = buildApp({
         connectionString: config.targetDatabaseUrl,
       })
     : undefined,
+  askEvidenceRepository,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
