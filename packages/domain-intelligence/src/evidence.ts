@@ -83,4 +83,17 @@ export type AskEvidenceRepository = {
     resourceId: string;
     filters: Record<string, unknown>;
   }): Promise<AskEvidenceEntry[]>;
+  close?(): Promise<void>;
 };
+
+export class AskEvidenceUnavailableError extends Error {
+  readonly reason: AskUnavailableData["reason"];
+  readonly status: AskEvidenceToolStatus;
+
+  constructor(reason: AskUnavailableData["reason"], status: AskEvidenceToolStatus = "unavailable") {
+    super(`Ask evidence unavailable: ${reason}`);
+    this.name = "AskEvidenceUnavailableError";
+    this.reason = reason;
+    this.status = status;
+  }
+}

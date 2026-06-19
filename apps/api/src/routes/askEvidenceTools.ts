@@ -1,15 +1,16 @@
 import { hasActiveLinkedResource, hasPermission } from "@vayada/backend-authorization";
 import type { PermissionKey, RequestContext } from "@vayada/backend-auth";
-import type {
-  AskEvidenceToolExecutor,
-  AskEvidenceToolExecutors,
-  AskEvidenceEntry,
-  AskEvidenceRepository,
-  AskEvidenceToolId,
-  AskEvidenceToolResult,
-  AskEvidenceToolScope,
-  AskEvidenceToolStatus,
-  AskUnavailableData,
+import {
+  AskEvidenceUnavailableError,
+  type AskEvidenceToolExecutor,
+  type AskEvidenceToolExecutors,
+  type AskEvidenceEntry,
+  type AskEvidenceRepository,
+  type AskEvidenceToolId,
+  type AskEvidenceToolResult,
+  type AskEvidenceToolScope,
+  type AskEvidenceToolStatus,
+  type AskUnavailableData,
 } from "@vayada/domain-intelligence";
 
 export type {
@@ -164,7 +165,10 @@ async function metricTool(
       filters,
       orderEvidence(definition, evidence),
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof AskEvidenceUnavailableError) {
+      return unavailableResult(context, definition, scope, filters, error.status, error.reason);
+    }
     return unavailableResult(context, definition, scope, filters, "error", "source_unavailable");
   }
 }
@@ -186,7 +190,10 @@ async function setupTool(
       filters,
     });
     return toEvidenceResult(context, definition, scope, filters, evidence);
-  } catch {
+  } catch (error) {
+    if (error instanceof AskEvidenceUnavailableError) {
+      return unavailableResult(context, definition, scope, filters, error.status, error.reason);
+    }
     return unavailableResult(context, definition, scope, filters, "error", "source_unavailable");
   }
 }

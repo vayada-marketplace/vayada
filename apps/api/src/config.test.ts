@@ -575,12 +575,32 @@ describe("api config", () => {
 
   it("keeps Ask Intelligence on the fixture provider by default", () => {
     expect(loadConfig({}).askIntelligence).toEqual({ provider: "fixture" });
+    expect(loadConfig({}).askIntelligenceEvidenceSource).toBe("fixture");
     expect(
       loadConfig({
         ASK_INTELLIGENCE_MODEL: "gpt-5.4-mini",
         OPENAI_API_KEY: "sk_test",
       }).askIntelligence,
     ).toEqual({ provider: "fixture" });
+  });
+
+  it("loads target Ask Intelligence evidence source only when explicitly enabled", () => {
+    expect(
+      loadConfig({
+        ASK_INTELLIGENCE_EVIDENCE_SOURCE: "target",
+        TARGET_DATABASE_URL: "postgresql://target-db",
+      }).askIntelligenceEvidenceSource,
+    ).toBe("target");
+    expect(() =>
+      loadConfig({
+        ASK_INTELLIGENCE_EVIDENCE_SOURCE: "target",
+      }),
+    ).toThrow("ASK_INTELLIGENCE_EVIDENCE_SOURCE=target requires TARGET_DATABASE_URL");
+    expect(() =>
+      loadConfig({
+        ASK_INTELLIGENCE_EVIDENCE_SOURCE: "legacy",
+      }),
+    ).toThrow("ASK_INTELLIGENCE_EVIDENCE_SOURCE must be one of: fixture, target");
   });
 
   it("loads Ask Intelligence OpenAI provider config only when explicitly enabled", () => {
