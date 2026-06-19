@@ -228,9 +228,9 @@ function askRoleGrantSeedSql(): string {
 }
 
 function expectAskOwnerSeedGrants(roleKey: "hotel_owner" | "owner" | "operator"): void {
-  const sql = askRoleGrantSeedSql();
+  const sql = askRoleGrantSeedSql().replace(/\s+/g, " ");
   for (const permission of askOwnerPermissions) {
-    expect(sql).toMatch(new RegExp(`\\('hotel_group',\\s*'${roleKey}',\\s*'${permission}'\\)`));
+    expect(sql).toContain(`('hotel_group', '${roleKey}', '${permission}')`);
   }
 }
 

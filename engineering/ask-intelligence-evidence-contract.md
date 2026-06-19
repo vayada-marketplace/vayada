@@ -204,6 +204,10 @@ Unavailable reasons:
 - `not_linked_resource`: requested resource is not linked to the selected
   organization;
 - `missing_permission`: membership lacks the required permission;
+- `missing_entitlement`: selected organization lacks the required product
+  entitlement;
+- `inactive_entitlement`: selected organization has the required product
+  entitlement, but it is not active;
 - `source_not_in_catalog`: no approved MVP tool can answer this question;
 - `source_unavailable`: approved source is down or not loaded;
 - `stale_source`: source freshness exceeds the tool SLO;
