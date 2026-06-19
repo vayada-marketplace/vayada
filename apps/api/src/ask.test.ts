@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   createFakeVerifier,
@@ -21,6 +21,11 @@ import {
 } from "./routes/ask.js";
 
 const futureExpiry = Math.floor(Date.now() / 1000) + 3600;
+const askOwnerPermissions: PermissionKey[] = [
+  "intelligence.ask.read",
+  "booking.analytics.read",
+  "booking.settings.read",
+];
 
 const session: VerifiedSession = {
   workosUserId: "user_workos_hotel_owner",
@@ -187,6 +192,27 @@ function expectValidAskAnswerEnvelope(answer: AskAnswer): void {
   expect(Array.isArray(answer.audit.deniedToolCallIds)).toBe(true);
 }
 
+function askRoleGrantSeedSql(): string {
+  const workspaceRelative = resolve(
+    process.cwd(),
+    "../../packages/backend-migration/migrations/0019_seed_ask_intelligence_role_grants.sql",
+  );
+  const path = existsSync(workspaceRelative)
+    ? workspaceRelative
+    : resolve(
+        process.cwd(),
+        "packages/backend-migration/migrations/0019_seed_ask_intelligence_role_grants.sql",
+      );
+  return readFileSync(path, "utf8");
+}
+
+function expectAskOwnerSeedGrants(roleKey: "hotel_owner" | "owner"): void {
+  const sql = askRoleGrantSeedSql();
+  for (const permission of askOwnerPermissions) {
+    expect(sql).toMatch(new RegExp(`\\('hotel_group',\\s*'${roleKey}',\\s*'${permission}'\\)`));
+  }
+}
+
 type EvidenceContractFixtureAnswer = Pick<
   AskAnswer,
   | "status"
@@ -283,6 +309,32 @@ describe("Ask Intelligence route", () => {
     expect(auditRepository.records[0].modelRequestIds).toHaveLength(2);
     expect(auditRepository.records[0].traceId).toBe(
       `ask_trace_ask_run_${response.body.audit.requestId}`,
+    );
+  });
+
+  it("allows seeded hotel owner grants to call Ask for a linked booking hotel", async () => {
+    expectAskOwnerSeedGrants("hotel_owner");
+    expectAskOwnerSeedGrants("owner");
+    app = buildAskApp({ permissions: askOwnerPermissions });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("answered");
+    expect(response.body.scope.bookingHotelId).toBe("booking_hotel_alpenrose");
+    expect(response.body.evidenceReferences).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolId: "get_booking_performance",
+          metricKey: "booking.direct_booking_share",
+        }),
+      ]),
     );
   });
 
@@ -434,7 +486,7 @@ describe("Ask Intelligence route", () => {
     });
   });
 
-  it("returns not_authorized and audits tenant-scope rejection", async () => {
+  it("returns not_authorized for another organization's booking hotel", async () => {
     const auditRepository = createInMemoryAskAuditRepository();
     app = buildAskApp({ auditRepository });
 
@@ -444,7 +496,7 @@ describe("Ask Intelligence route", () => {
       headers: { authorization: "Bearer valid-token" },
       payload: askPayload({
         scope: {
-          organizationId: "org_hotel_group",
+          organizationId: "org_other_hotel_group",
           bookingHotelId: "booking_hotel_bellevue",
           dateRange: { from: "2026-06-01", to: "2026-06-30" },
         },
@@ -481,6 +533,55 @@ describe("Ask Intelligence route", () => {
     expectValidAskAnswerEnvelope(response.body);
     expect(response.body.status).toBe("not_authorized");
     expect(response.body.unavailableData[0].reason).toBe("missing_permission");
+  });
+
+  it("returns not_authorized when Booking Engine entitlement is inactive", async () => {
+    app = buildAskApp({
+      entitlements: [
+        {
+          product: "booking",
+          key: "booking-engine",
+          status: "suspended",
+        },
+      ],
+    });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(403);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("not_authorized");
+    expect(response.body.unavailableData[0].reason).toBe("inactive_entitlement");
+    expect(response.body.evidenceReferences).toEqual([]);
+  });
+
+  it("returns not_authorized when Ask tool permissions are missing", async () => {
+    app = buildAskApp({ permissions: ["intelligence.ask.read", "booking.settings.read"] });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("not_authorized");
+    expect(response.body.unavailableData).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "missing_permission",
+          requestedToolId: "get_booking_performance",
+        }),
+      ]),
+    );
+    expect(response.body.evidenceReferences).toEqual([]);
   });
 
   it("audits budget exhaustion from a misbehaving model", async () => {
