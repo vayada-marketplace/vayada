@@ -1,12 +1,14 @@
 import { Usage, type Model, type ModelRequest, type ModelResponse } from "@openai/agents";
 import type { RequestContext } from "@vayada/backend-auth";
 import {
+  ASK_ANSWER_SCHEMA_VERSION,
   createOpenAIAgentsAskRuntime,
   type AskAgentRunTelemetry,
   type AskAgentRuntime,
   AskAnswer,
   AskAuditRecord,
   AskAuditRepository,
+  ASK_PROMPT_VERSION,
   type AskEvidenceEntry,
   type AskEvidenceRepository,
   type AskEvidenceToolResult,
@@ -88,7 +90,7 @@ export async function registerAskRoutes(
       baseContext = enforceRoutePolicy(request, { permission: "intelligence.ask.read" });
     } catch (error) {
       const answer = notAuthorized(request, parseFallback(request.body), error);
-      await recordAudit(auditRepository, answer, null, modelMetadata);
+      await recordAudit(request, auditRepository, answer, null, modelMetadata);
       return reply.code(statusCode(error)).send(answer);
     }
 
@@ -107,7 +109,7 @@ export async function registerAskRoutes(
         ],
         followUpQuestions: ["Which hotel, date range, and question should I analyze?"],
       });
-      await recordAudit(auditRepository, answer, null, modelMetadata);
+      await recordAudit(request, auditRepository, answer, null, modelMetadata);
       return reply.code(400).send(answer);
     }
 
@@ -116,7 +118,7 @@ export async function registerAskRoutes(
       scopedContext = enforceScopedPolicy(request, parsed.body.scope.bookingHotelId);
     } catch (error) {
       const answer = notAuthorized(request, parsed.body, error);
-      await recordAudit(auditRepository, answer, null, modelMetadata);
+      await recordAudit(request, auditRepository, answer, null, modelMetadata);
       return reply.code(statusCode(error)).send(answer);
     }
 
@@ -135,7 +137,7 @@ export async function registerAskRoutes(
         confidence: { level: "unknown", reasons: ["not_linked_resource"] },
         deniedToolCallIds: ["tool_call_ask_organization_denied"],
       });
-      await recordAudit(auditRepository, answer, null, modelMetadata);
+      await recordAudit(request, auditRepository, answer, null, modelMetadata);
       return reply.code(403).send(answer);
     }
 
@@ -152,7 +154,7 @@ export async function registerAskRoutes(
         },
       });
     const answer = await runtime.answer(parsed.body, scopedContext);
-    await recordAudit(auditRepository, answer, telemetry, modelMetadata);
+    await recordAudit(request, auditRepository, answer, telemetry, modelMetadata);
     return answer;
   });
 }
@@ -512,36 +514,59 @@ function envelope(
 }
 
 async function recordAudit(
+  request: FastifyRequest,
   repository: AskAuditRepository,
   answer: AskAnswer,
   telemetry: AskAgentRunTelemetry | null,
   modelMetadata: AskRoutesOptions["modelMetadata"] | null,
 ) {
-  await repository.recordAskRun({
-    requestId: answer.audit.requestId,
-    actorInternalUserId: answer.audit.actorInternalUserId,
-    organizationId: answer.audit.organizationId,
-    bookingHotelId: answer.scope.bookingHotelId ?? null,
-    question: answer.question,
-    status: answer.status,
-    answerId: answer.answerId,
-    generatedAt: answer.generatedAt,
-    toolPlan: telemetry?.plan ? (telemetry.plan as unknown as Record<string, unknown>) : null,
-    toolCallIds: answer.audit.toolCallIds,
-    deniedToolCallIds: answer.audit.deniedToolCallIds,
-    evidenceIds: telemetry?.evidenceIds ?? evidenceIds(answer),
-    modelProvider: modelMetadata?.provider ?? null,
-    modelName: modelMetadata?.model ?? null,
-    promptVersion: telemetry?.promptVersion ?? null,
-    answerSchemaVersion: telemetry?.answerSchemaVersion ?? null,
-    traceId: telemetry?.traceId ?? null,
-    modelResponseIds: telemetry?.modelResponseIds ?? [],
-    modelRequestIds: telemetry?.modelRequestIds ?? [],
-    latencyMs: telemetry?.latencyMs ?? null,
-    usage: telemetry?.usage ?? null,
-    estimatedCostUsd: null,
-    failure: telemetry?.failure ?? null,
-  });
+  try {
+    await repository.recordAskRun({
+      requestId: answer.audit.requestId,
+      actorInternalUserId: answer.audit.actorInternalUserId,
+      organizationId: answer.audit.organizationId,
+      bookingHotelId: answer.scope.bookingHotelId ?? null,
+      question: answer.question,
+      status: answer.status,
+      answerId: answer.answerId,
+      summary: answer.summary,
+      blocks: answer.blocks,
+      conversationId: answer.conversationId,
+      runId: answer.runId,
+      contractVersion: answer.contractVersion,
+      generatedAt: answer.generatedAt,
+      scope: answer.scope,
+      toolPlan: telemetry?.plan ? (telemetry.plan as unknown as Record<string, unknown>) : null,
+      toolResults: telemetry?.toolResults ?? [],
+      toolCallIds: answer.audit.toolCallIds,
+      deniedToolCallIds: answer.audit.deniedToolCallIds,
+      evidenceIds: telemetry?.evidenceIds ?? evidenceIds(answer),
+      evidenceReferences: answer.evidenceReferences,
+      unavailableData: answer.unavailableData,
+      caveats: answer.caveats,
+      confidence: answer.confidence,
+      suggestedActions: answer.suggestedActions,
+      followUpQuestions: answer.followUpQuestions,
+      modelProvider: modelMetadata?.provider ?? null,
+      modelName: modelMetadata?.model ?? null,
+      promptVersion: telemetry?.promptVersion ?? ASK_PROMPT_VERSION,
+      answerSchemaVersion: telemetry?.answerSchemaVersion ?? ASK_ANSWER_SCHEMA_VERSION,
+      traceId: telemetry?.traceId ?? null,
+      modelResponseIds: telemetry?.modelResponseIds ?? [],
+      modelRequestIds: telemetry?.modelRequestIds ?? [],
+      latencyMs: telemetry?.latencyMs ?? null,
+      usage: telemetry?.usage ?? null,
+      estimatedCostUsd: null,
+      failure: telemetry?.failure ?? null,
+    });
+  } catch (error) {
+    // Ask answers remain available when the audit sink is unavailable. The
+    // failure is logged with the request ID and covered by route tests.
+    request.log.warn(
+      { err: error, requestId: answer.audit.requestId },
+      "Ask Intelligence audit persistence failed",
+    );
+  }
 }
 
 function evidenceIds(answer: AskAnswer): string[] {

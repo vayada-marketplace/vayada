@@ -68,6 +68,7 @@ export type AskAgentRunTelemetry = {
   toolCallIds: string[];
   deniedToolCallIds: string[];
   evidenceIds: string[];
+  toolResults: AskEvidenceToolResult[];
 };
 
 type AskRuntimeContext = {
@@ -436,5 +437,6 @@ function buildTelemetry(input: {
     evidenceIds: input.toolResults.flatMap((result) =>
       result.evidence.map((entry) => entry.evidenceId),
     ),
+    toolResults: input.toolResults,
   };
 }
