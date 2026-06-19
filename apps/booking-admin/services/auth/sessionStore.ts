@@ -129,6 +129,14 @@ export function getScopedBookingHotelIds(): string[] {
     : [];
 }
 
+export function getSelectedOrganizationId(): string | null {
+  const token = currentCompatibilityToken() ?? getLegacyPasswordToken();
+  if (!token) return null;
+
+  const payload = decodeJwtPayload(token);
+  return typeof payload?.org === "string" ? payload.org : null;
+}
+
 export function getLegacyPasswordToken(): string | null {
   if (typeof window === "undefined") return null;
 
@@ -158,6 +166,13 @@ export function hasHotelAccessMarker(): boolean {
   return (
     localStorage.getItem("userType") === "hotel" || localStorage.getItem("isSuperAdmin") === "true"
   );
+}
+
+function currentCompatibilityToken(): string | null {
+  if (!legacyCompatibilityToken) return null;
+  return Date.now() < legacyCompatibilityToken.expiresAt - 30_000
+    ? legacyCompatibilityToken.token
+    : null;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {

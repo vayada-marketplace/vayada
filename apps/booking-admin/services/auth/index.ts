@@ -12,6 +12,7 @@ import {
   hasHotelAccessMarker,
   isAuthKitLoginEnabled,
   isLegacyPasswordFallbackEnabled,
+  setLegacyCompatibilityToken,
   setAuthKitSession,
   setLegacyPasswordSession,
   type AuthKitSessionResponse,
@@ -58,6 +59,11 @@ export interface RegisterResponse {
   status: string;
 }
 
+type CompatibilityTokenResponse = {
+  accessToken: string;
+  expiresIn: number;
+};
+
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
     ...options,
@@ -83,6 +89,17 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   return body as T;
 }
 
+async function attachBookingCompatibilityToken(): Promise<void> {
+  const csrfToken = getAuthCsrfToken();
+  if (!csrfToken) return;
+
+  const response = await authFetch<CompatibilityTokenResponse>("/auth/compat/booking-admin-token", {
+    method: "POST",
+    headers: { "x-vayada-csrf": csrfToken },
+  });
+  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
+}
+
 function storeLegacyLoginResponse(response: LoginResponse): void {
   setLegacyPasswordSession({
     token: response.access_token!,
@@ -102,6 +119,8 @@ export const authService = {
   isAuthKitEnabled: isAuthKitLoginEnabled,
 
   isLegacyFallbackEnabled: isLegacyPasswordFallbackEnabled,
+
+  ensureBookingCompatibilityToken: attachBookingCompatibilityToken,
 
   startHostedLogin: (loginHint?: string): void => {
     const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
