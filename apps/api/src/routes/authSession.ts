@@ -65,7 +65,12 @@ export type ProductAuditSink = {
   record(event: ProductAuditEvent): Promise<void>;
 };
 
-export type AuthSurface = "platform-admin" | "booking-admin" | "pms-web" | "affiliate-dashboard";
+export type AuthSurface =
+  | "platform-admin"
+  | "booking-admin"
+  | "pms-web"
+  | "affiliate-dashboard"
+  | "marketplace-web";
 
 export type RequiredResourceLink = {
   product: Product;
@@ -73,7 +78,7 @@ export type RequiredResourceLink = {
 };
 
 export type AuthSurfacePolicy = {
-  requiredOrganizationKind: OrganizationKind;
+  requiredOrganizationKind: OrganizationKind | OrganizationKind[];
   callbackReturnUrl?: string;
   logoutReturnUrl?: string;
   legacyJwtSecret?: string;
@@ -207,7 +212,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       ipAddress: request.ip,
       userAgent: request.headers["user-agent"],
     });
-    let resolution: { user: IdentityUser; organizationId?: string };
+    let resolution: IdentityResolution;
     try {
       resolution = await resolveOrCreateIdentity(session, request, options, surfacePolicy);
     } catch (error) {
@@ -249,7 +254,9 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (callbackReturnUrl) {
       return reply.redirect(callbackReturnUrl);
     }
-    return reply.send(toSessionResponse(session, resolution.user, csrfToken));
+    return reply.send(
+      toSessionResponse(session, resolution.user, csrfToken, resolution.organizationKind),
+    );
   });
 
   app.get("/session", async (request, reply) => {
@@ -266,14 +273,19 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (!session) {
       return reply.code(401).send({ error: "invalid_session" });
     }
-    let resolution: { user: IdentityUser; organizationId?: string };
+    let resolution: IdentityResolution;
     try {
       resolution = await resolveExistingIdentity(session, options, surfacePolicy);
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
     return reply.send(
-      toSessionResponse(session, resolution.user, readCookie(request, CSRF_COOKIE)),
+      toSessionResponse(
+        session,
+        resolution.user,
+        readCookie(request, CSRF_COOKIE),
+        resolution.organizationKind,
+      ),
     );
   });
 
@@ -297,7 +309,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (!session) {
       return reply.code(401).send({ error: "invalid_session" });
     }
-    let resolution: { user: IdentityUser; organizationId?: string };
+    let resolution: IdentityResolution;
     try {
       resolution = await resolveExistingIdentity(session, options, surfacePolicy);
     } catch (error) {
@@ -312,7 +324,14 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           domain: options.cookieDomain,
         }),
       )
-      .send(toSessionResponse(session, resolution.user, readCookie(request, CSRF_COOKIE)));
+      .send(
+        toSessionResponse(
+          session,
+          resolution.user,
+          readCookie(request, CSRF_COOKIE),
+          resolution.organizationKind,
+        ),
+      );
   });
 
   app.post("/logout", async (request, reply) => {
@@ -322,10 +341,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (!passesCsrfCheck(request, options)) {
       return reply.code(403).send({ error: "csrf_rejected" });
     }
-    const body = request.body as { surface?: string } | undefined;
+    const body = request.body as { surface?: string; return_to?: string } | undefined;
     const surfacePolicy = getSurfacePolicy(parseSurface(body?.surface), options);
     const sealedSession = readCookie(request, SESSION_COOKIE);
-    let logoutUrl = surfacePolicy.logoutReturnUrl ?? options.logoutReturnUrl;
+    const returnTo = body?.return_to
+      ? validateReturnTo(body.return_to, options.allowedOrigins)
+      : (surfacePolicy.logoutReturnUrl ?? options.logoutReturnUrl);
+    let logoutUrl = returnTo;
     if (sealedSession) {
       const session = await options.authKitClient.authenticateSession({ sealedSession });
       if (session) {
@@ -345,7 +367,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       }
       logoutUrl = await options.authKitClient.getLogoutUrl({
         sealedSession,
-        returnTo: surfacePolicy.logoutReturnUrl ?? options.logoutReturnUrl,
+        returnTo,
       });
     }
 
@@ -396,7 +418,8 @@ function parseSurface(value: string | undefined): AuthSurface {
     value === "platform-admin" ||
     value === "booking-admin" ||
     value === "pms-web" ||
-    value === "affiliate-dashboard"
+    value === "affiliate-dashboard" ||
+    value === "marketplace-web"
   ) {
     return value;
   }
@@ -614,6 +637,7 @@ async function resolveExistingIdentity(
 type IdentityResolution = {
   user: IdentityUser;
   organizationId?: string;
+  organizationKind?: OrganizationKind;
   resourceScope?: {
     product: Product;
     resourceType: ResourceType;
@@ -656,8 +680,12 @@ async function resolveOrganizationAccess(
   if (organization.status !== "active") {
     throw new Error(`Organization ${organization.organizationId} is not active`);
   }
-  if (organization.kind !== surfacePolicy.requiredOrganizationKind) {
-    throw new Error(`Selected organization must be ${surfacePolicy.requiredOrganizationKind}`);
+  if (!matchesOrganizationKind(organization.kind, surfacePolicy.requiredOrganizationKind)) {
+    throw new Error(
+      `Selected organization must be ${requiredOrganizationKindLabel(
+        surfacePolicy.requiredOrganizationKind,
+      )}`,
+    );
   }
   const membership = await options.identityRepository.findActiveMembership(
     userId,
@@ -676,13 +704,14 @@ async function resolveOrganizationAccess(
     }
     return {
       organizationId: organization.organizationId,
+      organizationKind: organization.kind,
       resourceScope: {
         ...surfacePolicy.requiredResourceLink,
         resourceIds: matchingLinks.map((link) => link.resourceId),
       },
     };
   }
-  return { organizationId: organization.organizationId };
+  return { organizationId: organization.organizationId, organizationKind: organization.kind };
 }
 
 function findRequiredResourceLinks(
@@ -701,11 +730,28 @@ function resourceScopeKey(scope: { product: Product; resourceType: ResourceType 
   return `${scope.product}:${scope.resourceType}`;
 }
 
-function toSessionResponse(session: AuthKitSession, user: IdentityUser, csrfToken?: string) {
+function matchesOrganizationKind(
+  actual: OrganizationKind,
+  required: OrganizationKind | OrganizationKind[],
+): boolean {
+  return Array.isArray(required) ? required.includes(actual) : actual === required;
+}
+
+function requiredOrganizationKindLabel(required: OrganizationKind | OrganizationKind[]): string {
+  return Array.isArray(required) ? required.join(" or ") : required;
+}
+
+function toSessionResponse(
+  session: AuthKitSession,
+  user: IdentityUser,
+  csrfToken?: string,
+  organizationKind?: OrganizationKind,
+) {
   return {
     accessToken: session.accessToken,
     csrfToken,
     organizationId: session.organizationId,
+    organizationKind,
     user: {
       id: user.userId,
       email: user.email,

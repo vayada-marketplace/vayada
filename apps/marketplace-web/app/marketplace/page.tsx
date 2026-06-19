@@ -13,6 +13,7 @@ import { hotelService } from "@/services/api/hotels";
 import { creatorService } from "@/services/api/creators";
 import { ApiErrorResponse } from "@/services/api/client";
 import { checkProfileStatus } from "@/lib/utils";
+import { authService } from "@/services/auth";
 
 export default function MarketplacePage() {
   const router = useRouter();
@@ -47,15 +48,22 @@ export default function MarketplacePage() {
     const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
     setUserType(storedUserType);
 
-    if (storedUserType !== "hotel" && storedUserType !== "creator") {
-      // Admins and other roles don't have a marketplace profile to gate on.
-      setProfileReady(true);
-      return;
-    }
-
     let cancelled = false;
     (async () => {
-      const status = await checkProfileStatus(storedUserType);
+      const authenticated = await authService.ensureSession();
+      if (cancelled) return;
+      if (!authenticated) {
+        router.replace(ROUTES.LOGIN);
+        return;
+      }
+      const refreshedUserType =
+        (localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null) ?? storedUserType;
+      setUserType(refreshedUserType);
+      if (refreshedUserType !== "hotel" && refreshedUserType !== "creator") {
+        setProfileReady(true);
+        return;
+      }
+      const status = await checkProfileStatus(refreshedUserType);
       if (cancelled) return;
       if (!status || !status.profile_complete) {
         localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, createContext, useContext } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
@@ -24,6 +24,7 @@ export const useSidebar = () => useContext(SidebarContext);
 
 export default function AuthenticatedNavigation() {
   const pathname = usePathname();
+  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [userType, setUserType] = useState<UserType | null>(null);
 
@@ -36,8 +37,25 @@ export default function AuthenticatedNavigation() {
       // Default to collapsed if no saved preference
       setIsCollapsed(true);
     }
-    setUserType(localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null);
-  }, []);
+    let cancelled = false;
+    authService
+      .ensureSession()
+      .then((authenticated) => {
+        if (cancelled) return;
+        if (!authenticated) {
+          router.replace("/login");
+          return;
+        }
+        setUserType(localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null);
+      })
+      .catch((error) => {
+        console.error("Failed to verify marketplace session:", error);
+        if (!cancelled) router.replace("/login");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   // Save collapsed state to localStorage
   useEffect(() => {

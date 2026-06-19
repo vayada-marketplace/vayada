@@ -1,4 +1,4 @@
-import { ApiClient, ApiErrorResponse } from "./client";
+import { ApiClient, ApiErrorResponse, getApiBearerToken } from "./client";
 
 const PLATFORM_MEDIA_API_BASE_URL =
   process.env.NEXT_PUBLIC_PLATFORM_MEDIA_API_URL ??
@@ -271,20 +271,11 @@ function legacyUploadErrorDetail(body: unknown): string | undefined {
 }
 
 function shouldUseLegacyMarketplaceImageUpload(): boolean {
-  // Temporary production rollback: keep all current file uploads on the legacy FastAPI backend
-  // until the platform media API is deployed behind a production host and cut over deliberately.
-  return true;
+  return process.env.NEXT_PUBLIC_MARKETPLACE_LEGACY_UPLOADS_ENABLED === "true";
 }
 
 function getLegacyBearerToken(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const token = localStorage.getItem("access_token");
-  const expiresAt = localStorage.getItem("token_expires_at");
-  if (!token || !expiresAt) return null;
-
-  if (Date.now() >= Number(expiresAt)) return null;
-  return token;
+  return getApiBearerToken();
 }
 
 function stripTrailingSlash(value: string): string {

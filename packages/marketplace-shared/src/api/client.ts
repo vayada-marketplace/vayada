@@ -3,6 +3,36 @@
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
+let bearerTokenProvider: (() => string | null) | null = null;
+
+export function setApiBearerTokenProvider(provider: (() => string | null) | null): void {
+  bearerTokenProvider = provider;
+}
+
+export function getApiBearerToken(): string | null {
+  if (bearerTokenProvider) {
+    const token = bearerTokenProvider();
+    if (token) return token;
+  }
+  return getStoredLegacyToken();
+}
+
+function getStoredLegacyToken(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const token = localStorage.getItem("access_token");
+  const expiresAt = localStorage.getItem("token_expires_at");
+
+  if (!token || !expiresAt) return null;
+
+  if (Date.now() >= Number(expiresAt)) {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("token_expires_at");
+    return null;
+  }
+
+  return token;
+}
 
 export interface ApiError {
   detail:
@@ -28,8 +58,6 @@ export class ApiErrorResponse extends Error {
 
 export class ApiClient {
   private baseURL: string;
-  private TOKEN_KEY = "access_token";
-  private EXPIRES_AT_KEY = "token_expires_at";
 
   constructor(baseURL: string = API_BASE_URL) {
     this.baseURL = baseURL;
@@ -39,20 +67,7 @@ export class ApiClient {
    * Get JWT token from localStorage if not expired
    */
   private getToken(): string | null {
-    if (typeof window === "undefined") return null;
-
-    const token = localStorage.getItem(this.TOKEN_KEY);
-    const expiresAt = localStorage.getItem(this.EXPIRES_AT_KEY);
-
-    if (!token || !expiresAt) return null;
-
-    // Check if token is expired
-    if (Date.now() >= parseInt(expiresAt)) {
-      this.clearToken();
-      return null;
-    }
-
-    return token;
+    return getApiBearerToken();
   }
 
   /**
@@ -60,8 +75,8 @@ export class ApiClient {
    */
   private clearToken(): void {
     if (typeof window === "undefined") return;
-    localStorage.removeItem(this.TOKEN_KEY);
-    localStorage.removeItem(this.EXPIRES_AT_KEY);
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("token_expires_at");
   }
 
   /**

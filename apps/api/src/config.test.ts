@@ -47,6 +47,8 @@ describe("api config", () => {
         AUTH_AFFILIATE_DASHBOARD_SUCCESS_URL: "https://affiliate.localhost/dashboard",
         AUTH_AFFILIATE_DASHBOARD_LOGOUT_URL: "https://affiliate.localhost/login",
         AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET: "affiliate-pms-secret",
+        AUTH_MARKETPLACE_WEB_SUCCESS_URL: "https://marketplace.localhost/marketplace",
+        AUTH_MARKETPLACE_WEB_LOGOUT_URL: "https://marketplace.localhost/login",
       }).authSession,
     ).toEqual({
       workosClientId: "client",
@@ -62,6 +64,8 @@ describe("api config", () => {
       authAffiliateDashboardSuccessUrl: "https://affiliate.localhost/dashboard",
       authAffiliateDashboardLogoutUrl: "https://affiliate.localhost/login",
       authLegacyAffiliatePmsJwtSecret: "affiliate-pms-secret",
+      authMarketplaceWebSuccessUrl: "https://marketplace.localhost/marketplace",
+      authMarketplaceWebLogoutUrl: "https://marketplace.localhost/login",
     });
   });
 
