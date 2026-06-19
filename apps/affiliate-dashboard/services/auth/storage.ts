@@ -33,7 +33,7 @@ let authKitSession: AuthKitSessionResponse | null = null;
 let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
 
 export function isCompatibilityTokenEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED === "true";
+  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED !== "false";
 }
 
 export function storeUser(data: StoredUser): void {
