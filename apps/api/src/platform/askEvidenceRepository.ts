@@ -74,7 +74,7 @@ export function createTargetAskEvidenceRepository(config: {
     });
 
   return {
-    async findMetricEvidence({ metricKeys, resourceId, dateRange, filters }) {
+    async findMetricEvidence({ metricKeys, organizationId, resourceId, dateRange, filters }) {
       const toolIds = metricToolIds(metricKeys);
       if (toolIds.length === 0) return [];
       await ensureActiveCatalog(pool, toolIds);
@@ -82,18 +82,21 @@ export function createTargetAskEvidenceRepository(config: {
       const result = await pool.query<TargetMetricEvidenceRow>(metricEvidenceSql(), [
         metricKeys,
         resourceId,
+        organizationId,
         dateRange?.from ?? null,
         dateRange?.to ?? null,
         toolIds,
+        JSON.stringify(filters),
       ]);
 
       return result.rows.map((row) => toMetricEvidence(row, dateRange, filters));
     },
-    async findSetupEvidence({ resourceId, filters }) {
-      await ensureActiveCatalog(pool, ["get_setup_gaps", "get_hotel_settings_summary"]);
+    async findSetupEvidence({ toolId, organizationId, resourceId, filters }) {
+      await ensureActiveCatalog(pool, [toolId]);
       const result = await pool.query<TargetSetupEvidenceRow>(setupEvidenceSql(), [
         resourceId,
-        ["get_setup_gaps", "get_hotel_settings_summary"],
+        organizationId,
+        toolId,
       ]);
 
       return result.rows.map((row) => toSetupEvidence(row, filters));
@@ -136,9 +139,9 @@ function metricToolIds(metricKeys: string[]): AskEvidenceToolId[] {
 function metricEvidenceSql(): string {
   return `${bookingScopedPropertyCte()},
   active_catalog AS (
-    SELECT DISTINCT catalog.source_owner, catalog.source_view
+    SELECT DISTINCT catalog.source_owner, catalog.source_view, catalog.freshness_slo_seconds
     FROM intelligence.ai_evidence_catalog catalog
-    WHERE catalog.tool_id = ANY($5::text[])
+    WHERE catalog.tool_id = ANY($6::text[])
       AND catalog.tool_version = 'v1'
       AND catalog.status = 'active'
       AND catalog.read_only = TRUE
@@ -148,19 +151,22 @@ function metricEvidenceSql(): string {
       snapshot.*,
       scoped.resource_id AS requested_resource_id,
       scoped.resource_type AS requested_resource_type,
+      catalog.freshness_slo_seconds,
       ROW_NUMBER() OVER (
         PARTITION BY snapshot.metric_key
         ORDER BY snapshot.generated_at DESC, snapshot.id DESC
       ) AS snapshot_rank
     FROM intelligence.metric_snapshot_runs snapshot
     JOIN scoped_property scoped ON scoped.property_id = snapshot.property_id
+     AND snapshot.organization_id = $3::uuid
     JOIN active_catalog catalog
       ON catalog.source_owner = snapshot.source_owner
      AND catalog.source_view = snapshot.source_view
     WHERE snapshot.metric_key = ANY($1::text[])
       AND snapshot.run_status IN ('succeeded', 'partial', 'stale')
-      AND ($3::date IS NULL OR snapshot.period_end IS NULL OR snapshot.period_end >= $3::date)
-      AND ($4::date IS NULL OR snapshot.period_start IS NULL OR snapshot.period_start <= $4::date)
+      AND ($4::date IS NULL OR snapshot.period_start = $4::date)
+      AND ($5::date IS NULL OR snapshot.period_end = $5::date)
+      AND ($7::jsonb = '{}'::jsonb OR snapshot.filters @> $7::jsonb)
   )
   SELECT
     id::text AS "id",
@@ -173,7 +179,13 @@ function metricEvidenceSql(): string {
     metric_key AS "metricKey",
     generated_at AS "generatedAt",
     source_fresh_at AS "sourceFreshAt",
-    freshness_status AS "freshnessStatus",
+    CASE
+      WHEN expires_at IS NOT NULL AND expires_at <= now() THEN 'stale'
+      WHEN source_fresh_at IS NOT NULL
+        AND source_fresh_at <= now() - (freshness_slo_seconds * interval '1 second')
+        THEN 'stale'
+      ELSE freshness_status
+    END AS "freshnessStatus",
     quality,
     sample_size AS "sampleSize",
     aggregate_id AS "aggregateId",
@@ -187,9 +199,9 @@ function metricEvidenceSql(): string {
 function setupEvidenceSql(): string {
   return `${setupScopedPropertyCte()},
   active_catalog AS (
-    SELECT 1
+    SELECT catalog.freshness_slo_seconds
     FROM intelligence.ai_evidence_catalog catalog
-    WHERE catalog.tool_id = ANY($2::text[])
+    WHERE catalog.tool_id = $3::text
       AND catalog.tool_version = 'v1'
       AND catalog.status = 'active'
       AND catalog.read_only = TRUE
@@ -200,14 +212,16 @@ function setupEvidenceSql(): string {
       setup.*,
       scoped.resource_id AS requested_resource_id,
       scoped.resource_type AS requested_resource_type,
+      catalog.freshness_slo_seconds,
       ROW_NUMBER() OVER (
         PARTITION BY setup.setup_area
         ORDER BY setup.source_snapshot_at DESC, setup.id DESC
       ) AS setup_rank
     FROM intelligence.setup_completeness_snapshots setup
     JOIN scoped_property scoped ON scoped.property_id = setup.property_id
+     AND setup.organization_id = $2::uuid
+    JOIN active_catalog catalog ON TRUE
     WHERE setup.completion_status <> 'not_applicable'
-      AND EXISTS (SELECT 1 FROM active_catalog)
   )
   SELECT
     id::text AS "id",
@@ -219,7 +233,11 @@ function setupEvidenceSql(): string {
     completeness_score AS "completenessScore",
     source_snapshot_at AS "sourceSnapshotAt",
     source_fresh_at AS "sourceFreshAt",
-    freshness_status AS "freshnessStatus",
+    CASE
+      WHEN COALESCE(source_fresh_at, source_snapshot_at) <= now() - (freshness_slo_seconds * interval '1 second')
+        THEN 'stale'
+      ELSE freshness_status
+    END AS "freshnessStatus",
     missing_items AS "missingItems",
     blocking_items AS "blockingItems",
     stale_items AS "staleItems",

@@ -75,11 +75,14 @@ export type AskEvidenceToolResult = {
 export type AskEvidenceRepository = {
   findMetricEvidence(input: {
     metricKeys: string[];
+    organizationId: string;
     resourceId: string;
     dateRange?: AskEvidenceToolScope["dateRange"];
     filters: Record<string, unknown>;
   }): Promise<AskEvidenceEntry[]>;
   findSetupEvidence(input: {
+    toolId: AskEvidenceToolId;
+    organizationId: string;
     resourceId: string;
     filters: Record<string, unknown>;
   }): Promise<AskEvidenceEntry[]>;

@@ -154,6 +154,7 @@ async function metricTool(
   try {
     const evidence = await repository.findMetricEvidence({
       metricKeys: definition.metricKeys,
+      organizationId: scope.organizationId!,
       resourceId: scope.bookingHotelId!,
       dateRange: scope.dateRange,
       filters,
@@ -186,6 +187,8 @@ async function setupTool(
   try {
     const resource = setupResource(scope);
     const evidence = await repository.findSetupEvidence({
+      toolId: definition.toolId,
+      organizationId: scope.organizationId!,
       resourceId: resource.resourceId!,
       filters,
     });

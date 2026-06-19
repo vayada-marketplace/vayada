@@ -8,6 +8,7 @@ import {
   type VerifiedSession,
 } from "@vayada/backend-auth";
 import { injectJson } from "@vayada/backend-test";
+import { AskEvidenceUnavailableError } from "@vayada/domain-intelligence";
 import { Usage, type Model, type ModelRequest, type ModelResponse } from "@openai/agents";
 import { afterEach, describe, expect, it } from "vitest";
 import type { QueryResultRow } from "pg";
@@ -200,6 +201,7 @@ function targetAskEvidencePool(
     setupRows?: QueryResultRow[];
     fail?: boolean;
     missingCatalog?: boolean;
+    missingCatalogToolIds?: string[];
   } = {},
 ): TargetAskEvidencePool {
   const calls: TargetAskEvidencePool["calls"] = [];
@@ -224,7 +226,17 @@ function targetAskEvidencePool(
         return queryRows<T>(setupRows);
       }
       if (text.includes("intelligence.ai_evidence_catalog")) {
-        return queryRows<T>(options.missingCatalog ? [] : [{ active: true }]);
+        const requestedToolIds = Array.isArray(values?.[0])
+          ? values[0].map((value) => String(value))
+          : typeof values?.[0] === "string"
+            ? [values[0]]
+            : [];
+        const missingRequestedTool = requestedToolIds.some((toolId) =>
+          options.missingCatalogToolIds?.includes(toolId),
+        );
+        return queryRows<T>(
+          options.missingCatalog || missingRequestedTool ? [] : [{ active: true }],
+        );
       }
       return queryRows<T>([]);
     },
@@ -449,6 +461,76 @@ describe("Ask Intelligence route", () => {
   afterEach(async () => {
     await app?.close();
     app = null;
+  });
+
+  it("queries target evidence by selected organization and exact metric filters", async () => {
+    const targetPool = targetAskEvidencePool({ metricRows: [], setupRows: [] });
+    const repository = targetAskEvidenceRepository(targetPool);
+
+    await repository.findMetricEvidence({
+      metricKeys: ["booking.direct_booking_share"],
+      organizationId: "org_hotel_group",
+      resourceId: "booking_hotel_alpenrose",
+      dateRange: { from: "2026-06-01", to: "2026-06-30" },
+      filters: { currency: "EUR" },
+    });
+
+    const metricCall = targetPool.calls.find((call) =>
+      call.text.includes("intelligence.metric_snapshot_runs"),
+    );
+
+    expect(metricCall?.values).toEqual([
+      ["booking.direct_booking_share"],
+      "booking_hotel_alpenrose",
+      "org_hotel_group",
+      "2026-06-01",
+      "2026-06-30",
+      ["get_booking_performance"],
+      JSON.stringify({ currency: "EUR" }),
+    ]);
+    expect(metricCall?.text).toContain("snapshot.organization_id = $3::uuid");
+    expect(metricCall?.text).toContain("snapshot.period_start = $4::date");
+    expect(metricCall?.text).toContain("snapshot.period_end = $5::date");
+    expect(metricCall?.text).toContain("snapshot.filters @> $7::jsonb");
+    expect(metricCall?.text).toContain("expires_at <= now()");
+    expect(metricCall?.text).toContain("freshness_slo_seconds");
+  });
+
+  it("checks target setup evidence catalog entries per requested tool", async () => {
+    const targetPool = targetAskEvidencePool({
+      missingCatalogToolIds: ["get_setup_gaps"],
+    });
+    const repository = targetAskEvidenceRepository(targetPool);
+
+    await expect(
+      repository.findSetupEvidence({
+        toolId: "get_setup_gaps",
+        organizationId: "org_hotel_group",
+        resourceId: "booking_hotel_alpenrose",
+        filters: {},
+      }),
+    ).rejects.toBeInstanceOf(AskEvidenceUnavailableError);
+    await expect(
+      repository.findSetupEvidence({
+        toolId: "get_hotel_settings_summary",
+        organizationId: "org_hotel_group",
+        resourceId: "booking_hotel_alpenrose",
+        filters: {},
+      }),
+    ).resolves.toHaveLength(2);
+
+    const setupCall = targetPool.calls.find((call) =>
+      call.text.includes("intelligence.setup_completeness_snapshots"),
+    );
+
+    expect(setupCall?.values).toEqual([
+      "booking_hotel_alpenrose",
+      "org_hotel_group",
+      "get_hotel_settings_summary",
+    ]);
+    expect(setupCall?.text).toContain("setup.organization_id = $2::uuid");
+    expect(setupCall?.text).toContain("catalog.tool_id = $3::text");
+    expect(setupCall?.text).toContain("freshness_slo_seconds");
   });
 
   it("returns an answered AskAnswer envelope for fixture-backed booking performance", async () => {

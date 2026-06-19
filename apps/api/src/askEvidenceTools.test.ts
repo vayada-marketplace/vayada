@@ -175,6 +175,36 @@ describe("Ask Intelligence evidence tools", () => {
     });
   });
 
+  it("passes authorized organization and requested tool ids to the repository", async () => {
+    const calls: unknown[] = [];
+    const capturingRepository: AskEvidenceRepository = {
+      async findMetricEvidence(input) {
+        calls.push(input);
+        return [evidenceRows[0]];
+      },
+      async findSetupEvidence(input) {
+        calls.push(input);
+        return [evidenceRows[4]];
+      },
+    };
+
+    await getBookingPerformance(context(), capturingRepository, scope, { currency: "EUR" });
+    await getSetupGaps(context(), capturingRepository, scope);
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        organizationId: "org_hotel_group",
+        resourceId: "booking_hotel_alpenrose",
+        filters: { currency: "EUR" },
+      }),
+      expect.objectContaining({
+        toolId: "get_setup_gaps",
+        organizationId: "org_hotel_group",
+        resourceId: "booking_hotel_alpenrose",
+      }),
+    ]);
+  });
+
   it("authorizes setup evidence through PMS read scope when booking settings read is absent", async () => {
     const result = await getSetupGaps(
       context(["intelligence.ask.read", "pms.read"]),
