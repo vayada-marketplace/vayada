@@ -133,6 +133,7 @@ function metricToolIds(metricKeys: string[]): AskEvidenceToolId[] {
   if (metricKeys.some((metricKey) => BOOKING_PERFORMANCE_METRIC_KEYS.has(metricKey))) {
     return ["get_booking_performance"];
   }
+  // Unsupported metrics intentionally return empty evidence until the target catalog exposes a tool.
   return [];
 }
 
