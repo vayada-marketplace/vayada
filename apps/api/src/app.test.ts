@@ -1723,11 +1723,13 @@ function buildAuthenticatedApp(
     bookingGuestPiiPort?: BookingGuestPiiPort;
     pmsOperationsAllowedOrigins?: string[];
     bookingAdminCompatAllowedOrigins?: string[];
+    browserAllowedOrigins?: string[];
     linkedPmsPropertyId?: string;
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
     logger: false,
+    browserAllowedOrigins: options.browserAllowedOrigins,
     bookingReservationsRepository: options.reservationsRepository ?? bookingReservationsRepository,
     pmsOperationsRepository: options.pmsOperationsRepository ?? pmsOperationsRepository,
     pmsCheckoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
@@ -1816,6 +1818,45 @@ describe("vayada-api", () => {
       group: "booking",
       status: "ok",
     });
+  });
+
+  it("allows configured browser CORS origins on authenticated booking routes", async () => {
+    app = buildAuthenticatedApp({
+      browserAllowedOrigins: ["https://next-booking-admin.vayada.com"],
+    });
+
+    const url = "/api/booking/hotels/booking_hotel_alpenrose/reservations";
+    const preflight = await app.inject({
+      method: "OPTIONS",
+      url,
+      headers: {
+        origin: "https://next-booking-admin.vayada.com",
+        "access-control-request-method": "GET",
+        "access-control-request-headers": "authorization,content-type,x-hotel-id",
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
+    expect(preflight.headers["access-control-allow-headers"]).toBe(
+      "authorization,content-type,x-hotel-id",
+    );
+    expect(preflight.headers["access-control-allow-methods"]).toBe(
+      "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    );
+
+    const unauthenticated = await app.inject({
+      method: "GET",
+      url,
+      headers: {
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(unauthenticated.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
   });
 
   it("supports next booking-admin setup status compatibility with CORS", async () => {
