@@ -459,7 +459,7 @@ function textForEvidence(entry: AskEvidenceEntry): string | null {
 }
 
 function notAuthorized(request: FastifyRequest, body: AskRequestBody, error: unknown) {
-  const reason = authReason(error);
+  const reason = authReason(error, request, body.scope.bookingHotelId);
   return envelope(request, body, request.authContext, {
     status: "not_authorized",
     summary: "I cannot access that Ask Intelligence scope with the current authorization context.",
@@ -570,11 +570,41 @@ function statusCode(error: unknown): 401 | 403 {
   return statusError(error) && error.statusCode === 401 ? 401 : 403;
 }
 
-function authReason(error: unknown) {
+function authReason(error: unknown, request: FastifyRequest, bookingHotelId: string | undefined) {
   if (!statusError(error) || error.statusCode === 401) return "missing_permission";
-  return error.message.toLowerCase().includes("permission")
-    ? "missing_permission"
-    : "not_linked_resource";
+  const message = error.message.toLowerCase();
+  if (message.includes("permission")) return "missing_permission";
+  if (message.includes("entitlement")) {
+    return hasInactiveBookingEngineEntitlement(request, bookingHotelId)
+      ? "inactive_entitlement"
+      : "missing_entitlement";
+  }
+  return "not_linked_resource";
+}
+
+function hasInactiveBookingEngineEntitlement(
+  request: FastifyRequest,
+  bookingHotelId: string | undefined,
+): boolean {
+  return Boolean(
+    request.authContext?.entitlements.some((entitlement) => {
+      if (
+        entitlement.product !== "booking" ||
+        entitlement.key !== "booking-engine" ||
+        entitlement.status === "active"
+      ) {
+        return false;
+      }
+
+      return (
+        !bookingHotelId ||
+        entitlement.resource === undefined ||
+        (entitlement.resource.product === "booking" &&
+          entitlement.resource.resourceType === "booking_hotel" &&
+          entitlement.resource.resourceId === bookingHotelId)
+      );
+    }),
+  );
 }
 
 function statusError(error: unknown): error is Error & { statusCode: number } {

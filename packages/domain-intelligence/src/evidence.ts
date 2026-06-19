@@ -41,6 +41,8 @@ export type AskUnavailableData = {
     | "missing_scope"
     | "not_linked_resource"
     | "missing_permission"
+    | "missing_entitlement"
+    | "inactive_entitlement"
     | "source_unavailable"
     | "stale_source"
     | "empty_result"
