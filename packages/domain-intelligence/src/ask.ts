@@ -1,3 +1,5 @@
+import type { AskEvidenceToolResult } from "./evidence.js";
+
 export const ASK_CONTRACT_VERSION = "ask-intelligence-evidence.v1";
 
 export type AskStatus =
@@ -48,15 +50,29 @@ export type AskAnswer = {
   };
 };
 
-export type AskAuditRecord = Pick<AskAnswer, "answerId" | "generatedAt" | "question" | "status"> & {
+export type AskAuditRecord = Pick<
+  AskAnswer,
+  "answerId" | "generatedAt" | "question" | "status" | "summary" | "blocks"
+> & {
+  conversationId: string;
+  runId: string;
+  contractVersion: typeof ASK_CONTRACT_VERSION;
+  scope: AskScope;
   requestId: string;
   actorInternalUserId: string | null;
   organizationId: string | null;
   bookingHotelId: string | null;
   toolPlan: Record<string, unknown> | null;
+  toolResults: AskEvidenceToolResult[];
   toolCallIds: string[];
   deniedToolCallIds: string[];
   evidenceIds: string[];
+  evidenceReferences: Record<string, unknown>[];
+  unavailableData: Record<string, unknown>[];
+  caveats: Record<string, unknown>[];
+  confidence: AskConfidence;
+  suggestedActions: Record<string, unknown>[];
+  followUpQuestions: string[];
   modelProvider: string | null;
   modelName: string | null;
   promptVersion: string | null;

@@ -238,6 +238,12 @@ and correlation IDs.
 Audit records should store evidence references and aggregate metadata by
 default, not raw guest PII or payout details.
 
+Runtime audit persistence is best-effort after the answer envelope is composed:
+if the target audit repository is unavailable, the route logs the failure with
+the request ID and still returns the answer. The persistent repository stores a
+redacted question plus a stable question hash; generated answer metadata omits
+raw question text.
+
 ## Fixtures
 
 Representative fixture answers live in:

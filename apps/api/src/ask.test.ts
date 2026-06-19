@@ -380,6 +380,47 @@ describe("Ask Intelligence route", () => {
     expect(response.body.scope.bookingHotelId).toBe("booking_hotel_alpenrose");
   });
 
+  it("returns the answer when audit persistence fails", async () => {
+    const auditRepository: AskAuditTestRepository = {
+      records: [],
+      async recordAskRun() {
+        throw new Error("audit database unavailable");
+      },
+    };
+    app = buildAskApp({ auditRepository });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload(),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("answered");
+  });
+
+  it("closes the audit repository during Fastify shutdown", async () => {
+    let closed = false;
+    const auditRepository: AskAuditTestRepository = {
+      records: [],
+      async recordAskRun(record) {
+        this.records.push(record);
+      },
+      async close() {
+        closed = true;
+      },
+    };
+    app = buildAskApp({ auditRepository });
+    await app.ready();
+
+    await app.close();
+    app = null;
+
+    expect(closed).toBe(true);
+  });
+
   it("answers booking source mix through the runtime evidence tool plan", async () => {
     const auditRepository = createInMemoryAskAuditRepository();
     app = buildAskApp({ auditRepository });

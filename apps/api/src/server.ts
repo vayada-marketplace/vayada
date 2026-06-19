@@ -6,6 +6,7 @@ import {
 
 import { buildApp, type ApiAuthOptions } from "./app.js";
 import { type ApiConfig, loadConfig } from "./config.js";
+import { createPgAskAuditRepository } from "./platform/askAuditRepository.js";
 import { createOpenAIAskModel } from "./platform/askIntelligence.js";
 import { createPgBookingWebEventSink } from "./platform/bookingWebEvents.js";
 import { createTargetBookingDashboardMetricsReadPort } from "./platform/bookingDashboard.js";
@@ -429,6 +430,11 @@ const app = buildApp({
   bookingWebCheckoutAdapter,
   askModel: askModelProvider?.model,
   askModelMetadata: askModelProvider?.metadata,
+  askAuditRepository: config.targetDatabaseUrl
+    ? createPgAskAuditRepository({
+        connectionString: config.targetDatabaseUrl,
+      })
+    : undefined,
   legacyCheckoutCommandProxyEnabled: config.bookingWebLegacyCheckoutCommandProxyEnabled,
   bookingWebAttributionSink:
     config.bookingWebEventSink === "target" && config.auth
