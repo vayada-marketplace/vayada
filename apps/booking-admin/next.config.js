@@ -2,6 +2,7 @@
 const path = require("path");
 const nextConfig = {
   reactStrictMode: true,
+  allowedDevOrigins: ["127.0.0.1"],
   output: "standalone",
   transpilePackages: ["@vayada/feature-hub"],
   turbopack: {
