@@ -51,6 +51,7 @@ import {
 import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
+import { createPgMarketplaceHotelProfileStatusRepository } from "./routes/marketplaceHotelProfileStatus.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import {
@@ -393,6 +394,12 @@ const app = buildApp({
   marketplaceAdminRepository:
     config.marketplaceAdminSource === "target"
       ? createPgMarketplaceAdminRepository({
+          connectionString: config.targetDatabaseUrl!,
+        })
+      : undefined,
+  marketplaceHotelProfileStatusRepository:
+    config.marketplaceDiscoverySource === "target"
+      ? createPgMarketplaceHotelProfileStatusRepository({
           connectionString: config.targetDatabaseUrl!,
         })
       : undefined,

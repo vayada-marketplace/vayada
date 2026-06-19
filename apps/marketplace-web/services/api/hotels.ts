@@ -297,10 +297,10 @@ export const hotelService = {
 
   /**
    * Get hotel profile completion status
-   * GET /hotels/me/profile-status
+   * GET /api/marketplace/hotels/me/profile-status
    */
   getProfileStatus: async (): Promise<HotelProfileStatus> => {
-    return apiClient.get<HotelProfileStatus>("/hotels/me/profile-status");
+    return apiClient.get<HotelProfileStatus>("/api/marketplace/hotels/me/profile-status");
   },
 };
 

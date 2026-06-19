@@ -57,7 +57,11 @@ This document specifies the requirements for implementing profile status endpoin
 
 ### 2. Hotel Profile Status
 
-**Endpoint:** `GET /hotels/me/profile-status`
+**Endpoint:** `GET /api/marketplace/hotels/me/profile-status`
+
+**Legacy root path:** `GET /hotels/me/profile-status` is retired for the
+next-stack marketplace-web hotel profile gate. Do not add new callers to the
+root path.
 
 **Authentication:** Required (JWT Bearer token)
 
@@ -70,9 +74,9 @@ This document specifies the requirements for implementing profile status endpoin
   "profile_complete": boolean,
   "missing_fields": string[],
   "has_defaults": {
-    "location": boolean,
-    "category": boolean
+    "location": boolean
   },
+  "missing_listings": boolean,
   "completion_steps": string[]
 }
 ```
@@ -82,7 +86,7 @@ This document specifies the requirements for implementing profile status endpoin
 - `profile_complete` (boolean): Indicates whether the hotel profile is fully complete
 - `missing_fields` (string[]): Array of field names that are missing or incomplete (e.g., `["name", "about", "website"]`)
 - `has_defaults.location` (boolean): Indicates whether the location field contains a default/placeholder value
-- `has_defaults.category` (boolean): Indicates whether the category field contains a default/placeholder value
+- `missing_listings` (boolean): Indicates whether the hotel has no active marketplace listings
 - `completion_steps` (string[]): Array of human-readable steps needed to complete the profile (e.g., `["Update your hotel name", "Add a description", "Set a custom location"]`)
 
 **Example Response:**
@@ -92,14 +96,15 @@ This document specifies the requirements for implementing profile status endpoin
   "profile_complete": false,
   "missing_fields": ["about", "website"],
   "has_defaults": {
-    "location": true,
-    "category": false
+    "location": true
   },
+  "missing_listings": true,
   "completion_steps": [
     "Update your hotel name",
     "Add a description about your hotel",
     "Set a custom location (currently using default)",
-    "Add your website URL"
+    "Add your website URL",
+    "Add at least one property listing"
   ]
 }
 ```
@@ -107,7 +112,7 @@ This document specifies the requirements for implementing profile status endpoin
 **Error Responses:**
 
 - `401 Unauthorized`: If the user is not authenticated or token is invalid
-- `404 Not Found`: If the hotel profile does not exist for the authenticated user
+- `200 OK`: If the hotel profile row does not exist yet, with `profile_complete: false`
 - `500 Internal Server Error`: For server errors
 
 ---
@@ -174,7 +179,7 @@ The `completion_steps` array should provide actionable, user-friendly guidance. 
 The frontend currently calls these endpoints:
 
 - `GET /creators/me/profile-status` via `creatorService.getProfileStatus()`
-- `GET /hotels/me/profile-status` via `hotelService.getProfileStatus()`
+- `GET /api/marketplace/hotels/me/profile-status` via `hotelService.getProfileStatus()`
 
 Both are called with JWT authentication headers automatically added by the API client.
 
@@ -197,7 +202,8 @@ Both are called with JWT authentication headers automatically added by the API c
 - [ ] Hotel endpoint correctly identifies default values
 - [ ] Both endpoints require authentication (401 for unauthenticated requests)
 - [ ] Both endpoints validate user type (403 for wrong user type)
-- [ ] Both endpoints return 404 when profile doesn't exist
+- [ ] Creator endpoint returns 404 when profile doesn't exist
+- [ ] Hotel target endpoint returns an incomplete response when profile doesn't exist
 - [ ] Response format matches schema exactly
 - [ ] Completion steps are actionable and clear
 - [ ] Missing fields list is accurate and complete
