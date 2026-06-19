@@ -12,6 +12,7 @@ COPY packages ./packages
 
 RUN npm ci
 RUN npm --workspace vayada-api run build
+RUN npm --workspace @vayada/backend-migration run build
 RUN npm prune --omit=dev
 
 FROM node:24-slim AS runtime

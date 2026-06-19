@@ -59,13 +59,22 @@ The audit exits non-zero when target identity tables are missing or when active
 users, organizations, memberships, or required owner resource links are not
 ready for AuthKit.
 
+Production API images prune dev dependencies, so one-off ECS tasks should use
+the compiled commands:
+
+```bash
+npm --workspace @vayada/backend-migration run target:migrate:dist -- --env production
+npm --workspace @vayada/backend-migration run target:workos:audit:dist
+npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- --email user@example.com --dry-run
+```
+
 Use `--email` for one-user migration smoke tests:
 
 ```bash
 TARGET_DATABASE_URL=<target database url> \
   WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL=<legacy auth database url> \
   WORKOS_API_KEY=<workos api key> \
-  npm --workspace @vayada/backend-migration run target:workos:backfill -- \
+  npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- \
     --email user@example.com \
     --dry-run
 ```
@@ -76,7 +85,7 @@ Apply mode requires the printed cohort key as a confirmation guard:
 TARGET_DATABASE_URL=<target database url> \
   WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL=<legacy auth database url> \
   WORKOS_API_KEY=<workos api key> \
-  npm --workspace @vayada/backend-migration run target:workos:backfill -- \
+  npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- \
     --email user@example.com \
     --apply \
     --confirm email:user@example.com
