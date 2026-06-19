@@ -142,13 +142,11 @@ If a check cannot be run locally (env, secrets, infra), say so explicitly rather
 
 ## Complexity guardrail — Ponytail
 
-Use Ponytail automatically as a **complexity-control layer**, not as the top-level workflow.
+Ponytail comes from the installed plugin; its hooks and skills own the detailed rules. In this repo, treat it as a **complexity-control layer**, not as the top-level workflow or a replacement for verification.
 
-- During implementation, default to Ponytail constraints: smallest correct change, no speculative abstractions, no new dependencies when existing code, stdlib, platform APIs, or installed dependencies cover the need.
-- Before opening or finalizing a PR, run a Ponytail review pass over the current diff. If the Ponytail plugin is available, invoke `@ponytail-review` / `/ponytail-review`; otherwise do the same pass manually and call it out in the PR notes.
-- The Ponytail pass asks only: what can be deleted, simplified, merged, or handled with existing code? Fix valid simplifications, then rerun any checks affected by the change.
-- Ponytail is **below verification**: it must not remove acceptance criteria, trust-boundary validation, security measures, accessibility basics, error handling that prevents data loss, required tests, browser checks, migrations safety, or adversarial review.
-- For auth, payments, booking state, availability, tenant isolation, PMS workflows, WorkOS, data migrations, or shared packages, use Ponytail only after correctness and risk controls are in place.
+- Keep implementation changes small and scoped to the ticket.
+- Before adversarial review or PR finalization, run `/ponytail-review` (or a manual complexity pass if the plugin is unavailable), fix valid simplifications, then rerun affected checks.
+- Do not use Ponytail to remove acceptance criteria, trust-boundary validation, security measures, accessibility basics, data-loss prevention, required tests, browser checks, migrations safety, or adversarial review.
 
 ## Shipping conventions
 
@@ -156,7 +154,7 @@ Use Ponytail automatically as a **complexity-control layer**, not as the top-lev
 - For each Linear implementation issue, create a branch linked to the issue, commit with a descriptive message, push the branch, and open a GitHub PR.
 - For large architecture or rewrite work, use stacked PRs. Keep each PR focused and around 400 changed non-generated lines or fewer unless the ticket explicitly justifies a larger slice.
 - For TypeScript backend rewrite, WorkOS, Ask Intelligence, target-schema, migration, or cutover work, load `.agents/skills/typescript-rewrite-workflow/SKILL.md` before coding. Architecture/design contracts must be written or linked before implementation PRs.
-- Run the Ponytail complexity pass before the adversarial review. Ponytail catches over-building; adversarial review catches product risk, missed acceptance criteria, and regressions.
+- Run the complexity and adversarial review passes described above before PR finalization.
 - For shared packages, cross-domain architecture, auth, tenant boundaries, booking, payment, availability, or PMS workflows: explicitly use an independent subagent adversarial review before opening or finalizing the PR. Do not count a local self-review as satisfying this requirement.
 - PR descriptions should include the Linear issue ID, summary, validation, and risk notes.
 - CodeRabbit is expected to review every non-draft PR; address or explicitly resolve its findings before merge.
