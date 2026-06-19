@@ -11,6 +11,7 @@ import {
   hasAuthenticatedSession,
   hasHotelAccessMarker,
   isAuthKitLoginEnabled,
+  isCompatibilityTokenEnabled,
   isLegacyPasswordFallbackEnabled,
   setLegacyCompatibilityToken,
   setAuthKitSession,
@@ -120,7 +121,10 @@ export const authService = {
 
   isLegacyFallbackEnabled: isLegacyPasswordFallbackEnabled,
 
-  ensureBookingCompatibilityToken: attachBookingCompatibilityToken,
+  ensureBookingCompatibilityToken: async (): Promise<void> => {
+    if (!isCompatibilityTokenEnabled()) return;
+    await attachBookingCompatibilityToken();
+  },
 
   startHostedLogin: (loginHint?: string): void => {
     const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);

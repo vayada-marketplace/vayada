@@ -12,6 +12,7 @@ import {
   hasAuthenticatedSession,
   hasPlatformAccessMarker,
   isAuthKitLoginEnabled,
+  isCompatibilityTokenEnabled,
   isLegacyPasswordFallbackEnabled,
   setAuthKitSession,
   setLegacyCompatibilityToken,
@@ -129,7 +130,9 @@ export const authService = {
         : await authFetch<AuthKitSessionResponse>("/auth/session");
 
     setAuthKitSession(response);
-    await attachMarketplaceCompatibilityToken();
+    if (isCompatibilityTokenEnabled()) {
+      await attachMarketplaceCompatibilityToken();
+    }
     return response;
   },
 

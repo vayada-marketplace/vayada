@@ -26,6 +26,10 @@ export function isLegacyPasswordFallbackEnabled(): boolean {
   return process.env.NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED === "true";
 }
 
+export function isCompatibilityTokenEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED === "true";
+}
+
 export function setAuthKitSession(session: AuthKitSessionResponse): void {
   authKitSession = session;
   if (typeof window === "undefined") return;
@@ -103,10 +107,9 @@ export function getAuthCsrfToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
+  const compatibilityToken = currentCompatibilityToken();
+  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
   if (authKitSession?.accessToken) return authKitSession.accessToken;
-  if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
-    return legacyCompatibilityToken.token;
-  }
   return getLegacyPasswordToken();
 }
 
@@ -131,6 +134,13 @@ export function hasAuthenticatedSession(): boolean {
     return Boolean(getAuthBearerToken());
   }
   return Boolean(getLegacyPasswordToken());
+}
+
+function currentCompatibilityToken(): string | null {
+  if (!legacyCompatibilityToken) return null;
+  return Date.now() < legacyCompatibilityToken.expiresAt - 30_000
+    ? legacyCompatibilityToken.token
+    : null;
 }
 
 export function hasHotelAccessMarker(): boolean {
