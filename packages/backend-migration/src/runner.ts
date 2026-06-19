@@ -3,6 +3,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import pg from "pg";
 
+import { normalizePgConnectionString } from "./pgConnection.js";
+
 export type MigrationEnvironment = "local" | "staging" | "preprod" | "production";
 
 export const MIGRATION_ENVIRONMENTS: readonly MigrationEnvironment[] = [
@@ -258,7 +260,9 @@ export async function applyMigrations(config: RunnerConfig, client: pg.Client): 
 }
 
 export async function runMigrations(config: RunnerConfig): Promise<RunResult> {
-  const client = new pg.Client({ connectionString: config.connectionString });
+  const client = new pg.Client({
+    connectionString: normalizePgConnectionString(config.connectionString),
+  });
   await client.connect();
 
   try {

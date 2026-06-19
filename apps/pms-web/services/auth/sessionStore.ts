@@ -27,7 +27,7 @@ export function isLegacyPasswordFallbackEnabled(): boolean {
 }
 
 export function isCompatibilityTokenEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED !== "false";
+  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED === "true";
 }
 
 export function setAuthKitSession(session: AuthKitSessionResponse): void {

@@ -1,5 +1,7 @@
 import pg from "pg";
 
+import { normalizePgConnectionString } from "./pgConnection.js";
+
 export type WorkosBackfillMode = "dry-run" | "apply";
 
 export type WorkosBackfillUser = {
@@ -407,9 +409,15 @@ export function createPgWorkosBackfillRepository(config: {
   legacyAuthConnectionString?: string;
   max?: number;
 }): WorkosBackfillRepository {
-  const pool = new pg.Pool({ connectionString: config.connectionString, max: config.max });
+  const pool = new pg.Pool({
+    connectionString: normalizePgConnectionString(config.connectionString),
+    max: config.max,
+  });
   const legacyAuthPool = config.legacyAuthConnectionString
-    ? new pg.Pool({ connectionString: config.legacyAuthConnectionString, max: config.max })
+    ? new pg.Pool({
+        connectionString: normalizePgConnectionString(config.legacyAuthConnectionString),
+        max: config.max,
+      })
     : null;
 
   return {

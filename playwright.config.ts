@@ -71,7 +71,8 @@ export default defineConfig({
           timeout: 120_000,
         },
         {
-          command: "PORT=3003 npm run dev:booking-admin",
+          command:
+            "NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=true PORT=3003 npm run dev:booking-admin",
           url: "http://127.0.0.1:3003",
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,

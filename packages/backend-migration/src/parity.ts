@@ -5,6 +5,7 @@ import pg from "pg";
 import { getParityHandlers } from "./cases/registry.js";
 import { checkIdStability, checkRowCounts, validateExpectedTargetConfig } from "./parityUtils.js";
 import type { ExpectedTarget, ParityConfig, ParityFinding, ParityReport } from "./parityTypes.js";
+import { normalizePgConnectionString } from "./pgConnection.js";
 
 export type {
   ExpectedTarget,
@@ -54,7 +55,9 @@ export async function runParityChecks(config: ParityConfig): Promise<ParityRepor
     return buildParityReport(config, runId, startedAt, findings);
   }
 
-  const client = new pg.Client({ connectionString: config.connectionString });
+  const client = new pg.Client({
+    connectionString: normalizePgConnectionString(config.connectionString),
+  });
   await client.connect();
 
   try {

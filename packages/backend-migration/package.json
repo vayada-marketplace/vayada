@@ -21,6 +21,7 @@
     "target:parity": "tsx src/cli/parity.ts",
     "target:c1-rehearsal:checks": "tsx src/cli/c1RehearsalChecks.ts",
     "target:workos:backfill": "tsx src/cli/workosBackfill.ts",
+    "target:workos:audit": "tsx src/cli/workosLinkAudit.ts",
     "target:fixtures:smoke": "tsx src/cli/smoke.ts"
   },
   "dependencies": {
