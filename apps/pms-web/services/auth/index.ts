@@ -12,6 +12,7 @@ import {
   hasAuthenticatedSession,
   hasHotelAccessMarker,
   isAuthKitLoginEnabled,
+  isCompatibilityTokenEnabled,
   isLegacyPasswordFallbackEnabled,
   setAuthKitSession,
   setLegacyCompatibilityToken,
@@ -124,7 +125,9 @@ export const authService = {
         : await authFetch<AuthKitSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
 
     setAuthKitSession(response);
-    await attachPmsCompatibilityToken();
+    if (isCompatibilityTokenEnabled()) {
+      await attachPmsCompatibilityToken();
+    }
     return response;
   },
 

@@ -32,6 +32,10 @@ export type AuthKitSessionResponse = {
 let authKitSession: AuthKitSessionResponse | null = null;
 let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
 
+export function isCompatibilityTokenEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED !== "false";
+}
+
 export function storeUser(data: StoredUser): void {
   if (typeof window === "undefined") return;
   const displayName = data.name || displayNameFromEmail(data.email);
@@ -88,6 +92,13 @@ export function getAuthCsrfToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
+  const compatibilityToken = getLegacyCompatibilityToken();
+  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
+  if (authKitSession?.accessToken) return authKitSession.accessToken;
+  return null;
+}
+
+function getLegacyCompatibilityToken(): string | null {
   if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
     return legacyCompatibilityToken.token;
   }
@@ -99,7 +110,7 @@ export function hasAuthenticatedSession(): boolean {
 }
 
 export function hasCompatibilityToken(): boolean {
-  return Boolean(getAuthBearerToken());
+  return Boolean(getLegacyCompatibilityToken());
 }
 
 /** Client-side hint based on the last successful login. The cookie is

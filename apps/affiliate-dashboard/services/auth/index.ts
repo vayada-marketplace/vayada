@@ -5,6 +5,7 @@ import {
   getUserName,
   hasAuthenticatedSession,
   hasCompatibilityToken,
+  isCompatibilityTokenEnabled,
   isLoggedInHint,
   setAuthKitSession,
   setLegacyCompatibilityToken,
@@ -84,12 +85,14 @@ export const authService = {
           );
 
     setAuthKitSession(response);
-    await attachAffiliateCompatibilityToken();
+    if (isCompatibilityTokenEnabled()) {
+      await attachAffiliateCompatibilityToken();
+    }
     return response;
   },
 
   ensureSession: async (): Promise<boolean> => {
-    if (hasAuthenticatedSession() && hasCompatibilityToken()) {
+    if (hasAuthenticatedSession() && (!isCompatibilityTokenEnabled() || hasCompatibilityToken())) {
       return true;
     }
     try {

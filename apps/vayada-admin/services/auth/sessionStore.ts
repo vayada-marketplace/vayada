@@ -26,6 +26,10 @@ export function isLegacyPasswordFallbackEnabled(): boolean {
   return process.env.NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED === "true";
 }
 
+export function isCompatibilityTokenEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED !== "false";
+}
+
 export function setAuthKitSession(session: AuthKitSessionResponse): void {
   authKitSession = session;
   if (typeof window === "undefined") return;
@@ -105,10 +109,17 @@ export function getAuthCsrfToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
+  const compatibilityToken = getLegacyCompatibilityToken();
+  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
+  if (authKitSession?.accessToken) return authKitSession.accessToken;
+  return getLegacyPasswordToken();
+}
+
+function getLegacyCompatibilityToken(): string | null {
   if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
     return legacyCompatibilityToken.token;
   }
-  return getLegacyPasswordToken();
+  return null;
 }
 
 export function getLegacyPasswordToken(): string | null {

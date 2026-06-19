@@ -248,6 +248,9 @@ Compatibility bridge behavior:
   documented by the implementation ticket.
 - New TypeScript product routes must use WorkOS-backed `RequestContext`, not
   the compatibility credential.
+- Next-stack browser deployments keep compatibility-token minting disabled by
+  default with `NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED=false`; VAY-860
+  owns retiring the remaining fallback bridge after WorkOS links are complete.
 
 The alternative request-scoped principal handoff is preferred for server-to-server
 internal calls, but not for browser-to-FastAPI traffic because the current
@@ -283,7 +286,7 @@ VAY-751 retirement state:
   credential path again.
 - WorkOS-linked platform users (`users.type = 'admin'` or
   `users.is_superadmin = true` with an `identity.external_identities.provider =
-  'workos'` row) cannot mint new local password sessions, complete legacy
+'workos'` row) cannot mint new local password sessions, complete legacy
   password reset, consume legacy email verification tokens, or complete local
   TOTP challenge/setup flows.
 - Unlinked users remain on the legacy credential path while the rollback window
