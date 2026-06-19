@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
@@ -14,8 +14,6 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const [sessionExpired, setSessionExpired] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [email, setEmail] = useState("");
-  const [emailError, setEmailError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const redirectAfterLogin = useCallback(async () => {
@@ -65,19 +63,12 @@ function LoginContent() {
     };
   }, [redirectAfterLogin, searchParams]);
 
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleLogin = async () => {
     setSubmitError("");
-    setEmailError("");
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setEmailError("Please enter a valid email address");
-      return;
-    }
 
     setIsSubmitting(true);
     try {
-      authService.startHostedLogin(email);
+      authService.startHostedLogin();
       window.setTimeout(() => setIsSubmitting(false), 5000);
     } catch {
       setIsSubmitting(false);
@@ -85,7 +76,7 @@ function LoginContent() {
     }
   };
 
-  const retryLogin = () => authService.startHostedLogin(email || undefined);
+  const retryLogin = () => authService.startHostedLogin();
 
   return (
     <div className="min-h-screen flex">
@@ -119,7 +110,7 @@ function LoginContent() {
             </Link>
           </p>
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <div className="space-y-5">
             {sessionExpired && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <p className="text-sm text-yellow-800 font-medium">
@@ -127,30 +118,6 @@ function LoginContent() {
                 </p>
               </div>
             )}
-
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
-                Email address
-              </label>
-              <input
-                id="email"
-                type="email"
-                name="email"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  if (emailError) setEmailError("");
-                  if (submitError) setSubmitError("");
-                }}
-                required
-                placeholder="name@example.com"
-                autoComplete="email"
-                className={`w-full px-4 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm text-gray-900 ${
-                  emailError ? "border-red-300 ring-1 ring-red-300" : "border-gray-300"
-                }`}
-              />
-              {emailError && <p className="mt-1 text-sm text-red-600">{emailError}</p>}
-            </div>
 
             {submitError && (
               <div className="space-y-3">
@@ -169,14 +136,15 @@ function LoginContent() {
 
             {!submitError && (
               <button
-                type="submit"
+                type="button"
+                onClick={handleLogin}
                 disabled={isSubmitting}
                 className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {isSubmitting ? "Redirecting..." : "Continue with WorkOS"}
               </button>
             )}
-          </form>
+          </div>
         </div>
       </div>
 
