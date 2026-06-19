@@ -95,6 +95,32 @@ framework in the MVP. Add another provider only when there is a concrete
 business need and a compatibility test suite for tool calls, structured outputs,
 refusals, token accounting, and trace fields.
 
+### Runtime configuration and rollback
+
+Local development and tests default to the fixture provider. OpenAI mode is
+explicit:
+
+```text
+ASK_INTELLIGENCE_PROVIDER=openai
+ASK_INTELLIGENCE_MODEL=gpt-5.5
+OPENAI_API_KEY=<secret>
+OPENAI_BASE_URL=<optional override>
+OPENAI_ORGANIZATION=<optional>
+OPENAI_PROJECT=<optional>
+```
+
+`ASK_INTELLIGENCE_PROVIDER=openai` fails during config loading unless
+`ASK_INTELLIGENCE_MODEL` and `OPENAI_API_KEY` are both present. Staging or next
+runtime values are owned by the platform deployment for `next-target-backend`;
+`OPENAI_API_KEY` must live in AWS SSM/Secrets Manager and be injected into the
+ECS task, not committed to this repo or printed by GitHub Actions.
+
+Rollback is configuration-only: set `ASK_INTELLIGENCE_PROVIDER=fixture`, or
+remove `ASK_INTELLIGENCE_PROVIDER`, `ASK_INTELLIGENCE_MODEL`, and `OPENAI_*`
+values from the task environment. Evidence source rollback remains separate:
+`ASK_INTELLIGENCE_EVIDENCE_SOURCE=fixture` keeps local/test evidence defaults,
+while `target` requires `TARGET_DATABASE_URL`.
+
 ### Service boundary
 
 Ask Intelligence should live under the target backend shape:
