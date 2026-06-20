@@ -16,7 +16,11 @@ import type {
   BookingWebAffiliateRepository,
   BookingWebAffiliateStripeConnectRequest,
 } from "./bookingWebAffiliate.js";
-import type { BookingWebCheckoutAdapter } from "./bookingWebPublic.js";
+import {
+  recordTargetCheckoutCommand,
+  type BookingWebCalendarReadPool,
+  type BookingWebCheckoutAdapter,
+} from "./bookingWebPublic.js";
 
 type LegacyHotelResponse = {
   id: string;
@@ -1176,6 +1180,38 @@ describe("Booking Web public bootstrap parity", () => {
     expect(new Set(changePreviewContexts.map((entry) => entry.idempotencyKey))).toHaveLength(1);
     await app.close();
     expect(closed).toBe(1);
+  });
+
+  it("completes reserved checkout idempotency rows with response fields", async () => {
+    const calls: Array<{ text: string; values: unknown[] | undefined }> = [];
+    const pool = {
+      async query(text: string, values?: unknown[]) {
+        calls.push({ text, values });
+        return { rows: [] };
+      },
+    } as unknown as BookingWebCalendarReadPool;
+
+    await recordTargetCheckoutCommand(pool, {
+      propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+      resourceType: "guest_booking",
+      resourceId: "booking_123",
+      body: { bookingReference: "VAY-123" },
+      context: {
+        operation: "booking-create",
+        requestId: "req-1",
+        correlationId: "corr-1",
+        idempotencyKey: "idem-1",
+        fingerprint: "f".repeat(64),
+        occurredAt: new Date("2026-06-20T21:07:48.453Z"),
+      },
+    });
+
+    expect(calls[0]?.text).toContain("response_status_code = EXCLUDED.response_status_code");
+    expect(calls[0]?.text).toContain(
+      "response_resource_product = EXCLUDED.response_resource_product",
+    );
+    expect(calls[0]?.text).toContain("response_resource_type = EXCLUDED.response_resource_type");
+    expect(calls[0]?.text).toContain("response_resource_id = EXCLUDED.response_resource_id");
   });
 
   it("reports actionable parity mismatches by fixture case and field", () => {
