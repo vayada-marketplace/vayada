@@ -2166,7 +2166,7 @@ async function reserveTargetCheckoutCommand(
   );
 }
 
-async function recordTargetCheckoutCommand(
+export async function recordTargetCheckoutCommand(
   pool: BookingWebCalendarReadPool,
   input: {
     propertyId: string;
@@ -2224,7 +2224,11 @@ async function recordTargetCheckoutCommand(
                THEN 'completed'
                ELSE 'conflict'
              END,
+             response_status_code = EXCLUDED.response_status_code,
              response_body_hash = EXCLUDED.response_body_hash,
+             response_resource_product = EXCLUDED.response_resource_product,
+             response_resource_type = EXCLUDED.response_resource_type,
+             response_resource_id = EXCLUDED.response_resource_id,
              completed_at = EXCLUDED.completed_at
        RETURNING id
      )
