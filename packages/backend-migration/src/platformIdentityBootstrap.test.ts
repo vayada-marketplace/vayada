@@ -5,6 +5,7 @@ import {
   PLATFORM_ORGANIZATION_ID,
   PLATFORM_RESOURCE_ID,
   PLATFORM_RESOURCE_RELATIONSHIP,
+  PLATFORM_WORKOS_ROLE_SLUG,
   mapLegacyUserStatus,
 } from "./platformIdentityBootstrap.js";
 
@@ -13,6 +14,7 @@ describe("platform identity bootstrap constants", () => {
     expect(PLATFORM_ORGANIZATION_ID).toBe("00000000-0000-0000-0000-000000000001");
     expect(PLATFORM_RESOURCE_ID).toBe("vayada");
     expect(PLATFORM_RESOURCE_RELATIONSHIP).toBe("operator");
+    expect(PLATFORM_WORKOS_ROLE_SLUG).toBe("admin");
     expect(PLATFORM_BOOTSTRAP_CONFIRM).toBe("platform-identity-bootstrap:v1");
   });
 });

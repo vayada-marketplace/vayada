@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
+import { mapWorkosMembershipRoleKey } from "./platform/workosWebhooks.js";
 import type {
   WorkosMembershipPayload,
   WorkosOrganizationPayload,
@@ -407,6 +408,40 @@ describe("WorkOS webhook routes", () => {
       "billing_admin",
     ]);
     await app.close();
+  });
+
+  it("maps WorkOS admin memberships back to internal owner roles", () => {
+    expect(
+      mapWorkosMembershipRoleKey({
+        organizationKind: "platform",
+        roleKey: "admin",
+      }),
+    ).toBe("platform_admin");
+    expect(
+      mapWorkosMembershipRoleKey({
+        organizationKind: "hotel_group",
+        roleKey: "admin",
+      }),
+    ).toBe("hotel_owner");
+    expect(
+      mapWorkosMembershipRoleKey({
+        organizationKind: "hotel_group",
+        roleKey: "admin",
+        existingRoleKey: "owner",
+      }),
+    ).toBe("owner");
+    expect(
+      mapWorkosMembershipRoleKey({
+        organizationKind: "creator_workspace",
+        roleKey: "admin",
+      }),
+    ).toBe("admin");
+    expect(
+      mapWorkosMembershipRoleKey({
+        organizationKind: "platform",
+        roleKey: "member",
+      }),
+    ).toBe("member");
   });
 });
 

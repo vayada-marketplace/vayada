@@ -5,6 +5,7 @@ import { normalizePgConnectionString } from "./pgConnection.js";
 export const PLATFORM_ORGANIZATION_ID = "00000000-0000-0000-0000-000000000001";
 export const PLATFORM_RESOURCE_ID = "vayada";
 export const PLATFORM_RESOURCE_RELATIONSHIP = "operator";
+export const PLATFORM_WORKOS_ROLE_SLUG = "admin";
 export const PLATFORM_BOOTSTRAP_CONFIRM = "platform-identity-bootstrap:v1";
 
 export type PlatformIdentityBootstrapMode = "dry-run" | "apply";
@@ -160,7 +161,7 @@ async function applyPlatformIdentityBootstrap(
          id,
          status,
          'platform_admin',
-         ARRAY['platform_admin'],
+         ARRAY[$3::text],
          created_at,
          updated_at
        FROM jsonb_to_recordset($2::jsonb) AS users(
@@ -174,7 +175,11 @@ async function applyPlatformIdentityBootstrap(
          role_key = EXCLUDED.role_key,
          workos_role_slugs = EXCLUDED.workos_role_slugs,
          updated_at = EXCLUDED.updated_at`,
-      [PLATFORM_ORGANIZATION_ID, JSON.stringify(legacyUsers.map(toMembershipRecord))],
+      [
+        PLATFORM_ORGANIZATION_ID,
+        JSON.stringify(legacyUsers.map(toMembershipRecord)),
+        PLATFORM_WORKOS_ROLE_SLUG,
+      ],
     );
 
     await client.query(
