@@ -885,6 +885,7 @@ export function createTargetBookingWebCalendarRepository(config: {
          WHERE (profile.property_id::text = $1 OR profile.canonical_slug = $2)
            AND offer.stay_date >= $3::date
            AND offer.stay_date < $4::date
+           AND (offer.expires_at IS NULL OR offer.expires_at > now())
          GROUP BY offer.stay_date
          ORDER BY offer.stay_date ASC`,
           [hotel.propertyId, hotel.slug, start, end],

@@ -23,11 +23,13 @@
     "target:platform-identity:bootstrap": "tsx src/cli/platformIdentityBootstrap.ts",
     "target:workos:backfill": "tsx src/cli/workosBackfill.ts",
     "target:workos:audit": "tsx src/cli/workosLinkAudit.ts",
+    "target:booking-public-bookability:backfill": "tsx src/cli/bookingPublicBookabilityBackfill.ts",
     "target:fixtures:smoke": "tsx src/cli/smoke.ts",
     "target:migrate:dist": "node dist/cli/migrate.js",
     "target:platform-identity:bootstrap:dist": "node dist/cli/platformIdentityBootstrap.js",
     "target:workos:backfill:dist": "node dist/cli/workosBackfill.js",
-    "target:workos:audit:dist": "node dist/cli/workosLinkAudit.js"
+    "target:workos:audit:dist": "node dist/cli/workosLinkAudit.js",
+    "target:booking-public-bookability:backfill:dist": "node dist/cli/bookingPublicBookabilityBackfill.js"
   },
   "dependencies": {
     "@workos-inc/node": "^10.2.0",
