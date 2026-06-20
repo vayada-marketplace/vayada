@@ -48,6 +48,28 @@ should reuse `platformMediaChecks` instead of creating ad hoc media assertions.
 
 ## WorkOS Backfill
 
+Bootstrap platform admins from the legacy auth DB before running the WorkOS
+backfill. The command imports only legacy `is_superadmin` / `type = 'admin'`
+users into the fixed platform organization and leaves hotel/creator/affiliate
+resource ETL to the product-specific migration pipeline.
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  LEGACY_AUTH_DATABASE_URL=<legacy auth database url> \
+  npm --workspace @vayada/backend-migration run target:platform-identity:bootstrap:dist -- \
+    --dry-run
+```
+
+Apply mode requires the printed guard:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  LEGACY_AUTH_DATABASE_URL=<legacy auth database url> \
+  npm --workspace @vayada/backend-migration run target:platform-identity:bootstrap:dist -- \
+    --apply \
+    --confirm platform-identity-bootstrap:v1
+```
+
 Audit the migrated target identity/resource links before a backfill:
 
 ```bash
@@ -64,7 +86,9 @@ the compiled commands:
 
 ```bash
 npm --workspace @vayada/backend-migration run target:migrate:dist -- --env production
+npm --workspace @vayada/backend-migration run target:platform-identity:bootstrap:dist -- --dry-run
 npm --workspace @vayada/backend-migration run target:workos:audit:dist
+npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- --organization-kind platform --dry-run
 npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- --email user@example.com --dry-run
 ```
 

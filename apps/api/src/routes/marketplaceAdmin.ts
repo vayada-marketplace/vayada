@@ -13,7 +13,7 @@ export const MARKETPLACE_ADMIN_COLLABORATIONS_CONTRACT = {
   path: "/api/marketplace/admin/collaborations",
   owner: "marketplace",
   permission: "platform.user.suspend" satisfies PermissionKey,
-  fallback: "legacy users.is_superadmin during platform organization migration",
+  fallback: "opt-in legacy users.is_superadmin during platform organization migration",
   doc: "engineering/marketplace-admin-contract.md",
 } as const;
 
@@ -248,6 +248,7 @@ export type MarketplaceAdminRepository = {
 
 export type MarketplaceAdminRoutesOptions = {
   repository: MarketplaceAdminRepository;
+  legacySuperadminFallbackEnabled?: boolean;
 };
 
 type MarketplaceAdminPool = {
@@ -516,7 +517,7 @@ export async function registerMarketplaceAdminRoutes(
   });
 
   app.get<{ Querystring: AdminCollaborationsQuery }>("/admin/collaborations", async (request) => {
-    const access = await requireMarketplaceAdminAccess(request, repository);
+    const access = await requireMarketplaceAdminAccess(request, options);
     const page = parsePositiveInteger(firstQueryValue(request.query.page), 1);
     const pageSize = Math.min(
       parsePositiveInteger(
@@ -548,7 +549,7 @@ export async function registerMarketplaceAdminRoutes(
   app.post<{ Params: CollaborationParams; Body: RespondBody }>(
     "/admin/collaborations/:collaborationId/respond",
     async (request, reply) => {
-      await requireMarketplaceAdminAccess(request, repository);
+      await requireMarketplaceAdminAccess(request, options);
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return sendAdminError(reply, 422, "idempotency_required");
       if (request.body?.status !== "accepted" && request.body?.status !== "declined") {
@@ -568,7 +569,7 @@ export async function registerMarketplaceAdminRoutes(
   app.post<{ Params: CollaborationParams; Body: ApproveBody }>(
     "/admin/collaborations/:collaborationId/approve",
     async (request, reply) => {
-      await requireMarketplaceAdminAccess(request, repository);
+      await requireMarketplaceAdminAccess(request, options);
       const idempotencyKey = readIdempotencyKey(request);
       if (!idempotencyKey) return sendAdminError(reply, 422, "idempotency_required");
       const result = await repository.approveCollaborationAsHotel({
@@ -583,7 +584,7 @@ export async function registerMarketplaceAdminRoutes(
   app.post<{ Params: HotelUserParams; Body: MarketplaceAdminCreateHotelListingRequest }>(
     "/admin/users/:hotelUserId/listings",
     async (request, reply) => {
-      const access = await requireMarketplaceAdminAccess(request, repository);
+      const access = await requireMarketplaceAdminAccess(request, options);
       const validation = validateCreateListingRequest(request.body);
       if (validation) return sendAdminError(reply, 422, validation);
       const result = await repository.createHotelListingForUser({
@@ -599,7 +600,7 @@ export async function registerMarketplaceAdminRoutes(
   app.put<{ Params: ListingParams; Body: MarketplaceAdminUpdateHotelListingRequest }>(
     "/admin/users/:hotelUserId/listings/:listingId",
     async (request, reply) => {
-      const access = await requireMarketplaceAdminAccess(request, repository);
+      const access = await requireMarketplaceAdminAccess(request, options);
       const validation = validateUpdateListingRequest(request.body);
       if (validation) return sendAdminError(reply, 422, validation);
       const result = await repository.updateHotelListingForUser({
@@ -616,7 +617,7 @@ export async function registerMarketplaceAdminRoutes(
   app.delete<{ Params: ListingParams }>(
     "/admin/users/:hotelUserId/listings/:listingId",
     async (request, reply) => {
-      const access = await requireMarketplaceAdminAccess(request, repository);
+      const access = await requireMarketplaceAdminAccess(request, options);
       const result = await repository.deleteHotelListingForUser({
         hotelUserId: request.params.hotelUserId,
         listingId: request.params.listingId,
@@ -630,7 +631,7 @@ export async function registerMarketplaceAdminRoutes(
 
 async function requireMarketplaceAdminAccess(
   request: FastifyRequest,
-  repository: MarketplaceAdminRepository,
+  options: MarketplaceAdminRoutesOptions,
 ): Promise<MarketplaceAdminRouteAccess> {
   try {
     const context = enforceRoutePolicy(request, {
@@ -644,8 +645,9 @@ async function requireMarketplaceAdminAccess(
     });
     return { context, authorizationMode: "platform_organization_membership" };
   } catch (error) {
+    if (!options.legacySuperadminFallbackEnabled) throw error;
     const context = requireAuthContext(request);
-    if (await repository.isLegacySuperadmin?.(context.actor.internalUserId)) {
+    if (await options.repository.isLegacySuperadmin?.(context.actor.internalUserId)) {
       return { context, authorizationMode: "legacy_superadmin_fallback" };
     }
     throw error;
