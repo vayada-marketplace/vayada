@@ -1,6 +1,7 @@
 import { pmsClient } from "../api/pmsClient";
 import {
   assertPmsOperationsReadModelEnabled,
+  isPmsOperationsReadModelEnabled,
   pmsOperationsClient,
 } from "../api/pmsOperationsClient";
 import type { RoomImageReference } from "../upload";
@@ -235,8 +236,142 @@ export interface RoomCreate {
   sortOrder?: number;
 }
 
+function selectedPmsPropertyId(): string {
+  const propertyId =
+    typeof window !== "undefined" ? localStorage.getItem("selectedHotelId")?.trim() : "";
+  if (!propertyId) {
+    throw new Error("Select a PMS property before loading rooms.");
+  }
+  return propertyId;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  const parsed =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function asNullableNumber(value: unknown): number | null {
+  if (value == null) return null;
+  const parsed = asNumber(value, NaN);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function asString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function toRoom(
+  response: PmsOperationsListResponse<PmsOperationsRoom>,
+  room: PmsOperationsRoom,
+): Room {
+  return {
+    id: room.roomId,
+    hotelId: response.propertyId,
+    roomTypeId: room.roomTypeId,
+    roomTypeName: asString(room.metadata.roomTypeName),
+    roomNumber: room.roomNumber,
+    floor: room.floor ?? "",
+    status: room.status === "retired" ? "out_of_order" : room.status,
+    sortOrder: room.sortOrder,
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
+function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomType {
+  const baseRate = asNumber(roomType.baseRate.amountDecimal);
+  const maxAdults = roomType.occupancyLimits.adults ?? null;
+  const maxChildren = roomType.occupancyLimits.children ?? null;
+  const derivedOccupancy = (maxAdults ?? 0) + (maxChildren ?? 0);
+  const maxOccupancy =
+    roomType.occupancyLimits.total ?? (derivedOccupancy > 0 ? derivedOccupancy : 0);
+  const nonRefundablePlan = roomType.ratePlans.find(
+    (plan) => plan.active && plan.rateType === "non_refundable",
+  );
+  const nonRefundableRate = nonRefundablePlan
+    ? asNumber(nonRefundablePlan.baseRate.amountDecimal)
+    : null;
+
+  return {
+    id: roomType.roomTypeId,
+    hotelId: propertyId,
+    name: roomType.name,
+    category: roomType.category ?? "",
+    description: roomType.description,
+    shortDescription: asString(roomType.attributes.shortDescription, roomType.description),
+    maxOccupancy,
+    maxAdults,
+    maxChildren,
+    bedrooms: asNumber(roomType.attributes.bedrooms, 1),
+    bathrooms: asNumber(roomType.attributes.bathrooms, 1),
+    size: asNumber(roomType.attributes.size),
+    baseRate,
+    nonRefundableRate,
+    currency: roomType.baseRate.currency,
+    locationAddress: asString(roomType.attributes.locationAddress),
+    latitude: asNullableNumber(roomType.attributes.latitude),
+    longitude: asNullableNumber(roomType.attributes.longitude),
+    amenities: roomType.amenities,
+    images: roomType.media.map((image) =>
+      image.altText === undefined ? { url: image.url } : { url: image.url, altText: image.altText },
+    ),
+    bedType: asString(roomType.attributes.bedType),
+    features: [],
+    benefits: [],
+    totalRooms: roomType.roomCount,
+    isActive: roomType.active,
+    sortOrder: roomType.sortOrder,
+    monthlyRates: {},
+    dailyRates: {},
+    operatingPeriods: [],
+    seasons:
+      baseRate > 0
+        ? [
+            {
+              name: "Default",
+              tier: "mid",
+              from: "01-01",
+              to: "12-31",
+              rate: String(baseRate),
+              minStay: roomType.rateRulesSummary.minStayNights ?? 1,
+              maxStay: roomType.rateRulesSummary.maxStayNights,
+            },
+          ]
+        : [],
+    weekendSurcharge: "+0%",
+    cancellationPolicy: "Free until 7 days before",
+    flexibleRateEnabled: true,
+    flexibleCancellationType: "free",
+    partialRefundCancelWindowDays: 30,
+    partialRefundAmountPercent: 50,
+    partialRefundTiers: [],
+    nonRefundableEnabled: nonRefundableRate != null,
+    nonRefundableDiscount:
+      baseRate > 0 && nonRefundableRate != null
+        ? Math.max(0, Math.round((1 - nonRefundableRate / baseRate) * 100))
+        : 5,
+    nonRefundableCancellationPolicy: "Non-refundable from booking",
+    minimumAdvanceDays: 0,
+    ratePaymentMethods: null,
+    rateDepositSettings: null,
+    mealPlans: [],
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
 export const individualRoomsService = {
-  list: () => pmsClient.get<Room[]>("/admin/rooms"),
+  list: async () => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.get<Room[]>("/admin/rooms");
+    }
+
+    const response = await pmsOperationsRoomsReadService.listRooms(selectedPmsPropertyId());
+    return response.items
+      .filter((room) => room.status !== "retired")
+      .map((room) => toRoom(response, room));
+  },
 
   create: (data: RoomCreate) => pmsClient.post<Room>("/admin/rooms", data),
 
@@ -254,9 +389,23 @@ export const benefitsService = {
 };
 
 export const roomsService = {
-  list: () => pmsClient.get<RoomType[]>("/admin/room-types"),
+  list: async () => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.get<RoomType[]>("/admin/room-types");
+    }
 
-  get: (id: string) => pmsClient.get<RoomType>(`/admin/room-types/${id}`),
+    const response = await pmsOperationsRoomsReadService.listRoomTypes(selectedPmsPropertyId());
+    return response.items.map((roomType) => toRoomType(response.propertyId, roomType));
+  },
+
+  get: async (id: string) => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.get<RoomType>(`/admin/room-types/${id}`);
+    }
+
+    const response = await pmsOperationsRoomsReadService.getRoomType(selectedPmsPropertyId(), id);
+    return toRoomType(response.propertyId, response.item);
+  },
 
   create: (data: RoomTypeCreate) => pmsClient.post<RoomType>("/admin/room-types", data),
 
