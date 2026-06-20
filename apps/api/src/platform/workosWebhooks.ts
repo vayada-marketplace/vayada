@@ -17,6 +17,29 @@ type PgWorkosWebhookStoreConfig = {
   max?: number;
 };
 
+type WorkosOrganizationRow = {
+  id: string;
+  kind: WorkosOrganizationPayload["kind"];
+};
+
+export function mapWorkosMembershipRoleKey(input: {
+  organizationKind: WorkosOrganizationPayload["kind"];
+  roleKey: string;
+  existingRoleKey?: string | null;
+}): string {
+  if (input.roleKey !== "admin") return input.roleKey;
+  if (
+    input.existingRoleKey === "platform_admin" ||
+    input.existingRoleKey === "hotel_owner" ||
+    input.existingRoleKey === "owner"
+  ) {
+    return input.existingRoleKey;
+  }
+  if (input.organizationKind === "platform") return "platform_admin";
+  if (input.organizationKind === "hotel_group") return "hotel_owner";
+  return input.roleKey;
+}
+
 export function createWorkosWebhookVerifier(config: {
   apiKey: string;
   secret: string;
@@ -314,14 +337,21 @@ async function findOrganizationIdByWorkosOrgId(
   pool: pg.Pool | pg.PoolClient,
   workosOrgId: string,
 ): Promise<string | null> {
-  const result = await pool.query<{ id: string }>(
-    `SELECT id
+  return (await findOrganizationByWorkosOrgId(pool, workosOrgId))?.id ?? null;
+}
+
+async function findOrganizationByWorkosOrgId(
+  pool: pg.Pool | pg.PoolClient,
+  workosOrgId: string,
+): Promise<WorkosOrganizationRow | null> {
+  const result = await pool.query<WorkosOrganizationRow>(
+    `SELECT id, kind
      FROM identity.organizations
      WHERE workos_org_id = $1
      LIMIT 1`,
     [workosOrgId],
   );
-  return result.rows[0]?.id ?? null;
+  return result.rows[0] ?? null;
 }
 
 async function upsertWorkosUser(pool: pg.Pool, input: WorkosUserPayload): Promise<string> {
@@ -424,10 +454,22 @@ async function upsertWorkosMembership(
   input: WorkosMembershipPayload,
 ): Promise<{ userId: string; organizationId: string }> {
   const userId = await findUserIdByWorkosUserId(pool, input.workosUserId);
-  const organizationId = await findOrganizationIdByWorkosOrgId(pool, input.workosOrgId);
-  if (!userId || !organizationId) {
+  const organization = await findOrganizationByWorkosOrgId(pool, input.workosOrgId);
+  if (!userId || !organization) {
     throw new Error("WorkOS membership references an unknown user or organization");
   }
+  const existingMembership = await pool.query<{ role_key: string }>(
+    `SELECT role_key
+     FROM identity.organization_memberships
+     WHERE organization_id = $1 AND user_id = $2
+     LIMIT 1`,
+    [organization.id, userId],
+  );
+  const roleKey = mapWorkosMembershipRoleKey({
+    organizationKind: organization.kind,
+    roleKey: input.roleKey,
+    existingRoleKey: existingMembership.rows[0]?.role_key,
+  });
 
   await pool.query(
     `INSERT INTO identity.organization_memberships
@@ -453,13 +495,13 @@ async function upsertWorkosMembership(
        workos_role_slugs = EXCLUDED.workos_role_slugs,
        updated_at = now()`,
     [
-      organizationId,
+      organization.id,
       userId,
       input.status,
-      input.roleKey,
+      roleKey,
       input.workosMembershipId,
       input.workosRoleSlugs,
     ],
   );
-  return { userId, organizationId };
+  return { userId, organizationId: organization.id };
 }

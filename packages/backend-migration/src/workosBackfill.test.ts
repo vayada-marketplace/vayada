@@ -187,6 +187,25 @@ describe("runWorkosBackfill", () => {
     });
   });
 
+  it("uses WorkOS admin role for internal platform admins", async () => {
+    const repository = createMemoryRepository({
+      users: [user()],
+      organizations: [organization({ kind: "platform" })],
+      memberships: [membership({ roleKey: "platform_admin" })],
+    });
+    const workos = createMemoryWorkosClient();
+
+    await runWorkosBackfill({
+      mode: "apply",
+      cohort: defaultCohort(),
+      repository,
+      workos,
+    });
+
+    expect(workos.createdMemberships[0]?.roleSlugs).toEqual(["admin"]);
+    expect(repository.linkedMemberships[0]?.roleSlugs).toEqual(["admin"]);
+  });
+
   it("links existing WorkOS resources by external ID before creating memberships", async () => {
     const repository = createMemoryRepository({
       users: [user({ passwordHash: TEST_BCRYPT_HASH, passwordHashType: "bcrypt" })],

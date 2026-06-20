@@ -798,7 +798,9 @@ function normalizedRoleSlugs(membership: WorkosBackfillMembership): string[] {
 }
 
 function workosRoleSlug(roleKey: string): string {
-  if (roleKey === "owner" || roleKey === "hotel_owner") return "admin";
+  if (roleKey === "owner" || roleKey === "hotel_owner" || roleKey === "platform_admin") {
+    return "admin";
+  }
   return roleKey;
 }
 
