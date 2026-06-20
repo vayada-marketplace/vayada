@@ -127,14 +127,7 @@ export const hotelService = {
    * Get all hotel listings (public marketplace endpoint - returns direct array)
    */
   getAll: async (params?: { page?: number; limit?: number }): Promise<PaginatedResponse<Hotel>> => {
-    let response: ListingMarketplaceResponse[];
-
-    try {
-      response = (await getAllMarketplaceListings()).map(toLegacyListingMarketplaceResponse);
-    } catch (error) {
-      if (!isMissingDiscoveryRoute(error)) throw error;
-      response = await apiClient.get<ListingMarketplaceResponse[]>("/marketplace/listings");
-    }
+    const response = (await getAllMarketplaceListings()).map(toLegacyListingMarketplaceResponse);
 
     // Transform API response to frontend format
     const hotels = response.map(transformListingMarketplaceResponse);
@@ -303,15 +296,6 @@ export const hotelService = {
     return apiClient.get<HotelProfileStatus>("/api/marketplace/hotels/me/profile-status");
   },
 };
-
-function isMissingDiscoveryRoute(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    (error as { status: unknown }).status === 404
-  );
-}
 
 function toLegacyListingMarketplaceResponse(
   listing: MarketplaceListingReadModel,
