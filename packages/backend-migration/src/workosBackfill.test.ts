@@ -67,7 +67,7 @@ describe("runWorkosBackfill", () => {
       ],
     };
 
-    expect(createWorkosBackfillCohortForOrganizationKind(source, "platform")).toEqual({
+    expect(createWorkosBackfillCohortForOrganizationKind(source, " Platform ")).toEqual({
       key: "organization-kind:platform",
       userIds: ["platform_user"],
       organizationIds: ["platform_org"],

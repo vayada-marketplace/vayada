@@ -414,7 +414,7 @@ export function createWorkosBackfillCohortForOrganizationKind(
   source: WorkosBackfillSource,
   organizationKind: string,
 ): WorkosBackfillCohort {
-  const normalizedKind = organizationKind.trim();
+  const normalizedKind = organizationKind.trim().toLowerCase();
   if (!normalizedKind) {
     throw new Error("WorkOS backfill organization kind is required.");
   }

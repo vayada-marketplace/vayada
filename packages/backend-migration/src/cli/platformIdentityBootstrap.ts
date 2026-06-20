@@ -16,12 +16,23 @@ function parseArgs(argv: string[]): {
   let targetConnectionString = process.env["TARGET_DATABASE_URL"] ?? "";
   let legacyAuthConnectionString = process.env["LEGACY_AUTH_DATABASE_URL"] ?? "";
   let confirm = "";
+  let explicitMode: PlatformIdentityBootstrapMode | null = null;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--dry-run") {
+      if (explicitMode === "apply") {
+        console.error("Error: --dry-run and --apply are mutually exclusive.");
+        process.exit(1);
+      }
+      explicitMode = "dry-run";
       mode = "dry-run";
     } else if (arg === "--apply") {
+      if (explicitMode === "dry-run") {
+        console.error("Error: --dry-run and --apply are mutually exclusive.");
+        process.exit(1);
+      }
+      explicitMode = "apply";
       mode = "apply";
     } else if (arg === "--target-connection-string" && args[i + 1]) {
       targetConnectionString = args[++i];
