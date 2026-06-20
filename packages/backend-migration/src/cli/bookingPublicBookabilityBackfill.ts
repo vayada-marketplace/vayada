@@ -27,23 +27,24 @@ function parseArgs(argv: string[]): {
 }
 
 const args = parseArgs(process.argv);
+const normalizedSlug = args.slug.trim().toLowerCase();
 
 if (!args.connectionString) {
   console.error("Error: TARGET_DATABASE_URL or --connection-string is required.");
   process.exit(1);
 }
-if (!args.slug) {
+if (!normalizedSlug) {
   console.error("Error: --slug is required.");
   process.exit(1);
 }
-if (args.apply && args.confirm !== `booking-public-bookability:${args.slug}`) {
-  console.error(`Error: apply requires --confirm booking-public-bookability:${args.slug}`);
+if (args.apply && args.confirm !== `booking-public-bookability:${normalizedSlug}`) {
+  console.error(`Error: apply requires --confirm booking-public-bookability:${normalizedSlug}`);
   process.exit(1);
 }
 
 const result = await runBookingPublicBookabilityBackfill({
   connectionString: args.connectionString,
-  slug: args.slug,
+  slug: normalizedSlug,
   apply: args.apply,
   days: args.days,
 });

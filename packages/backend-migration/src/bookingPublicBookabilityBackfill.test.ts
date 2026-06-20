@@ -20,5 +20,9 @@ describe("booking public bookability backfill helpers", () => {
       maxAdults: 2,
       maxOccupancy: 2,
     });
+    expect(occupancyForLegacyRoom({ maxAdults: 3, maxChildren: null })).toEqual({
+      maxAdults: 3,
+      maxOccupancy: 3,
+    });
   });
 });

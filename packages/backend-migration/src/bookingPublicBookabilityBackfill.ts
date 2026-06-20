@@ -459,6 +459,8 @@ async function upsertTargetRows(
          sellable_publicly = EXCLUDED.sellable_publicly,
          available_rooms = EXCLUDED.available_rooms,
          base_price_amount = EXCLUDED.base_price_amount,
+         taxes_and_fees_amount = EXCLUDED.taxes_and_fees_amount,
+         discounts_amount = EXCLUDED.discounts_amount,
          currency = EXCLUDED.currency,
          occupancy = EXCLUDED.occupancy,
          room_summary = EXCLUDED.room_summary,
@@ -594,10 +596,11 @@ function maxAdults(snapshots: RoomSnapshot[]): number {
 }
 
 export function occupancyForLegacyRoom(room: LegacyRoom): Record<string, number> {
-  const maxOccupancy = numberValue(room.maxOccupancy) ?? 1;
+  const legacyMaxAdults = numberValue(room.maxAdults);
+  const maxOccupancy = numberValue(room.maxOccupancy) ?? legacyMaxAdults ?? 1;
   const maxChildren = numberValue(room.maxChildren);
   return {
-    maxAdults: numberValue(room.maxAdults) ?? maxOccupancy,
+    maxAdults: legacyMaxAdults ?? maxOccupancy,
     maxOccupancy,
     ...(maxChildren === null ? {} : { maxChildren }),
   };
