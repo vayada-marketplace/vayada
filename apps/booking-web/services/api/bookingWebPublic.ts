@@ -1,6 +1,6 @@
 import type { Hotel, RoomType } from "@/lib/types";
 
-import { bookingEngine, bookingWebPublic, type ApiRequestInit } from "./client";
+import { bookingWebPublic, type ApiRequestInit } from "./client";
 
 const FALLBACK_IMAGE = "/vayada-logo.png";
 export const PUBLIC_BOOKING_HOST_REVALIDATE_SECONDS = 60;
@@ -130,42 +130,12 @@ export type BookingWebAffiliateStripeConnectResponse = {
   onboardingUrl: string;
 };
 
-type LegacyResolveDomainResponse = {
-  slug: string;
-};
-
 export const bookingWebPublicApi = {
   async resolveHost(host: string, init?: ApiRequestInit): Promise<BookingWebPublicHostResponse> {
-    try {
-      return await bookingWebPublic.get<BookingWebPublicHostResponse>(
-        `/api/booking-web/hosts/${encodeURIComponent(host)}`,
-        init,
-      );
-    } catch {
-      const resolved = await bookingEngine.get<LegacyResolveDomainResponse>(
-        `/api/resolve-domain?domain=${encodeURIComponent(host)}`,
-        init,
-      );
-      const hotel = await bookingEngine.get<Hotel>(
-        `/api/hotels/${encodeURIComponent(resolved.slug)}`,
-        init,
-      );
-      return {
-        slug: hotel.slug,
-        canonicalUrl: hotel.canonicalUrl,
-        bookingBaseUrl: hotel.bookingBaseUrl,
-        customDomainUrl: hotel.customDomainUrl ?? null,
-        shouldRedirect: false,
-        redirectUrl: null,
-        redirectStatus: null,
-        hotel: {
-          slug: hotel.slug,
-          name: hotel.name,
-          defaultLocale: hotel.defaultLanguage,
-          supportedLocales: hotel.supportedLanguages,
-        },
-      };
-    }
+    return bookingWebPublic.get<BookingWebPublicHostResponse>(
+      `/api/booking-web/hosts/${encodeURIComponent(host)}`,
+      init,
+    );
   },
 
   async getHotel(
@@ -307,9 +277,9 @@ export function toLegacyRooms(
   }
 
   return Array.from(grouped.entries()).flatMap(([roomTypeId, roomOffers]) => {
-    const fallbackOffer = roomOffers[0];
-    if (!fallbackOffer) return [];
-    const flexible = roomOffers.find((offer) => offer.refundable) || fallbackOffer;
+    const firstOffer = roomOffers[0];
+    if (!firstOffer) return [];
+    const flexible = roomOffers.find((offer) => offer.refundable) || firstOffer;
     const nonRefundable = roomOffers.find((offer) => !offer.refundable) || null;
     const displayRoom = displayRoomById.get(roomTypeId);
     const nights = Math.max(data.request.nights || 1, 1);
