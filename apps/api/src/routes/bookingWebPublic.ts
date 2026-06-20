@@ -840,6 +840,8 @@ function isAllowedBookingWebOrigin(origin: unknown): origin is string {
   return (
     host === "booking.vayada.com" ||
     host.endsWith(".booking.vayada.com") ||
+    host === "next-booking.vayada.com" ||
+    host.endsWith(".next-booking.vayada.com") ||
     host === "booking.localhost" ||
     host.endsWith(".booking.localhost")
   );
@@ -2700,7 +2702,11 @@ function normalizeHost(value: string): string {
 
 function slugFromKnownBookingHost(host: string): string | null {
   const parts = host.split(".");
-  if (host.endsWith(".booking.vayada.com") || host.endsWith(".booking.localhost")) {
+  if (
+    host.endsWith(".booking.vayada.com") ||
+    host.endsWith(".next-booking.vayada.com") ||
+    host.endsWith(".booking.localhost")
+  ) {
     return parts.length >= 3 && parts[0] !== "www" && parts[0] !== "booking" ? parts[0]! : null;
   }
   if (host.endsWith(".localhost")) {
