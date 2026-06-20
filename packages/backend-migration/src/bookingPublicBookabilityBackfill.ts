@@ -397,9 +397,9 @@ async function upsertTargetRows(
 
     await client.query(
       `INSERT INTO pms.room_types
-         (id, property_id, source_system, source_room_type_id, name, description, category,
-          occupancy_limits, base_rate_amount, currency, active)
-       VALUES ($1, $2, 'pms', $1, $3, $4, $5, $6, $7, $8, true)
+          (id, property_id, source_system, source_room_type_id, name, description, category,
+           occupancy_limits, base_rate_amount, currency, active)
+       VALUES ($1, $2, 'pms', $3, $4, $5, $6, $7, $8, $9, true)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
@@ -412,6 +412,7 @@ async function upsertTargetRows(
       [
         roomId,
         input.propertyId,
+        roomId,
         roomName,
         stringValue(snapshot.room.description) ?? "",
         stringValue(snapshot.room.category),
