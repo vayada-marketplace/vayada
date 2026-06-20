@@ -316,6 +316,8 @@ async function quoteFromTargetOfferSnapshots(
        AND offer.availability_status IN ('available', 'limited')
        AND COALESCE((offer.occupancy ->> 'maxAdults')::int, $5::int) >= $5::int
        AND COALESCE((offer.occupancy ->> 'maxChildren')::int, $6::int) >= $6::int
+       AND COALESCE((offer.occupancy ->> 'maxOccupancy')::int, $5::int + $6::int) >= ($5::int + $6::int)
+       AND (offer.expires_at IS NULL OR offer.expires_at > $9::timestamptz)
      GROUP BY offer.public_offer_key, offer.room_type_id, offer.rate_plan_id, offer.currency
      HAVING COUNT(DISTINCT offer.stay_date) = $8::int
         AND MIN(offer.available_rooms) >= $7::int
@@ -330,6 +332,7 @@ async function quoteFromTargetOfferSnapshots(
       config.request.children,
       config.request.rooms,
       config.request.nights,
+      config.requestedAt.toISOString(),
     ],
   );
 

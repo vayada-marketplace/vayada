@@ -4543,6 +4543,7 @@ describe("vayada-api", () => {
       0,
       1,
       3,
+      "2026-06-09T09:00:00.000Z",
     ]);
     expect(findForbiddenPublicBookabilityKeys(quote)).toEqual([]);
   });
