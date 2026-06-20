@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { WorkOS } from "@workos-inc/node";
 
 import {
+  createWorkosBackfillCohortForOrganizationKind,
   createWorkosBackfillCohortForEmail,
   createPgWorkosBackfillRepository,
   runWorkosBackfill,
@@ -20,6 +21,7 @@ function parseArgs(argv: string[]): {
   workosApiKey: string;
   cohortManifestPath?: string;
   email?: string;
+  organizationKind?: string;
   confirm: string;
 } {
   const args = argv.slice(2);
@@ -29,6 +31,7 @@ function parseArgs(argv: string[]): {
   let workosApiKey = process.env["WORKOS_API_KEY"] ?? "";
   let cohortManifestPath = "";
   let email = "";
+  let organizationKind = "";
   let confirm = "";
 
   for (let i = 0; i < args.length; i++) {
@@ -45,6 +48,8 @@ function parseArgs(argv: string[]): {
       cohortManifestPath = args[++i];
     } else if (arg === "--email" && args[i + 1]) {
       email = args[++i];
+    } else if (arg === "--organization-kind" && args[i + 1]) {
+      organizationKind = args[++i];
     } else if (arg === "--confirm" && args[i + 1]) {
       confirm = args[++i];
     }
@@ -57,6 +62,7 @@ function parseArgs(argv: string[]): {
     workosApiKey,
     cohortManifestPath: cohortManifestPath || undefined,
     email: email || undefined,
+    organizationKind: organizationKind || undefined,
     confirm,
   };
 }
@@ -68,6 +74,7 @@ const {
   workosApiKey,
   cohortManifestPath,
   email,
+  organizationKind,
   confirm,
 } = parseArgs(process.argv);
 
@@ -75,12 +82,13 @@ if (!connectionString) {
   console.error("Error: TARGET_DATABASE_URL or --connection-string is required.");
   process.exit(1);
 }
-if (!cohortManifestPath && !email) {
-  console.error("Error: --cohort-manifest or --email is required.");
+const cohortSourceCount = [cohortManifestPath, email, organizationKind].filter(Boolean).length;
+if (cohortSourceCount === 0) {
+  console.error("Error: --cohort-manifest, --email, or --organization-kind is required.");
   process.exit(1);
 }
-if (cohortManifestPath && email) {
-  console.error("Error: pass only one of --cohort-manifest or --email.");
+if (cohortSourceCount > 1) {
+  console.error("Error: pass only one of --cohort-manifest, --email, or --organization-kind.");
   process.exit(1);
 }
 if (mode === "apply" && !workosApiKey) {
@@ -92,9 +100,12 @@ const repository = createPgWorkosBackfillRepository({
   connectionString,
   legacyAuthConnectionString,
 });
+const source = cohortManifestPath ? null : await repository.loadSource();
 const cohort = cohortManifestPath
   ? await loadCohortManifest(cohortManifestPath)
-  : createWorkosBackfillCohortForEmail(await repository.loadSource(), email!);
+  : email
+    ? createWorkosBackfillCohortForEmail(source!, email)
+    : createWorkosBackfillCohortForOrganizationKind(source!, organizationKind!);
 if (mode === "apply" && confirm !== cohort.key) {
   console.error(`Error: --apply requires --confirm ${cohort.key}.`);
   process.exit(1);

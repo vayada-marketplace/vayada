@@ -406,6 +406,8 @@ const app = buildApp({
           connectionString: config.targetDatabaseUrl!,
         })
       : undefined,
+  marketplaceAdminLegacySuperadminFallbackEnabled:
+    config.marketplaceAdminLegacySuperadminFallbackEnabled,
   marketplaceHotelProfileStatusRepository:
     config.marketplaceDiscoverySource === "target"
       ? createPgMarketplaceHotelProfileStatusRepository({

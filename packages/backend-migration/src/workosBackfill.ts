@@ -42,6 +42,12 @@ export type WorkosBackfillSource = {
   memberships: WorkosBackfillMembership[];
 };
 
+export type LegacyAuthBackfillRow = {
+  id: string;
+  emailVerified: boolean | null;
+  passwordHash: string | null;
+};
+
 export type WorkosBackfillCohort = {
   key: string;
   userIds: string[];
@@ -404,6 +410,44 @@ export function createWorkosBackfillCohortForEmail(
   };
 }
 
+export function createWorkosBackfillCohortForOrganizationKind(
+  source: WorkosBackfillSource,
+  organizationKind: string,
+): WorkosBackfillCohort {
+  const normalizedKind = organizationKind.trim();
+  if (!normalizedKind) {
+    throw new Error("WorkOS backfill organization kind is required.");
+  }
+
+  const organizations = source.organizations.filter(
+    (organization) => organization.kind === normalizedKind && organization.status === "active",
+  );
+  if (organizations.length === 0) {
+    throw new Error(`No active target organizations found for kind ${normalizedKind}.`);
+  }
+
+  const organizationIds = new Set(organizations.map((organization) => organization.id));
+  const activeUserIds = new Set(
+    source.users.filter((user) => user.status === "active").map((user) => user.id),
+  );
+  const memberships = source.memberships.filter(
+    (membership) =>
+      membership.status === "active" &&
+      organizationIds.has(membership.organizationId) &&
+      activeUserIds.has(membership.userId),
+  );
+  if (memberships.length === 0) {
+    throw new Error(`No active memberships found for organization kind ${normalizedKind}.`);
+  }
+
+  return {
+    key: `organization-kind:${normalizedKind}`,
+    userIds: Array.from(new Set(memberships.map((membership) => membership.userId))),
+    organizationIds: Array.from(organizationIds),
+    membershipIds: memberships.map((membership) => membership.id),
+  };
+}
+
 export function createPgWorkosBackfillRepository(config: {
   connectionString: string;
   legacyAuthConnectionString?: string;
@@ -480,7 +524,7 @@ export function createPgWorkosBackfillRepository(config: {
       ]);
 
       return {
-        users: await attachLegacyPasswordHashes(users.rows, legacyAuthPool),
+        users: await attachLegacyAuthFields(users.rows, legacyAuthPool),
         organizations: organizations.rows,
         memberships: memberships.rows,
       };
@@ -616,15 +660,16 @@ export function createPgWorkosBackfillRepository(config: {
   };
 }
 
-async function attachLegacyPasswordHashes(
+async function attachLegacyAuthFields(
   users: WorkosBackfillUser[],
   legacyAuthPool: pg.Pool | null,
 ): Promise<WorkosBackfillUser[]> {
   if (!legacyAuthPool || users.length === 0) return users;
 
-  const { rows } = await legacyAuthPool.query<{ id: string; passwordHash: string | null }>(
+  const { rows } = await legacyAuthPool.query<LegacyAuthBackfillRow>(
     `SELECT
        id::text,
+       email_verified AS "emailVerified",
        CASE
          WHEN password_hash LIKE '$2a$%'
            OR password_hash LIKE '$2b$%'
@@ -636,12 +681,20 @@ async function attachLegacyPasswordHashes(
      WHERE id = ANY($1::uuid[])`,
     [users.map((user) => user.id)],
   );
-  const passwordHashes = new Map(rows.map((row) => [row.id, row.passwordHash]));
+  return mergeLegacyAuthBackfillFields(users, rows);
+}
 
+export function mergeLegacyAuthBackfillFields(
+  users: WorkosBackfillUser[],
+  legacyRows: LegacyAuthBackfillRow[],
+): WorkosBackfillUser[] {
+  const legacyByUserId = new Map(legacyRows.map((row) => [row.id, row]));
   return users.map((user) => {
-    const passwordHash = passwordHashes.get(user.id) ?? null;
+    const legacy = legacyByUserId.get(user.id);
+    const passwordHash = legacy?.passwordHash ?? null;
     return {
       ...user,
+      emailVerified: legacy?.emailVerified ?? user.emailVerified,
       passwordHash,
       passwordHashType: passwordHash ? "bcrypt" : null,
     };

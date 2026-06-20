@@ -325,6 +325,15 @@ describe("api config", () => {
     ).toThrow("MARKETPLACE_DISCOVERY_SOURCE must be one of: disabled, target");
   });
 
+  it("keeps marketplace admin legacy superadmin fallback disabled by default", () => {
+    expect(loadConfig({}).marketplaceAdminLegacySuperadminFallbackEnabled).toBe(false);
+    expect(
+      loadConfig({
+        MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED: "true",
+      }).marketplaceAdminLegacySuperadminFallbackEnabled,
+    ).toBe(true);
+  });
+
   it("keeps PMS operations routes disabled by default", () => {
     expect(loadConfig({}).pmsOperationsSource).toBe("disabled");
   });

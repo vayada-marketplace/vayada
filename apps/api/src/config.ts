@@ -87,6 +87,7 @@ export type ApiConfig = {
   bookingPublicApiUrl?: string;
   marketplaceDiscoverySource: MarketplaceDiscoverySource;
   marketplaceAdminSource: MarketplaceAdminSource;
+  marketplaceAdminLegacySuperadminFallbackEnabled: boolean;
   pmsOperationsSource: PmsOperationsSource;
   financeSource: FinanceSource;
   marketplaceDiscoveryAllowedOrigins: string[];
@@ -415,6 +416,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
     marketplaceDiscoverySource,
     marketplaceAdminSource,
+    marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
+      env,
+      "MARKETPLACE_ADMIN_LEGACY_SUPERADMIN_FALLBACK_ENABLED",
+    ),
     pmsOperationsSource,
     financeSource,
     marketplaceDiscoveryAllowedOrigins: readOptionalCsvEnv(

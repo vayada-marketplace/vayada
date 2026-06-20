@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createWorkosBackfillCohortForOrganizationKind,
   createWorkosBackfillCohortForEmail,
+  mergeLegacyAuthBackfillFields,
   runWorkosBackfill,
   type WorkosBackfillClient,
   type WorkosBackfillRepository,
@@ -33,6 +35,62 @@ describe("runWorkosBackfill", () => {
       userIds: ["user_internal"],
       organizationIds: ["org_internal"],
       membershipIds: ["membership_internal"],
+    });
+  });
+
+  it("builds a cohort from active memberships in an organization kind", () => {
+    const source = {
+      users: [
+        user({ id: "platform_user", status: "active" }),
+        user({ id: "pending_user", status: "pending" }),
+      ],
+      organizations: [
+        organization({ id: "platform_org", kind: "platform" }),
+        organization({ id: "hotel_org", kind: "hotel_group" }),
+      ],
+      memberships: [
+        membership({
+          id: "platform_membership",
+          userId: "platform_user",
+          organizationId: "platform_org",
+        }),
+        membership({
+          id: "pending_membership",
+          userId: "pending_user",
+          organizationId: "platform_org",
+        }),
+        membership({
+          id: "hotel_membership",
+          userId: "platform_user",
+          organizationId: "hotel_org",
+        }),
+      ],
+    };
+
+    expect(createWorkosBackfillCohortForOrganizationKind(source, "platform")).toEqual({
+      key: "organization-kind:platform",
+      userIds: ["platform_user"],
+      organizationIds: ["platform_org"],
+      membershipIds: ["platform_membership"],
+    });
+  });
+
+  it("carries legacy auth email verification and bcrypt hashes into backfill users", () => {
+    expect(
+      mergeLegacyAuthBackfillFields(
+        [user({ id: "platform_user", emailVerified: false })],
+        [
+          {
+            id: "platform_user",
+            emailVerified: true,
+            passwordHash: TEST_BCRYPT_HASH,
+          },
+        ],
+      )[0],
+    ).toMatchObject({
+      emailVerified: true,
+      passwordHash: TEST_BCRYPT_HASH,
+      passwordHashType: "bcrypt",
     });
   });
 

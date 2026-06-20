@@ -115,11 +115,13 @@ describe("marketplace admin routes", () => {
     });
   });
 
-  it("uses documented legacy superadmin fallback when platform membership is not backfilled", async () => {
+  it("uses documented legacy superadmin fallback only when explicitly enabled", async () => {
     const repository = createMemoryMarketplaceAdminRepository({
       legacySuperadminUserIds: ["user_creator"],
     });
-    app = buildMarketplaceAdminApp(repository);
+    app = buildMarketplaceAdminApp(repository, {
+      marketplaceAdminLegacySuperadminFallbackEnabled: true,
+    });
 
     const response = await injectJson<MarketplaceAdminCollaborationsResponse>(app, {
       method: "GET",
@@ -132,7 +134,9 @@ describe("marketplace admin routes", () => {
   });
 
   it("rejects authenticated users without platform membership or superadmin fallback", async () => {
-    const repository = createMemoryMarketplaceAdminRepository();
+    const repository = createMemoryMarketplaceAdminRepository({
+      legacySuperadminUserIds: ["user_creator"],
+    });
     app = buildMarketplaceAdminApp(repository);
 
     const response = await injectJson(app, {
@@ -274,7 +278,10 @@ describe("marketplace admin routes", () => {
   });
 });
 
-function buildMarketplaceAdminApp(repository: MarketplaceAdminRepository) {
+function buildMarketplaceAdminApp(
+  repository: MarketplaceAdminRepository,
+  options: { marketplaceAdminLegacySuperadminFallbackEnabled?: boolean } = {},
+) {
   const identityRepository: IdentityRepository = {
     async findUserByProviderUserId(_provider, providerUserId) {
       if (providerUserId === "user_workos_platform") {
@@ -335,6 +342,8 @@ function buildMarketplaceAdminApp(repository: MarketplaceAdminRepository) {
   return buildApp({
     logger: false,
     marketplaceAdminRepository: repository,
+    marketplaceAdminLegacySuperadminFallbackEnabled:
+      options.marketplaceAdminLegacySuperadminFallbackEnabled,
     auth: {
       verifier: createFakeVerifier(
         new Map([
