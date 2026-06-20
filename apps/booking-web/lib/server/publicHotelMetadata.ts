@@ -52,23 +52,6 @@ type PublicHotelProfileResponse = {
   };
 };
 
-type LegacyHotelResponse = {
-  slug: string;
-  name: string;
-  description?: string | null;
-  location?: string;
-  country?: string;
-  starRating?: number;
-  heroImage?: string;
-  images?: string[];
-  checkInTime?: string;
-  checkOutTime?: string;
-  contact?: { address?: string; phone?: string; email?: string };
-  branding?: { faviconUrl?: string };
-  customDomainUrl?: string | null;
-  supportedLanguages?: string[];
-};
-
 export const fallbackHotelMetadata: Metadata = {
   title: "Book Your Stay",
   description: "Book your perfect hotel stay.",
@@ -87,7 +70,6 @@ async function fetchPublicHotelUncached(
   locale: string,
 ): Promise<PublicHotelMetadata | null> {
   const apiUrl = process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL || "https://api.localhost";
-  const bookingApiUrl = process.env.NEXT_PUBLIC_API_URL || "";
   const params = new URLSearchParams();
   if (locale) params.set("locale", locale);
   const qs = params.toString();
@@ -100,22 +82,6 @@ async function fetchPublicHotelUncached(
     );
     if (!res.ok) throw new Error(`Booking Web API returned ${res.status}`);
     return toPublicHotelMetadata((await res.json()) as PublicHotelProfileResponse);
-  } catch {
-    if (!bookingApiUrl) return null;
-  }
-
-  const legacyParams = new URLSearchParams();
-  if (locale) legacyParams.set("lang", locale);
-  const legacyQs = legacyParams.toString();
-  try {
-    const res = await fetch(
-      `${bookingApiUrl}/api/hotels/${encodeURIComponent(slug)}${legacyQs ? `?${legacyQs}` : ""}`,
-      {
-        next: { revalidate: PUBLIC_HOTEL_METADATA_REVALIDATE_SECONDS },
-      },
-    );
-    if (!res.ok) return null;
-    return toLegacyPublicHotelMetadata((await res.json()) as LegacyHotelResponse);
   } catch {
     return null;
   }
@@ -212,24 +178,5 @@ function toPublicHotelMetadata(data: PublicHotelProfileResponse): PublicHotelMet
     checkOutTime: hotel.policies.checkOutUntil || undefined,
     customDomainUrl: hotel.customDomainUrl,
     supportedLanguages: hotel.supportedLocales,
-  };
-}
-
-function toLegacyPublicHotelMetadata(hotel: LegacyHotelResponse): PublicHotelMetadata {
-  return {
-    name: hotel.name,
-    slug: hotel.slug,
-    description: hotel.description || undefined,
-    country: hotel.country,
-    location: hotel.location,
-    starRating: hotel.starRating,
-    heroImage: hotel.heroImage,
-    images: hotel.images || [],
-    checkInTime: hotel.checkInTime,
-    checkOutTime: hotel.checkOutTime,
-    contact: hotel.contact,
-    branding: hotel.branding,
-    customDomainUrl: hotel.customDomainUrl ?? null,
-    supportedLanguages: hotel.supportedLanguages,
   };
 }

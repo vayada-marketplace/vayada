@@ -1,8 +1,7 @@
 /**
  * One ApiClient class, instantiated once per backend:
  *   - bookingWebPublic: TypeScript public Booking Web API
- *   - bookingEngine:   legacy booking API for property/domain reads
- *   - pmsApi:          PMS public API for room availability + guest booking flows
+ *   - bookingEngine:   booking API for remaining non-BFF reads
  */
 
 class ApiError extends Error {
@@ -72,7 +71,7 @@ async function parse<T>(res: Response): Promise<T> {
     // Never surface a raw "API error: POST 422" to the user. Callers that
     // render errors (e.g. the checkout payment step) classify on
     // err.status / err.detail and map to friendly localized copy; this
-    // message is only the last-resort fallback.
+    // message is only the last-resort copy.
     const message = messageFromDetail(detail) || "Something went wrong. Please try again.";
     throw new ApiError(message, res.status, detail);
   }
@@ -82,13 +81,7 @@ async function parse<T>(res: Response): Promise<T> {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 const BOOKING_WEB_PUBLIC_API_URL =
   process.env.NEXT_PUBLIC_BOOKING_WEB_API_URL || "https://api.localhost";
-const PMS_API_URL =
-  process.env.NEXT_PUBLIC_PMS_API_URL ||
-  (API_URL && !API_URL.includes("localhost")
-    ? "https://pms-api.vayada.com"
-    : "https://api.pms.localhost");
 
 export const bookingWebPublic = new ApiClient(BOOKING_WEB_PUBLIC_API_URL);
 export const bookingEngine = new ApiClient(API_URL);
-export const pmsApi = new ApiClient(PMS_API_URL);
 export { ApiError };

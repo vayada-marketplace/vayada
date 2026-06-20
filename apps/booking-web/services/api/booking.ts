@@ -1,5 +1,5 @@
 import { Booking } from "@/lib/types";
-import { ApiError, bookingWebPublic, pmsApi } from "./client";
+import { bookingWebPublic } from "./client";
 
 export interface BookingRequestResponse {
   // For card payments (VAY-388) `booking` is a placeholder preview —
@@ -85,15 +85,10 @@ export const bookingService = {
       promoCode?: string;
     },
   ): Promise<BookingRequestResponse> {
-    try {
-      return await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings`,
-        data,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      return pmsApi.post(`/api/hotels/${encodeURIComponent(slug)}/bookings`, data);
-    }
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings`,
+      data,
+    );
   },
 
   // Materializes the soft-hold draft into a real booking row after
@@ -102,106 +97,54 @@ export const bookingService = {
   // Stripe webhook has already materialized the draft returns the same
   // booking. Accepts a draft id (VAY-388) or a legacy booking id.
   async confirmAuthorization(slug: string, handle: string): Promise<Booking> {
-    try {
-      return await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      return pmsApi.post(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
-      );
-    }
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(handle)}/confirm-authorization`,
+    );
   },
 
   async withdraw(slug: string, bookingId: string, guestEmail: string): Promise<void> {
     const body = { guestEmail };
-    try {
-      await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/withdraw`,
-        body,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      await pmsApi.post(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/withdraw`,
-        body,
-      );
-    }
+    await bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/withdraw`,
+      body,
+    );
   },
 
   async cancelPreview(slug: string, bookingId: string, guestEmail: string): Promise<CancelPreview> {
     const body = { guestEmail };
-    try {
-      return await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel-preview`,
-        body,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      return pmsApi.post(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel-preview`,
-        body,
-      );
-    }
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel-preview`,
+      body,
+    );
   },
 
   async cancel(slug: string, bookingId: string, guestEmail: string): Promise<void> {
     const body = { guestEmail };
-    try {
-      await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel`,
-        body,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      await pmsApi.post(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel`,
-        body,
-      );
-    }
+    await bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/cancel`,
+      body,
+    );
   },
 
   async getStatus(slug: string, reference: string, email: string): Promise<BookingStatus> {
     const params = new URLSearchParams({ reference, email });
-    try {
-      return await bookingWebPublic.get(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/status?${params}`,
-      );
-    } catch {
-      return pmsApi.get(`/api/hotels/${encodeURIComponent(slug)}/bookings/status?${params}`);
-    }
+    return bookingWebPublic.get(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/status?${params}`,
+    );
   },
 
   async getPaymentSettings(slug: string): Promise<PaymentSettings> {
-    try {
-      return await bookingWebPublic.get<PaymentSettings>(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/checkout-config`,
-      );
-    } catch {
-      try {
-        return await pmsApi.get<PaymentSettings>(
-          `/api/hotels/${encodeURIComponent(slug)}/payment-settings`,
-        );
-      } catch {
-        // Settings endpoint is best-effort — return a permissive default so the
-        // checkout form still renders if the backend is briefly unreachable.
-        return { payAtPropertyEnabled: false, freeCancellationDays: 7 };
-      }
-    }
+    return bookingWebPublic.get<PaymentSettings>(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/checkout-config`,
+    );
   },
 
   async lookup(slug: string, bookingReference: string, guestEmail: string): Promise<Booking> {
     const body = { bookingReference, guestEmail };
-    try {
-      return await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/lookup`,
-        body,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      return pmsApi.post(`/api/hotels/${encodeURIComponent(slug)}/bookings/lookup`, body);
-    }
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/lookup`,
+      body,
+    );
   },
 
   // Guest-initiated booking change requests (VAY-379)
@@ -210,18 +153,10 @@ export const bookingService = {
     bookingId: string,
     payload: ChangeRequestPayload,
   ): Promise<ChangeRequestPreview> {
-    try {
-      return await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request/preview`,
-        payload,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      return pmsApi.post(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request/preview`,
-        payload,
-      );
-    }
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request/preview`,
+      payload,
+    );
   },
 
   async submitChangeRequest(
@@ -229,18 +164,10 @@ export const bookingService = {
     bookingId: string,
     payload: ChangeRequestPayload,
   ): Promise<BookingChangeRequest> {
-    try {
-      return await bookingWebPublic.post(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request`,
-        payload,
-      );
-    } catch (err) {
-      if (!shouldFallbackToPms(err)) throw err;
-      return pmsApi.post(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request`,
-        payload,
-      );
-    }
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request`,
+      payload,
+    );
   },
 
   async getChangeRequest(
@@ -249,21 +176,11 @@ export const bookingService = {
     email: string,
   ): Promise<BookingChangeRequest | null> {
     const params = new URLSearchParams({ email });
-    try {
-      return await bookingWebPublic.get(
-        `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request?${params}`,
-      );
-    } catch {
-      return pmsApi.get(
-        `/api/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request?${params}`,
-      );
-    }
+    return bookingWebPublic.get(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/${encodeURIComponent(bookingId)}/change-request?${params}`,
+    );
   },
 };
-
-function shouldFallbackToPms(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 404;
-}
 
 export interface ChangeRequestPayload {
   guestEmail: string;
