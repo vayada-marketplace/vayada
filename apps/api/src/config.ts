@@ -109,6 +109,29 @@ function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefine
   return value ? value : undefined;
 }
 
+function normalizePgConnectionString(connectionString: string): string {
+  try {
+    const url = new URL(connectionString);
+    if (!["postgres:", "postgresql:"].includes(url.protocol)) {
+      return connectionString;
+    }
+
+    if (url.searchParams.get("sslmode") !== "require" || url.searchParams.has("uselibpqcompat")) {
+      return connectionString;
+    }
+
+    url.searchParams.set("uselibpqcompat", "true");
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
+function readOptionalPgConnectionEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
+  const value = readOptionalEnv(env, key);
+  return value ? normalizePgConnectionString(value) : undefined;
+}
+
 function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
   const authKeys = [
     "AUTH_DATABASE_URL",
@@ -129,7 +152,7 @@ function loadAuthConfig(env: NodeJS.ProcessEnv): ApiAuthConfig | undefined {
   }
 
   return {
-    databaseUrl: values["AUTH_DATABASE_URL"]!,
+    databaseUrl: normalizePgConnectionString(values["AUTH_DATABASE_URL"]!),
     workosJwksUrl: values["WORKOS_JWKS_URL"]!,
     workosIssuer: values["WORKOS_ISSUER"]!,
     workosAudience: values["WORKOS_AUDIENCE"]!,
@@ -285,7 +308,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     host: "0.0.0.0",
     port: 8003,
   });
-  const targetDatabaseUrl = readOptionalEnv(env, "TARGET_DATABASE_URL");
+  const targetDatabaseUrl = readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL");
   const publicHotelProfileSource = readSourceEnv(
     env,
     "PUBLIC_HOTEL_PROFILE_SOURCE",
@@ -398,7 +421,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     askIntelligence: loadAskIntelligenceConfig(env),
     askIntelligenceEvidenceSource,
     targetDatabaseUrl,
-    bookingDatabaseUrl: readOptionalEnv(env, "BOOKING_DATABASE_URL"),
+    bookingDatabaseUrl: readOptionalPgConnectionEnv(env, "BOOKING_DATABASE_URL"),
     bookingReservationsSource: readSourceEnv(
       env,
       "BOOKING_RESERVATIONS_SOURCE",
@@ -409,7 +432,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     bookingDomainResolutionSource,
     publicBookabilitySource,
     bookingSettingsSource,
-    bookingReservationsReadDatabaseUrl: readOptionalEnv(
+    bookingReservationsReadDatabaseUrl: readOptionalPgConnectionEnv(
       env,
       "BOOKING_RESERVATIONS_READ_DATABASE_URL",
     ),

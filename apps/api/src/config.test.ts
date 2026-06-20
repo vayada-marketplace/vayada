@@ -23,6 +23,32 @@ describe("api config", () => {
     });
   });
 
+  it("adds libpq compatibility for Postgres SSL database URLs", () => {
+    const config = loadConfig({
+      AUTH_DATABASE_URL: "postgresql://user:pass@auth-db:5432/auth?sslmode=require",
+      WORKOS_JWKS_URL: "https://api.workos.com/sso/jwks/client",
+      WORKOS_ISSUER: "https://api.workos.com",
+      WORKOS_AUDIENCE: "client",
+      TARGET_DATABASE_URL: "postgresql://user:pass@target-db:5432/target?sslmode=require",
+      BOOKING_DATABASE_URL: "postgresql://user:pass@booking-db:5432/booking?sslmode=require",
+      BOOKING_RESERVATIONS_READ_DATABASE_URL:
+        "postgresql://user:pass@reservations-db:5432/reservations?sslmode=require",
+    });
+
+    expect(config.auth?.databaseUrl).toBe(
+      "postgresql://user:pass@auth-db:5432/auth?sslmode=require&uselibpqcompat=true",
+    );
+    expect(config.targetDatabaseUrl).toBe(
+      "postgresql://user:pass@target-db:5432/target?sslmode=require&uselibpqcompat=true",
+    );
+    expect(config.bookingDatabaseUrl).toBe(
+      "postgresql://user:pass@booking-db:5432/booking?sslmode=require&uselibpqcompat=true",
+    );
+    expect(config.bookingReservationsReadDatabaseUrl).toBe(
+      "postgresql://user:pass@reservations-db:5432/reservations?sslmode=require&uselibpqcompat=true",
+    );
+  });
+
   it("rejects partial auth config", () => {
     expect(() =>
       loadConfig({
