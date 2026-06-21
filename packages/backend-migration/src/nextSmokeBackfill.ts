@@ -55,6 +55,15 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
       workosOrgId: config.affiliateWorkosOrgId,
       workosMembershipId: config.affiliateWorkosMembershipId,
     });
+    const blockers = nextSmokeApplyBlockers({
+      mode: config.mode,
+      pmsConnectionString: config.pmsConnectionString,
+      hotelOrg,
+      affiliateOrg,
+    });
+    if (config.mode === "apply" && blockers.length > 0) {
+      throw new Error(`Cannot apply next smoke backfill: ${blockers.join(", ")}.`);
+    }
 
     await upsertEntitlement(client, hotelOrg.organizationId, {
       product: "booking",
@@ -93,8 +102,6 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
       source: "VAY-877",
     });
 
-    await client.query(config.mode === "apply" ? "COMMIT" : "ROLLBACK");
-
     const pmsModules = config.pmsConnectionString
       ? await upsertPmsModules({
           mode: config.mode,
@@ -104,14 +111,8 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
           max: config.max,
         })
       : undefined;
-    const blockers = [
-      ...(!hotelOrg.workosOrgId ? ["hotel_group_missing_workos_org_id"] : []),
-      ...(hotelOrg.activeMemberships.length === 0 ? ["hotel_group_missing_active_membership"] : []),
-      ...(!affiliateOrg.workosOrgId ? ["affiliate_partner_missing_workos_org_id"] : []),
-      ...(!affiliateOrg.workosMembershipId
-        ? ["affiliate_partner_missing_workos_membership_id"]
-        : []),
-    ];
+
+    await client.query(config.mode === "apply" ? "COMMIT" : "ROLLBACK");
 
     return {
       kind: "next_smoke_backfill",
@@ -143,6 +144,27 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
     client.release();
     await pool.end();
   }
+}
+
+export function nextSmokeApplyBlockers(input: {
+  mode: NextSmokeBackfillMode;
+  pmsConnectionString?: string;
+  hotelOrg: { workosOrgId: string | null; activeMemberships: unknown[] };
+  affiliateOrg: { workosOrgId: string | null; workosMembershipId: string | null };
+}): string[] {
+  return [
+    ...(input.mode === "apply" && !input.pmsConnectionString
+      ? ["pms_database_url_required_for_feature_hub_modules"]
+      : []),
+    ...(!input.hotelOrg.workosOrgId ? ["hotel_group_missing_workos_org_id"] : []),
+    ...(input.hotelOrg.activeMemberships.length === 0
+      ? ["hotel_group_missing_active_membership"]
+      : []),
+    ...(!input.affiliateOrg.workosOrgId ? ["affiliate_partner_missing_workos_org_id"] : []),
+    ...(!input.affiliateOrg.workosMembershipId
+      ? ["affiliate_partner_missing_workos_membership_id"]
+      : []),
+  ];
 }
 
 export function affiliateResourceIdForEmail(email: string): string {
@@ -225,7 +247,37 @@ async function loadMarketplaceProfile(
   input: { organizationId: string; bookingHotelId: string; explicitResourceId?: string },
 ) {
   if (input.explicitResourceId) {
-    return { resourceId: input.explicitResourceId, sourceHotelProfileId: null };
+    const { rows } = await client.query<{
+      resource_id: string;
+      source_hotel_profile_id: string | null;
+    }>(
+      `WITH booking_property AS (
+         SELECT property_id
+         FROM hotel_catalog.property_source_links
+         WHERE source_system = 'booking'
+           AND source_table = 'booking_hotels'
+           AND source_id = $3
+           AND status = 'active'
+         LIMIT 1
+       )
+       SELECT profile.property_id::text AS resource_id, profile.source_hotel_profile_id
+       FROM marketplace.marketplace_hotel_profiles profile
+       WHERE profile.organization_id = $1::uuid
+         AND profile.property_id::text = $2
+         AND (profile.property_id IN (SELECT property_id FROM booking_property)
+              OR profile.property_id::text = $3)
+       LIMIT 1`,
+      [input.organizationId, input.explicitResourceId, input.bookingHotelId],
+    );
+    if (!rows[0]) {
+      throw new Error(
+        "Explicit marketplace hotel profile resource does not match the selected hotel organization/property.",
+      );
+    }
+    return {
+      resourceId: rows[0].resource_id,
+      sourceHotelProfileId: rows[0].source_hotel_profile_id,
+    };
   }
   const { rows } = await client.query<{
     resource_id: string;

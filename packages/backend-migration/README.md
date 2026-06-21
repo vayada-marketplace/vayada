@@ -167,11 +167,13 @@ TARGET_DATABASE_URL=<target database url> \
     --confirm next-smoke-backfill:vay-874-vay-877
 ```
 
-`PMS_DATABASE_URL` is optional. When present, the command activates the
-`affiliates` Feature Hub module for the smoke PMS hotel ID, defaulting to the
-same UUID as the booking hotel. Use `--pms-hotel-id <uuid>` if the PMS hotel ID
-differs, and repeat `--module-id <id>` to activate a different reviewed module
-set.
+`PMS_DATABASE_URL` is required in apply mode because the VAY-874 smoke criteria
+include the Feature Hub module activation. The command activates the
+`affiliates` module for the smoke PMS hotel ID, defaulting to the same UUID as
+the booking hotel. Use `--pms-hotel-id <uuid>` if the PMS hotel ID differs, and
+repeat `--module-id <id>` to activate a different reviewed module set. Dry runs
+may omit `PMS_DATABASE_URL`; apply will fail before committing target identity
+changes if PMS or WorkOS readiness blockers remain.
 
 If the affiliate org is newly created locally, complete provider state with the
 existing WorkOS command, then rerun the smoke backfill dry-run or audit to record

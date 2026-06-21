@@ -7,6 +7,7 @@ import {
   NEXT_SMOKE_AFFILIATE_RESOURCE_ID,
   NEXT_SMOKE_BOOKING_HOTEL_ID,
   NEXT_SMOKE_CONFIRM,
+  nextSmokeApplyBlockers,
   normalizeModuleIds,
 } from "./nextSmokeBackfill.js";
 
@@ -29,5 +30,34 @@ describe("next smoke backfill helpers", () => {
       "stripe",
     ]);
     expect(() => normalizeModuleIds(["bad module"])).toThrow(/Invalid module id/);
+  });
+
+  it("requires PMS and WorkOS readiness before apply can commit", () => {
+    expect(
+      nextSmokeApplyBlockers({
+        mode: "apply",
+        pmsConnectionString: undefined,
+        hotelOrg: { workosOrgId: "org_hotel", activeMemberships: [{ userId: "user_1" }] },
+        affiliateOrg: { workosOrgId: null, workosMembershipId: null },
+      }),
+    ).toEqual([
+      "pms_database_url_required_for_feature_hub_modules",
+      "affiliate_partner_missing_workos_org_id",
+      "affiliate_partner_missing_workos_membership_id",
+    ]);
+  });
+
+  it("does not require PMS module activation during dry runs", () => {
+    expect(
+      nextSmokeApplyBlockers({
+        mode: "dry-run",
+        pmsConnectionString: undefined,
+        hotelOrg: { workosOrgId: "org_hotel", activeMemberships: [{ userId: "user_1" }] },
+        affiliateOrg: {
+          workosOrgId: "org_affiliate",
+          workosMembershipId: "membership_affiliate",
+        },
+      }),
+    ).toEqual([]);
   });
 });
