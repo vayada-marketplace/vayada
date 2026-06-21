@@ -3,6 +3,7 @@ import {
   BOOKING_ADMIN_BENEFITS_SETTINGS_PATH,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
+import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
@@ -15,6 +16,11 @@ test.describe("booking-admin benefits settings cutover", () => {
     );
 
     const assertHealthy = watchPageHealth(page, testInfo);
+    const assertNoLegacyCalls = watchNoLegacyCalls(
+      page,
+      testInfo,
+      "booking-admin-benefits-settings",
+    );
 
     await mockBookingAdminBookingFlow(page);
 
@@ -34,13 +40,6 @@ test.describe("booking-admin benefits settings cutover", () => {
       await route.fulfill({ json: { benefits: typedBenefits } });
     });
 
-    const legacyRequests: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname === "/admin/benefits") {
-        legacyRequests.push(`${request.method()} ${request.url()}`);
-      }
-    });
-
     await page.goto("/booking-flow");
     await page.getByRole("button", { name: /^Benefits$/ }).click();
 
@@ -54,8 +53,8 @@ test.describe("booking-admin benefits settings cutover", () => {
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_BENEFITS_SETTINGS_PATH);
     expect(typedWrites).toEqual([{ benefits: typedBenefits }]);
-    expect(legacyRequests).toEqual([]);
 
+    await assertNoLegacyCalls();
     await assertHealthy();
   });
 });
