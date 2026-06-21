@@ -1870,9 +1870,22 @@ export async function registerPmsLegacyAdminRoutes(
     }
 
     const context = requireAuthContext(request);
-    return context.linkedResources
-      .filter(isPmsPropertyResource)
-      .map((resource) => toLegacyPmsHotelSummary(resource.resourceId));
+    const hotels: PmsLegacyHotelSummary[] = [];
+    let firstPolicyError: PmsOperationsError | null = null;
+
+    for (const resource of context.linkedResources.filter(isPmsPropertyResource)) {
+      const policy = checkPmsPropertyReadPolicy(request, resource.resourceId);
+      if (policy.ok) {
+        hotels.push(toLegacyPmsHotelSummary(resource.resourceId));
+      } else {
+        firstPolicyError ??= policy.error;
+      }
+    }
+
+    if (hotels.length === 0) {
+      return sendPmsOperationsError(reply, firstPolicyError ?? missingPmsPropertyAccessError());
+    }
+    return hotels;
   });
 
   app.get<{ Querystring: PmsReservationListQuery }>("/bookings", async (request, reply) => {
@@ -2120,6 +2133,53 @@ function isBookingHotelResource(resource: LinkedResource): boolean {
     resource.product === "booking" &&
     resource.resourceType === "booking_hotel"
   );
+}
+
+type PmsPropertyReadPolicyCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      error: PmsOperationsError;
+    };
+
+function checkPmsPropertyReadPolicy(
+  request: FastifyRequest,
+  propertyId: string,
+): PmsPropertyReadPolicyCheck {
+  try {
+    enforceRoutePolicy(request, {
+      permission: "pms.operations.read",
+      entitlement: {
+        product: "pms",
+        key: "property-management",
+        resource: {
+          product: "pms",
+          resourceType: "pms_property",
+          resourceId: propertyId,
+        },
+      },
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: propertyId,
+        allowedRelationships: ["owner", "operator", "front_desk"],
+      },
+    });
+    return { ok: true };
+  } catch (error) {
+    const contractError = toPmsOperationsAccessError(error, request, propertyId);
+    if (!contractError) throw error;
+    return { ok: false, error: contractError };
+  }
+}
+
+function missingPmsPropertyAccessError(): PmsOperationsError {
+  return {
+    statusCode: 403,
+    code: "missing_resource_access",
+    category: "authorization",
+    message: toPmsOperationsAuthorizationMessage("missing_resource_access"),
+  };
 }
 
 function toLegacyPmsHotelSummary(propertyId: string): PmsLegacyHotelSummary {

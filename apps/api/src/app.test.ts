@@ -6995,6 +6995,36 @@ describe("vayada-api", () => {
     });
   });
 
+  it("requires PMS read permission before listing legacy PMS hotels", async () => {
+    app = buildAuthenticatedApp({
+      permissions: [],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/admin/hotels",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    expect(response.json()).toMatchObject({
+      code: "missing_permission",
+      category: "authorization",
+    });
+  });
+
   it("returns a structured PMS setup-status error when the read model is unavailable", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.read"],
