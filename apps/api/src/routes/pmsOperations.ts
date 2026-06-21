@@ -663,6 +663,14 @@ type PmsLegacyCalendarQuery = {
   end?: string;
 };
 
+type PmsLegacyHotelSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  location: string;
+  country: string;
+};
+
 type PmsRoomBlocksQuery = {
   from?: string;
   to?: string;
@@ -1770,6 +1778,7 @@ export async function registerPmsLegacyAdminRoutes(
 ): Promise<void> {
   for (const path of [
     "/setup-status",
+    "/hotels",
     "/messaging/unread-count",
     "/bookings",
     "/hotel",
@@ -1848,6 +1857,22 @@ export async function registerPmsLegacyAdminRoutes(
     if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
 
     return { unreadCount: 0 };
+  });
+
+  app.get("/hotels", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const context = requireAuthContext(request);
+    return context.linkedResources
+      .filter(isPmsPropertyResource)
+      .map((resource) => toLegacyPmsHotelSummary(resource.resourceId));
   });
 
   app.get<{ Querystring: PmsReservationListQuery }>("/bookings", async (request, reply) => {
@@ -1972,14 +1997,7 @@ export async function registerPmsLegacyAdminRoutes(
         options.repository.listRoomTypesByPropertyId(propertyId),
         options.repository.listRoomsByPropertyId(propertyId),
         options.repository.listRoomBlocksByPropertyId(propertyId, range.value),
-        options.repository.listReservationsByPropertyId(propertyId, {
-          status: undefined,
-          arrivalFrom: undefined,
-          arrivalTo: range.value.to,
-          search: undefined,
-          limit: PMS_RESERVATION_LIST_MAX_LIMIT,
-          offset: 0,
-        }),
+        listLegacyCalendarReservations(options.repository, propertyId, range.value),
       ]);
       return toLegacyPmsCalendarData(
         roomTypes.items,
@@ -2089,11 +2107,48 @@ function getLegacyPmsPropertyId(request: FastifyRequest): string | null {
 }
 
 function isPmsPropertyResource(resource: LinkedResource): boolean {
-  return resource.product === "pms" && resource.resourceType === "pms_property";
+  return (
+    resource.status === "active" &&
+    resource.product === "pms" &&
+    resource.resourceType === "pms_property"
+  );
 }
 
 function isBookingHotelResource(resource: LinkedResource): boolean {
-  return resource.product === "booking" && resource.resourceType === "booking_hotel";
+  return (
+    resource.status === "active" &&
+    resource.product === "booking" &&
+    resource.resourceType === "booking_hotel"
+  );
+}
+
+function toLegacyPmsHotelSummary(propertyId: string): PmsLegacyHotelSummary {
+  return {
+    id: propertyId,
+    name: propertyId,
+    slug: propertyId,
+    location: "",
+    country: "",
+  };
+}
+
+async function listLegacyCalendarReservations(
+  repository: PmsOperationsReadRepository,
+  propertyId: string,
+  range: { from: string; to: string },
+) {
+  if (repository.listReservationsOverlappingStayRangeByPropertyId) {
+    return repository.listReservationsOverlappingStayRangeByPropertyId(propertyId, range);
+  }
+
+  return repository.listReservationsByPropertyId(propertyId, {
+    status: undefined,
+    arrivalFrom: range.from,
+    arrivalTo: range.to,
+    search: undefined,
+    limit: PMS_RESERVATION_LIST_MAX_LIMIT,
+    offset: 0,
+  });
 }
 
 function getRequiredLegacyPmsPropertyId(

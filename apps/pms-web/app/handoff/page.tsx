@@ -49,8 +49,6 @@ export default function HandoffPage() {
       // Precedence: explicit safeRedirect > setup (if incomplete)
       // > choose-property (if 2+ hotels) > dashboard (default).
       const pmsApiUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "https://pms-api.vayada.com";
-      const bookingApiUrl =
-        process.env.NEXT_PUBLIC_AUTH_API_URL || "https://booking-api.vayada.com";
       const setupStatusHeaders: Record<string, string> = {
         Authorization: `Bearer ${token}`,
       };
@@ -81,10 +79,10 @@ export default function HandoffPage() {
             return;
           }
 
-          // Fetch the user's hotel list from the booking-engine API
-          // (the source of truth after the multi-hotel ids unification).
+          // Fetch PMS property IDs so subsequent X-Hotel-Id headers authorize
+          // against pms_property resources, not booking_hotel resources.
           try {
-            const listRes = await fetch(`${bookingApiUrl}/admin/hotels`, {
+            const listRes = await fetch(`${pmsApiUrl}/admin/hotels`, {
               headers: { Authorization: `Bearer ${token}` },
             });
             const hotels = listRes.ok ? await listRes.json() : [];

@@ -65,7 +65,7 @@ export interface CheckoutInspectionTemplate {
 export const pmsSettingsService = {
   getSetupStatus: () => pmsClient.get<PmsSetupStatus>("/admin/setup-status"),
 
-  listHotels: () => apiClient.get<HotelSummary[]>("/admin/hotels"),
+  listHotels: () => pmsClient.get<HotelSummary[]>("/admin/hotels"),
 
   getHotelDetails: () => pmsClient.get<HotelDetails>("/admin/hotel"),
 };

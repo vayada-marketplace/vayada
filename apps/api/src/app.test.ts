@@ -6732,14 +6732,18 @@ describe("vayada-api", () => {
   });
 
   it("serves PMS Web legacy helper reads from scoped target PMS data and empty states", async () => {
-    const reservationFilters: Array<Record<string, unknown>> = [];
+    const reservationRanges: Array<{ from: string; to: string }> = [];
     const legacyRepository: PmsOperationsReadRepository = {
       ...pmsOperationsRepository,
       async listReservationsByPropertyId(propertyId, filters) {
-        reservationFilters.push(filters);
         expect(propertyId).toBe(pmsPropertyId);
         expect(filters.limit).toBe(500);
         expect(filters.offset).toBe(0);
+        return { items: pmsReservations, total: pmsReservations.length };
+      },
+      async listReservationsOverlappingStayRangeByPropertyId(propertyId, range) {
+        reservationRanges.push(range);
+        expect(propertyId).toBe(pmsPropertyId);
         return { items: pmsReservations, total: pmsReservations.length };
       },
       async listRoomBlocksByPropertyId(propertyId, range) {
@@ -6786,6 +6790,7 @@ describe("vayada-api", () => {
       headers,
     });
     const hotel = await app.inject({ method: "GET", url: "/admin/hotel", headers });
+    const hotels = await app.inject({ method: "GET", url: "/admin/hotels", headers });
     const hotelFromBookingHeader = await app.inject({
       method: "GET",
       url: "/admin/hotel",
@@ -6847,6 +6852,7 @@ describe("vayada-api", () => {
       unread,
       bookings,
       hotel,
+      hotels,
       hotelFromBookingHeader,
       paymentSettings,
       calendar,
@@ -6883,6 +6889,15 @@ describe("vayada-api", () => {
       instant_book: false,
       sameDayBookingsEnabled: true,
     });
+    expect(hotels.json()).toEqual([
+      {
+        id: pmsPropertyId,
+        name: pmsPropertyId,
+        slug: pmsPropertyId,
+        location: "",
+        country: "",
+      },
+    ]);
     expect(hotelFromBookingHeader.json()).toMatchObject({
       id: pmsPropertyId,
     });
@@ -6919,14 +6934,7 @@ describe("vayada-api", () => {
         expect.objectContaining({ id: pmsReservations[0].guestBookingId }),
       ]),
     );
-    expect(reservationFilters).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          arrivalFrom: undefined,
-          arrivalTo: "2026-08-18",
-        }),
-      ]),
-    );
+    expect(reservationRanges).toEqual([{ from: "2026-08-15", to: "2026-08-18" }]);
     expect(calendarBody.blocks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: pmsRoomBlocks[0].blockId, endDate: "2026-08-16" }),
@@ -7181,6 +7189,43 @@ describe("vayada-api", () => {
 
     expect(result).toMatchObject({ items: [], total: 0 });
     expect(queries).toHaveLength(2);
+  });
+
+  it("builds PMS calendar reservation overlap queries without arrival pagination", async () => {
+    const pool: PmsOperationsReadPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: unknown[],
+      ): Promise<QueryResult<T>> {
+        expect(values).toEqual([pmsPropertyId, "2026-08-18", "2026-08-15"]);
+        expect(text).toContain("booking.check_in < $2::date");
+        expect(text).toContain("booking.check_out > $3::date");
+        expect(text).not.toMatch(/\bLIMIT\s+\$/);
+        expect(text).not.toMatch(/\bOFFSET\s+\$/);
+        return {
+          command: "SELECT",
+          rowCount: 0,
+          oid: 0,
+          fields: [],
+          rows: [] as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetPmsOperationsReadRepository({
+      connectionString: "postgresql://pms-operations-read",
+      pool,
+    });
+
+    const result = await repository.listReservationsOverlappingStayRangeByPropertyId?.(
+      pmsPropertyId,
+      {
+        from: "2026-08-15",
+        to: "2026-08-18",
+      },
+    );
+
+    expect(result).toMatchObject({ items: [], total: 0 });
   });
 
   it("rejects PMS calendar ranges over the documented maximum", async () => {
