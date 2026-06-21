@@ -23,7 +23,7 @@ import type {
   PmsRoomType,
   PmsSourceFreshness,
 } from "../domains/pmsOperationsReadModel.js";
-import { requireAuthContext } from "@vayada/backend-auth";
+import { requireAuthContext, type LinkedResource } from "@vayada/backend-auth";
 import { enforceRoutePolicy } from "./policy.js";
 
 export const PMS_OPERATIONS_CONTRACT_VERSION = "pms-operations.v1" as const;
@@ -1974,7 +1974,7 @@ export async function registerPmsLegacyAdminRoutes(
         options.repository.listRoomBlocksByPropertyId(propertyId, range.value),
         options.repository.listReservationsByPropertyId(propertyId, {
           status: undefined,
-          arrivalFrom: range.value.from,
+          arrivalFrom: undefined,
           arrivalTo: range.value.to,
           search: undefined,
           limit: PMS_RESERVATION_LIST_MAX_LIMIT,
@@ -1985,7 +1985,9 @@ export async function registerPmsLegacyAdminRoutes(
         roomTypes.items,
         rooms.items,
         blocks.items,
-        reservations.items,
+        reservations.items.filter((reservation) =>
+          isLegacyCalendarReservationInRange(reservation, range.value),
+        ),
       );
     } catch {
       return sendPmsOperationsError(
@@ -2065,17 +2067,33 @@ export async function registerPmsLegacyAdminRoutes(
 }
 
 function getLegacyPmsPropertyId(request: FastifyRequest): string | null {
-  const header = request.headers["x-hotel-id"];
-  if (typeof header === "string" && header.length > 0) return header;
   const context = requireAuthContext(request);
-  return (
-    context.linkedResources.find(
-      (resource) =>
-        resource.status === "active" &&
-        resource.product === "pms" &&
-        resource.resourceType === "pms_property",
-    )?.resourceId ?? null
+  const activeResources = context.linkedResources.filter(
+    (resource) => resource.status === "active",
   );
+  const activePmsPropertyIds = activeResources
+    .filter(isPmsPropertyResource)
+    .map((resource) => resource.resourceId);
+
+  const header = request.headers["x-hotel-id"];
+  if (typeof header === "string" && header.length > 0) {
+    const selectedResource = activeResources.find((resource) => resource.resourceId === header);
+    if (selectedResource && isPmsPropertyResource(selectedResource)) return header;
+    if (selectedResource && isBookingHotelResource(selectedResource)) {
+      return activePmsPropertyIds.length === 1 ? activePmsPropertyIds[0] : header;
+    }
+    return header;
+  }
+
+  return activePmsPropertyIds[0] ?? null;
+}
+
+function isPmsPropertyResource(resource: LinkedResource): boolean {
+  return resource.product === "pms" && resource.resourceType === "pms_property";
+}
+
+function isBookingHotelResource(resource: LinkedResource): boolean {
+  return resource.product === "booking" && resource.resourceType === "booking_hotel";
 }
 
 function getRequiredLegacyPmsPropertyId(
@@ -2217,6 +2235,9 @@ function legacyCalendarBookingsForReservation(
   reservation: PmsOperationalReservation,
   roomTypesById: Map<string, PmsRoomType>,
 ) {
+  const status = toLegacyPmsCalendarStatus(reservation.status);
+  if (!status) return [];
+
   const assignments: Array<PmsOperationalAssignment | null> =
     reservation.assignments.length > 0 ? reservation.assignments : [null];
   const [guestFirstName, guestLastName] = splitLegacyGuestName(
@@ -2233,7 +2254,7 @@ function legacyCalendarBookingsForReservation(
       guestLastName,
       checkIn: reservation.stay.checkIn,
       checkOut: reservation.stay.checkOut,
-      status: toLegacyPmsCalendarStatus(reservation.status),
+      status,
       roomId: assignment?.roomId ?? null,
       roomNumber: assignment?.roomNumber ?? null,
       channel: assignment?.channel ?? legacyReservationSource(reservation.source),
@@ -2242,6 +2263,13 @@ function legacyCalendarBookingsForReservation(
       roomPosition: assignment?.position ?? index,
     };
   });
+}
+
+function isLegacyCalendarReservationInRange(
+  reservation: PmsOperationalReservation,
+  range: { from: string; to: string },
+): boolean {
+  return reservation.stay.checkIn < range.to && reservation.stay.checkOut > range.from;
 }
 
 function toLegacyPmsHotel(propertyId: string, body?: unknown) {
@@ -2375,7 +2403,7 @@ function toLegacyPmsBookingStatus(status: string): PmsLegacyBookingStatus {
   }
 }
 
-function toLegacyPmsCalendarStatus(status: string): PmsLegacyCalendarBookingStatus {
+function toLegacyPmsCalendarStatus(status: string): PmsLegacyCalendarBookingStatus | null {
   switch (status) {
     case "pending":
     case "confirmed":
@@ -2383,7 +2411,7 @@ function toLegacyPmsCalendarStatus(status: string): PmsLegacyCalendarBookingStat
     case "in_house":
       return status;
     default:
-      return "confirmed";
+      return null;
   }
 }
 

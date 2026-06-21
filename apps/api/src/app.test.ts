@@ -6732,9 +6732,11 @@ describe("vayada-api", () => {
   });
 
   it("serves PMS Web legacy helper reads from scoped target PMS data and empty states", async () => {
+    const reservationFilters: Array<Record<string, unknown>> = [];
     const legacyRepository: PmsOperationsReadRepository = {
       ...pmsOperationsRepository,
       async listReservationsByPropertyId(propertyId, filters) {
+        reservationFilters.push(filters);
         expect(propertyId).toBe(pmsPropertyId);
         expect(filters.limit).toBe(500);
         expect(filters.offset).toBe(0);
@@ -6784,6 +6786,11 @@ describe("vayada-api", () => {
       headers,
     });
     const hotel = await app.inject({ method: "GET", url: "/admin/hotel", headers });
+    const hotelFromBookingHeader = await app.inject({
+      method: "GET",
+      url: "/admin/hotel",
+      headers: { ...headers, "x-hotel-id": "booking_hotel_alpenrose" },
+    });
     const paymentSettings = await app.inject({
       method: "GET",
       url: "/admin/payment-settings",
@@ -6840,6 +6847,7 @@ describe("vayada-api", () => {
       unread,
       bookings,
       hotel,
+      hotelFromBookingHeader,
       paymentSettings,
       calendar,
       channexStatus,
@@ -6875,6 +6883,9 @@ describe("vayada-api", () => {
       instant_book: false,
       sameDayBookingsEnabled: true,
     });
+    expect(hotelFromBookingHeader.json()).toMatchObject({
+      id: pmsPropertyId,
+    });
     expect(paymentSettings.json()).toMatchObject({
       paymentSettings: {
         defaultCurrency: "EUR",
@@ -6896,7 +6907,25 @@ describe("vayada-api", () => {
       ]),
     );
     expect(calendarBody.bookings).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: pmsReservations[0].guestBookingId })]),
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: pmsReservations[1].guestBookingId,
+          status: "confirmed",
+        }),
+      ]),
+    );
+    expect(calendarBody.bookings).toEqual(
+      expect.not.arrayContaining([
+        expect.objectContaining({ id: pmsReservations[0].guestBookingId }),
+      ]),
+    );
+    expect(reservationFilters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          arrivalFrom: undefined,
+          arrivalTo: "2026-08-18",
+        }),
+      ]),
     );
     expect(calendarBody.blocks).toEqual(
       expect.arrayContaining([
