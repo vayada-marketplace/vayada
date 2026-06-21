@@ -167,64 +167,87 @@ export async function registerBookingAdminCompatRoutes(
     async (request) => toModuleActivation(request.params.moduleId, request.body?.isActive === true),
   );
 
-  app.get("/settings/custom-domain/status", async () => ({
-    configured: false,
-    verification_errors: [],
-  }));
+  app.get("/settings/custom-domain/status", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return {
+      configured: false,
+      verification_errors: [],
+    };
+  });
 
-  app.post("/settings/custom-domain", async (_request, reply) =>
-    sendCompatNotImplemented(reply, "Custom domain writes are not available on next-api yet."),
-  );
+  app.post("/settings/custom-domain", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
+      reply,
+      "Custom domain writes are not available on next-api yet.",
+    );
+  });
 
-  app.delete("/settings/custom-domain", async (_request, reply) =>
-    sendCompatNotImplemented(reply, "Custom domain writes are not available on next-api yet."),
-  );
+  app.delete("/settings/custom-domain", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
+      reply,
+      "Custom domain writes are not available on next-api yet.",
+    );
+  });
 
-  app.get("/addons", async () => []);
+  app.get("/addons", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return [];
+  });
 
-  app.post("/addons", async (_request, reply) =>
-    sendCompatNotImplemented(
+  app.post("/addons", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
       reply,
       "Booking add-on item management is not available on next-api yet.",
-    ),
-  );
+    );
+  });
 
-  app.patch("/addons/:addonId", async (_request, reply) =>
-    sendCompatNotImplemented(
+  app.patch("/addons/:addonId", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
       reply,
       "Booking add-on item management is not available on next-api yet.",
-    ),
-  );
+    );
+  });
 
-  app.delete("/addons/:addonId", async (_request, reply) =>
-    sendCompatNotImplemented(
+  app.delete("/addons/:addonId", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
       reply,
       "Booking add-on item management is not available on next-api yet.",
-    ),
-  );
+    );
+  });
 
-  app.get("/promo-codes", async () => []);
+  app.get("/promo-codes", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return [];
+  });
 
-  app.post("/promo-codes", async (_request, reply) =>
-    sendCompatNotImplemented(
+  app.post("/promo-codes", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
       reply,
       "Booking promo-code management is not available on next-api yet.",
-    ),
-  );
+    );
+  });
 
-  app.patch("/promo-codes/:promoCodeId", async (_request, reply) =>
-    sendCompatNotImplemented(
+  app.patch("/promo-codes/:promoCodeId", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
       reply,
       "Booking promo-code management is not available on next-api yet.",
-    ),
-  );
+    );
+  });
 
-  app.delete("/promo-codes/:promoCodeId", async (_request, reply) =>
-    sendCompatNotImplemented(
+  app.delete("/promo-codes/:promoCodeId", async (request, reply) => {
+    if (!requireBookingAdminCompatHotelAccess(request, reply)) return reply;
+    return sendCompatNotImplemented(
       reply,
       "Booking promo-code management is not available on next-api yet.",
-    ),
-  );
+    );
+  });
 
   app.post("/hotels", async (_request, reply) =>
     reply.code(501).send({
@@ -235,6 +258,16 @@ export async function registerBookingAdminCompatRoutes(
 
 function sendCompatNotImplemented(reply: FastifyReply, detail: string) {
   return reply.code(501).send({ detail });
+}
+
+function requireBookingAdminCompatHotelAccess(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): HotelSummary[] | null {
+  const hotels = getLinkedBookingHotels(request);
+  if (hotels.length > 0) return hotels;
+  reply.code(403).send({ detail: "Missing booking hotel access." });
+  return null;
 }
 
 function getLinkedBookingHotels(request: FastifyRequest): HotelSummary[] {

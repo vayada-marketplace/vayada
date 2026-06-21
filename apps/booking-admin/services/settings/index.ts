@@ -125,6 +125,14 @@ function hasRoomFilterDesignUpdate(data: DesignSettingsUpdate): boolean {
   );
 }
 
+function unsupportedDesignUpdateKeys(data: DesignSettingsUpdate): string[] {
+  return (Object.keys(data) as (keyof DesignSettingsUpdate)[]).filter(
+    (key) =>
+      !["booking_filters", "custom_filters", "filter_rooms"].includes(key) &&
+      data[key] !== undefined,
+  );
+}
+
 async function resolveBookingHotelId(): Promise<string> {
   const selectedHotelId =
     typeof window !== "undefined" ? window.localStorage.getItem("selectedHotelId") : null;
@@ -288,6 +296,13 @@ export const settingsService = {
     ),
 
   updateDesignSettings: async (data: DesignSettingsUpdate): Promise<DesignSettings> => {
+    const unsupportedKeys = unsupportedDesignUpdateKeys(data);
+    if (unsupportedKeys.length > 0) {
+      throw new Error(
+        `Design media and color settings are not available on next-api yet: ${unsupportedKeys.join(", ")}.`,
+      );
+    }
+
     if (!hasRoomFilterDesignUpdate(data)) {
       throw new Error("Design media and color settings are not available on next-api yet.");
     }
