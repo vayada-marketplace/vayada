@@ -249,11 +249,12 @@ export async function registerBookingAdminCompatRoutes(
     );
   });
 
-  app.post("/hotels", async (_request, reply) =>
-    reply.code(501).send({
+  app.post("/hotels", async (request, reply) => {
+    requireAuthContext(request);
+    return reply.code(501).send({
       detail: "Booking setup creation is not available on next-api yet.",
-    }),
-  );
+    });
+  });
 }
 
 function sendCompatNotImplemented(reply: FastifyReply, detail: string) {

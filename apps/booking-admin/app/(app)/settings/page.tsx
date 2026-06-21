@@ -303,24 +303,26 @@ export default function SettingsPage() {
     }
   };
 
-  const savePaymentProviderSettings = async () => {
+  const savePaymentProviderSettings = async (): Promise<boolean> => {
     setSavingPayment(true);
     setPaymentError("");
     setPaymentSuccess("");
-    if (paymentProvider === "xendit") {
-      if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-        setPaymentError(t("settings.billing.errorAccountNumberFormat"));
-        setSavingPayment(false);
-        return;
+    try {
+      if (paymentProvider === "xendit") {
+        if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
+          setPaymentError(t("settings.billing.errorAccountNumberFormat"));
+          return false;
+        }
+        if (!xenditAccountHolderName.trim()) {
+          setPaymentError(t("settings.billing.errorAccountHolderRequired"));
+          return false;
+        }
       }
-      if (!xenditAccountHolderName.trim()) {
-        setPaymentError(t("settings.billing.errorAccountHolderRequired"));
-        setSavingPayment(false);
-        return;
-      }
+      setPaymentError("Payment settings writes are not available on next-api yet.");
+      return false;
+    } finally {
+      setSavingPayment(false);
     }
-    setPaymentError("Payment settings writes are not available on next-api yet.");
-    setSavingPayment(false);
   };
 
   const handleSave = async () => {

@@ -2040,6 +2040,19 @@ describe("vayada-api", () => {
       "https://next-booking-admin.vayada.com",
     );
 
+    const unauthenticatedCreate = await app.inject({
+      method: "POST",
+      url: "/admin/hotels",
+      headers: {
+        origin: "https://next-booking-admin.vayada.com",
+      },
+      payload: { property_name: "Demo Lodge" },
+    });
+    expect(unauthenticatedCreate.statusCode).toBe(401);
+    expect(unauthenticatedCreate.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
+
     await app.close();
     app = buildAuthenticatedApp({
       linkedHotelId: null,
