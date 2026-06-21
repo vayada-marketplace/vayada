@@ -86,6 +86,12 @@ export async function registerBookingAdminCompatRoutes(
   app.options("/dashboard/page-views", async (_request, reply) => reply.code(204).send());
   app.options("/module-activations", async (_request, reply) => reply.code(204).send());
   app.options("/module-activations/:moduleId", async (_request, reply) => reply.code(204).send());
+  app.options("/settings/custom-domain/status", async (_request, reply) => reply.code(204).send());
+  app.options("/settings/custom-domain", async (_request, reply) => reply.code(204).send());
+  app.options("/addons", async (_request, reply) => reply.code(204).send());
+  app.options("/addons/:addonId", async (_request, reply) => reply.code(204).send());
+  app.options("/promo-codes", async (_request, reply) => reply.code(204).send());
+  app.options("/promo-codes/:promoCodeId", async (_request, reply) => reply.code(204).send());
 
   app.get("/settings/setup-status", async (request) => {
     const hotels = getLinkedBookingHotels(request);
@@ -161,11 +167,74 @@ export async function registerBookingAdminCompatRoutes(
     async (request) => toModuleActivation(request.params.moduleId, request.body?.isActive === true),
   );
 
+  app.get("/settings/custom-domain/status", async () => ({
+    configured: false,
+    verification_errors: [],
+  }));
+
+  app.post("/settings/custom-domain", async (_request, reply) =>
+    sendCompatNotImplemented(reply, "Custom domain writes are not available on next-api yet."),
+  );
+
+  app.delete("/settings/custom-domain", async (_request, reply) =>
+    sendCompatNotImplemented(reply, "Custom domain writes are not available on next-api yet."),
+  );
+
+  app.get("/addons", async () => []);
+
+  app.post("/addons", async (_request, reply) =>
+    sendCompatNotImplemented(
+      reply,
+      "Booking add-on item management is not available on next-api yet.",
+    ),
+  );
+
+  app.patch("/addons/:addonId", async (_request, reply) =>
+    sendCompatNotImplemented(
+      reply,
+      "Booking add-on item management is not available on next-api yet.",
+    ),
+  );
+
+  app.delete("/addons/:addonId", async (_request, reply) =>
+    sendCompatNotImplemented(
+      reply,
+      "Booking add-on item management is not available on next-api yet.",
+    ),
+  );
+
+  app.get("/promo-codes", async () => []);
+
+  app.post("/promo-codes", async (_request, reply) =>
+    sendCompatNotImplemented(
+      reply,
+      "Booking promo-code management is not available on next-api yet.",
+    ),
+  );
+
+  app.patch("/promo-codes/:promoCodeId", async (_request, reply) =>
+    sendCompatNotImplemented(
+      reply,
+      "Booking promo-code management is not available on next-api yet.",
+    ),
+  );
+
+  app.delete("/promo-codes/:promoCodeId", async (_request, reply) =>
+    sendCompatNotImplemented(
+      reply,
+      "Booking promo-code management is not available on next-api yet.",
+    ),
+  );
+
   app.post("/hotels", async (_request, reply) =>
     reply.code(501).send({
       detail: "Booking setup creation is not available on next-api yet.",
     }),
   );
+}
+
+function sendCompatNotImplemented(reply: FastifyReply, detail: string) {
+  return reply.code(501).send({ detail });
 }
 
 function getLinkedBookingHotels(request: FastifyRequest): HotelSummary[] {

@@ -319,19 +319,8 @@ export default function SettingsPage() {
         return;
       }
     }
-    try {
-      await pmsClient.patch("/admin/payment-settings", {
-        paymentProvider,
-        ...(paymentProvider === "xendit"
-          ? { xenditChannelCode, xenditAccountNumber, xenditAccountHolderName }
-          : {}),
-      });
-      setPaymentSuccess(t("settings.billing.paymentSettingsSaved"));
-    } catch (err: any) {
-      setPaymentError(err.message || t("settings.billing.errorPaymentSaveFailed"));
-    } finally {
-      setSavingPayment(false);
-    }
+    setPaymentError("Payment settings writes are not available on next-api yet.");
+    setSavingPayment(false);
   };
 
   const handleSave = async () => {
@@ -379,23 +368,6 @@ export default function SettingsPage() {
       setFeedback(null);
       const data = await settingsService.updatePropertySettings(normalizedSettings);
       setSettings(data);
-      // Sync slug, name, and payment methods to PMS
-      try {
-        await Promise.all([
-          pmsClient.patch("/admin/hotel", {
-            slug: data.slug,
-            name: data.property_name,
-            contact_email: data.reservation_email,
-          }),
-          pmsClient.patch("/admin/payment-settings", {
-            payAtPropertyEnabled: data.pay_at_property_enabled,
-            onlineCardPayment: data.online_card_payment,
-            bankTransfer: data.bank_transfer,
-          }),
-        ]);
-      } catch {
-        // Non-fatal: PMS sync may fail if not using vayada PMS
-      }
       setFeedback({ type: "success", message: t("settings.feedback.saveSuccess") });
     } catch {
       setFeedback({ type: "error", message: t("settings.feedback.saveError") });

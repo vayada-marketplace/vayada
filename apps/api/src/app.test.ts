@@ -1970,6 +1970,53 @@ describe("vayada-api", () => {
       activeModules: [],
       activations: [],
     });
+
+    const customDomainStatus = await injectJson(app, {
+      method: "GET",
+      url: "/admin/settings/custom-domain/status",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(customDomainStatus.statusCode).toBe(200);
+    expect(customDomainStatus.body).toMatchObject({ configured: false });
+
+    const addons = await injectJson<unknown[]>(app, {
+      method: "GET",
+      url: "/admin/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(addons.statusCode).toBe(200);
+    expect(addons.body).toEqual([]);
+
+    const promoCodes = await injectJson<unknown[]>(app, {
+      method: "GET",
+      url: "/admin/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(promoCodes.statusCode).toBe(200);
+    expect(promoCodes.body).toEqual([]);
+
+    const unsupportedAddonWrite = await injectJson(app, {
+      method: "POST",
+      url: "/admin/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+      payload: { name: "Breakfast" },
+    });
+    expect(unsupportedAddonWrite.statusCode).toBe(501);
+    expect(unsupportedAddonWrite.body).toMatchObject({
+      detail: "Booking add-on item management is not available on next-api yet.",
+    });
   });
 
   it("does not expose booking addon settings until a read model is configured", async () => {

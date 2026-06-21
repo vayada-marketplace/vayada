@@ -1,4 +1,9 @@
 import { apiClient } from "../api/client";
+import {
+  getBookingRoomFilterSettings,
+  updateBookingRoomFilterSettings,
+  type BookingRoomFilterSettings,
+} from "../api/bookingRoomFilterSettingsClient";
 
 export interface PropertySettings {
   // booking_hotels.id — unified across both backend databases after
@@ -103,6 +108,33 @@ const DEFAULT_DESIGN_SETTINGS: DesignSettings = {
   filter_rooms: {},
 };
 
+function toDesignSettings(settings: BookingRoomFilterSettings): DesignSettings {
+  return {
+    ...DEFAULT_DESIGN_SETTINGS,
+    booking_filters: settings.bookingFilters,
+    custom_filters: settings.customFilters,
+    filter_rooms: settings.filterRooms,
+  };
+}
+
+function hasRoomFilterDesignUpdate(data: DesignSettingsUpdate): boolean {
+  return (
+    data.booking_filters !== undefined ||
+    data.custom_filters !== undefined ||
+    data.filter_rooms !== undefined
+  );
+}
+
+async function resolveBookingHotelId(): Promise<string> {
+  const selectedHotelId =
+    typeof window !== "undefined" ? window.localStorage.getItem("selectedHotelId") : null;
+  if (selectedHotelId) return selectedHotelId;
+
+  const property = await apiClient.get<PropertySettings>("/admin/settings/property");
+  if (property.id) return property.id;
+  throw new Error("Booking hotel id is required.");
+}
+
 export interface SetupPrefillData {
   property_name?: string;
   reservation_email?: string;
@@ -203,7 +235,7 @@ export const customDomainService = {
 
   disconnect: () => apiClient.delete<{ removed: string }>("/admin/settings/custom-domain"),
 
-  getStatus: async (): Promise<CustomDomainStatus> => ({ configured: false }),
+  getStatus: () => apiClient.get<CustomDomainStatus>("/admin/settings/custom-domain/status"),
 };
 
 export interface HotelDeletionImpact {
@@ -250,16 +282,32 @@ export const settingsService = {
   verifyEmailChange: (token: string) =>
     apiClient.post<{ message: string; email: string }>("/auth/verify-email-change", { token }),
 
-  getDesignSettings: async (): Promise<DesignSettings> => ({ ...DEFAULT_DESIGN_SETTINGS }),
+  getDesignSettings: async (): Promise<DesignSettings> =>
+    toDesignSettings(
+      await getBookingRoomFilterSettings({ hotelId: await resolveBookingHotelId() }),
+    ),
 
-  updateDesignSettings: async (data: DesignSettingsUpdate): Promise<DesignSettings> => ({
-    ...DEFAULT_DESIGN_SETTINGS,
-    ...data,
-  }),
+  updateDesignSettings: async (data: DesignSettingsUpdate): Promise<DesignSettings> => {
+    if (!hasRoomFilterDesignUpdate(data)) {
+      throw new Error("Design media and color settings are not available on next-api yet.");
+    }
+
+    const hotelId = await resolveBookingHotelId();
+    const current = await getBookingRoomFilterSettings({ hotelId });
+    const saved = await updateBookingRoomFilterSettings({
+      hotelId,
+      body: {
+        bookingFilters: data.booking_filters ?? current.bookingFilters,
+        customFilters: data.custom_filters ?? current.customFilters,
+        filterRooms: data.filter_rooms ?? current.filterRooms,
+      },
+    });
+    return toDesignSettings(saved);
+  },
 
   getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
 
-  listAddons: async (): Promise<AddonItem[]> => [],
+  listAddons: () => apiClient.get<AddonItem[]>("/admin/addons"),
 
   createAddon: (data: Omit<AddonItem, "id">) => apiClient.post<AddonItem>("/admin/addons", data),
 
@@ -273,7 +321,7 @@ export const settingsService = {
   updateAddonSettings: (data: Partial<AddonSettings>) =>
     apiClient.patch<AddonSettings>("/admin/settings/addons", data),
 
-  listPromoCodes: async (): Promise<PromoCodeItem[]> => [],
+  listPromoCodes: () => apiClient.get<PromoCodeItem[]>("/admin/promo-codes"),
 
   createPromoCode: (data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">) =>
     apiClient.post<PromoCodeItem>("/admin/promo-codes", data),
