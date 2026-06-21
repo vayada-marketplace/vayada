@@ -53,7 +53,10 @@ import {
   createTargetBookingWebCalendarRepository,
   type BookingWebCalendarReadPool,
 } from "./routes/bookingWebPublic.js";
-import type { PlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
+import type {
+  PlatformAdminDashboardRepository,
+  PlatformAdminGrowthDashboard,
+} from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import {
   createTargetPmsOperationsReadRepository,
   type PmsOperationsReadPool,
@@ -2128,7 +2131,7 @@ describe("vayada-api", () => {
       },
     });
 
-    const response = await injectJson(app, {
+    const response = await injectJson<PlatformAdminGrowthDashboard>(app, {
       method: "GET",
       url: "/api/platform/admin/growth?granularity=weekly&exclude_test_data=true",
       headers: {
@@ -2141,8 +2144,62 @@ describe("vayada-api", () => {
       properties: [{ id: "property_1", status: "live" }],
       selectedPropertyIds: ["property_1"],
       bookingPropertyId: null,
-      emptyMessage: "Target growth telemetry is not available yet; target properties are loaded.",
+      emptyMessage: "Target growth telemetry is not available yet for the selected properties.",
     });
+    expect(response.body.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "live_properties", rawValue: 1, value: "1" }),
+        expect.objectContaining({ key: "page_views", rawValue: null, value: "N/A" }),
+        expect.objectContaining({ key: "booking_requests", rawValue: null, value: "N/A" }),
+      ]),
+    );
+  });
+
+  it("scopes platform admin growth metrics to the selected target properties", async () => {
+    app = buildPlatformAdminApp({
+      repository: {
+        async listBookings() {
+          return [];
+        },
+        async listGrowthProperties() {
+          return [
+            {
+              id: "property_1",
+              name: "Hotel Alpenrose",
+              slug: "hotel-alpenrose",
+              status: "live",
+              createdAt: "2026-06-01T12:00:00.000Z",
+            },
+            {
+              id: "property_2",
+              name: "Demo Lodge",
+              slug: "demo-lodge",
+              status: "demo",
+              createdAt: "2026-06-02T12:00:00.000Z",
+            },
+          ];
+        },
+      },
+    });
+
+    const response = await injectJson<PlatformAdminGrowthDashboard>(app, {
+      method: "GET",
+      url: "/api/platform/admin/growth?property_ids=property_2&booking_property_id=property_1",
+      headers: {
+        authorization: "Bearer platform-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      selectedPropertyIds: ["property_2"],
+      bookingPropertyId: null,
+    });
+    expect(response.body.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "live_properties", rawValue: 0, value: "0" }),
+      ]),
+    );
   });
 
   it("rejects platform admin reads without the platform resource link", async () => {

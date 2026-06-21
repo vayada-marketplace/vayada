@@ -216,12 +216,17 @@ function toGrowthDashboard(
   query: ReturnType<typeof parseGrowthQuery>,
   properties: PlatformAdminProperty[],
 ): PlatformAdminGrowthDashboard {
-  const propertyIds = new Set(properties.map((property) => property.id));
-  const selectedPropertyIds =
+  const propertiesById = new Map(properties.map((property) => [property.id, property]));
+  const selectedProperties =
     query.propertyIds === undefined
-      ? properties.map((property) => property.id)
-      : query.propertyIds.filter((id) => propertyIds.has(id));
-  const liveCount = properties.filter((property) => property.status === "live").length;
+      ? properties
+      : query.propertyIds.flatMap((id) => {
+          const property = propertiesById.get(id);
+          return property ? [property] : [];
+        });
+  const selectedPropertyIds = selectedProperties.map((property) => property.id);
+  const selectedPropertyIdSet = new Set(selectedPropertyIds);
+  const liveCount = selectedProperties.filter((property) => property.status === "live").length;
 
   return {
     properties,
@@ -229,23 +234,31 @@ function toGrowthDashboard(
     excludeTestData: query.excludeTestData,
     granularity: query.granularity,
     bookingPropertyId:
-      query.bookingPropertyId && propertyIds.has(query.bookingPropertyId)
+      query.bookingPropertyId && selectedPropertyIdSet.has(query.bookingPropertyId)
         ? query.bookingPropertyId
         : null,
     metrics: [
       metric("live_properties", "Live properties", liveCount),
-      metric("page_views", "Page views", 0),
-      metric("booking_requests", "Booking requests", 0),
-      metric("conversion_rate", "Conversion rate", 0, "0%"),
+      metric("page_views", "Page views", null),
+      metric("booking_requests", "Booking requests", null),
+      metric("conversion_rate", "Conversion rate", null),
     ],
     pageViews: [],
     bookingRequests: [],
     liveProperties: [],
-    emptyMessage: "Target growth telemetry is not available yet; target properties are loaded.",
+    emptyMessage:
+      selectedProperties.length === 0
+        ? "No target properties match the selected filters."
+        : "Target growth telemetry is not available yet for the selected properties.",
   };
 }
 
-function metric(key: string, label: string, rawValue: number, value = String(rawValue)) {
+function metric(
+  key: string,
+  label: string,
+  rawValue: number | null,
+  value = rawValue === null ? "N/A" : String(rawValue),
+) {
   return {
     key,
     label,
