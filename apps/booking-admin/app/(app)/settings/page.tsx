@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { apiClient } from "@/services/api/client";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
   BuildingOffice2Icon,
@@ -53,6 +54,20 @@ type Section =
   | "account"
   | "billing"
   | "payments";
+
+type PmsPaymentSettingsResponse = {
+  paymentSettings: {
+    stripeConnectAccountId?: string | null;
+    stripeConnectOnboarded?: boolean;
+    paymentProvider?: "stripe" | "xendit" | "vayada";
+    xenditChannelCode?: string | null;
+    xenditAccountNumber?: string | null;
+    xenditAccountHolderName?: string | null;
+    payAtPropertyEnabled?: boolean;
+    onlineCardPayment?: boolean;
+    bankTransfer?: boolean;
+  };
+};
 
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
 
@@ -209,31 +224,38 @@ export default function SettingsPage() {
     }
   };
 
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = useCallback(async (): Promise<PropertySettings | null> => {
     try {
       setLoading(true);
       const data = await settingsService.getPropertySettings();
       setSettings(data);
+      return data;
     } catch {
       setFeedback({ type: "error", message: t("settings.feedback.loadError") });
+      return null;
     } finally {
       setLoading(false);
     }
   }, [t]);
 
   useEffect(() => {
-    fetchSettings();
+    const propertyPromise = fetchSettings();
     customDomainService
       .getStatus()
       .then(setDomainStatus)
       .catch(() => {});
-    // Load payment settings from PMS (single source of truth for payment methods)
-    pmsClient
-      .get<{ paymentSettings: any }>("/admin/payment-settings")
+    propertyPromise
+      .then((property) => {
+        if (!property?.id) return null;
+        return apiClient.get<PmsPaymentSettingsResponse>(
+          `/api/pms/properties/${encodeURIComponent(property.id)}/payment-settings`,
+        );
+      })
       .then((res) => {
+        if (!res) return;
         const ps = res.paymentSettings;
-        setStripeAccountId(ps.stripeConnectAccountId);
-        setStripeOnboarded(ps.stripeConnectOnboarded);
+        setStripeAccountId(ps.stripeConnectAccountId ?? null);
+        setStripeOnboarded(ps.stripeConnectOnboarded ?? false);
         setPaymentProvider(ps.paymentProvider || "stripe");
         setXenditChannelCode(ps.xenditChannelCode || "ID_BCA");
         setXenditAccountNumber(ps.xenditAccountNumber || "");
@@ -495,9 +517,10 @@ export default function SettingsPage() {
     if (propertyCoordinateLoaded || propertyCoordinateLoadingRef.current) return;
     propertyCoordinateLoadingRef.current = true;
     try {
-      const roomTypes = await pmsClient.get<
-        { latitude: number | null; longitude: number | null }[]
-      >("/admin/room-types");
+      const roomTypes =
+        await pmsClient.get<{ latitude: number | null; longitude: number | null }[]>(
+          "/admin/room-types",
+        );
       const withCoords = roomTypes.filter(
         (rt) =>
           rt.latitude != null &&
@@ -1091,16 +1114,15 @@ export default function SettingsPage() {
               <div className="lg:sticky lg:top-5 lg:self-start space-y-2">
                 {propertyCoordinateLoaded && !propertyCoordinate && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                    Set a location on your room types in{" "}
-                    <strong>Rooms &amp; Rates</strong> so the map knows where to center.
+                    Set a location on your room types in <strong>Rooms &amp; Rates</strong> so the
+                    map knows where to center.
                   </div>
                 )}
                 <LocationMapPreview
                   propertyName={settings.property_name}
                   property={propertyCoordinate}
                   pois={(settings.points_of_interest || []).filter(
-                    (poi) =>
-                      Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude),
+                    (poi) => Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude),
                   )}
                   selectedPoiId={selectedPoiId}
                   onPlacePoi={

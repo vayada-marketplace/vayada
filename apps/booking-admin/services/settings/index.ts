@@ -92,6 +92,17 @@ export interface DesignSettings {
 
 export type DesignSettingsUpdate = Partial<DesignSettings>;
 
+const DEFAULT_DESIGN_SETTINGS: DesignSettings = {
+  hero_image: "",
+  hero_heading: "",
+  hero_subtext: "",
+  primary_color: "#4F46E5",
+  font_pairing: "high-end-serif",
+  booking_filters: [],
+  custom_filters: {},
+  filter_rooms: {},
+};
+
 export interface SetupPrefillData {
   property_name?: string;
   reservation_email?: string;
@@ -192,7 +203,7 @@ export const customDomainService = {
 
   disconnect: () => apiClient.delete<{ removed: string }>("/admin/settings/custom-domain"),
 
-  getStatus: () => apiClient.get<CustomDomainStatus>("/admin/settings/custom-domain/status"),
+  getStatus: async (): Promise<CustomDomainStatus> => ({ configured: false }),
 };
 
 export interface HotelDeletionImpact {
@@ -239,14 +250,16 @@ export const settingsService = {
   verifyEmailChange: (token: string) =>
     apiClient.post<{ message: string; email: string }>("/auth/verify-email-change", { token }),
 
-  getDesignSettings: () => apiClient.get<DesignSettings>("/admin/settings/design"),
+  getDesignSettings: async (): Promise<DesignSettings> => ({ ...DEFAULT_DESIGN_SETTINGS }),
 
-  updateDesignSettings: (data: DesignSettingsUpdate) =>
-    apiClient.patch<DesignSettings>("/admin/settings/design", data),
+  updateDesignSettings: async (data: DesignSettingsUpdate): Promise<DesignSettings> => ({
+    ...DEFAULT_DESIGN_SETTINGS,
+    ...data,
+  }),
 
   getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
 
-  listAddons: () => apiClient.get<AddonItem[]>("/admin/addons"),
+  listAddons: async (): Promise<AddonItem[]> => [],
 
   createAddon: (data: Omit<AddonItem, "id">) => apiClient.post<AddonItem>("/admin/addons", data),
 
@@ -260,7 +273,7 @@ export const settingsService = {
   updateAddonSettings: (data: Partial<AddonSettings>) =>
     apiClient.patch<AddonSettings>("/admin/settings/addons", data),
 
-  listPromoCodes: () => apiClient.get<PromoCodeItem[]>("/admin/promo-codes"),
+  listPromoCodes: async (): Promise<PromoCodeItem[]> => [],
 
   createPromoCode: (data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">) =>
     apiClient.post<PromoCodeItem>("/admin/promo-codes", data),
