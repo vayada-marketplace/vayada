@@ -88,6 +88,26 @@ All network calls are mocked via `mockBookingApis`. No seeded backend is require
 
 The smoke tests for `affiliate-dashboard`, `booking-admin`, `marketplace-web`, `pms-web`, and `vayada-admin` navigate to `/login` and verify the login shell renders without errors. The AuthKit-backed admin pages now immediately redirect to hosted auth, so their smoke only asserts the local redirecting state and that the removed legacy controls stay gone.
 
+## No Legacy Call Guard
+
+Migrated next-stack specs can opt into `watchNoLegacyCalls(page, testInfo, surface)`
+from `tests/e2e/support/noLegacyCalls.ts`. Each surface has a data-driven
+banlist for legacy route shapes, hostnames, or headers. The guard records
+browser requests and fails with the exact offending method and URL.
+
+Currently covered surface:
+
+- `booking-admin-benefits-settings` bans legacy production API hosts and
+  `/admin/benefits`, plus `X-Hotel-Id` routing scope.
+
+The booking-admin migrated surface specs require a production build:
+
+```bash
+cd apps/booking-admin && npm run build && PORT=3013 npx next start -p 3013 &
+E2E_BOOKING_ADMIN_PROD=1 E2E_BOOKING_ADMIN_BASE_URL=http://127.0.0.1:3013 \
+  npm run e2e:booking-admin -- tests/e2e/booking-admin/benefits.spec.ts
+```
+
 ## Debugging
 
 CI uploads `playwright-report/` and `test-results/` on every pilot run. Open the report locally with:
