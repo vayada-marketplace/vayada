@@ -8,6 +8,7 @@ import {
   NEXT_SMOKE_BOOKING_HOTEL_ID,
   NEXT_SMOKE_CONFIRM,
   nextSmokeApplyBlockers,
+  nextSmokeConfigBlockers,
   normalizeModuleIds,
 } from "./nextSmokeBackfill.js";
 
@@ -57,6 +58,30 @@ describe("next smoke backfill helpers", () => {
           workosOrgId: "org_affiliate",
           workosMembershipId: "membership_affiliate",
         },
+      }),
+    ).toEqual([]);
+  });
+
+  it("blocks apply modes that would write unverified affiliate WorkOS state", () => {
+    expect(
+      nextSmokeConfigBlockers({
+        mode: "apply",
+        affiliateOrganizationId: undefined,
+        affiliateWorkosOrgId: "org_manual",
+        affiliateWorkosMembershipId: "om_manual",
+      }),
+    ).toEqual([
+      "affiliate_organization_id_required_for_apply",
+      "affiliate_workos_org_id_flag_is_dry_run_only",
+      "affiliate_workos_membership_id_flag_is_dry_run_only",
+    ]);
+
+    expect(
+      nextSmokeConfigBlockers({
+        mode: "dry-run",
+        affiliateOrganizationId: undefined,
+        affiliateWorkosOrgId: "org_manual",
+        affiliateWorkosMembershipId: "om_manual",
       }),
     ).toEqual([]);
   });

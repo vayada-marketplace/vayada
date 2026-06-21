@@ -28,6 +28,11 @@ export type NextSmokeBackfillConfig = {
 };
 
 export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
+  const configBlockers = nextSmokeConfigBlockers(config);
+  if (config.mode === "apply" && configBlockers.length > 0) {
+    throw new Error(`Cannot apply next smoke backfill: ${configBlockers.join(", ")}.`);
+  }
+
   const bookingHotelId = config.bookingHotelId ?? NEXT_SMOKE_BOOKING_HOTEL_ID;
   const affiliateEmail = normalizeEmail(config.affiliateUserEmail ?? NEXT_SMOKE_AFFILIATE_EMAIL);
   const affiliateResourceId =
@@ -54,6 +59,7 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
       userId: affiliateUser.userId,
       workosOrgId: config.affiliateWorkosOrgId,
       workosMembershipId: config.affiliateWorkosMembershipId,
+      allowIdentityWrites: config.mode !== "apply",
     });
     const blockers = nextSmokeApplyBlockers({
       mode: config.mode,
@@ -144,6 +150,25 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
     client.release();
     await pool.end();
   }
+}
+
+export function nextSmokeConfigBlockers(
+  config: Pick<
+    NextSmokeBackfillConfig,
+    "mode" | "affiliateOrganizationId" | "affiliateWorkosOrgId" | "affiliateWorkosMembershipId"
+  >,
+): string[] {
+  return [
+    ...(config.mode === "apply" && !config.affiliateOrganizationId
+      ? ["affiliate_organization_id_required_for_apply"]
+      : []),
+    ...(config.mode === "apply" && config.affiliateWorkosOrgId
+      ? ["affiliate_workos_org_id_flag_is_dry_run_only"]
+      : []),
+    ...(config.mode === "apply" && config.affiliateWorkosMembershipId
+      ? ["affiliate_workos_membership_id_flag_is_dry_run_only"]
+      : []),
+  ];
 }
 
 export function nextSmokeApplyBlockers(input: {
@@ -330,9 +355,32 @@ async function ensureAffiliateOrg(
     userId: string;
     workosOrgId?: string;
     workosMembershipId?: string;
+    allowIdentityWrites: boolean;
   },
 ) {
   const existing = await findAffiliateOrg(client, input.userId, input.organizationId);
+  if (!existing && !input.allowIdentityWrites) {
+    throw new Error(
+      "Affiliate organization must already exist before apply; run a prepare step and WorkOS backfill first.",
+    );
+  }
+  if (existing && !input.allowIdentityWrites) {
+    if (!existing.membershipId || existing.membershipStatus !== "active") {
+      throw new Error(
+        "Affiliate smoke user must already have an active affiliate organization membership before apply.",
+      );
+    }
+    return {
+      organizationId: existing.organization_id,
+      kind: "affiliate_partner",
+      name: existing.name,
+      workosOrgId: existing.workos_org_id,
+      workosExternalId: existing.workos_external_id,
+      membershipId: existing.membershipId,
+      workosMembershipId: existing.workosMembershipId,
+    };
+  }
+
   let org =
     existing ??
     (
@@ -401,11 +449,17 @@ async function findAffiliateOrg(client: pg.PoolClient, userId: string, organizat
     name: string;
     workos_org_id: string | null;
     workos_external_id: string | null;
+    membership_id: string | null;
+    membership_status: string | null;
+    workos_membership_id: string | null;
   }>(
     `SELECT organization.id::text AS organization_id,
             organization.name,
             organization.workos_org_id,
-            organization.workos_external_id
+            organization.workos_external_id,
+            membership.id::text AS membership_id,
+            membership.status AS membership_status,
+            membership.workos_membership_id
      FROM identity.organizations organization
      LEFT JOIN identity.organization_memberships membership
        ON membership.organization_id = organization.id AND membership.user_id = $1::uuid
@@ -422,7 +476,17 @@ async function findAffiliateOrg(client: pg.PoolClient, userId: string, organizat
       "Smoke user has multiple affiliate_partner orgs; pass --affiliate-organization-id.",
     );
   }
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    organization_id: row.organization_id,
+    name: row.name,
+    workos_org_id: row.workos_org_id,
+    workos_external_id: row.workos_external_id,
+    membershipId: row.membership_id,
+    membershipStatus: row.membership_status,
+    workosMembershipId: row.workos_membership_id,
+  };
 }
 
 async function upsertResourceLink(

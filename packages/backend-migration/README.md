@@ -164,6 +164,7 @@ TARGET_DATABASE_URL=<target database url> \
   PMS_DATABASE_URL=<pms database url> \
   npm --workspace @vayada/backend-migration run target:next-smoke:backfill:dist -- \
     --apply \
+    --affiliate-organization-id <verified affiliate organization id> \
     --confirm next-smoke-backfill:vay-874-vay-877
 ```
 
@@ -175,9 +176,14 @@ repeat `--module-id <id>` to activate a different reviewed module set. Dry runs
 may omit `PMS_DATABASE_URL`; apply will fail before committing target identity
 changes if PMS or WorkOS readiness blockers remain.
 
-If the affiliate org is newly created locally, complete provider state with the
-existing WorkOS command, then rerun the smoke backfill dry-run or audit to record
-the concrete WorkOS IDs:
+Apply mode does not accept `--affiliate-workos-org-id` or
+`--affiliate-workos-membership-id`; those flags are dry-run/audit aids only. The
+affiliate org and smoke-user membership must already exist locally and have
+verified WorkOS IDs before the smoke backfill applies resource links and
+entitlements. If the affiliate org does not exist yet, create the local
+affiliate org/membership in a separate reviewed prepare step, complete provider
+state with the existing WorkOS command, then rerun the smoke backfill dry-run and
+apply with the verified `--affiliate-organization-id`:
 
 ```bash
 TARGET_DATABASE_URL=<target database url> \
