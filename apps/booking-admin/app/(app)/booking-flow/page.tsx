@@ -45,7 +45,7 @@ import {
   normalizeBookingBenefitsSettings,
   normalizeBookingRoomFilterSettings,
 } from "@/services/api/bookingFlowSettingsLoader";
-import { pmsClient } from "@/services/api/pmsClient";
+import { apiClient } from "@/services/api/client";
 import { ToggleSwitch, FeedbackAlert, ConfirmDialog } from "@/components/ui";
 import { uploadSingleImage } from "@/lib/utils/uploadImage";
 import { SettingsLayout, type SettingsNavSection } from "@/components/settings/layout";
@@ -71,6 +71,13 @@ type Tab =
   | "localization"
   | "guest-form"
   | "last-minute";
+
+type PmsRoomsResponse = {
+  items?: {
+    roomId: string;
+    roomNumber: string;
+  }[];
+};
 
 const CATEGORIES = [
   { value: "dining", label: "Dining" },
@@ -312,12 +319,18 @@ export default function BookingFlowPage() {
           setFiltersEnabled(normalizedRoomFilterSettings.bookingFilters.length > 0);
           setCustomFilters(normalizedRoomFilterSettings.customFilters);
           setFilterRooms(normalizedRoomFilterSettings.filterRooms);
-          // Fetch rooms from PMS
-          if (property?.slug) {
+          if (property?.id) {
             setPmsRoomsLoading(true);
-            pmsClient
-              .get<{ id: string; name: string }[]>(`/api/hotels/${property.slug}/rooms`)
-              .then((rooms) => setPmsRooms(rooms.map((r) => ({ id: r.id, name: r.name }))))
+            apiClient
+              .get<PmsRoomsResponse>(`/api/pms/properties/${encodeURIComponent(property.id)}/rooms`)
+              .then((response) =>
+                setPmsRooms(
+                  (response.items ?? []).map((room) => ({
+                    id: room.roomId,
+                    name: room.roomNumber,
+                  })),
+                ),
+              )
               .catch(() => setPmsRooms([]))
               .finally(() => setPmsRoomsLoading(false));
           }

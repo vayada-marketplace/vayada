@@ -1682,28 +1682,32 @@ const publicHotelQuoteRepository: PublicHotelQuoteRepository = {
 };
 
 function identityRepositoryWithResources(
-  hotelId = "booking_hotel_alpenrose",
-  linkedPmsPropertyId = pmsPropertyId,
+  hotelId: string | null = "booking_hotel_alpenrose",
+  linkedPmsPropertyId: string | null = pmsPropertyId,
 ): IdentityRepository {
   return {
     ...identityRepository,
     async findLinkedResources() {
-      return [
-        {
+      const resources: Awaited<ReturnType<IdentityRepository["findLinkedResources"]>> = [];
+      if (hotelId) {
+        resources.push({
           product: "booking",
           resourceType: "booking_hotel",
           resourceId: hotelId,
           relationship: "owner",
           status: "active",
-        },
-        {
+        });
+      }
+      if (linkedPmsPropertyId) {
+        resources.push({
           product: "pms",
           resourceType: "pms_property",
           resourceId: linkedPmsPropertyId,
           relationship: "operator",
           status: "active",
-        },
-      ];
+        });
+      }
+      return resources;
     },
   };
 }
@@ -1712,7 +1716,7 @@ function buildAuthenticatedApp(
   options: {
     permissions?: PermissionKey[];
     entitlements?: ProductEntitlement[];
-    linkedHotelId?: string;
+    linkedHotelId?: string | null;
     reservationsRepository?: BookingReservationsReadRepository;
     settingsRepository?: BookingSettingsReadRepository;
     settingsWriteRepository?: BookingSettingsWriteRepository;
@@ -1724,7 +1728,7 @@ function buildAuthenticatedApp(
     pmsOperationsAllowedOrigins?: string[];
     bookingAdminCompatAllowedOrigins?: string[];
     browserAllowedOrigins?: string[];
-    linkedPmsPropertyId?: string;
+    linkedPmsPropertyId?: string | null;
   } = {},
 ): ReturnType<typeof buildApp> {
   return buildApp({
@@ -1970,6 +1974,104 @@ describe("vayada-api", () => {
       activeModules: [],
       activations: [],
     });
+
+    const customDomainStatus = await injectJson(app, {
+      method: "GET",
+      url: "/admin/settings/custom-domain/status",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(customDomainStatus.statusCode).toBe(200);
+    expect(customDomainStatus.body).toMatchObject({ configured: false });
+
+    const addons = await injectJson<unknown[]>(app, {
+      method: "GET",
+      url: "/admin/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(addons.statusCode).toBe(200);
+    expect(addons.body).toEqual([]);
+
+    const promoCodes = await injectJson<unknown[]>(app, {
+      method: "GET",
+      url: "/admin/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(promoCodes.statusCode).toBe(200);
+    expect(promoCodes.body).toEqual([]);
+
+    const unsupportedAddonWrite = await injectJson(app, {
+      method: "POST",
+      url: "/admin/addons",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+      payload: { name: "Breakfast" },
+    });
+    expect(unsupportedAddonWrite.statusCode).toBe(501);
+    expect(unsupportedAddonWrite.body).toMatchObject({
+      detail: "Booking add-on item management is not available on next-api yet.",
+    });
+  });
+
+  it("requires auth and booking hotel access for booking-admin helper fallbacks", async () => {
+    app = buildAuthenticatedApp({
+      bookingAdminCompatAllowedOrigins: ["https://next-booking-admin.vayada.com"],
+    });
+
+    const unauthenticated = await app.inject({
+      method: "GET",
+      url: "/admin/addons",
+      headers: {
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(unauthenticated.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
+
+    const unauthenticatedCreate = await app.inject({
+      method: "POST",
+      url: "/admin/hotels",
+      headers: {
+        origin: "https://next-booking-admin.vayada.com",
+      },
+      payload: { property_name: "Demo Lodge" },
+    });
+    expect(unauthenticatedCreate.statusCode).toBe(401);
+    expect(unauthenticatedCreate.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
+
+    await app.close();
+    app = buildAuthenticatedApp({
+      linkedHotelId: null,
+      bookingAdminCompatAllowedOrigins: ["https://next-booking-admin.vayada.com"],
+    });
+
+    const missingAccess = await app.inject({
+      method: "GET",
+      url: "/admin/settings/custom-domain/status",
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://next-booking-admin.vayada.com",
+      },
+    });
+    expect(missingAccess.statusCode).toBe(403);
+    expect(missingAccess.headers["access-control-allow-origin"]).toBe(
+      "https://next-booking-admin.vayada.com",
+    );
+    expect(JSON.parse(missingAccess.body)).toEqual({ detail: "Missing booking hotel access." });
   });
 
   it("does not expose booking addon settings until a read model is configured", async () => {

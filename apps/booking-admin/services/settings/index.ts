@@ -1,4 +1,9 @@
 import { apiClient } from "../api/client";
+import {
+  getBookingRoomFilterSettings,
+  updateBookingRoomFilterSettings,
+  type BookingRoomFilterSettings,
+} from "../api/bookingRoomFilterSettingsClient";
 
 export interface PropertySettings {
   // booking_hotels.id — unified across both backend databases after
@@ -91,6 +96,52 @@ export interface DesignSettings {
 }
 
 export type DesignSettingsUpdate = Partial<DesignSettings>;
+
+const DEFAULT_DESIGN_SETTINGS: DesignSettings = {
+  hero_image: "",
+  hero_heading: "",
+  hero_subtext: "",
+  primary_color: "#4F46E5",
+  font_pairing: "high-end-serif",
+  booking_filters: [],
+  custom_filters: {},
+  filter_rooms: {},
+};
+
+function toDesignSettings(settings: BookingRoomFilterSettings): DesignSettings {
+  return {
+    ...DEFAULT_DESIGN_SETTINGS,
+    booking_filters: settings.bookingFilters,
+    custom_filters: settings.customFilters,
+    filter_rooms: settings.filterRooms,
+  };
+}
+
+function hasRoomFilterDesignUpdate(data: DesignSettingsUpdate): boolean {
+  return (
+    data.booking_filters !== undefined ||
+    data.custom_filters !== undefined ||
+    data.filter_rooms !== undefined
+  );
+}
+
+function unsupportedDesignUpdateKeys(data: DesignSettingsUpdate): string[] {
+  return (Object.keys(data) as (keyof DesignSettingsUpdate)[]).filter(
+    (key) =>
+      !["booking_filters", "custom_filters", "filter_rooms"].includes(key) &&
+      data[key] !== undefined,
+  );
+}
+
+async function resolveBookingHotelId(): Promise<string> {
+  const selectedHotelId =
+    typeof window !== "undefined" ? window.localStorage.getItem("selectedHotelId") : null;
+  if (selectedHotelId) return selectedHotelId;
+
+  const property = await apiClient.get<PropertySettings>("/admin/settings/property");
+  if (property.id) return property.id;
+  throw new Error("Booking hotel id is required.");
+}
 
 export interface SetupPrefillData {
   property_name?: string;
@@ -239,10 +290,35 @@ export const settingsService = {
   verifyEmailChange: (token: string) =>
     apiClient.post<{ message: string; email: string }>("/auth/verify-email-change", { token }),
 
-  getDesignSettings: () => apiClient.get<DesignSettings>("/admin/settings/design"),
+  getDesignSettings: async (): Promise<DesignSettings> =>
+    toDesignSettings(
+      await getBookingRoomFilterSettings({ hotelId: await resolveBookingHotelId() }),
+    ),
 
-  updateDesignSettings: (data: DesignSettingsUpdate) =>
-    apiClient.patch<DesignSettings>("/admin/settings/design", data),
+  updateDesignSettings: async (data: DesignSettingsUpdate): Promise<DesignSettings> => {
+    const unsupportedKeys = unsupportedDesignUpdateKeys(data);
+    if (unsupportedKeys.length > 0) {
+      throw new Error(
+        `Design media and color settings are not available on next-api yet: ${unsupportedKeys.join(", ")}.`,
+      );
+    }
+
+    if (!hasRoomFilterDesignUpdate(data)) {
+      throw new Error("Design media and color settings are not available on next-api yet.");
+    }
+
+    const hotelId = await resolveBookingHotelId();
+    const current = await getBookingRoomFilterSettings({ hotelId });
+    const saved = await updateBookingRoomFilterSettings({
+      hotelId,
+      body: {
+        bookingFilters: data.booking_filters ?? current.bookingFilters,
+        customFilters: data.custom_filters ?? current.customFilters,
+        filterRooms: data.filter_rooms ?? current.filterRooms,
+      },
+    });
+    return toDesignSettings(saved);
+  },
 
   getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
 

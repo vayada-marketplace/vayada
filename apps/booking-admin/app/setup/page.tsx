@@ -373,12 +373,10 @@ export default function SetupPage() {
         localStorage.setItem("selectedHotelId", savedSettings.id);
       }
 
-      // 2. Save design settings
+      // 2. Save the room-filter portion of design settings. Media/color
+      // design fields are not persisted by next-api yet and the service
+      // rejects them instead of silently dropping them.
       await settingsService.updateDesignSettings({
-        primary_color: primaryColor,
-        font_pairing: selectedFont,
-        hero_image: heroImage,
-        hero_subtext: propertyDescription,
         booking_filters: bookingFilters,
       });
 
