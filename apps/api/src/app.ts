@@ -99,6 +99,10 @@ import {
   type PlatformContactIntakeRoutesOptions,
 } from "./routes/platformContactIntake.js";
 import {
+  registerPlatformAdminDashboardRoutes,
+  type PlatformAdminDashboardRepository,
+} from "./routes/platform/admin/dashboard/bookingCompatible.js";
+import {
   registerPmsLegacyAdminRoutes,
   registerPmsOperationsRoutes,
 } from "./routes/pmsOperations.js";
@@ -148,6 +152,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   askBudgets?: AskRoutesOptions["budgets"];
   askNow?: AskRoutesOptions["now"];
   platformContactIntake?: PlatformContactIntakeRoutesOptions;
+  platformAdminDashboardRepository?: PlatformAdminDashboardRepository;
   marketplaceDiscoveryAllowedOrigins?: string[];
   identityPrivacyAllowedOrigins?: string[];
   bookingPublicApiUrl?: string;
@@ -348,6 +353,10 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       ...options.platformContactIntake,
     });
   }
+  app.register(registerPlatformAdminDashboardRoutes, {
+    prefix: "/api/platform/admin",
+    repository: options.platformAdminDashboardRepository,
+  });
   if (options.platformMedia) {
     app.register(registerPlatformMediaRoutes, {
       prefix: "/api/media",
