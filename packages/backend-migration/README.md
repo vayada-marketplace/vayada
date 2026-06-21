@@ -118,3 +118,143 @@ TARGET_DATABASE_URL=<target database url> \
 Use `--cohort-manifest <path>` for reviewed batch cohorts.
 Omit `WORKOS_BACKFILL_LEGACY_AUTH_DATABASE_URL` to migrate identities without
 importing legacy bcrypt password hashes.
+
+## Next Stack Smoke Backfill
+
+VAY-874 and VAY-877 use one targeted command for the production next-route smoke
+data. It is intentionally narrow:
+
+- activates the Booking Engine entitlement for smoke booking hotel
+  `43303cea-963c-445a-9522-a05145fe0918`;
+- adds the marketplace hotel profile owner link and scoped entitlement for the
+  selected hotel-group org;
+- creates or updates an affiliate-partner org, membership, affiliate resource
+  link, and `affiliate-payouts` entitlement for the smoke affiliate user;
+- optionally activates Booking Admin Feature Hub module rows in the PMS DB when
+  `PMS_DATABASE_URL` is supplied.
+
+Run reviewed target migrations first so role grants from
+`0018_marketplace_hotel_profile_grants.sql` and
+`0019_seed_ask_intelligence_role_grants.sql` are present:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:migrate:dist -- --env production
+```
+
+Dry-run the smoke backfill:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:next-smoke:backfill:dist -- \
+    --dry-run
+```
+
+If the command cannot infer the marketplace profile, pass the Vayada resource ID
+explicitly:
+
+```bash
+--marketplace-hotel-profile-resource-id <marketplace hotel profile resource id>
+```
+
+Apply mode requires the printed guard:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  PMS_DATABASE_URL=<pms database url> \
+  npm --workspace @vayada/backend-migration run target:next-smoke:backfill:dist -- \
+    --apply \
+    --affiliate-organization-id <verified affiliate organization id> \
+    --confirm next-smoke-backfill:vay-874-vay-877
+```
+
+`PMS_DATABASE_URL` is required in apply mode because the VAY-874 smoke criteria
+include the Feature Hub module activation. The command activates the
+`affiliates` module for the smoke PMS hotel ID, defaulting to the same UUID as
+the booking hotel. Use `--pms-hotel-id <uuid>` if the PMS hotel ID differs, and
+repeat `--module-id <id>` to activate a different reviewed module set. Dry runs
+may omit `PMS_DATABASE_URL`; apply will fail before committing target identity
+changes if PMS or WorkOS readiness blockers remain.
+
+Apply mode does not accept `--affiliate-workos-org-id` or
+`--affiliate-workos-membership-id`; those flags are dry-run/audit aids only. The
+affiliate org and smoke-user membership must already exist locally and have
+verified WorkOS IDs before the smoke backfill applies resource links and
+entitlements. If the affiliate org does not exist yet, create the local
+affiliate org/membership in a separate reviewed prepare step, complete provider
+state with the existing WorkOS command, then rerun the smoke backfill dry-run and
+apply with the verified `--affiliate-organization-id`:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  WORKOS_API_KEY=<workos api key> \
+  npm --workspace @vayada/backend-migration run target:workos:backfill:dist -- \
+    --email flamur.maliqi2811@gmail.com \
+    --apply \
+    --confirm email:flamur.maliqi2811@gmail.com
+```
+
+The smoke command output documents:
+
+- hotel-group WorkOS org ID;
+- booking hotel entitlement status;
+- marketplace hotel profile resource ID;
+- affiliate-partner WorkOS org ID and WorkOS membership ID;
+- affiliate Vayada resource ID and entitlement status.
+
+Validate the emitted IDs with:
+
+```sql
+SELECT organization.id::text AS organization_id,
+       organization.workos_org_id,
+       booking_entitlement.status AS booking_engine_status,
+       marketplace_link.resource_id AS marketplace_hotel_profile_resource_id,
+       marketplace_entitlement.status AS marketplace_hotel_profile_status
+FROM identity.organizations organization
+LEFT JOIN identity.product_entitlements booking_entitlement
+  ON booking_entitlement.organization_id = organization.id
+ AND booking_entitlement.product = 'booking'
+ AND booking_entitlement.entitlement_key = 'booking-engine'
+ AND booking_entitlement.resource_id = '<booking hotel id>'
+LEFT JOIN identity.organization_resource_links marketplace_link
+  ON marketplace_link.organization_id = organization.id
+ AND marketplace_link.product = 'marketplace'
+ AND marketplace_link.resource_type = 'hotel_profile'
+ AND marketplace_link.resource_id = '<marketplace hotel profile resource id>'
+ AND marketplace_link.status = 'active'
+LEFT JOIN identity.product_entitlements marketplace_entitlement
+  ON marketplace_entitlement.organization_id = organization.id
+ AND marketplace_entitlement.product = 'marketplace'
+ AND marketplace_entitlement.entitlement_key = 'marketplace-hotel-profile'
+ AND marketplace_entitlement.resource_id = '<marketplace hotel profile resource id>'
+WHERE organization.id = '<hotel organization id>'::uuid;
+
+SELECT affiliate_org.id::text AS affiliate_organization_id,
+       affiliate_org.workos_org_id,
+       membership.workos_membership_id,
+       affiliate_link.resource_id AS affiliate_resource_id,
+       affiliate_entitlement.status AS affiliate_payouts_status
+FROM identity.organizations affiliate_org
+JOIN identity.organization_memberships membership
+  ON membership.organization_id = affiliate_org.id
+ AND membership.user_id = '<affiliate user id>'::uuid
+LEFT JOIN identity.organization_resource_links affiliate_link
+  ON affiliate_link.organization_id = affiliate_org.id
+ AND affiliate_link.product = 'affiliate'
+ AND affiliate_link.resource_type = 'affiliate'
+ AND affiliate_link.resource_id = '<affiliate resource id>'
+ AND affiliate_link.status = 'active'
+LEFT JOIN identity.product_entitlements affiliate_entitlement
+  ON affiliate_entitlement.organization_id = affiliate_org.id
+ AND affiliate_entitlement.product = 'affiliate'
+ AND affiliate_entitlement.entitlement_key = 'affiliate-payouts'
+ AND affiliate_entitlement.resource_id = '<affiliate resource id>'
+WHERE affiliate_org.id = '<affiliate organization id>'::uuid;
+```
+
+Run the global audit after the targeted backfill:
+
+```bash
+TARGET_DATABASE_URL=<target database url> \
+  npm --workspace @vayada/backend-migration run target:workos:audit:dist
+```
