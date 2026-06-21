@@ -166,6 +166,10 @@ export type PmsOperationsReadRepository = {
     propertyId: string,
     filters: PmsReservationListFilters,
   ): Promise<PmsOperationsPaginatedReadResult<PmsOperationalReservation>>;
+  listReservationsOverlappingStayRangeByPropertyId?(
+    propertyId: string,
+    range: { from: PmsDate; to: PmsDate },
+  ): Promise<PmsOperationsPaginatedReadResult<PmsOperationalReservation>>;
   findReservationByGuestBookingId(
     propertyId: string,
     guestBookingId: string,
@@ -369,6 +373,23 @@ export function createTargetPmsOperationsReadRepository(config: {
       return {
         items: reservationResult.rows.map(toPmsOperationalReservation),
         total: toInteger(countResult.rows[0]?.total ?? 0),
+        sourceFreshness: {},
+      };
+    },
+
+    async listReservationsOverlappingStayRangeByPropertyId(propertyId, range) {
+      const result = await pool.query<TargetPmsOperationalReservationRow>(
+        `${PMS_OPERATIONAL_RESERVATION_SELECT_SQL}
+         WHERE booking.property_id = $1
+           AND booking.check_in < $2::date
+           AND booking.check_out > $3::date
+         ORDER BY booking.check_in ASC, booking.public_reference ASC`,
+        [propertyId, range.to, range.from],
+      );
+
+      return {
+        items: result.rows.map(toPmsOperationalReservation),
+        total: result.rows.length,
         sourceFreshness: {},
       };
     },

@@ -2,6 +2,10 @@
 
 import { useEffect } from "react";
 
+type HandoffHotel = {
+  id: string;
+};
+
 export default function HandoffPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -27,9 +31,6 @@ export default function HandoffPage() {
     if (token && expiresAt) {
       localStorage.setItem("access_token", token);
       localStorage.setItem("token_expires_at", expiresAt);
-      if (handoffHotelId) {
-        localStorage.setItem("selectedHotelId", handoffHotelId);
-      }
       if (userData) {
         try {
           const user = JSON.parse(decodeURIComponent(userData));
@@ -46,65 +47,79 @@ export default function HandoffPage() {
       }
 
       // Check PMS setup status before redirecting.
-      // Precedence: explicit safeRedirect > setup (if incomplete)
-      // > choose-property (if 2+ hotels) > dashboard (default).
+      // Precedence: explicit safeRedirect > choose-property (if 2+ hotels and no
+      // valid selected PMS property) > setup (if incomplete) > dashboard.
       const pmsApiUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "https://pms-api.vayada.com";
-      const bookingApiUrl =
-        process.env.NEXT_PUBLIC_AUTH_API_URL || "https://booking-api.vayada.com";
-      const setupStatusHeaders: Record<string, string> = {
-        Authorization: `Bearer ${token}`,
-      };
-      if (handoffHotelId) {
-        setupStatusHeaders["X-Hotel-Id"] = handoffHotelId;
-      }
-      fetch(`${pmsApiUrl}/admin/setup-status`, {
-        headers: setupStatusHeaders,
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then(async (data) => {
-          const setupComplete = !!(data && data.setup_complete);
-          localStorage.setItem("pmsSetupComplete", setupComplete ? "true" : "false");
+      (async () => {
+        let hotels: HandoffHotel[] = [];
+        let selectedPmsHotelId: string | null = null;
 
-          if (safeRedirect) {
-            window.location.href = safeRedirect;
-            return;
+        try {
+          const listRes = await fetch(`${pmsApiUrl}/admin/hotels`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const body = listRes.ok ? await listRes.json() : [];
+          hotels = Array.isArray(body)
+            ? body.filter((hotel): hotel is HandoffHotel => typeof hotel?.id === "string")
+            : [];
+          selectedPmsHotelId =
+            handoffHotelId && hotels.some((hotel) => hotel.id === handoffHotelId)
+              ? handoffHotelId
+              : null;
+          if (selectedPmsHotelId) {
+            localStorage.setItem("selectedHotelId", selectedPmsHotelId);
+          } else {
+            localStorage.removeItem("selectedHotelId");
           }
-          if (!setupComplete) {
-            window.location.href = "/setup";
-            return;
-          }
+        } catch {
+          localStorage.removeItem("selectedHotelId");
+        }
 
-          // If the caller already told us which hotel to land on,
-          // honor it and skip the choose-property step.
-          if (handoffHotelId) {
-            window.location.href = "/dashboard";
-            return;
-          }
+        if (!safeRedirect && !selectedPmsHotelId && hotels.length > 1) {
+          window.location.href = "/choose-property";
+          return;
+        }
 
-          // Fetch the user's hotel list from the booking-engine API
-          // (the source of truth after the multi-hotel ids unification).
-          try {
-            const listRes = await fetch(`${bookingApiUrl}/admin/hotels`, {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            const hotels = listRes.ok ? await listRes.json() : [];
-            if (Array.isArray(hotels) && hotels.length > 1) {
-              localStorage.removeItem("selectedHotelId");
-              window.location.href = "/choose-property";
-              return;
-            }
-            if (Array.isArray(hotels) && hotels.length === 1) {
-              localStorage.setItem("selectedHotelId", hotels[0].id);
-            }
-          } catch {
-            // Fall through to dashboard if the list call fails.
-          }
-          window.location.href = "/dashboard";
-        })
-        .catch(() => {
-          localStorage.setItem("pmsSetupComplete", "true");
-          window.location.href = safeRedirect || "/dashboard";
+        const setupStatusHeaders: Record<string, string> = {
+          Authorization: `Bearer ${token}`,
+        };
+        if (selectedPmsHotelId) {
+          setupStatusHeaders["X-Hotel-Id"] = selectedPmsHotelId;
+        }
+
+        const setupStatusResponse = await fetch(`${pmsApiUrl}/admin/setup-status`, {
+          headers: setupStatusHeaders,
         });
+        const data = setupStatusResponse.ok ? await setupStatusResponse.json() : null;
+
+        const setupComplete = !!(data && data.setup_complete);
+        localStorage.setItem("pmsSetupComplete", setupComplete ? "true" : "false");
+
+        if (safeRedirect) {
+          window.location.href = safeRedirect;
+          return;
+        }
+        if (!setupComplete) {
+          window.location.href = "/setup";
+          return;
+        }
+
+        // If the caller already told us which hotel to land on,
+        // honor it and skip the choose-property step.
+        if (selectedPmsHotelId) {
+          window.location.href = "/dashboard";
+          return;
+        }
+
+        if (hotels.length === 1) {
+          localStorage.setItem("selectedHotelId", hotels[0].id);
+        }
+        window.location.href = "/dashboard";
+      })().catch(() => {
+        localStorage.setItem("pmsSetupComplete", "true");
+        localStorage.removeItem("selectedHotelId");
+        window.location.href = safeRedirect || "/dashboard";
+      });
     } else {
       window.location.href = "/login";
     }
