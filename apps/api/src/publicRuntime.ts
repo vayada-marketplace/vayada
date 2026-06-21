@@ -1,0 +1,85 @@
+import type { ApiConfig } from "./config.js";
+import {
+  createCompatibilityPublicHotelQuoteRepository,
+  createTargetPublicHotelQuoteRepository,
+  type PublicHotelQuoteReadPool,
+} from "./routes/aiHotelQuotes.js";
+import {
+  createPgPublicHotelProfileRepository,
+  createTargetPublicHotelProfileRepository,
+  type PublicHotelProfileReadPool,
+} from "./routes/aiHotels.js";
+import {
+  createTargetBookingWebCalendarRepository,
+  type BookingWebCalendarReadPool,
+} from "./routes/bookingWebPublic.js";
+import {
+  createPgMarketplaceDiscoveryReadRepository,
+  type MarketplaceDiscoveryReadPool,
+} from "./routes/marketplaceDiscovery.js";
+
+export type PublicRuntimePools = {
+  publicHotelProfilePool?: PublicHotelProfileReadPool;
+  publicHotelQuotePool?: PublicHotelQuoteReadPool;
+  bookingWebCalendarPool?: BookingWebCalendarReadPool;
+  marketplaceDiscoveryPool?: MarketplaceDiscoveryReadPool;
+};
+
+export function createPublicRuntimeRepositories(config: ApiConfig, pools: PublicRuntimePools = {}) {
+  const publicHotelProfileRepository =
+    config.publicHotelProfileSource === "target"
+      ? createTargetPublicHotelProfileRepository({
+          connectionString: requireTargetDatabaseUrl(config),
+          pool: pools.publicHotelProfilePool,
+        })
+      : config.bookingDatabaseUrl
+        ? createPgPublicHotelProfileRepository({
+            connectionString: config.bookingDatabaseUrl,
+            bookingHostBase: config.bookingHostBase,
+          })
+        : undefined;
+
+  const publicHotelQuoteRepository =
+    publicHotelProfileRepository && config.publicBookabilitySource === "target"
+      ? createTargetPublicHotelQuoteRepository({
+          connectionString: requireTargetDatabaseUrl(config),
+          profileRepository: publicHotelProfileRepository,
+          pool: pools.publicHotelQuotePool,
+        })
+      : publicHotelProfileRepository
+        ? createCompatibilityPublicHotelQuoteRepository({
+            profileRepository: publicHotelProfileRepository,
+            pmsPublicApiUrl: config.pmsPublicApiUrl,
+          })
+        : undefined;
+
+  const bookingWebCalendarRepository =
+    config.publicBookabilitySource === "target"
+      ? createTargetBookingWebCalendarRepository({
+          connectionString: requireTargetDatabaseUrl(config),
+          pool: pools.bookingWebCalendarPool,
+        })
+      : undefined;
+
+  const marketplaceDiscoveryRepository =
+    config.marketplaceDiscoverySource === "target"
+      ? createPgMarketplaceDiscoveryReadRepository({
+          connectionString: requireTargetDatabaseUrl(config),
+          pool: pools.marketplaceDiscoveryPool,
+        })
+      : undefined;
+
+  return {
+    publicHotelProfileRepository,
+    publicHotelQuoteRepository,
+    bookingWebCalendarRepository,
+    marketplaceDiscoveryRepository,
+  };
+}
+
+function requireTargetDatabaseUrl(config: ApiConfig): string {
+  if (!config.targetDatabaseUrl) {
+    throw new Error("TARGET_DATABASE_URL is required for target public runtime repositories");
+  }
+  return config.targetDatabaseUrl;
+}

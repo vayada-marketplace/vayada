@@ -21,25 +21,16 @@ import {
   createPgWorkosWebhookStore,
   createWorkosWebhookVerifier,
 } from "./platform/workosWebhooks.js";
-import {
-  createCompatibilityPublicHotelQuoteRepository,
-  createTargetPublicHotelQuoteRepository,
-} from "./routes/aiHotelQuotes.js";
-import {
-  createPgPublicHotelProfileRepository,
-  createTargetPublicHotelProfileRepository,
-} from "./routes/aiHotels.js";
+import { createPublicRuntimeRepositories } from "./publicRuntime.js";
 import { createTargetPmsOperationsCommandRepository } from "./domains/pmsOperationsCommandRepository.js";
 import { createTargetPmsOperationsReadRepository } from "./domains/pmsOperationsReadModel.js";
+import { createTargetPublicHotelProfileRepository } from "./routes/aiHotels.js";
 import {
   createPgBookingWebAffiliateHotelResolver,
   createPgBookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
-import {
-  createTargetBookingWebCalendarRepository,
-  createTargetBookingWebCheckoutAdapter,
-} from "./routes/bookingWebPublic.js";
+import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
 import {
   createHttpPmsGuestFormSettingsSync,
   createPgBookingSettingsReadRepository,
@@ -50,7 +41,6 @@ import {
   createTargetFinancePublicHotelPropertyResolver,
   createXenditBankValidator,
 } from "./routes/finance.js";
-import { createPgMarketplaceDiscoveryReadRepository } from "./routes/marketplaceDiscovery.js";
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
 import { createPgMarketplaceHotelProfileStatusRepository } from "./routes/marketplaceHotelProfileStatus.js";
@@ -90,17 +80,12 @@ function buildAuthOptions(auth: ApiConfig["auth"]): ApiAuthOptions | undefined {
   };
 }
 
-const publicHotelProfileRepository =
-  config.publicHotelProfileSource === "target"
-    ? createTargetPublicHotelProfileRepository({
-        connectionString: config.targetDatabaseUrl!,
-      })
-    : config.bookingDatabaseUrl
-      ? createPgPublicHotelProfileRepository({
-          connectionString: config.bookingDatabaseUrl,
-          bookingHostBase: config.bookingHostBase,
-        })
-      : undefined;
+const {
+  publicHotelProfileRepository,
+  publicHotelQuoteRepository,
+  bookingWebCalendarRepository,
+  marketplaceDiscoveryRepository,
+} = createPublicRuntimeRepositories(config);
 
 const bookingSettingsRepository =
   config.bookingSettingsSource === "target"
@@ -143,26 +128,6 @@ const bookingDashboardMetricsReadPort =
   config.bookingReservationsSource === "target" && config.targetDatabaseUrl
     ? createTargetBookingDashboardMetricsReadPort({
         connectionString: config.targetDatabaseUrl,
-      })
-    : undefined;
-
-const publicHotelQuoteRepository =
-  publicHotelProfileRepository && config.publicBookabilitySource === "target"
-    ? createTargetPublicHotelQuoteRepository({
-        connectionString: config.targetDatabaseUrl!,
-        profileRepository: publicHotelProfileRepository,
-      })
-    : publicHotelProfileRepository
-      ? createCompatibilityPublicHotelQuoteRepository({
-          profileRepository: publicHotelProfileRepository,
-          pmsPublicApiUrl: config.pmsPublicApiUrl,
-        })
-      : undefined;
-
-const bookingWebCalendarRepository =
-  config.publicBookabilitySource === "target"
-    ? createTargetBookingWebCalendarRepository({
-        connectionString: config.targetDatabaseUrl!,
       })
     : undefined;
 
@@ -394,12 +359,7 @@ const app = buildApp({
   bookingAdminCompat: config.authSession
     ? { allowedOrigins: config.authSession.authAllowedOrigins }
     : undefined,
-  marketplaceDiscoveryRepository:
-    config.marketplaceDiscoverySource === "target"
-      ? createPgMarketplaceDiscoveryReadRepository({
-          connectionString: config.targetDatabaseUrl!,
-        })
-      : undefined,
+  marketplaceDiscoveryRepository,
   marketplaceCollaborationRepository:
     config.marketplaceDiscoverySource === "target"
       ? createPgMarketplaceCollaborationReadRepository({

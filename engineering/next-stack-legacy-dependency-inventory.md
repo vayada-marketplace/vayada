@@ -372,3 +372,39 @@ The next-stack debt falls into four groups:
   PMS Web.
 - VAY-760 follow-ups: Booking Web public profile/domain/bookability/checkout and
   affiliate public route runtime dependency removal.
+
+## Cutover validation notes
+
+VAY-882 adds the repeatable `next-api` legacy-free runtime check:
+
+```bash
+npm --workspace vayada-api run test:legacy-free
+```
+
+The check loads `next-api` with target source flags and no legacy product DB/API
+env vars, boots the route app, and serves these migrated public route groups:
+
+- `/api/ai/hotels/*`
+- `/api/booking-web/hosts/*`
+- `/api/booking-web/hotels/*`
+- `/api/marketplace/listings`
+- `/api/marketplace/creators`
+
+It fails with a `VAY-882 legacy runtime HTTP client called` error if those
+covered routes try to call a legacy service client.
+
+Remaining legacy-runtime env requirements outside the covered route groups:
+
+| Env requirement                                        | Remaining surface / retirement condition                              | Owner ticket             | Forbidden by `test:legacy-free` |
+| ------------------------------------------------------ | --------------------------------------------------------------------- | ------------------------ | ------------------------------- |
+| `BOOKING_DATABASE_URL`                                 | Legacy Booking settings/profile fallback removed                      | VAY-760, VAY-883         | Yes                             |
+| `BOOKING_RESERVATIONS_READ_DATABASE_URL`               | Booking/PMS reservation reads use target read models only             | VAY-878, VAY-883         | Yes                             |
+| `BOOKING_PUBLIC_API_URL`                               | Public domain/promo and Booking Admin helper fallbacks removed        | VAY-760, VAY-883         | Yes                             |
+| `PMS_API_URL`                                          | PMS guest-form sync and Booking Admin/PMS helper fallbacks removed    | VAY-878, VAY-883         | Yes                             |
+| `PMS_PUBLIC_API_URL`                                   | Public checkout/status/lookup proxy fallbacks removed                 | VAY-760 follow-up tracks | Yes                             |
+| `AUTH_LEGACY_MARKETPLACE_JWT_SECRET`                   | Marketplace Web no longer needs legacy marketplace JWT handoff        | VAY-737, VAY-803         | No                              |
+| `AUTH_LEGACY_BOOKING_JWT_SECRET`                       | Booking Admin no longer needs legacy Booking JWT handoff              | VAY-883, then VAY-884    | No                              |
+| `AUTH_LEGACY_PMS_JWT_SECRET`                           | PMS Web no longer needs legacy PMS JWT handoff                        | VAY-878, then VAY-879    | No                              |
+| `AUTH_LEGACY_AFFILIATE_PMS_JWT_SECRET`                 | Affiliate Dashboard moves to target affiliate/finance routes          | VAY-886                  | No                              |
+| `BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED`    | Public checkout command proxy is deleted or target checkout owns flow | VAY-760 follow-up tracks | No, must stay unset/false       |
+| Historical `MARKETPLACE_DATABASE_URL` compatibility DB | Marketplace discovery stays on `TARGET_DATABASE_URL` target mode      | VAY-882                  | Yes                             |
