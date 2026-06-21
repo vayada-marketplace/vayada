@@ -13,6 +13,7 @@ import type {
 } from "@vayada/domain-booking";
 import type {
   PmsCalendarDay,
+  PmsOperationalAssignment,
   PmsOperationsReadRepository,
   PmsOperationalReservation,
   PmsMoney,
@@ -615,6 +616,19 @@ export type PmsLegacySetupStatusResponse = {
   room_count: number;
 };
 
+type PmsLegacyBookingStatus =
+  | "pending"
+  | "confirmed"
+  | "checked_in"
+  | "in_house"
+  | "checked_out"
+  | "cancelled"
+  | "declined"
+  | "expired"
+  | "no_show";
+
+type PmsLegacyCalendarBookingStatus = "pending" | "confirmed" | "checked_in" | "in_house";
+
 type PmsPropertyParams = {
   propertyId: string;
 };
@@ -642,6 +656,11 @@ type PmsCheckoutChargeParams = PmsReservationParams & {
 type PmsCalendarQuery = {
   from?: string;
   to?: string;
+};
+
+type PmsLegacyCalendarQuery = {
+  start?: string;
+  end?: string;
 };
 
 type PmsRoomBlocksQuery = {
@@ -1749,17 +1768,29 @@ export async function registerPmsLegacyAdminRoutes(
   app: FastifyInstance,
   options: Pick<PmsOperationsRoutesOptions, "repository" | "allowedOrigins">,
 ): Promise<void> {
-  app.options("/setup-status", async (request, reply) => {
-    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
-      return sendPmsOperationsError(reply, {
-        statusCode: 403,
-        code: "missing_permission",
-        category: "authorization",
-        message: "PMS operations origin is not allowed.",
-      });
-    }
-    return reply.code(204).send();
-  });
+  for (const path of [
+    "/setup-status",
+    "/messaging/unread-count",
+    "/bookings",
+    "/hotel",
+    "/payment-settings",
+    "/calendar",
+    "/channex/status",
+    "/channex/channels",
+    "/calendar-settings",
+  ]) {
+    app.options(path, async (request, reply) => {
+      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+        return sendPmsOperationsError(reply, {
+          statusCode: 403,
+          code: "missing_permission",
+          category: "authorization",
+          message: "PMS operations origin is not allowed.",
+        });
+      }
+      return reply.code(204).send();
+    });
+  }
 
   app.get("/setup-status", async (request, reply) => {
     if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
@@ -1801,6 +1832,236 @@ export async function registerPmsLegacyAdminRoutes(
       );
     }
   });
+
+  app.get("/messaging/unread-count", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    return { unreadCount: 0 };
+  });
+
+  app.get<{ Querystring: PmsReservationListQuery }>("/bookings", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    const filters = toReservationFilters(request.query);
+    if ("error" in filters) return sendPmsOperationsError(reply, filters.error);
+
+    try {
+      const [reservations, roomTypes] = await Promise.all([
+        options.repository.listReservationsByPropertyId(propertyId, filters.value),
+        options.repository.listRoomTypesByPropertyId(propertyId),
+      ]);
+      const roomTypesById = new Map(
+        roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType]),
+      );
+      return {
+        bookings: reservations.items.map((reservation) =>
+          toLegacyPmsBooking(reservation, roomTypesById),
+        ),
+        total: reservations.total,
+        limit: filters.value.limit,
+        offset: filters.value.offset,
+      };
+    } catch {
+      return sendPmsOperationsError(
+        reply,
+        readModelUnavailable("PMS reservations read model is unavailable."),
+      );
+    }
+  });
+
+  app.get("/hotel", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    return toLegacyPmsHotel(propertyId);
+  });
+
+  app.patch<{ Body: unknown }>("/hotel", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+    return toLegacyPmsHotel(propertyId, request.body);
+  });
+
+  app.get("/payment-settings", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    return legacyPmsPaymentSettings();
+  });
+
+  app.get<{ Querystring: PmsLegacyCalendarQuery }>("/calendar", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    if (!request.query.start || !request.query.end) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 400,
+        code: "invalid_query",
+        category: "validation",
+        message: "Calendar requires start and end query parameters.",
+      });
+    }
+    const range = toRequiredDateRange(request.query.start, request.query.end);
+    if ("error" in range) return sendPmsOperationsError(reply, range.error);
+
+    try {
+      const [roomTypes, rooms, blocks, reservations] = await Promise.all([
+        options.repository.listRoomTypesByPropertyId(propertyId),
+        options.repository.listRoomsByPropertyId(propertyId),
+        options.repository.listRoomBlocksByPropertyId(propertyId, range.value),
+        options.repository.listReservationsByPropertyId(propertyId, {
+          status: undefined,
+          arrivalFrom: range.value.from,
+          arrivalTo: range.value.to,
+          search: undefined,
+          limit: PMS_RESERVATION_LIST_MAX_LIMIT,
+          offset: 0,
+        }),
+      ]);
+      return toLegacyPmsCalendarData(
+        roomTypes.items,
+        rooms.items,
+        blocks.items,
+        reservations.items,
+      );
+    } catch {
+      return sendPmsOperationsError(
+        reply,
+        readModelUnavailable("PMS calendar read model is unavailable."),
+      );
+    }
+  });
+
+  app.get("/channex/status", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    return legacyPmsChannexStatus();
+  });
+
+  app.get("/channex/channels", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    return { channels: [] };
+  });
+
+  app.get("/calendar-settings", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
+
+    return legacyPmsCalendarSettings();
+  });
+
+  app.patch<{ Body: unknown }>("/calendar-settings", async (request, reply) => {
+    if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+      return sendPmsOperationsError(reply, {
+        statusCode: 403,
+        code: "missing_permission",
+        category: "authorization",
+        message: "PMS operations origin is not allowed.",
+      });
+    }
+
+    const propertyId = getRequiredLegacyPmsPropertyId(request, reply);
+    if (!propertyId) return reply;
+    if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+    return legacyPmsCalendarSettings(request.body);
+  });
 }
 
 function getLegacyPmsPropertyId(request: FastifyRequest): string | null {
@@ -1815,6 +2076,345 @@ function getLegacyPmsPropertyId(request: FastifyRequest): string | null {
         resource.resourceType === "pms_property",
     )?.resourceId ?? null
   );
+}
+
+function getRequiredLegacyPmsPropertyId(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): string | null {
+  const propertyId = getLegacyPmsPropertyId(request);
+  if (propertyId) return propertyId;
+
+  sendPmsOperationsError(reply, {
+    statusCode: 403,
+    code: "missing_resource_access",
+    category: "authorization",
+    message: "Missing PMS property access.",
+  });
+  return null;
+}
+
+function toLegacyPmsBooking(
+  reservation: PmsOperationalReservation,
+  roomTypesById: Map<string, PmsRoomType>,
+) {
+  const primaryAssignment = reservation.assignments[0] ?? null;
+  const roomType = primaryAssignment ? roomTypesById.get(primaryAssignment.roomTypeId) : undefined;
+  const nightlyRate = legacyMoneyAmount(roomType?.baseRate);
+  const numberOfRooms = Math.max(reservation.assignments.length, 1);
+  const nights = daysBetweenDateOnly(reservation.stay.checkIn, reservation.stay.checkOut);
+  const totalAmount = nightlyRate * Math.max(nights, 1) * numberOfRooms;
+  const [guestFirstName, guestLastName] = splitLegacyGuestName(
+    reservation.primaryGuest.displayName,
+  );
+
+  return {
+    id: reservation.guestBookingId,
+    bookingReference: reservation.bookingReference,
+    roomTypeId: primaryAssignment?.roomTypeId ?? "",
+    roomName: roomType?.name ?? "",
+    roomMaxOccupancy: legacyMaxOccupancy(roomType),
+    totalRoomCapacity: legacyMaxOccupancy(roomType),
+    guestFirstName,
+    guestLastName,
+    guestEmail: reservation.primaryGuest.email ?? "",
+    guestPhone: reservation.primaryGuest.phone ?? "",
+    guestCountry: "",
+    guestGender: "",
+    guestDateOfBirth: null,
+    guestPassportNumber: "",
+    specialRequests: "",
+    checkIn: reservation.stay.checkIn,
+    checkOut: reservation.stay.checkOut,
+    nights,
+    adults: reservation.stay.adults,
+    children: reservation.stay.children,
+    nightlyRate,
+    numberOfRooms,
+    totalAmount,
+    depositRequired: false,
+    depositPercentage: null,
+    depositAmount: 0,
+    balanceAmount: totalAmount,
+    currency: roomType?.baseRate.currency ?? "EUR",
+    status: toLegacyPmsBookingStatus(reservation.status),
+    roomId: primaryAssignment?.roomId ?? null,
+    roomNumber: primaryAssignment?.roomNumber ?? null,
+    assignedRooms: reservation.assignments.map((assignment) => ({
+      roomId: assignment.roomId,
+      roomNumber: assignment.roomNumber,
+      position: assignment.position,
+    })),
+    channel: primaryAssignment?.channel ?? legacyReservationSource(reservation.source),
+    paymentMethod: null,
+    paymentStatus: null,
+    checkInPendingFlags: reservation.checkin.pendingFlags,
+    checkedInAt: reservation.checkin.completedAt,
+    checkedOutAt: reservation.checkout.completedAt,
+    hostResponseDeadline: null,
+    platformFeeAmount: null,
+    affiliateCommissionAmount: null,
+    propertyPayoutAmount: null,
+    addonIds: [],
+    addonNames: [],
+    addonTotal: 0,
+    addonQuantities: {},
+    addonDates: {},
+    estimatedArrivalTime: null,
+    numberOfGuests: reservation.stay.adults + reservation.stay.children,
+    guestWithdrawn: false,
+    createdAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
+    updatedAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
+  };
+}
+
+function toLegacyPmsCalendarData(
+  roomTypes: PmsRoomType[],
+  rooms: PmsRoom[],
+  blocks: PmsRoomBlockSummary[],
+  reservations: PmsOperationalReservation[],
+) {
+  const roomTypesById = new Map(roomTypes.map((roomType) => [roomType.roomTypeId, roomType]));
+  const roomsById = new Map(rooms.map((room) => [room.roomId, room]));
+
+  return {
+    roomTypes: roomTypes.map((roomType) => ({
+      id: roomType.roomTypeId,
+      name: roomType.name,
+      category: roomType.category ?? "",
+      totalRooms: roomType.roomCount,
+      baseRate: legacyMoneyAmount(roomType.baseRate),
+      maxOccupancy: legacyMaxOccupancy(roomType),
+      currency: roomType.baseRate.currency,
+      seasons: [],
+    })),
+    rooms: rooms.map((room) => ({
+      id: room.roomId,
+      roomTypeId: room.roomTypeId,
+      roomTypeName: roomTypesById.get(room.roomTypeId)?.name ?? "",
+      roomNumber: room.roomNumber,
+      floor: room.floor ?? "",
+      status: room.status,
+    })),
+    bookings: reservations.flatMap((reservation) =>
+      legacyCalendarBookingsForReservation(reservation, roomTypesById),
+    ),
+    blocks: blocks.map((block) => ({
+      id: block.blockId,
+      roomTypeId: block.roomTypeId,
+      roomId: block.roomId,
+      roomNumber: block.roomId ? (roomsById.get(block.roomId)?.roomNumber ?? null) : null,
+      startDate: block.startsOn,
+      endDate: addDaysDateOnly(block.endsOn, 1),
+      blockedCount: block.blockedCount,
+      reason: block.reason,
+      createdAt: `${block.startsOn}T00:00:00.000Z`,
+    })),
+  };
+}
+
+function legacyCalendarBookingsForReservation(
+  reservation: PmsOperationalReservation,
+  roomTypesById: Map<string, PmsRoomType>,
+) {
+  const assignments: Array<PmsOperationalAssignment | null> =
+    reservation.assignments.length > 0 ? reservation.assignments : [null];
+  const [guestFirstName, guestLastName] = splitLegacyGuestName(
+    reservation.primaryGuest.displayName,
+  );
+
+  return assignments.map((assignment, index) => {
+    const roomType = assignment ? roomTypesById.get(assignment.roomTypeId) : undefined;
+    return {
+      id: reservation.guestBookingId,
+      roomTypeId: assignment?.roomTypeId ?? "",
+      roomName: roomType?.name ?? "",
+      guestFirstName,
+      guestLastName,
+      checkIn: reservation.stay.checkIn,
+      checkOut: reservation.stay.checkOut,
+      status: toLegacyPmsCalendarStatus(reservation.status),
+      roomId: assignment?.roomId ?? null,
+      roomNumber: assignment?.roomNumber ?? null,
+      channel: assignment?.channel ?? legacyReservationSource(reservation.source),
+      bookingReference: reservation.bookingReference,
+      numberOfRooms: assignments.length,
+      roomPosition: assignment?.position ?? index,
+    };
+  });
+}
+
+function toLegacyPmsHotel(propertyId: string, body?: unknown) {
+  const raw = isLegacyRecord(body) ? body : {};
+  const timezone = legacyString(raw.timezone) ?? "UTC";
+  const country = legacyString(raw.country) ?? "";
+  const instantBook = legacyBoolean(raw.instant_book) ?? legacyBoolean(raw.instantBook) ?? false;
+  const sameDayBookingsEnabled =
+    legacyBoolean(raw.same_day_bookings_enabled) ??
+    legacyBoolean(raw.sameDayBookingsEnabled) ??
+    true;
+  const snakeCutoff = legacyNullableString(raw.same_day_booking_cutoff_time);
+  const camelCutoff = legacyNullableString(raw.sameDayBookingCutoffTime);
+  const sameDayBookingCutoffTime =
+    snakeCutoff !== undefined ? snakeCutoff : camelCutoff !== undefined ? camelCutoff : "18:00";
+
+  return {
+    id: propertyId,
+    name: "Property",
+    slug: propertyId,
+    location: "",
+    country,
+    timezone,
+    instant_book: instantBook,
+    instantBook,
+    same_day_bookings_enabled: sameDayBookingsEnabled,
+    sameDayBookingsEnabled: sameDayBookingsEnabled,
+    same_day_booking_cutoff_time: sameDayBookingCutoffTime,
+    sameDayBookingCutoffTime: sameDayBookingCutoffTime,
+  };
+}
+
+function legacyPmsPaymentSettings() {
+  return {
+    paymentSettings: {
+      stripeConnectAccountId: null,
+      stripeConnectOnboarded: false,
+      platformFeeType: "percentage",
+      platformFeeValue: 0,
+      platformFeeWithAffiliate: 0,
+      payAtPropertyEnabled: true,
+      onlineCardPayment: false,
+      bankTransfer: false,
+      xenditPaymentsEnabled: false,
+      paymentProvider: "stripe",
+      xenditChannelCode: null,
+      xenditAccountNumber: null,
+      xenditAccountHolderName: null,
+      defaultCurrency: "EUR",
+    },
+    cancellationPolicy: {
+      freeCancellationDays: 7,
+      partialRefundPct: 50,
+    },
+  };
+}
+
+function legacyPmsChannexStatus() {
+  return {
+    isConnected: false,
+    channexPropertyId: null,
+    roomTypesProvisioned: 0,
+    ratePlansProvisioned: 0,
+    lastBookingSyncAt: null,
+    lastAriSyncAt: null,
+    lastAriSyncError: null,
+    lastAriSyncFailedAt: null,
+    messagingAppInstalled: false,
+  };
+}
+
+function legacyPmsCalendarSettings(body?: unknown) {
+  const raw = isLegacyRecord(body) ? body : {};
+  const autoOpenMode = legacyString(raw.autoOpenMode) === "fixed" ? "fixed" : "rolling";
+  const rawAutoOpenMonths = Number(raw.autoOpenMonths);
+  const autoOpenMonths =
+    rawAutoOpenMonths === 12 || rawAutoOpenMonths === 18 || rawAutoOpenMonths === 24
+      ? rawAutoOpenMonths
+      : 18;
+
+  return {
+    autoRearrangeEnabled: legacyBoolean(raw.autoRearrangeEnabled) ?? true,
+    autoOpenEnabled: legacyBoolean(raw.autoOpenEnabled) ?? false,
+    autoOpenMode,
+    autoOpenMonths,
+    autoOpenFixedMonth: legacyNullableString(raw.autoOpenFixedMonth) ?? null,
+    autoOpenThrough: null,
+    autoOpenWarnings: [],
+  };
+}
+
+function splitLegacyGuestName(displayName: string): [string, string] {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return ["", ""];
+  const [firstName, ...rest] = parts;
+  return [firstName, rest.join(" ")];
+}
+
+function legacyMoneyAmount(money: PmsMoney | undefined): number {
+  const amount = Number.parseFloat(money?.amountDecimal ?? "0");
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function legacyMaxOccupancy(roomType: PmsRoomType | undefined): number {
+  if (!roomType) return 0;
+  const total = roomType.occupancyLimits.total;
+  if (typeof total === "number") return total;
+  return Object.values(roomType.occupancyLimits).reduce((sum, value) => sum + value, 0);
+}
+
+function legacyReservationSource(source: PmsOperationalReservation["source"]): string {
+  return source === "direct_booking" ? "direct" : source;
+}
+
+function toLegacyPmsBookingStatus(status: string): PmsLegacyBookingStatus {
+  switch (status) {
+    case "pending":
+    case "confirmed":
+    case "checked_in":
+    case "in_house":
+    case "checked_out":
+    case "declined":
+    case "expired":
+    case "no_show":
+      return status;
+    case "canceled":
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "confirmed";
+  }
+}
+
+function toLegacyPmsCalendarStatus(status: string): PmsLegacyCalendarBookingStatus {
+  switch (status) {
+    case "pending":
+    case "confirmed":
+    case "checked_in":
+    case "in_house":
+      return status;
+    default:
+      return "confirmed";
+  }
+}
+
+function daysBetweenDateOnly(from: string, to: string): number {
+  const start = Date.parse(`${from}T00:00:00.000Z`);
+  const end = Date.parse(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
+function addDaysDateOnly(value: string, days: number): string {
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(timestamp)) return value;
+  return new Date(timestamp + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function isLegacyRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function legacyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function legacyNullableString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  return legacyString(value);
+}
+
+function legacyBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function enforcePmsOperationsReadPolicy(
