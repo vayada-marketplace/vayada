@@ -2184,7 +2184,7 @@ describe("vayada-api", () => {
 
     const response = await injectJson<PlatformAdminGrowthDashboard>(app, {
       method: "GET",
-      url: "/api/platform/admin/growth?property_ids=property_2&booking_property_id=property_1",
+      url: "/api/platform/admin/growth?property_ids=property_2&property_ids=property_2&booking_property_id=property_1",
       headers: {
         authorization: "Bearer platform-token",
       },

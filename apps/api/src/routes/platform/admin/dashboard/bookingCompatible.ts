@@ -280,7 +280,7 @@ function mapBookingRow(row: PlatformAdminBookingDbRow): PlatformAdminBookingRow 
 function parsePropertyIds(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   const values = Array.isArray(value) ? value : [value];
-  return values.map((entry) => entry.trim()).filter(Boolean);
+  return Array.from(new Set(values.map((entry) => entry.trim()).filter(Boolean)));
 }
 
 function clampInteger(
