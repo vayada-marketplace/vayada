@@ -53,6 +53,10 @@ import {
   createTargetBookingWebCalendarRepository,
   type BookingWebCalendarReadPool,
 } from "./routes/bookingWebPublic.js";
+import type {
+  PlatformAdminDashboardRepository,
+  PlatformAdminGrowthDashboard,
+} from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import {
   createTargetPmsOperationsReadRepository,
   type PmsOperationsReadPool,
@@ -385,6 +389,86 @@ const identityRepository: IdentityRepository = {
     ];
   },
 };
+
+const platformSession: VerifiedSession = {
+  workosUserId: "user_workos_platform",
+  workosOrgId: "org_workos_platform",
+  sessionId: "session_platform",
+  expiresAt: futureExpiry,
+};
+
+const platformIdentityRepository: IdentityRepository = {
+  async findUserByProviderUserId() {
+    return {
+      userId: "user_platform_admin",
+      email: "platform@example.com",
+      status: "active",
+    };
+  },
+  async findOrganizationByWorkosOrgId() {
+    return {
+      organizationId: "org_platform",
+      workosOrgId: "org_workos_platform",
+      kind: "platform",
+      status: "active",
+    };
+  },
+  async findActiveMembership() {
+    return {
+      membershipId: "membership_platform_admin",
+      status: "active",
+      roleKey: "platform_admin",
+      workosMembershipId: "om_platform_admin",
+      workosRoleSlugs: ["platform_admin"],
+    };
+  },
+  async findLinkedResources() {
+    return [
+      {
+        product: "platform",
+        resourceType: "platform",
+        resourceId: "vayada",
+        relationship: "operator",
+        status: "active",
+      },
+    ];
+  },
+};
+
+function buildPlatformAdminApp(
+  options: {
+    permissions?: PermissionKey[];
+    repository?: PlatformAdminDashboardRepository;
+    resourceAccess?: boolean;
+  } = {},
+): ReturnType<typeof buildApp> {
+  return buildApp({
+    logger: false,
+    platformAdminDashboardRepository: options.repository,
+    auth: {
+      verifier: createFakeVerifier(new Map([["platform-token", platformSession]])),
+      repository:
+        options.resourceAccess === false
+          ? {
+              ...platformIdentityRepository,
+              async findLinkedResources() {
+                return [];
+              },
+            }
+          : platformIdentityRepository,
+      rolePermissionRepository: {
+        async findPermissionsForRole() {
+          return options.permissions ?? ["platform.admin.read"];
+        },
+      },
+      entitlementRepository: {
+        async findEntitlementsForContext() {
+          return [];
+        },
+      },
+    },
+  });
+}
 
 const bookingSettingsRepository: BookingSettingsReadRepository = {
   async findAddonSettingsByHotelId(hotelId) {
@@ -2072,6 +2156,166 @@ describe("vayada-api", () => {
       "https://next-booking-admin.vayada.com",
     );
     expect(JSON.parse(missingAccess.body)).toEqual({ detail: "Missing booking hotel access." });
+  });
+
+  it("returns platform admin bookings through platform organization scope", async () => {
+    const observedInputs: unknown[] = [];
+    app = buildPlatformAdminApp({
+      repository: {
+        async listBookings(input) {
+          observedInputs.push(input);
+          return [
+            {
+              id: "booking_1",
+              bookingReference: "VAY-2026-0001",
+              hotelId: "property_1",
+              hotelName: "Hotel Alpenrose",
+              hotelSlug: "hotel-alpenrose",
+              guestName: "Ada Lovelace",
+              guestEmail: "ada@example.com",
+              checkIn: "2026-07-10",
+              checkOut: "2026-07-12",
+              nights: 2,
+              totalAmount: 241,
+              currency: "EUR",
+              status: "accepted",
+              rawStatus: "confirmed",
+              channel: "direct",
+              requestedAt: "2026-06-01T12:00:00.000Z",
+              respondedAt: "2026-06-02T12:00:00.000Z",
+            },
+          ];
+        },
+        async listGrowthProperties() {
+          return [];
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/platform/admin/bookings?limit=500",
+      headers: {
+        authorization: "Bearer platform-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      bookings: [
+        {
+          bookingReference: "VAY-2026-0001",
+          hotelName: "Hotel Alpenrose",
+          status: "accepted",
+        },
+      ],
+    });
+    expect(observedInputs).toEqual([{ status: undefined, limit: 500, offset: 0 }]);
+  });
+
+  it("returns platform admin growth empty state without a missing endpoint", async () => {
+    app = buildPlatformAdminApp({
+      repository: {
+        async listBookings() {
+          return [];
+        },
+        async listGrowthProperties() {
+          return [
+            {
+              id: "property_1",
+              name: "Hotel Alpenrose",
+              slug: "hotel-alpenrose",
+              status: "live",
+              createdAt: "2026-06-01T12:00:00.000Z",
+            },
+          ];
+        },
+      },
+    });
+
+    const response = await injectJson<PlatformAdminGrowthDashboard>(app, {
+      method: "GET",
+      url: "/api/platform/admin/growth?granularity=weekly&exclude_test_data=true",
+      headers: {
+        authorization: "Bearer platform-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      properties: [{ id: "property_1", status: "live" }],
+      selectedPropertyIds: ["property_1"],
+      bookingPropertyId: null,
+      emptyMessage: "Target growth telemetry is not available yet for the selected properties.",
+    });
+    expect(response.body.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "live_properties", rawValue: 1, value: "1" }),
+        expect.objectContaining({ key: "page_views", rawValue: null, value: "N/A" }),
+        expect.objectContaining({ key: "booking_requests", rawValue: null, value: "N/A" }),
+      ]),
+    );
+  });
+
+  it("scopes platform admin growth metrics to the selected target properties", async () => {
+    app = buildPlatformAdminApp({
+      repository: {
+        async listBookings() {
+          return [];
+        },
+        async listGrowthProperties() {
+          return [
+            {
+              id: "property_1",
+              name: "Hotel Alpenrose",
+              slug: "hotel-alpenrose",
+              status: "live",
+              createdAt: "2026-06-01T12:00:00.000Z",
+            },
+            {
+              id: "property_2",
+              name: "Demo Lodge",
+              slug: "demo-lodge",
+              status: "demo",
+              createdAt: "2026-06-02T12:00:00.000Z",
+            },
+          ];
+        },
+      },
+    });
+
+    const response = await injectJson<PlatformAdminGrowthDashboard>(app, {
+      method: "GET",
+      url: "/api/platform/admin/growth?property_ids=property_2&property_ids=property_2&booking_property_id=property_1",
+      headers: {
+        authorization: "Bearer platform-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      selectedPropertyIds: ["property_2"],
+      bookingPropertyId: null,
+    });
+    expect(response.body.metrics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "live_properties", rawValue: 0, value: "0" }),
+      ]),
+    );
+  });
+
+  it("rejects platform admin reads without the platform resource link", async () => {
+    app = buildPlatformAdminApp({ resourceAccess: false });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/platform/admin/bookings?limit=500",
+      headers: {
+        authorization: "Bearer platform-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
   });
 
   it("does not expose booking addon settings until a read model is configured", async () => {

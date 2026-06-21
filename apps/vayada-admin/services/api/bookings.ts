@@ -1,4 +1,4 @@
-import { pmsApiClient } from "./pmsClient";
+import { apiClient } from "./client";
 
 export type BookingStatus = "pending" | "accepted" | "rejected" | "withdrawn";
 
@@ -29,6 +29,8 @@ export const bookingsService = {
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.offset) qs.set("offset", String(params.offset));
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return pmsApiClient.get<{ bookings: SuperAdminBookingRow[] }>(`/super-admin/bookings${suffix}`);
+    return apiClient.get<{ bookings: SuperAdminBookingRow[] }>(
+      `/api/platform/admin/bookings${suffix}`,
+    );
   },
 };

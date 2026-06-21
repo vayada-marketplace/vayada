@@ -62,6 +62,7 @@ import {
   createInMemoryPlatformMediaRepository,
   createPassthroughPlatformMediaTargetResolver,
 } from "./routes/platformMedia.js";
+import { createTargetPlatformAdminDashboardRepository } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { createPgPlatformContactIntakeRepository } from "./routes/platformContactIntake.js";
 
 const config = loadConfig();
@@ -380,6 +381,11 @@ const app = buildApp({
         }),
         allowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
       }
+    : undefined,
+  platformAdminDashboardRepository: config.targetDatabaseUrl
+    ? createTargetPlatformAdminDashboardRepository({
+        connectionString: config.targetDatabaseUrl,
+      })
     : undefined,
   pmsOperationsAllowedOrigins: config.pmsOperationsAllowedOrigins,
   bookingSettingsRepository,

@@ -1,3 +1,4 @@
+import { apiClient } from "./client";
 import { pmsApiClient } from "./pmsClient";
 
 export type PlatformStatus = "live" | "demo" | "test";
@@ -61,7 +62,7 @@ export function getGrowthDashboard(params: {
     search.set("booking_property_id", params.bookingPropertyId);
   }
 
-  return pmsApiClient.get<GrowthDashboard>(`/platform-admin/growth?${search.toString()}`);
+  return apiClient.get<GrowthDashboard>(`/api/platform/admin/growth?${search.toString()}`);
 }
 
 export function updatePropertyStatus(id: string, status: PlatformStatus) {
