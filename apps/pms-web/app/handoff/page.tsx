@@ -76,7 +76,6 @@ export default function HandoffPage() {
         }
 
         if (!safeRedirect && !selectedPmsHotelId && hotels.length > 1) {
-          localStorage.setItem("pmsSetupComplete", "true");
           window.location.href = "/choose-property";
           return;
         }
