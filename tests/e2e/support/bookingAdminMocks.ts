@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
+export const BOOKING_ADMIN_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
@@ -161,6 +162,9 @@ export async function mockBookingAdminShellRoutes(
   await page.route("**/admin/promo-codes", (route) => route.fulfill({ json: [] }));
   await page.route(`**/api/hotels/${BOOKING_ADMIN_HOTEL_SLUG}/rooms`, (route) =>
     route.fulfill({ json: [] }),
+  );
+  await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}`, (route) =>
+    route.fulfill({ json: { items: [] } }),
   );
 }
 

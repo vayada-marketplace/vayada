@@ -1,4 +1,4 @@
-import { apiClient, ApiErrorResponse, type ApiClient } from "./client";
+import { apiClient, ApiErrorResponse, omitHotelContext, type ApiClient } from "./client";
 
 export const BOOKING_RESERVATIONS_LIST_PATH = "/api/booking/hotels/:hotelId/reservations";
 
@@ -126,7 +126,10 @@ export async function getBookingReservations(
   client: BookingReservationsApiClient = apiClient,
 ): Promise<BookingReservationList> {
   try {
-    return await client.get<BookingReservationList>(buildBookingReservationsListEndpoint(input));
+    return await client.get<BookingReservationList>(
+      buildBookingReservationsListEndpoint(input),
+      omitHotelContext,
+    );
   } catch (error) {
     throw toBookingReservationListClientError(error);
   }
