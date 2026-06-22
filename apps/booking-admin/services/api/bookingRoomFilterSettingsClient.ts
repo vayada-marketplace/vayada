@@ -1,4 +1,4 @@
-import { apiClient, type ApiClient } from "./client";
+import { apiClient, omitHotelContext, type ApiClient } from "./client";
 import {
   toBookingSettingsClientErrorInput,
   type BookingSettingsClientErrorCategory,
@@ -88,6 +88,7 @@ export async function getBookingRoomFilterSettings(
   try {
     return await client.get<BookingRoomFilterSettings>(
       buildBookingRoomFilterSettingsEndpoint(input),
+      omitHotelContext,
     );
   } catch (error) {
     throw toBookingRoomFilterSettingsClientError(error);
@@ -102,6 +103,7 @@ export async function updateBookingRoomFilterSettings(
     return await client.put<BookingRoomFilterSettings>(
       buildBookingRoomFilterSettingsEndpoint(input),
       input.body,
+      omitHotelContext,
     );
   } catch (error) {
     throw toBookingRoomFilterSettingsClientError(error, "write");

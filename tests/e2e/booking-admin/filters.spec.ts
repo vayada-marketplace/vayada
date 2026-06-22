@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   BOOKING_ADMIN_HOTEL_ID,
-  BOOKING_ADMIN_PMS_ROOMS_PATH,
+  BOOKING_ADMIN_ROOMS_PATH,
   BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
@@ -48,7 +48,7 @@ test.describe("booking-admin room-filter settings cutover", () => {
       });
     });
 
-    await page.route(`**${BOOKING_ADMIN_PMS_ROOMS_PATH}*`, (route) =>
+    await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}*`, (route) =>
       route.fulfill({
         json: {
           contractVersion: "pms-operations.v1",

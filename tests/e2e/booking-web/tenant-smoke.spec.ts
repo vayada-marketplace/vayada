@@ -62,22 +62,27 @@ test.describe("booking-web tenant smoke", () => {
   test("shows pending feedback when selecting a rate", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     await mockBookingApis(page);
-    await page.route("**/book?**", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      await route.continue();
-    });
 
     await page.goto("/");
 
+    let releaseNavigation!: () => void;
+    await page.route("**/addons?**", async (route) => {
+      await new Promise<void>((resolve) => {
+        releaseNavigation = resolve;
+      });
+      await route.continue();
+    });
+
     const selectButton = page.getByTestId("select-rate-alpine-suite");
     await expect(selectButton).toBeVisible();
-    await selectButton.click();
+    await selectButton.click({ noWaitAfter: true });
 
     const pendingButton = page.getByTestId("select-rate-alpine-suite");
     await expect(pendingButton).toBeVisible();
     await expect(pendingButton).toBeDisabled();
     await expect(pendingButton).toHaveAttribute("aria-busy", "true");
     await expect(pendingButton).toContainText("Preparing checkout");
+    releaseNavigation();
 
     await assertHealthy();
   });

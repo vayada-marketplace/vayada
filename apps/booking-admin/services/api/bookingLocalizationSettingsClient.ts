@@ -1,4 +1,4 @@
-import { apiClient, type ApiClient } from "./client";
+import { apiClient, omitHotelContext, type ApiClient } from "./client";
 import {
   toBookingSettingsClientErrorInput,
   type BookingSettingsClientErrorCategory,
@@ -90,6 +90,7 @@ export async function getBookingLocalizationSettings(
   try {
     return await client.get<BookingLocalizationSettings>(
       buildBookingLocalizationSettingsEndpoint(input),
+      omitHotelContext,
     );
   } catch (error) {
     throw toBookingLocalizationSettingsClientError(error);
@@ -104,6 +105,7 @@ export async function updateBookingLocalizationSettings(
     return await client.put<BookingLocalizationSettings>(
       buildBookingLocalizationSettingsEndpoint(input),
       input.body,
+      omitHotelContext,
     );
   } catch (error) {
     throw toBookingLocalizationSettingsClientError(error, "write");

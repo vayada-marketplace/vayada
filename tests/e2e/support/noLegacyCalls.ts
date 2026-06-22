@@ -15,10 +15,10 @@ const surfaceRules = {
   "booking-admin-benefits-settings": [
     legacyProductionHostRule(),
     pathRule("/admin/benefits", "legacy Booking Admin benefits route"),
-    headerOnPathPrefixRule(
-      "/api/booking/hotels/",
+    headerRule(
       "x-hotel-id",
       "legacy X-Hotel-Id routing header",
+      /^\/api\/booking\/hotels\/[^/]+\/settings\/benefits$/,
     ),
   ],
   "booking-admin-booking-flow": [
@@ -112,12 +112,15 @@ function pathPrefixRule(pathnamePrefix: string, name: string): LegacyCallRule {
   };
 }
 
-function headerRule(headerName: string, name: string): LegacyCallRule {
+function headerRule(headerName: string, name: string, pathPattern?: RegExp): LegacyCallRule {
+  const normalizedHeaderName = headerName.toLowerCase();
   return {
     name,
     matches: (request) =>
+      (!pathPattern || pathPattern.test(new URL(request.url()).pathname)) &&
       Object.entries(request.headers()).some(
-        ([candidate, value]) => candidate.toLowerCase() === headerName && value.trim().length > 0,
+        ([candidate, value]) =>
+          candidate.toLowerCase() === normalizedHeaderName && value.trim().length > 0,
       ),
   };
 }

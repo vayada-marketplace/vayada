@@ -5,6 +5,11 @@
 import { clearAuthData, getAuthBearerToken } from "../auth/sessionStore";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
+const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
+
+export const omitHotelContext: RequestInit = {
+  headers: { [OMIT_HOTEL_CONTEXT_HEADER]: "true" },
+};
 
 export interface ApiError {
   detail:
@@ -77,6 +82,8 @@ export class ApiClient {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
+    const omitHotelContextHeader = headers[OMIT_HOTEL_CONTEXT_HEADER] === "true";
+    delete headers[OMIT_HOTEL_CONTEXT_HEADER];
 
     // Add Authorization header if token exists
     if (token) {
@@ -86,7 +93,7 @@ export class ApiClient {
     // Legacy `/admin/*` compatibility routes still use the hotel context
     // header. Target routes carry the resource id in the path.
     const hotelId = typeof window !== "undefined" ? localStorage.getItem("selectedHotelId") : null;
-    if (hotelId && endpoint.startsWith("/admin/")) {
+    if (hotelId && endpoint.startsWith("/admin/") && !omitHotelContextHeader) {
       headers["X-Hotel-Id"] = hotelId;
     }
 
