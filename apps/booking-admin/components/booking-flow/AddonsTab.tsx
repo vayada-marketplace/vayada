@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { PlusIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
@@ -12,6 +12,22 @@ const CATEGORY_COLORS: Record<string, string> = {
   dining: "bg-orange-100 text-orange-700",
   experience: "bg-green-100 text-green-700",
 };
+
+const CATEGORY_OPTIONS = ["dining", "experience", "transport", "wellness", "other"] as const;
+
+export type AddonItemCategory = (typeof CATEGORY_OPTIONS)[number];
+
+export interface AddonItemFormValues {
+  name: string;
+  description: string;
+  price: string;
+  currency: string;
+  category: AddonItemCategory;
+  image: string;
+  duration: string;
+  perPerson: boolean;
+  perNight: boolean;
+}
 
 function AddonsIcon({ className }: { className?: string }) {
   return (
@@ -29,25 +45,142 @@ function AddonsIcon({ className }: { className?: string }) {
   );
 }
 
+function emptyDraft(currency: string): AddonItemFormValues {
+  return {
+    name: "",
+    description: "",
+    price: "",
+    currency,
+    category: "experience",
+    image: "",
+    duration: "",
+    perPerson: false,
+    perNight: false,
+  };
+}
+
+function toAddonCategory(category: string): AddonItemCategory {
+  return CATEGORY_OPTIONS.includes(category as AddonItemCategory)
+    ? (category as AddonItemCategory)
+    : "other";
+}
+
+function toDraft(addon: AddonItem, fallbackCurrency: string): AddonItemFormValues {
+  return {
+    name: addon.name,
+    description: addon.description,
+    price: addon.price.toFixed(2),
+    currency: addon.currency || fallbackCurrency,
+    category: toAddonCategory(addon.category),
+    image: addon.image,
+    duration: addon.duration ?? "",
+    perPerson: addon.perPerson === true,
+    perNight: addon.perNight === true,
+  };
+}
+
 interface AddonsTabProps {
   addons: AddonItem[];
   addonSettings: AddonSettings;
   propertyCurrency: string;
-  itemManagementUnavailable: string;
   handleToggleAddonSetting: (key: keyof AddonSettings) => void;
+  onCreateAddon: (values: AddonItemFormValues) => Promise<void>;
+  onUpdateAddon: (addonId: string, values: AddonItemFormValues) => Promise<void>;
+  onDeleteAddon: (addonId: string) => Promise<void>;
 }
 
 export default function AddonsTab({
   addons,
   addonSettings,
   propertyCurrency,
-  itemManagementUnavailable,
   handleToggleAddonSetting,
+  onCreateAddon,
+  onUpdateAddon,
+  onDeleteAddon,
 }: AddonsTabProps) {
   const [filterCategory, setFilterCategory] = useState("all");
+  const [draft, setDraft] = useState<AddonItemFormValues>(() => emptyDraft(propertyCurrency));
+  const [editingAddon, setEditingAddon] = useState<AddonItem | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [savingItem, setSavingItem] = useState(false);
+  const [deletingAddonId, setDeletingAddonId] = useState<string | null>(null);
+  const [itemError, setItemError] = useState<string | null>(null);
   const categories = Array.from(new Set(addons.map((a) => a.category).filter(Boolean)));
   const filteredAddons =
     filterCategory === "all" ? addons : addons.filter((a) => a.category === filterCategory);
+
+  const openCreateEditor = () => {
+    setEditingAddon(null);
+    setDraft(emptyDraft(propertyCurrency));
+    setItemError(null);
+    setIsEditorOpen(true);
+  };
+
+  const openEditEditor = (addon: AddonItem) => {
+    setEditingAddon(addon);
+    setDraft(toDraft(addon, propertyCurrency));
+    setItemError(null);
+    setIsEditorOpen(true);
+  };
+
+  const closeEditor = () => {
+    if (savingItem) return;
+    setIsEditorOpen(false);
+    setEditingAddon(null);
+    setItemError(null);
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = draft.name.trim();
+    const price = Number(draft.price);
+    if (!name) {
+      setItemError("Name is required.");
+      return;
+    }
+    if (!Number.isFinite(price) || price < 0) {
+      setItemError("Price must be a non-negative amount.");
+      return;
+    }
+
+    setSavingItem(true);
+    setItemError(null);
+    const normalized = {
+      ...draft,
+      name,
+      description: draft.description.trim(),
+      price: price.toFixed(2),
+      currency: draft.currency.trim().toUpperCase(),
+      image: draft.image.trim(),
+      duration: draft.duration.trim(),
+    };
+
+    try {
+      if (editingAddon) {
+        await onUpdateAddon(editingAddon.id, normalized);
+      } else {
+        await onCreateAddon(normalized);
+      }
+      closeEditor();
+    } catch {
+      setItemError("Failed to save add-on.");
+    } finally {
+      setSavingItem(false);
+    }
+  };
+
+  const handleDelete = async (addon: AddonItem) => {
+    if (!window.confirm(`Delete ${addon.name}?`)) return;
+    setDeletingAddonId(addon.id);
+    setItemError(null);
+    try {
+      await onDeleteAddon(addon.id);
+    } catch {
+      setItemError("Failed to delete add-on.");
+    } finally {
+      setDeletingAddonId(null);
+    }
+  };
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -61,18 +194,19 @@ export default function AddonsTab({
             </p>
           </div>
           <button
-            disabled
-            aria-label={itemManagementUnavailable}
-            className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-200 text-gray-500 text-[12px] font-medium rounded-lg cursor-not-allowed"
+            onClick={openCreateEditor}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-900 text-white text-[12px] font-medium rounded-lg hover:bg-gray-800"
           >
             <PlusIcon className="w-3.5 h-3.5" />
             Add Experience
           </button>
         </div>
 
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-          {itemManagementUnavailable}
-        </div>
+        {itemError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+            {itemError}
+          </div>
+        )}
 
         {/* Category filter pills */}
         {categories.length > 1 && (
@@ -165,16 +299,17 @@ export default function AddonsTab({
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    disabled
-                    aria-label={itemManagementUnavailable}
-                    className="p-1.5 text-gray-300 rounded-md cursor-not-allowed"
+                    onClick={() => openEditEditor(addon)}
+                    aria-label={`Edit ${addon.name}`}
+                    className="p-1.5 text-gray-500 hover:text-gray-900 rounded-md hover:bg-gray-100"
                   >
                     <PencilSquareIcon className="w-4 h-4" />
                   </button>
                   <button
-                    disabled
-                    aria-label={itemManagementUnavailable}
-                    className="p-1.5 text-gray-300 rounded-md cursor-not-allowed"
+                    onClick={() => handleDelete(addon)}
+                    disabled={deletingAddonId === addon.id}
+                    aria-label={`Delete ${addon.name}`}
+                    className="p-1.5 text-gray-500 hover:text-red-600 rounded-md hover:bg-red-50 disabled:opacity-50"
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>
@@ -209,6 +344,166 @@ export default function AddonsTab({
           />
         </div>
       </div>
+
+      {isEditorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <form
+            onSubmit={handleSubmit}
+            className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl space-y-4"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-[15px] font-semibold text-gray-900">
+                  {editingAddon ? "Edit Add-on" : "Create Add-on"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditor}
+                className="text-[12px] font-medium text-gray-500 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+            </div>
+
+            {itemError && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">
+                {itemError}
+              </div>
+            )}
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="sm:col-span-2 text-[12px] font-medium text-gray-700">
+                Name
+                <input
+                  value={draft.name}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, name: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-900"
+                  placeholder="Airport transfer"
+                />
+              </label>
+              <label className="sm:col-span-2 text-[12px] font-medium text-gray-700">
+                Description
+                <textarea
+                  value={draft.description}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, description: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-900"
+                  rows={3}
+                />
+              </label>
+              <label className="text-[12px] font-medium text-gray-700">
+                Price
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.price}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, price: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-900"
+                />
+              </label>
+              <label className="text-[12px] font-medium text-gray-700">
+                Currency
+                <input
+                  value={draft.currency}
+                  maxLength={3}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, currency: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] uppercase text-gray-900 outline-none focus:border-gray-900"
+                />
+              </label>
+              <label className="text-[12px] font-medium text-gray-700">
+                Category
+                <select
+                  value={draft.category}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      category: event.target.value as AddonItemCategory,
+                    }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-900"
+                >
+                  {CATEGORY_OPTIONS.map((category) => (
+                    <option key={category} value={category}>
+                      {category.charAt(0).toUpperCase() + category.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-[12px] font-medium text-gray-700">
+                Duration
+                <input
+                  value={draft.duration}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, duration: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-900"
+                  placeholder="45 min"
+                />
+              </label>
+              <label className="sm:col-span-2 text-[12px] font-medium text-gray-700">
+                Image URL
+                <input
+                  value={draft.image}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, image: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-900"
+                  placeholder="https://"
+                />
+              </label>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-[12px] text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={draft.perPerson}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, perPerson: event.target.checked }))
+                  }
+                />
+                Per person
+              </label>
+              <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-[12px] text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={draft.perNight}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, perNight: event.target.checked }))
+                  }
+                />
+                Per night
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeEditor}
+                className="px-3 py-2 text-[12px] font-medium text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingItem}
+                className="rounded-lg bg-gray-900 px-3 py-2 text-[12px] font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                {savingItem ? "Saving..." : editingAddon ? "Save Changes" : "Create Add-on"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

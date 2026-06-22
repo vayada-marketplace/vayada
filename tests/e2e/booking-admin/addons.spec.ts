@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import {
+  BOOKING_ADMIN_ADDON_ITEMS_PATH,
   BOOKING_ADMIN_ADDON_SETTINGS_PATH,
+  BOOKING_ADMIN_HOTEL_ID,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
@@ -23,7 +25,86 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await mockBookingAdminBookingFlow(page);
 
     const contractRequests: string[] = [];
+    const itemContractRequests: Array<{ method: string; pathname: string }> = [];
+    const typedItemWrites: Array<{ method: string; pathname: string; body?: unknown }> = [];
     const typedWrites: unknown[] = [];
+    let addonItems = [
+      {
+        addonItemId: "addon_airport_transfer",
+        hotelId: BOOKING_ADMIN_HOTEL_ID,
+        propertyId: "property_alpenrose",
+        name: "Airport transfer",
+        description: "Private pickup from the airport.",
+        price: "45.00",
+        currency: "EUR",
+        category: "transport",
+        imageUrl: null,
+        duration: "45 min",
+        pricingModel: "per_stay",
+        publicVisible: true,
+        status: "active",
+        sortOrder: 0,
+        createdAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      },
+    ];
+    await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, async (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      itemContractRequests.push({ method: request.method(), pathname });
+
+      if (request.method() === "POST") {
+        const body = request.postDataJSON();
+        const created = {
+          addonItemId: "addon_spa_ritual",
+          hotelId: BOOKING_ADMIN_HOTEL_ID,
+          propertyId: "property_alpenrose",
+          name: body.name,
+          description: body.description,
+          price: body.price,
+          currency: body.currency,
+          category: body.category,
+          imageUrl: body.imageUrl,
+          duration: body.duration,
+          pricingModel: body.pricingModel,
+          publicVisible: body.publicVisible,
+          status: body.status,
+          sortOrder: 1,
+          createdAt: "2026-06-01T10:05:00.000Z",
+          updatedAt: "2026-06-01T10:05:00.000Z",
+        };
+        typedItemWrites.push({ method: "POST", pathname, body });
+        addonItems = [...addonItems, created];
+        await route.fulfill({ status: 201, json: created });
+        return;
+      }
+
+      if (request.method() === "PATCH") {
+        const body = request.postDataJSON();
+        const addonItemId = pathname.split("/").pop();
+        const updatedAt = "2026-06-01T10:10:00.000Z";
+        const updated = addonItems
+          .filter((item) => item.addonItemId === addonItemId)
+          .map((item) => ({ ...item, ...body, updatedAt }))[0];
+        typedItemWrites.push({ method: "PATCH", pathname, body });
+        addonItems = addonItems.map((item) =>
+          item.addonItemId === addonItemId ? (updated ?? item) : item,
+        );
+        await route.fulfill({ json: updated });
+        return;
+      }
+
+      if (request.method() === "DELETE") {
+        const addonItemId = pathname.split("/").pop();
+        typedItemWrites.push({ method: "DELETE", pathname });
+        addonItems = addonItems.filter((item) => item.addonItemId !== addonItemId);
+        await route.fulfill({ status: 204 });
+        return;
+      }
+
+      expect(request.method()).toBe("GET");
+      await route.fulfill({ json: { addonItems } });
+    });
     await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, async (route) => {
       if (route.request().method() === "PUT") {
         const body = route.request().postDataJSON();
@@ -42,6 +123,26 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await page.goto("/booking-flow");
     await page.getByRole("button", { name: /^Add-ons$/ }).click();
 
+    await expect(page.getByText("Airport transfer")).toBeVisible();
+    await page.getByRole("button", { name: "Add Experience" }).click();
+    await page.getByLabel("Name").fill("Spa ritual");
+    await page.getByLabel("Description").fill("Private treatment.");
+    await page.getByLabel("Price").fill("125.50");
+    await page.getByLabel("Category").selectOption("wellness");
+    await page.getByLabel("Duration").fill("90 min");
+    await page.getByLabel("Per person").check();
+    await page.getByRole("button", { name: "Create Add-on" }).click();
+    await expect(page.getByText("Spa ritual")).toBeVisible();
+
+    await page.getByRole("button", { name: "Edit Spa ritual" }).click();
+    await page.getByLabel("Name").fill("Spa ritual deluxe");
+    await page.getByRole("button", { name: "Save Changes" }).click();
+    await expect(page.getByText("Spa ritual deluxe")).toBeVisible();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Delete Spa ritual deluxe" }).click();
+    await expect(page.getByText("Spa ritual deluxe")).not.toBeVisible();
+
     await expect(page.getByRole("heading", { name: "Display Settings" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Show Add-ons Step/ })).toBeVisible();
 
@@ -52,7 +153,50 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await expect.poll(() => typedWrites.length).toBe(1);
 
     expect(contractRequests.length).toBeGreaterThan(0);
+    expect(itemContractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_ADDON_SETTINGS_PATH);
+    expect(itemContractRequests[0]).toEqual({
+      method: "GET",
+      pathname: BOOKING_ADMIN_ADDON_ITEMS_PATH,
+    });
+    expect(typedItemWrites).toEqual([
+      {
+        method: "POST",
+        pathname: BOOKING_ADMIN_ADDON_ITEMS_PATH,
+        body: {
+          name: "Spa ritual",
+          description: "Private treatment.",
+          price: "125.50",
+          currency: "EUR",
+          category: "wellness",
+          imageUrl: null,
+          duration: "90 min",
+          pricingModel: "per_guest",
+          publicVisible: true,
+          status: "active",
+        },
+      },
+      {
+        method: "PATCH",
+        pathname: `${BOOKING_ADMIN_ADDON_ITEMS_PATH}/addon_spa_ritual`,
+        body: {
+          name: "Spa ritual deluxe",
+          description: "Private treatment.",
+          price: "125.50",
+          currency: "EUR",
+          category: "wellness",
+          imageUrl: null,
+          duration: "90 min",
+          pricingModel: "per_guest",
+          publicVisible: true,
+          status: "active",
+        },
+      },
+      {
+        method: "DELETE",
+        pathname: `${BOOKING_ADMIN_ADDON_ITEMS_PATH}/addon_spa_ritual`,
+      },
+    ]);
     expect(typedWrites).toEqual([{ showAddonsStep: true, groupAddonsByCategory: true }]);
 
     await assertNoLegacyCalls();
