@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   BOOKING_ADMIN_HOTEL_SLUG,
+  BOOKING_ADMIN_ROOMS_PATH,
   BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
@@ -51,6 +52,16 @@ test.describe("booking-admin room-filter settings cutover", () => {
           { id: "room-suite", name: "Alpine Suite" },
           { id: "room-deluxe", name: "Deluxe Room" },
         ],
+      }),
+    );
+    await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}`, (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            { roomId: "room-suite", roomNumber: "Alpine Suite" },
+            { roomId: "room-deluxe", roomNumber: "Deluxe Room" },
+          ],
+        },
       }),
     );
 

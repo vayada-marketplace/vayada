@@ -1,4 +1,4 @@
-import { apiClient, type ApiClient } from "./client";
+import { apiClient, omitHotelContext, type ApiClient } from "./client";
 import {
   toBookingSettingsClientErrorInput,
   type BookingSettingsClientErrorCategory,
@@ -86,7 +86,10 @@ export async function getBookingGuestFormSettings(
   client: BookingGuestFormSettingsReadApiClient = apiClient,
 ): Promise<BookingGuestFormSettings> {
   try {
-    return await client.get<BookingGuestFormSettings>(buildBookingGuestFormSettingsEndpoint(input));
+    return await client.get<BookingGuestFormSettings>(
+      buildBookingGuestFormSettingsEndpoint(input),
+      omitHotelContext,
+    );
   } catch (error) {
     throw toBookingGuestFormSettingsClientError(error);
   }
@@ -100,6 +103,7 @@ export async function updateBookingGuestFormSettings(
     return await client.put<BookingGuestFormSettings>(
       buildBookingGuestFormSettingsEndpoint(input),
       input.body,
+      omitHotelContext,
     );
   } catch (error) {
     throw toBookingGuestFormSettingsClientError(error, "write");
