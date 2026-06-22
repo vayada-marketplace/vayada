@@ -13,7 +13,7 @@ import ColorsTab from "@/components/design-studio/ColorsTab";
 import FontsTab from "@/components/design-studio/FontsTab";
 
 const GOOGLE_FONTS_URL =
-  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;600;700&display=swap";
+  "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
 
 type Tab = "media" | "colors" | "fonts";
 
@@ -158,7 +158,7 @@ export default function DesignStudioPage() {
 
   return (
     <div className="p-4 md:p-6 pb-24 lg:pb-6 lg:h-full flex flex-col">
-      { }
+      {}
       <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
       <div className="shrink-0 flex items-start justify-between gap-3">
         <div className="min-w-0">

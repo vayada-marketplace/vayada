@@ -38,6 +38,8 @@ export interface PropertySettings {
   special_requests_enabled?: boolean;
   arrival_time_enabled?: boolean;
   guest_count_enabled?: boolean;
+  guest_adult_age_threshold?: number;
+  guest_children_enabled?: boolean;
   refer_a_guest_enabled?: boolean;
   map_view_enabled?: boolean;
   free_cancellation_days: number;
@@ -254,6 +256,9 @@ export const settingsService = {
     apiClient.patch<AddonItem>(`/admin/addons/${id}`, data),
 
   deleteAddon: (id: string) => apiClient.delete(`/admin/addons/${id}`),
+
+  reorderAddons: (orderedAddonIds: string[]) =>
+    apiClient.patch<void>("/admin/addons/reorder", { orderedAddonIds }),
 
   getAddonSettings: () => apiClient.get<AddonSettings>("/admin/settings/addons"),
 

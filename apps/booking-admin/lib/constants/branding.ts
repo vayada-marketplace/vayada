@@ -40,4 +40,13 @@ export const FONT_PAIRINGS = [
     headingFamily: "'Cinzel', serif",
     bodyFamily: "'Source Sans Pro', sans-serif",
   },
+  {
+    id: "italiana",
+    name: "Italiana",
+    fonts: "Italiana + Source Sans Pro",
+    preview: "Refined & Graceful",
+    headingFamily: "'Italiana', serif",
+    bodyFamily: "'Source Sans Pro', sans-serif",
+    googleFamilies: ["Italiana", "Source+Sans+Pro:wght@300;400;600;700"],
+  },
 ];

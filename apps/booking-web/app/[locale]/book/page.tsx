@@ -61,15 +61,15 @@ function BookPageContent() {
     searchParams.get("checkIn") || "2026-02-13",
     searchParams.get("checkOut") || "2026-02-18",
   );
+  const childrenEnabled = hotel.guestChildrenEnabled !== false;
+  const adultsParam = parseInt(searchParams.get("adults") || "2");
+  const rawChildrenParam = parseInt(searchParams.get("children") || "0");
+  const childrenParam = childrenEnabled ? rawChildrenParam : 0;
 
   // Ensure rooms have date-resolved rates (in case of direct navigation)
   useEffect(() => {
-    const a = parseInt(searchParams.get("adults") || "2");
-    const c = parseInt(searchParams.get("children") || "0");
-    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, a, c);
+    if (checkIn && checkOut) refetchRooms(checkIn, checkOut, adultsParam, childrenParam);
   }, []);
-  const adultsParam = parseInt(searchParams.get("adults") || "2");
-  const childrenParam = parseInt(searchParams.get("children") || "0");
   const roomsParam = parseInt(searchParams.get("rooms") || "1");
   const rateType = searchParams.get("rateType") || "flexible";
 

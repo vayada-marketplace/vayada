@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.dependencies import require_current_hotel
 from app.models.addon import (
+    AddonReorderRequest,
     AddonResponse,
     AddonSettingsResponse,
     AddonSettingsUpdate,
@@ -64,6 +65,29 @@ async def create_addon(
         included_items=data.included_items,
     )
     return _addon_to_response(row)
+
+
+@router.patch("/addons/reorder", status_code=status.HTTP_204_NO_CONTENT)
+async def reorder_addons(
+    data: AddonReorderRequest,
+    hotel: dict = Depends(require_current_hotel),
+):
+    hotel_id = str(hotel["id"])
+    ordered_ids = data.ordered_addon_ids
+    if not ordered_ids:
+        raise HTTPException(status_code=400, detail="orderedAddonIds must not be empty")
+    if len(set(ordered_ids)) != len(ordered_ids):
+        raise HTTPException(status_code=400, detail="orderedAddonIds contains duplicates")
+
+    existing_ids = [
+        str(row["id"]) for row in await BookingAddonRepository.list_by_hotel_id(hotel_id)
+    ]
+    if set(ordered_ids) != set(existing_ids):
+        raise HTTPException(
+            status_code=400, detail="orderedAddonIds must include every add-on once"
+        )
+
+    await BookingAddonRepository.bulk_set_sort_order(hotel_id, ordered_ids)
 
 
 @router.patch("/addons/{addon_id}", response_model=AddonResponse)

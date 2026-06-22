@@ -142,6 +142,29 @@ class TestPropertySettings:
         # Other fields should remain unchanged
         assert body["reservation_email"] == "hotel@test.com"
 
+    async def test_guest_type_settings_round_trip(self, client, hotel_with_property):
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        resp = await client.patch(
+            "/admin/settings/property",
+            json={
+                "guest_adult_age_threshold": 16,
+                "guest_children_enabled": False,
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["guest_adult_age_threshold"] == 16
+        assert body["guest_children_enabled"] is False
+
+        get_resp = await client.get("/admin/settings/property", headers=headers)
+        assert get_resp.status_code == 200
+        get_body = get_resp.json()
+        assert get_body["guest_adult_age_threshold"] == 16
+        assert get_body["guest_children_enabled"] is False
+
     async def test_rename_rotates_slug_and_records_history(self, client, hotel_with_property):
         """VAY-394: renaming a property rewrites its slug to match the new name
         and appends the previous slug to previous_slugs so confirmation-email

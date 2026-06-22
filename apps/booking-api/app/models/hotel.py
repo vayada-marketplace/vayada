@@ -70,6 +70,8 @@ class HotelResponse(BaseModel):
     default_language: str = "en"
     supported_languages: list[str] = ["en"]
     refer_a_guest_enabled: bool = False
+    guest_adult_age_threshold: int = 18
+    guest_children_enabled: bool = True
     instant_book: bool = False
     map_view_enabled: bool = False
     show_room_detail_map: bool = False

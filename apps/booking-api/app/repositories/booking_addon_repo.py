@@ -42,14 +42,20 @@ class BookingAddonRepository:
         highlights: list[str] | None = None,
         included_items: list[str] | None = None,
     ) -> dict:
-        query = """
-            INSERT INTO booking_addons
-                (hotel_id, name, description, price, currency, category, image, duration, per_person, per_night, location, max_guests, highlights, included_items)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            RETURNING *
-        """
         row = await Database.fetchrow(
-            query,
+            """
+            INSERT INTO booking_addons
+                (
+                    hotel_id, name, description, price, currency, category, image, duration,
+                    per_person, per_night, location, max_guests, highlights, included_items,
+                    sort_order
+                )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+                (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM booking_addons WHERE hotel_id = $1)
+            )
+            RETURNING *
+            """,
             hotel_id,
             name,
             description,
@@ -66,6 +72,26 @@ class BookingAddonRepository:
             json.dumps(included_items or []),
         )
         return dict(row)
+
+    @staticmethod
+    async def bulk_set_sort_order(hotel_id: str, ordered_ids: list[str]) -> None:
+        if not ordered_ids:
+            return
+        sort_orders = list(range(1, len(ordered_ids) + 1))
+        await Database.execute(
+            """
+            UPDATE booking_addons AS a
+            SET sort_order = v.sort_order,
+                updated_at = now()
+            FROM (
+                SELECT UNNEST($2::uuid[]) AS id, UNNEST($3::int[]) AS sort_order
+            ) AS v
+            WHERE a.id = v.id AND a.hotel_id = $1
+            """,
+            hotel_id,
+            ordered_ids,
+            sort_orders,
+        )
 
     @staticmethod
     async def update(addon_id: str, hotel_id: str, updates: dict) -> dict | None:

@@ -55,6 +55,8 @@ export interface Hotel {
   defaultLanguage: string;
   supportedLanguages: string[];
   referAGuestEnabled?: boolean;
+  guestAdultAgeThreshold?: number;
+  guestChildrenEnabled?: boolean;
   instantBook?: boolean;
   mapViewEnabled?: boolean;
   showRoomDetailMap?: boolean;

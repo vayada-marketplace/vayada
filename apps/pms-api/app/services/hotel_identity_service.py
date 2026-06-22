@@ -9,6 +9,7 @@ endpoints can degrade gracefully; writes propagate exceptions so admin
 endpoints can return 502.
 """
 
+import json
 import logging
 
 from app.config import settings as app_settings
@@ -28,6 +29,17 @@ _PAYMENT_FLAG_COLUMNS = {
 
 def _is_configured() -> bool:
     return bool(app_settings.BOOKING_ENGINE_DATABASE_URL)
+
+
+def _parse_json(value, default):
+    if value is None:
+        return default
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return default
+    return value
 
 
 # ── Reads (lenient — log + None on failure) ──────────────────────────
@@ -119,6 +131,27 @@ async def get_guest_payment_info_by_slug(slug: str) -> dict | None:
         logger.warning("booking_db pay-at-hotel lookup failed for slug %s: %s", slug, e)
         return None
     return dict(row) if row else None
+
+
+async def get_benefits(hotel_id: str) -> list[str] | None:
+    """Read authoritative Book Direct Benefits from booking_db.
+
+    ``None`` means booking_db is not configured locally, so callers can use
+    their legacy PMS fallback. A configured booking_db error/missing row returns
+    an empty list to avoid showing stale PMS benefits to guests.
+    """
+    if not _is_configured():
+        return None
+    try:
+        raw = await BookingEngineDatabase.fetchval(
+            "SELECT benefits FROM booking_hotels WHERE id = $1",
+            hotel_id,
+        )
+    except Exception as e:
+        logger.warning("booking_db benefits lookup failed for hotel %s: %s", hotel_id, e)
+        return []
+    parsed = _parse_json(raw, [])
+    return parsed if isinstance(parsed, list) else []
 
 
 async def list_addons(hotel_id: str) -> list[dict]:

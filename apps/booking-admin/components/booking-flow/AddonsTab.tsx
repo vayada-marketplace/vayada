@@ -38,6 +38,30 @@ interface AddonsTabProps {
   openEditModal: (addon: AddonItem) => void;
   handleDeleteAddon: (id: string) => void;
   handleToggleAddonSetting: (key: keyof AddonSettings) => void;
+  onReorderAddons?: (orderedIds: string[]) => Promise<void> | void;
+}
+
+function buildReorderedIds(
+  addons: AddonItem[],
+  visibleAddons: AddonItem[],
+  draggedId: string,
+  targetId: string,
+  filterCategory: string,
+) {
+  const from = visibleAddons.findIndex((addon) => addon.id === draggedId);
+  const to = visibleAddons.findIndex((addon) => addon.id === targetId);
+  if (from === -1 || to === -1 || from === to) return addons.map((addon) => addon.id);
+
+  const nextVisible = [...visibleAddons];
+  const [moved] = nextVisible.splice(from, 1);
+  nextVisible.splice(to, 0, moved);
+  if (filterCategory === "all") return nextVisible.map((addon) => addon.id);
+
+  const visibleIds = new Set(visibleAddons.map((addon) => addon.id));
+  let visibleIndex = 0;
+  return addons.map((addon) =>
+    visibleIds.has(addon.id) ? nextVisible[visibleIndex++].id : addon.id,
+  );
 }
 
 export default function AddonsTab({
@@ -49,11 +73,28 @@ export default function AddonsTab({
   openEditModal,
   handleDeleteAddon,
   handleToggleAddonSetting,
+  onReorderAddons,
 }: AddonsTabProps) {
   const [filterCategory, setFilterCategory] = useState("all");
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
   const categories = Array.from(new Set(addons.map((a) => a.category).filter(Boolean)));
   const filteredAddons =
     filterCategory === "all" ? addons : addons.filter((a) => a.category === filterCategory);
+
+  const handleDropOnAddon = (targetId: string) => {
+    if (!draggingId || !onReorderAddons) return;
+    const orderedIds = buildReorderedIds(
+      addons,
+      filteredAddons,
+      draggingId,
+      targetId,
+      filterCategory,
+    );
+    setDraggingId(null);
+    setDragOverId(null);
+    void onReorderAddons(orderedIds);
+  };
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -112,10 +153,39 @@ export default function AddonsTab({
             {filteredAddons.map((addon) => (
               <div
                 key={addon.id}
-                className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors"
+                draggable={!!onReorderAddons}
+                onDragStart={(e) => {
+                  setDraggingId(addon.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", addon.id);
+                }}
+                onDragOver={(e) => {
+                  if (draggingId && draggingId !== addon.id) {
+                    e.preventDefault();
+                    setDragOverId(addon.id);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dragOverId === addon.id) setDragOverId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDropOnAddon(addon.id);
+                }}
+                onDragEnd={() => {
+                  setDraggingId(null);
+                  setDragOverId(null);
+                }}
+                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                  draggingId === addon.id
+                    ? "border-primary-300 bg-primary-50/40 opacity-70"
+                    : dragOverId === addon.id
+                      ? "border-primary-400 bg-primary-50 shadow-sm"
+                      : "border-gray-200 hover:border-gray-300"
+                }`}
               >
                 {/* Drag handle icon */}
-                <div className="text-gray-300 shrink-0">
+                <div className="text-gray-300 shrink-0 cursor-grab active:cursor-grabbing">
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="9" cy="6" r="1.5" />
                     <circle cx="15" cy="6" r="1.5" />

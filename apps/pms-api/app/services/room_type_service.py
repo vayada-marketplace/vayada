@@ -6,6 +6,7 @@ from app.database import Database
 from app.models.room_type import RoomTypeResponse
 from app.repositories.hotel_repo import HotelRepository
 from app.repositories.room_type_repo import RoomTypeRepository
+from app.services import hotel_identity_service
 from app.services.availability_service import remaining_for_stay
 from app.services.calendar_auto_open_service import is_stay_sellable
 from app.services.occupancy import room_allows_guest_mix
@@ -68,7 +69,11 @@ async def get_rooms_for_guest(
         "FROM hotels WHERE id = $1",
         hotel_id,
     )
-    hotel_benefits = parse_jsonb(hotel_row["benefits"]) if hotel_row else []
+    pms_benefits = parse_jsonb(hotel_row["benefits"]) if hotel_row else []
+    booking_engine_benefits = await hotel_identity_service.get_benefits(hotel_id)
+    hotel_benefits = (
+        booking_engine_benefits if booking_engine_benefits is not None else pms_benefits
+    )
     hotel_lm_config = None
     if hotel_row and hotel_row.get("last_minute_discount"):
         raw = hotel_row["last_minute_discount"]

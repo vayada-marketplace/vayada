@@ -58,6 +58,12 @@ class UpdateAddonRequest(BaseModel):
     included_items: list[str] | None = None
 
 
+class AddonReorderRequest(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    ordered_addon_ids: list[str]
+
+
 class AddonSettingsResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
