@@ -32,22 +32,16 @@ function AddonsIcon({ className }: { className?: string }) {
 interface AddonsTabProps {
   addons: AddonItem[];
   addonSettings: AddonSettings;
-  deletingId: string | null;
   propertyCurrency: string;
-  openCreateModal: () => void;
-  openEditModal: (addon: AddonItem) => void;
-  handleDeleteAddon: (id: string) => void;
+  itemManagementUnavailable: string;
   handleToggleAddonSetting: (key: keyof AddonSettings) => void;
 }
 
 export default function AddonsTab({
   addons,
   addonSettings,
-  deletingId,
   propertyCurrency,
-  openCreateModal,
-  openEditModal,
-  handleDeleteAddon,
+  itemManagementUnavailable,
   handleToggleAddonSetting,
 }: AddonsTabProps) {
   const [filterCategory, setFilterCategory] = useState("all");
@@ -67,12 +61,17 @@ export default function AddonsTab({
             </p>
           </div>
           <button
-            onClick={openCreateModal}
-            className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 transition-colors"
+            disabled
+            aria-label={itemManagementUnavailable}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-200 text-gray-500 text-[12px] font-medium rounded-lg cursor-not-allowed"
           >
             <PlusIcon className="w-3.5 h-3.5" />
             Add Experience
           </button>
+        </div>
+
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          {itemManagementUnavailable}
         </div>
 
         {/* Category filter pills */}
@@ -166,15 +165,16 @@ export default function AddonsTab({
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={() => openEditModal(addon)}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                    disabled
+                    aria-label={itemManagementUnavailable}
+                    className="p-1.5 text-gray-300 rounded-md cursor-not-allowed"
                   >
                     <PencilSquareIcon className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleDeleteAddon(addon.id)}
-                    disabled={deletingId === addon.id}
-                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
+                    disabled
+                    aria-label={itemManagementUnavailable}
+                    className="p-1.5 text-gray-300 rounded-md cursor-not-allowed"
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>

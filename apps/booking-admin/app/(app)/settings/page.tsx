@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { apiClient } from "@/services/api/client";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
@@ -23,7 +23,6 @@ import {
 } from "@heroicons/react/24/outline";
 import {
   settingsService,
-  customDomainService,
   type PropertySettings,
   type CustomDomainStatus,
 } from "@/services/settings";
@@ -70,6 +69,9 @@ type PmsPaymentSettingsResponse = {
 };
 
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
+const CUSTOM_DOMAIN_UNAVAILABLE = "Custom domain management is not available on next-api yet.";
+const PROPERTY_MAP_CENTERING_UNAVAILABLE =
+  "Automatic property map centering is not available on next-api yet.";
 
 const hasValidCoordinatePair = (latitude: number, longitude: number) =>
   Number.isFinite(latitude) &&
@@ -155,13 +157,15 @@ export default function SettingsPage() {
 
   // Custom domain
   const [domainInput, setDomainInput] = useState("");
-  const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null);
-  const [domainLoading, setDomainLoading] = useState(false);
+  const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>({
+    configured: false,
+    verification_errors: [CUSTOM_DOMAIN_UNAVAILABLE],
+  });
 
   // Stripe Connect / Payments
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [stripeOnboarded, setStripeOnboarded] = useState(false);
-  const [connectEmail, setConnectEmail] = useState(() =>
+  const [connectEmail] = useState(() =>
     typeof window !== "undefined" ? localStorage.getItem("userEmail") || "" : "",
   );
   const [connectCountry, setConnectCountry] = useState("AT");
@@ -174,12 +178,6 @@ export default function SettingsPage() {
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
-  const [propertyCoordinate, setPropertyCoordinate] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
-  const [propertyCoordinateLoaded, setPropertyCoordinateLoaded] = useState(false);
-  const propertyCoordinateLoadingRef = useRef(false);
 
   const handleChangeEmail = async () => {
     try {
@@ -240,10 +238,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const propertyPromise = fetchSettings();
-    customDomainService
-      .getStatus()
-      .then(setDomainStatus)
-      .catch(() => {});
     propertyPromise
       .then((property) => {
         if (!property?.id) return null;
@@ -401,19 +395,17 @@ export default function SettingsPage() {
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `poi-${Date.now()}`;
-    const defaultCoord = propertyCoordinate ?? { latitude: NaN, longitude: NaN };
     const newPoi = {
       id,
       label: "",
       travelTime: "",
       color,
-      latitude: defaultCoord.latitude,
-      longitude: defaultCoord.longitude,
+      latitude: NaN,
+      longitude: NaN,
       position: pois.length,
     };
     updatePois([...pois, newPoi]);
     setSelectedPoiId(id);
-    loadPropertyCoordinate();
   };
 
   const patchPoi = (
@@ -442,82 +434,17 @@ export default function SettingsPage() {
   };
 
   const handleConnectDomain = async () => {
-    if (!domainInput.trim()) return;
-    setDomainLoading(true);
-    setFeedback(null);
-    try {
-      const connectedDomain = domainInput.trim().toLowerCase();
-      const result = await customDomainService.connect(connectedDomain);
-      setDomainStatus({
-        configured: true,
-        domain: result.domain || connectedDomain,
-        status: result.status,
-        ssl_status: result.ssl_status,
-      });
-      setDomainInput("");
-      setFeedback({ type: "success", message: t("settings.feedback.domainConnected") });
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : t("settings.feedback.domainConnectError");
-      setFeedback({ type: "error", message });
-    } finally {
-      setDomainLoading(false);
-    }
+    setFeedback({ type: "error", message: CUSTOM_DOMAIN_UNAVAILABLE });
   };
 
   const handleDisconnectDomain = async () => {
-    setDomainLoading(true);
-    setFeedback(null);
-    try {
-      await customDomainService.disconnect();
-      setDomainStatus({ configured: false });
-      setFeedback({ type: "success", message: t("settings.feedback.domainRemoved") });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t("settings.feedback.domainRemoveError");
-      setFeedback({ type: "error", message });
-    } finally {
-      setDomainLoading(false);
-    }
+    setFeedback({ type: "error", message: CUSTOM_DOMAIN_UNAVAILABLE });
   };
 
   const handleRefreshDomainStatus = async () => {
-    try {
-      const status = await customDomainService.getStatus();
-      setDomainStatus(status);
-    } catch {}
+    setDomainStatus({ configured: false, verification_errors: [CUSTOM_DOMAIN_UNAVAILABLE] });
+    setFeedback({ type: "error", message: CUSTOM_DOMAIN_UNAVAILABLE });
   };
-
-  const loadPropertyCoordinate = useCallback(async () => {
-    if (propertyCoordinateLoaded || propertyCoordinateLoadingRef.current) return;
-    propertyCoordinateLoadingRef.current = true;
-    try {
-      const roomTypes =
-        await pmsClient.get<{ latitude: number | null; longitude: number | null }[]>(
-          "/admin/room-types",
-        );
-      const withCoords = roomTypes.filter(
-        (rt) =>
-          rt.latitude != null &&
-          rt.longitude != null &&
-          Number.isFinite(rt.latitude) &&
-          Number.isFinite(rt.longitude),
-      );
-      if (withCoords.length === 0) {
-        setPropertyCoordinateLoaded(true);
-        return;
-      }
-      const centroid = {
-        latitude: withCoords.reduce((s, rt) => s + rt.latitude!, 0) / withCoords.length,
-        longitude: withCoords.reduce((s, rt) => s + rt.longitude!, 0) / withCoords.length,
-      };
-      setPropertyCoordinate(centroid);
-      setPropertyCoordinateLoaded(true);
-    } catch {
-      // transient failure — leave propertyCoordinateLoaded false so next navigation retries
-    } finally {
-      propertyCoordinateLoadingRef.current = false;
-    }
-  }, [propertyCoordinateLoaded]);
 
   const sections: SettingsNavSection[] = [
     { id: "property", label: t("settings.tabs.property"), icon: BuildingOffice2Icon },
@@ -543,7 +470,6 @@ export default function SettingsPage() {
       activeId={activeSection}
       onSelect={(id) => {
         setActiveSection(id as Section);
-        if (id === "location") loadPropertyCoordinate();
       }}
     >
       {/* Feedback banner */}
@@ -863,12 +789,11 @@ export default function SettingsPage() {
 
                 <button
                   onClick={handleDisconnectDomain}
-                  disabled={domainLoading}
-                  className="px-4 py-2 text-[13px] font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                  disabled
+                  title={CUSTOM_DOMAIN_UNAVAILABLE}
+                  className="px-4 py-2 text-[13px] font-medium text-gray-500 border border-gray-300 rounded-lg cursor-not-allowed"
                 >
-                  {domainLoading
-                    ? t("settings.booking.removing")
-                    : t("settings.booking.removeDomain")}
+                  {t("settings.booking.removeDomain")}
                 </button>
               </div>
             ) : (
@@ -876,22 +801,25 @@ export default function SettingsPage() {
                 <p className="text-[13px] text-gray-500">
                   {t("settings.booking.customDomainDesc")}
                 </p>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                  {CUSTOM_DOMAIN_UNAVAILABLE}
+                </div>
                 <div className="flex gap-3">
                   <input
                     type="text"
                     value={domainInput}
                     onChange={(e) => setDomainInput(e.target.value)}
                     placeholder={t("settings.booking.customDomainPlaceholder")}
-                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    disabled
+                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] bg-gray-50 text-gray-500 cursor-not-allowed"
                   />
                   <button
                     onClick={handleConnectDomain}
-                    disabled={domainLoading || !domainInput.trim()}
-                    className="px-4 py-2 text-[13px] font-medium bg-primary-500 text-white rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+                    disabled
+                    title={CUSTOM_DOMAIN_UNAVAILABLE}
+                    className="px-4 py-2 text-[13px] font-medium bg-gray-200 text-gray-500 rounded-lg cursor-not-allowed"
                   >
-                    {domainLoading
-                      ? t("settings.booking.connecting")
-                      : t("settings.booking.connectDomain")}
+                    {t("settings.booking.connectDomain")}
                   </button>
                 </div>
               </div>
@@ -1086,15 +1014,14 @@ export default function SettingsPage() {
               </div>
 
               <div className="lg:sticky lg:top-5 lg:self-start space-y-2">
-                {propertyCoordinateLoaded && !propertyCoordinate && (
+                {(settings.points_of_interest || []).length === 0 && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                    Set a location on your room types in <strong>Rooms &amp; Rates</strong> so the
-                    map knows where to center.
+                    {PROPERTY_MAP_CENTERING_UNAVAILABLE}
                   </div>
                 )}
                 <LocationMapPreview
                   propertyName={settings.property_name}
-                  property={propertyCoordinate}
+                  property={null}
                   pois={(settings.points_of_interest || []).filter(
                     (poi) => Number.isFinite(poi.latitude) && Number.isFinite(poi.longitude),
                   )}

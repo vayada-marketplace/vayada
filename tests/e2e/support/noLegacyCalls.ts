@@ -21,6 +21,43 @@ const surfaceRules = {
       /^\/api\/booking\/hotels\/[^/]+\/settings\/benefits$/,
     ),
   ],
+  "booking-admin-booking-flow": [
+    legacyProductionHostRule(),
+    pathPrefixRule("/admin/addons", "legacy Booking Admin add-on item route"),
+    pathPrefixRule("/admin/promo-codes", "legacy Booking Admin promo-code route"),
+    pathRule("/admin/hotel", "legacy Booking Admin hotel settings route"),
+    pathRule("/admin/settings/addons", "legacy Booking Admin add-on settings route"),
+    pathRule("/admin/settings/design", "legacy Booking Admin design settings route"),
+    pathPrefixRule("/api/hotels/", "legacy public hotel helper route"),
+    headerOnPathPrefixRule(
+      "/api/booking/hotels/",
+      "x-hotel-id",
+      "legacy X-Hotel-Id routing header",
+    ),
+    headerOnPathPrefixRule(
+      "/api/pms/properties/",
+      "x-hotel-id",
+      "legacy X-Hotel-Id routing header",
+    ),
+  ],
+  "booking-admin-settings": [
+    legacyProductionHostRule(),
+    pathPrefixRule("/admin/settings/custom-domain", "legacy Booking Admin custom-domain route"),
+    pathRule("/admin/payment-settings", "legacy Booking Admin payment settings route"),
+    pathRule("/admin/room-types", "legacy Booking Admin room-types route"),
+    headerOnPathPrefixRule(
+      "/api/pms/properties/",
+      "x-hotel-id",
+      "legacy X-Hotel-Id routing header",
+    ),
+  ],
+  "booking-admin-setup": [
+    legacyProductionHostRule(),
+    pathPrefixRule("/admin/addons", "legacy Booking Admin add-on item route"),
+    pathPrefixRule("/admin/promo-codes", "legacy Booking Admin promo-code route"),
+    pathRule("/admin/hotel", "legacy Booking Admin hotel settings route"),
+    pathRule("/admin/payment-settings", "legacy Booking Admin payment settings route"),
+  ],
 } satisfies Record<string, LegacyCallRule[]>;
 
 export type NoLegacyCallSurface = keyof typeof surfaceRules;
@@ -68,13 +105,35 @@ function pathRule(pathname: string, name: string): LegacyCallRule {
   };
 }
 
+function pathPrefixRule(pathnamePrefix: string, name: string): LegacyCallRule {
+  return {
+    name,
+    matches: (_request, url) => url.pathname.startsWith(pathnamePrefix),
+  };
+}
+
 function headerRule(headerName: string, name: string, pathPattern?: RegExp): LegacyCallRule {
+  const normalizedHeaderName = headerName.toLowerCase();
   return {
     name,
     matches: (request) =>
       (!pathPattern || pathPattern.test(new URL(request.url()).pathname)) &&
       Object.entries(request.headers()).some(
-        ([candidate, value]) => candidate.toLowerCase() === headerName && value.trim().length > 0,
+        ([candidate, value]) =>
+          candidate.toLowerCase() === normalizedHeaderName && value.trim().length > 0,
       ),
+  };
+}
+
+function headerOnPathPrefixRule(
+  pathnamePrefix: string,
+  headerName: string,
+  name: string,
+): LegacyCallRule {
+  const header = headerRule(headerName, name);
+  return {
+    name,
+    matches: (request, url) =>
+      url.pathname.startsWith(pathnamePrefix) && header.matches(request, url),
   };
 }

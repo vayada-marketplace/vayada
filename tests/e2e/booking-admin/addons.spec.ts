@@ -3,6 +3,7 @@ import {
   BOOKING_ADMIN_ADDON_SETTINGS_PATH,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
+import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
@@ -17,6 +18,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
     );
 
     const assertHealthy = watchPageHealth(page, testInfo);
+    const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "booking-admin-booking-flow");
 
     await mockBookingAdminBookingFlow(page);
 
@@ -37,14 +39,6 @@ test.describe("booking-admin add-ons settings cutover", () => {
       });
     });
 
-    const legacyWrites: string[] = [];
-    await page.route("**/admin/settings/addons", async (route) => {
-      legacyWrites.push(route.request().postData() ?? "");
-      await route.fulfill({
-        json: { showAddonsStep: true, groupAddonsByCategory: true },
-      });
-    });
-
     await page.goto("/booking-flow");
     await page.getByRole("button", { name: /^Add-ons$/ }).click();
 
@@ -60,8 +54,8 @@ test.describe("booking-admin add-ons settings cutover", () => {
     expect(contractRequests.length).toBeGreaterThan(0);
     expect(new URL(contractRequests[0]!).pathname).toBe(BOOKING_ADMIN_ADDON_SETTINGS_PATH);
     expect(typedWrites).toEqual([{ showAddonsStep: true, groupAddonsByCategory: true }]);
-    expect(legacyWrites).toEqual([]);
 
+    await assertNoLegacyCalls();
     await assertHealthy();
   });
 });

@@ -19,7 +19,6 @@ import { CheckIcon } from "@heroicons/react/24/outline";
 import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
 import { getCurrencySymbol } from "@/lib/utils";
 
-import PmsStep from "@/components/setup/PmsStep";
 import {
   AddonsStep,
   BenefitsStep,
@@ -31,15 +30,18 @@ import {
   createEmptyRoom,
   hasSeasonCoverageGaps,
   useSetupWizardState,
-  type LastMinuteConfig,
-  type RoomTab,
-  type RoomType,
-  type SetupAddon,
 } from "@vayada/hotel-setup-wizard";
-import PromoCodesStep, { type SetupPromoCode } from "@/components/setup/PromoCodesStep";
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
+const ADDON_ITEM_MANAGEMENT_UNAVAILABLE =
+  "Add-on item management is not available on next-api yet. Remove setup add-ons before completing setup.";
+const PROMO_CODE_IMPORT_UNAVAILABLE =
+  "Setup promo codes from this invite were not imported because promo-code management is not available on next-api yet.";
+const PAYMENT_SETTINGS_WRITE_UNAVAILABLE =
+  "Payment settings writes are not available on next-api yet. Use the default pay-at-property setup options before completing setup.";
+const LAST_MINUTE_SETTINGS_UNAVAILABLE =
+  "Last-minute discount settings are not available on next-api yet. Remove last-minute discounts before completing setup.";
 
 const STEPS = [
   { number: 1, label: "Your Property" },
@@ -67,10 +69,7 @@ export default function SetupPage() {
   const [showWizard, setShowWizard] = useState(false);
 
   // Step 3: Choose PMS
-  const [selectedPms, setSelectedPms] = useState("vayada");
-
-  // Step 6: Promo Codes
-  const [setupPromoCodes, setSetupPromoCodes] = useState<SetupPromoCode[]>([]);
+  const [selectedPms] = useState("vayada");
 
   const {
     propertyName,
@@ -315,10 +314,30 @@ export default function SetupPage() {
     return false;
   };
 
+  const hasDefaultPaymentSetup = (): boolean =>
+    payAtHotel &&
+    payAtHotelMethods.length === 2 &&
+    payAtHotelMethods.includes("cash") &&
+    payAtHotelMethods.includes("card") &&
+    !onlineCardPayment &&
+    !bankTransfer &&
+    paymentProvider === "vayada";
+
   const handleComplete = async () => {
     setError("");
     setSaving(true);
     try {
+      const unavailableSelections = [
+        ...(setupAddons.length > 0 ? [ADDON_ITEM_MANAGEMENT_UNAVAILABLE] : []),
+        ...(!hasDefaultPaymentSetup() ? [PAYMENT_SETTINGS_WRITE_UNAVAILABLE] : []),
+        ...(lastMinuteConfig.enabled ? [LAST_MINUTE_SETTINGS_UNAVAILABLE] : []),
+      ];
+      if (unavailableSelections.length > 0) {
+        setError(unavailableSelections.join(" "));
+        setSaving(false);
+        return;
+      }
+
       // Clear any stale hotel selection so the explicit create below
       // doesn't accidentally carry an X-Hotel-Id header pointing at
       // some other hotel.
@@ -452,75 +471,6 @@ export default function SetupPage() {
 
         if (failedRooms.length > 0) {
           console.warn("Some rooms failed to create:", failedRooms);
-        }
-
-        // 5. Save payment settings
-        try {
-          await pmsClient.patch("/admin/payment-settings", {
-            payAtPropertyEnabled: payAtHotel,
-            onlineCardPayment: onlineCardPayment,
-            bankTransfer: bankTransfer,
-            paymentProvider: paymentProvider,
-            defaultCurrency: currency,
-            ...(paymentProvider === "xendit"
-              ? {
-                  xenditChannelCode,
-                  xenditAccountNumber,
-                  xenditAccountHolderName,
-                }
-              : {}),
-          });
-        } catch {
-          // Non-fatal
-        }
-
-        // 5b. Save last-minute discount config on the hotel. Persist disabled
-        // too, otherwise a stale enabled config can continue discounting rooms.
-        try {
-          await pmsClient.patch("/admin/hotel", {
-            last_minute_discount: lastMinuteConfig,
-          });
-        } catch (err) {
-          console.error("Failed to persist last-minute discount config:", err);
-          throw new Error(
-            "Last-minute discount settings could not be saved. Please try again before completing setup.",
-          );
-        }
-      }
-
-      // 6. Create add-ons
-      for (const addon of setupAddons) {
-        try {
-          await settingsService.createAddon({
-            name: addon.name,
-            description: addon.description,
-            price: addon.price,
-            currency: addon.currency,
-            category: addon.category,
-            image: addon.image,
-            duration: addon.duration || undefined,
-            perPerson: addon.perPerson,
-            perNight: addon.perNight,
-          });
-        } catch {
-          // Non-fatal: addons can be added later from Booking Flow settings
-        }
-      }
-
-      // 7. Create promo codes
-      for (const promo of setupPromoCodes) {
-        try {
-          await settingsService.createPromoCode({
-            code: promo.code,
-            discountType: promo.discountType,
-            discountValue: promo.discountValue,
-            validFrom: promo.validFrom,
-            validUntil: promo.validUntil,
-            isActive: promo.isActive,
-            maxUses: promo.maxUses,
-          });
-        } catch {
-          // Non-fatal: promo codes can be added later from Booking Flow settings
         }
       }
 
@@ -714,20 +664,8 @@ export default function SetupPage() {
         );
       }
 
-      // Prefill promo codes
       if (data.promoCodes && data.promoCodes.length > 0) {
-        setSetupPromoCodes(
-          data.promoCodes.map((p: any) => ({
-            _localId: crypto.randomUUID(),
-            code: p.code || "",
-            discountType: p.discountType || "percentage",
-            discountValue: p.discountValue || 0,
-            validFrom: p.validFrom || null,
-            validUntil: p.validUntil || null,
-            isActive: p.isActive !== undefined ? p.isActive : true,
-            maxUses: p.maxUses ?? null,
-          })),
-        );
+        setError(PROMO_CODE_IMPORT_UNAVAILABLE);
       }
 
       // Prefill benefits

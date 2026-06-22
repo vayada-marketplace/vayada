@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 import {
-  BOOKING_ADMIN_HOTEL_SLUG,
+  BOOKING_ADMIN_HOTEL_ID,
   BOOKING_ADMIN_ROOMS_PATH,
   BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH,
   mockBookingAdminBookingFlow,
 } from "../support/bookingAdminMocks";
+import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
 const PROD = process.env.E2E_BOOKING_ADMIN_PROD === "1";
@@ -19,6 +20,7 @@ test.describe("booking-admin room-filter settings cutover", () => {
     );
 
     const assertHealthy = watchPageHealth(page, testInfo);
+    const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "booking-admin-booking-flow");
 
     await mockBookingAdminBookingFlow(page);
 
@@ -46,44 +48,19 @@ test.describe("booking-admin room-filter settings cutover", () => {
       });
     });
 
-    await page.route(`**/api/hotels/${BOOKING_ADMIN_HOTEL_SLUG}/rooms`, (route) =>
-      route.fulfill({
-        json: [
-          { id: "room-suite", name: "Alpine Suite" },
-          { id: "room-deluxe", name: "Deluxe Room" },
-        ],
-      }),
-    );
-    await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}`, (route) =>
+    await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}*`, (route) =>
       route.fulfill({
         json: {
+          contractVersion: "pms-operations.v1",
+          propertyId: BOOKING_ADMIN_HOTEL_ID,
           items: [
             { roomId: "room-suite", roomNumber: "Alpine Suite" },
             { roomId: "room-deluxe", roomNumber: "Deluxe Room" },
           ],
+          sourceFreshness: {},
         },
       }),
     );
-
-    const legacyWrites: unknown[] = [];
-    await page.route("**/admin/settings/design", async (route) => {
-      if (route.request().method() === "PATCH") {
-        legacyWrites.push(route.request().postDataJSON());
-      }
-
-      await route.fulfill({
-        json: {
-          hero_image: "",
-          hero_heading: "",
-          hero_subtext: "",
-          primary_color: "",
-          font_pairing: "",
-          booking_filters: [],
-          custom_filters: {},
-          filter_rooms: {},
-        },
-      });
-    });
 
     await page.goto("/booking-flow");
 
@@ -109,8 +86,8 @@ test.describe("booking-admin room-filter settings cutover", () => {
         },
       },
     ]);
-    expect(legacyWrites).toEqual([]);
 
+    await assertNoLegacyCalls();
     await assertHealthy();
   });
 });
