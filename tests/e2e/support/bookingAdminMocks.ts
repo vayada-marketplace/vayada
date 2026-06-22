@@ -7,6 +7,7 @@ export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKI
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
 export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
+export const BOOKING_ADMIN_PMS_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -140,27 +141,18 @@ export async function mockBookingAdminShellRoutes(
     }),
   );
   await page.route("**/admin/superadmin/hotels", (route) => route.fulfill({ json: [] }));
-  await page.route("**/admin/addons", (route) => route.fulfill({ json: [] }));
-  await page.route("**/admin/settings/design", (route) =>
-    route.fulfill({
-      json: {
-        hero_image: "",
-        hero_heading: "",
-        hero_subtext: "",
-        primary_color: "",
-        font_pairing: "",
-        booking_filters: [],
-        custom_filters: {},
-        filter_rooms: {},
-      },
-    }),
-  );
   await page.route("**/admin/settings/property", (route) =>
     route.fulfill({ json: propertySettings }),
   );
-  await page.route("**/admin/promo-codes", (route) => route.fulfill({ json: [] }));
-  await page.route(`**/api/hotels/${BOOKING_ADMIN_HOTEL_SLUG}/rooms`, (route) =>
-    route.fulfill({ json: [] }),
+  await page.route(`**${BOOKING_ADMIN_PMS_ROOMS_PATH}*`, (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "pms-operations.v1",
+        propertyId: BOOKING_ADMIN_HOTEL_ID,
+        items: [],
+        sourceFreshness: {},
+      },
+    }),
   );
 }
 

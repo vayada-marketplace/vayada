@@ -5,19 +5,10 @@ import type { PromoCodeItem } from "@/services/settings";
 
 interface PromoCodesTabProps {
   promoCodes: PromoCodeItem[];
-  deletingId: string | null;
-  openCreateModal: () => void;
-  openEditModal: (promo: PromoCodeItem) => void;
-  handleDeletePromoCode: (id: string) => void;
+  managementUnavailable: string;
 }
 
-export default function PromoCodesTab({
-  promoCodes,
-  deletingId,
-  openCreateModal,
-  openEditModal,
-  handleDeletePromoCode,
-}: PromoCodesTabProps) {
+export default function PromoCodesTab({ promoCodes, managementUnavailable }: PromoCodesTabProps) {
   return (
     <div className="max-w-2xl space-y-4">
       <div className="bg-white rounded-lg border border-gray-200 p-5">
@@ -29,12 +20,17 @@ export default function PromoCodesTab({
             </p>
           </div>
           <button
-            onClick={openCreateModal}
-            className="inline-flex items-center gap-1 px-3 py-1.5 bg-primary-500 text-white text-[12px] font-medium rounded-lg hover:bg-primary-600 transition-colors"
+            disabled
+            title={managementUnavailable}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-200 text-gray-500 text-[12px] font-medium rounded-lg cursor-not-allowed"
           >
             <PlusIcon className="w-3.5 h-3.5" />
             Add Promo Code
           </button>
+        </div>
+
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+          {managementUnavailable}
         </div>
 
         {promoCodes.length === 0 ? (
@@ -121,15 +117,16 @@ export default function PromoCodesTab({
                 {/* Actions */}
                 <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={() => openEditModal(promo)}
-                    className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+                    disabled
+                    title={managementUnavailable}
+                    className="p-1.5 text-gray-300 rounded-md cursor-not-allowed"
                   >
                     <PencilSquareIcon className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => handleDeletePromoCode(promo.id)}
-                    disabled={deletingId === promo.id}
-                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50"
+                    disabled
+                    title={managementUnavailable}
+                    className="p-1.5 text-gray-300 rounded-md cursor-not-allowed"
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>

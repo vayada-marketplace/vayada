@@ -223,12 +223,6 @@ export interface PromoCodeItem {
   createdAt?: string;
 }
 
-export interface CustomDomainConnectResponse {
-  domain: string;
-  status: string;
-  ssl_status: string;
-}
-
 export interface CustomDomainStatus {
   configured: boolean;
   domain?: string;
@@ -236,15 +230,6 @@ export interface CustomDomainStatus {
   ssl_status?: string;
   verification_errors?: string[];
 }
-
-export const customDomainService = {
-  connect: (domain: string) =>
-    apiClient.post<CustomDomainConnectResponse>("/admin/settings/custom-domain", { domain }),
-
-  disconnect: () => apiClient.delete<{ removed: string }>("/admin/settings/custom-domain"),
-
-  getStatus: () => apiClient.get<CustomDomainStatus>("/admin/settings/custom-domain/status"),
-};
 
 export interface HotelDeletionImpact {
   upcomingBookingsCount: number;
@@ -321,28 +306,4 @@ export const settingsService = {
   },
 
   getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
-
-  listAddons: () => apiClient.get<AddonItem[]>("/admin/addons"),
-
-  createAddon: (data: Omit<AddonItem, "id">) => apiClient.post<AddonItem>("/admin/addons", data),
-
-  updateAddon: (id: string, data: Partial<AddonItem>) =>
-    apiClient.patch<AddonItem>(`/admin/addons/${id}`, data),
-
-  deleteAddon: (id: string) => apiClient.delete(`/admin/addons/${id}`),
-
-  getAddonSettings: () => apiClient.get<AddonSettings>("/admin/settings/addons"),
-
-  updateAddonSettings: (data: Partial<AddonSettings>) =>
-    apiClient.patch<AddonSettings>("/admin/settings/addons", data),
-
-  listPromoCodes: () => apiClient.get<PromoCodeItem[]>("/admin/promo-codes"),
-
-  createPromoCode: (data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">) =>
-    apiClient.post<PromoCodeItem>("/admin/promo-codes", data),
-
-  updatePromoCode: (id: string, data: Partial<PromoCodeItem>) =>
-    apiClient.patch<PromoCodeItem>(`/admin/promo-codes/${id}`, data),
-
-  deletePromoCode: (id: string) => apiClient.delete(`/admin/promo-codes/${id}`),
 };

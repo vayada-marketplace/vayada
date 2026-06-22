@@ -83,9 +83,10 @@ export class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    // Add hotel context header if selected
+    // Legacy `/admin/*` compatibility routes still use the hotel context
+    // header. Target routes carry the resource id in the path.
     const hotelId = typeof window !== "undefined" ? localStorage.getItem("selectedHotelId") : null;
-    if (hotelId) {
+    if (hotelId && endpoint.startsWith("/admin/")) {
       headers["X-Hotel-Id"] = hotelId;
     }
 
