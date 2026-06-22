@@ -95,6 +95,8 @@ function HomePageContent() {
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const { slug } = useSlug();
   const searchParams = useSearchParams();
+  const childrenEnabled = hotel.guestChildrenEnabled !== false;
+  const adultAgeThreshold = hotel.guestAdultAgeThreshold || 18;
 
   useEffect(() => {
     trackEvent(slug, "page_visit");
@@ -122,20 +124,29 @@ function HomePageContent() {
   const [checkIn, setCheckIn] = useState(initialDates.checkIn);
   const [checkOut, setCheckOut] = useState(initialDates.checkOut);
   const [adults, setAdults] = useState(() => parseInt(searchParams.get("adults") || "2"));
-  const [children, setChildren] = useState(() => parseInt(searchParams.get("children") || "0"));
+  const [children, setChildren] = useState(() =>
+    childrenEnabled ? parseInt(searchParams.get("children") || "0") : 0,
+  );
 
   // "Committed" search params — only update when user clicks "Check Availability"
   const [committedCheckIn, setCommittedCheckIn] = useState(checkIn);
   const [committedCheckOut, setCommittedCheckOut] = useState(checkOut);
   const [committedAdults, setCommittedAdults] = useState(adults);
   const [committedChildren, setCommittedChildren] = useState(children);
+  const childrenForSearch = childrenEnabled ? children : 0;
+  const committedChildrenForSearch = childrenEnabled ? committedChildren : 0;
+
+  useEffect(() => {
+    if (!childrenEnabled && children !== 0) setChildren(0);
+    if (!childrenEnabled && committedChildren !== 0) setCommittedChildren(0);
+  }, [childrenEnabled, children, committedChildren]);
 
   // Fetch rooms with default dates on initial load so prices reflect seasonal rates
   const [initialFetchDone, setInitialFetchDone] = useState(false);
   useEffect(() => {
     if (!roomsLoading && rooms.length > 0 && !initialFetchDone) {
       setInitialFetchDone(true);
-      refetchRooms(checkIn, checkOut, adults, children);
+      refetchRooms(checkIn, checkOut, adults, childrenForSearch);
     }
   }, [roomsLoading, rooms.length]);
 
@@ -152,11 +163,11 @@ function HomePageContent() {
       setCommittedCheckIn(checkIn);
       setCommittedCheckOut(checkOut);
       setCommittedAdults(adults);
-      setCommittedChildren(children);
-      refetchRooms(checkIn, checkOut, adults, children);
+      setCommittedChildren(childrenForSearch);
+      refetchRooms(checkIn, checkOut, adults, childrenForSearch);
     }, 300);
     return () => clearTimeout(handle);
-  }, [checkIn, checkOut, adults, children]);
+  }, [checkIn, checkOut, adults, childrenForSearch]);
 
   // roomCount removed — now computed dynamically per room type
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
@@ -245,7 +256,7 @@ function HomePageContent() {
     if (sortOption === "priceLow") result.sort((a, b) => a.baseRate - b.baseRate);
     else if (sortOption === "priceHigh") result.sort((a, b) => b.baseRate - a.baseRate);
     else if (sortOption === "roomSize") result.sort((a, b) => (b.size || 0) - (a.size || 0));
-    const totalGuests = committedAdults + committedChildren;
+    const totalGuests = committedAdults + committedChildrenForSearch;
     const isSoldOut = (room: (typeof rooms)[number]) =>
       room.remainingRooms < Math.ceil(totalGuests / room.maxOccupancy);
     result.sort((a, b) => Number(isSoldOut(a)) - Number(isSoldOut(b)));
@@ -380,7 +391,9 @@ function HomePageContent() {
                 </p>
                 <p className="text-base font-semibold text-gray-900 whitespace-nowrap">
                   {tc("adults", { count: adults })}
-                  {children > 0 && `, ${tc("children", { count: children })}`}
+                  {childrenEnabled &&
+                    childrenForSearch > 0 &&
+                    `, ${tc("children", { count: childrenForSearch })}`}
                 </p>
                 <p className="text-sm text-gray-500">{tc("guests")}</p>
               </div>
@@ -389,10 +402,12 @@ function HomePageContent() {
               open={guestsOpen}
               onClose={() => setGuestsOpen(false)}
               adults={adults}
-              children={children}
+              children={childrenForSearch}
+              adultAgeThreshold={adultAgeThreshold}
+              childrenEnabled={childrenEnabled}
               onUpdate={(a, c) => {
                 setAdults(a);
-                setChildren(c);
+                setChildren(childrenEnabled ? c : 0);
               }}
             />
           </div>
@@ -510,10 +525,10 @@ function HomePageContent() {
               setCommittedCheckIn(checkIn);
               setCommittedCheckOut(checkOut);
               setCommittedAdults(adults);
-              setCommittedChildren(children);
+              setCommittedChildren(childrenForSearch);
               setSearching(true);
               roomsSectionRef.current?.scrollIntoView({ behavior: "smooth" });
-              await refetchRooms(checkIn, checkOut, adults, children);
+              await refetchRooms(checkIn, checkOut, adults, childrenForSearch);
               setSearching(false);
             }}
             disabled={searching || roomsRefetching}
@@ -656,7 +671,7 @@ function HomePageContent() {
                     <RoomCard
                       room={room}
                       nights={nights}
-                      totalGuests={committedAdults + committedChildren}
+                      totalGuests={committedAdults + committedChildrenForSearch}
                       imageIndex={imageIndices[room.id] ?? 0}
                       checkIn={committedCheckIn}
                       hotelTimezone={hotel.timezone}
@@ -678,7 +693,7 @@ function HomePageContent() {
                         setDetailModalIndex(roomIndex);
                       }}
                       onSelectRate={(rateType, requiredRooms) => {
-                        const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${requiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
+                        const params = `room=${room.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildrenForSearch}&rooms=${requiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
                         router.push(hasAddons ? `/addons?${params}` : `/book?${params}`);
                       }}
                     />
@@ -709,7 +724,7 @@ function HomePageContent() {
         (() => {
           const modalRoom = filteredRooms[detailModalIndex];
           const modalRequiredRooms = Math.ceil(
-            (committedAdults + committedChildren) / modalRoom.maxOccupancy,
+            (committedAdults + committedChildrenForSearch) / modalRoom.maxOccupancy,
           );
           const modalSoldOut = modalRoom.remainingRooms < modalRequiredRooms;
           return (
@@ -740,7 +755,7 @@ function HomePageContent() {
               pointsOfInterest={hotel.pointsOfInterest || []}
               onSelectRate={(rateType) => {
                 if (modalSoldOut) return;
-                const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildren}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
+                const params = `room=${modalRoom.id}&checkIn=${committedCheckIn}&checkOut=${committedCheckOut}&adults=${committedAdults}&children=${committedChildrenForSearch}&rooms=${modalRequiredRooms}&rateType=${rateType}${appliedPromo ? `&promoCode=${appliedPromo.code}` : ""}`;
                 router.push(hasAddons ? `/addons?${params}` : `/book?${params}`);
               }}
             />

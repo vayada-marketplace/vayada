@@ -137,6 +137,8 @@ export default function BookingFlowPage() {
   const [specialRequestsEnabled, setSpecialRequestsEnabled] = useState(false);
   const [arrivalTimeEnabled, setArrivalTimeEnabled] = useState(false);
   const [guestCountEnabled, setGuestCountEnabled] = useState(false);
+  const [adultAgeThreshold, setAdultAgeThreshold] = useState(18);
+  const [childrenEnabled, setChildrenEnabled] = useState(true);
   const [savingGuestForm, setSavingGuestForm] = useState(false);
 
   const { t } = useTranslation();
@@ -195,6 +197,8 @@ export default function BookingFlowPage() {
           setSpecialRequestsEnabled(property.special_requests_enabled ?? false);
           setArrivalTimeEnabled(property.arrival_time_enabled ?? false);
           setGuestCountEnabled(property.guest_count_enabled ?? false);
+          setAdultAgeThreshold(property.guest_adult_age_threshold ?? 18);
+          setChildrenEnabled(property.guest_children_enabled ?? true);
         }
         // Fetch rooms from PMS
         if (property?.slug) {
@@ -337,6 +341,23 @@ export default function BookingFlowPage() {
     }
   };
 
+  const handleReorderAddons = async (orderedIds: string[]) => {
+    if (orderedIds.join("|") === addons.map((addon) => addon.id).join("|")) return;
+
+    const previous = addons;
+    const byId = new Map(previous.map((addon) => [addon.id, addon]));
+    const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean) as AddonItem[];
+    setAddons(reordered);
+
+    try {
+      await settingsService.reorderAddons(orderedIds);
+      showFeedback("success", "Add-on order saved");
+    } catch {
+      setAddons(previous);
+      showFeedback("error", "Failed to update add-on order");
+    }
+  };
+
   // ── Promo Code CRUD handlers ──
 
   const openCreatePromoModal = () => {
@@ -476,6 +497,8 @@ export default function BookingFlowPage() {
         special_requests_enabled: specialRequestsEnabled,
         arrival_time_enabled: arrivalTimeEnabled,
         guest_count_enabled: guestCountEnabled,
+        guest_adult_age_threshold: adultAgeThreshold,
+        guest_children_enabled: childrenEnabled,
       };
       await settingsService.updatePropertySettings(guestFormData);
       // Sync to PMS so guest-facing booking page picks up the changes
@@ -590,6 +613,7 @@ export default function BookingFlowPage() {
             openEditModal={openEditModal}
             handleDeleteAddon={handleDeleteAddon}
             handleToggleAddonSetting={handleToggleAddonSetting}
+            onReorderAddons={handleReorderAddons}
           />
         )}
 
@@ -687,6 +711,7 @@ export default function BookingFlowPage() {
                 placeholder={`Search currencies, e.g. "Swiss" or "CHF"...`}
                 getLabel={(o) => o.code}
                 getSearchLabel={(o) => `${o.name} \u00b7 ${o.code}`}
+                getSearchText={(o) => `${o.name} ${o.code} ${o.searchTerms?.join(" ") ?? ""}`}
                 popularCodes={POPULAR_CURRENCY_CODES}
                 emptyMessage={`No additional currencies added \u2014 your booking page will show only ${defaultCurrency}`}
               />
@@ -783,6 +808,36 @@ export default function BookingFlowPage() {
                     className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${guestCountEnabled ? "left-4" : "left-0.5"}`}
                   />
                 </button>
+              </div>
+              <div className="pt-3 mt-3 border-t border-gray-100 space-y-3">
+                <ToggleSwitch
+                  size="sm"
+                  enabled={childrenEnabled}
+                  onChange={() => setChildrenEnabled(!childrenEnabled)}
+                  label="Allow children"
+                  description="Show the children selector on the guest booking page"
+                />
+                <div className="p-3 rounded-lg border border-gray-200">
+                  <label className="block text-[13px] font-medium text-gray-900 mb-1">
+                    Adult age threshold
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={adultAgeThreshold}
+                      onChange={(e) => {
+                        const next = Number.parseInt(e.target.value || "18", 10);
+                        setAdultAgeThreshold(Math.min(99, Math.max(1, next || 18)));
+                      }}
+                      className="w-24 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    />
+                    <span className="text-[12px] text-gray-500">
+                      Guests age {adultAgeThreshold}+ count as adults
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1485,6 +1540,7 @@ function SearchableMultiSelect<T extends { code: string; flag: string }>({
   placeholder,
   getLabel,
   getSearchLabel,
+  getSearchText,
   popularCodes,
   emptyMessage,
 }: {
@@ -1495,6 +1551,7 @@ function SearchableMultiSelect<T extends { code: string; flag: string }>({
   placeholder: string;
   getLabel: (opt: T) => string;
   getSearchLabel: (opt: T) => string;
+  getSearchText?: (opt: T) => string;
   popularCodes: string[];
   emptyMessage: string;
 }) {
@@ -1512,7 +1569,9 @@ function SearchableMultiSelect<T extends { code: string; flag: string }>({
 
   const available = options.filter((o) => o.code !== excludeCode);
   const filtered = query.trim()
-    ? available.filter((o) => getSearchLabel(o).toLowerCase().includes(query.toLowerCase()))
+    ? available.filter((o) =>
+        (getSearchText?.(o) ?? getSearchLabel(o)).toLowerCase().includes(query.toLowerCase()),
+      )
     : available;
   const popular = available.filter((o) => popularCodes.includes(o.code));
 

@@ -3,6 +3,7 @@ Tests for public /api/hotels/{slug}/rooms endpoint.
 """
 
 import json
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from app.database import Database
@@ -26,6 +27,26 @@ class TestPublicRooms:
         assert len(rooms) == 1
         assert rooms[0]["name"] == "Deluxe Suite"
         assert rooms[0]["remainingRooms"] == 5
+
+    async def test_rooms_use_booking_engine_benefits_when_configured(
+        self, client, hotel_with_rooms
+    ):
+        hotel = hotel_with_rooms["hotel"]
+        await Database.execute(
+            "UPDATE hotels SET benefits = $1::jsonb WHERE id = $2",
+            json.dumps(["Stale PMS benefit"]),
+            hotel["id"],
+        )
+
+        with patch(
+            "app.services.room_type_service.hotel_identity_service.get_benefits",
+            new=AsyncMock(return_value=[]),
+        ):
+            resp = await client.get(f"/api/hotels/{hotel['slug']}/rooms")
+
+        assert resp.status_code == 200
+        rooms = resp.json()
+        assert rooms[0]["benefits"] == []
 
     async def test_get_rooms_unknown_slug(self, client, init_database):
         resp = await client.get("/api/hotels/nonexistent-slug-xyz/rooms")

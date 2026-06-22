@@ -75,7 +75,8 @@ function PaymentPageContent() {
   const checkOut = searchParams.get("checkOut") || "";
 
   const adultsParam = parseInt(searchParams.get("adults") || "2");
-  const childrenParam = parseInt(searchParams.get("children") || "0");
+  const childrenEnabled = hotel.guestChildrenEnabled !== false;
+  const childrenParam = childrenEnabled ? parseInt(searchParams.get("children") || "0") : 0;
 
   // Ensure rooms have date-resolved rates on mount. URL search params stay
   // stable for the lifetime of this page (a checkIn/checkOut change comes

@@ -90,6 +90,8 @@ async def get_hotel_by_slug(slug: str, locale: str = "en") -> HotelResponse | No
         default_language=row.get("default_language") or "en",
         supported_languages=parse_json(row.get("supported_languages"), default=["en"]),
         refer_a_guest_enabled=row.get("refer_a_guest_enabled", False),
+        guest_adult_age_threshold=row.get("guest_adult_age_threshold") or 18,
+        guest_children_enabled=row.get("guest_children_enabled", True),
         instant_book=row.get("instant_book", False),
         map_view_enabled=row.get("map_view_enabled", False),
         show_room_detail_map=row.get("show_room_detail_map", False),

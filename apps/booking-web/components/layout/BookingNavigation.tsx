@@ -13,6 +13,7 @@ const LANGUAGES = [
   { code: "fr", label: "Français" },
   { code: "es", label: "Español" },
   { code: "id", label: "Indonesia" },
+  { code: "nl", label: "Nederlands" },
 ] as const;
 
 const CURRENCY_LABELS: Record<string, string> = {
@@ -37,6 +38,7 @@ const CURRENCY_LABELS: Record<string, string> = {
   BRL: "R$ Brazilian Real",
   INR: "\u20B9 Indian Rupee",
   KRW: "\u20A9 South Korean Won",
+  LKR: "Rs Sri Lankan Rupee",
   MXN: "MX$ Mexican Peso",
   TRY: "\u20BA Turkish Lira",
   PLN: "z\u0142 Polish Zloty",
@@ -262,7 +264,7 @@ export default function BookingNavigation() {
   };
 
   const handleLanguageChange = (newLocale: string) => {
-    router.replace(pathname, { locale: newLocale as "en" | "de" | "fr" | "es" | "id" });
+    router.replace(pathname, { locale: newLocale as "en" | "de" | "fr" | "es" | "id" | "nl" });
   };
 
   return (

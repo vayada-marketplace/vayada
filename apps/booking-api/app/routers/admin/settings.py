@@ -65,6 +65,8 @@ _PROPERTY_FIELD_MAP = {
     "special_requests_enabled": "special_requests_enabled",
     "arrival_time_enabled": "arrival_time_enabled",
     "guest_count_enabled": "guest_count_enabled",
+    "guest_adult_age_threshold": "guest_adult_age_threshold",
+    "guest_children_enabled": "guest_children_enabled",
     "instagram": "social_instagram",
     "facebook": "social_facebook",
     "tiktok": "social_tiktok",
@@ -154,6 +156,8 @@ async def _hotel_to_property_settings(hotel: dict) -> PropertySettingsResponse:
         special_requests_enabled=_coalesce(hotel, "special_requests_enabled"),
         arrival_time_enabled=_coalesce(hotel, "arrival_time_enabled"),
         guest_count_enabled=_coalesce(hotel, "guest_count_enabled"),
+        guest_adult_age_threshold=_coalesce(hotel, "guest_adult_age_threshold"),
+        guest_children_enabled=_coalesce(hotel, "guest_children_enabled"),
         instagram=_coalesce(hotel, "social_instagram"),
         facebook=_coalesce(hotel, "social_facebook"),
         tiktok=_coalesce(hotel, "social_tiktok"),
@@ -313,6 +317,12 @@ async def _create_hotel_from_settings(
         ),
         arrival_time_enabled=_api_to_db_value(data.arrival_time_enabled, "arrival_time_enabled"),
         guest_count_enabled=_api_to_db_value(data.guest_count_enabled, "guest_count_enabled"),
+        guest_adult_age_threshold=_api_to_db_value(
+            data.guest_adult_age_threshold, "guest_adult_age_threshold"
+        ),
+        guest_children_enabled=_api_to_db_value(
+            data.guest_children_enabled, "guest_children_enabled"
+        ),
         refer_a_guest_enabled=_api_to_db_value(data.refer_a_guest_enabled, "refer_a_guest_enabled"),
         map_view_enabled=_api_to_db_value(data.map_view_enabled, "map_view_enabled"),
         social_instagram=data.instagram or "",

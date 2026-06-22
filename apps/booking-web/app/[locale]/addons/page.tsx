@@ -38,6 +38,8 @@ export default function AddonsPage() {
     searchParams.get("checkOut") || "",
   );
   const adultsParam = parseInt(searchParams.get("adults") || "2");
+  const childrenEnabled = hotel.guestChildrenEnabled !== false;
+  const childrenParam = childrenEnabled ? parseInt(searchParams.get("children") || "0") : 0;
   const nights = calculateNights(checkIn, checkOut);
 
   // Generate array of stay dates (each night of the stay)
@@ -430,7 +432,6 @@ export default function AddonsPage() {
               if (checkIn) params.set("checkIn", checkIn);
               if (checkOut) params.set("checkOut", checkOut);
               params.set("adults", String(adultsParam));
-              const childrenParam = parseInt(searchParams.get("children") || "0");
               if (childrenParam > 0) params.set("children", String(childrenParam));
               const qs = params.toString();
               router.push(qs ? `/?${qs}` : "/");
@@ -450,6 +451,8 @@ export default function AddonsPage() {
           <button
             onClick={() => {
               const params = new URLSearchParams(searchParams.toString());
+              if (childrenParam > 0) params.set("children", String(childrenParam));
+              else params.delete("children");
               if (selectedIds.length > 0) {
                 // For perPerson/per-booking addons, encode the count after a colon.
                 // For perNight-only addons, the count is implicit (= dates.length)

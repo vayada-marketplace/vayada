@@ -17,6 +17,8 @@ class TestGetHotel:
         assert body["checkOutTime"] == "11:00"
         assert body["contact"]["address"] == hotel["contact_address"]
         assert body["name"] == hotel["name"]
+        assert body["guestAdultAgeThreshold"] == 18
+        assert body["guestChildrenEnabled"] is True
 
     async def test_get_hotel_not_found(self, client):
         resp = await client.get("/api/hotels/nonexistent-slug")
@@ -76,6 +78,21 @@ class TestGetHotel:
         resp = await client.get(f"/api/hotels/{hotel['slug']}")
         assert resp.status_code == 200
         assert resp.json()["instantBook"] is True
+
+    async def test_get_hotel_exposes_guest_type_settings(self, client, hotel_with_property):
+        from app.database import Database
+
+        hotel = hotel_with_property["hotel"]
+        await Database.execute(
+            "UPDATE booking_hotels SET guest_adult_age_threshold = 16, guest_children_enabled = false WHERE id = $1",
+            hotel["id"],
+        )
+
+        resp = await client.get(f"/api/hotels/{hotel['slug']}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["guestAdultAgeThreshold"] == 16
+        assert body["guestChildrenEnabled"] is False
 
 
 class TestGetAddons:

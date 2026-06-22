@@ -89,6 +89,61 @@ class TestCreateAddon:
         assert "Addon Two" in names
 
 
+class TestReorderAddons:
+    async def test_reorder_persists_order(self, client, hotel_with_property):
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        one = await client.post("/admin/addons", json={"name": "One", "price": 10}, headers=headers)
+        two = await client.post("/admin/addons", json={"name": "Two", "price": 20}, headers=headers)
+        three = await client.post(
+            "/admin/addons", json={"name": "Three", "price": 30}, headers=headers
+        )
+        ordered_ids = [
+            three.json()["id"],
+            one.json()["id"],
+            two.json()["id"],
+        ]
+
+        resp = await client.patch(
+            "/admin/addons/reorder",
+            json={"orderedAddonIds": ordered_ids},
+            headers=headers,
+        )
+        assert resp.status_code == 204
+
+        list_resp = await client.get("/admin/addons", headers=headers)
+        assert [addon["id"] for addon in list_resp.json()] == ordered_ids
+
+    async def test_reorder_rejects_partial_order(self, client, hotel_with_property):
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        one = await client.post("/admin/addons", json={"name": "One", "price": 10}, headers=headers)
+        await client.post("/admin/addons", json={"name": "Two", "price": 20}, headers=headers)
+
+        resp = await client.patch(
+            "/admin/addons/reorder",
+            json={"orderedAddonIds": [one.json()["id"]]},
+            headers=headers,
+        )
+        assert resp.status_code == 400
+
+    async def test_reorder_rejects_duplicates(self, client, hotel_with_property):
+        user = hotel_with_property["user"]
+        headers = get_auth_headers(user["token"])
+
+        one = await client.post("/admin/addons", json={"name": "One", "price": 10}, headers=headers)
+        addon_id = one.json()["id"]
+
+        resp = await client.patch(
+            "/admin/addons/reorder",
+            json={"orderedAddonIds": [addon_id, addon_id]},
+            headers=headers,
+        )
+        assert resp.status_code == 400
+
+
 class TestUpdateAddon:
     async def test_update_success(self, client, hotel_with_property):
         user = hotel_with_property["user"]
