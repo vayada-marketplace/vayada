@@ -471,6 +471,17 @@ function buildPlatformAdminApp(
 }
 
 const bookingSettingsRepository: BookingSettingsReadRepository = {
+  async findPropertyLinkByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      propertyId: pmsPropertyId,
+      pmsProperty: true,
+      financeProperty: true,
+    };
+  },
   async findAddonSettingsByHotelId(hotelId) {
     if (hotelId !== "booking_hotel_alpenrose") {
       return null;
@@ -3564,6 +3575,29 @@ describe("vayada-api", () => {
     });
   });
 
+  it("resolves the canonical property link for a booking hotel", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/property-link",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: pmsPropertyId,
+      resourceLinks: {
+        bookingHotel: true,
+        pmsProperty: true,
+        financeProperty: true,
+      },
+    });
+  });
+
   it("returns booking guest-form settings with auth, policy, and the documented legacy-compatible shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -5317,6 +5351,19 @@ describe("vayada-api", () => {
         values?: readonly unknown[],
       ): Promise<Pick<QueryResult<T>, "rows">> {
         queries.push({ text, values });
+        if (text.includes("finance.payment_settings")) {
+          return {
+            rows: [
+              {
+                source_link_count: 1,
+                propertyId: "d3000000-0000-0000-0000-000000000682",
+                pmsProperty: true,
+                financeProperty: true,
+              },
+            ] as unknown as T[],
+          };
+        }
+
         if (text.includes("show_addons_step = $2")) {
           state.show_addons_step = values?.[1] as boolean;
           state.group_addons_by_category = values?.[2] as boolean;
@@ -5359,6 +5406,24 @@ describe("vayada-api", () => {
     app = buildAuthenticatedApp({
       settingsRepository: targetRepository,
       settingsWriteRepository: targetRepository,
+    });
+
+    const propertyLinkResponse = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/property-link",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    expect(propertyLinkResponse.statusCode).toBe(200);
+    expect(propertyLinkResponse.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: "d3000000-0000-0000-0000-000000000682",
+      resourceLinks: {
+        bookingHotel: true,
+        pmsProperty: true,
+        financeProperty: true,
+      },
     });
 
     const cases = [
@@ -5448,6 +5513,8 @@ describe("vayada-api", () => {
     const sql = queries.map((query) => query.text).join("\n");
     expect(sql).toContain("relationship = 'canonical_input'");
     expect(sql).toContain("status = 'active'");
+    expect(sql).toContain("finance.payment_settings");
+    expect(sql).toContain("hotel_catalog.property_source_links pms_link");
     expect(sql).not.toMatch(/\b(FROM|UPDATE)\s+booking_hotels\b/i);
 
     await app.close();

@@ -1,13 +1,16 @@
 import type { Page } from "@playwright/test";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
+export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
+export const BOOKING_ADMIN_PROPERTY_LINK_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/property-link`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
 export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
+export const BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -16,6 +19,7 @@ export interface BookingAdminPropertySettingsFixture {
   default_language: string;
   supported_currencies: string[];
   supported_languages: string[];
+  pay_at_hotel_methods: string[];
   special_requests_enabled: boolean;
   arrival_time_enabled: boolean;
   guest_count_enabled: boolean;
@@ -68,6 +72,7 @@ export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFi
   default_language: "en",
   supported_currencies: [],
   supported_languages: [],
+  pay_at_hotel_methods: ["cash", "card"],
   special_requests_enabled: false,
   arrival_time_enabled: false,
   guest_count_enabled: false,
@@ -143,6 +148,19 @@ export async function mockBookingAdminShellRoutes(
   await page.route("**/admin/superadmin/hotels", (route) => route.fulfill({ json: [] }));
   await page.route("**/admin/settings/property", (route) =>
     route.fulfill({ json: propertySettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_PROPERTY_LINK_PATH}*`, (route) =>
+    route.fulfill({
+      json: {
+        hotelId: BOOKING_ADMIN_HOTEL_ID,
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        resourceLinks: {
+          bookingHotel: true,
+          pmsProperty: true,
+          financeProperty: true,
+        },
+      },
+    }),
   );
   await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}*`, (route) =>
     route.fulfill({
