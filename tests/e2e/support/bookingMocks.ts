@@ -56,7 +56,7 @@ const rooms = [
     amenities: ["Free WiFi", "Breakfast", "Balcony"],
     images: ["/vayada-logo.png"],
     bedType: "King bed",
-    remainingRooms: 2,
+    remainingRooms: 3,
     features: ["Free Cancellation", "Include Breakfast"],
     benefits: ["Best direct rate"],
     flexibleRateEnabled: true,
