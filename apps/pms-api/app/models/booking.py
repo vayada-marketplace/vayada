@@ -19,7 +19,7 @@ class BookingCreate(BaseModel):
     guest_first_name: str
     guest_last_name: str
     guest_email: EmailStr
-    guest_phone: str
+    guest_phone: str = ""
     guest_country: str = ""
     special_requests: str = ""
     estimated_arrival_time: str | None = None

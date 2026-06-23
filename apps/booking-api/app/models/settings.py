@@ -28,6 +28,7 @@ HOTEL_FIELD_DEFAULTS: dict[str, Any] = {
     "special_requests_enabled": True,
     "arrival_time_enabled": False,
     "guest_count_enabled": False,
+    "phone_required": True,
     "guest_adult_age_threshold": 18,
     "guest_children_enabled": True,
     "pay_at_property_enabled": False,
@@ -140,6 +141,7 @@ class PropertySettingsResponse(BaseModel):
     special_requests_enabled: bool
     arrival_time_enabled: bool
     guest_count_enabled: bool
+    phone_required: bool = True
     guest_adult_age_threshold: int = Field(default=18, ge=1, le=99)
     guest_children_enabled: bool = True
     instagram: str
@@ -212,6 +214,7 @@ class PropertySettingsUpdate(BaseModel):
     special_requests_enabled: bool | None = None
     arrival_time_enabled: bool | None = None
     guest_count_enabled: bool | None = None
+    phone_required: bool | None = None
     guest_adult_age_threshold: int | None = Field(default=None, ge=1, le=99)
     guest_children_enabled: bool | None = None
     instagram: str | None = None
