@@ -62,6 +62,7 @@ function toAddonPricingModel(addon: { perPerson?: boolean; perNight?: boolean })
 }
 
 function toAddonCategory(category: string) {
+  if (category === "food") return "dining";
   return ["dining", "experience", "transport", "wellness", "other"].includes(category)
     ? (category as "dining" | "experience" | "transport" | "wellness" | "other")
     : "other";
@@ -409,12 +410,17 @@ export default function SetupPage() {
           throw new Error("Booking hotel id is required before saving add-ons.");
         }
         for (const addon of setupAddons) {
+          const parsedPrice = Number(addon.price);
+          if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+            throw new Error(`Invalid add-on price for "${addon.name}".`);
+          }
+
           await createBookingAddonItem({
             hotelId: createdHotelId,
             body: {
               name: addon.name,
               description: addon.description,
-              price: (Number(addon.price) || 0).toFixed(2),
+              price: parsedPrice.toFixed(2),
               currency: addon.currency || currency,
               category: toAddonCategory(addon.category),
               imageUrl: addon.image || null,

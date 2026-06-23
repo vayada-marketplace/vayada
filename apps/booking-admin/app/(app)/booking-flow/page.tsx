@@ -148,7 +148,7 @@ function toAddonPricingModel(addon: { perPerson?: boolean; perNight?: boolean })
   return "per_stay";
 }
 
-function toAddonItemBody(values: AddonItemFormValues): CreateBookingAddonItemBody {
+function toAddonWritableFields(values: AddonItemFormValues) {
   return {
     name: values.name,
     description: values.description,
@@ -158,6 +158,12 @@ function toAddonItemBody(values: AddonItemFormValues): CreateBookingAddonItemBod
     imageUrl: values.image || null,
     duration: values.duration || null,
     pricingModel: toAddonPricingModel(values) as BookingAddonPricingModel,
+  };
+}
+
+function toAddonCreateBody(values: AddonItemFormValues): CreateBookingAddonItemBody {
+  return {
+    ...toAddonWritableFields(values),
     publicVisible: true,
     status: "active",
   };
@@ -367,7 +373,7 @@ export default function BookingFlowPage() {
     try {
       const saved = await createBookingAddonItem({
         hotelId: getBookingHotelIdForSave(),
-        body: toAddonItemBody(values),
+        body: toAddonCreateBody(values),
       });
       setAddons((current) => [...current, toSettingsAddonItem(saved)]);
       showFeedback("success", t("bookingFlow.addons.feedback.createSuccess"));
@@ -382,7 +388,7 @@ export default function BookingFlowPage() {
       const saved = await updateBookingAddonItem({
         hotelId: getBookingHotelIdForSave(),
         addonItemId: addonId,
-        body: toAddonItemBody(values),
+        body: toAddonWritableFields(values),
       });
       setAddons((current) =>
         current.map((addon) => (addon.id === addonId ? toSettingsAddonItem(saved) : addon)),
