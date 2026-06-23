@@ -2044,6 +2044,14 @@ async function createStripeProviderAccountInClient(
     providerAccount.onboardingUrl,
     buildProviderAccountCommandMeta(command, keyHash),
   );
+  if (owner.ownerScope === "property") {
+    await relinkPaymentSettingsProviderAccount(
+      client,
+      owner.propertyId,
+      "stripe",
+      insertedAccount.providerAccountId,
+    );
+  }
   await completeProviderAccountIdempotency(
     client,
     command,
@@ -2157,6 +2165,7 @@ async function loadStripeProviderAccountByOwner(
        WHERE account_scope = 'property'
          AND provider = 'stripe'
          AND property_id = $1::uuid
+         AND provider_account_id NOT LIKE 'settings-choice:%'
        ORDER BY created_at ASC
        LIMIT 1`,
       [owner.propertyId],
@@ -2267,6 +2276,27 @@ async function insertStripeProviderAccount(
     ],
   );
   return result.rows[0]!;
+}
+
+async function relinkPaymentSettingsProviderAccount(
+  client: FinancePropertySettingsWriteClient,
+  propertyId: string,
+  provider: FinanceRoutePaymentProvider,
+  providerAccountId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE finance.payment_settings settings
+     SET provider_account_id = $3::uuid,
+         updated_at = now()
+     FROM finance.payment_provider_accounts placeholder
+     WHERE settings.property_id = $1::uuid
+       AND settings.provider_account_id = placeholder.id
+       AND placeholder.property_id = settings.property_id
+       AND placeholder.account_scope = 'property'
+       AND placeholder.provider = $2
+       AND placeholder.provider_account_id = $4`,
+    [propertyId, provider, providerAccountId, `settings-choice:${propertyId}:${provider}`],
+  );
 }
 
 async function updateStripeProviderAccountOnboardingUrl(
@@ -6389,7 +6419,23 @@ function jsonPolicyBody(value: unknown, name: string): FinanceJsonPolicyBodyResu
   if (!record) {
     return { ok: false, error: invalidQuery("invalid_body", `${name} must be an object.`) };
   }
-  return { ok: true, value: jsonPolicy(record) };
+  for (const [key, entry] of Object.entries(record)) {
+    const valid =
+      entry === null ||
+      typeof entry === "string" ||
+      typeof entry === "boolean" ||
+      (typeof entry === "number" && Number.isFinite(entry));
+    if (!valid) {
+      return {
+        ok: false,
+        error: invalidQuery(
+          "invalid_body",
+          `${name}.${key} must be a string, number, boolean, or null.`,
+        ),
+      };
+    }
+  }
+  return { ok: true, value: record as FinanceJsonPolicy };
 }
 
 function toAffiliatePayoutSettingsPatchCommand(

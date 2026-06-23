@@ -385,19 +385,26 @@ export default function SetupPage() {
       const savedSettings = await settingsService.createHotel(propertyPayload);
       if (savedSettings?.id) {
         localStorage.setItem("selectedHotelId", savedSettings.id);
-        const propertyLink = await getBookingHotelPropertyLink({ hotelId: savedSettings.id });
-        await updateFinancePaymentSettings({
-          propertyId: propertyLink.propertyId,
-          body: buildFinancePaymentSettingsBody({
-            payAtPropertyEnabled: payAtHotel,
-            payAtHotelMethods,
-            onlineCardPayment,
-            bankTransfer,
-            paymentProvider,
-            defaultCurrency: currency,
-            commandPrefix: `setup-payment-settings-${savedSettings.id}`,
-          }),
-        });
+        try {
+          const propertyLink = await getBookingHotelPropertyLink({ hotelId: savedSettings.id });
+          await updateFinancePaymentSettings({
+            propertyId: propertyLink.propertyId,
+            body: buildFinancePaymentSettingsBody({
+              payAtPropertyEnabled: payAtHotel,
+              payAtHotelMethods,
+              onlineCardPayment,
+              bankTransfer,
+              paymentProvider,
+              defaultCurrency: currency,
+              commandPrefix: `setup-payment-settings-${savedSettings.id}`,
+            }),
+          });
+        } catch {
+          localStorage.setItem(
+            "setupWarning",
+            "Hotel created, but payment settings were not saved. Update them from Settings > Payments.",
+          );
+        }
       }
 
       // 2. Save the room-filter portion of design settings. Media/color

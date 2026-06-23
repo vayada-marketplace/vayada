@@ -653,6 +653,12 @@ describe("finance route contracts", () => {
     expect(accountInsert.values?.[0]).toBe(propertyId);
     expect(accountInsert.values?.[1]).toBeNull();
     expect(accountInsert.values?.[2]).toBe("property");
+    expect(target.requiredCall("UPDATE finance.payment_settings").values).toEqual([
+      propertyId,
+      "stripe",
+      first.response.providerAccountId,
+      `settings-choice:${propertyId}:stripe`,
+    ]);
   });
 
   it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
@@ -996,6 +1002,25 @@ describe("finance route contracts", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.body.code).toBe("invalid_payment_method");
+    expect(repository.writeCount).toBe(0);
+
+    const nestedPolicyResponse = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      payload: {
+        commandId: "cmd-payment-settings-invalid-policy",
+        idempotencyKey: "finance-payment-settings-invalid-policy",
+        paymentSettings: {
+          refundPolicy: {
+            rules: { freeCancellationDays: 7 },
+          },
+        },
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(nestedPolicyResponse.statusCode).toBe(400);
+    expect(nestedPolicyResponse.body.code).toBe("invalid_body");
     expect(repository.writeCount).toBe(0);
   });
 
@@ -2503,7 +2528,7 @@ function targetPaymentSettingsPool(): {
   const providerAccountId = "f7000000-0000-0000-0000-000000000899";
   const state: {
     calls: QueryCall[];
-    idempotencyFingerprint: string | null;
+    idempotency: Map<string, string>;
     providerAccount: {
       id: string;
       provider: string;
@@ -2527,7 +2552,7 @@ function targetPaymentSettingsPool(): {
     } | null;
   } = {
     calls: [],
-    idempotencyFingerprint: null,
+    idempotency: new Map(),
     providerAccount: null,
     settings: null,
   };
@@ -2546,14 +2571,16 @@ function targetPaymentSettingsPool(): {
       return { rows, rowCount: rows.length };
     }
     if (text.includes("INSERT INTO platform.idempotency_keys")) {
+      const idempotencyKey = String(values?.[0]);
       const fingerprint = String(values?.[1]);
-      const inserted = state.idempotencyFingerprint === null;
-      state.idempotencyFingerprint ??= fingerprint;
+      const previous = state.idempotency.get(idempotencyKey);
+      const inserted = previous === undefined;
+      if (inserted) state.idempotency.set(idempotencyKey, fingerprint);
       return {
         rows: [
           {
             inserted,
-            requestFingerprintHash: state.idempotencyFingerprint,
+            requestFingerprintHash: previous ?? fingerprint,
           } as unknown as T,
         ],
         rowCount: 1,
@@ -3729,6 +3756,13 @@ function paymentSettingsPatchResult(
           : paymentSettings.statementDescriptor,
       requiresManualReview:
         command.payload.requiresManualReview ?? paymentSettings.requiresManualReview,
+      providerAccount:
+        command.payload.paymentProvider === undefined
+          ? paymentSettings.providerAccount
+          : {
+              ...paymentSettings.providerAccount,
+              provider: command.payload.paymentProvider,
+            },
     },
     commandMeta: {
       commandId: command.commandId,

@@ -192,6 +192,7 @@ export default function SettingsPage() {
   const [paymentError, setPaymentError] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
 
   const handleChangeEmail = async () => {
@@ -252,6 +253,7 @@ export default function SettingsPage() {
   }, [t]);
 
   useEffect(() => {
+    setPaymentSettingsLoaded(false);
     const propertyPromise = fetchSettings();
     propertyPromise
       .then(async (property) => {
@@ -263,7 +265,10 @@ export default function SettingsPage() {
         );
       })
       .then((res) => {
-        if (!res) return;
+        if (!res) {
+          setPaymentSettingsLoaded(true);
+          return;
+        }
         const ps = res.paymentSettings;
         setStripeAccountId(ps.stripeConnectAccountId ?? null);
         setStripeOnboarded(ps.stripeConnectOnboarded ?? false);
@@ -278,8 +283,12 @@ export default function SettingsPage() {
           online_card_payment: ps.onlineCardPayment ?? false,
           bank_transfer: ps.bankTransfer ?? false,
         }));
+        setPaymentSettingsLoaded(true);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        setPaymentSettingsLoaded(false);
+        setPaymentError(errorMessage(err, "Payment settings failed to load."));
+      });
   }, [fetchSettings]);
 
   const handleCreateStripeAccount = async () => {
@@ -319,15 +328,13 @@ export default function SettingsPage() {
     setPaymentError("");
     setPaymentSuccess("");
     try {
+      if (!paymentSettingsLoaded) {
+        setPaymentError("Payment settings did not load. Refresh before saving payments.");
+        return false;
+      }
       if (paymentProvider === "xendit") {
-        if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-          setPaymentError(t("settings.billing.errorAccountNumberFormat"));
-          return false;
-        }
-        if (!xenditAccountHolderName.trim()) {
-          setPaymentError(t("settings.billing.errorAccountHolderRequired"));
-          return false;
-        }
+        setPaymentError("Xendit account details are not saved by this payment settings flow yet.");
+        return false;
       }
       const hotelId = readBookingHotelId(settings);
       if (!hotelId) {
