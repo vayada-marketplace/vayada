@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
 import { updateBookingBenefitsSettings } from "@/services/api/bookingBenefitsSettingsClient";
+import { updateBookingLastMinuteSettings } from "@/services/api/bookingLastMinuteSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
@@ -40,8 +41,6 @@ const PROMO_CODE_IMPORT_UNAVAILABLE =
   "Setup promo codes from this invite were not imported because promo-code management is not available on next-api yet.";
 const PAYMENT_SETTINGS_WRITE_UNAVAILABLE =
   "Payment settings writes are not available on next-api yet. Use the default pay-at-property setup options before completing setup.";
-const LAST_MINUTE_SETTINGS_UNAVAILABLE =
-  "Last-minute discount settings are not available on next-api yet. Remove last-minute discounts before completing setup.";
 
 const STEPS = [
   { number: 1, label: "Your Property" },
@@ -330,7 +329,6 @@ export default function SetupPage() {
       const unavailableSelections = [
         ...(setupAddons.length > 0 ? [ADDON_ITEM_MANAGEMENT_UNAVAILABLE] : []),
         ...(!hasDefaultPaymentSetup() ? [PAYMENT_SETTINGS_WRITE_UNAVAILABLE] : []),
-        ...(lastMinuteConfig.enabled ? [LAST_MINUTE_SETTINGS_UNAVAILABLE] : []),
       ];
       if (unavailableSelections.length > 0) {
         setError(unavailableSelections.join(" "));
@@ -486,6 +484,13 @@ export default function SetupPage() {
         } catch {
           // Non-fatal: benefits can be added later from Settings
         }
+      }
+
+      if (savedSettings.id && lastMinuteConfig.enabled) {
+        await updateBookingLastMinuteSettings({
+          hotelId: savedSettings.id,
+          body: lastMinuteConfig,
+        });
       }
 
       // Auto-select the newly created hotel
