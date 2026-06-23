@@ -36,6 +36,7 @@ import {
   createPgBookingSettingsReadRepository,
   createPgTargetBookingSettingsRepository,
 } from "./routes/bookingSettings.js";
+import { createTargetBookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import {
   createTargetFinancePropertySettingsRepository,
   createTargetFinancePublicHotelPropertyResolver,
@@ -104,6 +105,12 @@ const bookingGuestFormSettingsSync =
         pmsApiUrl: config.pmsApiUrl,
       })
     : undefined;
+
+const bookingCustomDomainRepository = config.targetDatabaseUrl
+  ? createTargetBookingCustomDomainRepository({
+      connectionString: config.targetDatabaseUrl,
+    })
+  : undefined;
 
 const bookingReservationsRepository =
   config.bookingReservationsSource === "target"
@@ -356,6 +363,7 @@ const app = buildApp({
   bookingSettingsRepository,
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,
+  bookingCustomDomainRepository,
   bookingAdminCompat: config.authSession
     ? { allowedOrigins: config.authSession.authAllowedOrigins }
     : undefined,

@@ -50,6 +50,11 @@ import {
   type BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
 import {
+  createTargetBookingCustomDomainRepository,
+  type BookingCustomDomainPool,
+  type BookingCustomDomainRepository,
+} from "./routes/bookingCustomDomain.js";
+import {
   createTargetBookingWebCalendarRepository,
   type BookingWebCalendarReadPool,
 } from "./routes/bookingWebPublic.js";
@@ -551,6 +556,34 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
   async updateRoomFilterSettingsByHotelId(hotelId, settings) {
     expect(hotelId).toBe("booking_hotel_alpenrose");
     return settings;
+  },
+};
+
+const bookingCustomDomainRepository: BookingCustomDomainRepository = {
+  async findByBookingHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") return null;
+    return {
+      hotelId,
+      propertyId: "f6853000-0000-0000-0000-000000000001",
+      domain: "book.alpenrose.example",
+      verificationStatus: "verified",
+      verifiedAt: "2026-06-22T10:00:00.000Z",
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    };
+  },
+  async upsertForBookingHotelId(hotelId, domain) {
+    if (hotelId !== "booking_hotel_alpenrose") return null;
+    return {
+      hotelId,
+      propertyId: "f6853000-0000-0000-0000-000000000001",
+      domain,
+      verificationStatus: "pending",
+      verifiedAt: null,
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    };
+  },
+  async deleteForBookingHotelId(hotelId) {
+    return hotelId === "booking_hotel_alpenrose";
   },
 };
 
@@ -1804,6 +1837,7 @@ function buildAuthenticatedApp(
     reservationsRepository?: BookingReservationsReadRepository;
     settingsRepository?: BookingSettingsReadRepository;
     settingsWriteRepository?: BookingSettingsWriteRepository;
+    customDomainRepository?: BookingCustomDomainRepository;
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
     pmsOperationsRepository?: PmsOperationsReadRepository;
     pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
@@ -1827,6 +1861,7 @@ function buildAuthenticatedApp(
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
+    bookingCustomDomainRepository: options.customDomainRepository ?? bookingCustomDomainRepository,
     bookingGuestFormSettingsSync: options.guestFormSettingsSync,
     bookingAdminCompat: options.bookingAdminCompatAllowedOrigins
       ? { allowedOrigins: options.bookingAdminCompatAllowedOrigins }
@@ -4106,6 +4141,205 @@ describe("vayada-api", () => {
       category: "write_model",
       message: "Booking settings could not be saved.",
     });
+  });
+
+  it("returns booking custom-domain verification state with auth, policy, and property linkage", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: "f6853000-0000-0000-0000-000000000001",
+      configured: true,
+      domain: "book.alpenrose.example",
+      status: "verified",
+      sslStatus: "active",
+      dnsRecords: [
+        {
+          type: "CNAME",
+          name: "book.alpenrose.example",
+          value: "custom.booking.vayada.com",
+          status: "verified",
+        },
+      ],
+      verificationErrors: [],
+      checkedAt: "2026-06-22T10:00:00.000Z",
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    });
+  });
+
+  it("connects booking custom-domain through the typed write contract", async () => {
+    const writes: Array<{ hotelId: string; domain: string }> = [];
+    app = buildAuthenticatedApp({
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async upsertForBookingHotelId(hotelId, domain) {
+          writes.push({ hotelId, domain });
+          return {
+            hotelId,
+            propertyId: "f6853000-0000-0000-0000-000000000001",
+            domain,
+            verificationStatus: "pending",
+            verifiedAt: null,
+            updatedAt: "2026-06-22T10:00:00.000Z",
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        domain: " Book.Alpenrose.Example ",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(writes).toEqual([
+      {
+        hotelId: "booking_hotel_alpenrose",
+        domain: "book.alpenrose.example",
+      },
+    ]);
+    expect(response.body).toMatchObject({
+      configured: true,
+      domain: "book.alpenrose.example",
+      status: "pending",
+      sslStatus: "pending",
+      dnsRecords: [
+        {
+          type: "CNAME",
+          name: "book.alpenrose.example",
+          value: "custom.booking.vayada.com",
+          status: "pending",
+        },
+      ],
+    });
+  });
+
+  it("rejects invalid booking custom-domain payloads", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        domain: "https://book.alpenrose.example/path",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    const body = response.body as { details: string[] };
+    expect(body).toMatchObject({
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking custom-domain payload is invalid.",
+    });
+    expect(body.details).toContain(
+      "domain must be a hostname, not a URL, path, wildcard, localhost, or IP.",
+    );
+  });
+
+  it("rejects booking custom-domain access when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp({ linkedHotelId: null });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
+  it("disconnects booking custom-domain with the typed write contract", async () => {
+    const deletes: string[] = [];
+    app = buildAuthenticatedApp({
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async deleteForBookingHotelId(hotelId) {
+          deletes.push(hotelId);
+          return true;
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(deletes).toEqual(["booking_hotel_alpenrose"]);
+  });
+
+  it("resolves booking custom-domain target property ids through property_source_links", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: BookingCustomDomainPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              hotelId: "booking_hotel_alpenrose",
+              propertyId: "f6853000-0000-0000-0000-000000000001",
+              domain: null,
+              verificationStatus: null,
+              verifiedAt: null,
+              updatedAt: null,
+            } as unknown as T,
+          ],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingCustomDomainRepository({
+      connectionString: "postgres://target",
+      pool,
+    });
+
+    await expect(repository.findByBookingHotelId("booking_hotel_alpenrose")).resolves.toMatchObject(
+      {
+        hotelId: "booking_hotel_alpenrose",
+        propertyId: "f6853000-0000-0000-0000-000000000001",
+        domain: null,
+      },
+    );
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.text).toContain("hotel_catalog.property_source_links");
+    expect(queries[0]!.text).toContain("source_table = 'booking_hotels'");
+    expect(queries[0]!.values).toEqual(["booking_hotel_alpenrose"]);
   });
 
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
