@@ -2,6 +2,11 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { apiClient } from "@/services/api/client";
+import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
+import {
+  buildFinancePaymentSettingsBody,
+  updateFinancePaymentSettings,
+} from "@/services/api/financePaymentSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
   BuildingOffice2Icon,
@@ -72,6 +77,16 @@ const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2
 const CUSTOM_DOMAIN_UNAVAILABLE = "Custom domain management is not available on next-api yet.";
 const PROPERTY_MAP_CENTERING_UNAVAILABLE =
   "Automatic property map centering is not available on next-api yet.";
+
+function readBookingHotelId(settings: PropertySettings): string {
+  if (settings.id?.trim()) return settings.id.trim();
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("selectedHotelId")?.trim() ?? "";
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 const hasValidCoordinatePair = (latitude: number, longitude: number) =>
   Number.isFinite(latitude) &&
@@ -239,10 +254,12 @@ export default function SettingsPage() {
   useEffect(() => {
     const propertyPromise = fetchSettings();
     propertyPromise
-      .then((property) => {
-        if (!property?.id) return null;
+      .then(async (property) => {
+        const hotelId = property ? readBookingHotelId(property) : "";
+        if (!hotelId) return null;
+        const propertyLink = await getBookingHotelPropertyLink({ hotelId });
         return apiClient.get<PmsPaymentSettingsResponse>(
-          `/api/pms/properties/${encodeURIComponent(property.id)}/payment-settings`,
+          `/api/pms/properties/${encodeURIComponent(propertyLink.propertyId)}/payment-settings`,
         );
       })
       .then((res) => {
@@ -277,11 +294,11 @@ export default function SettingsPage() {
       setStripeAccountId(result.accountId);
       const link = await pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link");
       window.open(link.url, "_blank");
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg =
         err instanceof TypeError
           ? t("settings.billing.errorPaymentServerUnreachable")
-          : err.message || t("settings.billing.errorAccountCreate");
+          : errorMessage(err, t("settings.billing.errorAccountCreate"));
       setPaymentError(msg);
     } finally {
       setCreatingAccount(false);
@@ -292,8 +309,8 @@ export default function SettingsPage() {
     try {
       const link = await pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link");
       window.open(link.url, "_blank");
-    } catch (err: any) {
-      setPaymentError(err.message || t("settings.billing.errorOnboardingLink"));
+    } catch (err: unknown) {
+      setPaymentError(errorMessage(err, t("settings.billing.errorOnboardingLink")));
     }
   };
 
@@ -312,7 +329,30 @@ export default function SettingsPage() {
           return false;
         }
       }
-      setPaymentError("Payment settings writes are not available on next-api yet.");
+      const hotelId = readBookingHotelId(settings);
+      if (!hotelId) {
+        setPaymentError("Select a hotel before saving payment settings.");
+        return false;
+      }
+      const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+      await updateFinancePaymentSettings({
+        propertyId: propertyLink.propertyId,
+        body: buildFinancePaymentSettingsBody({
+          payAtPropertyEnabled: settings.pay_at_property_enabled,
+          payAtHotelMethods: settings.pay_at_hotel_methods,
+          onlineCardPayment: settings.online_card_payment ?? false,
+          bankTransfer: settings.bank_transfer ?? false,
+          paymentProvider,
+          defaultCurrency: settings.default_currency,
+          commandPrefix: `settings-payment-settings-${hotelId}`,
+        }),
+      });
+      setPaymentSuccess(t("settings.billing.paymentSettingsSaved"));
+      return true;
+    } catch (err: unknown) {
+      setPaymentError(
+        err instanceof Error ? err.message : t("settings.billing.errorPaymentSaveFailed"),
+      );
       return false;
     } finally {
       setSavingPayment(false);

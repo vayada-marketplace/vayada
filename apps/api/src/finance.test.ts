@@ -22,6 +22,8 @@ import type {
   FinanceManualPaymentRecordResult,
   FinancePaymentLedgerItem,
   FinancePaymentLedgerQuery,
+  FinancePaymentSettingsPatchCommand,
+  FinancePaymentSettingsPatchResult,
   FinancePaymentSettingsReadModel,
   FinancePayout,
   FinancePayoutListQuery,
@@ -893,6 +895,110 @@ describe("finance route contracts", () => {
     expect(repository.enqueueCount).toBe(0);
   });
 
+  it("updates Finance payment settings and replays idempotency keys without duplicate writes", async () => {
+    const repository = paymentSettingsWriteRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+    const payload = {
+      commandId: "cmd-payment-settings-001",
+      idempotencyKey: "finance-payment-settings-f300686-001",
+      paymentSettings: {
+        paymentsEnabled: true,
+        paymentProvider: "xendit",
+        acceptedMethods: ["xendit", "bank_transfer"],
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR"],
+        requiresManualReview: false,
+      },
+    };
+
+    const first = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      payload,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const replay = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      payload,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(first.statusCode).toBe(200);
+    expect(replay.statusCode).toBe(200);
+    expect(first.body).toMatchObject({
+      contractVersion: "finance-route-contracts.v1",
+      propertyId,
+      paymentSettings: {
+        paymentsEnabled: true,
+        paymentProvider: "xendit",
+        acceptedMethods: ["xendit", "bank_transfer"],
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR"],
+        requiresManualReview: false,
+      },
+      commandMeta: {
+        idempotencyKey: "finance-payment-settings-f300686-001",
+        sideEffects: ["audit_event"],
+        outboxEvents: [],
+        jobs: [],
+      },
+    });
+    expect(replay.body).toMatchObject({
+      paymentSettings: first.body.paymentSettings,
+      commandMeta: first.body.commandMeta,
+    });
+    expect(repository.writeCount).toBe(1);
+  });
+
+  it("rejects Finance payment settings writes without manage permission", async () => {
+    app = buildFinanceApp();
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      payload: {
+        commandId: "cmd-payment-settings-denied",
+        idempotencyKey: "finance-payment-settings-denied",
+        paymentSettings: {
+          paymentsEnabled: true,
+        },
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body.code).toBe("missing_permission");
+  });
+
+  it("validates strict Finance payment settings write payloads before repository writes", async () => {
+    const repository = paymentSettingsWriteRepository();
+    app = buildFinanceApp({
+      repository,
+      permissions: financeManagePermissions(),
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/finance/properties/${propertyId}/payment-settings`,
+      payload: {
+        commandId: "cmd-payment-settings-invalid",
+        idempotencyKey: "finance-payment-settings-invalid",
+        paymentSettings: {
+          acceptedMethods: ["card", "card"],
+        },
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body.code).toBe("invalid_payment_method");
+    expect(repository.writeCount).toBe(0);
+  });
+
   it("passes the F1d manual payment record fixture in target mode", async () => {
     const repository = manualPaymentRepository();
     app = buildFinanceApp({
@@ -1424,6 +1530,87 @@ describe("finance route contracts", () => {
     expect(JSON.stringify(response.body)).not.toContain("acct_target_alpenrose");
   });
 
+  it("round-trips Vayada provider choices through the PMS compatibility facade", async () => {
+    app = buildFinanceApp({
+      repository: {
+        async getPaymentSettings() {
+          return {
+            ...paymentSettings,
+            paymentProvider: "vayada",
+            acceptedMethods: ["card", "pay_at_property"],
+            providerAccount: {
+              ...paymentSettings.providerAccount,
+              provider: "vayada",
+              status: "active",
+              onboardingStatus: "completed",
+              chargesEnabled: true,
+            },
+          };
+        },
+        async getCancellationPolicy() {
+          return cancellationPolicy;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${propertyId}/payment-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      paymentSettings: {
+        paymentProvider: "vayada",
+        onlineCardPayment: true,
+        payAtPropertyEnabled: true,
+        xenditPaymentsEnabled: false,
+      },
+    });
+  });
+
+  it("does not expose PMS compatibility online methods before the provider can charge", async () => {
+    app = buildFinanceApp({
+      repository: {
+        async getPaymentSettings() {
+          return {
+            ...paymentSettings,
+            paymentProvider: "xendit",
+            acceptedMethods: ["xendit", "card", "pay_at_property", "bank_transfer"],
+            providerAccount: {
+              ...paymentSettings.providerAccount,
+              provider: "xendit",
+              status: "setup_incomplete",
+              onboardingStatus: "not_started",
+              chargesEnabled: false,
+            },
+          };
+        },
+        async getCancellationPolicy() {
+          return cancellationPolicy;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${propertyId}/payment-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      paymentSettings: {
+        paymentProvider: "xendit",
+        payAtPropertyEnabled: true,
+        bankTransfer: true,
+        onlineCardPayment: false,
+        xenditPaymentsEnabled: false,
+      },
+    });
+  });
+
   it("does not expose PMS compatibility payment methods when payments are disabled", async () => {
     app = buildFinanceApp({
       repository: {
@@ -1498,6 +1685,67 @@ describe("finance route contracts", () => {
       requiresManualReview: true,
       providerAccount: { status: "active" },
     });
+  });
+
+  it("persists target payment provider choices with audit and idempotent replay", async () => {
+    const target = targetPaymentSettingsPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+    });
+    const command = paymentSettingsTargetCommand({
+      payload: {
+        paymentsEnabled: true,
+        paymentProvider: "vayada",
+        acceptedMethods: ["card", "pay_at_property"],
+        defaultCurrency: "EUR",
+        supportedCurrencies: ["EUR"],
+        requiresManualReview: false,
+      },
+    });
+    const keyHash = sha256(command.idempotencyKey);
+
+    const first = await repository.updatePaymentSettings!(command);
+    const replay = await repository.updatePaymentSettings!(command);
+
+    expect(first.ok).toBe(true);
+    expect(replay.ok).toBe(true);
+    if (!first.ok || !replay.ok) throw new Error("Unexpected payment settings write failure");
+    expect(first.status).toBe("updated");
+    expect(first.settings.paymentProvider).toBe("vayada");
+    expect(first.settings.providerAccount).toMatchObject({
+      provider: "vayada",
+      status: "active",
+      onboardingStatus: "completed",
+      chargesEnabled: true,
+    });
+    expect(first.settings.requiresManualReview).toBe(false);
+    expect(replay.status).toBe("idempotent_replay");
+    expect(replay.settings.paymentProvider).toBe("vayada");
+    expect(
+      target.calls.filter((call) => call.text.includes("INSERT INTO finance.payment_settings")),
+    ).toHaveLength(1);
+    expect(
+      target.calls.filter((call) =>
+        call.text.includes("INSERT INTO platform.product_audit_events"),
+      ),
+    ).toHaveLength(1);
+
+    const providerInsert = target.requiredCall("INSERT INTO finance.payment_provider_accounts");
+    expect(providerInsert.values?.[1]).toBe("vayada");
+    expect(providerInsert.values?.[2]).toBe(`settings-choice:${propertyId}:vayada`);
+    expect(providerInsert.values?.[3]).toBe("active");
+    expect(providerInsert.values?.[5]).toBe(true);
+
+    const paymentSettingsUpsert = target.requiredCall("INSERT INTO finance.payment_settings");
+    expect(paymentSettingsUpsert.values?.[9]).toBe(target.providerAccountId);
+    expect(paymentSettingsUpsert.values?.[10]).toBe(true);
+
+    const auditInsert = target.requiredCall("INSERT INTO platform.product_audit_events");
+    expect(auditInsert.values?.[0]).toBe(
+      `finance.payment-settings.audit.property.${propertyId}.key.${keyHash}.v1`,
+    );
+    expect(auditInsert.values?.[2]).toBe(propertyId);
   });
 
   it("maps property payouts from the target Finance payout read model without destination secrets", async () => {
@@ -2233,6 +2481,191 @@ function targetManualPaymentPool(
   };
 }
 
+function targetPaymentSettingsPool(): {
+  calls: QueryCall[];
+  providerAccountId: string;
+  pool: {
+    connect(): Promise<{
+      query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<{ rows: T[]; rowCount: number }>;
+      release(): void;
+    }>;
+    query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      values?: readonly unknown[],
+    ): Promise<{ rows: T[]; rowCount: number }>;
+    end(): Promise<void>;
+  };
+  requiredCall(fragment: string): QueryCall;
+} {
+  const providerAccountId = "f7000000-0000-0000-0000-000000000899";
+  const state: {
+    calls: QueryCall[];
+    idempotencyFingerprint: string | null;
+    providerAccount: {
+      id: string;
+      provider: string;
+      providerAccountRef: string;
+      status: string;
+      onboardingStatus: string;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      capabilities: string[];
+    } | null;
+    settings: {
+      paymentsEnabled: boolean;
+      acceptedMethods: string[];
+      defaultCurrency: string;
+      depositPolicy: unknown;
+      refundPolicy: unknown;
+      taxPolicy: unknown;
+      statementDescriptor: string | null;
+      requiresManualReview: boolean;
+      updatedAt: string;
+    } | null;
+  } = {
+    calls: [],
+    idempotencyFingerprint: null,
+    providerAccount: null,
+    settings: null,
+  };
+
+  const query = async <T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[]; rowCount: number }> => {
+    state.calls.push({ text, values });
+    if (text === "BEGIN" || text === "COMMIT" || text === "ROLLBACK") {
+      return { rows: [] as T[], rowCount: 0 };
+    }
+    if (text.includes("FROM finance.payment_settings settings")) {
+      const row = targetPaymentSettingsRow(state.settings, state.providerAccount);
+      const rows = row ? [row as unknown as T] : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (text.includes("INSERT INTO platform.idempotency_keys")) {
+      const fingerprint = String(values?.[1]);
+      const inserted = state.idempotencyFingerprint === null;
+      state.idempotencyFingerprint ??= fingerprint;
+      return {
+        rows: [
+          {
+            inserted,
+            requestFingerprintHash: state.idempotencyFingerprint,
+          } as unknown as T,
+        ],
+        rowCount: 1,
+      };
+    }
+    if (text.includes('SELECT id::text AS "providerAccountId"')) {
+      const rows = state.providerAccount
+        ? [{ providerAccountId: state.providerAccount.id } as unknown as T]
+        : [];
+      return { rows, rowCount: rows.length };
+    }
+    if (text.includes("INSERT INTO finance.payment_provider_accounts")) {
+      state.providerAccount = {
+        id: providerAccountId,
+        provider: String(values?.[1]),
+        providerAccountRef: String(values?.[2]),
+        status: String(values?.[3]),
+        onboardingStatus: String(values?.[4]),
+        chargesEnabled: Boolean(values?.[5]),
+        payoutsEnabled: false,
+        capabilities: (values?.[7] as string[] | undefined) ?? [],
+      };
+      return {
+        rows: [{ providerAccountId } as unknown as T],
+        rowCount: 1,
+      };
+    }
+    if (text.includes("INSERT INTO finance.payment_settings")) {
+      state.settings = {
+        paymentsEnabled: Boolean(values?.[1]),
+        acceptedMethods: (values?.[2] as string[] | undefined) ?? [],
+        defaultCurrency: String(values?.[3]),
+        depositPolicy: JSON.parse(String(values?.[4] ?? "{}")),
+        refundPolicy: JSON.parse(String(values?.[5] ?? "{}")),
+        taxPolicy: JSON.parse(String(values?.[6] ?? "{}")),
+        statementDescriptor: values?.[7] === undefined ? null : (values?.[7] as string | null),
+        requiresManualReview: Boolean(values?.[8]),
+        updatedAt: "2026-06-12T12:00:00.000Z",
+      };
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    if (text.includes("INSERT INTO platform.product_audit_events")) {
+      return { rows: [] as T[], rowCount: 1 };
+    }
+    return { rows: [] as T[], rowCount: 0 };
+  };
+
+  const client = { query, release() {} };
+  return {
+    get calls() {
+      return state.calls;
+    },
+    providerAccountId,
+    pool: {
+      async connect() {
+        return client;
+      },
+      query,
+      async end() {},
+    },
+    requiredCall(fragment: string) {
+      const call = state.calls.find((candidate) => candidate.text.includes(fragment));
+      expect(call, fragment).toBeDefined();
+      return call!;
+    },
+  };
+}
+
+function targetPaymentSettingsRow(
+  settings: {
+    paymentsEnabled: boolean;
+    acceptedMethods: string[];
+    defaultCurrency: string;
+    depositPolicy: unknown;
+    refundPolicy: unknown;
+    taxPolicy: unknown;
+    statementDescriptor: string | null;
+    requiresManualReview: boolean;
+    updatedAt: string;
+  } | null,
+  providerAccount: {
+    provider: string;
+    providerAccountRef: string;
+    status: string;
+    onboardingStatus: string;
+    chargesEnabled: boolean;
+    payoutsEnabled: boolean;
+    capabilities: string[];
+  } | null,
+): Record<string, unknown> | null {
+  if (!settings) return null;
+  return {
+    propertyId,
+    paymentsEnabled: settings.paymentsEnabled,
+    acceptedMethods: settings.acceptedMethods,
+    defaultCurrency: settings.defaultCurrency,
+    depositPolicy: settings.depositPolicy,
+    refundPolicy: settings.refundPolicy,
+    taxPolicy: settings.taxPolicy,
+    statementDescriptor: settings.statementDescriptor,
+    requiresManualReview: settings.requiresManualReview,
+    updatedAt: settings.updatedAt,
+    providerAccountId: providerAccount?.providerAccountRef ?? null,
+    provider: providerAccount?.provider ?? null,
+    providerStatus: providerAccount?.status ?? null,
+    providerOnboardingStatus: providerAccount?.onboardingStatus ?? null,
+    chargesEnabled: providerAccount?.chargesEnabled ?? null,
+    payoutsEnabled: providerAccount?.payoutsEnabled ?? null,
+    providerCapabilities: providerAccount?.capabilities ?? [],
+  };
+}
+
 function targetManualPaymentRows<T extends QueryResultRow>(
   text: string,
   values: readonly unknown[] | undefined,
@@ -2508,6 +2941,41 @@ function manualPaymentTargetCommand(
       paymentMethod: "cash",
       reference: "front desk receipt 8812",
       ...options.payload,
+    },
+  };
+}
+
+function paymentSettingsTargetCommand(
+  options: {
+    propertyId?: string;
+    idempotencyKey?: string;
+    payload?: FinancePaymentSettingsPatchCommand["payload"];
+  } = {},
+): FinancePaymentSettingsPatchCommand {
+  const commandPropertyId = options.propertyId ?? propertyId;
+  return {
+    commandType: "finance.payment_settings.update",
+    commandId: "cmd-payment-settings-target",
+    idempotencyKey: options.idempotencyKey ?? "finance-payment-settings-target-f300686",
+    propertyId: commandPropertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: "f2000000-0000-0000-0000-000000000686",
+      },
+      requestId: "req_payment_settings_target",
+      correlationId: "corr_payment_settings_target",
+      reason: "Payment settings target test",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+    },
+    payload: options.payload ?? {
+      paymentsEnabled: true,
+      paymentProvider: "vayada",
+      acceptedMethods: ["card", "pay_at_property"],
+      defaultCurrency: "EUR",
+      supportedCurrencies: ["EUR"],
+      requiresManualReview: false,
     },
   };
 }
@@ -2884,6 +3352,42 @@ function manualPaymentRepository(): FinancePropertyReadRepository & {
   return repository;
 }
 
+function paymentSettingsWriteRepository(): FinancePropertyReadRepository & {
+  writeCount: number;
+} {
+  const records = new Map<string, FinancePaymentSettingsPatchResult & { ok: true }>();
+  const repository: FinancePropertyReadRepository & {
+    writeCount: number;
+  } = {
+    ...financeRepository,
+    writeCount: 0,
+    async updatePaymentSettings(command) {
+      if (command.propertyId !== propertyId) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "property_not_found",
+          message: "Finance property payment settings were not found.",
+        };
+      }
+
+      const existing = records.get(command.idempotencyKey);
+      if (existing) {
+        return {
+          ...existing,
+          status: "idempotent_replay",
+        };
+      }
+
+      repository.writeCount += 1;
+      const result = paymentSettingsPatchResult(command, "updated");
+      records.set(command.idempotencyKey, result);
+      return result;
+    },
+  };
+  return repository;
+}
+
 function stripeProviderAccountRepository(): FinancePropertyReadRepository & {
   providerCreateCount: number;
   seedAffiliateProviderAccount(): void;
@@ -3190,6 +3694,41 @@ function affiliatePayoutSettingsPatchResult(
         command.payload.payoutThresholdAmount !== undefined
           ? command.payload.payoutThresholdAmount
           : affiliatePayoutSettings.payoutThresholdAmount,
+    },
+    commandMeta: {
+      commandId: command.commandId,
+      idempotencyKey: command.idempotencyKey,
+      sideEffects: ["audit_event"],
+      outboxEvents: [],
+      jobs: [],
+    },
+  };
+}
+
+function paymentSettingsPatchResult(
+  command: FinancePaymentSettingsPatchCommand,
+  status: "updated" | "idempotent_replay",
+): FinancePaymentSettingsPatchResult & { ok: true } {
+  return {
+    ok: true,
+    status,
+    settings: {
+      ...paymentSettings,
+      paymentsEnabled: command.payload.paymentsEnabled ?? paymentSettings.paymentsEnabled,
+      paymentProvider: command.payload.paymentProvider ?? paymentSettings.paymentProvider,
+      acceptedMethods: command.payload.acceptedMethods ?? paymentSettings.acceptedMethods,
+      defaultCurrency: command.payload.defaultCurrency ?? paymentSettings.defaultCurrency,
+      supportedCurrencies:
+        command.payload.supportedCurrencies ?? paymentSettings.supportedCurrencies,
+      depositPolicy: command.payload.depositPolicy ?? paymentSettings.depositPolicy,
+      refundPolicy: command.payload.refundPolicy ?? paymentSettings.refundPolicy,
+      taxPolicy: command.payload.taxPolicy ?? paymentSettings.taxPolicy,
+      statementDescriptor:
+        command.payload.statementDescriptor !== undefined
+          ? command.payload.statementDescriptor
+          : paymentSettings.statementDescriptor,
+      requiresManualReview:
+        command.payload.requiresManualReview ?? paymentSettings.requiresManualReview,
     },
     commandMeta: {
       commandId: command.commandId,

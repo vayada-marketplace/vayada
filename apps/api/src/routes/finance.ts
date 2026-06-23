@@ -44,6 +44,10 @@ import {
   type FinancePaymentLedgerItem,
   type FinancePaymentLedgerQuery,
   type FinancePaymentLedgerResponse,
+  type FinancePaymentSettingsPatchCommand,
+  type FinancePaymentSettingsPatchResponse,
+  type FinancePaymentSettingsPatchResult,
+  type FinancePaymentSettingsPatchPayload,
   type FinancePaymentSettingsReadModel,
   type FinancePayout,
   type FinancePayoutListQuery,
@@ -108,6 +112,7 @@ const PROPERTY_PAYOUT_DISPATCH_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] =
 ];
 
 const AFFILIATE_PAYOUT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
+const PAYMENT_SETTINGS_SIDE_EFFECTS: FinanceCommandMeta["sideEffects"] = ["audit_event"];
 
 const XENDIT_PAYOUT_RECONCILIATION_LEGACY_DISPOSITION =
   "legacy /admin/xendit/reconcile-payouts disabled or proxied during rehearsal";
@@ -426,6 +431,7 @@ type FinanceCommandError = {
   code:
     | "invalid_command"
     | "affiliate_not_found"
+    | "property_not_found"
     | "invoice_not_found"
     | "provider_account_not_found"
     | "payout_not_found"
@@ -493,6 +499,12 @@ type AffiliatePayoutSettingsPatchBody = {
   payoutThresholdAmount?: unknown;
 };
 
+type PaymentSettingsPatchBody = {
+  commandId?: unknown;
+  idempotencyKey?: unknown;
+  paymentSettings?: unknown;
+};
+
 export async function registerFinanceRoutes(
   app: FastifyInstance,
   options: FinanceRoutesOptions,
@@ -515,6 +527,42 @@ export async function registerFinanceRoutes(
         (await options.repository.getPaymentSettings(propertyId)) ??
         setupIncompletePaymentSettings(propertyId, new Date().toISOString());
       return toFinancePaymentSettingsResponse(settings);
+    },
+  );
+
+  app.patch<{ Params: FinancePropertyParams; Body: PaymentSettingsPatchBody }>(
+    "/finance/properties/:propertyId/payment-settings",
+    async (request, reply) => {
+      const propertyId = request.params.propertyId;
+      if (!enforceFinancePropertyWritePolicy(request, reply, propertyId)) return reply;
+
+      if (!options.repository.updatePaymentSettings) {
+        reply.code(501);
+        return {
+          statusCode: 501,
+          code: "write_unavailable",
+          category: "write_model",
+          message: "Finance payment settings writes are not configured.",
+        } satisfies FinanceCommandError;
+      }
+
+      const parsed = toPaymentSettingsPatchCommand(request, propertyId);
+      if ("statusCode" in parsed) {
+        reply.code(parsed.statusCode);
+        return parsed;
+      }
+
+      const result = await options.repository.updatePaymentSettings(parsed);
+      if (!result.ok) {
+        const error = toFinanceCommandError(result);
+        reply.code(error.statusCode);
+        return error;
+      }
+
+      return {
+        ...toFinancePaymentSettingsResponse(result.settings),
+        commandMeta: result.commandMeta,
+      } satisfies FinancePaymentSettingsPatchResponse;
     },
   );
 
@@ -1272,6 +1320,21 @@ export function createTargetFinancePropertySettingsRepository(config: {
           )
         : null;
     },
+    async updatePaymentSettings(command) {
+      const client = await checkoutFinanceWriteClient(pool);
+      const ownsTransaction = typeof client.release === "function";
+      try {
+        if (ownsTransaction) await client.query("BEGIN");
+        const result = await updatePaymentSettingsInClient(client, command);
+        if (ownsTransaction) await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        if (ownsTransaction) await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        if (ownsTransaction) client.release?.();
+      }
+    },
     async getFinancialSummary(propertyId) {
       const row = await loadFinancialSummaryRow(pool, propertyId);
       return row ? toFinancialSummaryResponseBody(row) : null;
@@ -1491,6 +1554,391 @@ async function checkoutFinanceWriteClient(
       const result = await pool.query<T>(text, values);
       return { ...result, rowCount: result.rows.length };
     },
+  };
+}
+
+async function updatePaymentSettingsInClient(
+  client: FinancePropertySettingsWriteClient,
+  command: FinancePaymentSettingsPatchCommand,
+): Promise<FinancePaymentSettingsPatchResult> {
+  const existing = await loadPaymentSettingsRow(client, command.propertyId);
+  const current = existing
+    ? toFinancePaymentSettingsReadModel(existing)
+    : setupIncompletePaymentSettings(command.propertyId, new Date().toISOString());
+  const next = mergePaymentSettings(current, command.payload);
+  const keyHash = sha256(command.idempotencyKey);
+  const fingerprint = sha256(
+    stableJson({ propertyId: command.propertyId, payload: command.payload }),
+  );
+  const commandMeta = buildPaymentSettingsCommandMeta(command);
+
+  const idempotency = await client.query<{
+    inserted: boolean;
+    requestFingerprintHash: string;
+  }>(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       response_status_code,
+       response_body_hash,
+       response_resource_product,
+       response_resource_type,
+       response_resource_id,
+       correlation_id,
+       expires_at,
+       completed_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'finance',
+       'payment_settings_update',
+       $1,
+       $2,
+       'completed',
+       'property',
+       $3::uuid,
+       200,
+       $4,
+       'finance',
+       'payment_settings',
+       $3,
+       $5,
+       now() + interval '24 hours',
+       now(),
+       $6::jsonb
+     )
+     ON CONFLICT (operation_scope, operation, key_hash, scope_key)
+     DO UPDATE SET last_seen_at = now()
+     RETURNING (xmax = 0) AS inserted,
+               request_fingerprint_hash AS "requestFingerprintHash"`,
+    [
+      keyHash,
+      fingerprint,
+      command.propertyId,
+      sha256(stableJson(commandMeta)),
+      command.audit.correlationId ?? command.audit.requestId,
+      JSON.stringify({ commandMeta, commandId: command.commandId }),
+    ],
+  );
+
+  const idempotencyRow = idempotency.rows[0];
+  if (idempotencyRow && idempotencyRow.requestFingerprintHash !== fingerprint) {
+    return {
+      ok: false,
+      statusCode: 409,
+      code: "idempotency_conflict",
+      message: "Idempotency key was already used with a different payment-settings payload.",
+    };
+  }
+
+  if (idempotencyRow?.inserted) {
+    await upsertPaymentSettings(client, command, next);
+    await recordPaymentSettingsAuditEvent(client, command, keyHash);
+  }
+
+  const stored = await loadPaymentSettingsRow(client, command.propertyId);
+  const settings = stored ? toFinancePaymentSettingsReadModel(stored) : null;
+  if (!settings) {
+    return {
+      ok: false,
+      statusCode: 404,
+      code: "property_not_found",
+      message: "Finance property payment settings were not found.",
+    };
+  }
+
+  return {
+    ok: true,
+    status: idempotencyRow?.inserted ? "updated" : "idempotent_replay",
+    settings,
+    commandMeta,
+  };
+}
+
+function mergePaymentSettings(
+  current: FinancePaymentSettingsReadModel,
+  payload: FinancePaymentSettingsPatchPayload,
+): FinancePaymentSettingsReadModel {
+  const defaultCurrency =
+    payload.defaultCurrency ?? payload.supportedCurrencies?.[0] ?? current.defaultCurrency;
+  return {
+    ...current,
+    ...payload,
+    defaultCurrency,
+    supportedCurrencies: [defaultCurrency],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function upsertPaymentSettings(
+  client: FinancePropertySettingsWriteClient,
+  command: FinancePaymentSettingsPatchCommand,
+  settings: FinancePaymentSettingsReadModel,
+): Promise<void> {
+  const hasProviderChoice = command.payload.paymentProvider !== undefined;
+  const providerAccountId = hasProviderChoice
+    ? await resolvePaymentSettingsProviderAccountId(client, command, settings.defaultCurrency)
+    : null;
+  await client.query(
+    `INSERT INTO finance.payment_settings (
+       property_id,
+       provider_account_id,
+       payments_enabled,
+       accepted_methods,
+       default_currency,
+       deposit_policy,
+       refund_policy,
+       tax_policy,
+       statement_descriptor,
+       requires_manual_review,
+       source_system,
+       updated_at
+     )
+     VALUES (
+       $1::uuid,
+       $10::uuid,
+       $2,
+       $3::text[],
+       $4,
+       $5::jsonb,
+       $6::jsonb,
+       $7::jsonb,
+       $8,
+       $9,
+       'finance',
+       now()
+     )
+     ON CONFLICT (property_id) DO UPDATE SET
+       provider_account_id = CASE
+         WHEN $11::boolean THEN $10::uuid
+         ELSE finance.payment_settings.provider_account_id
+       END,
+       payments_enabled = EXCLUDED.payments_enabled,
+       accepted_methods = EXCLUDED.accepted_methods,
+       default_currency = EXCLUDED.default_currency,
+       deposit_policy = EXCLUDED.deposit_policy,
+       refund_policy = EXCLUDED.refund_policy,
+       tax_policy = EXCLUDED.tax_policy,
+       statement_descriptor = EXCLUDED.statement_descriptor,
+       requires_manual_review = EXCLUDED.requires_manual_review,
+       source_system = 'finance',
+       updated_at = now()`,
+    [
+      command.propertyId,
+      settings.paymentsEnabled,
+      settings.acceptedMethods,
+      settings.defaultCurrency,
+      JSON.stringify(settings.depositPolicy),
+      JSON.stringify(settings.refundPolicy),
+      JSON.stringify(settings.taxPolicy),
+      settings.statementDescriptor,
+      settings.requiresManualReview,
+      providerAccountId,
+      hasProviderChoice,
+    ],
+  );
+}
+
+async function resolvePaymentSettingsProviderAccountId(
+  client: FinancePropertySettingsWriteClient,
+  command: FinancePaymentSettingsPatchCommand,
+  defaultCurrency: string,
+): Promise<string | null> {
+  const provider = command.payload.paymentProvider;
+  if (!provider) return null;
+
+  const existing = await client.query<{ providerAccountId: string }>(
+    `SELECT id::text AS "providerAccountId"
+     FROM finance.payment_provider_accounts
+     WHERE property_id = $1::uuid
+       AND account_scope = 'property'
+       AND provider = $2
+     ORDER BY
+       CASE
+         WHEN provider_account_id LIKE 'settings-choice:%' THEN 1
+         ELSE 0
+       END,
+       updated_at DESC
+     LIMIT 1`,
+    [command.propertyId, provider],
+  );
+  if (existing.rows[0]) return existing.rows[0].providerAccountId;
+
+  const placeholder = paymentSettingsProviderPlaceholder(provider);
+  const result = await client.query<{ providerAccountId: string }>(
+    `INSERT INTO finance.payment_provider_accounts (
+       property_id,
+       account_scope,
+       provider,
+       provider_account_id,
+       status,
+       onboarding_status,
+       charges_enabled,
+       payouts_enabled,
+       default_currency,
+       capabilities,
+       account_metadata,
+       created_at,
+       updated_at
+     )
+     VALUES (
+       $1::uuid,
+       'property',
+       $2,
+       $3,
+       $4,
+       $5,
+       $6,
+       false,
+       $7,
+       $8::text[],
+       $9::jsonb,
+       now(),
+       now()
+     )
+     ON CONFLICT (provider, provider_account_id) WHERE provider_account_id IS NOT NULL
+     DO UPDATE SET
+       property_id = EXCLUDED.property_id,
+       account_scope = 'property',
+       status = EXCLUDED.status,
+       onboarding_status = EXCLUDED.onboarding_status,
+       charges_enabled = EXCLUDED.charges_enabled,
+       default_currency = EXCLUDED.default_currency,
+       capabilities = EXCLUDED.capabilities,
+       account_metadata = finance.payment_provider_accounts.account_metadata || EXCLUDED.account_metadata,
+       updated_at = now()
+     RETURNING id::text AS "providerAccountId"`,
+    [
+      command.propertyId,
+      provider,
+      `settings-choice:${command.propertyId}:${provider}`,
+      placeholder.status,
+      placeholder.onboardingStatus,
+      placeholder.chargesEnabled,
+      defaultCurrency,
+      placeholder.capabilities,
+      JSON.stringify({
+        source: "payment_settings_choice",
+        commandId: command.commandId,
+      }),
+    ],
+  );
+  return result.rows[0]?.providerAccountId ?? null;
+}
+
+function paymentSettingsProviderPlaceholder(
+  provider: FinancePaymentSettingsPatchPayload["paymentProvider"],
+): {
+  status: string;
+  onboardingStatus: string;
+  chargesEnabled: boolean;
+  capabilities: string[];
+} {
+  if (provider === "vayada" || provider === "manual" || provider === "bank_transfer") {
+    return {
+      status: "active",
+      onboardingStatus: "completed",
+      chargesEnabled: provider === "vayada",
+      capabilities: provider === "vayada" ? ["card_payments"] : [],
+    };
+  }
+  return {
+    status: "setup_incomplete",
+    onboardingStatus: "not_started",
+    chargesEnabled: false,
+    capabilities: [],
+  };
+}
+
+async function recordPaymentSettingsAuditEvent(
+  client: FinancePropertySettingsWriteClient,
+  command: FinancePaymentSettingsPatchCommand,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'finance',
+       'finance.payment_settings.updated',
+       1,
+       $2::timestamptz,
+       'property',
+       NULL,
+       $3::uuid,
+       $4,
+       $5::uuid,
+       'finance',
+       'payment_settings',
+       $3,
+       $6,
+       $7,
+       $8::jsonb,
+       '{}'::jsonb,
+       $9::jsonb,
+       'financial',
+       'confidential'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `finance.payment-settings.audit.property.${command.propertyId}.key.${keyHash}.v1`,
+      command.audit.requestedAt,
+      command.propertyId,
+      command.audit.actor.kind,
+      command.audit.actor.kind === "user" ? command.audit.actor.userId : null,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        changedFields: Object.keys(command.payload).sort(),
+        paymentProvider: command.payload.paymentProvider ?? null,
+        acceptedMethods: command.payload.acceptedMethods ?? null,
+        paymentsEnabled: command.payload.paymentsEnabled ?? null,
+      }),
+      JSON.stringify({
+        contractVersion: FINANCE_ROUTE_CONTRACT_VERSION,
+        idempotencyKeyHash: keyHash,
+        requestId: command.audit.requestId,
+      }),
+    ],
+  );
+}
+
+function buildPaymentSettingsCommandMeta(
+  command: FinancePaymentSettingsPatchCommand,
+): FinanceCommandMeta {
+  return {
+    commandId: command.commandId,
+    idempotencyKey: command.idempotencyKey,
+    sideEffects: PAYMENT_SETTINGS_SIDE_EFFECTS,
+    outboxEvents: [],
+    jobs: [],
   };
 }
 
@@ -5790,6 +6238,160 @@ function toPropertyPayoutDispatchCommand(
   };
 }
 
+function toPaymentSettingsPatchCommand(
+  request: FastifyRequest<{ Body: PaymentSettingsPatchBody }>,
+  propertyId: string,
+): FinancePaymentSettingsPatchCommand | FinanceValidationError {
+  const body = plainRecord(request.body);
+  if (!body) {
+    return invalidQuery("invalid_body", "Payment settings update body must be an object.");
+  }
+  const commandId = nonEmptyString(body.commandId);
+  const idempotencyKey = nonEmptyString(body.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return invalidQuery(
+      "invalid_body",
+      "Payment settings update requires commandId and idempotencyKey.",
+    );
+  }
+
+  const bodyKeys = strictObjectKeys(body, ["commandId", "idempotencyKey", "paymentSettings"]);
+  if (bodyKeys) return bodyKeys;
+  const paymentSettings = plainRecord(body.paymentSettings);
+  if (!paymentSettings) {
+    return invalidQuery("invalid_body", "paymentSettings must be an object.");
+  }
+  const settingsKeys = strictObjectKeys(paymentSettings, [
+    "paymentsEnabled",
+    "paymentProvider",
+    "acceptedMethods",
+    "defaultCurrency",
+    "supportedCurrencies",
+    "depositPolicy",
+    "refundPolicy",
+    "taxPolicy",
+    "statementDescriptor",
+    "requiresManualReview",
+  ]);
+  if (settingsKeys) return settingsKeys;
+
+  const payload: FinancePaymentSettingsPatchPayload = {};
+  if (paymentSettings.paymentsEnabled !== undefined) {
+    if (typeof paymentSettings.paymentsEnabled !== "boolean") {
+      return invalidQuery("invalid_body", "paymentsEnabled must be a boolean.");
+    }
+    payload.paymentsEnabled = paymentSettings.paymentsEnabled;
+  }
+  if (paymentSettings.paymentProvider !== undefined) {
+    const provider = optionalEnum(paymentSettings.paymentProvider, FINANCE_ROUTE_PAYMENT_PROVIDERS);
+    if (!provider) return invalidQuery("invalid_provider", "Unsupported payment provider.");
+    payload.paymentProvider = provider;
+  }
+  if (paymentSettings.acceptedMethods !== undefined) {
+    const methods = paymentMethodArray(paymentSettings.acceptedMethods);
+    if (!methods) return invalidQuery("invalid_payment_method", "acceptedMethods is invalid.");
+    payload.acceptedMethods = methods;
+  }
+  if (paymentSettings.defaultCurrency !== undefined) {
+    const currency = currencyBodyString(paymentSettings.defaultCurrency);
+    if (!currency) return invalidQuery("invalid_body", "defaultCurrency must be an ISO-4217 code.");
+    payload.defaultCurrency = currency;
+  }
+  if (paymentSettings.supportedCurrencies !== undefined) {
+    const currencies = currencyArray(paymentSettings.supportedCurrencies);
+    if (!currencies) {
+      return invalidQuery("invalid_body", "supportedCurrencies must contain ISO-4217 codes.");
+    }
+    if (currencies.length !== 1) {
+      return invalidQuery("invalid_body", "Only one supported currency is currently stored.");
+    }
+    payload.supportedCurrencies = currencies;
+  }
+  for (const key of ["depositPolicy", "refundPolicy", "taxPolicy"] as const) {
+    if (paymentSettings[key] !== undefined) {
+      const policy = jsonPolicyBody(paymentSettings[key], key);
+      if (!policy.ok) return policy.error;
+      payload[key] = policy.value;
+    }
+  }
+  if (paymentSettings.statementDescriptor !== undefined) {
+    if (paymentSettings.statementDescriptor !== null) {
+      const descriptor = nonEmptyString(paymentSettings.statementDescriptor);
+      if (!descriptor) {
+        return invalidQuery("invalid_body", "statementDescriptor must be a string or null.");
+      }
+      payload.statementDescriptor = descriptor;
+    } else {
+      payload.statementDescriptor = null;
+    }
+  }
+  if (paymentSettings.requiresManualReview !== undefined) {
+    if (typeof paymentSettings.requiresManualReview !== "boolean") {
+      return invalidQuery("invalid_body", "requiresManualReview must be a boolean.");
+    }
+    payload.requiresManualReview = paymentSettings.requiresManualReview;
+  }
+  if (Object.keys(payload).length === 0) {
+    return invalidQuery("invalid_body", "Payment settings update has no changes.");
+  }
+
+  return {
+    commandType: "finance.payment_settings.update",
+    commandId,
+    idempotencyKey,
+    propertyId,
+    audit: financeCommandAudit(request, "Update property payment settings"),
+    payload,
+  };
+}
+
+function strictObjectKeys(
+  value: Record<string, unknown>,
+  allowedKeys: readonly string[],
+): FinanceValidationError | null {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.includes(key)) {
+      return invalidQuery("invalid_body", `${key} is not supported.`);
+    }
+  }
+  return null;
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function paymentMethodArray(value: unknown): FinanceRoutePaymentMethod[] | null {
+  if (!Array.isArray(value)) return null;
+  const methods: FinanceRoutePaymentMethod[] = [];
+  for (const entry of value) {
+    const method = optionalEnum(entry, FINANCE_ROUTE_PAYMENT_METHODS);
+    if (!method || methods.includes(method)) return null;
+    methods.push(method);
+  }
+  return methods;
+}
+
+function currencyArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const currencies = value.map(currencyBodyString);
+  if (currencies.some((currency) => !currency)) return null;
+  return currencies as string[];
+}
+
+type FinanceJsonPolicyBodyResult =
+  | { ok: true; value: FinanceJsonPolicy }
+  | { ok: false; error: FinanceValidationError };
+
+function jsonPolicyBody(value: unknown, name: string): FinanceJsonPolicyBodyResult {
+  const record = plainRecord(value);
+  if (!record) {
+    return { ok: false, error: invalidQuery("invalid_body", `${name} must be an object.`) };
+  }
+  return { ok: true, value: jsonPolicy(record) };
+}
+
 function toAffiliatePayoutSettingsPatchCommand(
   request: FastifyRequest<{ Body: AffiliatePayoutSettingsPatchBody }>,
   affiliateId: string,
@@ -5938,6 +6540,7 @@ function toFinanceCommandError(
     | Extract<FinanceProviderAccountCommandResult, { ok: false }>
     | Extract<FinanceXenditPayoutReconciliationResult, { ok: false }>
     | Extract<FinancePropertyPayoutDispatchResult, { ok: false }>
+    | Extract<FinancePaymentSettingsPatchResult, { ok: false }>
     | Extract<FinanceAffiliatePayoutSettingsPatchResult, { ok: false }>,
 ) {
   return {
@@ -6366,7 +6969,7 @@ function toPmsPaymentSettingsFacade(
     onlineCardPayment: boolean;
     bankTransfer: boolean;
     xenditPaymentsEnabled: boolean;
-    paymentProvider: "stripe" | "xendit";
+    paymentProvider: "stripe" | "xendit" | "vayada";
     xenditChannelCode: null;
     xenditAccountNumber: null;
     xenditAccountHolderName: null;
@@ -6378,6 +6981,7 @@ function toPmsPaymentSettingsFacade(
   };
 } {
   const enabledMethods = settings.paymentsEnabled ? settings.acceptedMethods : [];
+  const canChargeOnline = settings.paymentsEnabled && financeProviderCanCharge(settings);
   return {
     paymentSettings: {
       stripeConnectAccountId: null,
@@ -6388,12 +6992,14 @@ function toPmsPaymentSettingsFacade(
       platformFeeValue: 0,
       platformFeeWithAffiliate: 0,
       payAtPropertyEnabled: enabledMethods.includes("pay_at_property"),
-      onlineCardPayment: enabledMethods.includes("card"),
+      onlineCardPayment:
+        enabledMethods.includes("card") && canChargeOnline && settings.paymentProvider !== "xendit",
       bankTransfer: enabledMethods.includes("bank_transfer"),
       xenditPaymentsEnabled:
-        settings.paymentsEnabled &&
-        (settings.paymentProvider === "xendit" || enabledMethods.includes("xendit")),
-      paymentProvider: settings.paymentProvider === "xendit" ? "xendit" : "stripe",
+        enabledMethods.includes("xendit") &&
+        canChargeOnline &&
+        settings.paymentProvider === "xendit",
+      paymentProvider: pmsFacadePaymentProvider(settings.paymentProvider),
       xenditChannelCode: null,
       xenditAccountNumber: null,
       xenditAccountHolderName: null,
@@ -6404,6 +7010,21 @@ function toPmsPaymentSettingsFacade(
       partialRefundPct: policy.partialRefundPercent,
     },
   };
+}
+
+function financeProviderCanCharge(settings: FinancePaymentSettingsReadModel): boolean {
+  return (
+    settings.providerAccount.status === "active" &&
+    settings.providerAccount.onboardingStatus === "completed" &&
+    settings.providerAccount.chargesEnabled
+  );
+}
+
+function pmsFacadePaymentProvider(
+  provider: FinanceRoutePaymentProvider,
+): "stripe" | "xendit" | "vayada" {
+  if (provider === "xendit" || provider === "vayada") return provider;
+  return "stripe";
 }
 
 function isStatusError(error: unknown): error is Error & { statusCode: number } {
