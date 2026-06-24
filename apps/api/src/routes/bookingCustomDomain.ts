@@ -205,7 +205,11 @@ export function createTargetBookingCustomDomainRepository(config: {
         [propertyId, normalizedDomain, hotelId],
       );
 
-      return result.rows[0] ? toState(hotelId, result.rows[0]) : null;
+      if (!result.rows[0]) {
+        throw new BookingCustomDomainConflictError();
+      }
+
+      return toState(hotelId, result.rows[0]);
     },
     async deleteForBookingHotelId(hotelId) {
       const result = await pool.query<{ propertyId: string }>(

@@ -188,7 +188,9 @@ export async function mockBookingAdminShellRoutes(
     }),
   );
   await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, (route) =>
-    route.fulfill({ json: options.customDomain ?? defaultCustomDomain }),
+    route.request().method() === "DELETE"
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({ json: options.customDomain ?? defaultCustomDomain }),
   );
 }
 

@@ -240,7 +240,12 @@ export default function SettingsPage() {
         settingsService
           .getCustomDomainStatus()
           .then(setDomainStatus)
-          .catch(() => setDomainStatus(null));
+          .catch((error) => {
+            setDomainStatus(null);
+            const message =
+              error instanceof Error ? error.message : "Failed to load custom domain status.";
+            setFeedback({ type: "error", message });
+          });
         return apiClient.get<PmsPaymentSettingsResponse>(
           `/api/pms/properties/${encodeURIComponent(property.id)}/payment-settings`,
         );
