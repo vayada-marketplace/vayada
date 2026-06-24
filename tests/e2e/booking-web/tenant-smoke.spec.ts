@@ -19,6 +19,27 @@ test.describe("booking-web tenant smoke", () => {
     await assertHealthy();
   });
 
+  test("carries selected multi-room quantity to checkout", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    await page.goto("/?adults=4&children=0");
+
+    await expect(page.getByRole("heading", { name: /2×\s*Alpine Suite/ })).toBeVisible();
+    await expect(page.getByText("Up to 6 guests")).toBeVisible();
+    const roomQuantity = page.getByLabel("2 Rooms");
+    await expect(roomQuantity).toHaveValue("2");
+
+    await roomQuantity.selectOption("3");
+    await expect(page.getByRole("heading", { name: /3×\s*Alpine Suite/ })).toBeVisible();
+    await expect(page.getByText("Up to 9 guests")).toBeVisible();
+
+    await page.getByRole("button", { name: "Select This Rate", exact: true }).click();
+    await expect(page).toHaveURL(/rooms=3/);
+
+    await assertHealthy();
+  });
+
   test("keeps the mobile room detail modal open for internal controls", async ({
     page,
   }, testInfo) => {
