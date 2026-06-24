@@ -487,10 +487,17 @@ export default function SetupPage() {
       }
 
       if (savedSettings.id && lastMinuteConfig.enabled) {
-        await updateBookingLastMinuteSettings({
-          hotelId: savedSettings.id,
-          body: lastMinuteConfig,
-        });
+        try {
+          await updateBookingLastMinuteSettings({
+            hotelId: savedSettings.id,
+            body: lastMinuteConfig,
+          });
+        } catch {
+          localStorage.setItem(
+            "setupWarning",
+            "Last-minute settings could not be saved during setup. You can retry from Booking Settings.",
+          );
+        }
       }
 
       // Auto-select the newly created hotel

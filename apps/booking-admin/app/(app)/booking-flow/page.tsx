@@ -36,6 +36,7 @@ import {
   type BookingLocalizationSettings,
 } from "@/services/api/bookingLocalizationSettingsClient";
 import {
+  BookingLastMinuteSettingsClientError,
   getBookingLastMinuteSettings,
   updateBookingLastMinuteSettings,
   type BookingLastMinuteSettings,
@@ -416,8 +417,12 @@ export default function BookingFlowPage() {
       });
       setLastMinuteSettings(saved);
       showFeedback("success", "Last-minute settings saved.");
-    } catch {
-      showFeedback("error", "Last-minute settings could not be saved.");
+    } catch (error) {
+      const detail =
+        error instanceof BookingLastMinuteSettingsClientError
+          ? error.detail
+          : "Last-minute settings could not be saved.";
+      showFeedback("error", detail);
     } finally {
       setSavingLastMinute(false);
     }
@@ -548,6 +553,12 @@ export default function BookingFlowPage() {
                 </div>
                 <button
                   type="button"
+                  aria-label={
+                    lastMinuteSettings.enabled
+                      ? "Disable last-minute discounts"
+                      : "Enable last-minute discounts"
+                  }
+                  aria-pressed={lastMinuteSettings.enabled}
                   onClick={() =>
                     setLastMinuteSettings((current) =>
                       current.enabled
@@ -582,6 +593,12 @@ export default function BookingFlowPage() {
                     </div>
                     <button
                       type="button"
+                      aria-label={
+                        lastMinuteSettings.stackWithPromo
+                          ? "Disable stack with promo codes"
+                          : "Enable stack with promo codes"
+                      }
+                      aria-pressed={lastMinuteSettings.stackWithPromo}
                       onClick={() =>
                         setLastMinuteSettings((current) => ({
                           ...current,
