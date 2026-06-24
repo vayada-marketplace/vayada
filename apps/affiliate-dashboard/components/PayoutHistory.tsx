@@ -3,13 +3,12 @@
 import useSWR from "swr";
 import { CheckCircleIcon } from "@heroicons/react/24/solid";
 import DataState from "@/components/DataState";
+import { affiliateApiPaths } from "@/services/api/paths";
 import type { PayoutsResponse } from "@/services/types";
 
 const METHOD_LABELS: Record<string, string> = {
-  bank: "Bank Transfer",
-  paypal: "PayPal",
   stripe: "Stripe",
-  xendit: "Xendit",
+  bank_transfer: "Bank Transfer",
   manual: "Manual",
 };
 
@@ -31,7 +30,7 @@ function formatAmount(amount: number, currency: string): string {
 }
 
 export default function PayoutHistory() {
-  const { data, error } = useSWR<PayoutsResponse>("/affiliate/payouts");
+  const { data, error } = useSWR<PayoutsResponse>(affiliateApiPaths.payouts);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -49,23 +48,23 @@ export default function PayoutHistory() {
           <div className="space-y-3">
             {items.map((payout) => (
               <div
-                key={payout.id}
+                key={payout.payoutId}
                 className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0"
               >
                 <div className="flex items-center gap-3">
                   <CheckCircleIcon className="w-5 h-5 text-success-500" />
                   <div>
                     <p className="text-sm font-medium text-gray-900">
-                      {formatAmount(payout.amount, payout.currency)}
+                      {formatAmount(Number(payout.amount), payout.currency)}
                     </p>
                     <p className="text-xs text-muted">
-                      {formatDate(payout.date)} &middot;{" "}
-                      {METHOD_LABELS[payout.method] || payout.method}
+                      {formatDate(payout.paidAt ?? payout.scheduledAt ?? new Date().toISOString())}{" "}
+                      &middot; {METHOD_LABELS[payout.provider] || payout.provider}
                     </p>
                   </div>
                 </div>
-                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-success-50 text-success-700">
-                  Paid
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-success-50 text-success-700 capitalize">
+                  {payout.payoutStatus.replace("_", " ")}
                 </span>
               </div>
             ))}

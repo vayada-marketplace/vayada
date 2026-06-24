@@ -3,6 +3,7 @@
 import { useState } from "react";
 import useSWR from "swr";
 import DataState from "@/components/DataState";
+import { affiliateApiPaths } from "@/services/api/paths";
 import { currencySymbol } from "@/services/constants/currency";
 import type { EarningsPeriod, EarningsResponse } from "@/services/types";
 
@@ -12,9 +13,7 @@ const MESSAGE_CLASSNAME = "h-40 flex items-center justify-center text-sm text-mu
 
 export default function EarningsChart() {
   const [period, setPeriod] = useState<Period>("6m");
-  const { data: response, error } = useSWR<EarningsResponse>(
-    `/affiliate/earnings?period=${period}`,
-  );
+  const { data: response, error } = useSWR<EarningsResponse>(affiliateApiPaths.earnings(period));
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -38,7 +37,7 @@ export default function EarningsChart() {
       <DataState
         data={response ?? null}
         error={Boolean(error)}
-        isEmpty={(r) => r.months.length === 0}
+        isEmpty={(r) => r.buckets.length === 0}
         loadingLabel="Loading…"
         errorLabel="Couldn't load earnings."
         emptyLabel="No earnings yet."
@@ -47,23 +46,26 @@ export default function EarningsChart() {
         emptyClassName={MESSAGE_CLASSNAME}
       >
         {(res) => {
-          const maxEarnings = Math.max(...res.months.map((d) => d.earnings), 1);
+          const maxEarnings = Math.max(...res.buckets.map((d) => Number(d.commissionAmount)), 1);
           const symbol = currencySymbol(res.currency);
           return (
             <div className="flex items-end gap-3 h-40">
-              {res.months.map((d) => (
-                <div key={d.month} className="flex-1 flex flex-col items-center gap-1.5">
-                  <span className="text-xs font-medium text-gray-700">
-                    {symbol}
-                    {Math.round(d.earnings).toLocaleString()}
-                  </span>
-                  <div
-                    className="w-full bg-primary-500 rounded-t-md transition-all duration-300 min-h-[4px]"
-                    style={{ height: `${(d.earnings / maxEarnings) * 100}%` }}
-                  />
-                  <span className="text-xs text-muted">{d.label}</span>
-                </div>
-              ))}
+              {res.buckets.map((d) => {
+                const commissionAmount = Number(d.commissionAmount);
+                return (
+                  <div key={d.bucketStart} className="flex-1 flex flex-col items-center gap-1.5">
+                    <span className="text-xs font-medium text-gray-700">
+                      {symbol}
+                      {Math.round(commissionAmount).toLocaleString()}
+                    </span>
+                    <div
+                      className="w-full bg-primary-500 rounded-t-md transition-all duration-300 min-h-[4px]"
+                      style={{ height: `${(commissionAmount / maxEarnings) * 100}%` }}
+                    />
+                    <span className="text-xs text-muted">{d.label}</span>
+                  </div>
+                );
+              })}
             </div>
           );
         }}

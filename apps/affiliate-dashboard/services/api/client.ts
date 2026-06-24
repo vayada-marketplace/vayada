@@ -1,15 +1,15 @@
 /**
  * API client for the affiliate dashboard.
  *
- * Auth: protected legacy PMS affiliate routes receive a short-lived
- * compatibility bearer minted by apps/api after AuthKit session resolution.
- * The token is kept in memory only and is never persisted to localStorage.
+ * Auth: protected target routes receive the AuthKit access token resolved by
+ * apps/api. Tokens are kept in memory only and are never persisted to
+ * localStorage.
  */
 
 import { authService } from "@/services/auth";
 import { clearAuthData, getAuthBearerToken } from "@/services/auth/storage";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.pms.localhost";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.localhost";
 
 export interface ApiError {
   detail:

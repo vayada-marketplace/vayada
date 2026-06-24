@@ -1,16 +1,14 @@
-/**
- * Shape returned by /affiliate/activity. Booking events have count=1;
- * click events are aggregated per (affiliate, day).
- */
 export type ActivityType = "click" | "booking" | "signup";
 
 export interface Activity {
-  type: ActivityType;
-  ts: string;
-  property: string;
+  activityType: ActivityType;
+  occurredAt: string;
+  propertyName: string;
   count: number;
 }
 
 export interface ActivitiesResponse {
+  contractVersion: "affiliate-dashboard.v1";
+  affiliateId: string;
   activities: Activity[];
 }

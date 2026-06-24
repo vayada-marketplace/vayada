@@ -8,16 +8,20 @@ import EarningsChart from "@/components/EarningsChart";
 import PayoutHistory from "@/components/PayoutHistory";
 import RecentActivity from "@/components/RecentActivity";
 import PerformanceTips from "@/components/PerformanceTips";
+import { affiliateApiPaths } from "@/services/api/paths";
 import { authService } from "@/services/auth";
 import { affiliateLink } from "@/services/constants/site";
-import type { DashboardStats, PropertiesResponse } from "@/services/types";
+import type { AffiliateDashboardResponse, AffiliatePropertiesResponse } from "@/services/types";
 
 const PROPERTY_COLORS = ["#0f766e", "#1e3a5f", "#6b21a8", "#b45309", "#be123c", "#047857"];
 
 export default function DashboardPage() {
-  const { data: stats, error: statsError } = useSWR<DashboardStats>("/affiliate/dashboard");
-  const { data: propertiesData, error: propertiesError } =
-    useSWR<PropertiesResponse>("/affiliate/properties");
+  const { data: dashboard, error: statsError } = useSWR<AffiliateDashboardResponse>(
+    affiliateApiPaths.dashboard,
+  );
+  const { data: propertiesData, error: propertiesError } = useSWR<AffiliatePropertiesResponse>(
+    affiliateApiPaths.properties,
+  );
 
   const userName = authService.getUserName();
   const userInitials = authService.getUserInitials();
@@ -30,7 +34,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!stats || !propertiesData) {
+  if (!dashboard || !propertiesData) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center">
         <div className="text-gray-500 text-sm">Loading dashboard...</div>
@@ -38,9 +42,12 @@ export default function DashboardPage() {
     );
   }
 
+  const stats = dashboard.summary;
   const properties = propertiesData.properties;
   const avgPerBooking =
-    stats.totalBookings > 0 ? Math.round(stats.totalEarned / stats.totalBookings) : 0;
+    stats.bookingCount > 0
+      ? Math.round(Number(stats.totalCommissionAmount) / stats.bookingCount)
+      : 0;
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -62,22 +69,22 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatsCard
             label="Total Earned"
-            value={`$${stats.totalEarned.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            value={formatMoney(stats.totalCommissionAmount, stats.currency)}
             subtitle={`Across ${stats.propertyCount} properties`}
           />
           <StatsCard
             label="Bookings Referred"
-            value={stats.totalBookings.toString()}
-            subtitle={`Avg $${avgPerBooking} per booking`}
+            value={stats.bookingCount.toString()}
+            subtitle={`Avg ${formatMoney(String(avgPerBooking), stats.currency)} per booking`}
           />
           <StatsCard
             label="Link Clicks"
-            value={stats.totalClicks.toString()}
+            value={stats.clickCount.toString()}
             subtitle={`${stats.conversionRate}% conversion rate`}
           />
           <StatsCard
             label="Outstanding Balance"
-            value={`$${stats.outstandingBalance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+            value={formatMoney(stats.outstandingBalanceAmount, stats.currency)}
             subtitle="Across all properties"
             highlight
           />
@@ -90,14 +97,14 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {properties.map((property, i) => (
                 <PropertyCard
-                  key={property.affiliateId}
-                  name={property.hotelName}
-                  commission={property.commissionPct}
-                  status={property.status === "approved" ? "active" : "pending"}
-                  affiliateLink={affiliateLink(property.hotelSlug, property.referralCode)}
-                  bookings={property.bookingCount}
-                  outstanding={property.totalCommission}
-                  clicks={property.clickCount}
+                  key={property.propertyId}
+                  name={property.displayName}
+                  commission={property.commissionPercent}
+                  status={property.status === "active" ? "active" : "pending"}
+                  affiliateLink={affiliateLink(property.slug, property.referralCode)}
+                  bookings={property.metrics.bookingCount}
+                  outstanding={Number(property.metrics.totalCommissionAmount)}
+                  clicks={property.metrics.clickCount}
                   color={PROPERTY_COLORS[i % PROPERTY_COLORS.length]}
                 />
               ))}
@@ -128,4 +135,18 @@ export default function DashboardPage() {
       </footer>
     </div>
   );
+}
+
+function formatMoney(amount: string, currency: string): string {
+  const numeric = Number(amount);
+  if (!Number.isFinite(numeric)) return `${currency} ${amount}`;
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(numeric);
+  } catch {
+    return `${currency} ${numeric.toLocaleString()}`;
+  }
 }

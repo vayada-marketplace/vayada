@@ -1,6 +1,7 @@
 /**
  * SWR fetcher backed by ApiClient. Use as the global fetcher in
- * SWRConfig — useSWR<T>('/affiliate/dashboard') returns DashboardStats.
+ * SWRConfig — useSWR<T>('/api/affiliate/dashboard') returns the target
+ * dashboard contract.
  *
  * 401s are translated by ApiClient into a redirect to /login (and the
  * thrown ApiErrorResponse is what SWR sees as `error`), so SWR consumers
