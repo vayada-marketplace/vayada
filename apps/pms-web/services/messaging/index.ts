@@ -3,7 +3,14 @@ import { buildQueryString } from "@/lib/utils/queryString";
 
 export type ThreadStatus = "open" | "closed" | "no_reply_needed";
 export type MessageDirection = "inbound" | "outbound";
-export type MessageChannel = "booking.com" | "airbnb" | "expedia" | "other" | null;
+export type MessageChannel =
+  | "booking.com"
+  | "airbnb"
+  | "expedia"
+  | "email"
+  | "direct"
+  | "other"
+  | null;
 
 export interface MessageAttachment {
   id: string;
@@ -21,6 +28,7 @@ export interface Message {
   body: string;
   sentAt: string;
   readAt: string | null;
+  automated: boolean;
   attachments: MessageAttachment[];
 }
 
@@ -29,6 +37,9 @@ export interface MessageThread {
   source: string;
   channel: MessageChannel;
   bookingId: string | null;
+  bookingReference: string | null;
+  checkIn: string | null;
+  checkOut: string | null;
   guestName: string | null;
   guestEmail: string | null;
   status: ThreadStatus;
@@ -50,6 +61,36 @@ export interface ThreadDetailResponse {
 
 export interface UnreadCountResponse {
   unreadCount: number;
+}
+
+export interface MessageTemplate {
+  id: string;
+  name: string;
+  category: "pre_arrival" | "in_stay" | "post_stay" | "general";
+  icon: string;
+  content: string;
+  isDefault: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GuestAutomation {
+  id: string;
+  templateId: string | null;
+  templateName: string | null;
+  name: string;
+  icon: string;
+  description: string;
+  triggerEvent: "before_check_in" | "day_of_check_in" | "after_check_out" | "day_of_check_out";
+  daysOffset: number;
+  sendTime: string;
+  audience: "all" | "direct" | "ota" | "booking.com" | "airbnb";
+  deliveryChannel: "smart" | "ota_only" | "email_only";
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const messagingService = {
@@ -111,4 +152,33 @@ export const messagingService = {
     pmsClient.post<MessageThread>(`/admin/messaging/threads/${id}/no-reply-needed`, {}),
 
   unreadCount: () => pmsClient.get<UnreadCountResponse>("/admin/messaging/unread-count"),
+
+  listTemplates: () => pmsClient.get<{ templates: MessageTemplate[] }>("/admin/inbox/templates"),
+
+  createTemplate: (data: Partial<MessageTemplate> & { name: string }) =>
+    pmsClient.post<MessageTemplate>("/admin/inbox/templates", data),
+
+  updateTemplate: (id: string, data: Partial<MessageTemplate>) =>
+    pmsClient.patch<MessageTemplate>(`/admin/inbox/templates/${id}`, data),
+
+  deleteTemplate: (id: string) => pmsClient.delete(`/admin/inbox/templates/${id}`),
+
+  renderTemplate: (id: string, threadId?: string) =>
+    pmsClient.get<{ content: string; variables: Record<string, string> }>(
+      `/admin/inbox/templates/${id}/render${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`,
+    ),
+
+  variablePreview: () =>
+    pmsClient.get<{ variables: Record<string, string> }>("/admin/inbox/variables/preview"),
+
+  listAutomations: () =>
+    pmsClient.get<{ automations: GuestAutomation[] }>("/admin/inbox/automations"),
+
+  createAutomation: (data: Partial<GuestAutomation> & { name: string }) =>
+    pmsClient.post<GuestAutomation>("/admin/inbox/automations", data),
+
+  updateAutomation: (id: string, data: Partial<GuestAutomation>) =>
+    pmsClient.patch<GuestAutomation>(`/admin/inbox/automations/${id}`, data),
+
+  deleteAutomation: (id: string) => pmsClient.delete(`/admin/inbox/automations/${id}`),
 };

@@ -16,7 +16,12 @@ class MessageThreadRepository:
     @staticmethod
     async def get_by_id(thread_id: str, hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
-            "SELECT * FROM message_threads WHERE id = $1 AND hotel_id = $2",
+            """
+            SELECT mt.*, b.booking_reference, b.check_in, b.check_out
+            FROM message_threads mt
+            LEFT JOIN bookings b ON b.id = mt.booking_id
+            WHERE mt.id = $1 AND mt.hotel_id = $2
+            """,
             thread_id,
             hotel_id,
         )
@@ -78,11 +83,13 @@ class MessageThreadRepository:
         if status and before:
             rows = await Database.fetch(
                 """
-                SELECT * FROM message_threads
-                WHERE hotel_id = $1
-                  AND status = $2::thread_status
-                  AND last_message_at < $3
-                ORDER BY last_message_at DESC NULLS LAST
+                SELECT mt.*, b.booking_reference, b.check_in, b.check_out
+                FROM message_threads mt
+                LEFT JOIN bookings b ON b.id = mt.booking_id
+                WHERE mt.hotel_id = $1
+                  AND mt.status = $2::thread_status
+                  AND mt.last_message_at < $3
+                ORDER BY mt.last_message_at DESC NULLS LAST
                 LIMIT $4
                 """,
                 hotel_id,
@@ -93,9 +100,11 @@ class MessageThreadRepository:
         elif status:
             rows = await Database.fetch(
                 """
-                SELECT * FROM message_threads
-                WHERE hotel_id = $1 AND status = $2::thread_status
-                ORDER BY last_message_at DESC NULLS LAST
+                SELECT mt.*, b.booking_reference, b.check_in, b.check_out
+                FROM message_threads mt
+                LEFT JOIN bookings b ON b.id = mt.booking_id
+                WHERE mt.hotel_id = $1 AND mt.status = $2::thread_status
+                ORDER BY mt.last_message_at DESC NULLS LAST
                 LIMIT $3
                 """,
                 hotel_id,
@@ -105,9 +114,11 @@ class MessageThreadRepository:
         elif before:
             rows = await Database.fetch(
                 """
-                SELECT * FROM message_threads
-                WHERE hotel_id = $1 AND last_message_at < $2
-                ORDER BY last_message_at DESC NULLS LAST
+                SELECT mt.*, b.booking_reference, b.check_in, b.check_out
+                FROM message_threads mt
+                LEFT JOIN bookings b ON b.id = mt.booking_id
+                WHERE mt.hotel_id = $1 AND mt.last_message_at < $2
+                ORDER BY mt.last_message_at DESC NULLS LAST
                 LIMIT $3
                 """,
                 hotel_id,
@@ -117,9 +128,11 @@ class MessageThreadRepository:
         else:
             rows = await Database.fetch(
                 """
-                SELECT * FROM message_threads
-                WHERE hotel_id = $1
-                ORDER BY last_message_at DESC NULLS LAST
+                SELECT mt.*, b.booking_reference, b.check_in, b.check_out
+                FROM message_threads mt
+                LEFT JOIN bookings b ON b.id = mt.booking_id
+                WHERE mt.hotel_id = $1
+                ORDER BY mt.last_message_at DESC NULLS LAST
                 LIMIT $2
                 """,
                 hotel_id,
@@ -196,6 +209,7 @@ class MessageRepository:
         body: str,
         sent_at: datetime,
         raw_payload: dict | None = None,
+        automated: bool = False,
     ) -> dict | None:
         """Insert message + update parent thread's last_message_* and unread_count
         in one CTE. Returns None if a row with (thread_id, source_message_id)
@@ -210,9 +224,9 @@ class MessageRepository:
             WITH inserted AS (
                 INSERT INTO messages (
                     thread_id, source_message_id, direction, sender_name,
-                    body, sent_at, raw_payload
+                    body, sent_at, raw_payload, automated
                 )
-                VALUES ($1, $2, $3::message_direction, $4, $5, $6, $7::jsonb)
+                VALUES ($1, $2, $3::message_direction, $4, $5, $6, $7::jsonb, $10)
                 ON CONFLICT (thread_id, source_message_id) DO NOTHING
                 RETURNING *
             ), thread_update AS (
@@ -236,6 +250,7 @@ class MessageRepository:
             payload_json,
             preview,
             unread_delta,
+            automated,
         )
         return dict(row) if row else None
 

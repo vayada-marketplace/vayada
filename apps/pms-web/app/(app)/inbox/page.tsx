@@ -1,14 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useTranslation } from "@/lib/i18n";
-import { messagingService, Message, MessageThread, ThreadStatus } from "@/services/messaging";
+import {
+  messagingService,
+  Message,
+  MessageTemplate,
+  MessageThread,
+  ThreadStatus,
+} from "@/services/messaging";
 
 const CHANNEL_BADGE: Record<string, { bg: string; label: string }> = {
   "booking.com": { bg: "bg-[#003580] text-white", label: "Booking.com" },
   airbnb: { bg: "bg-rose-500 text-white", label: "Airbnb" },
   expedia: { bg: "bg-amber-400 text-amber-950", label: "Expedia" },
+  email: { bg: "bg-gray-500 text-white", label: "Email" },
+  direct: { bg: "bg-emerald-600 text-white", label: "Direct" },
   other: { bg: "bg-gray-400 text-white", label: "Other" },
 };
 
@@ -86,20 +95,55 @@ function formatTimestamp(iso: string): string {
   );
 }
 
+function needsReply(thread: MessageThread): boolean {
+  return thread.status === "open" && thread.lastMessageDirection === "inbound";
+}
+
+function routingLabel(thread: MessageThread | null): string {
+  const channel = thread?.channel || "email";
+  if (channel === "booking.com") return "Routing via Booking.com chat";
+  if (channel === "airbnb") return "Routing via Airbnb messages";
+  if (channel === "expedia") return "Routing via Expedia messages";
+  return "Routing via Email";
+}
+
+function bookingDates(thread: MessageThread): string {
+  if (!thread.checkIn || !thread.checkOut) return "";
+  return `${new Date(thread.checkIn).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  })} - ${new Date(thread.checkOut).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  })}`;
+}
+
 export default function InboxPage() {
   const { t } = useTranslation();
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [statusFilter, setStatusFilter] = useState<ThreadStatus>("open");
+  const [searchQuery, setSearchQuery] = useState("");
   const [loadingList, setLoadingList] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [thread, setThread] = useState<MessageThread | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [featureCardHidden, setFeatureCardHidden] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [composerBody, setComposerBody] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [composerError, setComposerError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const filteredThreads = threads.filter((thr) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return [thr.guestName, thr.guestEmail, thr.bookingReference, thr.lastMessagePreview]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(q));
+  });
 
   const fetchThreads = useCallback(async () => {
     if (!isVisible()) return;
@@ -137,6 +181,13 @@ export default function InboxPage() {
     const i = setInterval(fetchThreads, LIST_POLL_MS);
     return () => clearInterval(i);
   }, [fetchThreads]);
+
+  useEffect(() => {
+    messagingService
+      .listTemplates()
+      .then((res) => setTemplates(res.templates))
+      .catch(console.error);
+  }, []);
 
   useEffect(() => {
     if (!selectedId) {
@@ -182,6 +233,20 @@ export default function InboxPage() {
     }
   };
 
+  const insertTemplate = async (templateId: string) => {
+    if (!selectedId) return;
+    try {
+      const rendered = await messagingService.renderTemplate(templateId, selectedId);
+      setComposerBody((prev) =>
+        prev.trim() ? `${prev.trim()}\n\n${rendered.content}` : rendered.content,
+      );
+      setTemplatesOpen(false);
+    } catch (e) {
+      console.error("Template render failed", e);
+      setComposerError((e as Error).message || "Failed to insert template.");
+    }
+  };
+
   const handleClose = async () => {
     if (!selectedId) return;
     if (!confirm("Close this conversation?")) return;
@@ -213,13 +278,17 @@ export default function InboxPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div
-        className={`bg-white px-5 pt-4 flex flex-col ${selectedId ? "hidden md:flex" : "flex"}`}
-      >
+      <div className={`bg-white px-5 pt-4 flex flex-col ${selectedId ? "hidden md:flex" : "flex"}`}>
         <div className="mb-4 md:mb-5">
           <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("inbox.title")}</h1>
           <p className="text-sm text-gray-500 mt-1">{t("inbox.subtitle")}</p>
         </div>
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search guests, reservations..."
+          className="mb-3 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:bg-white focus:ring-1 focus:ring-emerald-500"
+        />
         <div className="relative border-b border-gray-200">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {STATUS_TABS.map((tab) => {
@@ -232,9 +301,7 @@ export default function InboxPage() {
                     setSelectedId(null);
                   }}
                   className={`relative shrink-0 whitespace-nowrap px-3 py-2.5 text-sm transition-colors ${
-                    isActive
-                      ? "text-gray-900 font-semibold"
-                      : "text-gray-400 hover:text-gray-600"
+                    isActive ? "text-gray-900 font-semibold" : "text-gray-400 hover:text-gray-600"
                   }`}
                 >
                   {tab.label}
@@ -257,11 +324,11 @@ export default function InboxPage() {
         >
           {loadingList ? (
             <div className="p-6 text-sm text-gray-500">Loading…</div>
-          ) : threads.length === 0 ? (
+          ) : filteredThreads.length === 0 ? (
             <div className="p-6 text-sm text-gray-500">No conversations.</div>
           ) : (
             <ul>
-              {threads.map((thr) => {
+              {filteredThreads.map((thr) => {
                 const badge = CHANNEL_BADGE[thr.channel || "other"] || CHANNEL_BADGE.other;
                 const isSelected = thr.id === selectedId;
                 return (
@@ -282,19 +349,30 @@ export default function InboxPage() {
                           {thr.guestName || thr.guestEmail || "Guest"}
                         </span>
                         {thr.unreadCount > 0 && (
-                          <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] text-[10px] font-bold bg-emerald-600 text-white rounded-full px-1.5">
-                            {thr.unreadCount}
+                          <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+                        )}
+                      </div>
+                      <div className="mb-1 flex items-center gap-2">
+                        {needsReply(thr) && (
+                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                            Needs reply
+                          </span>
+                        )}
+                        {thr.bookingReference && (
+                          <span className="text-[11px] font-medium text-gray-400">
+                            {thr.bookingReference}
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-gray-500 line-clamp-2">
                         {thr.lastMessageDirection === "outbound" && (
-                          <span className="text-gray-400">You: </span>
+                          <span className="text-gray-400">Host: </span>
                         )}
                         {thr.lastMessagePreview || "(no messages yet)"}
                       </p>
-                      <p className="text-[11px] text-gray-400 mt-1">
-                        {relativeTime(thr.lastMessageAt)}
+                      <p className="text-[11px] text-gray-400 mt-1 flex items-center justify-between gap-2">
+                        <span>{bookingDates(thr)}</span>
+                        <span>{relativeTime(thr.lastMessageAt)}</span>
                       </p>
                     </button>
                   </li>
@@ -302,13 +380,30 @@ export default function InboxPage() {
               })}
             </ul>
           )}
+          {!featureCardHidden && (
+            <div className="m-4 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-emerald-900">Feature Hub</p>
+                  <p className="mt-1 text-[11px] leading-4 text-emerald-800">
+                    New: Automation rules let you reply before guests ask.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFeatureCardHidden(true)}
+                  className="text-xs text-emerald-600 hover:text-emerald-900"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
         </aside>
 
         {/* Thread detail */}
         <section
-          className={`flex-1 flex-col bg-gray-50 min-w-0 ${
-            selectedId ? "flex" : "hidden md:flex"
-          }`}
+          className={`flex-1 flex-col bg-gray-50 min-w-0 ${selectedId ? "flex" : "hidden md:flex"}`}
         >
           {!selectedId ? (
             <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
@@ -330,16 +425,35 @@ export default function InboxPage() {
                     <ArrowLeftIcon className="w-5 h-5" />
                   </button>
                   <div className="min-w-0">
-                    <h2 className="text-sm font-semibold text-gray-900 truncate">
-                      {thread.guestName || thread.guestEmail || "Guest"}
-                    </h2>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h2 className="text-sm font-semibold text-gray-900 truncate">
+                        {thread.guestName || thread.guestEmail || "Guest"}
+                      </h2>
+                      <span
+                        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                          (CHANNEL_BADGE[thread.channel || "other"] || CHANNEL_BADGE.other).bg
+                        }`}
+                      >
+                        {(CHANNEL_BADGE[thread.channel || "other"] || CHANNEL_BADGE.other).label}
+                      </span>
+                      {needsReply(thread) && (
+                        <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                          Needs reply
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500 truncate">
-                      {(CHANNEL_BADGE[thread.channel || "other"] || CHANNEL_BADGE.other).label}
-                      {thread.bookingId && " · Booking linked"}
+                      {[thread.bookingReference, bookingDates(thread)].filter(Boolean).join(" · ")}
                     </p>
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">
+                  <Link
+                    href="/inbox/automations"
+                    className="text-xs px-2 py-1 text-gray-600 hover:text-gray-900 rounded border border-gray-200"
+                  >
+                    Automations
+                  </Link>
                   {thread.channel === "booking.com" && thread.status === "open" && (
                     <button
                       onClick={handleNoReplyNeeded}
@@ -353,7 +467,7 @@ export default function InboxPage() {
                       onClick={handleClose}
                       className="text-xs px-2 py-1 text-gray-600 hover:text-gray-900 rounded border border-gray-200"
                     >
-                      Close
+                      Mark as done
                     </button>
                   )}
                 </div>
@@ -370,11 +484,18 @@ export default function InboxPage() {
                     >
                       <div
                         className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                          m.direction === "outbound"
-                            ? "bg-emerald-600 text-white"
-                            : "bg-white border border-gray-200 text-gray-900"
+                          m.automated
+                            ? "bg-indigo-600 text-white"
+                            : m.direction === "outbound"
+                              ? "bg-emerald-600 text-white"
+                              : "bg-white border border-gray-200 text-gray-900"
                         }`}
                       >
+                        {m.automated && (
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-white/75">
+                            Automated
+                          </p>
+                        )}
                         {m.body && (
                           <p className="text-sm whitespace-pre-wrap break-words">{m.body}</p>
                         )}
@@ -441,7 +562,7 @@ export default function InboxPage() {
                       </button>
                     </div>
                   )}
-                  <div className="flex items-end gap-2">
+                  <div className="relative flex items-end gap-2">
                     <label className="cursor-pointer text-gray-400 hover:text-gray-600 pb-2">
                       📎
                       <input
@@ -468,6 +589,50 @@ export default function InboxPage() {
                         }}
                       />
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => setTemplatesOpen((value) => !value)}
+                      className="mb-1 rounded-md border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Templates
+                    </button>
+                    {templatesOpen && (
+                      <div className="absolute bottom-full left-8 z-20 mb-2 w-80 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                        <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2">
+                          <span className="text-xs font-semibold text-gray-900">Templates</span>
+                          <button
+                            type="button"
+                            onClick={() => setTemplatesOpen(false)}
+                            className="text-xs text-gray-400 hover:text-gray-700"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <div className="max-h-72 overflow-y-auto py-1">
+                          {templates.map((template) => (
+                            <button
+                              key={template.id}
+                              type="button"
+                              onClick={() => insertTemplate(template.id)}
+                              className="block w-full px-3 py-2 text-left hover:bg-gray-50"
+                            >
+                              <span className="block text-xs font-semibold text-gray-900">
+                                {template.name}
+                              </span>
+                              <span className="line-clamp-2 text-[11px] text-gray-500">
+                                {template.content}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <Link
+                          href="/inbox/templates"
+                          className="block border-t border-gray-100 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                        >
+                          Manage &gt;
+                        </Link>
+                      </div>
+                    )}
                     <textarea
                       value={composerBody}
                       onChange={(e) => setComposerBody(e.target.value)}
@@ -488,6 +653,10 @@ export default function InboxPage() {
                     >
                       {sending ? "Sending…" : "Send"}
                     </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500">
+                    <span>{routingLabel(thread)}</span>
+                    <span>Auto-translate: EN / guest language</span>
                   </div>
                 </div>
               )}

@@ -160,6 +160,9 @@ class HotelDetailsResponse(BaseModel):
     phone: str = ""
     latitude: float | None = None
     longitude: float | None = None
+    wifi_password: str = ""
+    host_contact_name: str = ""
+    google_review_link: str = ""
     last_minute_discount: Any | None = None
     instant_book: bool = False
     same_day_bookings_enabled: bool = True
