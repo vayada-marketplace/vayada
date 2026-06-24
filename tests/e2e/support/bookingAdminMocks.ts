@@ -11,6 +11,7 @@ export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKI
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
 export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
+export const BOOKING_ADMIN_CUSTOM_DOMAIN_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/custom-domain`;
 export const BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings`;
 
 export interface BookingAdminPropertySettingsFixture {
@@ -75,8 +76,27 @@ export interface BookingAdminRoomFilterSettingsFixture {
   filterRooms: Record<string, string[]>;
 }
 
+export interface BookingAdminCustomDomainFixture {
+  hotelId: string;
+  propertyId: string;
+  configured: boolean;
+  domain: string | null;
+  status: "not_configured" | "pending" | "verified" | "failed";
+  sslStatus: "not_configured" | "pending" | "active" | "failed";
+  dnsRecords: Array<{
+    type: "CNAME" | "TXT";
+    name: string;
+    value: string;
+    status: "pending" | "verified" | "failed";
+  }>;
+  verificationErrors: string[];
+  checkedAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface BookingAdminShellMocksOptions {
   propertySettings?: BookingAdminPropertySettingsFixture;
+  customDomain?: BookingAdminCustomDomainFixture;
 }
 
 export interface BookingAdminBookingFlowMocksOptions {
@@ -152,6 +172,19 @@ const defaultRoomFilterSettings: BookingAdminRoomFilterSettingsFixture = {
   filterRooms: {},
 };
 
+export const defaultCustomDomain: BookingAdminCustomDomainFixture = {
+  hotelId: BOOKING_ADMIN_HOTEL_ID,
+  propertyId: "f6853000-0000-0000-0000-000000000001",
+  configured: false,
+  domain: null,
+  status: "not_configured",
+  sslStatus: "not_configured",
+  dnsRecords: [],
+  verificationErrors: [],
+  checkedAt: null,
+  updatedAt: null,
+};
+
 export async function mockBookingAdminAuthenticatedSession(page: Page): Promise<void> {
   await page.addInitScript((hotelId) => {
     const oneHourFromNow = Date.now() + 60 * 60 * 1000;
@@ -217,6 +250,11 @@ export async function mockBookingAdminShellRoutes(
         sourceFreshness: {},
       },
     }),
+  );
+  await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, (route) =>
+    route.request().method() === "DELETE"
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({ json: options.customDomain ?? defaultCustomDomain }),
   );
 }
 

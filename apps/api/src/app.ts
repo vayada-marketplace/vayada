@@ -30,6 +30,7 @@ import {
   registerBookingAdminCompatRoutes,
   type BookingAdminCompatRoutesOptions,
 } from "./routes/bookingAdminCompat.js";
+import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
 import type { BookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
 import {
@@ -130,6 +131,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
+  bookingCustomDomainRepository?: BookingCustomDomainRepository;
   bookingAdminCompat?: BookingAdminCompatRoutesOptions;
   publicHotelProfileRepository?: PublicHotelProfileRepository;
   publicHotelQuoteRepository?: PublicHotelQuoteRepository;
@@ -314,6 +316,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     settingsRepository: options.bookingSettingsRepository,
     settingsWriteRepository: options.bookingSettingsWriteRepository,
     guestFormSettingsSync: options.bookingGuestFormSettingsSync,
+    customDomainRepository: options.bookingCustomDomainRepository,
   });
   if (options.bookingAdminCompat) {
     app.register(registerBookingAdminCompatRoutes, {

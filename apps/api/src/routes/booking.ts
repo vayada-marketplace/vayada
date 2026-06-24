@@ -9,6 +9,10 @@ import {
   type BookingDashboardRoutesOptions,
 } from "./bookingDashboard.js";
 import {
+  registerBookingCustomDomainRoutes,
+  type BookingCustomDomainRepository,
+} from "./bookingCustomDomain.js";
+import {
   registerBookingReservationRoutes,
   type BookingReservationsReadRepository,
 } from "./bookingReservations.js";
@@ -31,6 +35,7 @@ export type BookingRoutesOptions = {
   settingsRepository?: BookingSettingsReadRepository;
   settingsWriteRepository?: BookingSettingsWriteRepository;
   guestFormSettingsSync?: BookingGuestFormSettingsSync;
+  customDomainRepository?: BookingCustomDomainRepository;
 };
 
 export async function registerBookingRoutes(
@@ -58,6 +63,10 @@ export async function registerBookingRoutes(
     await registerBookingDashboardRoutes(app, {
       metricsReadPort: options.dashboardMetricsReadPort,
     });
+  }
+
+  if (options.customDomainRepository) {
+    await registerBookingCustomDomainRoutes(app, options.customDomainRepository);
   }
 
   app.get<{ Params: BookingHotelParams }>("/hotels/:hotelId/policy-check", async (request) => {
