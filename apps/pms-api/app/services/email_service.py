@@ -2,6 +2,7 @@ import json
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape
 from urllib.parse import quote, urlparse
 
 from app.channels import channel_label as _ota_channel_label  # re-exported for tests
@@ -123,6 +124,15 @@ async def _send_email(to: str, subject: str, html_body: str, reply_to: str | Non
         logger.info("Email sent to %s: %s", to, subject)
     except Exception as e:
         logger.warning("Failed to send email to %s: %s", to, e)
+
+
+async def send_guest_message_email(guest_email: str, subject: str, body: str):
+    """Send a plain guest communication message through the existing SMTP path."""
+    safe_body = escape(body).replace("\n", "<br>")
+    content = f"""
+    <p class="detail">{safe_body}</p>
+    """
+    await _send_email(guest_email, subject, _wrap_html(content))
 
 
 async def send_guest_confirmation(guest_email: str, booking: dict):

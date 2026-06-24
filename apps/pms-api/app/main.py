@@ -15,6 +15,7 @@ from app.routers.admin_checkin_checklist import router as admin_checkin_checklis
 from app.routers.admin_checkout import router as admin_checkout_router
 from app.routers.admin_financials import router as admin_financials_router
 from app.routers.admin_import import router as admin_import_router
+from app.routers.admin_inbox import router as admin_inbox_router
 from app.routers.admin_messaging import router as admin_messaging_router
 from app.routers.admin_module_activations import router as admin_module_activations_router
 from app.routers.admin_payments import router as admin_payments_router
@@ -59,7 +60,11 @@ async def run_migrations():
             if f.name in executed:
                 continue
             sql = f.read_text()
-            lines = [l for l in sql.split("\n") if l.strip() and not l.strip().startswith("--")]
+            lines = [
+                line
+                for line in sql.split("\n")
+                if line.strip() and not line.strip().startswith("--")
+            ]
             if not "\n".join(lines).strip():
                 await conn.execute(
                     "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING",
@@ -127,6 +132,7 @@ app.include_router(admin_financials_router, dependencies=_admin_deps)
 app.include_router(admin_affiliates_router, dependencies=_admin_deps)
 app.include_router(admin_channex_router, dependencies=_admin_deps)
 app.include_router(admin_messaging_router, dependencies=_admin_deps)
+app.include_router(admin_inbox_router, dependencies=_admin_deps)
 app.include_router(admin_module_activations_router, dependencies=_admin_deps)
 app.include_router(upload_router)
 app.include_router(admin_import_router)

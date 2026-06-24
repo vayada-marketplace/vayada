@@ -28,6 +28,7 @@ class Message(_Camel):
     body: str
     sent_at: datetime
     read_at: datetime | None = None
+    automated: bool = False
     attachments: list[MessageAttachment] = []
 
 
@@ -36,6 +37,9 @@ class MessageThread(_Camel):
     source: str
     channel: str | None = None  # "booking.com" | "airbnb" | "expedia" | None
     booking_id: str | None = None
+    booking_reference: str | None = None
+    check_in: str | None = None
+    check_out: str | None = None
     guest_name: str | None = None
     guest_email: str | None = None
     status: str
