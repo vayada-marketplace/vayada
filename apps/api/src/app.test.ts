@@ -57,6 +57,14 @@ import type {
   UpdateBookingAddonItemBody,
 } from "./routes/bookingAddonItems.js";
 import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
+import type {
+  BookingPromoCode,
+  BookingPromoCodesPool,
+  BookingPromoCodesRepository,
+  CreateBookingPromoCodeBody,
+  UpdateBookingPromoCodeBody,
+} from "./routes/bookingPromoCodes.js";
+import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import {
   createTargetBookingCustomDomainRepository,
   type BookingCustomDomainPool,
@@ -687,6 +695,64 @@ const bookingAddonItemsRepository: BookingAddonItemsRepository = {
   async retireAddonItemByHotelId(hotelId, addonItemId) {
     expect(hotelId).toBe("booking_hotel_alpenrose");
     return addonItemId === bookingAddonItem.addonItemId;
+  },
+};
+
+const bookingPromoCode: BookingPromoCode = {
+  promoCodeId: "0f850001-0000-4000-8000-000000000001",
+  hotelId: "booking_hotel_alpenrose",
+  propertyId: "property_alpenrose",
+  code: "SUMMER20",
+  discountType: "percentage",
+  discountValue: "20.00",
+  currency: null,
+  validFrom: "2026-07-01",
+  validUntil: "2026-08-31",
+  isActive: true,
+  maxUses: 50,
+  useCount: 3,
+  createdAt: "2026-06-01T10:00:00.000Z",
+  updatedAt: "2026-06-01T10:00:00.000Z",
+};
+
+function promoCodeFromBody(
+  body: CreateBookingPromoCodeBody | UpdateBookingPromoCodeBody,
+): BookingPromoCode {
+  return {
+    ...bookingPromoCode,
+    promoCodeId: "0f850001-0000-4000-8000-000000000002",
+    code: body.code ?? bookingPromoCode.code,
+    discountType: body.discountType ?? bookingPromoCode.discountType,
+    discountValue: body.discountValue ?? bookingPromoCode.discountValue,
+    currency: body.currency ?? bookingPromoCode.currency,
+    validFrom: body.validFrom ?? bookingPromoCode.validFrom,
+    validUntil: body.validUntil ?? bookingPromoCode.validUntil,
+    isActive: body.isActive ?? bookingPromoCode.isActive,
+    maxUses: body.maxUses ?? bookingPromoCode.maxUses,
+    updatedAt: "2026-06-01T11:00:00.000Z",
+  };
+}
+
+const bookingPromoCodesRepository: BookingPromoCodesRepository = {
+  async listPromoCodesByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") return null;
+    return [bookingPromoCode];
+  },
+  async createPromoCodeByHotelId(hotelId, body) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return promoCodeFromBody(body);
+  },
+  async updatePromoCodeByHotelId(hotelId, promoCodeId, body) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    if (promoCodeId !== bookingPromoCode.promoCodeId) return null;
+    return {
+      ...promoCodeFromBody(body),
+      promoCodeId,
+    };
+  },
+  async retirePromoCodeByHotelId(hotelId, promoCodeId) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return promoCodeId === bookingPromoCode.promoCodeId;
   },
 };
 
@@ -1942,6 +2008,7 @@ function buildAuthenticatedApp(
     settingsWriteRepository?: BookingSettingsWriteRepository;
     customDomainRepository?: BookingCustomDomainRepository;
     bookingAddonItemsRepository?: BookingAddonItemsRepository;
+    bookingPromoCodesRepository?: BookingPromoCodesRepository;
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
     pmsOperationsRepository?: PmsOperationsReadRepository;
     pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
@@ -1963,6 +2030,7 @@ function buildAuthenticatedApp(
     bookingGuestPiiPort: options.bookingGuestPiiPort,
     pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
     bookingAddonItemsRepository: options.bookingAddonItemsRepository ?? bookingAddonItemsRepository,
+    bookingPromoCodesRepository: options.bookingPromoCodesRepository ?? bookingPromoCodesRepository,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
@@ -4805,6 +4873,222 @@ describe("vayada-api", () => {
     });
     expect(response.body.details).toEqual(expect.any(Array));
   });
+
+  it("lists booking promo codes with the typed target route", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      promoCodes: [bookingPromoCode],
+    });
+  });
+
+  it("creates booking promo codes with normalized codes through the typed target route", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        code: " summer25 ",
+        discountType: "percentage",
+        discountValue: "25.00",
+        validFrom: "2026-07-01",
+        validUntil: "2026-08-31",
+        isActive: true,
+        maxUses: 25,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toMatchObject({
+      promoCodeId: "0f850001-0000-4000-8000-000000000002",
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: "property_alpenrose",
+      code: "SUMMER25",
+      discountType: "percentage",
+      discountValue: "25.00",
+      currency: null,
+      validFrom: "2026-07-01",
+      validUntil: "2026-08-31",
+      isActive: true,
+      maxUses: 25,
+    });
+  });
+
+  it("updates booking promo codes with the typed target route", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/promo-codes/${bookingPromoCode.promoCodeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        code: "EARLY30",
+        discountType: "fixed",
+        discountValue: "30.00",
+        currency: "EUR",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      promoCodeId: bookingPromoCode.promoCodeId,
+      hotelId: "booking_hotel_alpenrose",
+      code: "EARLY30",
+      discountType: "fixed",
+      discountValue: "30.00",
+      currency: "EUR",
+    });
+  });
+
+  it("retires booking promo codes instead of deleting usage history", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/promo-codes/${bookingPromoCode.promoCodeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+  });
+
+  it("rejects booking promo-code writes when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        code: "SUMMER20",
+        discountType: "percentage",
+        discountValue: "20.00",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
+  });
+
+  it("rejects invalid booking promo-code payloads", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        code: "",
+        discountType: "percentage",
+        discountValue: "101.00",
+        validFrom: "2026-08-31",
+        validUntil: "2026-07-01",
+        maxUses: 0,
+        legacyField: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking promo-code payload is invalid.",
+    });
+    expect(response.body.details).toEqual(expect.any(Array));
+  });
+
+  it("rejects oversized booking promo-code numeric fields before target persistence", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        code: "FIXEDBIG",
+        discountType: "fixed",
+        discountValue: "10000000000000.00",
+        currency: "EUR",
+        maxUses: 2147483648,
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking promo-code payload is invalid.",
+    });
+    expect(response.body.details).toEqual(
+      expect.arrayContaining([
+        "discountValue must fit NUMERIC(15,2).",
+        "maxUses must be null or an integer from 1 to 2147483647.",
+      ]),
+    );
+  });
+
+  it("returns a conflict when booking promo-code codes are duplicated", async () => {
+    app = buildAuthenticatedApp({
+      bookingPromoCodesRepository: {
+        ...bookingPromoCodesRepository,
+        async createPromoCodeByHotelId() {
+          throw { code: "23505" };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/promo-codes",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        code: "SUMMER20",
+        discountType: "percentage",
+        discountValue: "20.00",
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toEqual({
+      statusCode: 409,
+      code: "conflict",
+      category: "validation",
+      message: "Booking promo-code already exists for this hotel.",
+    });
+  });
+
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -5982,6 +6266,12 @@ describe("vayada-api", () => {
     );
   });
 
+  it("rejects empty target booking promo-code repository connection strings", async () => {
+    expect(() => createPgTargetBookingPromoCodesRepository({ connectionString: " " })).toThrow(
+      "Target booking promo codes repository connectionString must not be empty",
+    );
+  });
+
   it("serves booking settings contracts from the target repository without legacy queries", async () => {
     const queries: { text: string; values?: readonly unknown[] }[] = [];
     let poolClosed = false;
@@ -6294,6 +6584,91 @@ describe("vayada-api", () => {
     expect(queries[1]?.text).toContain("COALESCE(addon_definitions.category, 'other') AS category");
     expect(queries[1]?.text).toContain("addon_definitions.status <> 'retired'");
     expect(queries.map((query) => query.text).join("\n")).not.toContain("$2::uuid");
+  });
+
+  it("serves target booking promo codes without touching applied-promo outcomes", async () => {
+    const queries: { text: string; values?: unknown[] }[] = [];
+    const pool: BookingPromoCodesPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("hotel_catalog.property_source_links")) {
+          return {
+            rows: [{ propertyId: "d3000000-0000-0000-0000-000000000682" }] as unknown as T[],
+          };
+        }
+        if (text.includes("RETURNING id::text AS id")) {
+          return { rows: [{ id: "0f850001-0000-4000-8000-000000000001" }] as unknown as T[] };
+        }
+        return {
+          rows: [
+            {
+              promoCodeId: "0f850001-0000-4000-8000-000000000001",
+              propertyId: "d3000000-0000-0000-0000-000000000682",
+              code: "SUMMER20",
+              discountType: "percentage",
+              discountValue: "20.00",
+              currency: null,
+              validFrom: "2026-07-01",
+              validUntil: "2026-08-31",
+              isActive: true,
+              maxUses: 50,
+              useCount: 3,
+              createdAt: "2026-06-01T10:00:00.000Z",
+              updatedAt: "2026-06-01T10:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createPgTargetBookingPromoCodesRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const items = await repository.listPromoCodesByHotelId("booking_hotel_alpenrose");
+    const created = await repository.createPromoCodeByHotelId("booking_hotel_alpenrose", {
+      code: "SUMMER20",
+      discountType: "percentage",
+      discountValue: "20.00",
+      currency: null,
+      validFrom: "2026-07-01",
+      validUntil: "2026-08-31",
+      isActive: true,
+      maxUses: 50,
+    });
+    const retired = await repository.retirePromoCodeByHotelId(
+      "booking_hotel_alpenrose",
+      "0f850001-0000-4000-8000-000000000001",
+    );
+
+    expect(items).toEqual([
+      {
+        promoCodeId: "0f850001-0000-4000-8000-000000000001",
+        hotelId: "booking_hotel_alpenrose",
+        propertyId: "d3000000-0000-0000-0000-000000000682",
+        code: "SUMMER20",
+        discountType: "percentage",
+        discountValue: "20.00",
+        currency: null,
+        validFrom: "2026-07-01",
+        validUntil: "2026-08-31",
+        isActive: true,
+        maxUses: 50,
+        useCount: 3,
+        createdAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      },
+    ]);
+    expect(created?.promoCodeId).toBe("0f850001-0000-4000-8000-000000000001");
+    expect(retired).toBe(true);
+    const sql = queries.map((query) => query.text).join("\n");
+    expect(sql).toContain("booking.promo_definitions");
+    expect(sql).toContain("promo_definitions.status <> 'retired'");
+    expect(sql).not.toContain("promo_applications");
   });
 
   it("sends guest-form PMS compatibility sync requests with hotel scope and auth", async () => {

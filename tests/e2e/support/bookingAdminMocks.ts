@@ -5,6 +5,7 @@ export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
 export const BOOKING_ADMIN_ADDON_ITEMS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/addon-items`;
+export const BOOKING_ADMIN_PROMO_CODES_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/promo-codes`;
 export const BOOKING_ADMIN_PROPERTY_LINK_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/property-link`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
@@ -49,6 +50,25 @@ export interface BookingAdminAddonItemsFixture {
     publicVisible: boolean;
     status: string;
     sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+}
+
+export interface BookingAdminPromoCodesFixture {
+  promoCodes: Array<{
+    promoCodeId: string;
+    hotelId: string;
+    propertyId: string;
+    code: string;
+    discountType: string;
+    discountValue: string;
+    currency: string | null;
+    validFrom: string | null;
+    validUntil: string | null;
+    isActive: boolean;
+    maxUses: number | null;
+    useCount: number;
     createdAt: string;
     updatedAt: string;
   }>;
@@ -113,6 +133,7 @@ export interface BookingAdminShellMocksOptions {
 
 export interface BookingAdminBookingFlowMocksOptions {
   addonItems?: BookingAdminAddonItemsFixture;
+  promoCodes?: BookingAdminPromoCodesFixture;
   addonSettings?: BookingAdminAddonSettingsFixture;
   benefitsSettings?: BookingAdminBenefitsSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
@@ -156,6 +177,27 @@ const defaultAddonItems: BookingAdminAddonItemsFixture = {
       publicVisible: true,
       status: "active",
       sortOrder: 0,
+      createdAt: "2026-06-01T10:00:00.000Z",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+    },
+  ],
+};
+
+const defaultPromoCodes: BookingAdminPromoCodesFixture = {
+  promoCodes: [
+    {
+      promoCodeId: "promo_summer20",
+      hotelId: BOOKING_ADMIN_HOTEL_ID,
+      propertyId: BOOKING_ADMIN_PROPERTY_ID,
+      code: "SUMMER20",
+      discountType: "percentage",
+      discountValue: "20.00",
+      currency: null,
+      validFrom: "2026-07-01",
+      validUntil: "2026-08-31",
+      isActive: true,
+      maxUses: 50,
+      useCount: 3,
       createdAt: "2026-06-01T10:00:00.000Z",
       updatedAt: "2026-06-01T10:00:00.000Z",
     },
@@ -286,6 +328,9 @@ export async function mockBookingAdminBookingFlow(
   await mockBookingAdminShellRoutes(page);
   await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, (route) =>
     route.fulfill({ json: options.addonItems ?? defaultAddonItems }),
+  );
+  await page.route(`**${BOOKING_ADMIN_PROMO_CODES_PATH}**`, (route) =>
+    route.fulfill({ json: options.promoCodes ?? defaultPromoCodes }),
   );
   await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.addonSettings ?? defaultAddonSettings }),
