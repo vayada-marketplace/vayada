@@ -100,6 +100,22 @@ export const BOOKING_LAST_MINUTE_SETTINGS_CONTRACT = {
   },
 } as const;
 
+export const BOOKING_HOTEL_PROPERTY_LINK_CONTRACT = {
+  method: "GET",
+  path: "/api/booking/hotels/:hotelId/property-link",
+  permission: "booking.settings.manage",
+  entitlement: {
+    product: "booking",
+    key: "booking-engine",
+    resourceType: "booking_hotel",
+  },
+  resource: {
+    product: "booking",
+    resourceType: "booking_hotel",
+    allowedRelationships: ["owner", "operator"],
+  },
+} as const;
+
 export const BOOKING_ADDON_SETTINGS_WRITE_CONTRACT = {
   ...BOOKING_ADDON_SETTINGS_CONTRACT,
   method: "PUT",
@@ -169,6 +185,12 @@ export type BookingLastMinuteSettingsReadModel = {
   updatedAt?: string | Date | null;
 };
 
+export type BookingHotelPropertyLinkReadModel = {
+  propertyId: string;
+  pmsProperty: boolean;
+  financeProperty: boolean;
+};
+
 export type BookingAddonSettingsResponse = {
   showAddonsStep: boolean;
   groupAddonsByCategory: boolean;
@@ -204,6 +226,16 @@ export type BookingLastMinuteSettingsResponse = {
   updatedAt: string;
 };
 
+export type BookingHotelPropertyLinkResponse = {
+  hotelId: string;
+  propertyId: string;
+  resourceLinks: {
+    bookingHotel: true;
+    pmsProperty: boolean;
+    financeProperty: boolean;
+  };
+};
+
 export type BookingAddonSettings = BookingAddonSettingsResponse;
 export type BookingGuestFormSettings = BookingGuestFormSettingsResponse;
 export type BookingBenefitsSettings = BookingBenefitsSettingsResponse;
@@ -212,6 +244,7 @@ export type BookingRoomFilterSettings = BookingRoomFilterSettingsResponse;
 export type BookingLastMinuteSettings = BookingLastMinuteSettingsResponse;
 
 export type BookingSettingsReadRepository = {
+  findPropertyLinkByHotelId?(hotelId: string): Promise<BookingHotelPropertyLinkReadModel | null>;
   findAddonSettingsByHotelId(hotelId: string): Promise<BookingAddonSettingsReadModel | null>;
   findGuestFormSettingsByHotelId(
     hotelId: string,
@@ -429,6 +462,20 @@ export type BookingLastMinuteSettingsError = {
   message: string;
 };
 
+export type BookingHotelPropertyLinkError = {
+  statusCode: 401 | 403 | 404 | 500;
+  code:
+    | "unauthenticated"
+    | "missing_permission"
+    | "missing_entitlement"
+    | "inactive_entitlement"
+    | "missing_resource_access"
+    | "not_found"
+    | "read_model_unavailable";
+  category: "authentication" | "authorization" | "read_model";
+  message: string;
+};
+
 export type BookingAddonSettingsRequest = {
   params: {
     hotelId: string;
@@ -541,6 +588,14 @@ export type BookingLastMinuteSettingsContract = {
   request: BookingLastMinuteSettingsRequest;
   response: BookingLastMinuteSettingsResponse;
   error: BookingLastMinuteSettingsError;
+};
+
+export type BookingHotelPropertyLinkContract = {
+  method: typeof BOOKING_HOTEL_PROPERTY_LINK_CONTRACT.method;
+  path: typeof BOOKING_HOTEL_PROPERTY_LINK_CONTRACT.path;
+  request: BookingAddonSettingsRequest;
+  response: BookingHotelPropertyLinkResponse;
+  error: BookingHotelPropertyLinkError;
 };
 
 export type UpdateBookingAddonSettingsContract = {
@@ -656,6 +711,13 @@ const DEFAULT_LAST_MINUTE_SETTINGS: UpdateBookingLastMinuteSettingsBody = {
   tiers: [],
 };
 
+type TargetBookingPropertyLinkQueryRow = {
+  source_link_count: number | string;
+  propertyId: string | null;
+  pmsProperty: boolean;
+  financeProperty: boolean;
+};
+
 const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
   WITH source_links AS (
     SELECT property_id
@@ -671,6 +733,27 @@ const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
            min(property_id::text)::uuid AS property_id
     FROM source_links
   )
+`;
+
+const TARGET_BOOKING_PROPERTY_LINK_SELECT = `
+  ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE}
+  SELECT
+    source_link_status.source_link_count,
+    source_link_status.property_id::text AS "propertyId",
+    EXISTS (
+      SELECT 1
+      FROM hotel_catalog.property_source_links pms_link
+      WHERE pms_link.property_id = source_link_status.property_id
+        AND pms_link.source_system = 'pms'
+        AND pms_link.status = 'active'
+    ) AS "pmsProperty",
+    EXISTS (
+      SELECT 1
+      FROM finance.payment_settings payment_settings
+      WHERE payment_settings.property_id = source_link_status.property_id
+    ) AS "financeProperty"
+  FROM source_link_status
+  WHERE source_link_status.source_link_count > 0
 `;
 
 const TARGET_BOOKING_SETTINGS_SELECT = `
@@ -1015,6 +1098,28 @@ export function createPgTargetBookingSettingsRepository(config: {
     return toSingleSettingsRow(result, hotelId);
   }
 
+  async function findPropertyLink(
+    hotelId: string,
+  ): Promise<BookingHotelPropertyLinkReadModel | null> {
+    const result = await pool.query<TargetBookingPropertyLinkQueryRow>(
+      TARGET_BOOKING_PROPERTY_LINK_SELECT,
+      [hotelId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    if (Number(row.source_link_count) > 1) {
+      throw new Error(
+        `Duplicate active canonical booking hotel source links found for booking hotel ${hotelId}`,
+      );
+    }
+    if (!row.propertyId) return null;
+    return {
+      propertyId: row.propertyId,
+      pmsProperty: row.pmsProperty,
+      financeProperty: row.financeProperty,
+    };
+  }
+
   async function updateSettings(
     hotelId: string,
     setClause: string,
@@ -1076,6 +1181,9 @@ export function createPgTargetBookingSettingsRepository(config: {
   }
 
   return {
+    async findPropertyLinkByHotelId(hotelId) {
+      return findPropertyLink(hotelId);
+    },
     async findAddonSettingsByHotelId(hotelId) {
       const row = await findSettings(hotelId);
       return row ? toTargetAddonSettings(row) : null;
@@ -1218,6 +1326,55 @@ export async function registerBookingSettingsRoutes(
   app.addHook("onClose", async () => {
     await Promise.all([...closeables].map((closeable) => closeable?.close?.()));
   });
+
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/property-link",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) {
+          return sendBookingPropertyLinkError(reply, contractError);
+        }
+        throw error;
+      }
+
+      if (!repository.findPropertyLinkByHotelId) {
+        return sendBookingPropertyLinkError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking hotel property link is unavailable.",
+        });
+      }
+
+      let propertyLink: BookingHotelPropertyLinkReadModel | null;
+      try {
+        propertyLink = await repository.findPropertyLinkByHotelId(hotelId);
+      } catch {
+        return sendBookingPropertyLinkError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking hotel property link is unavailable.",
+        });
+      }
+
+      if (!propertyLink) {
+        return sendBookingPropertyLinkError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "read_model",
+          message: "Booking hotel property link not found.",
+        });
+      }
+
+      return toPropertyLinkResponse(hotelId, propertyLink);
+    },
+  );
 
   app.get<{ Params: BookingHotelParams }>(
     "/hotels/:hotelId/settings/addons",
@@ -1868,6 +2025,21 @@ export function toLastMinuteSettingsResponse(
   };
 }
 
+export function toPropertyLinkResponse(
+  hotelId: string,
+  propertyLink: BookingHotelPropertyLinkReadModel,
+): BookingHotelPropertyLinkResponse {
+  return {
+    hotelId,
+    propertyId: propertyLink.propertyId,
+    resourceLinks: {
+      bookingHotel: true,
+      pmsProperty: propertyLink.pmsProperty,
+      financeProperty: propertyLink.financeProperty,
+    },
+  };
+}
+
 // Mirrors the legacy booking-api `parse_json` handling of
 // `booking_hotels.benefits`: the JSONB value may arrive as a native array, a
 // JSON-encoded string, or NULL. NULL, malformed, and non-list values all
@@ -2310,6 +2482,13 @@ function sendBookingRoomFilterSettingsError(
 function sendBookingLastMinuteSettingsError(
   reply: FastifyReply,
   error: BookingLastMinuteSettingsError | BookingSettingsAccessError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingPropertyLinkError(
+  reply: FastifyReply,
+  error: BookingHotelPropertyLinkError | BookingSettingsAccessError,
 ): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }

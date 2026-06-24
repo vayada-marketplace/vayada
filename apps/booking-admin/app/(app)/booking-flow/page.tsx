@@ -24,6 +24,15 @@ import {
   updateBookingAddonSettings,
 } from "@/services/api/bookingAddonSettingsClient";
 import {
+  createBookingAddonItem,
+  deleteBookingAddonItem,
+  listBookingAddonItems,
+  updateBookingAddonItem,
+  type BookingAddonItem,
+  type BookingAddonPricingModel,
+  type CreateBookingAddonItemBody,
+} from "@/services/api/bookingAddonItemsClient";
+import {
   getBookingBenefitsSettings,
   type BookingBenefitsSettings,
 } from "@/services/api/bookingBenefitsSettingsClient";
@@ -58,7 +67,7 @@ import { SettingsLayout, type SettingsNavSection } from "@/components/settings/l
 import { DEFAULT_LAST_MINUTE_TIERS } from "@vayada/hotel-setup-wizard";
 
 import RoomsTab from "@/components/booking-flow/RoomsTab";
-import AddonsTab from "@/components/booking-flow/AddonsTab";
+import AddonsTab, { type AddonItemFormValues } from "@/components/booking-flow/AddonsTab";
 import BenefitsTab from "@/components/booking-flow/BenefitsTab";
 import PromoCodesTab from "@/components/booking-flow/PromoCodesTab";
 import LocalizationTab from "@/components/booking-flow/LocalizationTab";
@@ -120,8 +129,6 @@ const DEFAULT_LAST_MINUTE_SETTINGS: BookingLastMinuteSettings = {
   updatedAt: "",
 };
 
-const ADDON_ITEM_MANAGEMENT_UNAVAILABLE =
-  "Add-on item management is not available on next-api yet. Display settings still save.";
 const PROMO_CODE_MANAGEMENT_UNAVAILABLE = "Promo-code management is not available on next-api yet.";
 
 function pickRecordByKeys<T>(record: Record<string, T>, keys: string[]): Record<string, T> {
@@ -134,6 +141,49 @@ function getSelectedBookingHotelId(): string | null {
   return window.localStorage.getItem("selectedHotelId");
 }
 
+function toSettingsAddonItem(item: BookingAddonItem): AddonItem {
+  return {
+    id: item.addonItemId,
+    name: item.name,
+    description: item.description,
+    price: Number(item.price) || 0,
+    currency: item.currency,
+    category: item.category,
+    image: item.imageUrl ?? "",
+    duration: item.duration ?? undefined,
+    perPerson: item.pricingModel === "per_guest" || item.pricingModel === "per_guest_night",
+    perNight: item.pricingModel === "per_night" || item.pricingModel === "per_guest_night",
+  };
+}
+
+function toAddonPricingModel(addon: { perPerson?: boolean; perNight?: boolean }) {
+  if (addon.perPerson && addon.perNight) return "per_guest_night";
+  if (addon.perPerson) return "per_guest";
+  if (addon.perNight) return "per_night";
+  return "per_stay";
+}
+
+function toAddonWritableFields(values: AddonItemFormValues) {
+  return {
+    name: values.name,
+    description: values.description,
+    price: values.price,
+    currency: values.currency,
+    category: values.category,
+    imageUrl: values.image || null,
+    duration: values.duration || null,
+    pricingModel: toAddonPricingModel(values) as BookingAddonPricingModel,
+  };
+}
+
+function toAddonCreateBody(values: AddonItemFormValues): CreateBookingAddonItemBody {
+  return {
+    ...toAddonWritableFields(values),
+    publicVisible: true,
+    status: "active",
+  };
+}
+
 export default function BookingFlowPage() {
   const [activeTab, setActiveTab] = useState<Tab>("rooms");
   const [loading, setLoading] = useState(true);
@@ -141,8 +191,7 @@ export default function BookingFlowPage() {
     null,
   );
 
-  // Add-on catalog CRUD awaits target API contracts; display settings still save.
-  const addons: AddonItem[] = [];
+  const [addons, setAddons] = useState<AddonItem[]>([]);
   const [addonSettings, setAddonSettings] = useState<AddonSettings>(DEFAULT_ADDON_SETTINGS);
   const addonSettingsRef = useRef<AddonSettings>(DEFAULT_ADDON_SETTINGS);
   const addonSettingsWriteSeqRef = useRef(0);
@@ -230,6 +279,11 @@ export default function BookingFlowPage() {
       (hotelId) => getBookingAddonSettings({ hotelId }),
       DEFAULT_ADDON_SETTINGS,
     );
+    const addonItemsPromise = loadTypedSetting(
+      (hotelId) =>
+        listBookingAddonItems({ hotelId }).then((items) => items.map(toSettingsAddonItem)),
+      [] as AddonItem[],
+    );
     const guestFormSettingsPromise = loadTypedSetting(
       (hotelId) => getBookingGuestFormSettings({ hotelId }),
       DEFAULT_GUEST_FORM_SETTINGS,
@@ -253,6 +307,7 @@ export default function BookingFlowPage() {
 
     Promise.all([
       addonSettingsPromise,
+      addonItemsPromise,
       benefitsSettingsPromise,
       guestFormSettingsPromise,
       localizationSettingsPromise,
@@ -263,6 +318,7 @@ export default function BookingFlowPage() {
       .then(
         ([
           settings,
+          addonItems,
           benefitsRes,
           guestFormSettings,
           localizationSettings,
@@ -273,6 +329,7 @@ export default function BookingFlowPage() {
           setBookingHotelId(selectedHotelId || property?.id || null);
           addonSettingsRef.current = settings;
           setAddonSettings(settings);
+          setAddons(addonItems);
           setBenefits(
             normalizeBookingBenefitsSettings(benefitsRes, DEFAULT_BENEFITS_SETTINGS).benefits,
           );
@@ -335,6 +392,51 @@ export default function BookingFlowPage() {
         setAddonSettings(previous);
         showFeedback("error", t("bookingFlow.addons.feedback.settingError"));
       }
+    }
+  };
+
+  const handleCreateAddon = async (values: AddonItemFormValues) => {
+    try {
+      const saved = await createBookingAddonItem({
+        hotelId: getBookingHotelIdForSave(),
+        body: toAddonCreateBody(values),
+      });
+      setAddons((current) => [...current, toSettingsAddonItem(saved)]);
+      showFeedback("success", t("bookingFlow.addons.feedback.createSuccess"));
+    } catch {
+      showFeedback("error", t("bookingFlow.addons.feedback.saveError"));
+      throw new Error("Failed to save add-on.");
+    }
+  };
+
+  const handleUpdateAddon = async (addonId: string, values: AddonItemFormValues) => {
+    try {
+      const saved = await updateBookingAddonItem({
+        hotelId: getBookingHotelIdForSave(),
+        addonItemId: addonId,
+        body: toAddonWritableFields(values),
+      });
+      setAddons((current) =>
+        current.map((addon) => (addon.id === addonId ? toSettingsAddonItem(saved) : addon)),
+      );
+      showFeedback("success", t("bookingFlow.addons.feedback.updateSuccess"));
+    } catch {
+      showFeedback("error", t("bookingFlow.addons.feedback.saveError"));
+      throw new Error("Failed to save add-on.");
+    }
+  };
+
+  const handleDeleteAddon = async (addonId: string) => {
+    try {
+      await deleteBookingAddonItem({
+        hotelId: getBookingHotelIdForSave(),
+        addonItemId: addonId,
+      });
+      setAddons((current) => current.filter((addon) => addon.id !== addonId));
+      showFeedback("success", t("bookingFlow.addons.feedback.deleteSuccess"));
+    } catch {
+      showFeedback("error", t("bookingFlow.addons.feedback.deleteError"));
+      throw new Error("Failed to delete add-on.");
     }
   };
 
@@ -490,8 +592,10 @@ export default function BookingFlowPage() {
             addons={addons}
             addonSettings={addonSettings}
             propertyCurrency={defaultCurrency}
-            itemManagementUnavailable={ADDON_ITEM_MANAGEMENT_UNAVAILABLE}
             handleToggleAddonSetting={handleToggleAddonSetting}
+            onCreateAddon={handleCreateAddon}
+            onUpdateAddon={handleUpdateAddon}
+            onDeleteAddon={handleDeleteAddon}
           />
         )}
 

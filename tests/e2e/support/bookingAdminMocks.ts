@@ -1,14 +1,19 @@
 import type { Page } from "@playwright/test";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
+export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
+export const BOOKING_ADMIN_ADDON_ITEMS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/addon-items`;
+export const BOOKING_ADMIN_PROPERTY_LINK_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/property-link`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
 export const BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/last-minute`;
 export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
+export const BOOKING_ADMIN_CUSTOM_DOMAIN_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/custom-domain`;
+export const BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings`;
 
 export interface BookingAdminPropertySettingsFixture {
   id: string;
@@ -17,6 +22,7 @@ export interface BookingAdminPropertySettingsFixture {
   default_language: string;
   supported_currencies: string[];
   supported_languages: string[];
+  pay_at_hotel_methods: string[];
   special_requests_enabled: boolean;
   arrival_time_enabled: boolean;
   guest_count_enabled: boolean;
@@ -25,6 +31,27 @@ export interface BookingAdminPropertySettingsFixture {
 export interface BookingAdminAddonSettingsFixture {
   showAddonsStep: boolean;
   groupAddonsByCategory: boolean;
+}
+
+export interface BookingAdminAddonItemsFixture {
+  addonItems: Array<{
+    addonItemId: string;
+    hotelId: string;
+    propertyId: string;
+    name: string;
+    description: string;
+    price: string;
+    currency: string;
+    category: string;
+    imageUrl: string | null;
+    duration: string | null;
+    pricingModel: string;
+    publicVisible: boolean;
+    status: string;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface BookingAdminBenefitsSettingsFixture {
@@ -61,11 +88,31 @@ export interface BookingAdminLastMinuteSettingsFixture {
   updatedAt: string;
 }
 
+export interface BookingAdminCustomDomainFixture {
+  hotelId: string;
+  propertyId: string;
+  configured: boolean;
+  domain: string | null;
+  status: "not_configured" | "pending" | "verified" | "failed";
+  sslStatus: "not_configured" | "pending" | "active" | "failed";
+  dnsRecords: Array<{
+    type: "CNAME" | "TXT";
+    name: string;
+    value: string;
+    status: "pending" | "verified" | "failed";
+  }>;
+  verificationErrors: string[];
+  checkedAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface BookingAdminShellMocksOptions {
   propertySettings?: BookingAdminPropertySettingsFixture;
+  customDomain?: BookingAdminCustomDomainFixture;
 }
 
 export interface BookingAdminBookingFlowMocksOptions {
+  addonItems?: BookingAdminAddonItemsFixture;
   addonSettings?: BookingAdminAddonSettingsFixture;
   benefitsSettings?: BookingAdminBenefitsSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
@@ -81,6 +128,7 @@ export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFi
   default_language: "en",
   supported_currencies: [],
   supported_languages: [],
+  pay_at_hotel_methods: ["cash", "card"],
   special_requests_enabled: false,
   arrival_time_enabled: false,
   guest_count_enabled: false,
@@ -89,6 +137,29 @@ export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFi
 const defaultAddonSettings: BookingAdminAddonSettingsFixture = {
   showAddonsStep: true,
   groupAddonsByCategory: true,
+};
+
+const defaultAddonItems: BookingAdminAddonItemsFixture = {
+  addonItems: [
+    {
+      addonItemId: "addon_airport_transfer",
+      hotelId: BOOKING_ADMIN_HOTEL_ID,
+      propertyId: "property_alpenrose",
+      name: "Airport transfer",
+      description: "Private pickup from the airport.",
+      price: "45.00",
+      currency: "EUR",
+      category: "transport",
+      imageUrl: null,
+      duration: "45 min",
+      pricingModel: "per_stay",
+      publicVisible: true,
+      status: "active",
+      sortOrder: 0,
+      createdAt: "2026-06-01T10:00:00.000Z",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+    },
+  ],
 };
 
 const defaultBenefitsSettings: BookingAdminBenefitsSettingsFixture = {
@@ -119,6 +190,19 @@ const defaultLastMinuteSettings: BookingAdminLastMinuteSettingsFixture = {
   stackWithPromo: false,
   tiers: [],
   updatedAt: "2026-06-22T10:00:00.000Z",
+};
+
+export const defaultCustomDomain: BookingAdminCustomDomainFixture = {
+  hotelId: BOOKING_ADMIN_HOTEL_ID,
+  propertyId: "f6853000-0000-0000-0000-000000000001",
+  configured: false,
+  domain: null,
+  status: "not_configured",
+  sslStatus: "not_configured",
+  dnsRecords: [],
+  verificationErrors: [],
+  checkedAt: null,
+  updatedAt: null,
 };
 
 export async function mockBookingAdminAuthenticatedSession(page: Page): Promise<void> {
@@ -164,6 +248,19 @@ export async function mockBookingAdminShellRoutes(
   await page.route("**/admin/settings/property", (route) =>
     route.fulfill({ json: propertySettings }),
   );
+  await page.route(`**${BOOKING_ADMIN_PROPERTY_LINK_PATH}*`, (route) =>
+    route.fulfill({
+      json: {
+        hotelId: BOOKING_ADMIN_HOTEL_ID,
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        resourceLinks: {
+          bookingHotel: true,
+          pmsProperty: true,
+          financeProperty: true,
+        },
+      },
+    }),
+  );
   await page.route(`**${BOOKING_ADMIN_ROOMS_PATH}*`, (route) =>
     route.fulfill({
       json: {
@@ -174,6 +271,11 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, (route) =>
+    route.request().method() === "DELETE"
+      ? route.fulfill({ status: 204 })
+      : route.fulfill({ json: options.customDomain ?? defaultCustomDomain }),
+  );
 }
 
 export async function mockBookingAdminBookingFlow(
@@ -182,6 +284,9 @@ export async function mockBookingAdminBookingFlow(
 ): Promise<void> {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
+  await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, (route) =>
+    route.fulfill({ json: options.addonItems ?? defaultAddonItems }),
+  );
   await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.addonSettings ?? defaultAddonSettings }),
   );

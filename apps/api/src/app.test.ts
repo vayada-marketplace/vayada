@@ -49,6 +49,19 @@ import {
   type BookingSettingsReadRepository,
   type BookingSettingsWriteRepository,
 } from "./routes/bookingSettings.js";
+import type {
+  BookingAddonItem,
+  BookingAddonItemsPool,
+  BookingAddonItemsRepository,
+  CreateBookingAddonItemBody,
+  UpdateBookingAddonItemBody,
+} from "./routes/bookingAddonItems.js";
+import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
+import {
+  createTargetBookingCustomDomainRepository,
+  type BookingCustomDomainPool,
+  type BookingCustomDomainRepository,
+} from "./routes/bookingCustomDomain.js";
 import {
   createTargetBookingWebCalendarRepository,
   type BookingWebCalendarReadPool,
@@ -471,6 +484,17 @@ function buildPlatformAdminApp(
 }
 
 const bookingSettingsRepository: BookingSettingsReadRepository = {
+  async findPropertyLinkByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      propertyId: pmsPropertyId,
+      pmsProperty: true,
+      financeProperty: true,
+    };
+  },
   async findAddonSettingsByHotelId(hotelId) {
     if (hotelId !== "booking_hotel_alpenrose") {
       return null;
@@ -572,6 +596,97 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
       lastMinuteDiscount: settings,
       updatedAt: "2026-06-22T10:00:00.000Z",
     };
+  },
+};
+
+const bookingCustomDomainRepository: BookingCustomDomainRepository = {
+  async findByBookingHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") return null;
+    return {
+      hotelId,
+      propertyId: "f6853000-0000-0000-0000-000000000001",
+      domain: "book.alpenrose.example",
+      verificationStatus: "verified",
+      verifiedAt: "2026-06-22T10:00:00.000Z",
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    };
+  },
+  async upsertForBookingHotelId(hotelId, domain) {
+    if (hotelId !== "booking_hotel_alpenrose") return null;
+    return {
+      hotelId,
+      propertyId: "f6853000-0000-0000-0000-000000000001",
+      domain,
+      verificationStatus: "pending",
+      verifiedAt: null,
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    };
+  },
+  async deleteForBookingHotelId(hotelId) {
+    return hotelId === "booking_hotel_alpenrose";
+  },
+};
+
+const bookingAddonItem: BookingAddonItem = {
+  addonItemId: "0f840001-0000-4000-8000-000000000001",
+  hotelId: "booking_hotel_alpenrose",
+  propertyId: "property_alpenrose",
+  name: "Airport transfer",
+  description: "Private pickup from the airport.",
+  price: "45.00",
+  currency: "EUR",
+  category: "transport",
+  imageUrl: null,
+  duration: "45 min",
+  pricingModel: "per_stay",
+  publicVisible: true,
+  status: "active",
+  sortOrder: 0,
+  createdAt: "2026-06-01T10:00:00.000Z",
+  updatedAt: "2026-06-01T10:00:00.000Z",
+};
+
+function addonItemFromBody(
+  body: CreateBookingAddonItemBody | UpdateBookingAddonItemBody,
+): BookingAddonItem {
+  return {
+    ...bookingAddonItem,
+    addonItemId: "0f840001-0000-4000-8000-000000000002",
+    name: body.name ?? bookingAddonItem.name,
+    description: body.description ?? bookingAddonItem.description,
+    price: body.price ?? bookingAddonItem.price,
+    currency: body.currency ?? bookingAddonItem.currency,
+    category: body.category ?? bookingAddonItem.category,
+    imageUrl: body.imageUrl ?? bookingAddonItem.imageUrl,
+    duration: body.duration ?? bookingAddonItem.duration,
+    pricingModel: body.pricingModel ?? bookingAddonItem.pricingModel,
+    publicVisible: body.publicVisible ?? bookingAddonItem.publicVisible,
+    status: body.status ?? bookingAddonItem.status,
+    sortOrder: body.sortOrder ?? bookingAddonItem.sortOrder,
+    updatedAt: "2026-06-01T11:00:00.000Z",
+  };
+}
+
+const bookingAddonItemsRepository: BookingAddonItemsRepository = {
+  async listAddonItemsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") return null;
+    return [bookingAddonItem];
+  },
+  async createAddonItemByHotelId(hotelId, body) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return addonItemFromBody(body);
+  },
+  async updateAddonItemByHotelId(hotelId, addonItemId, body) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    if (addonItemId !== bookingAddonItem.addonItemId) return null;
+    return {
+      ...addonItemFromBody(body),
+      addonItemId,
+    };
+  },
+  async retireAddonItemByHotelId(hotelId, addonItemId) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return addonItemId === bookingAddonItem.addonItemId;
   },
 };
 
@@ -1825,6 +1940,8 @@ function buildAuthenticatedApp(
     reservationsRepository?: BookingReservationsReadRepository;
     settingsRepository?: BookingSettingsReadRepository;
     settingsWriteRepository?: BookingSettingsWriteRepository;
+    customDomainRepository?: BookingCustomDomainRepository;
+    bookingAddonItemsRepository?: BookingAddonItemsRepository;
     guestFormSettingsSync?: BookingGuestFormSettingsSync;
     pmsOperationsRepository?: PmsOperationsReadRepository;
     pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
@@ -1845,9 +1962,11 @@ function buildAuthenticatedApp(
     pmsOperationsCommandRepository: options.pmsOperationsCommandRepository,
     bookingGuestPiiPort: options.bookingGuestPiiPort,
     pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
+    bookingAddonItemsRepository: options.bookingAddonItemsRepository ?? bookingAddonItemsRepository,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
     bookingSettingsWriteRepository:
       options.settingsWriteRepository ?? bookingSettingsWriteRepository,
+    bookingCustomDomainRepository: options.customDomainRepository ?? bookingCustomDomainRepository,
     bookingGuestFormSettingsSync: options.guestFormSettingsSync,
     bookingAdminCompat: options.bookingAdminCompatAllowedOrigins
       ? { allowedOrigins: options.bookingAdminCompatAllowedOrigins }
@@ -3585,6 +3704,29 @@ describe("vayada-api", () => {
     });
   });
 
+  it("resolves the canonical property link for a booking hotel", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/property-link",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: pmsPropertyId,
+      resourceLinks: {
+        bookingHotel: true,
+        pmsProperty: true,
+        financeProperty: true,
+      },
+    });
+  });
+
   it("returns booking guest-form settings with auth, policy, and the documented legacy-compatible shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -4202,6 +4344,467 @@ describe("vayada-api", () => {
     });
   });
 
+  it("returns booking custom-domain verification state with auth, policy, and property linkage", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: "f6853000-0000-0000-0000-000000000001",
+      configured: true,
+      domain: "book.alpenrose.example",
+      status: "verified",
+      sslStatus: "active",
+      dnsRecords: [
+        {
+          type: "CNAME",
+          name: "book.alpenrose.example",
+          value: "custom.booking.vayada.com",
+          status: "verified",
+        },
+      ],
+      verificationErrors: [],
+      checkedAt: "2026-06-22T10:00:00.000Z",
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    });
+  });
+
+  it("connects booking custom-domain through the typed write contract", async () => {
+    const writes: Array<{ hotelId: string; domain: string }> = [];
+    app = buildAuthenticatedApp({
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async upsertForBookingHotelId(hotelId, domain) {
+          writes.push({ hotelId, domain });
+          return {
+            hotelId,
+            propertyId: "f6853000-0000-0000-0000-000000000001",
+            domain,
+            verificationStatus: "pending",
+            verifiedAt: null,
+            updatedAt: "2026-06-22T10:00:00.000Z",
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        domain: " Book.Alpenrose.Example ",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(writes).toEqual([
+      {
+        hotelId: "booking_hotel_alpenrose",
+        domain: "book.alpenrose.example",
+      },
+    ]);
+    expect(response.body).toMatchObject({
+      configured: true,
+      domain: "book.alpenrose.example",
+      status: "pending",
+      sslStatus: "pending",
+      dnsRecords: [
+        {
+          type: "CNAME",
+          name: "book.alpenrose.example",
+          value: "custom.booking.vayada.com",
+          status: "pending",
+        },
+      ],
+    });
+  });
+
+  it("rejects invalid booking custom-domain payloads", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        domain: "https://book.alpenrose.example/path",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    const body = response.body as { details: string[] };
+    expect(body).toMatchObject({
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking custom-domain payload is invalid.",
+    });
+    expect(body.details).toContain(
+      "domain must be a hostname, not a URL, path, wildcard, localhost, or IP.",
+    );
+  });
+
+  it("rejects booking custom-domain access when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp({ linkedHotelId: null });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
+  it("disconnects booking custom-domain with the typed write contract", async () => {
+    const deletes: string[] = [];
+    app = buildAuthenticatedApp({
+      customDomainRepository: {
+        ...bookingCustomDomainRepository,
+        async deleteForBookingHotelId(hotelId) {
+          deletes.push(hotelId);
+          return true;
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/custom-domain",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(deletes).toEqual(["booking_hotel_alpenrose"]);
+  });
+
+  it("resolves booking custom-domain target property ids through property_source_links", async () => {
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: BookingCustomDomainPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              hotelId: "booking_hotel_alpenrose",
+              propertyId: "f6853000-0000-0000-0000-000000000001",
+              domain: null,
+              verificationStatus: null,
+              verifiedAt: null,
+              updatedAt: null,
+            } as unknown as T,
+          ],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingCustomDomainRepository({
+      connectionString: "postgres://target",
+      pool,
+    });
+
+    await expect(repository.findByBookingHotelId("booking_hotel_alpenrose")).resolves.toMatchObject(
+      {
+        hotelId: "booking_hotel_alpenrose",
+        propertyId: "f6853000-0000-0000-0000-000000000001",
+        domain: null,
+      },
+    );
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.text).toContain("hotel_catalog.property_source_links");
+    expect(queries[0]!.text).toContain("source_table = 'booking_hotels'");
+    expect(queries[0]!.values).toEqual(["booking_hotel_alpenrose"]);
+  });
+
+  it("lists booking add-on items with the typed target route", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      addonItems: [bookingAddonItem],
+    });
+  });
+
+  it("returns the booking add-on item read-model not-found contract", async () => {
+    app = buildAuthenticatedApp({
+      bookingAddonItemsRepository: {
+        ...bookingAddonItemsRepository,
+        async listAddonItemsByHotelId() {
+          return null;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).toEqual({
+      statusCode: 404,
+      code: "not_found",
+      category: "read_model",
+      message: "Booking add-on item target not found.",
+    });
+  });
+
+  it("returns the booking add-on item read-model unavailable contract", async () => {
+    app = buildAuthenticatedApp({
+      bookingAddonItemsRepository: {
+        ...bookingAddonItemsRepository,
+        async listAddonItemsByHotelId() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).toEqual({
+      statusCode: 500,
+      code: "read_model_unavailable",
+      category: "read_model",
+      message: "Booking add-on items could not be loaded.",
+    });
+  });
+
+  it("creates booking add-on items with the typed target route", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        name: "Spa ritual",
+        description: "Private treatment.",
+        price: "125.50",
+        currency: "EUR",
+        category: "wellness",
+        imageUrl: "https://images.example/spa.jpg",
+        duration: "90 min",
+        pricingModel: "per_guest",
+        publicVisible: false,
+        status: "disabled",
+        sortOrder: 3,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toMatchObject({
+      addonItemId: "0f840001-0000-4000-8000-000000000002",
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: "property_alpenrose",
+      name: "Spa ritual",
+      description: "Private treatment.",
+      price: "125.50",
+      currency: "EUR",
+      category: "wellness",
+      imageUrl: "https://images.example/spa.jpg",
+      duration: "90 min",
+      pricingModel: "per_guest",
+      publicVisible: false,
+      status: "disabled",
+      sortOrder: 3,
+    });
+  });
+
+  it("updates booking add-on items with the typed target route", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/addon-items/${bookingAddonItem.addonItemId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        name: "Private transfer",
+        price: "55.00",
+        pricingModel: "per_guest",
+        publicVisible: false,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      addonItemId: bookingAddonItem.addonItemId,
+      hotelId: "booking_hotel_alpenrose",
+      name: "Private transfer",
+      price: "55.00",
+      pricingModel: "per_guest",
+      publicVisible: false,
+    });
+  });
+
+  it("retires booking add-on items instead of deleting historical selections", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/addon-items/${bookingAddonItem.addonItemId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(204);
+  });
+
+  it("returns not found for malformed booking add-on item ids", async () => {
+    app = buildAuthenticatedApp();
+
+    const patchResponse = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items/not-a-uuid",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        name: "Private transfer",
+      },
+    });
+
+    expect(patchResponse.statusCode).toBe(404);
+    expect(patchResponse.body).toMatchObject({
+      code: "not_found",
+      category: "write_model",
+    });
+
+    const deleteResponse = await injectJson(app, {
+      method: "DELETE",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items/not-a-uuid",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(deleteResponse.statusCode).toBe(404);
+    expect(deleteResponse.body).toMatchObject({
+      code: "not_found",
+      category: "write_model",
+    });
+  });
+
+  it("rejects booking add-on item reads without authentication", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(response.body).toEqual({
+      statusCode: 401,
+      code: "unauthenticated",
+      category: "authentication",
+      message: "A valid access token is required.",
+    });
+  });
+
+  it("rejects booking add-on item writes when permission is missing", async () => {
+    app = buildAuthenticatedApp({ permissions: [] });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        name: "Spa ritual",
+        price: "125.50",
+        currency: "EUR",
+        category: "wellness",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_permission",
+      category: "authorization",
+      message: "Missing required booking settings permission.",
+    });
+  });
+
+  it("rejects invalid booking add-on item payloads", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "POST",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/addon-items",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        name: "",
+        price: "12.345",
+        currency: "eur",
+        category: "legacy",
+        status: "retired",
+        legacyField: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking add-on item payload is invalid.",
+    });
+    expect(response.body.details).toEqual(expect.any(Array));
+  });
   it("returns booking reservations with auth, policy, and the documented product list shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -5373,6 +5976,12 @@ describe("vayada-api", () => {
     );
   });
 
+  it("rejects empty target booking add-on item repository connection strings", async () => {
+    expect(() => createPgTargetBookingAddonItemsRepository({ connectionString: " " })).toThrow(
+      "Target booking add-on items repository connectionString must not be empty",
+    );
+  });
+
   it("serves booking settings contracts from the target repository without legacy queries", async () => {
     const queries: { text: string; values?: readonly unknown[] }[] = [];
     let poolClosed = false;
@@ -5427,6 +6036,19 @@ describe("vayada-api", () => {
         values?: readonly unknown[],
       ): Promise<Pick<QueryResult<T>, "rows">> {
         queries.push({ text, values });
+        if (text.includes("finance.payment_settings")) {
+          return {
+            rows: [
+              {
+                source_link_count: 1,
+                propertyId: "d3000000-0000-0000-0000-000000000682",
+                pmsProperty: true,
+                financeProperty: true,
+              },
+            ] as unknown as T[],
+          };
+        }
+
         if (text.includes("show_addons_step = $2")) {
           state.show_addons_step = values?.[1] as boolean;
           state.group_addons_by_category = values?.[2] as boolean;
@@ -5473,6 +6095,24 @@ describe("vayada-api", () => {
     app = buildAuthenticatedApp({
       settingsRepository: targetRepository,
       settingsWriteRepository: targetRepository,
+    });
+
+    const propertyLinkResponse = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/property-link",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    expect(propertyLinkResponse.statusCode).toBe(200);
+    expect(propertyLinkResponse.body).toEqual({
+      hotelId: "booking_hotel_alpenrose",
+      propertyId: "d3000000-0000-0000-0000-000000000682",
+      resourceLinks: {
+        bookingHotel: true,
+        pmsProperty: true,
+        financeProperty: true,
+      },
     });
 
     const cases = [
@@ -5576,11 +6216,84 @@ describe("vayada-api", () => {
     const sql = queries.map((query) => query.text).join("\n");
     expect(sql).toContain("relationship = 'canonical_input'");
     expect(sql).toContain("status = 'active'");
+    expect(sql).toContain("finance.payment_settings");
+    expect(sql).toContain("hotel_catalog.property_source_links pms_link");
     expect(sql).not.toMatch(/\b(FROM|UPDATE)\s+booking_hotels\b/i);
 
     await app.close();
     app = null;
     expect(poolClosed).toBe(true);
+  });
+
+  it("serves target booking add-on items without legacy queries or retired rows", async () => {
+    const queries: { text: string; values?: unknown[] }[] = [];
+    const pool: BookingAddonItemsPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("hotel_catalog.property_source_links")) {
+          return {
+            rows: [{ propertyId: "d3000000-0000-0000-0000-000000000682" }] as unknown as T[],
+          };
+        }
+        return {
+          rows: [
+            {
+              addonItemId: "0f840001-0000-4000-8000-000000000001",
+              propertyId: "d3000000-0000-0000-0000-000000000682",
+              name: "Migrated add-on",
+              description: null,
+              category: "food",
+              pricingModel: "per_stay",
+              price: "45.00",
+              currency: "EUR",
+              publicVisible: true,
+              status: "active",
+              metadata: {},
+              createdAt: "2026-06-01T10:00:00.000Z",
+              updatedAt: "2026-06-01T10:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const repository = createPgTargetBookingAddonItemsRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+
+    const items = await repository.listAddonItemsByHotelId("booking_hotel_alpenrose");
+
+    expect(items).toEqual([
+      {
+        addonItemId: "0f840001-0000-4000-8000-000000000001",
+        hotelId: "booking_hotel_alpenrose",
+        propertyId: "d3000000-0000-0000-0000-000000000682",
+        name: "Migrated add-on",
+        description: "",
+        price: "45.00",
+        currency: "EUR",
+        category: "dining",
+        imageUrl: null,
+        duration: null,
+        pricingModel: "per_stay",
+        publicVisible: true,
+        status: "active",
+        sortOrder: 0,
+        createdAt: "2026-06-01T10:00:00.000Z",
+        updatedAt: "2026-06-01T10:00:00.000Z",
+      },
+    ]);
+    await repository.updateAddonItemByHotelId("booking_hotel_alpenrose", "not-a-uuid", {
+      name: "Updated",
+    });
+
+    expect(queries[1]?.text).toContain("COALESCE(addon_definitions.category, 'other') AS category");
+    expect(queries[1]?.text).toContain("addon_definitions.status <> 'retired'");
+    expect(queries.map((query) => query.text).join("\n")).not.toContain("$2::uuid");
   });
 
   it("sends guest-form PMS compatibility sync requests with hotel scope and auth", async () => {

@@ -4,6 +4,12 @@ import {
   updateBookingRoomFilterSettings,
   type BookingRoomFilterSettings,
 } from "../api/bookingRoomFilterSettingsClient";
+import {
+  deleteBookingCustomDomain,
+  getBookingCustomDomain,
+  upsertBookingCustomDomain,
+  type BookingCustomDomainResponse,
+} from "../api/bookingCustomDomainClient";
 
 export interface PropertySettings {
   // booking_hotels.id — unified across both backend databases after
@@ -223,13 +229,7 @@ export interface PromoCodeItem {
   createdAt?: string;
 }
 
-export interface CustomDomainStatus {
-  configured: boolean;
-  domain?: string;
-  status?: string;
-  ssl_status?: string;
-  verification_errors?: string[];
-}
+export type CustomDomainStatus = BookingCustomDomainResponse;
 
 export interface HotelDeletionImpact {
   upcomingBookingsCount: number;
@@ -304,6 +304,15 @@ export const settingsService = {
     });
     return toDesignSettings(saved);
   },
+
+  getCustomDomainStatus: async (): Promise<CustomDomainStatus> =>
+    getBookingCustomDomain({ hotelId: await resolveBookingHotelId() }),
+
+  connectCustomDomain: async (domain: string): Promise<CustomDomainStatus> =>
+    upsertBookingCustomDomain({ hotelId: await resolveBookingHotelId(), domain }),
+
+  disconnectCustomDomain: async (): Promise<void> =>
+    deleteBookingCustomDomain({ hotelId: await resolveBookingHotelId() }),
 
   getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
 };

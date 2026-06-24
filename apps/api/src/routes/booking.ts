@@ -1,9 +1,17 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  registerBookingAddonItemRoutes,
+  type BookingAddonItemsRepository,
+} from "./bookingAddonItems.js";
+import {
   registerBookingDashboardRoutes,
   type BookingDashboardRoutesOptions,
 } from "./bookingDashboard.js";
+import {
+  registerBookingCustomDomainRoutes,
+  type BookingCustomDomainRepository,
+} from "./bookingCustomDomain.js";
 import {
   registerBookingReservationRoutes,
   type BookingReservationsReadRepository,
@@ -21,17 +29,23 @@ type BookingHotelParams = {
 };
 
 export type BookingRoutesOptions = {
+  addonItemsRepository?: BookingAddonItemsRepository;
   dashboardMetricsReadPort?: BookingDashboardRoutesOptions["metricsReadPort"];
   reservationsRepository?: BookingReservationsReadRepository;
   settingsRepository?: BookingSettingsReadRepository;
   settingsWriteRepository?: BookingSettingsWriteRepository;
   guestFormSettingsSync?: BookingGuestFormSettingsSync;
+  customDomainRepository?: BookingCustomDomainRepository;
 };
 
 export async function registerBookingRoutes(
   app: FastifyInstance,
   options: BookingRoutesOptions = {},
 ): Promise<void> {
+  if (options.addonItemsRepository) {
+    await registerBookingAddonItemRoutes(app, options.addonItemsRepository);
+  }
+
   if (options.settingsRepository) {
     await registerBookingSettingsRoutes(
       app,
@@ -49,6 +63,10 @@ export async function registerBookingRoutes(
     await registerBookingDashboardRoutes(app, {
       metricsReadPort: options.dashboardMetricsReadPort,
     });
+  }
+
+  if (options.customDomainRepository) {
+    await registerBookingCustomDomainRoutes(app, options.customDomainRepository);
   }
 
   app.get<{ Params: BookingHotelParams }>("/hotels/:hotelId/policy-check", async (request) => {

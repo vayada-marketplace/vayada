@@ -1,8 +1,13 @@
 import { expect, test } from "@playwright/test";
 import {
+  BOOKING_ADMIN_CUSTOM_DOMAIN_PATH,
+  BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH,
   BOOKING_ADMIN_HOTEL_ID,
+  BOOKING_ADMIN_PROPERTY_ID,
+  defaultCustomDomain,
   mockBookingAdminAuthenticatedSession,
   mockBookingAdminShellRoutes,
+  type BookingAdminCustomDomainFixture,
 } from "../support/bookingAdminMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
@@ -21,31 +26,107 @@ test.describe("booking-admin settings no-legacy guard", () => {
 
     await mockBookingAdminAuthenticatedSession(page);
     await mockBookingAdminShellRoutes(page);
-    await page.route(`**/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/payment-settings*`, (route) =>
-      route.fulfill({
+    await page.route(
+      `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings*`,
+      (route) =>
+        route.fulfill({
+          json: {
+            paymentSettings: {
+              paymentProvider: "vayada",
+              payAtPropertyEnabled: true,
+              onlineCardPayment: true,
+              bankTransfer: false,
+            },
+          },
+        }),
+    );
+    let financePatchCount = 0;
+    await page.route(`**${BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH}`, async (route) => {
+      financePatchCount += 1;
+      const body = route.request().postDataJSON() as {
+        commandId: string;
+        idempotencyKey: string;
+        paymentSettings: {
+          paymentProvider: string;
+          acceptedMethods: string[];
+        };
+      };
+      expect(body.commandId).toContain("settings-payment-settings");
+      expect(body.idempotencyKey).toBe(body.commandId);
+      expect(body.paymentSettings).toMatchObject({
+        paymentProvider: "vayada",
+        acceptedMethods: ["pay_at_property", "cash", "manual_card", "card"],
+      });
+      await route.fulfill({
         json: {
-          paymentSettings: {
-            paymentProvider: "vayada",
-            payAtPropertyEnabled: true,
-            onlineCardPayment: false,
-            bankTransfer: false,
+          contractVersion: "finance-route-contracts.v1",
+          propertyId: BOOKING_ADMIN_PROPERTY_ID,
+          paymentSettings: body.paymentSettings,
+          commandMeta: {
+            commandId: body.commandId,
+            idempotencyKey: body.idempotencyKey,
+            sideEffects: ["audit_event"],
+            outboxEvents: [],
+            jobs: [],
           },
         },
-      }),
-    );
+      });
+    });
+    let customDomain: BookingAdminCustomDomainFixture = defaultCustomDomain;
+    await page.route(`**${BOOKING_ADMIN_CUSTOM_DOMAIN_PATH}*`, async (route) => {
+      const method = route.request().method();
+      if (method === "PUT") {
+        const body = route.request().postDataJSON() as { domain: string };
+        customDomain = {
+          hotelId: BOOKING_ADMIN_HOTEL_ID,
+          propertyId: "f6853000-0000-0000-0000-000000000001",
+          configured: true,
+          domain: body.domain,
+          status: "pending",
+          sslStatus: "pending",
+          dnsRecords: [
+            {
+              type: "CNAME",
+              name: body.domain,
+              value: "custom.booking.vayada.com",
+              status: "pending",
+            },
+          ],
+          verificationErrors: [],
+          checkedAt: "2026-06-22T10:00:00.000Z",
+          updatedAt: "2026-06-22T10:00:00.000Z",
+        };
+        await route.fulfill({ json: customDomain });
+        return;
+      }
+      if (method === "DELETE") {
+        customDomain = defaultCustomDomain;
+        await route.fulfill({ status: 204 });
+        return;
+      }
+      await route.fulfill({ json: customDomain });
+    });
 
     await page.goto("/settings");
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 
     await page.getByRole("button", { name: "Booking", exact: true }).click();
-    await expect(
-      page.getByText("Custom domain management is not available on next-api yet."),
-    ).toBeVisible();
+    await page.getByPlaceholder("booking.yourdomain.com").fill("book.alpenrose.example");
+    await page.getByRole("button", { name: "Connect Domain" }).click();
+    await expect(page.getByText("book.alpenrose.example").first()).toBeVisible();
+    await expect(page.getByText("custom.booking.vayada.com")).toBeVisible();
+    await page.getByRole("button", { name: "Remove Domain" }).click();
+    await expect(page.getByPlaceholder("booking.yourdomain.com")).toBeVisible();
 
     await page.getByRole("button", { name: "Location map", exact: true }).click();
     await expect(
       page.getByText("Automatic property map centering is not available on next-api yet."),
     ).toBeVisible();
+
+    await page.getByRole("button", { name: "Payments", exact: true }).click();
+    await page.getByRole("button", { name: "Save Changes", exact: true }).click();
+    await expect(page.getByText("Payment settings saved")).toBeVisible();
+    expect(financePatchCount).toBe(1);
 
     await assertNoLegacyCalls();
     await assertHealthy();

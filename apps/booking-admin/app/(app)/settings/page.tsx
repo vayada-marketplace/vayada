@@ -2,6 +2,11 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { apiClient } from "@/services/api/client";
+import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
+import {
+  buildFinancePaymentSettingsBody,
+  updateFinancePaymentSettings,
+} from "@/services/api/financePaymentSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import {
   BuildingOffice2Icon,
@@ -69,9 +74,18 @@ type PmsPaymentSettingsResponse = {
 };
 
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
-const CUSTOM_DOMAIN_UNAVAILABLE = "Custom domain management is not available on next-api yet.";
 const PROPERTY_MAP_CENTERING_UNAVAILABLE =
   "Automatic property map centering is not available on next-api yet.";
+
+function readBookingHotelId(settings: PropertySettings): string {
+  if (settings.id?.trim()) return settings.id.trim();
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("selectedHotelId")?.trim() ?? "";
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
 
 const hasValidCoordinatePair = (latitude: number, longitude: number) =>
   Number.isFinite(latitude) &&
@@ -157,10 +171,7 @@ export default function SettingsPage() {
 
   // Custom domain
   const [domainInput, setDomainInput] = useState("");
-  const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>({
-    configured: false,
-    verification_errors: [CUSTOM_DOMAIN_UNAVAILABLE],
-  });
+  const [domainStatus, setDomainStatus] = useState<CustomDomainStatus | null>(null);
 
   // Stripe Connect / Payments
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
@@ -177,6 +188,7 @@ export default function SettingsPage() {
   const [paymentError, setPaymentError] = useState("");
   const [paymentSuccess, setPaymentSuccess] = useState("");
   const [savingPayment, setSavingPayment] = useState(false);
+  const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
 
   const handleChangeEmail = async () => {
@@ -237,16 +249,32 @@ export default function SettingsPage() {
   }, [t]);
 
   useEffect(() => {
+    setPaymentSettingsLoaded(false);
     const propertyPromise = fetchSettings();
     propertyPromise
-      .then((property) => {
-        if (!property?.id) return null;
+      .then(async (property) => {
+        if (!property) return null;
+        settingsService
+          .getCustomDomainStatus()
+          .then(setDomainStatus)
+          .catch((error) => {
+            setDomainStatus(null);
+            const message =
+              error instanceof Error ? error.message : "Failed to load custom domain status.";
+            setFeedback({ type: "error", message });
+          });
+        const hotelId = readBookingHotelId(property);
+        if (!hotelId) return null;
+        const propertyLink = await getBookingHotelPropertyLink({ hotelId });
         return apiClient.get<PmsPaymentSettingsResponse>(
-          `/api/pms/properties/${encodeURIComponent(property.id)}/payment-settings`,
+          `/api/pms/properties/${encodeURIComponent(propertyLink.propertyId)}/payment-settings`,
         );
       })
       .then((res) => {
-        if (!res) return;
+        if (!res) {
+          setPaymentSettingsLoaded(true);
+          return;
+        }
         const ps = res.paymentSettings;
         setStripeAccountId(ps.stripeConnectAccountId ?? null);
         setStripeOnboarded(ps.stripeConnectOnboarded ?? false);
@@ -261,8 +289,12 @@ export default function SettingsPage() {
           online_card_payment: ps.onlineCardPayment ?? false,
           bank_transfer: ps.bankTransfer ?? false,
         }));
+        setPaymentSettingsLoaded(true);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        setPaymentSettingsLoaded(false);
+        setPaymentError(errorMessage(err, "Payment settings failed to load."));
+      });
   }, [fetchSettings]);
 
   const handleCreateStripeAccount = async () => {
@@ -277,11 +309,11 @@ export default function SettingsPage() {
       setStripeAccountId(result.accountId);
       const link = await pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link");
       window.open(link.url, "_blank");
-    } catch (err: any) {
+    } catch (err: unknown) {
       const msg =
         err instanceof TypeError
           ? t("settings.billing.errorPaymentServerUnreachable")
-          : err.message || t("settings.billing.errorAccountCreate");
+          : errorMessage(err, t("settings.billing.errorAccountCreate"));
       setPaymentError(msg);
     } finally {
       setCreatingAccount(false);
@@ -292,8 +324,8 @@ export default function SettingsPage() {
     try {
       const link = await pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link");
       window.open(link.url, "_blank");
-    } catch (err: any) {
-      setPaymentError(err.message || t("settings.billing.errorOnboardingLink"));
+    } catch (err: unknown) {
+      setPaymentError(errorMessage(err, t("settings.billing.errorOnboardingLink")));
     }
   };
 
@@ -302,17 +334,38 @@ export default function SettingsPage() {
     setPaymentError("");
     setPaymentSuccess("");
     try {
-      if (paymentProvider === "xendit") {
-        if (!xenditAccountNumber.trim() || !/^\d{5,20}$/.test(xenditAccountNumber.trim())) {
-          setPaymentError(t("settings.billing.errorAccountNumberFormat"));
-          return false;
-        }
-        if (!xenditAccountHolderName.trim()) {
-          setPaymentError(t("settings.billing.errorAccountHolderRequired"));
-          return false;
-        }
+      if (!paymentSettingsLoaded) {
+        setPaymentError("Payment settings did not load. Refresh before saving payments.");
+        return false;
       }
-      setPaymentError("Payment settings writes are not available on next-api yet.");
+      if (paymentProvider === "xendit") {
+        setPaymentError("Xendit account details are not saved by this payment settings flow yet.");
+        return false;
+      }
+      const hotelId = readBookingHotelId(settings);
+      if (!hotelId) {
+        setPaymentError("Select a hotel before saving payment settings.");
+        return false;
+      }
+      const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+      await updateFinancePaymentSettings({
+        propertyId: propertyLink.propertyId,
+        body: buildFinancePaymentSettingsBody({
+          payAtPropertyEnabled: settings.pay_at_property_enabled,
+          payAtHotelMethods: settings.pay_at_hotel_methods,
+          onlineCardPayment: settings.online_card_payment ?? false,
+          bankTransfer: settings.bank_transfer ?? false,
+          paymentProvider,
+          defaultCurrency: settings.default_currency,
+          commandPrefix: `settings-payment-settings-${hotelId}`,
+        }),
+      });
+      setPaymentSuccess(t("settings.billing.paymentSettingsSaved"));
+      return true;
+    } catch (err: unknown) {
+      setPaymentError(
+        err instanceof Error ? err.message : t("settings.billing.errorPaymentSaveFailed"),
+      );
       return false;
     } finally {
       setSavingPayment(false);
@@ -434,16 +487,50 @@ export default function SettingsPage() {
   };
 
   const handleConnectDomain = async () => {
-    setFeedback({ type: "error", message: CUSTOM_DOMAIN_UNAVAILABLE });
+    if (!domainInput.trim()) {
+      setFeedback({ type: "error", message: "Enter a custom domain." });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setFeedback(null);
+      const status = await settingsService.connectCustomDomain(domainInput);
+      setDomainStatus(status);
+      setDomainInput("");
+      setFeedback({ type: "success", message: t("settings.feedback.domainConnected") });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to connect custom domain.";
+      setFeedback({ type: "error", message });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDisconnectDomain = async () => {
-    setFeedback({ type: "error", message: CUSTOM_DOMAIN_UNAVAILABLE });
+    try {
+      setSaving(true);
+      setFeedback(null);
+      await settingsService.disconnectCustomDomain();
+      const status = await settingsService.getCustomDomainStatus();
+      setDomainStatus(status);
+      setFeedback({ type: "success", message: t("settings.feedback.domainRemoved") });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to remove custom domain.";
+      setFeedback({ type: "error", message });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleRefreshDomainStatus = async () => {
-    setDomainStatus({ configured: false, verification_errors: [CUSTOM_DOMAIN_UNAVAILABLE] });
-    setFeedback({ type: "error", message: CUSTOM_DOMAIN_UNAVAILABLE });
+    try {
+      const status = await settingsService.getCustomDomainStatus();
+      setDomainStatus(status);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh custom domain.";
+      setFeedback({ type: "error", message });
+    }
   };
 
   const sections: SettingsNavSection[] = [
@@ -733,18 +820,18 @@ export default function SettingsPage() {
                   </span>
                   <span
                     className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                      domainStatus.ssl_status === "active"
+                      domainStatus.sslStatus === "active"
                         ? "bg-green-100 text-green-700"
                         : domainStatus.status === "pending"
                           ? "bg-yellow-100 text-yellow-700"
                           : "bg-gray-100 text-gray-700"
                     }`}
                   >
-                    {domainStatus.ssl_status === "active"
+                    {domainStatus.sslStatus === "active"
                       ? t("settings.booking.active")
                       : domainStatus.status === "pending"
                         ? t("settings.booking.pendingDns")
-                        : domainStatus.ssl_status || t("settings.booking.checking")}
+                        : domainStatus.sslStatus || t("settings.booking.checking")}
                   </span>
                   <button
                     onClick={handleRefreshDomainStatus}
@@ -754,7 +841,7 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
-                {domainStatus.ssl_status !== "active" && (
+                {domainStatus.sslStatus !== "active" && domainStatus.dnsRecords.length > 0 && (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                     <p className="text-[13px] font-medium text-blue-900 mb-2">
                       {t("settings.booking.dnsSetupRequired")}
@@ -762,36 +849,40 @@ export default function SettingsPage() {
                     <p className="text-[13px] text-blue-700 mb-2">
                       {t("settings.booking.dnsInstructions")}
                     </p>
-                    <div className="bg-white rounded p-3 font-mono text-[11px] text-gray-800 space-y-1">
-                      <div>
-                        <span className="text-gray-500">{t("settings.booking.dnsType")}</span> CNAME
+                    {domainStatus.dnsRecords.map((record) => (
+                      <div
+                        key={`${record.type}:${record.name}`}
+                        className="bg-white rounded p-3 font-mono text-[11px] text-gray-800 space-y-1"
+                      >
+                        <div>
+                          <span className="text-gray-500">{t("settings.booking.dnsType")}</span>{" "}
+                          {record.type}
+                        </div>
+                        <div>
+                          <span className="text-gray-500">{t("settings.booking.dnsName")}</span>{" "}
+                          {record.name}
+                        </div>
+                        <div>
+                          <span className="text-gray-500">{t("settings.booking.dnsTarget")}</span>{" "}
+                          {record.value}
+                        </div>
                       </div>
-                      <div>
-                        <span className="text-gray-500">{t("settings.booking.dnsName")}</span>{" "}
-                        {domainStatus.domain}
-                      </div>
-                      <div>
-                        <span className="text-gray-500">{t("settings.booking.dnsTarget")}</span>{" "}
-                        custom.booking.vayada.com
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 )}
 
-                {domainStatus.verification_errors &&
-                  domainStatus.verification_errors.length > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                      <p className="text-[13px] text-red-700">
-                        {domainStatus.verification_errors.join(", ")}
-                      </p>
-                    </div>
-                  )}
+                {domainStatus.verificationErrors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <p className="text-[13px] text-red-700">
+                      {domainStatus.verificationErrors.join(", ")}
+                    </p>
+                  </div>
+                )}
 
                 <button
                   onClick={handleDisconnectDomain}
-                  disabled
-                  title={CUSTOM_DOMAIN_UNAVAILABLE}
-                  className="px-4 py-2 text-[13px] font-medium text-gray-500 border border-gray-300 rounded-lg cursor-not-allowed"
+                  disabled={saving}
+                  className="px-4 py-2 text-[13px] font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-60"
                 >
                   {t("settings.booking.removeDomain")}
                 </button>
@@ -801,23 +892,19 @@ export default function SettingsPage() {
                 <p className="text-[13px] text-gray-500">
                   {t("settings.booking.customDomainDesc")}
                 </p>
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                  {CUSTOM_DOMAIN_UNAVAILABLE}
-                </div>
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   <input
                     type="text"
                     value={domainInput}
                     onChange={(e) => setDomainInput(e.target.value)}
                     placeholder={t("settings.booking.customDomainPlaceholder")}
-                    disabled
-                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] bg-gray-50 text-gray-500 cursor-not-allowed"
+                    disabled={saving}
+                    className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-[13px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:bg-gray-50"
                   />
                   <button
                     onClick={handleConnectDomain}
-                    disabled
-                    title={CUSTOM_DOMAIN_UNAVAILABLE}
-                    className="px-4 py-2 text-[13px] font-medium bg-gray-200 text-gray-500 rounded-lg cursor-not-allowed"
+                    disabled={saving}
+                    className="px-4 py-2 text-[13px] font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-60"
                   >
                     {t("settings.booking.connectDomain")}
                   </button>

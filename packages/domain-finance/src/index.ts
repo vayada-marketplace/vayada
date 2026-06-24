@@ -216,6 +216,49 @@ export type FinancePaymentSettingsResponse = {
   paymentSettings: Omit<FinancePaymentSettingsReadModel, "propertyId" | "updatedAt">;
 };
 
+export type FinancePaymentSettingsPatchPayload = Partial<
+  Pick<
+    FinancePaymentSettingsReadModel,
+    | "paymentsEnabled"
+    | "paymentProvider"
+    | "acceptedMethods"
+    | "defaultCurrency"
+    | "supportedCurrencies"
+    | "depositPolicy"
+    | "refundPolicy"
+    | "taxPolicy"
+    | "statementDescriptor"
+    | "requiresManualReview"
+  >
+>;
+
+export type FinancePaymentSettingsPatchCommand = {
+  commandType: "finance.payment_settings.update";
+  commandId: string;
+  idempotencyKey: string;
+  propertyId: FinancePropertyId;
+  audit: FinanceCommandAudit;
+  payload: FinancePaymentSettingsPatchPayload;
+};
+
+export type FinancePaymentSettingsPatchResult =
+  | {
+      ok: true;
+      status: "updated" | "idempotent_replay";
+      settings: FinancePaymentSettingsReadModel;
+      commandMeta: FinanceCommandMeta;
+    }
+  | {
+      ok: false;
+      statusCode: 400 | 404 | 409 | 500;
+      code: "invalid_command" | "property_not_found" | "idempotency_conflict" | "write_unavailable";
+      message: string;
+    };
+
+export type FinancePaymentSettingsPatchResponse = FinancePaymentSettingsResponse & {
+  commandMeta: FinanceCommandMeta;
+};
+
 export type CancellationPolicy = {
   freeCancellationDays: number;
   partialRefundPercent: number;
@@ -1128,6 +1171,10 @@ export type FinanceManualPaymentRecordResult =
     };
 
 export type FinancePropertyCommandRepository = {
+  updatePaymentSettings(
+    command: FinancePaymentSettingsPatchCommand,
+  ): Promise<FinancePaymentSettingsPatchResult>;
+
   recordManualPayment(
     command: FinanceManualPaymentRecordCommand,
   ): Promise<FinanceManualPaymentRecordResult>;
@@ -1267,7 +1314,7 @@ export function toPublicPaymentCapabilityProjection(
   cancellationPolicy: CancellationPolicy,
 ): PublicPaymentCapabilityProjection {
   return {
-    paymentMethods: settings.paymentsEnabled ? settings.acceptedMethods : [],
+    paymentMethods: publicPaymentMethods(settings),
     defaultCurrency: settings.defaultCurrency,
     supportedCurrencies: settings.supportedCurrencies,
     depositPolicy: publicDepositPolicy(settings.depositPolicy),
@@ -1278,6 +1325,26 @@ export function toPublicPaymentCapabilityProjection(
       appliesTo: cancellationPolicy.appliesTo,
     },
   };
+}
+
+function publicPaymentMethods(
+  settings: FinancePaymentSettingsReadModel,
+): FinanceRoutePaymentMethod[] {
+  if (!settings.paymentsEnabled) return [];
+  const canChargeOnline = financeProviderCanCharge(settings);
+  return settings.acceptedMethods.filter((method) => {
+    if (method === "card" || method === "wallet") return canChargeOnline;
+    if (method === "xendit") return canChargeOnline && settings.paymentProvider === "xendit";
+    return true;
+  });
+}
+
+function financeProviderCanCharge(settings: FinancePaymentSettingsReadModel): boolean {
+  return (
+    settings.providerAccount.status === "active" &&
+    settings.providerAccount.onboardingStatus === "completed" &&
+    settings.providerAccount.chargesEnabled
+  );
 }
 
 function publicDepositPolicy(policy: FinanceJsonPolicy): FinanceJsonPolicy {

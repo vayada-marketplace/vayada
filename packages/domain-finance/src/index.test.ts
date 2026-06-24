@@ -520,6 +520,27 @@ describe("finance route projections", () => {
       /providerAccountId|payoutsEnabled|acct_123|internalNotes|bankTransferInstructions|IBAN PRIVATE|providerSecret|secret_ref/,
     );
   });
+
+  it("does not project online payment methods before the provider can charge", () => {
+    const policy = cancellationPolicyFromRefundPolicy(settings.refundPolicy, settings.updatedAt);
+    const projection = toPublicPaymentCapabilityProjection(
+      {
+        ...settings,
+        paymentProvider: "xendit",
+        acceptedMethods: ["card", "xendit", "pay_at_property", "bank_transfer", "wallet"],
+        providerAccount: {
+          ...settings.providerAccount,
+          provider: "xendit",
+          status: "setup_incomplete",
+          onboardingStatus: "not_started",
+          chargesEnabled: false,
+        },
+      },
+      policy,
+    );
+
+    expect(projection.paymentMethods).toEqual(["pay_at_property", "bank_transfer"]);
+  });
 });
 
 describe("BillingConfigReadPort", () => {
