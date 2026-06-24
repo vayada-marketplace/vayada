@@ -3,7 +3,7 @@ CREATE TABLE booking.promo_definitions (
   property_id UUID NOT NULL REFERENCES hotel_catalog.properties(id),
   source_system TEXT NOT NULL DEFAULT 'booking' CHECK (source_system IN ('booking', 'migration')),
   source_promo_id TEXT,
-  code TEXT NOT NULL,
+  code TEXT NOT NULL CHECK (code = upper(code)),
   discount_type TEXT NOT NULL CHECK (discount_type IN ('percentage', 'fixed')),
   discount_value NUMERIC(15, 2) NOT NULL CHECK (discount_value > 0),
   currency CHAR(3),
@@ -32,7 +32,7 @@ CREATE TABLE booking.promo_definitions (
 );
 
 CREATE UNIQUE INDEX uq_promo_definitions_property_code_active
-  ON booking.promo_definitions (property_id, code)
+  ON booking.promo_definitions (property_id, upper(code))
   WHERE status <> 'retired';
 
 CREATE INDEX idx_promo_definitions_property_status

@@ -80,8 +80,9 @@ function toSetupPromoCode(
 ): CreateBookingPromoCodeBody | null {
   if (!isRecord(input)) return null;
   const code = readString(input.code)?.toUpperCase();
-  const rawType = readString(input.discountType ?? input.discount_type);
-  const discountType = rawType === "fixed" ? "fixed" : "percentage";
+  const rawType = readString(input.discountType ?? input.discount_type)?.toLowerCase();
+  if (rawType !== "fixed" && rawType !== "percentage") return null;
+  const discountType = rawType;
   const rawValue = input.discountValue ?? input.discount_value;
   const discountValue =
     typeof rawValue === "number" ? rawValue.toFixed(2) : (readString(rawValue) ?? "");
@@ -471,17 +472,21 @@ export default function SetupPage() {
         }
       }
       if (setupPromoCodes.length > 0 && createdHotelId) {
-        try {
-          for (const promoCode of setupPromoCodes) {
+        const failedPromoCodes: string[] = [];
+        for (const promoCode of setupPromoCodes) {
+          try {
             await createBookingPromoCode({
               hotelId: createdHotelId,
               body: promoCode,
             });
+          } catch {
+            failedPromoCodes.push(promoCode.code);
           }
-        } catch {
+        }
+        if (failedPromoCodes.length > 0) {
           localStorage.setItem(
             "setupWarning",
-            "Hotel created, but promo codes were not saved. Add them from Booking Flow > Promo Codes.",
+            `Hotel created, but some promo codes were not saved: ${failedPromoCodes.join(", ")}. Add them from Booking Flow > Promo Codes.`,
           );
         }
       }
@@ -794,16 +799,14 @@ export default function SetupPage() {
         );
       }
 
-      if (Array.isArray(data.promoCodes) && data.promoCodes.length > 0) {
-        const invitePromoCodes = data.promoCodes as unknown[];
-        setSetupPromoCodes(
-          invitePromoCodes
-            .map((promoCode: unknown) =>
-              toSetupPromoCode(promoCode, data.property?.default_currency || "EUR"),
-            )
-            .filter((promoCode): promoCode is CreateBookingPromoCodeBody => promoCode !== null),
-        );
-      }
+      const invitePromoCodes = Array.isArray(data.promoCodes) ? (data.promoCodes as unknown[]) : [];
+      setSetupPromoCodes(
+        invitePromoCodes
+          .map((promoCode: unknown) =>
+            toSetupPromoCode(promoCode, data.property?.default_currency || "EUR"),
+          )
+          .filter((promoCode): promoCode is CreateBookingPromoCodeBody => promoCode !== null),
+      );
 
       // Prefill benefits
       if (data.benefits && data.benefits.length > 0) {

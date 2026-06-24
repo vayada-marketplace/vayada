@@ -155,18 +155,18 @@ function toBookingPromoCodesClientError(
 
 function missingHotelIdError(): BookingPromoCodesClientError {
   return new BookingPromoCodesClientError({
-    statusCode: 404,
-    code: "not_found",
-    category: "read_model",
+    statusCode: 422,
+    code: "invalid_payload",
+    category: "validation",
     detail: "Booking hotel id is required.",
   });
 }
 
 function missingPromoCodeIdError(): BookingPromoCodesClientError {
   return new BookingPromoCodesClientError({
-    statusCode: 404,
-    code: "not_found",
-    category: "write_model",
+    statusCode: 422,
+    code: "invalid_payload",
+    category: "validation",
     detail: "Booking promo-code id is required.",
   });
 }

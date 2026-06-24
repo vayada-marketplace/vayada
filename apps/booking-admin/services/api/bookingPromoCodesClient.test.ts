@@ -200,9 +200,9 @@ describe("booking promo-code clients", () => {
         client,
       ),
     ).rejects.toMatchObject({
-      statusCode: 404,
-      code: "not_found",
-      category: "read_model",
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
       detail: "Booking hotel id is required.",
     });
 
@@ -215,9 +215,9 @@ describe("booking promo-code clients", () => {
         client,
       ),
     ).rejects.toMatchObject({
-      statusCode: 404,
-      code: "not_found",
-      category: "write_model",
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
       detail: "Booking promo-code id is required.",
     });
   });

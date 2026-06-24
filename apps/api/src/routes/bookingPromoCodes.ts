@@ -150,6 +150,15 @@ export async function registerBookingPromoCodeRoutes(
       if (!parsed.ok) return sendInvalidPayload(reply, parsed.details);
 
       try {
+        const currentPromoCodes = await repository.listPromoCodesByHotelId(hotelId);
+        if (!currentPromoCodes) return sendPromoCodesError(reply, writeNotFoundError());
+        const currentPromoCode = currentPromoCodes.find(
+          (promoCode) => promoCode.promoCodeId === promoCodeId,
+        );
+        if (!currentPromoCode) return sendPromoCodesError(reply, writeNotFoundError());
+        const effectiveDetails = validateEffectiveUpdate(currentPromoCode, parsed.value);
+        if (effectiveDetails.length > 0) return sendInvalidPayload(reply, effectiveDetails);
+
         const promoCode = await repository.updatePromoCodeByHotelId(
           hotelId,
           promoCodeId,
@@ -275,8 +284,7 @@ export function createPgTargetBookingPromoCodesRepository(config: {
       addSet(sets, values, "valid_until", body.validUntil, "::date");
       addSet(sets, values, "is_active", body.isActive);
       addSet(sets, values, "max_uses", body.maxUses);
-      values.push(new Date());
-      sets.push(`updated_at = $${values.length}`);
+      sets.push("updated_at = now()");
 
       const result = await pool.query<PromoCodeRow>(
         `WITH updated AS (
@@ -437,6 +445,21 @@ function parseUpdateBody(body: unknown): ValidationResult<UpdateBookingPromoCode
   }
   if (details.length > 0) return { ok: false, details };
   return { ok: true, value };
+}
+
+function validateEffectiveUpdate(
+  existing: BookingPromoCode,
+  body: UpdateBookingPromoCodeBody,
+): string[] {
+  const details: string[] = [];
+  const discountType = body.discountType ?? existing.discountType;
+  const discountValue = body.discountValue ?? existing.discountValue;
+  const currency = "currency" in body ? body.currency : existing.currency;
+  const validFrom = "validFrom" in body ? body.validFrom : existing.validFrom;
+  const validUntil = "validUntil" in body ? body.validUntil : existing.validUntil;
+  validateDiscount(discountType, discountValue, currency, details);
+  validateDateOrder(validFrom, validUntil, details);
+  return details;
 }
 
 const KNOWN_FIELDS = new Set([

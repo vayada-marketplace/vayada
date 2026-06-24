@@ -4955,6 +4955,39 @@ describe("vayada-api", () => {
     });
   });
 
+  it("rejects booking promo-code patches that violate the stored effective state", async () => {
+    app = buildAuthenticatedApp({
+      bookingPromoCodesRepository: {
+        ...bookingPromoCodesRepository,
+        async updatePromoCodeByHotelId() {
+          throw new Error("update should not be called");
+        },
+      },
+    });
+
+    const response = await injectJson<Record<string, unknown>>(app, {
+      method: "PATCH",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/promo-codes/${bookingPromoCode.promoCodeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        discountValue: "101.00",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      statusCode: 422,
+      code: "invalid_payload",
+      category: "validation",
+      message: "Booking promo-code payload is invalid.",
+    });
+    expect(response.body.details).toEqual(
+      expect.arrayContaining(["percentage discountValue must be less than or equal to 100."]),
+    );
+  });
+
   it("retires booking promo codes instead of deleting usage history", async () => {
     app = buildAuthenticatedApp();
 

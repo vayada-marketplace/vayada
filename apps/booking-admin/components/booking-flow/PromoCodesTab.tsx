@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { PlusIcon, PencilSquareIcon, TicketIcon, TrashIcon } from "@heroicons/react/24/outline";
 import type { PromoCodeItem } from "@/services/settings";
 
@@ -62,8 +62,12 @@ export default function PromoCodesTab({
   const [savingPromo, setSavingPromo] = useState(false);
   const [deletingPromoId, setDeletingPromoId] = useState<string | null>(null);
   const [promoError, setPromoError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLFormElement | null>(null);
+  const lastFocusRef = useRef<HTMLElement | null>(null);
 
   const openCreateEditor = () => {
+    lastFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setEditingPromo(null);
     setDraft(emptyDraft(propertyCurrency));
     setPromoError(null);
@@ -71,18 +75,56 @@ export default function PromoCodesTab({
   };
 
   const openEditEditor = (promo: PromoCodeItem) => {
+    lastFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setEditingPromo(promo);
     setDraft(toDraft(promo, propertyCurrency));
     setPromoError(null);
     setIsEditorOpen(true);
   };
 
-  const closeEditor = () => {
+  const closeEditor = useCallback(() => {
     if (savingPromo) return;
     setIsEditorOpen(false);
     setEditingPromo(null);
     setPromoError(null);
-  };
+    lastFocusRef.current?.focus();
+  }, [savingPromo]);
+
+  useEffect(() => {
+    if (!isEditorOpen) return;
+    const dialog = dialogRef.current;
+    const firstInput = dialog?.querySelector<HTMLElement>("input, select, textarea");
+    const firstButton = dialog?.querySelector<HTMLElement>("button");
+    (firstInput ?? firstButton)?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeEditor();
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("disabled") && element.tabIndex !== -1);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeEditor, isEditorOpen]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -134,9 +176,12 @@ export default function PromoCodesTab({
       } else {
         await onCreatePromoCode(normalized);
       }
-      closeEditor();
-    } catch {
-      setPromoError("Failed to save promo code.");
+      setIsEditorOpen(false);
+      setEditingPromo(null);
+      setPromoError(null);
+      lastFocusRef.current?.focus();
+    } catch (error) {
+      setPromoError(error instanceof Error ? error.message : "Failed to save promo code.");
     } finally {
       setSavingPromo(false);
     }
@@ -148,8 +193,8 @@ export default function PromoCodesTab({
     setPromoError(null);
     try {
       await onDeletePromoCode(promo.id);
-    } catch {
-      setPromoError("Failed to delete promo code.");
+    } catch (error) {
+      setPromoError(error instanceof Error ? error.message : "Failed to delete promo code.");
     } finally {
       setDeletingPromoId(null);
     }
@@ -271,8 +316,15 @@ export default function PromoCodesTab({
       </div>
 
       {isEditorOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+          role="presentation"
+        >
           <form
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingPromo ? "Edit promo" : "Create promo"}
             onSubmit={handleSubmit}
             className="w-full max-w-lg rounded-lg bg-white p-5 shadow-xl space-y-4"
           >

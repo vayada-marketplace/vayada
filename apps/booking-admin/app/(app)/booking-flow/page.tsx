@@ -491,9 +491,12 @@ export default function BookingFlowPage() {
       });
       setPromoCodes((current) => [...current, toSettingsPromoCode(saved)]);
       showFeedback("success", "Promo code created.");
-    } catch {
-      showFeedback("error", "Promo code could not be saved.");
-      throw new Error("Failed to save promo code.");
+    } catch (error) {
+      showFeedback(
+        "error",
+        error instanceof Error ? error.message : "Promo code could not be saved.",
+      );
+      throw error;
     }
   };
 
@@ -510,9 +513,12 @@ export default function BookingFlowPage() {
         ),
       );
       showFeedback("success", "Promo code updated.");
-    } catch {
-      showFeedback("error", "Promo code could not be saved.");
-      throw new Error("Failed to save promo code.");
+    } catch (error) {
+      showFeedback(
+        "error",
+        error instanceof Error ? error.message : "Promo code could not be saved.",
+      );
+      throw error;
     }
   };
 
@@ -524,9 +530,12 @@ export default function BookingFlowPage() {
       });
       setPromoCodes((current) => current.filter((promoCode) => promoCode.id !== promoCodeId));
       showFeedback("success", "Promo code deleted.");
-    } catch {
-      showFeedback("error", "Promo code could not be deleted.");
-      throw new Error("Failed to delete promo code.");
+    } catch (error) {
+      showFeedback(
+        "error",
+        error instanceof Error ? error.message : "Promo code could not be deleted.",
+      );
+      throw error;
     }
   };
 
