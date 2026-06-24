@@ -4,7 +4,10 @@
 
 import { getAuthBearerToken, clearAuthData } from "../auth/sessionStore";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_AUTH_API_URL ||
+  "https://api.localhost";
 
 export interface ApiError {
   detail:
