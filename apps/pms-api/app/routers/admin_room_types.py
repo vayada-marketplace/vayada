@@ -4,7 +4,6 @@ import logging
 from datetime import date
 
 import asyncpg
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.database import Database
@@ -293,60 +292,6 @@ async def get_room_type_resolved_rate(
     return {"nightlyRate": float(nightly_rate), "currency": room["currency"]}
 
 
-@router.get("/geocode/search")
-async def search_locations(
-    q: str = Query(..., min_length=3, max_length=160),
-    user_id: str = Depends(require_hotel_admin),
-):
-    await get_hotel_id(user_id)
-    query = q.strip()
-    if len(query) < 3:
-        return {"results": []}
-
-    try:
-        async with httpx.AsyncClient(
-            timeout=8.0,
-            headers={"User-Agent": "Vayada PMS Admin geocoder (https://vayada.com)"},
-        ) as client:
-            response = await client.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={
-                    "q": query,
-                    "format": "jsonv2",
-                    "addressdetails": 1,
-                    "limit": 6,
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-    except Exception as exc:
-        logger.exception("Location search failed for query %r", query)
-        raise HTTPException(
-            status_code=502,
-            detail="Map provider is unavailable. Contact support if this continues.",
-        ) from exc
-
-    results = []
-    for item in payload if isinstance(payload, list) else []:
-        try:
-            latitude = float(item["lat"])
-            longitude = float(item["lon"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        label = str(item.get("display_name") or "").strip()
-        if not label:
-            continue
-        results.append(
-            {
-                "id": str(item.get("place_id") or label),
-                "label": label,
-                "latitude": latitude,
-                "longitude": longitude,
-            }
-        )
-    return {"results": results}
-
-
 @router.patch("/room-types/{room_type_id}", response_model=RoomTypeAdminResponse)
 async def update_room_type(
     room_type_id: str,
@@ -513,7 +458,7 @@ async def duplicate_room_type(
         if existing.get("non_refundable_rate") is not None
         else None,
         "currency": existing["currency"],
-        "location_address": existing.get("location_address") or "",
+        "address": existing.get("address") or "",
         "latitude": existing.get("latitude"),
         "longitude": existing.get("longitude"),
         "amenities": parse_jsonb(existing["amenities"]),

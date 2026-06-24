@@ -190,30 +190,6 @@ export default function BookingConfirmationPage({
   // but uses different copy so the guest doesn't think they cancelled.
   const isDeclined = status === "declined";
   const isExpired = status === "expired";
-  const paymentAmount = booking
-    ? formatPrice(
-        booking.depositRequired && booking.depositAmount
-          ? booking.depositAmount
-          : booking.totalAmount,
-        booking.currency,
-      )
-    : "";
-  const pendingPaymentNote =
-    booking?.paymentMethod === "card"
-      ? `Your card has been authorized for ${paymentAmount}. It will only be charged if we accept your booking. If declined, the hold will be released.`
-      : booking?.paymentMethod === "bank_transfer"
-        ? "Once we accept your booking, you'll receive an email with bank transfer details and the amount to transfer."
-        : booking?.paymentMethod === "pay_at_property"
-          ? `Once we accept your booking, you'll receive a confirmation email. Payment of ${paymentAmount} is due at the property upon check-in.`
-          : "";
-  const confirmedPaymentNote =
-    booking?.paymentMethod === "card"
-      ? "Your booking is confirmed and your card has been charged."
-      : booking?.paymentMethod === "bank_transfer"
-        ? "Your booking is accepted. We sent bank transfer details to your email. Include your booking reference with the transfer so the property can match your payment."
-        : booking?.paymentMethod === "pay_at_property"
-          ? `Your booking is confirmed. Payment of ${paymentAmount} is due at the property upon check-in.`
-          : "";
 
   return (
     <div className="min-h-screen bg-surface">
@@ -351,17 +327,6 @@ export default function BookingConfirmationPage({
             </p>
             <p className="text-2xl font-bold text-primary-600 tracking-wider">{reference}</p>
           </div>
-
-          {isPending && pendingPaymentNote && (
-            <div className="mb-8 rounded-xl border border-blue-200 bg-blue-50 p-4 text-left">
-              <p className="text-sm text-blue-800">{pendingPaymentNote}</p>
-            </div>
-          )}
-          {isConfirmed && confirmedPaymentNote && (
-            <div className="mb-8 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-left">
-              <p className="text-sm text-emerald-800">{confirmedPaymentNote}</p>
-            </div>
-          )}
 
           {/* Booking Details */}
           {hydrating && !booking ? (

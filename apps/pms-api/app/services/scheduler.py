@@ -21,7 +21,6 @@ from app.services.channex.inbound import poll_bookings_for_hotel
 from app.services.channex.messaging import poll_messages_for_all_hotels
 from app.services.channex.orchestrator import push_ari_for_hotel
 from app.services.email_service import send_affiliate_payout_notification
-from app.services.inbox_automation_service import process_guest_automations
 from app.services.payout_service import (
     dispatch_stripe_transfer,
     dispatch_xendit_payout,
@@ -347,15 +346,6 @@ async def poll_channex_messages():
         logger.error("Channex message sweep failed: %s", e)
 
 
-async def run_guest_automations():
-    try:
-        sent = await process_guest_automations()
-        if sent:
-            logger.info("Guest automations sent %d message(s)", sent)
-    except Exception as e:
-        logger.exception("Guest automation sweep failed: %s", e)
-
-
 def setup_scheduler():
     """Configure and return the scheduler with all jobs."""
     scheduler.add_job(
@@ -419,13 +409,6 @@ def setup_scheduler():
         advance_calendar_auto_open_windows,
         trigger=CronTrigger(hour=1, minute=15),
         id="advance_calendar_auto_open_windows",
-        replace_existing=True,
-    )
-
-    scheduler.add_job(
-        run_guest_automations,
-        trigger=IntervalTrigger(minutes=10),
-        id="guest_journey_automations",
         replace_existing=True,
     )
 

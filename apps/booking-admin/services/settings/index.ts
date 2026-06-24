@@ -38,7 +38,6 @@ export interface PropertySettings {
   special_requests_enabled?: boolean;
   arrival_time_enabled?: boolean;
   guest_count_enabled?: boolean;
-  phone_required?: boolean;
   guest_adult_age_threshold?: number;
   guest_children_enabled?: boolean;
   refer_a_guest_enabled?: boolean;

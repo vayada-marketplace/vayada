@@ -2,7 +2,6 @@
 
 import logging
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
@@ -22,7 +21,6 @@ from app.repositories.messaging_repo import (
     MessageThreadRepository,
 )
 from app.services import channex_service
-from app.services.email_service import send_guest_message_email
 from app.utils import get_hotel_id
 
 logger = logging.getLogger(__name__)
@@ -104,9 +102,6 @@ def _thread_to_model(row: dict) -> MessageThread:
         source=row["source"],
         channel=row.get("channel"),
         booking_id=str(row["booking_id"]) if row.get("booking_id") else None,
-        booking_reference=row.get("booking_reference"),
-        check_in=str(row["check_in"]) if row.get("check_in") else None,
-        check_out=str(row["check_out"]) if row.get("check_out") else None,
         guest_name=row.get("guest_name"),
         guest_email=row.get("guest_email"),
         status=row["status"],
@@ -126,7 +121,6 @@ def _message_to_model(row: dict, attachments: list) -> Message:
         body=row.get("body") or "",
         sent_at=row["sent_at"],
         read_at=row.get("read_at"),
-        automated=bool(row.get("automated", False)),
         attachments=[
             MessageAttachment(
                 id=str(a["id"]),
@@ -200,37 +194,9 @@ async def send_message(
     if not body.body and not body.attachment_ids:
         raise HTTPException(status_code=400, detail="message body or attachment required")
 
-    channel = thread.get("channel")
-
-    if thread.get("source") == "direct" or channel == "email":
-        if body.attachment_ids:
-            raise HTTPException(
-                status_code=400,
-                detail="Email threads do not support attachments yet",
-            )
-        guest_email = thread.get("guest_email")
-        if not guest_email:
-            raise HTTPException(status_code=400, detail="Guest email missing for this thread")
-        try:
-            await send_guest_message_email(guest_email, "Message from your host", body.body)
-        except Exception as e:
-            logger.exception("Direct guest email send failed")
-            raise HTTPException(status_code=502, detail=f"Email send failed: {e}") from e
-        inserted = await MessageRepository.insert_and_update_thread(
-            thread_id=thread_id,
-            source_message_id=f"manual:{uuid4()}",
-            direction="outbound",
-            sender_name=None,
-            body=body.body,
-            sent_at=datetime.now(UTC),
-            raw_payload={"source": "email"},
-        )
-        if not inserted:
-            raise HTTPException(status_code=500, detail="Message not recorded")
-        return _message_to_model(inserted, [])
-
     api_key = channex_service.get_platform_api_key()
     source_thread_id = thread["source_thread_id"]
+    channel = thread.get("channel")
 
     # Channex accepts one attachment per message; if more were uploaded, send
     # them as separate messages. Body goes with the first.
@@ -274,7 +240,7 @@ async def send_message(
                 )
             else:
                 detail = f"Channex send failed: {e}"
-            raise HTTPException(status_code=502, detail=detail) from e
+            raise HTTPException(status_code=502, detail=detail)
         logger.info(
             "Channex message accepted: thread=%s channel=%s channex_message_id=%s",
             thread_id,
@@ -357,7 +323,7 @@ async def upload_thread_attachment(
             file.content_type,
             len(contents),
         )
-        raise HTTPException(status_code=502, detail=f"Upload failed: {e}") from e
+        raise HTTPException(status_code=502, detail=f"Upload failed: {e}")
 
     attachment_id = result.get("id")
     logger.info(
@@ -424,7 +390,7 @@ async def mark_no_reply_needed(
         await channex_service.mark_thread_no_reply_needed(api_key, thread["source_thread_id"])
     except Exception as e:
         logger.exception("Channex no_reply_needed failed")
-        raise HTTPException(status_code=502, detail=f"Channex call failed: {e}") from e
+        raise HTTPException(status_code=502, detail=f"Channex call failed: {e}")
 
     row = await MessageThreadRepository.update_status(thread_id, hotel_id, "no_reply_needed")
     return _thread_to_model(row) if row else _thread_to_model(thread)

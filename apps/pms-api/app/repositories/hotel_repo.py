@@ -24,9 +24,6 @@ _UPDATE_COLUMNS = {
     "phone",
     "latitude",
     "longitude",
-    "wifi_password",
-    "host_contact_name",
-    "google_review_link",
     "instant_book",
     "same_day_bookings_enabled",
     "same_day_booking_cutoff_time",
@@ -38,7 +35,6 @@ _GUEST_FORM_COLUMNS = {
     "special_requests_enabled",
     "arrival_time_enabled",
     "guest_count_enabled",
-    "phone_required",
 }
 
 _CALENDAR_SETTINGS_COLUMNS = {
@@ -217,7 +213,7 @@ class HotelRepository:
     @staticmethod
     async def get_guest_form_settings(hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
-            "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled, phone_required "
+            "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
             "FROM hotels WHERE id = $1",
             hotel_id,
         )

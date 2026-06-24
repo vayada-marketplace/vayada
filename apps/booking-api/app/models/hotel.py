@@ -109,7 +109,6 @@ class PaymentSettingsResponse(BaseModel):
     special_requests_enabled: bool = True
     arrival_time_enabled: bool = False
     guest_count_enabled: bool = False
-    phone_required: bool = True
     terms_text: str = ""
     cancellation_policy_text: str = ""
     bank_details: BankDetails | None = None

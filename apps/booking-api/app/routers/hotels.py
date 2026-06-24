@@ -103,7 +103,6 @@ async def get_payment_settings(slug: str):
         special_requests_enabled=hotel.get("special_requests_enabled", True),
         arrival_time_enabled=hotel.get("arrival_time_enabled", False),
         guest_count_enabled=hotel.get("guest_count_enabled", False),
-        phone_required=hotel.get("phone_required", True),
         terms_text=hotel.get("terms_text") or "",
         cancellation_policy_text=hotel.get("cancellation_policy_text") or "",
         bank_details=BankDetails(

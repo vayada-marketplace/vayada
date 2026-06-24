@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PointOfInterest } from "@/lib/types";
 
 const TILE_SIZE = 256;
@@ -77,9 +70,6 @@ export default function LocationMap({ propertyName, property, pois }: LocationMa
   const [center, setCenter] = useState(initialView.center);
   const [zoom, setZoom] = useState(initialView.zoom);
   const dragRef = useRef<{ x: number; y: number; center: Coordinate } | null>(null);
-  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
-  const pinchRef = useRef<{ distance: number; zoom: number } | null>(null);
-  const lastWheelRef = useRef(0);
 
   useEffect(() => {
     setCenter(initialView.center);
@@ -130,81 +120,34 @@ export default function LocationMap({ propertyName, property, pois }: LocationMa
       top: px.y - centerPx.y + size.height / 2,
     };
   };
-  const changeZoom = (delta: number) => {
-    setZoom((value) => clamp(value + delta, MIN_ZOOM, MAX_ZOOM));
-  };
-  const getPinchDistance = () => {
-    const pointers = Array.from(pointersRef.current.values());
-    if (pointers.length < 2) return 0;
-    return Math.hypot(pointers[0].x - pointers[1].x, pointers[0].y - pointers[1].y);
-  };
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (event.pointerType === "touch" && pointersRef.current.size < 2) {
-      dragRef.current = null;
-      return;
-    }
-    event.currentTarget.setPointerCapture(event.pointerId);
-    if (pointersRef.current.size >= 2) {
-      pinchRef.current = { distance: getPinchDistance(), zoom };
-      dragRef.current = null;
-      return;
-    }
-    dragRef.current = { x: event.clientX, y: event.clientY, center };
-  };
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!pointersRef.current.has(event.pointerId)) return;
-    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
-    if (event.pointerType === "touch" && pointersRef.current.size < 2) return;
-    if (pointersRef.current.size >= 2 && pinchRef.current) {
-      const distance = getPinchDistance();
-      if (distance > 0 && pinchRef.current.distance > 0) {
-        setZoom(
-          clamp(
-            Math.round(pinchRef.current.zoom + Math.log2(distance / pinchRef.current.distance)),
-            MIN_ZOOM,
-            MAX_ZOOM,
-          ),
-        );
-      }
-      return;
-    }
-    if (!dragRef.current) return;
-    const start = dragRef.current;
-    const startPx = project(start.center, zoom);
-    setCenter(
-      unproject(startPx.x - (event.clientX - start.x), startPx.y - (event.clientY - start.y), zoom),
-    );
-  };
-  const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    pointersRef.current.delete(event.pointerId);
-    pinchRef.current = null;
-    const remainingPointer = Array.from(pointersRef.current.values())[0];
-    dragRef.current = remainingPointer
-      ? { x: remainingPointer.x, y: remainingPointer.y, center }
-      : null;
-  };
-  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const now = Date.now();
-    if (now - lastWheelRef.current < 80) return;
-    lastWheelRef.current = now;
-    changeZoom(event.deltaY < 0 ? 1 : -1);
-  };
 
   return (
     <div className="space-y-2">
       <div
         ref={containerRef}
-        className="relative h-[260px] w-full touch-pan-y overflow-hidden rounded-xl border border-gray-200 bg-gray-100"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerEnd}
-        onPointerCancel={handlePointerEnd}
-        onWheel={handleWheel}
+        className="relative h-[260px] w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-100 touch-none"
+        onPointerDown={(event) => {
+          (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
+          dragRef.current = { x: event.clientX, y: event.clientY, center };
+        }}
+        onPointerMove={(event) => {
+          if (!dragRef.current) return;
+          const start = dragRef.current;
+          const startPx = project(start.center, zoom);
+          setCenter(
+            unproject(
+              startPx.x - (event.clientX - start.x),
+              startPx.y - (event.clientY - start.y),
+              zoom,
+            ),
+          );
+        }}
+        onPointerUp={() => {
+          dragRef.current = null;
+        }}
+        onPointerCancel={() => {
+          dragRef.current = null;
+        }}
       >
         {ready &&
           tiles.map((tile) => (
@@ -238,15 +181,11 @@ export default function LocationMap({ propertyName, property, pois }: LocationMa
           </>
         )}
 
-        <div
-          className="absolute right-3 top-3 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
+        <div className="absolute right-3 top-3 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
           <button
             type="button"
             aria-label="Zoom in"
-            onClick={() => changeZoom(1)}
+            onClick={() => setZoom((value) => clamp(value + 1, MIN_ZOOM, MAX_ZOOM))}
             className="h-9 w-9 border-b border-gray-200 text-lg font-semibold text-gray-700 hover:bg-gray-50"
           >
             +
@@ -254,7 +193,7 @@ export default function LocationMap({ propertyName, property, pois }: LocationMa
           <button
             type="button"
             aria-label="Zoom out"
-            onClick={() => changeZoom(-1)}
+            onClick={() => setZoom((value) => clamp(value - 1, MIN_ZOOM, MAX_ZOOM))}
             className="h-9 w-9 text-lg font-semibold text-gray-700 hover:bg-gray-50"
           >
             -

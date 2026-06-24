@@ -133,25 +133,6 @@ async def get_guest_payment_info_by_slug(slug: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def get_phone_required_by_slug(slug: str) -> bool | None:
-    """Read the guest-phone required flag from booking_db.
-
-    Kept separate from get_guest_payment_info_by_slug so a deployment with
-    booking-api one migration behind does not break unrelated payment settings.
-    """
-    if not _is_configured():
-        return None
-    try:
-        value = await BookingEngineDatabase.fetchval(
-            "SELECT phone_required FROM booking_hotels WHERE slug = $1",
-            slug,
-        )
-    except Exception as e:
-        logger.warning("booking_db phone-required lookup failed for slug %s: %s", slug, e)
-        return None
-    return bool(value) if value is not None else None
-
-
 async def get_benefits(hotel_id: str) -> list[str] | None:
     """Read authoritative Book Direct Benefits from booking_db.
 

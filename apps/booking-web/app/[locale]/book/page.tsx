@@ -9,7 +9,6 @@ import BookingFooter from "@/components/layout/BookingFooter";
 import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
 import CountryDialCodePicker from "@/components/booking/CountryDialCodePicker";
-import MobileStaySummary from "@/components/booking/MobileStaySummary";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
 import { bookingService } from "@/services/api/booking";
 import { formatDate, ensureMinOneNight } from "@/lib/utils";
@@ -26,17 +25,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function FieldError({ id, message }: { id: string; message: string }) {
   return (
     <p id={id} role="alert" className="mt-1.5 flex items-center gap-1 text-xs text-red-600">
-      <svg
-        className="w-3.5 h-3.5 flex-shrink-0"
-        fill="currentColor"
-        viewBox="0 0 20 20"
-        aria-hidden="true"
-      >
-        <path
-          fillRule="evenodd"
-          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z"
-          clipRule="evenodd"
-        />
+      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
       </svg>
       {message}
     </p>
@@ -150,13 +140,7 @@ function BookPageContent() {
     specialRequestsEnabled: boolean;
     arrivalTimeEnabled: boolean;
     guestCountEnabled: boolean;
-    phoneRequired: boolean;
-  }>({
-    specialRequestsEnabled: true,
-    arrivalTimeEnabled: false,
-    guestCountEnabled: false,
-    phoneRequired: true,
-  });
+  }>({ specialRequestsEnabled: true, arrivalTimeEnabled: false, guestCountEnabled: false });
 
   useEffect(() => {
     if (!slug) return;
@@ -165,7 +149,6 @@ function BookPageContent() {
         specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
         arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
         guestCountEnabled: settings.guestCountEnabled ?? false,
-        phoneRequired: settings.phoneRequired ?? true,
       });
     });
   }, [slug]);
@@ -176,7 +159,7 @@ function BookPageContent() {
     if (!lastName.trim()) errors.lastName = t("errorRequired");
     if (!email.trim()) errors.email = t("errorRequired");
     else if (!EMAIL_RE.test(email)) errors.email = t("errorInvalidEmail");
-    if (guestFormSettings.phoneRequired && !phone.trim()) errors.phone = t("errorRequired");
+    if (!phone.trim()) errors.phone = t("errorRequired");
     return errors;
   };
 
@@ -189,14 +172,10 @@ function BookPageContent() {
     const errors = validateFields();
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      if (errors.firstName)
-        firstNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.lastName)
-        lastNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.email)
-        emailRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      else if (errors.phone)
-        phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (errors.firstName) firstNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (errors.lastName) lastNameRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (errors.email) emailRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (errors.phone) phoneRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!room) {
@@ -215,11 +194,7 @@ function BookPageContent() {
       // Strip national trunk prefix (leading 0) before prepending the dial code.
       const dialEntry = COUNTRY_DIAL_CODES.find((c) => c.iso2 === phoneCountryIso);
       const localPart = phone.replace(/[^0-9]/g, "").replace(/^0+/, "");
-      const composedPhone = localPart
-        ? dialEntry
-          ? `+${dialEntry.dial} ${localPart}`
-          : phone
-        : "";
+      const composedPhone = dialEntry ? `+${dialEntry.dial} ${localPart}` : phone;
 
       saveGuestDetails({
         roomTypeId: room.id,
@@ -272,13 +247,11 @@ function BookPageContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="hidden min-[769px]:block">
-        <HeroSection
-          heroImage={hotel.heroImage}
-          hotelName={hotel.name}
-          description={hotel.description}
-        />
-      </div>
+      <HeroSection
+        heroImage={hotel.heroImage}
+        hotelName={hotel.name}
+        description={hotel.description}
+      />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
@@ -287,50 +260,6 @@ function BookPageContent() {
 
           <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
-
-        <MobileStaySummary
-          room={room}
-          roomCount={roomsParam}
-          checkIn={checkIn}
-          checkOut={checkOut}
-          checkInTime={hotel.checkInTime}
-          checkOutTime={hotel.checkOutTime}
-          nights={nights}
-          adults={adultsParam}
-          childGuests={childrenParam}
-          roomTotal={roomTotal}
-          grandTotal={grandTotal}
-          selectedCurrency={selectedCurrency}
-          addons={addons}
-          selectedAddonIds={selectedAddonIds}
-          addonQuantities={addonQuantities}
-          addonDates={addonDates}
-          promoCode={promoCodeParam}
-          promoDiscountText={
-            promoDiscount?.type === "percentage" ? ` (-${promoDiscount.value}%)` : ""
-          }
-          discountAmount={discountAmount}
-          labels={{
-            title: t("bookingSummary"),
-            checkIn: t("checkIn"),
-            checkOut: t("checkOut"),
-            duration: t("duration"),
-            guests: tc("guests"),
-            total: tc("total"),
-            includesTaxes: tc("includesTaxes"),
-            nights: tc("nights", { count: nights }),
-            checkInFrom: hotel.checkInTime
-              ? tc("checkInFrom", { time: hotel.checkInTime })
-              : undefined,
-            checkOutBy: hotel.checkOutTime
-              ? tc("checkOutBy", { time: hotel.checkOutTime })
-              : undefined,
-          }}
-          locale={locale}
-          formatDate={formatDate}
-          formatPrice={formatPrice}
-          convertAndRound={convertAndRound}
-        />
 
         {submitError && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
@@ -342,7 +271,7 @@ function BookPageContent() {
           {/* Left Column */}
           <div className="lg:col-span-2 space-y-6">
             {/* Booking Summary Card */}
-            <div className="max-[768px]:hidden bg-white rounded-2xl border border-gray-200 p-6">
+            <div className="bg-white rounded-2xl border border-gray-200 p-6">
               <h3 className="text-lg font-bold text-gray-900 mb-5">{t("bookingSummary")}</h3>
 
               {/* Room row */}
@@ -448,10 +377,7 @@ function BookPageContent() {
                 {/* First + Last Name */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label
-                      htmlFor="firstName"
-                      className="block text-sm font-semibold text-gray-900 mb-1.5"
-                    >
+                    <label htmlFor="firstName" className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t("firstName")} <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -475,10 +401,7 @@ function BookPageContent() {
                     )}
                   </div>
                   <div>
-                    <label
-                      htmlFor="lastName"
-                      className="block text-sm font-semibold text-gray-900 mb-1.5"
-                    >
+                    <label htmlFor="lastName" className="block text-sm font-semibold text-gray-900 mb-1.5">
                       {t("lastName")} <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -505,10 +428,7 @@ function BookPageContent() {
 
                 {/* Email */}
                 <div>
-                  <label
-                    htmlFor="email"
-                    className="block text-sm font-semibold text-gray-900 mb-1.5"
-                  >
+                  <label htmlFor="email" className="block text-sm font-semibold text-gray-900 mb-1.5">
                     {t("emailAddress")} <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -518,11 +438,7 @@ function BookPageContent() {
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
-                      if (
-                        fieldErrors.email &&
-                        e.target.value.trim() &&
-                        EMAIL_RE.test(e.target.value)
-                      )
+                      if (fieldErrors.email && e.target.value.trim() && EMAIL_RE.test(e.target.value))
                         setFieldErrors((prev) => ({ ...prev, email: undefined }));
                     }}
                     onBlur={() => handleBlur("email")}
@@ -531,23 +447,16 @@ function BookPageContent() {
                     aria-describedby={fieldErrors.email ? "email-error" : undefined}
                     className={`w-full px-4 py-3 rounded-lg border ${fieldErrors.email ? "border-red-400 focus:ring-red-500 focus:border-red-500" : "border-gray-300 focus:ring-primary-500 focus:border-primary-500"} text-gray-900 focus:outline-none focus:ring-2 placeholder:text-gray-400`}
                   />
-                  {fieldErrors.email && <FieldError id="email-error" message={fieldErrors.email} />}
+                  {fieldErrors.email && (
+                    <FieldError id="email-error" message={fieldErrors.email} />
+                  )}
                 </div>
 
                 {/* Phone + Country */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label
-                      htmlFor="phone"
-                      className="block text-sm font-semibold text-gray-900 mb-1.5"
-                    >
-                      {guestFormSettings.phoneRequired ? (
-                        <>
-                          {t("phoneNumber")} <span className="text-red-500">*</span>
-                        </>
-                      ) : (
-                        <>{t("phoneNumber")} (optional)</>
-                      )}
+                    <label htmlFor="phone" className="block text-sm font-semibold text-gray-900 mb-1.5">
+                      {t("phoneNumber")} <span className="text-red-500">*</span>
                     </label>
                     <div
                       ref={phoneRef}
@@ -563,10 +472,7 @@ function BookPageContent() {
                         value={phone}
                         onChange={(e) => {
                           setPhone(e.target.value);
-                          if (
-                            fieldErrors.phone &&
-                            (!guestFormSettings.phoneRequired || e.target.value.trim())
-                          )
+                          if (fieldErrors.phone && e.target.value.trim())
                             setFieldErrors((prev) => ({ ...prev, phone: undefined }));
                         }}
                         onBlur={() => handleBlur("phone")}
@@ -694,7 +600,7 @@ function BookPageContent() {
           </div>
 
           {/* Right Sidebar — Your Stay */}
-          <div className="max-[768px]:hidden lg:col-span-1">
+          <div className="lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-8">
               <h3 className="text-lg font-bold text-gray-900 mb-5">{t("yourStay")}</h3>
 

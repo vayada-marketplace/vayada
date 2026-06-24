@@ -89,7 +89,6 @@ class GuestFormSettingsResponse(BaseModel):
     special_requests_enabled: bool = True
     arrival_time_enabled: bool = False
     guest_count_enabled: bool = False
-    phone_required: bool = True
 
 
 class GuestFormSettingsUpdate(BaseModel):
@@ -98,7 +97,6 @@ class GuestFormSettingsUpdate(BaseModel):
     special_requests_enabled: bool | None = None
     arrival_time_enabled: bool | None = None
     guest_count_enabled: bool | None = None
-    phone_required: bool | None = None
 
 
 class CalendarSettingsResponse(BaseModel):
@@ -160,9 +158,6 @@ class HotelDetailsResponse(BaseModel):
     phone: str = ""
     latitude: float | None = None
     longitude: float | None = None
-    wifi_password: str = ""
-    host_contact_name: str = ""
-    google_review_link: str = ""
     last_minute_discount: Any | None = None
     instant_book: bool = False
     same_day_bookings_enabled: bool = True
@@ -185,7 +180,7 @@ class SameDayBookingSettingsUpdate(BaseModel):
             hour_int = int(hour)
             minute_int = int(minute)
         except (TypeError, ValueError):
-            raise ValueError("sameDayBookingCutoffTime must use HH:mm format") from None
+            raise ValueError("sameDayBookingCutoffTime must use HH:mm format")
         if hour_int < 0 or hour_int > 23 or minute_int not in (0, 30):
             raise ValueError("sameDayBookingCutoffTime must be in 30-minute intervals")
         return f"{hour_int:02d}:{minute_int:02d}"

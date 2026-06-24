@@ -37,7 +37,6 @@ const hotel = {
   referAGuestEnabled: true,
   instantBook: true,
   mapViewEnabled: false,
-  showRoomDetailMap: true,
 };
 
 const rooms = [
@@ -55,9 +54,9 @@ const rooms = [
     nonRefundableRate: 210,
     currency: "EUR",
     amenities: ["Free WiFi", "Breakfast", "Balcony"],
-    images: ["/vayada-logo.png", "/vayada-logo.png"],
+    images: ["/vayada-logo.png"],
     bedType: "King bed",
-    remainingRooms: 3,
+    remainingRooms: 2,
     features: ["Free Cancellation", "Include Breakfast"],
     benefits: ["Best direct rate"],
     flexibleRateEnabled: true,
@@ -67,17 +66,11 @@ const rooms = [
     lastMinuteDiscountPercent: null,
     ratePaymentMethods: null,
     rateDepositSettings: null,
-    latitude: 46.0207,
-    longitude: 7.7491,
     locationMarkers: [],
   },
 ];
 
-interface BookingApiMockOptions {
-  paymentSettings?: Record<string, unknown>;
-}
-
-export async function mockBookingApis(page: Page, options: BookingApiMockOptions = {}) {
+export async function mockBookingApis(page: Page) {
   await page.route("**/api/events", async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });
@@ -92,26 +85,6 @@ export async function mockBookingApis(page: Page, options: BookingApiMockOptions
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/addons`, async (route) => {
     await route.fulfill({ json: [] });
-  });
-
-  await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/payment-settings`, async (route) => {
-    await route.fulfill({
-      json: {
-        payAtPropertyEnabled: true,
-        payAtHotelMethods: ["cash", "card"],
-        onlineCardPayment: false,
-        bankTransfer: false,
-        paypalEnabled: false,
-        freeCancellationDays: 7,
-        specialRequestsEnabled: true,
-        arrivalTimeEnabled: false,
-        guestCountEnabled: false,
-        phoneRequired: true,
-        termsText: "",
-        cancellationPolicyText: "",
-        ...options.paymentSettings,
-      },
-    });
   });
 
   await page.route("**/api/exchange-rates**", async (route) => {

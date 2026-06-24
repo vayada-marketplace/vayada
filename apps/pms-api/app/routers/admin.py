@@ -63,9 +63,6 @@ def _hotel_to_details(row: dict) -> HotelDetailsResponse:
         phone=row.get("phone", "") or "",
         latitude=float(row["latitude"]) if row.get("latitude") is not None else None,
         longitude=float(row["longitude"]) if row.get("longitude") is not None else None,
-        wifi_password=row.get("wifi_password", "") or "",
-        host_contact_name=row.get("host_contact_name", "") or "",
-        google_review_link=row.get("google_review_link", "") or "",
         last_minute_discount=json.loads(lm) if isinstance(lm, str) else lm,
         instant_book=bool(row.get("instant_book", False)),
         same_day_bookings_enabled=bool(row.get("same_day_bookings_enabled", True)),
@@ -409,7 +406,6 @@ async def get_guest_form_settings(user_id: str = Depends(require_hotel_admin)):
         special_requests_enabled=row["special_requests_enabled"],
         arrival_time_enabled=row["arrival_time_enabled"],
         guest_count_enabled=row["guest_count_enabled"],
-        phone_required=row["phone_required"],
     )
 
 
@@ -426,7 +422,6 @@ async def update_guest_form_settings(
         special_requests_enabled=row["special_requests_enabled"],
         arrival_time_enabled=row["arrival_time_enabled"],
         guest_count_enabled=row["guest_count_enabled"],
-        phone_required=row["phone_required"],
     )
 
 

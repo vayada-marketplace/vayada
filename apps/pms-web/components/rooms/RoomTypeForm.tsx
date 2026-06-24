@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { XMarkIcon, PlusIcon, CheckIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 import {
@@ -10,8 +10,6 @@ import {
   MealPlanCode,
   PartialRefundTier,
   RateDepositSetting,
-  LocationSuggestion,
-  roomsService,
 } from "@/services/rooms";
 import ImageUpload from "@/components/ImageUpload";
 import {
@@ -192,180 +190,6 @@ interface RoomTypeFormProps {
   // generated room units to match (VAY-406). The DB trigger keeps
   // total_rooms truthful so the VAY-402 oversell invariant still holds.
   mode?: "create" | "edit";
-}
-
-const TILE_SIZE = 256;
-const MIN_MAP_ZOOM = 4;
-const MAX_MAP_ZOOM = 17;
-
-interface Coordinate {
-  latitude: number;
-  longitude: number;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function parseCoordinateInput(raw: string, min: number, max: number): number | null {
-  if (raw.trim() === "") return null;
-  const value = Number(raw);
-  if (!Number.isFinite(value)) return null;
-  return clamp(value, min, max);
-}
-
-function formatCoordinate(value: number) {
-  return Number(value.toFixed(6)).toString();
-}
-
-function project({ latitude, longitude }: Coordinate, zoom: number) {
-  const scale = TILE_SIZE * 2 ** zoom;
-  const sin = Math.sin((latitude * Math.PI) / 180);
-  return {
-    x: ((longitude + 180) / 360) * scale,
-    y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale,
-  };
-}
-
-function unproject(x: number, y: number, zoom: number): Coordinate {
-  const scale = TILE_SIZE * 2 ** zoom;
-  const longitude = (x / scale) * 360 - 180;
-  const n = Math.PI - (2 * Math.PI * y) / scale;
-  const latitude = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
-  return { latitude, longitude };
-}
-
-function RoomLocationMapPreview({
-  latitude,
-  longitude,
-  label,
-}: {
-  latitude: number;
-  longitude: number;
-  label: string;
-}) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const point = useMemo(() => ({ latitude, longitude }), [latitude, longitude]);
-  const [center, setCenter] = useState<Coordinate>(point);
-  const [zoom, setZoom] = useState(15);
-  const [size, setSize] = useState({ width: 360, height: 180 });
-  const dragRef = useRef<{ x: number; y: number; center: Coordinate } | null>(null);
-
-  useEffect(() => {
-    setCenter(point);
-    setZoom(15);
-  }, [point]);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const resize = new ResizeObserver(([entry]) => {
-      setSize({ width: entry.contentRect.width, height: entry.contentRect.height });
-    });
-    resize.observe(node);
-    return () => resize.disconnect();
-  }, []);
-
-  const centerPx = project(center, zoom);
-  const tileCount = 2 ** zoom;
-  const tiles = [];
-  const startX = Math.floor((centerPx.x - size.width / 2) / TILE_SIZE) - 1;
-  const endX = Math.floor((centerPx.x + size.width / 2) / TILE_SIZE) + 1;
-  const startY = Math.floor((centerPx.y - size.height / 2) / TILE_SIZE) - 1;
-  const endY = Math.floor((centerPx.y + size.height / 2) / TILE_SIZE) + 1;
-
-  for (let x = startX; x <= endX; x += 1) {
-    for (let y = startY; y <= endY; y += 1) {
-      if (y < 0 || y >= tileCount) continue;
-      const wrappedX = ((x % tileCount) + tileCount) % tileCount;
-      tiles.push({
-        key: `${zoom}-${x}-${y}`,
-        url: `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png`,
-        left: x * TILE_SIZE - centerPx.x + size.width / 2,
-        top: y * TILE_SIZE - centerPx.y + size.height / 2,
-      });
-    }
-  }
-
-  const markerPx = project(point, zoom);
-  const markerStyle = {
-    left: markerPx.x - centerPx.x + size.width / 2,
-    top: markerPx.y - centerPx.y + size.height / 2,
-  };
-
-  return (
-    <div
-      ref={containerRef}
-      className="relative h-full min-h-[180px] overflow-hidden rounded-xl border border-gray-200 bg-gray-100 touch-none"
-      onPointerDown={(event) => {
-        (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
-        dragRef.current = { x: event.clientX, y: event.clientY, center };
-      }}
-      onPointerMove={(event) => {
-        if (!dragRef.current) return;
-        const start = dragRef.current;
-        const startPx = project(start.center, zoom);
-        setCenter(
-          unproject(
-            startPx.x - (event.clientX - start.x),
-            startPx.y - (event.clientY - start.y),
-            zoom,
-          ),
-        );
-      }}
-      onPointerUp={() => {
-        dragRef.current = null;
-      }}
-      onPointerCancel={() => {
-        dragRef.current = null;
-      }}
-    >
-      {tiles.map((tile) => (
-        <div
-          key={tile.key}
-          className="absolute h-64 w-64 bg-cover bg-center"
-          style={{ left: tile.left, top: tile.top, backgroundImage: `url(${tile.url})` }}
-        />
-      ))}
-
-      <div
-        className="absolute z-10 flex min-h-[44px] -translate-x-1/2 -translate-y-full items-end"
-        style={markerStyle}
-      >
-        <div className="flex max-w-[220px] items-center gap-1.5 rounded-full border border-white/80 bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-gray-800 shadow-md">
-          <span className="h-3 w-3 shrink-0 rounded-full border-2 border-white bg-primary-600 ring-2 ring-primary-100" />
-          <span className="truncate">{label || "Room location"}</span>
-        </div>
-      </div>
-
-      <div className="absolute bottom-3 left-3 max-w-[calc(100%-7.5rem)] rounded-lg bg-white/90 border border-gray-200 px-3 py-2 text-[11px] text-gray-600 shadow-sm">
-        {latitude.toFixed(5)}, {longitude.toFixed(5)}
-      </div>
-
-      <div className="absolute right-3 top-3 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-        <button
-          type="button"
-          aria-label="Zoom in"
-          onClick={() => setZoom((value) => clamp(value + 1, MIN_MAP_ZOOM, MAX_MAP_ZOOM))}
-          className="h-8 w-8 border-b border-gray-200 text-base font-semibold text-gray-700 hover:bg-gray-50"
-        >
-          +
-        </button>
-        <button
-          type="button"
-          aria-label="Zoom out"
-          onClick={() => setZoom((value) => clamp(value - 1, MIN_MAP_ZOOM, MAX_MAP_ZOOM))}
-          className="h-8 w-8 text-base font-semibold text-gray-700 hover:bg-gray-50"
-        >
-          -
-        </button>
-      </div>
-
-      <div className="absolute bottom-3 right-3 rounded-md bg-white/80 px-2 py-1 text-[9px] text-gray-500">
-        Map data (c) OpenStreetMap contributors
-      </div>
-    </div>
-  );
 }
 
 function bedsToSummary(beds: { type: string; count: number }[]): string {
@@ -942,14 +766,6 @@ export default function RoomTypeForm({
   const [longitudeInput, setLongitudeInput] = useState<string>(
     form.longitude != null ? String(form.longitude) : "",
   );
-  const locationSearchDirtyRef = useRef(false);
-  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
-  const [locationSearchOpen, setLocationSearchOpen] = useState(false);
-  const [locationSearchStatus, setLocationSearchStatus] = useState<"idle" | "loading" | "error">(
-    "idle",
-  );
-  const [locationSearchError, setLocationSearchError] = useState("");
-  const [locationValidationError, setLocationValidationError] = useState("");
   const [amenityInput, setAmenityInput] = useState("");
   const [featureInput, setFeatureInput] = useState("");
   const [expandedAmenityCategories, setExpandedAmenityCategories] = useState<string[]>([
@@ -1154,61 +970,6 @@ export default function RoomTypeForm({
   const updateForm = (updates: Partial<RoomTypeCreate>) => {
     const updated = { ...form, ...updates };
     onChange(updated);
-  };
-
-  useEffect(() => {
-    const query = (form.locationAddress || "").trim();
-    if (!locationSearchDirtyRef.current || query.length < 3) {
-      setLocationSuggestions([]);
-      setLocationSearchOpen(false);
-      setLocationSearchStatus("idle");
-      setLocationSearchError("");
-      return;
-    }
-
-    let active = true;
-    const timer = window.setTimeout(async () => {
-      setLocationSearchStatus("loading");
-      try {
-        const response = await roomsService.searchLocations(query);
-        if (!active) return;
-        setLocationSuggestions(response.results);
-        setLocationSearchStatus("idle");
-        setLocationSearchError("");
-        setLocationSearchOpen(true);
-      } catch (error: unknown) {
-        if (!active) return;
-        setLocationSuggestions([]);
-        setLocationSearchStatus("error");
-        setLocationSearchError(
-          error instanceof Error
-            ? error.message
-            : "Map provider is unavailable. Contact support if this continues.",
-        );
-        setLocationSearchOpen(true);
-      }
-    }, 350);
-
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [form.locationAddress]);
-
-  const selectLocationSuggestion = (suggestion: LocationSuggestion) => {
-    locationSearchDirtyRef.current = false;
-    setLocationSuggestions([]);
-    setLocationSearchOpen(false);
-    setLocationSearchStatus("idle");
-    setLocationSearchError("");
-    setLocationValidationError("");
-    setLatitudeInput(formatCoordinate(suggestion.latitude));
-    setLongitudeInput(formatCoordinate(suggestion.longitude));
-    updateForm({
-      locationAddress: suggestion.label,
-      latitude: suggestion.latitude,
-      longitude: suggestion.longitude,
-    });
   };
 
   const markPriceWarningTouched = (id: string) => {
@@ -1475,25 +1236,7 @@ export default function RoomTypeForm({
     Peak: "bg-red-800",
   };
 
-  const hasValidLocationCoordinates =
-    typeof form.latitude === "number" &&
-    Number.isFinite(form.latitude) &&
-    typeof form.longitude === "number" &&
-    Number.isFinite(form.longitude);
-  const hasAddressWithoutCoordinates =
-    Boolean((form.locationAddress || "").trim()) && !hasValidLocationCoordinates;
-
   const handleSubmit = (e: React.FormEvent) => {
-    if (hasAddressWithoutCoordinates) {
-      e.preventDefault();
-      setLocationValidationError(
-        "Please select an address from the suggestions or enter coordinates manually.",
-      );
-      setActiveTab("details");
-      return;
-    }
-    setLocationValidationError("");
-
     if (skipPriceWarningConfirmRef.current) {
       skipPriceWarningConfirmRef.current = false;
       setConfirmUnusualPricesOpen(false);
@@ -1908,9 +1651,9 @@ export default function RoomTypeForm({
                   Saved per room type. Guests see this address and pin when map view is enabled.
                 </p>
               </div>
-              {!hasValidLocationCoordinates && (
+              {!(form.latitude != null && form.longitude != null) && (
                 <span className="text-[11px] font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
-                  No location set - this room type won&apos;t appear on the map.
+                  No location set - this room type won't appear on the map.
                 </span>
               )}
             </div>
@@ -1921,74 +1664,17 @@ export default function RoomTypeForm({
                   <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
                     Search address
                   </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={form.locationAddress || ""}
-                      onChange={(e) => {
-                        locationSearchDirtyRef.current = true;
-                        setLocationValidationError("");
-                        updateForm({ locationAddress: e.target.value });
-                      }}
-                      onFocus={() => {
-                        if (locationSuggestions.length > 0 || locationSearchStatus === "error") {
-                          setLocationSearchOpen(true);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") setLocationSearchOpen(false);
-                      }}
-                      className={`w-full px-3 py-2 bg-white border rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900 ${
-                        locationValidationError ? "border-red-300" : "border-gray-200"
-                      }`}
-                      placeholder="Street, area, city, country"
-                      autoComplete="off"
-                    />
-                    {locationSearchOpen && (
-                      <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg">
-                        {locationSearchStatus === "loading" && (
-                          <div className="px-3 py-2 text-[12px] text-gray-500">
-                            Searching addresses...
-                          </div>
-                        )}
-                        {locationSearchStatus === "error" && (
-                          <div className="px-3 py-2 text-[12px] text-red-600">
-                            {locationSearchError}
-                          </div>
-                        )}
-                        {locationSearchStatus === "idle" &&
-                          locationSuggestions.map((suggestion) => (
-                            <button
-                              key={suggestion.id}
-                              type="button"
-                              onMouseDown={(event) => event.preventDefault()}
-                              onClick={() => selectLocationSuggestion(suggestion)}
-                              className="block w-full px-3 py-2 text-left text-[12px] text-gray-700 hover:bg-primary-50 hover:text-primary-700"
-                            >
-                              <span className="line-clamp-2">{suggestion.label}</span>
-                              <span className="mt-0.5 block text-[10px] text-gray-400">
-                                {suggestion.latitude.toFixed(5)}, {suggestion.longitude.toFixed(5)}
-                              </span>
-                            </button>
-                          ))}
-                        {locationSearchStatus === "idle" &&
-                          locationSuggestions.length === 0 &&
-                          (form.locationAddress || "").trim().length >= 3 && (
-                            <div className="px-3 py-2 text-[12px] text-gray-500">
-                              No matches found. Enter coordinates manually below.
-                            </div>
-                          )}
-                      </div>
-                    )}
-                  </div>
-                  {locationValidationError ? (
-                    <p className="text-[10px] text-red-600 mt-1">{locationValidationError}</p>
-                  ) : (
-                    <p className="text-[10px] text-gray-400 mt-1">
-                      Start typing and choose a suggestion to fill the address and coordinates.
-                      Can&apos;t find it? Enter coordinates manually below.
-                    </p>
-                  )}
+                  <input
+                    type="text"
+                    value={form.locationAddress || ""}
+                    onChange={(e) => updateForm({ locationAddress: e.target.value })}
+                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
+                    placeholder="Street, area, city, country"
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Provider autocomplete/geocoding plugs in here; coordinates are stored so the
+                    Booking Engine never geocodes on page load.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2002,20 +1688,14 @@ export default function RoomTypeForm({
                       min={-90}
                       max={90}
                       value={latitudeInput}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        setLatitudeInput(raw);
-                        setLocationValidationError("");
-                        updateForm({ latitude: parseCoordinateInput(raw, -90, 90) });
-                      }}
+                      onChange={(e) => setLatitudeInput(e.target.value)}
                       onBlur={() => {
-                        const parsed = parseCoordinateInput(latitudeInput, -90, 90);
-                        if (parsed === null) {
-                          setLatitudeInput("");
+                        if (latitudeInput === "") {
                           updateForm({ latitude: null });
                         } else {
-                          setLatitudeInput(formatCoordinate(parsed));
-                          updateForm({ latitude: parsed });
+                          const v = Math.max(-90, Math.min(90, Number(latitudeInput)));
+                          setLatitudeInput(String(v));
+                          updateForm({ latitude: v });
                         }
                       }}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
@@ -2032,20 +1712,14 @@ export default function RoomTypeForm({
                       min={-180}
                       max={180}
                       value={longitudeInput}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        setLongitudeInput(raw);
-                        setLocationValidationError("");
-                        updateForm({ longitude: parseCoordinateInput(raw, -180, 180) });
-                      }}
+                      onChange={(e) => setLongitudeInput(e.target.value)}
                       onBlur={() => {
-                        const parsed = parseCoordinateInput(longitudeInput, -180, 180);
-                        if (parsed === null) {
-                          setLongitudeInput("");
+                        if (longitudeInput === "") {
                           updateForm({ longitude: null });
                         } else {
-                          setLongitudeInput(formatCoordinate(parsed));
-                          updateForm({ longitude: parsed });
+                          const v = Math.max(-180, Math.min(180, Number(longitudeInput)));
+                          setLongitudeInput(String(v));
+                          updateForm({ longitude: v });
                         }
                       }}
                       className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-[12px] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent text-gray-900"
@@ -2055,19 +1729,25 @@ export default function RoomTypeForm({
                 </div>
               </div>
 
-              <div className="lg:col-span-2 min-h-[180px]">
-                {hasValidLocationCoordinates ? (
-                  <RoomLocationMapPreview
-                    latitude={form.latitude as number}
-                    longitude={form.longitude as number}
-                    label={form.locationAddress || form.name || "Room location"}
-                  />
+              <div className="lg:col-span-2 min-h-[180px] rounded-xl border border-gray-200 bg-white relative overflow-hidden">
+                <div className="absolute inset-0 opacity-70 bg-[linear-gradient(90deg,#e5e7eb_1px,transparent_1px),linear-gradient(0deg,#e5e7eb_1px,transparent_1px)] bg-[size:28px_28px]" />
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-sky-50" />
+                {form.latitude != null && form.longitude != null ? (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="relative">
+                      <div className="absolute -inset-5 rounded-full bg-primary-500/10 animate-pulse" />
+                      <div className="relative rounded-full bg-primary-600 text-white text-[11px] font-bold px-3 py-1.5 shadow-lg">
+                        Pin preview
+                      </div>
+                    </div>
+                    <div className="absolute bottom-3 left-3 right-3 rounded-lg bg-white/90 border border-gray-200 px-3 py-2 text-[11px] text-gray-600 shadow-sm">
+                      {Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}
+                    </div>
+                  </div>
                 ) : (
-                  <div className="relative flex min-h-[180px] items-center justify-center overflow-hidden rounded-xl border border-gray-200 bg-white px-6 text-center">
-                    <div className="absolute inset-0 opacity-70 bg-[linear-gradient(90deg,#e5e7eb_1px,transparent_1px),linear-gradient(0deg,#e5e7eb_1px,transparent_1px)] bg-[size:28px_28px]" />
-                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-sky-50" />
-                    <p className="relative text-[12px] font-medium text-gray-500">
-                      Select an address or enter coordinates to verify the guest-facing pin.
+                  <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                    <p className="text-[12px] font-medium text-gray-500">
+                      Enter coordinates to verify the guest-facing pin.
                     </p>
                   </div>
                 )}
