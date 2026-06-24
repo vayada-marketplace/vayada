@@ -74,7 +74,6 @@ export async function askIntelligence(
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "X-Hotel-Id": trimmedHotelId,
     },
     body: JSON.stringify({
       question: trimmedQuestion,

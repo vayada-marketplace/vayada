@@ -200,6 +200,9 @@ function parseAskRequest(
   if (!parsed.scope.organizationId) {
     return { ok: false, body: parsed, message: "Ask scope must include a selected organization." };
   }
+  if (!parsed.scope.bookingHotelId) {
+    return { ok: false, body: parsed, message: "Ask scope must include a selected booking hotel." };
+  }
   return { ok: true, body: parsed };
 }
 
