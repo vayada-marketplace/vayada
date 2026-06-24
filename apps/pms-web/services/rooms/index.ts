@@ -3,7 +3,9 @@ import {
   assertPmsOperationsReadModelEnabled,
   isPmsOperationsReadModelEnabled,
   pmsOperationsClient,
+  pmsOperationsRequestOptions,
 } from "../api/pmsOperationsClient";
+import { resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
 import type { RoomImageReference } from "../upload";
 
 export interface MonthlyRate {
@@ -236,15 +238,6 @@ export interface RoomCreate {
   sortOrder?: number;
 }
 
-function selectedPmsPropertyId(): string {
-  const propertyId =
-    typeof window !== "undefined" ? localStorage.getItem("selectedHotelId")?.trim() : "";
-  if (!propertyId) {
-    throw new Error("Select a PMS property before loading rooms.");
-  }
-  return propertyId;
-}
-
 function asNumber(value: unknown, fallback = 0): number {
   const parsed =
     typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -367,7 +360,8 @@ export const individualRoomsService = {
       return pmsClient.get<Room[]>("/admin/rooms");
     }
 
-    const response = await pmsOperationsRoomsReadService.listRooms(selectedPmsPropertyId());
+    const propertyId = await resolveSelectedPmsPropertyId("loading rooms");
+    const response = await pmsOperationsRoomsReadService.listRooms(propertyId);
     return response.items
       .filter((room) => room.status !== "retired")
       .map((room) => toRoom(response, room));
@@ -394,7 +388,8 @@ export const roomsService = {
       return pmsClient.get<RoomType[]>("/admin/room-types");
     }
 
-    const response = await pmsOperationsRoomsReadService.listRoomTypes(selectedPmsPropertyId());
+    const propertyId = await resolveSelectedPmsPropertyId("loading room types");
+    const response = await pmsOperationsRoomsReadService.listRoomTypes(propertyId);
     return response.items.map((roomType) => toRoomType(response.propertyId, roomType));
   },
 
@@ -403,7 +398,8 @@ export const roomsService = {
       return pmsClient.get<RoomType>(`/admin/room-types/${id}`);
     }
 
-    const response = await pmsOperationsRoomsReadService.getRoomType(selectedPmsPropertyId(), id);
+    const propertyId = await resolveSelectedPmsPropertyId("loading room type");
+    const response = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
     return toRoomType(response.propertyId, response.item);
   },
 
@@ -422,6 +418,7 @@ export const pmsOperationsRoomsReadService = {
     assertPmsOperationsReadModelEnabled();
     return pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoom>>(
       `/api/pms/properties/${encodeURIComponent(propertyId)}/rooms`,
+      pmsOperationsRequestOptions,
     );
   },
 
@@ -429,6 +426,7 @@ export const pmsOperationsRoomsReadService = {
     assertPmsOperationsReadModelEnabled();
     return pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
       `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types`,
+      pmsOperationsRequestOptions,
     );
   },
 
@@ -438,6 +436,7 @@ export const pmsOperationsRoomsReadService = {
       `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(
         roomTypeId,
       )}`,
+      pmsOperationsRequestOptions,
     );
   },
 };

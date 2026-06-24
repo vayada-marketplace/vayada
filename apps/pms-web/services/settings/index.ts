@@ -1,5 +1,7 @@
 import { apiClient } from "../api/client";
 import { pmsClient } from "../api/pmsClient";
+import { isPmsOperationsReadModelEnabled } from "../api/pmsOperationsClient";
+import { getPmsPropertyProfile, listPmsProperties } from "../api/pmsPropertyClient";
 
 export interface PmsSetupStatus {
   registered: boolean;
@@ -65,9 +67,15 @@ export interface CheckoutInspectionTemplate {
 export const pmsSettingsService = {
   getSetupStatus: () => pmsClient.get<PmsSetupStatus>("/admin/setup-status"),
 
-  listHotels: () => pmsClient.get<HotelSummary[]>("/admin/hotels"),
+  listHotels: () =>
+    isPmsOperationsReadModelEnabled()
+      ? listPmsProperties()
+      : pmsClient.get<HotelSummary[]>("/admin/hotels"),
 
-  getHotelDetails: () => pmsClient.get<HotelDetails>("/admin/hotel"),
+  getHotelDetails: () =>
+    isPmsOperationsReadModelEnabled()
+      ? getPmsPropertyProfile()
+      : pmsClient.get<HotelDetails>("/admin/hotel"),
 };
 
 export const settingsService = {

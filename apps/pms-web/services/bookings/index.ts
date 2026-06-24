@@ -1,4 +1,10 @@
 import { pmsClient } from "../api/pmsClient";
+import {
+  isPmsOperationsReadModelEnabled,
+  pmsOperationsClient,
+  pmsOperationsRequestOptions,
+} from "../api/pmsOperationsClient";
+import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
 import { buildQueryString } from "@/lib/utils/queryString";
 import type { CheckinStepType } from "@/services/settings";
 
@@ -99,6 +105,58 @@ export type BookingListParams = Record<string, string | number | undefined> & {
   offset?: number;
 };
 
+type PmsOperationsMoney = {
+  amountDecimal: string;
+  currency: string;
+};
+
+type PmsOperationsRoomType = {
+  roomTypeId: string;
+  name: string;
+  occupancyLimits: Record<string, number>;
+  baseRate: PmsOperationsMoney;
+};
+
+type PmsOperationalReservation = {
+  guestBookingId: string;
+  bookingReference: string;
+  status: string;
+  source: "direct_booking" | "channel" | "manual" | "migration";
+  stay: { checkIn: string; checkOut: string; adults: number; children: number };
+  primaryGuest: { displayName: string; email: string | null; phone: string | null };
+  assignments: Array<{
+    roomTypeId: string;
+    roomId: string | null;
+    roomNumber: string | null;
+    position: number;
+    channel: string;
+  }>;
+  checkin: { completedAt: string | null; pendingFlags: string[] };
+  checkout: { completedAt: string | null; pendingFlags: string[] };
+};
+
+type PmsOperationsListResponse<T> = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  items: T[];
+  sourceFreshness: Record<string, string | number | boolean | null>;
+};
+
+type PmsOperationsReservationListResponse = PmsOperationsListResponse<PmsOperationalReservation> & {
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+  };
+};
+
+type PmsOperationsReservationDetailResponse = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  item: PmsOperationalReservation;
+  sourceFreshness: Record<string, string | number | boolean | null>;
+};
+
 export interface PaymentSettings {
   stripeConnectAccountId: string | null;
   stripeConnectOnboarded: boolean;
@@ -109,7 +167,7 @@ export interface PaymentSettings {
   onlineCardPayment: boolean;
   bankTransfer: boolean;
   xenditPaymentsEnabled: boolean;
-  paymentProvider: "stripe" | "xendit";
+  paymentProvider: "stripe" | "xendit" | "vayada";
   xenditChannelCode: string | null;
   xenditAccountNumber: string | null;
   xenditAccountHolderName: string | null;
@@ -230,9 +288,13 @@ export interface CheckoutRecord {
 }
 
 export const bookingsService = {
-  list: (params?: BookingListParams) => {
-    const qs = buildQueryString(params);
-    return pmsClient.get<BookingListResponse>(`/admin/bookings${qs}`);
+  list: async (params?: BookingListParams) => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      const qs = buildQueryString(params);
+      return pmsClient.get<BookingListResponse>(`/admin/bookings${qs}`);
+    }
+
+    return pmsOperationsBookingsReadService.list(params);
   },
 
   listAll: async (params?: Omit<BookingListParams, "limit" | "offset">) => {
@@ -252,7 +314,13 @@ export const bookingsService = {
     }
   },
 
-  get: (id: string) => pmsClient.get<Booking>(`/admin/bookings/${id}`),
+  get: async (id: string) => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.get<Booking>(`/admin/bookings/${id}`);
+    }
+
+    return pmsOperationsBookingsReadService.get(id);
+  },
 
   update: (
     id: string,
@@ -346,10 +414,30 @@ export const bookingsService = {
 
   unassignRoom: (id: string) => pmsClient.patch<Booking>(`/admin/bookings/${id}/unassign-room`, {}),
 
-  getPaymentSettings: () => pmsClient.get<PaymentSettingsResponse>("/admin/payment-settings"),
+  getPaymentSettings: async () => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.get<PaymentSettingsResponse>("/admin/payment-settings");
+    }
 
-  updatePaymentSettings: (data: Partial<PaymentSettings>) =>
-    pmsClient.patch("/admin/payment-settings", data),
+    const propertyId = await resolveSelectedPmsPropertyId("loading payment settings");
+    return pmsOperationsClient.get<PaymentSettingsResponse>(
+      propertyEndpoint(propertyId, "payment-settings"),
+      pmsOperationsRequestOptions,
+    );
+  },
+
+  updatePaymentSettings: async (data: Partial<PaymentSettings>) => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.patch("/admin/payment-settings", data);
+    }
+
+    const propertyId = await resolveSelectedPmsPropertyId("saving payment settings");
+    return pmsOperationsClient.patch(
+      propertyEndpoint(propertyId, "payment-settings"),
+      data,
+      pmsOperationsRequestOptions,
+    );
+  },
 
   updateCancellationPolicy: (data: Partial<CancellationPolicy>) =>
     pmsClient.patch("/admin/cancellation-policy", data),
@@ -402,6 +490,189 @@ export const bookingsService = {
   cancelWithReason: (id: string, reason: string) =>
     pmsClient.post<Booking>(`/admin/bookings/${id}/cancel`, { reason }),
 
-  markNoShow: (id: string) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/no-show`, {}),
+  markNoShow: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/no-show`, {}),
 };
+
+const pmsOperationsBookingsReadService = {
+  list: async (params?: BookingListParams): Promise<BookingListResponse> => {
+    const propertyId = await resolveSelectedPmsPropertyId("loading bookings");
+    const query = buildPmsReservationsQuery(params);
+    const [reservations, roomTypes] = await Promise.all([
+      pmsOperationsClient.get<PmsOperationsReservationListResponse>(
+        `${propertyEndpoint(propertyId, "reservations")}${query}`,
+        pmsOperationsRequestOptions,
+      ),
+      pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
+        propertyEndpoint(propertyId, "room-types"),
+        pmsOperationsRequestOptions,
+      ),
+    ]);
+    const roomTypesById = new Map(
+      roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType]),
+    );
+    return {
+      bookings: reservations.items.map((reservation) => toBooking(reservation, roomTypesById)),
+      total: reservations.pagination.total,
+      limit: reservations.pagination.limit,
+      offset: reservations.pagination.offset,
+    };
+  },
+
+  get: async (id: string): Promise<Booking> => {
+    const propertyId = await resolveSelectedPmsPropertyId("loading booking details");
+    const [reservation, roomTypes] = await Promise.all([
+      pmsOperationsClient.get<PmsOperationsReservationDetailResponse>(
+        propertyEndpoint(propertyId, `reservations/${encodeURIComponent(id)}`),
+        pmsOperationsRequestOptions,
+      ),
+      pmsOperationsClient.get<PmsOperationsListResponse<PmsOperationsRoomType>>(
+        propertyEndpoint(propertyId, "room-types"),
+        pmsOperationsRequestOptions,
+      ),
+    ]);
+    const roomTypesById = new Map(
+      roomTypes.items.map((roomType) => [roomType.roomTypeId, roomType]),
+    );
+    return toBooking(reservation.item, roomTypesById);
+  },
+};
+
+function buildPmsReservationsQuery(params?: BookingListParams): string {
+  const query = new URLSearchParams();
+  appendQueryParam(query, "status", params?.status);
+  appendQueryParam(query, "search", params?.search);
+  appendQueryParam(query, "limit", params?.limit);
+  appendQueryParam(query, "offset", params?.offset);
+  const serialized = query.toString();
+  return serialized ? `?${serialized}` : "";
+}
+
+function appendQueryParam(
+  query: URLSearchParams,
+  key: string,
+  value: string | number | undefined,
+): void {
+  if (value === undefined || value === "") return;
+  query.set(key, String(value));
+}
+
+function toBooking(
+  reservation: PmsOperationalReservation,
+  roomTypesById: Map<string, PmsOperationsRoomType>,
+): Booking {
+  const primaryAssignment = reservation.assignments[0] ?? null;
+  const roomType = primaryAssignment ? roomTypesById.get(primaryAssignment.roomTypeId) : undefined;
+  const nightlyRate = moneyAmount(roomType?.baseRate);
+  const numberOfRooms = Math.max(reservation.assignments.length, 1);
+  const nights = daysBetweenDateOnly(reservation.stay.checkIn, reservation.stay.checkOut);
+  const totalAmount = nightlyRate * Math.max(nights, 1) * numberOfRooms;
+  const [guestFirstName, guestLastName] = splitGuestName(reservation.primaryGuest.displayName);
+
+  return {
+    id: reservation.guestBookingId,
+    bookingReference: reservation.bookingReference,
+    roomTypeId: primaryAssignment?.roomTypeId ?? "",
+    roomName: roomType?.name ?? "",
+    roomMaxOccupancy: maxOccupancy(roomType),
+    totalRoomCapacity: maxOccupancy(roomType),
+    guestFirstName,
+    guestLastName,
+    guestEmail: reservation.primaryGuest.email ?? "",
+    guestPhone: reservation.primaryGuest.phone ?? "",
+    guestCountry: "",
+    guestGender: "",
+    guestDateOfBirth: null,
+    guestPassportNumber: "",
+    specialRequests: "",
+    checkIn: reservation.stay.checkIn,
+    checkOut: reservation.stay.checkOut,
+    nights,
+    adults: reservation.stay.adults,
+    children: reservation.stay.children,
+    nightlyRate,
+    numberOfRooms,
+    totalAmount,
+    depositRequired: false,
+    depositPercentage: null,
+    depositAmount: 0,
+    balanceAmount: totalAmount,
+    currency: roomType?.baseRate.currency ?? "EUR",
+    status: toBookingStatus(reservation.status),
+    roomId: primaryAssignment?.roomId ?? null,
+    roomNumber: primaryAssignment?.roomNumber ?? null,
+    assignedRooms: reservation.assignments.map((assignment) => ({
+      roomId: assignment.roomId,
+      roomNumber: assignment.roomNumber,
+      position: assignment.position,
+    })),
+    channel: primaryAssignment?.channel ?? reservationSource(reservation.source),
+    paymentMethod: null,
+    paymentStatus: null,
+    checkInPendingFlags: reservation.checkin.pendingFlags,
+    checkedInAt: reservation.checkin.completedAt,
+    checkedOutAt: reservation.checkout.completedAt,
+    hostResponseDeadline: null,
+    platformFeeAmount: null,
+    affiliateCommissionAmount: null,
+    propertyPayoutAmount: null,
+    addonIds: [],
+    addonNames: [],
+    addonTotal: 0,
+    addonQuantities: {},
+    addonDates: {},
+    estimatedArrivalTime: null,
+    numberOfGuests: reservation.stay.adults + reservation.stay.children,
+    guestWithdrawn: false,
+    createdAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
+    updatedAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
+  };
+}
+
+function splitGuestName(displayName: string): [string, string] {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return ["", ""];
+  const [firstName, ...rest] = parts;
+  return [firstName, rest.join(" ")];
+}
+
+function daysBetweenDateOnly(from: string, to: string): number {
+  const start = Date.parse(`${from}T00:00:00.000Z`);
+  const end = Date.parse(`${to}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 1;
+  return Math.max(1, Math.round((end - start) / 86_400_000));
+}
+
+function moneyAmount(money: PmsOperationsMoney | undefined): number {
+  const amount = Number.parseFloat(money?.amountDecimal ?? "0");
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function maxOccupancy(roomType: PmsOperationsRoomType | undefined): number {
+  if (!roomType) return 0;
+  const total = roomType.occupancyLimits.total;
+  if (typeof total === "number") return total;
+  return Object.values(roomType.occupancyLimits).reduce((sum, value) => sum + value, 0);
+}
+
+function reservationSource(source: PmsOperationalReservation["source"]): string {
+  return source === "direct_booking" ? "direct" : source;
+}
+
+function toBookingStatus(status: string): Booking["status"] {
+  switch (status) {
+    case "pending":
+    case "confirmed":
+    case "checked_in":
+    case "in_house":
+    case "checked_out":
+    case "declined":
+    case "expired":
+    case "no_show":
+      return status;
+    case "canceled":
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "confirmed";
+  }
+}

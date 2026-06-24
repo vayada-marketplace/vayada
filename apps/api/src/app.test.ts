@@ -8155,6 +8155,161 @@ describe("vayada-api", () => {
     });
   });
 
+  it("serves PMS Web target property facades from path-scoped PMS property access", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read", "pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    const targetHeaders = {
+      authorization: "Bearer valid-token",
+      origin: "https://pms.localhost",
+      "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
+    };
+
+    const properties = await app.inject({
+      method: "GET",
+      url: "/api/pms/properties",
+      headers: targetHeaders,
+    });
+    const profile = await app.inject({
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/profile`,
+      headers: targetHeaders,
+    });
+    const profilePatch = await app.inject({
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/profile`,
+      headers: targetHeaders,
+      payload: {
+        timezone: "Europe/Vienna",
+        country: "AT",
+        instant_book: true,
+      },
+    });
+    const paymentSettings = await app.inject({
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/payment-settings`,
+      headers: targetHeaders,
+      payload: {
+        defaultCurrency: "CHF",
+        onlineCardPayment: true,
+        paymentProvider: "vayada",
+      },
+    });
+    const calendarSettings = await app.inject({
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/calendar-settings`,
+      headers: targetHeaders,
+      payload: {
+        autoRearrangeEnabled: false,
+        autoOpenEnabled: true,
+        autoOpenMode: "fixed",
+        autoOpenMonths: 24,
+      },
+    });
+    const channexStatus = await app.inject({
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/channex/status`,
+      headers: targetHeaders,
+    });
+    const channexChannels = await app.inject({
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/channex/channels`,
+      headers: targetHeaders,
+    });
+    const unread = await app.inject({
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/messaging/unread-count`,
+      headers: targetHeaders,
+    });
+
+    for (const response of [
+      properties,
+      profile,
+      profilePatch,
+      paymentSettings,
+      calendarSettings,
+      channexStatus,
+      channexChannels,
+      unread,
+    ]) {
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    }
+
+    expect(properties.json()).toEqual([
+      {
+        id: pmsPropertyId,
+        name: pmsPropertyId,
+        slug: pmsPropertyId,
+        location: "",
+        country: "",
+      },
+    ]);
+    expect(profile.json()).toMatchObject({ id: pmsPropertyId, timezone: "UTC" });
+    expect(profilePatch.json()).toMatchObject({
+      id: pmsPropertyId,
+      timezone: "Europe/Vienna",
+      country: "AT",
+      instant_book: true,
+    });
+    expect(paymentSettings.json()).toMatchObject({
+      paymentSettings: {
+        defaultCurrency: "CHF",
+        onlineCardPayment: true,
+        paymentProvider: "vayada",
+      },
+    });
+    expect(calendarSettings.json()).toMatchObject({
+      autoRearrangeEnabled: false,
+      autoOpenEnabled: true,
+      autoOpenMode: "fixed",
+      autoOpenMonths: 24,
+    });
+    expect(channexStatus.json()).toMatchObject({ isConnected: false });
+    expect(channexChannels.json()).toEqual({ channels: [] });
+    expect(unread.json()).toEqual({ unreadCount: 0 });
+  });
+
+  it("rejects PMS Web target property facades when the PMS property is not linked", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      linkedPmsPropertyId: null,
+      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/channex/status`,
+      headers: {
+        authorization: "Bearer valid-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+    expect(response.json()).toMatchObject({
+      code: "missing_resource_access",
+      category: "authorization",
+    });
+  });
+
   it("serves PMS Web legacy helper reads from scoped target PMS data and empty states", async () => {
     const reservationRanges: Array<{ from: string; to: string }> = [];
     const legacyRepository: PmsOperationsReadRepository = {
@@ -8893,6 +9048,55 @@ describe("vayada-api", () => {
       items: [],
       pagination: { total: 0, limit: 500, offset: 10 },
     });
+  });
+
+  it("returns PMS reservations overlapping the requested stay range for calendar reads", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsRepository: {
+        ...pmsOperationsRepository,
+        async listReservationsByPropertyId() {
+          throw new Error("expected overlapping stay range query");
+        },
+        async listReservationsOverlappingStayRangeByPropertyId(propertyId, range) {
+          expect(propertyId).toBe(pmsPropertyId);
+          expect(range).toEqual({ from: "2026-08-15", to: "2026-08-18" });
+          return { items: pmsReservations, total: pmsReservations.length };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/reservations`,
+      query: {
+        stayFrom: "2026-08-15",
+        stayTo: "2026-08-18",
+        limit: "1",
+        offset: "1",
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      propertyId: pmsPropertyId,
+      pagination: { total: pmsReservations.length, limit: 1, offset: 1 },
+    });
+    expect((response.body as PmsOperationsTestReservationListResponse).items).toHaveLength(1);
+    expect(
+      (response.body as PmsOperationsTestReservationListResponse).items[0].guestBookingId,
+    ).toBe(pmsReservations[1].guestBookingId);
   });
 
   it("returns PMS reservation detail and not-found errors", async () => {

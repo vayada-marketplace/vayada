@@ -28,8 +28,9 @@ function buildHandoffUrl(baseUrl: string, path: string): string {
  *
  * Mirrors the booking-admin /choose-property page. Multi-hotel users
  * land here after login and pick which property to manage. The
- * selection is persisted to localStorage.selectedHotelId which drives
- * the X-Hotel-Id header on all subsequent API requests.
+ * selection is persisted to localStorage.selectedHotelId. Typed PMS
+ * operations use this as the path-scoped pms_property id; remaining legacy
+ * admin compatibility calls may still send it as X-Hotel-Id.
  *
  * The "Add a new property" action hands off cross-domain to the
  * booking-admin setup wizard (which is the canonical onboarding flow

@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-
-type HandoffHotel = {
-  id: string;
-};
+import { listPmsProperties, type PmsPropertySummary } from "@/services/api/pmsPropertyClient";
 
 export default function HandoffPage() {
   useEffect(() => {
@@ -51,23 +48,17 @@ export default function HandoffPage() {
       // valid selected PMS property) > setup (if incomplete) > dashboard.
       const pmsApiUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "https://pms-api.vayada.com";
       (async () => {
-        let hotels: HandoffHotel[] = [];
-        let selectedPmsHotelId: string | null = null;
+        let properties: PmsPropertySummary[] = [];
+        let selectedPmsPropertyId: string | null = null;
 
         try {
-          const listRes = await fetch(`${pmsApiUrl}/admin/hotels`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const body = listRes.ok ? await listRes.json() : [];
-          hotels = Array.isArray(body)
-            ? body.filter((hotel): hotel is HandoffHotel => typeof hotel?.id === "string")
-            : [];
-          selectedPmsHotelId =
-            handoffHotelId && hotels.some((hotel) => hotel.id === handoffHotelId)
+          properties = await listPmsProperties();
+          selectedPmsPropertyId =
+            handoffHotelId && properties.some((property) => property.id === handoffHotelId)
               ? handoffHotelId
               : null;
-          if (selectedPmsHotelId) {
-            localStorage.setItem("selectedHotelId", selectedPmsHotelId);
+          if (selectedPmsPropertyId) {
+            localStorage.setItem("selectedHotelId", selectedPmsPropertyId);
           } else {
             localStorage.removeItem("selectedHotelId");
           }
@@ -75,7 +66,7 @@ export default function HandoffPage() {
           localStorage.removeItem("selectedHotelId");
         }
 
-        if (!safeRedirect && !selectedPmsHotelId && hotels.length > 1) {
+        if (!safeRedirect && !selectedPmsPropertyId && properties.length > 1) {
           window.location.href = "/choose-property";
           return;
         }
@@ -83,8 +74,8 @@ export default function HandoffPage() {
         const setupStatusHeaders: Record<string, string> = {
           Authorization: `Bearer ${token}`,
         };
-        if (selectedPmsHotelId) {
-          setupStatusHeaders["X-Hotel-Id"] = selectedPmsHotelId;
+        if (selectedPmsPropertyId) {
+          setupStatusHeaders["X-Hotel-Id"] = selectedPmsPropertyId;
         }
 
         const setupStatusResponse = await fetch(`${pmsApiUrl}/admin/setup-status`, {
@@ -106,13 +97,13 @@ export default function HandoffPage() {
 
         // If the caller already told us which hotel to land on,
         // honor it and skip the choose-property step.
-        if (selectedPmsHotelId) {
+        if (selectedPmsPropertyId) {
           window.location.href = "/dashboard";
           return;
         }
 
-        if (hotels.length === 1) {
-          localStorage.setItem("selectedHotelId", hotels[0].id);
+        if (properties.length === 1) {
+          localStorage.setItem("selectedHotelId", properties[0].id);
         }
         window.location.href = "/dashboard";
       })().catch(() => {
