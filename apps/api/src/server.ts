@@ -380,9 +380,6 @@ const app = buildApp({
   bookingSettingsWriteRepository: bookingSettingsRepository,
   bookingGuestFormSettingsSync,
   bookingCustomDomainRepository,
-  bookingAdminCompat: config.authSession
-    ? { allowedOrigins: config.authSession.authAllowedOrigins }
-    : undefined,
   marketplaceDiscoveryRepository,
   marketplaceCollaborationRepository:
     config.marketplaceDiscoverySource === "target"
