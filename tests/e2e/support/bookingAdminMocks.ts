@@ -4,6 +4,7 @@ export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
+export const BOOKING_ADMIN_ADDON_ITEMS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/addon-items`;
 export const BOOKING_ADMIN_PROPERTY_LINK_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/property-link`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
@@ -28,6 +29,27 @@ export interface BookingAdminPropertySettingsFixture {
 export interface BookingAdminAddonSettingsFixture {
   showAddonsStep: boolean;
   groupAddonsByCategory: boolean;
+}
+
+export interface BookingAdminAddonItemsFixture {
+  addonItems: Array<{
+    addonItemId: string;
+    hotelId: string;
+    propertyId: string;
+    name: string;
+    description: string;
+    price: string;
+    currency: string;
+    category: string;
+    imageUrl: string | null;
+    duration: string | null;
+    pricingModel: string;
+    publicVisible: boolean;
+    status: string;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface BookingAdminBenefitsSettingsFixture {
@@ -58,6 +80,7 @@ export interface BookingAdminShellMocksOptions {
 }
 
 export interface BookingAdminBookingFlowMocksOptions {
+  addonItems?: BookingAdminAddonItemsFixture;
   addonSettings?: BookingAdminAddonSettingsFixture;
   benefitsSettings?: BookingAdminBenefitsSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
@@ -81,6 +104,29 @@ export const defaultBookingAdminPropertySettings: BookingAdminPropertySettingsFi
 const defaultAddonSettings: BookingAdminAddonSettingsFixture = {
   showAddonsStep: true,
   groupAddonsByCategory: true,
+};
+
+const defaultAddonItems: BookingAdminAddonItemsFixture = {
+  addonItems: [
+    {
+      addonItemId: "addon_airport_transfer",
+      hotelId: BOOKING_ADMIN_HOTEL_ID,
+      propertyId: "property_alpenrose",
+      name: "Airport transfer",
+      description: "Private pickup from the airport.",
+      price: "45.00",
+      currency: "EUR",
+      category: "transport",
+      imageUrl: null,
+      duration: "45 min",
+      pricingModel: "per_stay",
+      publicVisible: true,
+      status: "active",
+      sortOrder: 0,
+      createdAt: "2026-06-01T10:00:00.000Z",
+      updatedAt: "2026-06-01T10:00:00.000Z",
+    },
+  ],
 };
 
 const defaultBenefitsSettings: BookingAdminBenefitsSettingsFixture = {
@@ -180,6 +226,9 @@ export async function mockBookingAdminBookingFlow(
 ): Promise<void> {
   await mockBookingAdminAuthenticatedSession(page);
   await mockBookingAdminShellRoutes(page);
+  await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, (route) =>
+    route.fulfill({ json: options.addonItems ?? defaultAddonItems }),
+  );
   await page.route(`**${BOOKING_ADMIN_ADDON_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.addonSettings ?? defaultAddonSettings }),
   );
