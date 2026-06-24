@@ -38,6 +38,32 @@ class BookingCreate(BaseModel):
     # list (or missing key) means "every night of the stay".
     addon_dates: dict[str, list[str]] = {}
     promo_code: str | None = None
+    expected_total_amount: float | None = None
+
+
+class BookingQuoteResponse(BaseModel):
+    """Authoritative checkout quote returned before booking creation."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    room_type_id: str
+    room_name: str
+    rate_type: str
+    payment_method: str
+    nightly_rate: float
+    number_of_rooms: int = 1
+    room_total: float
+    addon_total: float = 0
+    promo_code: str | None = None
+    promo_discount: float = 0
+    last_minute_discount_percent: float = 0
+    last_minute_discount_amount: float = 0
+    total_amount: float
+    currency: str
+    deposit_required: bool = False
+    deposit_percentage: int | None = None
+    deposit_amount: float = 0
+    balance_amount: float = 0
 
 
 class BookingResponse(BaseModel):

@@ -177,6 +177,11 @@ export type BookingWebCheckoutCommandContext = {
 
 export type BookingWebCheckoutAdapter = {
   getCheckoutConfig(slug: string, context?: BookingWebCheckoutCommandContext): Promise<unknown>;
+  quoteBooking(
+    slug: string,
+    request: BookingWebCheckoutRequest,
+    context?: BookingWebCheckoutCommandContext,
+  ): Promise<unknown>;
   createBooking(
     slug: string,
     request: BookingWebCheckoutRequest,
@@ -456,6 +461,22 @@ export async function registerBookingWebPublicRoutes(
       );
       reply.header("Cache-Control", "no-store");
       reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-checkout-config");
+      reply.header("X-Robots-Tag", "noindex");
+      return response;
+    },
+  );
+
+  app.post<{ Params: BookingWebHotelParams; Body: BookingWebCheckoutRequest }>(
+    "/hotels/:slug/bookings/quote",
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const response = await checkoutAdapter.quoteBooking(
+        request.params.slug,
+        body,
+        checkoutCommandContext(request, "booking-quote", request.params.slug, body, now),
+      );
+      reply.header("Cache-Control", "no-store");
+      reply.header("X-Vayada-RateLimit-Policy", "public-booking-web-booking-quote");
       reply.header("X-Robots-Tag", "noindex");
       return response;
     },
@@ -1073,6 +1094,19 @@ export function createTargetBookingWebCheckoutAdapter(
         pmsHandoff: { status: "pending_handoff" },
       };
     },
+    async quoteBooking(slug, _request, context) {
+      const property = await resolveTargetCheckoutProperty(pool, slug);
+      if (context) {
+        await recordTargetCheckoutCommand(pool, {
+          propertyId: property.propertyId,
+          context,
+          resourceType: "checkout_quote",
+          resourceId: property.propertyId,
+          body: { status: "checkout_quote_unavailable" },
+        });
+      }
+      throw createHttpError(503, "Target checkout quote is not configured for Booking Web.");
+    },
     async confirmAuthorization(slug, handle, context) {
       const property = await resolveTargetCheckoutProperty(pool, slug);
       if (context) {
@@ -1346,6 +1380,16 @@ export function createCompatibilityBookingWebCheckoutAdapter(config: {
       return fetchJson({
         baseUrl: pmsPublicApiUrl,
         path: `/api/hotels/${encodeURIComponent(slug)}/bookings`,
+        method: "POST",
+        body: request,
+        fetch: fetchImpl,
+      });
+    },
+    async quoteBooking(slug, request) {
+      assertLegacyCheckoutCommandProxyEnabled(legacyCheckoutCommandProxyEnabled);
+      return fetchJson({
+        baseUrl: pmsPublicApiUrl,
+        path: `/api/hotels/${encodeURIComponent(slug)}/bookings/quote`,
         method: "POST",
         body: request,
         fetch: fetchImpl,
