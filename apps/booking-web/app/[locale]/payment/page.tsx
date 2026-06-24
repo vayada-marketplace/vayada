@@ -9,6 +9,7 @@ import { Booking } from "@/lib/types";
 import BookingFooter from "@/components/layout/BookingFooter";
 import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
+import MobileStaySummary from "@/components/booking/MobileStaySummary";
 import StripeProvider from "@/components/StripeProvider";
 import StripeConfirmStep from "@/components/payment/StripeConfirmStep";
 import PolicyModal from "@/components/payment/PolicyModal";
@@ -336,11 +337,13 @@ function PaymentPageContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <HeroSection
-        heroImage={hotel.heroImage}
-        hotelName={hotel.name}
-        description={hotel.description}
-      />
+      <div className="hidden min-[769px]:block">
+        <HeroSection
+          heroImage={hotel.heroImage}
+          hotelName={hotel.name}
+          description={hotel.description}
+        />
+      </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
@@ -348,6 +351,50 @@ function PaymentPageContent() {
           <h2 className="text-3xl font-heading text-gray-900">{paymentTitle}</h2>
           <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
+
+        <MobileStaySummary
+          room={room}
+          roomCount={roomsParam}
+          checkIn={checkIn}
+          checkOut={checkOut}
+          checkInTime={hotel.checkInTime}
+          checkOutTime={hotel.checkOutTime}
+          nights={nights}
+          adults={adultsParam}
+          childGuests={childrenParam}
+          roomTotal={roomTotal}
+          grandTotal={grandTotal}
+          selectedCurrency={selectedCurrency}
+          addons={addons}
+          selectedAddonIds={selectedAddonIds}
+          addonQuantities={addonQuantities}
+          addonDates={addonDates}
+          promoCode={promoCodeParam}
+          promoDiscountText={
+            promoDiscount?.type === "percentage" ? ` (-${promoDiscount.value}%)` : ""
+          }
+          discountAmount={discountAmount}
+          labels={{
+            title: tb("bookingSummary"),
+            checkIn: tb("checkIn"),
+            checkOut: tb("checkOut"),
+            duration: tb("duration"),
+            guests: tc("guests"),
+            total: tc("total"),
+            includesTaxes: tc("includesTaxes"),
+            nights: tc("nights", { count: nights }),
+            checkInFrom: hotel.checkInTime
+              ? tc("checkInFrom", { time: hotel.checkInTime })
+              : undefined,
+            checkOutBy: hotel.checkOutTime
+              ? tc("checkOutBy", { time: hotel.checkOutTime })
+              : undefined,
+          }}
+          locale={locale}
+          formatDate={formatDate}
+          formatPrice={formatPrice}
+          convertAndRound={convertAndRound}
+        />
 
         {/* Guest confirmation banner */}
         <div className="flex items-center justify-between mb-8">
@@ -940,7 +987,7 @@ function PaymentPageContent() {
           </div>
 
           {/* Right Sidebar — Order Summary */}
-          <div className="lg:col-span-1">
+          <div className="max-[768px]:hidden lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-8">
               <h3 className="text-lg font-bold text-gray-900 mb-5">{t("orderSummary")}</h3>
 
