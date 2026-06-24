@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  registerBookingAddonItemRoutes,
+  type BookingAddonItemsRepository,
+} from "./bookingAddonItems.js";
+import {
   registerBookingDashboardRoutes,
   type BookingDashboardRoutesOptions,
 } from "./bookingDashboard.js";
@@ -25,6 +29,7 @@ type BookingHotelParams = {
 };
 
 export type BookingRoutesOptions = {
+  addonItemsRepository?: BookingAddonItemsRepository;
   dashboardMetricsReadPort?: BookingDashboardRoutesOptions["metricsReadPort"];
   reservationsRepository?: BookingReservationsReadRepository;
   settingsRepository?: BookingSettingsReadRepository;
@@ -37,6 +42,10 @@ export async function registerBookingRoutes(
   app: FastifyInstance,
   options: BookingRoutesOptions = {},
 ): Promise<void> {
+  if (options.addonItemsRepository) {
+    await registerBookingAddonItemRoutes(app, options.addonItemsRepository);
+  }
+
   if (options.settingsRepository) {
     await registerBookingSettingsRoutes(
       app,

@@ -50,6 +50,11 @@ const surfaceRules = {
       "x-hotel-id",
       "legacy X-Hotel-Id routing header",
     ),
+    headerOnPathPrefixRule(
+      "/api/finance/properties/",
+      "x-hotel-id",
+      "legacy X-Hotel-Id routing header",
+    ),
   ],
   "booking-admin-setup": [
     legacyProductionHostRule(),
@@ -57,6 +62,11 @@ const surfaceRules = {
     pathPrefixRule("/admin/promo-codes", "legacy Booking Admin promo-code route"),
     pathRule("/admin/hotel", "legacy Booking Admin hotel settings route"),
     pathRule("/admin/payment-settings", "legacy Booking Admin payment settings route"),
+    headerOnPathPrefixRule(
+      "/api/finance/properties/",
+      "x-hotel-id",
+      "legacy X-Hotel-Id routing header",
+    ),
   ],
 } satisfies Record<string, LegacyCallRule[]>;
 

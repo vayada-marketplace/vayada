@@ -4,7 +4,13 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
+import { createBookingAddonItem } from "@/services/api/bookingAddonItemsClient";
 import { updateBookingBenefitsSettings } from "@/services/api/bookingBenefitsSettingsClient";
+import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
+import {
+  buildFinancePaymentSettingsBody,
+  updateFinancePaymentSettings,
+} from "@/services/api/financePaymentSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
@@ -29,17 +35,15 @@ import {
   RoomsStep,
   createEmptyRoom,
   hasSeasonCoverageGaps,
+  type RoomType,
+  type SetupAddon,
   useSetupWizardState,
 } from "@vayada/hotel-setup-wizard";
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
-const ADDON_ITEM_MANAGEMENT_UNAVAILABLE =
-  "Add-on item management is not available on next-api yet. Remove setup add-ons before completing setup.";
 const PROMO_CODE_IMPORT_UNAVAILABLE =
   "Setup promo codes from this invite were not imported because promo-code management is not available on next-api yet.";
-const PAYMENT_SETTINGS_WRITE_UNAVAILABLE =
-  "Payment settings writes are not available on next-api yet. Use the default pay-at-property setup options before completing setup.";
 const LAST_MINUTE_SETTINGS_UNAVAILABLE =
   "Last-minute discount settings are not available on next-api yet. Remove last-minute discounts before completing setup.";
 
@@ -54,6 +58,20 @@ const STEPS = [
   { number: 9, label: "Last-Minute" },
   { number: 8, label: "Policies" },
 ];
+
+function toAddonPricingModel(addon: { perPerson?: boolean; perNight?: boolean }) {
+  if (addon.perPerson && addon.perNight) return "per_guest_night";
+  if (addon.perPerson) return "per_guest";
+  if (addon.perNight) return "per_night";
+  return "per_stay";
+}
+
+function toAddonCategory(category: string) {
+  if (category === "food") return "dining";
+  return ["dining", "experience", "transport", "wellness", "other"].includes(category)
+    ? (category as "dining" | "experience" | "transport" | "wellness" | "other")
+    : "other";
+}
 
 export default function SetupPage() {
   const router = useRouter();
@@ -314,22 +332,11 @@ export default function SetupPage() {
     return false;
   };
 
-  const hasDefaultPaymentSetup = (): boolean =>
-    payAtHotel &&
-    payAtHotelMethods.length === 2 &&
-    payAtHotelMethods.includes("cash") &&
-    payAtHotelMethods.includes("card") &&
-    !onlineCardPayment &&
-    !bankTransfer &&
-    paymentProvider === "vayada";
-
   const handleComplete = async () => {
     setError("");
     setSaving(true);
     try {
       const unavailableSelections = [
-        ...(setupAddons.length > 0 ? [ADDON_ITEM_MANAGEMENT_UNAVAILABLE] : []),
-        ...(!hasDefaultPaymentSetup() ? [PAYMENT_SETTINGS_WRITE_UNAVAILABLE] : []),
         ...(lastMinuteConfig.enabled ? [LAST_MINUTE_SETTINGS_UNAVAILABLE] : []),
       ];
       if (unavailableSelections.length > 0) {
@@ -388,8 +395,59 @@ export default function SetupPage() {
       // X-Hotel-Id header and the PMS register call gets the same id
       // as the booking-engine row.
       const savedSettings = await settingsService.createHotel(propertyPayload);
-      if (savedSettings?.id) {
-        localStorage.setItem("selectedHotelId", savedSettings.id);
+      const createdHotelId = savedSettings.id;
+      if (createdHotelId) {
+        localStorage.setItem("selectedHotelId", createdHotelId);
+      }
+
+      if (setupAddons.length > 0) {
+        if (!createdHotelId) {
+          throw new Error("Booking hotel id is required before saving add-ons.");
+        }
+        for (const addon of setupAddons) {
+          const parsedPrice = Number(addon.price);
+          if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+            throw new Error(`Invalid add-on price for "${addon.name}".`);
+          }
+
+          await createBookingAddonItem({
+            hotelId: createdHotelId,
+            body: {
+              name: addon.name,
+              description: addon.description,
+              price: parsedPrice.toFixed(2),
+              currency: addon.currency || currency,
+              category: toAddonCategory(addon.category),
+              imageUrl: addon.image || null,
+              duration: addon.duration || null,
+              pricingModel: toAddonPricingModel(addon),
+              publicVisible: true,
+              status: "active",
+            },
+          });
+        }
+      }
+      if (createdHotelId) {
+        try {
+          const propertyLink = await getBookingHotelPropertyLink({ hotelId: createdHotelId });
+          await updateFinancePaymentSettings({
+            propertyId: propertyLink.propertyId,
+            body: buildFinancePaymentSettingsBody({
+              payAtPropertyEnabled: payAtHotel,
+              payAtHotelMethods,
+              onlineCardPayment,
+              bankTransfer,
+              paymentProvider,
+              defaultCurrency: currency,
+              commandPrefix: `setup-payment-settings-${createdHotelId}`,
+            }),
+          });
+        } catch {
+          localStorage.setItem(
+            "setupWarning",
+            "Hotel created, but payment settings were not saved. Update them from Settings > Payments.",
+          );
+        }
       }
 
       // 2. Save the room-filter portion of design settings. Media/color
@@ -638,7 +696,7 @@ export default function SetupPage() {
       // Prefill rooms
       if (data.rooms && data.rooms.length > 0) {
         setRooms(
-          data.rooms.map((r: any) => ({
+          data.rooms.map((r: Partial<RoomType>) => ({
             ...createEmptyRoom(),
             ...r,
             currency: r.currency || data.property?.default_currency || "EUR",
@@ -649,7 +707,7 @@ export default function SetupPage() {
       // Prefill addons
       if (data.addons && data.addons.length > 0) {
         setSetupAddons(
-          data.addons.map((a: any) => ({
+          data.addons.map((a: Partial<SetupAddon>) => ({
             _localId: crypto.randomUUID(),
             name: a.name || "",
             description: a.description || "",

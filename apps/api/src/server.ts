@@ -29,6 +29,7 @@ import {
   createPgBookingWebAffiliateHotelResolver,
   createPgBookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
+import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
 import {
@@ -108,6 +109,12 @@ const bookingGuestFormSettingsSync =
 
 const bookingCustomDomainRepository = config.targetDatabaseUrl
   ? createTargetBookingCustomDomainRepository({
+      connectionString: config.targetDatabaseUrl,
+    })
+  : undefined;
+
+const bookingAddonItemsRepository = config.targetDatabaseUrl
+  ? createPgTargetBookingAddonItemsRepository({
       connectionString: config.targetDatabaseUrl,
     })
   : undefined;
@@ -338,6 +345,7 @@ const app = buildApp({
         }
       : undefined,
   bookingReservationsRepository,
+  bookingAddonItemsRepository,
   bookingDashboardMetricsReadPort,
   pmsOperationsRepository,
   pmsOperationsCommandRepository,
