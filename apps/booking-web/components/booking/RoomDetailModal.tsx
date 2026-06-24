@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
@@ -70,6 +70,7 @@ export default function RoomDetailModal({
     }
   }, [showFlexibleRate, selectedRate, room.nonRefundableRate]);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const navigatingAwayRef = useRef(false);
   const { formatPrice } = useCurrency();
   const tc = useTranslations("common");
 
@@ -86,6 +87,9 @@ export default function RoomDetailModal({
       else goPrevImage();
     }
     setTouchStartX(null);
+  };
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
   };
 
   // Reset image index when switching between rooms
@@ -117,6 +121,7 @@ export default function RoomDetailModal({
     return () => {
       window.removeEventListener("popstate", onPop);
       if (
+        !navigatingAwayRef.current &&
         !closedByPop &&
         typeof window !== "undefined" &&
         (window.history.state as { vayRoomModal?: boolean } | null)?.vayRoomModal
@@ -132,6 +137,11 @@ export default function RoomDetailModal({
   const nonRefundableNightly = getNonRefundableRate(room.baseRate, room.nonRefundableRate);
   const nonRefundableTotal = nonRefundableNightly * nights;
   const discount = Math.round((1 - nonRefundableNightly / room.baseRate) * 100);
+  const handleSelectRate = () => {
+    if (soldOut) return;
+    navigatingAwayRef.current = true;
+    onSelectRate(selectedRate);
+  };
 
   // Rate option buttons — shared between mobile scroll body and desktop sticky footer
   const rateOptionsJsx = (
@@ -256,9 +266,12 @@ export default function RoomDetailModal({
   return (
     <div
       className="fixed inset-0 z-[100] flex items-stretch md:items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={handleBackdropClick}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="room-detail-title"
         onClick={(e) => e.stopPropagation()}
         className="bg-white md:rounded-2xl shadow-2xl w-full md:max-w-5xl h-full md:h-[90vh] overflow-hidden flex flex-col overscroll-contain"
       >
@@ -395,7 +408,9 @@ export default function RoomDetailModal({
                 </div>
               )}
               <div className="flex items-center gap-2 mb-2">
-                <h2 className="text-2xl font-bold text-gray-900">{room.name}</h2>
+                <h2 id="room-detail-title" className="text-2xl font-bold text-gray-900">
+                  {room.name}
+                </h2>
                 {room.category && (
                   <span className="text-xs font-medium px-2.5 py-0.5 rounded-full bg-primary-50 text-primary-700 border border-primary-200">
                     {room.category}
@@ -582,9 +597,7 @@ export default function RoomDetailModal({
               </p>
               {rateOptionsJsx}
               <button
-                onClick={() => {
-                  if (!soldOut) onSelectRate(selectedRate);
-                }}
+                onClick={handleSelectRate}
                 disabled={soldOut}
                 className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
               >
@@ -614,9 +627,7 @@ export default function RoomDetailModal({
         {/* Mobile sticky CTA — outside scroll area so it's always reachable */}
         <div className="md:hidden flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
           <button
-            onClick={() => {
-              if (!soldOut) onSelectRate(selectedRate);
-            }}
+            onClick={handleSelectRate}
             disabled={soldOut}
             className="w-full py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"
           >

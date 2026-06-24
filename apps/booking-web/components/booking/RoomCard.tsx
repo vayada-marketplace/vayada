@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
@@ -47,22 +48,38 @@ export default function RoomCard({
   const tc = useTranslations("common");
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
 
-  const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy);
+  const minRequiredRooms = Math.max(1, Math.ceil(totalGuests / room.maxOccupancy));
+  const soldOut = room.remainingRooms < minRequiredRooms;
+  const [selectedRooms, setSelectedRooms] = useState(minRequiredRooms);
+  const roomQuantityOptions = Array.from(
+    { length: Math.max(0, room.remainingRooms - minRequiredRooms + 1) },
+    (_, index) => minRequiredRooms + index,
+  );
+  const displayRooms = soldOut ? minRequiredRooms : selectedRooms;
+  const combinedCapacity = room.maxOccupancy * displayRooms;
+  const showRoomQuantity = !soldOut && (roomQuantityOptions.length > 1 || displayRooms > 1);
+
+  useEffect(() => {
+    setSelectedRooms((value) => {
+      if (room.remainingRooms < minRequiredRooms) return minRequiredRooms;
+      return Math.min(Math.max(value, minRequiredRooms), room.remainingRooms);
+    });
+  }, [minRequiredRooms, room.remainingRooms]);
+
   // Per-night rates rounded in the displayed currency so nightly × nights matches
   // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
   const flexibleNightly = convertAndRound(room.baseRate, room.currency);
-  const flexibleTotal = flexibleNightly * nights * requiredRooms;
+  const flexibleTotal = flexibleNightly * nights * displayRooms;
   const nonRefundableNightlyBase = getNonRefundableRate(room.baseRate, room.nonRefundableRate);
   const nonRefundableNightly = convertAndRound(nonRefundableNightlyBase, room.currency);
-  const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms;
+  const nonRefundableTotal = nonRefundableNightly * nights * displayRooms;
   const discount = Math.round((1 - nonRefundableNightlyBase / room.baseRate) * 100);
-  const soldOut = room.remainingRooms < requiredRooms;
   const hasLastMinuteDeal = !!(
     room.lastMinuteDiscountPercent && room.lastMinuteDiscountPercent > 0
   );
   const originalFlexibleTotal =
     hasLastMinuteDeal && room.originalRate
-      ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
+      ? convertAndRound(room.originalRate, room.currency) * nights * displayRooms
       : null;
 
   const partialRefundTiers =
@@ -201,7 +218,7 @@ export default function RoomCard({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-xl font-bold text-gray-900">
-                  {requiredRooms > 1 && <span className="text-primary-600">{requiredRooms}× </span>}
+                  {displayRooms > 1 && <span className="text-primary-600">{displayRooms}× </span>}
                   {room.name}
                 </h3>
                 {room.category && (
@@ -241,7 +258,7 @@ export default function RoomCard({
                       d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
                     />
                   </svg>
-                  {t("upToGuests", { count: room.maxOccupancy })}
+                  {t("upToGuests", { count: combinedCapacity })}
                 </span>
               </div>
             </div>
@@ -308,6 +325,32 @@ export default function RoomCard({
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
               {t("selectYourRate")}
             </p>
+            {showRoomQuantity && (
+              <div
+                className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <span className="text-sm font-medium text-gray-700">
+                  {tc("room", { count: displayRooms })}
+                </span>
+                {roomQuantityOptions.length > 1 ? (
+                  <select
+                    value={selectedRooms}
+                    onChange={(event) => setSelectedRooms(Number(event.target.value))}
+                    className="rounded-md border border-gray-300 bg-white px-2 py-1 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    aria-label={tc("room", { count: displayRooms })}
+                  >
+                    {roomQuantityOptions.map((count) => (
+                      <option key={count} value={count}>
+                        {tc("room", { count })}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-sm font-semibold text-gray-900">{displayRooms}</span>
+                )}
+              </div>
+            )}
             <div className="space-y-3">
               {hasNonRefundable && (
                 <RateOption
@@ -318,7 +361,7 @@ export default function RoomCard({
                   title={t("nonRefundableRate")}
                   description={t("nonRefundableDesc")}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(nonRefundableNightly * requiredRooms, selectedCurrency)}
+                  nightlyLabel={formatPrice(nonRefundableNightly * displayRooms, selectedCurrency)}
                   discountPercent={discount}
                   soldOut={soldOut}
                 />
@@ -332,7 +375,7 @@ export default function RoomCard({
                   title={t("flexibleRate")}
                   description={flexibleDescription}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(flexibleNightly * requiredRooms, selectedCurrency)}
+                  nightlyLabel={formatPrice(flexibleNightly * displayRooms, selectedCurrency)}
                   soldOut={soldOut}
                 />
               )}
@@ -340,7 +383,7 @@ export default function RoomCard({
             <button
               onClick={() => {
                 if (soldOut || !effectiveSelectedRate) return;
-                onSelectRate(effectiveSelectedRate, requiredRooms);
+                onSelectRate(effectiveSelectedRate, selectedRooms);
               }}
               disabled={soldOut || !effectiveSelectedRate}
               className="w-full mt-4 py-3 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-600"

@@ -37,6 +37,7 @@ const hotel = {
   referAGuestEnabled: true,
   instantBook: true,
   mapViewEnabled: false,
+  showRoomDetailMap: true,
 };
 
 const rooms = [
@@ -54,9 +55,9 @@ const rooms = [
     nonRefundableRate: 210,
     currency: "EUR",
     amenities: ["Free WiFi", "Breakfast", "Balcony"],
-    images: ["/vayada-logo.png"],
+    images: ["/vayada-logo.png", "/vayada-logo.png"],
     bedType: "King bed",
-    remainingRooms: 2,
+    remainingRooms: 3,
     features: ["Free Cancellation", "Include Breakfast"],
     benefits: ["Best direct rate"],
     flexibleRateEnabled: true,
@@ -66,6 +67,8 @@ const rooms = [
     lastMinuteDiscountPercent: null,
     ratePaymentMethods: null,
     rateDepositSettings: null,
+    latitude: 46.0207,
+    longitude: 7.7491,
     locationMarkers: [],
   },
 ];
