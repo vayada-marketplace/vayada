@@ -4955,6 +4955,50 @@ describe("vayada-api", () => {
     });
   });
 
+  it("accepts booking promo-code patches that are valid against the stored state", async () => {
+    const fixedPromoCode: BookingPromoCode = {
+      ...bookingPromoCode,
+      discountType: "fixed",
+      currency: "EUR",
+    };
+    app = buildAuthenticatedApp({
+      bookingPromoCodesRepository: {
+        ...bookingPromoCodesRepository,
+        async listPromoCodesByHotelId(hotelId) {
+          expect(hotelId).toBe("booking_hotel_alpenrose");
+          return [fixedPromoCode];
+        },
+        async updatePromoCodeByHotelId(hotelId, promoCodeId, body) {
+          expect(hotelId).toBe("booking_hotel_alpenrose");
+          expect(promoCodeId).toBe(bookingPromoCode.promoCodeId);
+          expect(body).toEqual({ discountType: "fixed" });
+          return {
+            ...fixedPromoCode,
+            ...body,
+          };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/booking/hotels/booking_hotel_alpenrose/promo-codes/${bookingPromoCode.promoCodeId}`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        discountType: "fixed",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      promoCodeId: bookingPromoCode.promoCodeId,
+      discountType: "fixed",
+      currency: "EUR",
+    });
+  });
+
   it("rejects booking promo-code patches that violate the stored effective state", async () => {
     app = buildAuthenticatedApp({
       bookingPromoCodesRepository: {

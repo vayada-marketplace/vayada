@@ -437,12 +437,6 @@ function parseUpdateBody(body: unknown): ValidationResult<UpdateBookingPromoCode
   if ("validUntil" in input) value.validUntil = optionalDate(input, "validUntil", details);
   if ("isActive" in input) value.isActive = requiredBoolean(input, "isActive", details);
   if ("maxUses" in input) value.maxUses = optionalMaxUses(input, details);
-  if (value.discountType || value.discountValue || "currency" in value) {
-    validateDiscount(value.discountType, value.discountValue, value.currency, details);
-  }
-  if ("validFrom" in value || "validUntil" in value) {
-    validateDateOrder(value.validFrom, value.validUntil, details);
-  }
   if (details.length > 0) return { ok: false, details };
   return { ok: true, value };
 }
