@@ -39,4 +39,32 @@ test.describe("booking-web tenant smoke", () => {
 
     await assertHealthy();
   });
+
+  test("keeps the mobile room detail modal open for internal controls", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockBookingApis(page);
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "View Details", exact: true }).click();
+
+    const modal = page.getByRole("dialog", { name: "Alpine Suite" });
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: "Next image" }).click();
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: /View Full Amenities/i }).click();
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: "Zoom in" }).click();
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: /Select This Rate/i }).click();
+    await expect(page).toHaveURL(/\/book\?/);
+
+    await assertHealthy();
+  });
 });

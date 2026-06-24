@@ -4,18 +4,12 @@ import { useState, useEffect } from "react";
 import { PlusIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { pmsClient } from "@/services/api/pmsClient";
 import { SaveButton } from "@/components/ui";
-
-interface Tier {
-  daysBeforeMin: number;
-  daysBeforeMax: number | null;
-  discountPercent: number;
-}
-
-interface LastMinuteConfig {
-  enabled: boolean;
-  stackWithPromo: boolean;
-  tiers: Tier[];
-}
+import {
+  getLastMinuteConfigFromPayload,
+  type LastMinuteConfig,
+  type LastMinuteConfigPayload,
+  type LastMinuteTier as Tier,
+} from "@/lib/utils/lastMinuteConfig";
 
 const DEFAULT_TIERS: Tier[] = [
   { daysBeforeMin: 7, daysBeforeMax: 13, discountPercent: 10 },
@@ -37,11 +31,10 @@ export default function LastMinuteTab() {
 
   useEffect(() => {
     pmsClient
-      .get<{ last_minute_discount: LastMinuteConfig | null }>("/admin/hotel")
+      .get<LastMinuteConfigPayload>("/admin/hotel")
       .then((hotel) => {
-        if (hotel.last_minute_discount) {
-          setConfig(hotel.last_minute_discount);
-        }
+        const savedConfig = getLastMinuteConfigFromPayload(hotel);
+        if (savedConfig) setConfig(savedConfig);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
