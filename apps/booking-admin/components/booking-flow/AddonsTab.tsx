@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type DragEvent, type FormEvent } from "react";
 import { PlusIcon, PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { ToggleSwitch } from "@/components/ui";
 import type { AddonItem, AddonSettings } from "@/services/settings";
@@ -79,6 +79,17 @@ function toDraft(addon: AddonItem, fallbackCurrency: string): AddonItemFormValue
   };
 }
 
+function orderAddons(addons: AddonItem[]): AddonItem[] {
+  return addons
+    .map((addon, index) => ({ addon, index }))
+    .sort((left, right) => {
+      const leftOrder = left.addon.sortOrder ?? left.index;
+      const rightOrder = right.addon.sortOrder ?? right.index;
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ addon }) => addon);
+}
+
 interface AddonsTabProps {
   addons: AddonItem[];
   addonSettings: AddonSettings;
@@ -87,6 +98,7 @@ interface AddonsTabProps {
   onCreateAddon: (values: AddonItemFormValues) => Promise<void>;
   onUpdateAddon: (addonId: string, values: AddonItemFormValues) => Promise<void>;
   onDeleteAddon: (addonId: string) => Promise<void>;
+  onReorderAddon: (sourceAddonId: string, targetAddonId: string) => Promise<void>;
 }
 
 export default function AddonsTab({
@@ -97,6 +109,7 @@ export default function AddonsTab({
   onCreateAddon,
   onUpdateAddon,
   onDeleteAddon,
+  onReorderAddon,
 }: AddonsTabProps) {
   const [filterCategory, setFilterCategory] = useState("all");
   const [draft, setDraft] = useState<AddonItemFormValues>(() => emptyDraft(propertyCurrency));
@@ -105,9 +118,14 @@ export default function AddonsTab({
   const [savingItem, setSavingItem] = useState(false);
   const [deletingAddonId, setDeletingAddonId] = useState<string | null>(null);
   const [itemError, setItemError] = useState<string | null>(null);
-  const categories = Array.from(new Set(addons.map((a) => a.category).filter(Boolean)));
+  const [draggingAddonId, setDraggingAddonId] = useState<string | null>(null);
+  const orderedAddons = orderAddons(addons);
+  const categories = Array.from(new Set(orderedAddons.map((a) => a.category).filter(Boolean)));
   const filteredAddons =
-    filterCategory === "all" ? addons : addons.filter((a) => a.category === filterCategory);
+    filterCategory === "all"
+      ? orderedAddons
+      : orderedAddons.filter((a) => a.category === filterCategory);
+  const canReorder = filterCategory === "all" && orderedAddons.length > 1;
 
   const openCreateEditor = () => {
     setEditingAddon(null);
@@ -182,6 +200,38 @@ export default function AddonsTab({
     }
   };
 
+  const handleDragStart = (event: DragEvent<HTMLButtonElement>, addonId: string) => {
+    if (!canReorder) {
+      event.preventDefault();
+      return;
+    }
+
+    setDraggingAddonId(addonId);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", addonId);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>, targetAddonId: string) => {
+    const sourceAddonId = draggingAddonId || event.dataTransfer.getData("text/plain");
+    if (!canReorder || !sourceAddonId || sourceAddonId === targetAddonId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = async (event: DragEvent<HTMLDivElement>, targetAddonId: string) => {
+    event.preventDefault();
+    const sourceAddonId = event.dataTransfer.getData("text/plain") || draggingAddonId;
+    setDraggingAddonId(null);
+    if (!canReorder || !sourceAddonId || sourceAddonId === targetAddonId) return;
+
+    setItemError(null);
+    try {
+      await onReorderAddon(sourceAddonId, targetAddonId);
+    } catch {
+      setItemError("Failed to reorder add-ons.");
+    }
+  };
+
   return (
     <div className="max-w-2xl space-y-4">
       {/* Guest Experiences */}
@@ -245,10 +295,29 @@ export default function AddonsTab({
             {filteredAddons.map((addon) => (
               <div
                 key={addon.id}
-                className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors"
+                data-testid={`booking-addon-item-${addon.id}`}
+                onDragOver={(event) => handleDragOver(event, addon.id)}
+                onDrop={(event) => handleDrop(event, addon.id)}
+                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                  draggingAddonId === addon.id
+                    ? "border-gray-400 bg-gray-50"
+                    : "border-gray-200 hover:border-gray-300"
+                }`}
               >
-                {/* Drag handle icon */}
-                <div className="text-gray-300 shrink-0">
+                <button
+                  type="button"
+                  aria-label={`Drag ${addon.name}`}
+                  title={canReorder ? "Drag to reorder" : "Reordering is available in All view"}
+                  draggable={canReorder}
+                  disabled={!canReorder}
+                  onDragStart={(event) => handleDragStart(event, addon.id)}
+                  onDragEnd={() => setDraggingAddonId(null)}
+                  className={`text-gray-300 shrink-0 rounded p-1 ${
+                    canReorder
+                      ? "cursor-grab hover:text-gray-500 active:cursor-grabbing"
+                      : "cursor-not-allowed opacity-50"
+                  }`}
+                >
                   <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="9" cy="6" r="1.5" />
                     <circle cx="15" cy="6" r="1.5" />
@@ -257,7 +326,7 @@ export default function AddonsTab({
                     <circle cx="9" cy="18" r="1.5" />
                     <circle cx="15" cy="18" r="1.5" />
                   </svg>
-                </div>
+                </button>
 
                 {/* Image thumbnail */}
                 {addon.image ? (
@@ -274,7 +343,12 @@ export default function AddonsTab({
 
                 {/* Name and category */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] font-medium text-gray-900 truncate">{addon.name}</p>
+                  <p
+                    data-testid="booking-addon-item-name"
+                    className="text-[13px] font-medium text-gray-900 truncate"
+                  >
+                    {addon.name}
+                  </p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span
                       className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[addon.category] || "bg-gray-100 text-gray-600"}`}

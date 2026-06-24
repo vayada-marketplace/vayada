@@ -36,7 +36,7 @@ const hotel = {
     logoUrl: "/vayada-logo.png",
   },
   defaultLanguage: "en",
-  supportedLanguages: ["en", "de"],
+  supportedLanguages: ["en", "de", "nl"],
   referAGuestEnabled: true,
   instantBook: true,
   mapViewEnabled: false,

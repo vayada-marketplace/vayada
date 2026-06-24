@@ -229,3 +229,20 @@ During migration, routing can send specific paths to `apps/api` while old paths
 continue to hit the Python services. Once a product has enough migrated
 surfaces and post-merge smoke coverage, the remaining Python routes can be
 retired behind a reviewed cutover plan.
+
+## VAY-901 Booking Parity Checklist
+
+Before making the next Booking stack canonical, include this old-stack parity
+batch in cutover smoke:
+
+- VAY-888: Dutch (`nl`, Nederlands) appears in the guest-facing Booking Web
+  language picker and the route does not crash before full Dutch copy exists.
+- VAY-889: Sri Lankan Rupee (`LKR`) appears in Booking Admin localization
+  additional currencies.
+- VAY-890: Booking Web does not render Book Direct Benefits when the target
+  benefits list is empty or unset.
+- VAY-892: Booking Admin add-on reordering persists via target add-on item
+  `sortOrder` writes.
+- VAY-894: Design Studio exposes the Italiana typography preset.
+- VAY-891: child guest-type settings require the split target contract/schema
+  follow-up VAY-929 before cutover.

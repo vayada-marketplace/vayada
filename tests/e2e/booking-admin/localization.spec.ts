@@ -91,6 +91,10 @@ test.describe("booking-admin localization settings cutover", () => {
     await expect(page.getByText("English").first()).toBeVisible();
     await expect(page.getByText(/Fran/).first()).toBeVisible();
 
+    await page.getByPlaceholder(/Search currencies/).fill("LKR");
+    await page.getByRole("button", { name: /Sri Lankan Rupee.*LKR/ }).click();
+    await expect(page.getByText("LKR").first()).toBeVisible();
+
     await page.getByRole("button", { name: /^Save Changes$/ }).click();
 
     await expect.poll(() => typedWrites.length).toBe(1);
@@ -101,7 +105,7 @@ test.describe("booking-admin localization settings cutover", () => {
       {
         defaultCurrency: "CHF",
         defaultLanguage: "de",
-        supportedCurrencies: ["EUR", "USD"],
+        supportedCurrencies: ["EUR", "USD", "LKR"],
         supportedLanguages: ["en", "fr"],
       },
     ]);

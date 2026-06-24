@@ -16,6 +16,9 @@ test.describe("booking-web tenant smoke", () => {
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
     await expect(page.getByText("Alpine Suite")).toBeVisible();
     await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
+    const nav = page.locator("nav");
+    await nav.getByRole("button", { name: "EN", exact: true }).click();
+    await expect(nav.getByRole("button", { name: "Nederlands", exact: true })).toBeVisible();
 
     const graph = await publicStructuredDataGraph(page);
     const hotelNode = graph.find((node) => node["@type"] === "Hotel");

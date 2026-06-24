@@ -182,6 +182,7 @@ export interface AddonItem {
   duration?: string;
   perPerson?: boolean;
   perNight?: boolean;
+  sortOrder?: number;
   location?: string;
   maxGuests?: string;
   highlights?: string[];
