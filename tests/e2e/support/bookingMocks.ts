@@ -73,7 +73,11 @@ const rooms = [
   },
 ];
 
-export async function mockBookingApis(page: Page) {
+interface BookingApiMockOptions {
+  paymentSettings?: Record<string, unknown>;
+}
+
+export async function mockBookingApis(page: Page, options: BookingApiMockOptions = {}) {
   await page.route("**/api/events", async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });
@@ -88,6 +92,26 @@ export async function mockBookingApis(page: Page) {
 
   await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/addons`, async (route) => {
     await route.fulfill({ json: [] });
+  });
+
+  await page.route(`**/api/hotels/${SEEDED_BOOKING_SLUG}/payment-settings`, async (route) => {
+    await route.fulfill({
+      json: {
+        payAtPropertyEnabled: true,
+        payAtHotelMethods: ["cash", "card"],
+        onlineCardPayment: false,
+        bankTransfer: false,
+        paypalEnabled: false,
+        freeCancellationDays: 7,
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: false,
+        phoneRequired: true,
+        termsText: "",
+        cancellationPolicyText: "",
+        ...options.paymentSettings,
+      },
+    });
   });
 
   await page.route("**/api/exchange-rates**", async (route) => {

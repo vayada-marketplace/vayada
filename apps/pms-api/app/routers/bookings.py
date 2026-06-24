@@ -67,10 +67,10 @@ async def post_booking(slug: str, data: BookingCreate):
     try:
         result = await create_booking_request(slug, data)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error creating booking for %s: %s", slug, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return result
 
 
@@ -98,10 +98,10 @@ async def post_confirm_authorization(slug: str, handle: str):
     try:
         result = await confirm_payment_authorized(handle)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error confirming authorization for %s: %s", handle, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return result
 
 
@@ -111,10 +111,10 @@ async def post_withdraw(slug: str, booking_id: str, data: GuestActionRequest):
     try:
         await guest_withdraw_booking(booking_id, data.guest_email)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error withdrawing booking %s: %s", booking_id, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return {"status": "withdrawn"}
 
 
@@ -124,10 +124,10 @@ async def post_cancel_preview(slug: str, booking_id: str, data: GuestActionReque
     try:
         result = await get_cancellation_preview(booking_id, data.guest_email)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error previewing cancellation for %s: %s", booking_id, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return result
 
 
@@ -137,10 +137,10 @@ async def post_cancel(slug: str, booking_id: str, data: GuestActionRequest):
     try:
         await handle_guest_cancellation(booking_id, data.guest_email)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error cancelling booking %s: %s", booking_id, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return {"status": "cancelled"}
 
 
@@ -150,7 +150,7 @@ async def post_booking_lookup(slug: str, data: BookingLookup):
         booking = await lookup_booking(slug, data.booking_reference, data.guest_email)
     except Exception as e:
         logger.error("Error looking up booking: %s", e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
@@ -189,10 +189,10 @@ async def post_change_request_preview(
             addon_dates=data.addon_dates,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error previewing change request for %s: %s", booking_id, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return result
 
 
@@ -215,10 +215,10 @@ async def post_change_request(
             addon_dates=data.addon_dates,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error("Error submitting change request for %s: %s", booking_id, e)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     return _change_request_to_dict(cr)
 
 
@@ -232,7 +232,7 @@ async def get_change_request(
     try:
         cr = await get_change_request_for_guest(slug, booking_id, email)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     if not cr:
         return None
     return _change_request_to_dict(cr)
@@ -285,7 +285,7 @@ async def get_payment_settings(slug: str):
     policy = await CancellationPolicyRepository.get_by_hotel_id(hotel_id)
 
     hotel = await Database.fetchrow(
-        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled, "
+        "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled, phone_required, "
         "same_day_bookings_enabled, same_day_booking_cutoff_time "
         "FROM hotels WHERE id = $1",
         hotel_id,
@@ -341,6 +341,7 @@ async def get_payment_settings(slug: str):
         "specialRequestsEnabled": hotel["special_requests_enabled"] if hotel else True,
         "arrivalTimeEnabled": hotel["arrival_time_enabled"] if hotel else False,
         "guestCountEnabled": hotel["guest_count_enabled"] if hotel else False,
+        "phoneRequired": hotel["phone_required"] if hotel else True,
         "sameDayBookingsEnabled": hotel["same_day_bookings_enabled"] if hotel else True,
         "sameDayBookingCutoffTime": hotel["same_day_booking_cutoff_time"] if hotel else "18:00",
     }
@@ -379,5 +380,9 @@ async def get_payment_settings(slug: str):
         result["paypalPaymentWindowHours"] = 24
         if bank_transfer:
             result["bankTransfer"] = False
+
+    be_phone_required = await hotel_identity_service.get_phone_required_by_slug(slug)
+    if be_phone_required is not None:
+        result["phoneRequired"] = be_phone_required
 
     return result
