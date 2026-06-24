@@ -7,12 +7,13 @@ test.describe("booking-admin Ask Intelligence", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
 
     await page.addInitScript(
-      ({ token }) => {
+      ({ hotelId, token }) => {
         window.localStorage.setItem("access_token", token);
         window.localStorage.setItem("token_expires_at", String(Date.now() + 60 * 60 * 1000));
         window.localStorage.setItem("isLoggedIn", "true");
         window.localStorage.setItem("userType", "hotel");
         window.localStorage.setItem("isSuperAdmin", "false");
+        window.localStorage.setItem("selectedHotelId", hotelId);
         window.localStorage.setItem(
           "user",
           JSON.stringify({ id: "user_1", email: "owner@example.com", type: "hotel" }),
@@ -20,6 +21,7 @@ test.describe("booking-admin Ask Intelligence", () => {
       },
       {
         token: fakeJwt({ org: "org_hotel_group" }),
+        hotelId: BOOKING_ADMIN_HOTEL_ID,
       },
     );
     await mockBookingAdminShellRoutes(page);

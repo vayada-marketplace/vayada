@@ -268,10 +268,6 @@ export async function mockBookingAdminShellRoutes(
   options: BookingAdminShellMocksOptions = {},
 ): Promise<void> {
   const propertySettings = options.propertySettings ?? defaultBookingAdminPropertySettings;
-  // Register broad fallback first; Playwright lets later, more specific routes
-  // win. This fallback is intentionally non-contractual shell noise; specs
-  // still assert the product contract routes they own.
-  await page.route("**/admin/**", (route) => route.fulfill({ json: {} }));
   await page.route("**/admin/module-activations", (route) =>
     route.fulfill({ json: { activations: [] } }),
   );
@@ -289,6 +285,15 @@ export async function mockBookingAdminShellRoutes(
   await page.route("**/admin/superadmin/hotels", (route) => route.fulfill({ json: [] }));
   await page.route("**/admin/settings/property", (route) =>
     route.fulfill({ json: propertySettings }),
+  );
+  await page.route("**/admin/settings/setup-status", (route) =>
+    route.fulfill({
+      json: {
+        setup_complete: false,
+        missing_fields: [],
+        prefill_data: null,
+      },
+    }),
   );
   await page.route(`**${BOOKING_ADMIN_PROPERTY_LINK_PATH}*`, (route) =>
     route.fulfill({

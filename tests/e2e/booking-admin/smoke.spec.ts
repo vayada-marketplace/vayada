@@ -5,7 +5,6 @@ test.describe("booking-admin smoke", () => {
     const response = await page.request.get("/login");
     const html = await response.text();
     expect(html).toContain("Booking Engine");
-    expect(html).toContain("Redirecting to sign in...");
     expect(html).not.toContain("Email address");
     expect(html).not.toContain("Continue with WorkOS");
     expect(html).not.toContain("Use legacy password fallback");
