@@ -341,11 +341,23 @@ def _bank_transfer_details_html(booking: dict) -> str:
     if not rows_html:
         return ""
     reference = escape(str(booking.get("booking_reference") or ""))
-    amount = escape(f"{booking.get('currency', '')} {float(booking.get('total_amount') or 0):.2f}")
+    transfer_amount = (
+        booking.get("deposit_amount")
+        if booking.get("deposit_required") and booking.get("deposit_amount") is not None
+        else booking.get("total_amount")
+    )
+    amount = escape(f"{booking.get('currency', '')} {float(transfer_amount or 0):.2f}")
+    balance_html = ""
+    if booking.get("deposit_required"):
+        balance = escape(
+            f"{booking.get('currency', '')} {float(booking.get('balance_amount') or 0):.2f}"
+        )
+        balance_html = f'<p class="detail"><strong>Remaining balance:</strong> {balance} — due at the property upon check-in</p>'
     return f"""
     <h3>Bank Transfer Details</h3>
     <p class="detail">Please include your booking reference <strong>{reference}</strong> with the transfer.</p>
     <p class="detail"><strong>Amount:</strong> {amount}</p>
+    {balance_html}
     {rows_html}
     """
 
@@ -383,12 +395,21 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
         await _send_email(guest_email, subject, _wrap_html(content))
         return
 
+    payment_method = booking.get("payment_method", "card")
+    payment_note = ""
+    if payment_method == "card":
+        payment_note = '<p class="detail">Your card has been authorized. It will only be charged if the host accepts your booking.</p>'
+    elif payment_method == "bank_transfer":
+        payment_note = '<p class="detail">If the host accepts your booking, you will receive another email with bank transfer details and the amount to transfer.</p>'
+    elif payment_method == "pay_at_property":
+        payment_note = '<p class="detail">If the host accepts your booking, payment is due at the property upon check-in.</p>'
+
     subject = f"Booking Request Submitted — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Submitted</h2>
     <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
     <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
-    {_bank_transfer_details_html(booking)}
+    {payment_note}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -402,16 +423,24 @@ async def send_guest_booking_accepted(guest_email: str, booking: dict):
     """Notify guest that their booking has been accepted and payment captured."""
     subject = f"Booking Confirmed — {booking['booking_reference']}"
     payment_method = booking.get("payment_method", "card")
-    payment_note = (
-        "Your card has been charged."
-        if payment_method == "card"
-        else "Please pay at the property upon arrival."
-    )
+    if payment_method == "card":
+        payment_note = "Your card has been charged."
+    elif payment_method == "bank_transfer":
+        payment_note = (
+            "Please complete your bank transfer using the details below."
+            if booking.get("bank_details")
+            else "The property will send bank transfer details separately."
+        )
+    elif payment_method == "paypal":
+        payment_note = "The property has verified your PayPal payment."
+    else:
+        payment_note = "Payment is due at the property upon check-in."
 
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
     <p class="detail">Great news — your booking at <strong>{booking["hotel_name"]}</strong> has been accepted by the host.</p>
     <p class="detail">{payment_note}</p>
+    {_bank_transfer_details_html(booking)}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">

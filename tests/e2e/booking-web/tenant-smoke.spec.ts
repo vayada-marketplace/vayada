@@ -18,4 +18,83 @@ test.describe("booking-web tenant smoke", () => {
 
     await assertHealthy();
   });
+
+  test("mobile checkout hides the hero, uses one compact summary, and allows optional phone", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockBookingApis(page, { paymentSettings: { phoneRequired: false } });
+
+    await page.goto(
+      "/book?room=alpine-suite&checkIn=2026-07-01&checkOut=2026-07-03&adults=2&rooms=1&rateType=flexible",
+    );
+
+    await expect(page.getByRole("heading", { name: "Guest Information" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /Booking Summary/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your Stay" })).toBeHidden();
+    await expect(page.getByLabel(/first name/i)).toBeInViewport();
+    await expect(page.getByText("Phone Number (optional)")).toBeVisible();
+    await assertHealthy();
+
+    await page.getByLabel(/first name/i).fill("Ada");
+    await page.getByLabel(/last name/i).fill("Lovelace");
+    await page.getByLabel(/email address/i).fill("ada@example.com");
+    await page.getByRole("button", { name: /continue to payment/i }).click();
+
+    await expect(page).toHaveURL(/\/payment/);
+    await expect(page.getByRole("heading", { name: "Review your reservation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Booking Summary/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Order Summary" })).toBeHidden();
+  });
+
+  test("carries selected multi-room quantity to checkout", async ({ page }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page);
+
+    await page.goto("/?adults=4&children=0");
+
+    await expect(page.getByRole("heading", { name: /2×\s*Alpine Suite/ })).toBeVisible();
+    await expect(page.getByText("Up to 6 guests")).toBeVisible();
+    const roomQuantity = page.getByLabel("2 Rooms");
+    await expect(roomQuantity).toHaveValue("2");
+
+    await roomQuantity.selectOption("3");
+    await expect(page.getByRole("heading", { name: /3×\s*Alpine Suite/ })).toBeVisible();
+    await expect(page.getByText("Up to 9 guests")).toBeVisible();
+
+    await page.getByRole("button", { name: "Select This Rate", exact: true }).click();
+    await expect(page).toHaveURL(/rooms=3/);
+
+    await assertHealthy();
+  });
+
+  test("keeps the mobile room detail modal open for internal controls", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockBookingApis(page);
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "View Details", exact: true }).click();
+
+    const modal = page.getByRole("dialog", { name: "Alpine Suite" });
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: "Next image" }).click();
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: /View Full Amenities/i }).click();
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: "Zoom in" }).click();
+    await expect(modal).toBeVisible();
+
+    await modal.getByRole("button", { name: /Select This Rate/i }).click();
+    await expect(page).toHaveURL(/\/book\?/);
+
+    await assertHealthy();
+  });
 });

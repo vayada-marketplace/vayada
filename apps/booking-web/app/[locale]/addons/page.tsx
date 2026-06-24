@@ -3,22 +3,26 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import BookingFooter from "@/components/layout/BookingFooter";
 import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
+import MobileStaySummary from "@/components/booking/MobileStaySummary";
 import AddonDetailModal from "@/components/booking/AddonDetailModal";
 import { ADDON_CATEGORIES } from "@/lib/constants/addons";
 import { useHotel, useAddons } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { calculateNights, ensureMinOneNight } from "@/lib/utils";
+import { calculateNights, ensureMinOneNight, formatDate } from "@/lib/utils";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
+import { usePricing } from "@/lib/hooks/usePricing";
 
 export default function AddonsPage() {
   const router = useRouter();
+  const locale = useLocale();
   const searchParams = useSearchParams();
   const t = useTranslations("addons");
+  const tb = useTranslations("book");
   const tc = useTranslations("common");
   const { hotel } = useHotel();
   const { addons } = useAddons();
@@ -41,6 +45,10 @@ export default function AddonsPage() {
   const childrenEnabled = hotel.guestChildrenEnabled !== false;
   const childrenParam = childrenEnabled ? parseInt(searchParams.get("children") || "0") : 0;
   const nights = calculateNights(checkIn, checkOut);
+  const roomId = searchParams.get("room") || "";
+  const roomsParam = parseInt(searchParams.get("rooms") || "1");
+  const rateType = searchParams.get("rateType") || "flexible";
+  const promoCodeParam = searchParams.get("promoCode") || "";
 
   // Generate array of stay dates (each night of the stay)
   const stayDates = (() => {
@@ -62,6 +70,18 @@ export default function AddonsPage() {
     activeCategory === "all" ? addons : addons.filter((a) => a.category === activeCategory);
 
   const selectedIds = Object.keys(selections);
+  const { room, roomTotal, promoDiscount, discountAmount, grandTotal } = usePricing({
+    roomId,
+    checkIn,
+    checkOut,
+    rateType,
+    roomsParam,
+    adults: adultsParam,
+    selectedAddonIds: selectedIds,
+    addonQuantities: selections,
+    addonDates: selectedDates,
+    promoCode: promoCodeParam,
+  });
 
   // What dimension is the count selector for? perPerson → people (max=adults),
   // per-booking-only → items (cap at 10). Per-day-only addons don't get a count
@@ -135,11 +155,13 @@ export default function AddonsPage() {
 
   return (
     <div className="min-h-screen bg-white">
-      <HeroSection
-        heroImage={hotel.heroImage}
-        hotelName={hotel.name}
-        description={hotel.description}
-      />
+      <div className="hidden min-[769px]:block">
+        <HeroSection
+          heroImage={hotel.heroImage}
+          hotelName={hotel.name}
+          description={hotel.description}
+        />
+      </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
@@ -151,6 +173,52 @@ export default function AddonsPage() {
 
           <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
+
+        {room && (
+          <MobileStaySummary
+            room={room}
+            roomCount={roomsParam}
+            checkIn={checkIn}
+            checkOut={checkOut}
+            checkInTime={hotel.checkInTime}
+            checkOutTime={hotel.checkOutTime}
+            nights={nights}
+            adults={adultsParam}
+            childGuests={childrenParam}
+            roomTotal={roomTotal}
+            grandTotal={grandTotal}
+            selectedCurrency={selectedCurrency}
+            addons={addons}
+            selectedAddonIds={selectedIds}
+            addonQuantities={selections}
+            addonDates={selectedDates}
+            promoCode={promoCodeParam}
+            promoDiscountText={
+              promoDiscount?.type === "percentage" ? ` (-${promoDiscount.value}%)` : ""
+            }
+            discountAmount={discountAmount}
+            labels={{
+              title: tb("bookingSummary"),
+              checkIn: tb("checkIn"),
+              checkOut: tb("checkOut"),
+              duration: tb("duration"),
+              guests: tc("guests"),
+              total: tc("total"),
+              includesTaxes: tc("includesTaxes"),
+              nights: tc("nights", { count: nights }),
+              checkInFrom: hotel.checkInTime
+                ? tc("checkInFrom", { time: hotel.checkInTime })
+                : undefined,
+              checkOutBy: hotel.checkOutTime
+                ? tc("checkOutBy", { time: hotel.checkOutTime })
+                : undefined,
+            }}
+            locale={locale}
+            formatDate={formatDate}
+            formatPrice={formatPrice}
+            convertAndRound={convertAndRound}
+          />
+        )}
 
         {/* Category Filters */}
         <div className="flex items-center gap-2 mb-8 flex-wrap">

@@ -137,6 +137,7 @@ export default function BookingFlowPage() {
   const [specialRequestsEnabled, setSpecialRequestsEnabled] = useState(false);
   const [arrivalTimeEnabled, setArrivalTimeEnabled] = useState(false);
   const [guestCountEnabled, setGuestCountEnabled] = useState(false);
+  const [phoneRequired, setPhoneRequired] = useState(true);
   const [adultAgeThreshold, setAdultAgeThreshold] = useState(18);
   const [childrenEnabled, setChildrenEnabled] = useState(true);
   const [savingGuestForm, setSavingGuestForm] = useState(false);
@@ -197,6 +198,7 @@ export default function BookingFlowPage() {
           setSpecialRequestsEnabled(property.special_requests_enabled ?? false);
           setArrivalTimeEnabled(property.arrival_time_enabled ?? false);
           setGuestCountEnabled(property.guest_count_enabled ?? false);
+          setPhoneRequired(property.phone_required ?? true);
           setAdultAgeThreshold(property.guest_adult_age_threshold ?? 18);
           setChildrenEnabled(property.guest_children_enabled ?? true);
         }
@@ -497,6 +499,7 @@ export default function BookingFlowPage() {
         special_requests_enabled: specialRequestsEnabled,
         arrival_time_enabled: arrivalTimeEnabled,
         guest_count_enabled: guestCountEnabled,
+        phone_required: phoneRequired,
         guest_adult_age_threshold: adultAgeThreshold,
         guest_children_enabled: childrenEnabled,
       };
@@ -808,6 +811,22 @@ export default function BookingFlowPage() {
                     className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${guestCountEnabled ? "left-4" : "left-0.5"}`}
                   />
                 </button>
+              </div>
+              <div className="flex items-center justify-between gap-4 p-3 rounded-lg border border-gray-200">
+                <div>
+                  <span className="text-[13px] font-medium text-gray-900">Phone number</span>
+                  <p className="mt-0.5 text-[12px] text-gray-500">
+                    When optional, guests can skip the phone number field.
+                  </p>
+                </div>
+                <select
+                  value={phoneRequired ? "required" : "optional"}
+                  onChange={(event) => setPhoneRequired(event.target.value === "required")}
+                  className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-[13px] font-medium text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="required">Required</option>
+                  <option value="optional">Optional</option>
+                </select>
               </div>
               <div className="pt-3 mt-3 border-t border-gray-100 space-y-3">
                 <ToggleSwitch
