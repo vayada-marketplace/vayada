@@ -6,6 +6,11 @@ import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
 import { createBookingAddonItem } from "@/services/api/bookingAddonItemsClient";
 import { updateBookingBenefitsSettings } from "@/services/api/bookingBenefitsSettingsClient";
+import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
+import {
+  buildFinancePaymentSettingsBody,
+  updateFinancePaymentSettings,
+} from "@/services/api/financePaymentSettingsClient";
 import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
@@ -30,6 +35,8 @@ import {
   RoomsStep,
   createEmptyRoom,
   hasSeasonCoverageGaps,
+  type RoomType,
+  type SetupAddon,
   useSetupWizardState,
 } from "@vayada/hotel-setup-wizard";
 
@@ -37,8 +44,6 @@ const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
 const PROMO_CODE_IMPORT_UNAVAILABLE =
   "Setup promo codes from this invite were not imported because promo-code management is not available on next-api yet.";
-const PAYMENT_SETTINGS_WRITE_UNAVAILABLE =
-  "Payment settings writes are not available on next-api yet. Use the default pay-at-property setup options before completing setup.";
 const LAST_MINUTE_SETTINGS_UNAVAILABLE =
   "Last-minute discount settings are not available on next-api yet. Remove last-minute discounts before completing setup.";
 
@@ -327,21 +332,11 @@ export default function SetupPage() {
     return false;
   };
 
-  const hasDefaultPaymentSetup = (): boolean =>
-    payAtHotel &&
-    payAtHotelMethods.length === 2 &&
-    payAtHotelMethods.includes("cash") &&
-    payAtHotelMethods.includes("card") &&
-    !onlineCardPayment &&
-    !bankTransfer &&
-    paymentProvider === "vayada";
-
   const handleComplete = async () => {
     setError("");
     setSaving(true);
     try {
       const unavailableSelections = [
-        ...(!hasDefaultPaymentSetup() ? [PAYMENT_SETTINGS_WRITE_UNAVAILABLE] : []),
         ...(lastMinuteConfig.enabled ? [LAST_MINUTE_SETTINGS_UNAVAILABLE] : []),
       ];
       if (unavailableSelections.length > 0) {
@@ -430,6 +425,28 @@ export default function SetupPage() {
               status: "active",
             },
           });
+        }
+      }
+      if (createdHotelId) {
+        try {
+          const propertyLink = await getBookingHotelPropertyLink({ hotelId: createdHotelId });
+          await updateFinancePaymentSettings({
+            propertyId: propertyLink.propertyId,
+            body: buildFinancePaymentSettingsBody({
+              payAtPropertyEnabled: payAtHotel,
+              payAtHotelMethods,
+              onlineCardPayment,
+              bankTransfer,
+              paymentProvider,
+              defaultCurrency: currency,
+              commandPrefix: `setup-payment-settings-${createdHotelId}`,
+            }),
+          });
+        } catch {
+          localStorage.setItem(
+            "setupWarning",
+            "Hotel created, but payment settings were not saved. Update them from Settings > Payments.",
+          );
         }
       }
 
@@ -679,7 +696,7 @@ export default function SetupPage() {
       // Prefill rooms
       if (data.rooms && data.rooms.length > 0) {
         setRooms(
-          data.rooms.map((r: any) => ({
+          data.rooms.map((r: Partial<RoomType>) => ({
             ...createEmptyRoom(),
             ...r,
             currency: r.currency || data.property?.default_currency || "EUR",
@@ -690,7 +707,7 @@ export default function SetupPage() {
       // Prefill addons
       if (data.addons && data.addons.length > 0) {
         setSetupAddons(
-          data.addons.map((a: any) => ({
+          data.addons.map((a: Partial<SetupAddon>) => ({
             _localId: crypto.randomUUID(),
             name: a.name || "",
             description: a.description || "",

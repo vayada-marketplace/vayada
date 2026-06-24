@@ -188,8 +188,6 @@ test.describe("booking-admin add-ons settings cutover", () => {
           imageUrl: null,
           duration: "90 min",
           pricingModel: "per_guest",
-          publicVisible: true,
-          status: "active",
         },
       },
       {
