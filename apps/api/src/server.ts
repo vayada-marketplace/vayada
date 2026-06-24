@@ -30,6 +30,7 @@ import {
   createPgBookingWebAffiliateRepository,
 } from "./routes/bookingWebAffiliate.js";
 import { createPgTargetBookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
+import { createPgTargetBookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import { createCompatibilityPmsBookingReservationsReadRepository } from "./routes/bookingReservations.js";
 import { createTargetBookingWebCheckoutAdapter } from "./routes/bookingWebPublic.js";
 import {
@@ -115,6 +116,12 @@ const bookingCustomDomainRepository = config.targetDatabaseUrl
 
 const bookingAddonItemsRepository = config.targetDatabaseUrl
   ? createPgTargetBookingAddonItemsRepository({
+      connectionString: config.targetDatabaseUrl,
+    })
+  : undefined;
+
+const bookingPromoCodesRepository = config.targetDatabaseUrl
+  ? createPgTargetBookingPromoCodesRepository({
       connectionString: config.targetDatabaseUrl,
     })
   : undefined;
@@ -346,6 +353,7 @@ const app = buildApp({
       : undefined,
   bookingReservationsRepository,
   bookingAddonItemsRepository,
+  bookingPromoCodesRepository,
   bookingDashboardMetricsReadPort,
   pmsOperationsRepository,
   pmsOperationsCommandRepository,

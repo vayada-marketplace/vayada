@@ -5,6 +5,10 @@ import {
   type BookingAddonItemsRepository,
 } from "./bookingAddonItems.js";
 import {
+  registerBookingPromoCodeRoutes,
+  type BookingPromoCodesRepository,
+} from "./bookingPromoCodes.js";
+import {
   registerBookingDashboardRoutes,
   type BookingDashboardRoutesOptions,
 } from "./bookingDashboard.js";
@@ -30,6 +34,7 @@ type BookingHotelParams = {
 
 export type BookingRoutesOptions = {
   addonItemsRepository?: BookingAddonItemsRepository;
+  promoCodesRepository?: BookingPromoCodesRepository;
   dashboardMetricsReadPort?: BookingDashboardRoutesOptions["metricsReadPort"];
   reservationsRepository?: BookingReservationsReadRepository;
   settingsRepository?: BookingSettingsReadRepository;
@@ -44,6 +49,10 @@ export async function registerBookingRoutes(
 ): Promise<void> {
   if (options.addonItemsRepository) {
     await registerBookingAddonItemRoutes(app, options.addonItemsRepository);
+  }
+
+  if (options.promoCodesRepository) {
+    await registerBookingPromoCodeRoutes(app, options.promoCodesRepository);
   }
 
   if (options.settingsRepository) {

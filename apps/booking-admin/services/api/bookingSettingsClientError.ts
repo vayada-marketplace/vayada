@@ -2,7 +2,7 @@ import { ApiErrorResponse } from "./client";
 
 export type BookingSettingsClientOperation = "read" | "write";
 
-export type BookingSettingsClientErrorStatusCode = 401 | 403 | 404 | 422 | 500;
+export type BookingSettingsClientErrorStatusCode = 401 | 403 | 404 | 409 | 422 | 500;
 
 export type BookingSettingsClientErrorCategory =
   | "authentication"
@@ -18,6 +18,7 @@ export type BookingSettingsClientErrorCode =
   | "inactive_entitlement"
   | "missing_resource_access"
   | "invalid_payload"
+  | "conflict"
   | "not_found"
   | "read_model_unavailable"
   | "write_model_unavailable";
@@ -89,6 +90,15 @@ function mapApiError(
       statusCode: 404,
       code: "not_found",
       category: input.operation === "write" ? "write_model" : "read_model",
+      detail,
+    };
+  }
+
+  if (error.status === 409 && input.operation === "write") {
+    return {
+      statusCode: 409,
+      code: "conflict",
+      category: "validation",
       detail,
     };
   }
@@ -208,6 +218,7 @@ function toContractStatusCode(
     bodyStatusCode === 401 ||
     bodyStatusCode === 403 ||
     bodyStatusCode === 404 ||
+    bodyStatusCode === 409 ||
     bodyStatusCode === 422 ||
     bodyStatusCode === 500
   ) {
@@ -217,6 +228,7 @@ function toContractStatusCode(
     responseStatus === 401 ||
     responseStatus === 403 ||
     responseStatus === 404 ||
+    responseStatus === 409 ||
     responseStatus === 422
   ) {
     return responseStatus;
@@ -233,6 +245,7 @@ function isBookingSettingsClientErrorCode(value: unknown): value is BookingSetti
     value === "missing_resource_access" ||
     value === "not_found" ||
     value === "invalid_payload" ||
+    value === "conflict" ||
     value === "read_model_unavailable" ||
     value === "write_model_unavailable"
   );

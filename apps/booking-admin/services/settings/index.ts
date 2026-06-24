@@ -221,12 +221,14 @@ export interface PromoCodeItem {
   code: string;
   discountType: "percentage" | "fixed";
   discountValue: number;
+  currency?: string | null;
   validFrom?: string | null;
   validUntil?: string | null;
   isActive: boolean;
   maxUses?: number | null;
   useCount: number;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export type CustomDomainStatus = BookingCustomDomainResponse;

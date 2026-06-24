@@ -33,6 +33,7 @@ import {
 import type { BookingCustomDomainRepository } from "./routes/bookingCustomDomain.js";
 import { registerBookingRoutes, type BookingRoutesOptions } from "./routes/booking.js";
 import type { BookingAddonItemsRepository } from "./routes/bookingAddonItems.js";
+import type { BookingPromoCodesRepository } from "./routes/bookingPromoCodes.js";
 import {
   registerWorkosWebhookRoutes,
   type WorkosWebhookRoutesOptions,
@@ -128,6 +129,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   pmsOperationsAllowedOrigins?: string[];
   bookingDashboardMetricsReadPort?: BookingRoutesOptions["dashboardMetricsReadPort"];
   bookingAddonItemsRepository?: BookingAddonItemsRepository;
+  bookingPromoCodesRepository?: BookingPromoCodesRepository;
   bookingSettingsRepository?: BookingSettingsReadRepository;
   bookingSettingsWriteRepository?: BookingSettingsWriteRepository;
   bookingGuestFormSettingsSync?: BookingGuestFormSettingsSync;
@@ -311,6 +313,7 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
   app.register(registerBookingRoutes, {
     prefix: "/api/booking",
     addonItemsRepository: options.bookingAddonItemsRepository,
+    promoCodesRepository: options.bookingPromoCodesRepository,
     dashboardMetricsReadPort: options.bookingDashboardMetricsReadPort,
     reservationsRepository: options.bookingReservationsRepository,
     settingsRepository: options.bookingSettingsRepository,

@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
 import { createBookingAddonItem } from "@/services/api/bookingAddonItemsClient";
+import {
+  createBookingPromoCode,
+  type CreateBookingPromoCodeBody,
+} from "@/services/api/bookingPromoCodesClient";
 import { updateBookingBenefitsSettings } from "@/services/api/bookingBenefitsSettingsClient";
 import { updateBookingLastMinuteSettings } from "@/services/api/bookingLastMinuteSettingsClient";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
@@ -43,8 +47,6 @@ import {
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
-const PROMO_CODE_IMPORT_UNAVAILABLE =
-  "Setup promo codes from this invite were not imported because promo-code management is not available on next-api yet.";
 
 const STEPS = [
   { number: 1, label: "Your Property" },
@@ -72,6 +74,50 @@ function toAddonCategory(category: string) {
     : "other";
 }
 
+function toSetupPromoCode(
+  input: unknown,
+  fallbackCurrency: string,
+): CreateBookingPromoCodeBody | null {
+  if (!isRecord(input)) return null;
+  const code = readString(input.code)?.toUpperCase();
+  const rawType = readString(input.discountType ?? input.discount_type)?.toLowerCase();
+  if (rawType !== "fixed" && rawType !== "percentage") return null;
+  const discountType = rawType;
+  const rawValue = input.discountValue ?? input.discount_value;
+  const discountValue =
+    typeof rawValue === "number" ? rawValue.toFixed(2) : (readString(rawValue) ?? "");
+  if (!code || !discountValue) return null;
+  const currency = (readString(input.currency) ?? fallbackCurrency).toUpperCase();
+  return {
+    code,
+    discountType,
+    discountValue,
+    currency: discountType === "fixed" ? currency : null,
+    validFrom: readString(input.validFrom ?? input.valid_from) ?? null,
+    validUntil: readString(input.validUntil ?? input.valid_until) ?? null,
+    isActive: readBoolean(input.isActive ?? input.is_active) ?? true,
+    maxUses: readPositiveInteger(input.maxUses ?? input.max_uses),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
+}
+
 export default function SetupPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -84,6 +130,7 @@ export default function SetupPage() {
   const [applyingInvite, setApplyingInvite] = useState(false);
   const [appliedInviteCode, setAppliedInviteCode] = useState("");
   const [showWizard, setShowWizard] = useState(false);
+  const [setupPromoCodes, setSetupPromoCodes] = useState<CreateBookingPromoCodeBody[]>([]);
 
   // Step 3: Choose PMS
   const [selectedPms] = useState("vayada");
@@ -424,6 +471,25 @@ export default function SetupPage() {
           });
         }
       }
+      if (setupPromoCodes.length > 0 && createdHotelId) {
+        const failedPromoCodes: string[] = [];
+        for (const promoCode of setupPromoCodes) {
+          try {
+            await createBookingPromoCode({
+              hotelId: createdHotelId,
+              body: promoCode,
+            });
+          } catch {
+            failedPromoCodes.push(promoCode.code);
+          }
+        }
+        if (failedPromoCodes.length > 0) {
+          localStorage.setItem(
+            "setupWarning",
+            `Hotel created, but some promo codes were not saved: ${failedPromoCodes.join(", ")}. Add them from Booking Flow > Promo Codes.`,
+          );
+        }
+      }
       if (createdHotelId) {
         try {
           const propertyLink = await getBookingHotelPropertyLink({ hotelId: createdHotelId });
@@ -733,9 +799,14 @@ export default function SetupPage() {
         );
       }
 
-      if (data.promoCodes && data.promoCodes.length > 0) {
-        setError(PROMO_CODE_IMPORT_UNAVAILABLE);
-      }
+      const invitePromoCodes = Array.isArray(data.promoCodes) ? (data.promoCodes as unknown[]) : [];
+      setSetupPromoCodes(
+        invitePromoCodes
+          .map((promoCode: unknown) =>
+            toSetupPromoCode(promoCode, data.property?.default_currency || "EUR"),
+          )
+          .filter((promoCode): promoCode is CreateBookingPromoCodeBody => promoCode !== null),
+      );
 
       // Prefill benefits
       if (data.benefits && data.benefits.length > 0) {
