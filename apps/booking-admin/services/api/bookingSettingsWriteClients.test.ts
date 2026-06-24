@@ -22,6 +22,11 @@ import {
   type BookingLocalizationSettings,
 } from "./bookingLocalizationSettingsClient";
 import {
+  BookingLastMinuteSettingsClientError,
+  updateBookingLastMinuteSettings,
+  type UpdateBookingLastMinuteSettingsBody,
+} from "./bookingLastMinuteSettingsClient";
+import {
   BookingRoomFilterSettingsClientError,
   updateBookingRoomFilterSettings,
   type BookingRoomFilterSettings,
@@ -129,6 +134,29 @@ const updateCases: Array<UpdateCase<unknown>> = [
         {
           ...input,
           body: input.body as BookingLocalizationSettings,
+        },
+        client,
+      ),
+  },
+  {
+    name: "last-minute",
+    endpoint: "/api/booking/hotels/hotel%2Fwith%20space/settings/last-minute",
+    body: {
+      enabled: true,
+      stackWithPromo: false,
+      tiers: [{ daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 }],
+    } satisfies UpdateBookingLastMinuteSettingsBody,
+    errorClass: BookingLastMinuteSettingsClientError,
+    missingHotelIdError: {
+      statusCode: 404,
+      code: "not_found",
+      category: "read_model",
+    },
+    update: (input, client) =>
+      updateBookingLastMinuteSettings(
+        {
+          ...input,
+          body: input.body as UpdateBookingLastMinuteSettingsBody,
         },
         client,
       ),

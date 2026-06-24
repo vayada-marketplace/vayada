@@ -553,6 +553,20 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       },
     };
   },
+  async findLastMinuteSettingsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      lastMinuteDiscount: {
+        enabled: true,
+        stackWithPromo: false,
+        tiers: [{ daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 }],
+      },
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    };
+  },
 };
 
 const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
@@ -575,6 +589,13 @@ const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
   async updateRoomFilterSettingsByHotelId(hotelId, settings) {
     expect(hotelId).toBe("booking_hotel_alpenrose");
     return settings;
+  },
+  async updateLastMinuteSettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return {
+      lastMinuteDiscount: settings,
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    };
   },
 };
 
@@ -3786,6 +3807,46 @@ describe("vayada-api", () => {
     });
   });
 
+  it("returns booking last-minute settings with auth, policy, and the documented shape", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/last-minute",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toEqual({
+      enabled: true,
+      stackWithPromo: false,
+      tiers: [{ daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 }],
+      updatedAt: "2026-06-22T10:00:00.000Z",
+    });
+  });
+
+  it("rejects booking last-minute settings when linked-resource access is missing", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_other/settings/last-minute",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toEqual({
+      statusCode: 403,
+      code: "missing_resource_access",
+      category: "authorization",
+      message: "Missing booking hotel access.",
+    });
+  });
+
   const settingsWriteCases = [
     {
       name: "add-on display",
@@ -3837,6 +3898,27 @@ describe("vayada-api", () => {
         defaultLanguage: "en",
         supportedCurrencies: ["USD"],
         supportedLanguages: ["de"],
+      },
+    },
+    {
+      name: "last-minute",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/last-minute",
+      payload: {
+        enabled: true,
+        stackWithPromo: false,
+        tiers: [
+          { daysBeforeMin: 7, daysBeforeMax: 13, discountPercent: 10 },
+          { daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 },
+        ],
+      },
+      expected: {
+        enabled: true,
+        stackWithPromo: false,
+        tiers: [
+          { daysBeforeMin: 7, daysBeforeMax: 13, discountPercent: 10 },
+          { daysBeforeMin: 0, daysBeforeMax: 2, discountPercent: 30 },
+        ],
+        updatedAt: "2026-06-22T10:00:00.000Z",
       },
     },
     {
@@ -3997,6 +4079,18 @@ describe("vayada-api", () => {
         defaultLanguage: "en",
         supportedCurrencies: [],
         supportedLanguages: [],
+      },
+    },
+    {
+      name: "last-minute",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/last-minute",
+      payload: {
+        enabled: true,
+        stackWithPromo: false,
+        tiers: [
+          { daysBeforeMin: 0, daysBeforeMax: 4, discountPercent: 20 },
+          { daysBeforeMin: 4, daysBeforeMax: 7, discountPercent: 15 },
+        ],
       },
     },
     {
@@ -5905,6 +5999,16 @@ describe("vayada-api", () => {
       booking_filters: string[];
       custom_filters: Record<string, string>;
       filter_rooms: Record<string, string[]>;
+      last_minute_discount: {
+        enabled: boolean;
+        stackWithPromo: boolean;
+        tiers: Array<{
+          daysBeforeMin: number;
+          daysBeforeMax: number | null;
+          discountPercent: number;
+        }>;
+      };
+      updated_at: string;
     } = {
       show_addons_step: false,
       group_addons_by_category: true,
@@ -5919,6 +6023,12 @@ describe("vayada-api", () => {
       booking_filters: ["oceanView"],
       custom_filters: { oceanView: "Ocean view" },
       filter_rooms: { oceanView: ["room_101"] },
+      last_minute_discount: {
+        enabled: false,
+        stackWithPromo: false,
+        tiers: [],
+      },
+      updated_at: "2026-06-22T10:00:00.000Z",
     };
     const pool: BookingSettingsPool = {
       async query<T extends QueryResultRow = QueryResultRow>(
@@ -5957,6 +6067,10 @@ describe("vayada-api", () => {
           state.booking_filters = JSON.parse(values?.[1] as string) as string[];
           state.custom_filters = JSON.parse(values?.[2] as string) as Record<string, string>;
           state.filter_rooms = JSON.parse(values?.[3] as string) as Record<string, string[]>;
+        } else if (text.includes("last_minute_discount = $2::jsonb")) {
+          state.last_minute_discount = JSON.parse(
+            values?.[1] as string,
+          ) as typeof state.last_minute_discount;
         }
 
         return {
@@ -6051,6 +6165,20 @@ describe("vayada-api", () => {
           bookingFilters: ["spa_access"],
           customFilters: { spa_access: "Spa access" },
           filterRooms: { spa_access: ["room_102"] },
+        },
+      },
+      {
+        path: "/last-minute",
+        update: {
+          enabled: true,
+          stackWithPromo: true,
+          tiers: [{ daysBeforeMin: 0, daysBeforeMax: 1, discountPercent: 25 }],
+        },
+        expected: {
+          enabled: true,
+          stackWithPromo: true,
+          tiers: [{ daysBeforeMin: 0, daysBeforeMax: 1, discountPercent: 25 }],
+          updatedAt: "2026-06-22T10:00:00.000Z",
         },
       },
     ];

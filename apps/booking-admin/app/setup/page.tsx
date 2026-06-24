@@ -6,6 +6,7 @@ import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
 import { createBookingAddonItem } from "@/services/api/bookingAddonItemsClient";
 import { updateBookingBenefitsSettings } from "@/services/api/bookingBenefitsSettingsClient";
+import { updateBookingLastMinuteSettings } from "@/services/api/bookingLastMinuteSettingsClient";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import {
   buildFinancePaymentSettingsBody,
@@ -44,8 +45,6 @@ const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,700;1,400&family=Lato:wght@300;400;700&family=Cinzel:wght@400;600;700&family=Italiana&display=swap";
 const PROMO_CODE_IMPORT_UNAVAILABLE =
   "Setup promo codes from this invite were not imported because promo-code management is not available on next-api yet.";
-const LAST_MINUTE_SETTINGS_UNAVAILABLE =
-  "Last-minute discount settings are not available on next-api yet. Remove last-minute discounts before completing setup.";
 
 const STEPS = [
   { number: 1, label: "Your Property" },
@@ -336,9 +335,7 @@ export default function SetupPage() {
     setError("");
     setSaving(true);
     try {
-      const unavailableSelections = [
-        ...(lastMinuteConfig.enabled ? [LAST_MINUTE_SETTINGS_UNAVAILABLE] : []),
-      ];
+      const unavailableSelections: string[] = [];
       if (unavailableSelections.length > 0) {
         setError(unavailableSelections.join(" "));
         setSaving(false);
@@ -543,6 +540,20 @@ export default function SetupPage() {
           }
         } catch {
           // Non-fatal: benefits can be added later from Settings
+        }
+      }
+
+      if (savedSettings.id && lastMinuteConfig.enabled) {
+        try {
+          await updateBookingLastMinuteSettings({
+            hotelId: savedSettings.id,
+            body: lastMinuteConfig,
+          });
+        } catch {
+          localStorage.setItem(
+            "setupWarning",
+            "Last-minute settings could not be saved during setup. You can retry from Booking Settings.",
+          );
         }
       }
 

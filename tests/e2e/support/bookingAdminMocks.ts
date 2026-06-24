@@ -10,6 +10,7 @@ export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
 export const BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/localization`;
+export const BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/last-minute`;
 export const BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/room-filters`;
 export const BOOKING_ADMIN_CUSTOM_DOMAIN_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/custom-domain`;
 export const BOOKING_ADMIN_FINANCE_PAYMENT_SETTINGS_PATH = `/api/finance/properties/${BOOKING_ADMIN_PROPERTY_ID}/payment-settings`;
@@ -76,6 +77,17 @@ export interface BookingAdminRoomFilterSettingsFixture {
   filterRooms: Record<string, string[]>;
 }
 
+export interface BookingAdminLastMinuteSettingsFixture {
+  enabled: boolean;
+  stackWithPromo: boolean;
+  tiers: Array<{
+    daysBeforeMin: number;
+    daysBeforeMax: number | null;
+    discountPercent: number;
+  }>;
+  updatedAt: string;
+}
+
 export interface BookingAdminCustomDomainFixture {
   hotelId: string;
   propertyId: string;
@@ -105,6 +117,7 @@ export interface BookingAdminBookingFlowMocksOptions {
   benefitsSettings?: BookingAdminBenefitsSettingsFixture;
   guestFormSettings?: BookingAdminGuestFormSettingsFixture;
   localizationSettings?: BookingAdminLocalizationSettingsFixture;
+  lastMinuteSettings?: BookingAdminLastMinuteSettingsFixture;
   roomFilterSettings?: BookingAdminRoomFilterSettingsFixture;
 }
 
@@ -170,6 +183,13 @@ const defaultRoomFilterSettings: BookingAdminRoomFilterSettingsFixture = {
   bookingFilters: [],
   customFilters: {},
   filterRooms: {},
+};
+
+const defaultLastMinuteSettings: BookingAdminLastMinuteSettingsFixture = {
+  enabled: false,
+  stackWithPromo: false,
+  tiers: [],
+  updatedAt: "2026-06-22T10:00:00.000Z",
 };
 
 export const defaultCustomDomain: BookingAdminCustomDomainFixture = {
@@ -278,6 +298,9 @@ export async function mockBookingAdminBookingFlow(
   );
   await page.route(`**${BOOKING_ADMIN_LOCALIZATION_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.localizationSettings ?? defaultLocalizationSettings }),
+  );
+  await page.route(`**${BOOKING_ADMIN_LAST_MINUTE_SETTINGS_PATH}*`, (route) =>
+    route.fulfill({ json: options.lastMinuteSettings ?? defaultLastMinuteSettings }),
   );
   await page.route(`**${BOOKING_ADMIN_ROOM_FILTER_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: options.roomFilterSettings ?? defaultRoomFilterSettings }),

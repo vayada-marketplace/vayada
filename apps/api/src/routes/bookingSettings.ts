@@ -84,6 +84,22 @@ export const BOOKING_ROOM_FILTER_SETTINGS_CONTRACT = {
   },
 } as const;
 
+export const BOOKING_LAST_MINUTE_SETTINGS_CONTRACT = {
+  method: "GET",
+  path: "/api/booking/hotels/:hotelId/settings/last-minute",
+  permission: "booking.settings.manage",
+  entitlement: {
+    product: "booking",
+    key: "booking-engine",
+    resourceType: "booking_hotel",
+  },
+  resource: {
+    product: "booking",
+    resourceType: "booking_hotel",
+    allowedRelationships: ["owner", "operator"],
+  },
+} as const;
+
 export const BOOKING_HOTEL_PROPERTY_LINK_CONTRACT = {
   method: "GET",
   path: "/api/booking/hotels/:hotelId/property-link",
@@ -125,6 +141,11 @@ export const BOOKING_ROOM_FILTER_SETTINGS_WRITE_CONTRACT = {
   method: "PUT",
 } as const;
 
+export const BOOKING_LAST_MINUTE_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_LAST_MINUTE_SETTINGS_CONTRACT,
+  method: "PUT",
+} as const;
+
 export type BookingAddonSettingsReadModel = {
   showAddonsStep?: boolean | null;
   groupAddonsByCategory?: boolean | null;
@@ -151,6 +172,17 @@ export type BookingRoomFilterSettingsReadModel = {
   bookingFilters?: unknown;
   customFilters?: unknown;
   filterRooms?: unknown;
+};
+
+export type BookingLastMinuteTier = {
+  daysBeforeMin: number;
+  daysBeforeMax: number | null;
+  discountPercent: number;
+};
+
+export type BookingLastMinuteSettingsReadModel = {
+  lastMinuteDiscount?: unknown;
+  updatedAt?: string | Date | null;
 };
 
 export type BookingHotelPropertyLinkReadModel = {
@@ -187,6 +219,13 @@ export type BookingRoomFilterSettingsResponse = {
   filterRooms: Record<string, string[]>;
 };
 
+export type BookingLastMinuteSettingsResponse = {
+  enabled: boolean;
+  stackWithPromo: boolean;
+  tiers: BookingLastMinuteTier[];
+  updatedAt: string;
+};
+
 export type BookingHotelPropertyLinkResponse = {
   hotelId: string;
   propertyId: string;
@@ -202,6 +241,7 @@ export type BookingGuestFormSettings = BookingGuestFormSettingsResponse;
 export type BookingBenefitsSettings = BookingBenefitsSettingsResponse;
 export type BookingLocalizationSettings = BookingLocalizationSettingsResponse;
 export type BookingRoomFilterSettings = BookingRoomFilterSettingsResponse;
+export type BookingLastMinuteSettings = BookingLastMinuteSettingsResponse;
 
 export type BookingSettingsReadRepository = {
   findPropertyLinkByHotelId?(hotelId: string): Promise<BookingHotelPropertyLinkReadModel | null>;
@@ -216,6 +256,9 @@ export type BookingSettingsReadRepository = {
   findRoomFilterSettingsByHotelId?(
     hotelId: string,
   ): Promise<BookingRoomFilterSettingsReadModel | null>;
+  findLastMinuteSettingsByHotelId?(
+    hotelId: string,
+  ): Promise<BookingLastMinuteSettingsReadModel | null>;
   close?(): Promise<void>;
 };
 
@@ -224,6 +267,10 @@ export type UpdateBookingGuestFormSettingsBody = BookingGuestFormSettingsRespons
 export type UpdateBookingBenefitsSettingsBody = BookingBenefitsSettingsResponse;
 export type UpdateBookingLocalizationSettingsBody = BookingLocalizationSettingsResponse;
 export type UpdateBookingRoomFilterSettingsBody = BookingRoomFilterSettingsResponse;
+export type UpdateBookingLastMinuteSettingsBody = Omit<
+  BookingLastMinuteSettingsResponse,
+  "updatedAt"
+>;
 
 export type BookingSettingsWriteRepository = {
   updateAddonSettingsByHotelId(
@@ -246,6 +293,10 @@ export type BookingSettingsWriteRepository = {
     hotelId: string,
     settings: UpdateBookingRoomFilterSettingsBody,
   ): Promise<BookingRoomFilterSettingsReadModel | null>;
+  updateLastMinuteSettingsByHotelId?(
+    hotelId: string,
+    settings: UpdateBookingLastMinuteSettingsBody,
+  ): Promise<BookingLastMinuteSettingsReadModel | null>;
   close?(): Promise<void>;
 };
 
@@ -331,6 +382,10 @@ export type BookingRoomFilterSettingsErrorCategory =
   | "authentication"
   | "authorization"
   | "read_model";
+export type BookingLastMinuteSettingsErrorCategory =
+  | "authentication"
+  | "authorization"
+  | "read_model";
 
 export type BookingBenefitsSettingsErrorCode =
   | "unauthenticated"
@@ -355,6 +410,14 @@ export type BookingRoomFilterSettingsErrorCode =
   | "missing_entitlement"
   | "inactive_entitlement"
   | "missing_resource_access"
+  | "read_model_unavailable";
+export type BookingLastMinuteSettingsErrorCode =
+  | "unauthenticated"
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access"
+  | "not_found"
   | "read_model_unavailable";
 
 export type BookingAddonSettingsError = {
@@ -389,6 +452,13 @@ export type BookingRoomFilterSettingsError = {
   statusCode: 401 | 403 | 500;
   code: BookingRoomFilterSettingsErrorCode;
   category: BookingRoomFilterSettingsErrorCategory;
+  message: string;
+};
+
+export type BookingLastMinuteSettingsError = {
+  statusCode: 401 | 403 | 404 | 500;
+  code: BookingLastMinuteSettingsErrorCode;
+  category: BookingLastMinuteSettingsErrorCategory;
   message: string;
 };
 
@@ -441,6 +511,13 @@ export type BookingRoomFilterSettingsRequest = {
   query: Record<string, never>;
 };
 
+export type BookingLastMinuteSettingsRequest = {
+  params: {
+    hotelId: string;
+  };
+  query: Record<string, never>;
+};
+
 export type UpdateBookingAddonSettingsRequest = BookingAddonSettingsRequest & {
   body: UpdateBookingAddonSettingsBody;
 };
@@ -459,6 +536,10 @@ export type UpdateBookingLocalizationSettingsRequest = BookingLocalizationSettin
 
 export type UpdateBookingRoomFilterSettingsRequest = BookingRoomFilterSettingsRequest & {
   body: UpdateBookingRoomFilterSettingsBody;
+};
+
+export type UpdateBookingLastMinuteSettingsRequest = BookingLastMinuteSettingsRequest & {
+  body: UpdateBookingLastMinuteSettingsBody;
 };
 
 export type BookingAddonSettingsContract = {
@@ -499,6 +580,14 @@ export type BookingRoomFilterSettingsContract = {
   request: BookingRoomFilterSettingsRequest;
   response: BookingRoomFilterSettingsResponse;
   error: BookingRoomFilterSettingsError;
+};
+
+export type BookingLastMinuteSettingsContract = {
+  method: typeof BOOKING_LAST_MINUTE_SETTINGS_CONTRACT.method;
+  path: typeof BOOKING_LAST_MINUTE_SETTINGS_CONTRACT.path;
+  request: BookingLastMinuteSettingsRequest;
+  response: BookingLastMinuteSettingsResponse;
+  error: BookingLastMinuteSettingsError;
 };
 
 export type BookingHotelPropertyLinkContract = {
@@ -549,6 +638,14 @@ export type UpdateBookingRoomFilterSettingsContract = {
   error: BookingSettingsWriteError;
 };
 
+export type UpdateBookingLastMinuteSettingsContract = {
+  method: typeof BOOKING_LAST_MINUTE_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_LAST_MINUTE_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingLastMinuteSettingsRequest;
+  response: BookingLastMinuteSettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
 type BookingHotelParams = {
   hotelId: string;
 };
@@ -581,6 +678,10 @@ type BookingRoomFilterSettingsRow = {
   filter_rooms: unknown;
 };
 
+type BookingLastMinuteSettingsRow = {
+  updated_at: string | Date | null;
+};
+
 type TargetBookingSettingsRow = {
   show_addons_step: boolean | null;
   group_addons_by_category: boolean | null;
@@ -595,11 +696,19 @@ type TargetBookingSettingsRow = {
   booking_filters: unknown;
   custom_filters: unknown;
   filter_rooms: unknown;
+  last_minute_discount: unknown;
+  updated_at: string | Date | null;
 };
 
 type TargetBookingSettingsQueryRow = TargetBookingSettingsRow & {
   settings_property_id: string | null;
   source_link_count: number | string;
+};
+
+const DEFAULT_LAST_MINUTE_SETTINGS: UpdateBookingLastMinuteSettingsBody = {
+  enabled: false,
+  stackWithPromo: false,
+  tiers: [],
 };
 
 type TargetBookingPropertyLinkQueryRow = {
@@ -664,7 +773,9 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     settings.supported_languages,
     settings.booking_filters,
     settings.custom_filters,
-    settings.filter_rooms
+    settings.filter_rooms,
+    settings.last_minute_discount,
+    settings.updated_at
   FROM source_link_status
   LEFT JOIN booking.booking_settings settings
     ON source_link_status.source_link_count = 1
@@ -713,6 +824,15 @@ function toTargetRoomFilterSettings(
     bookingFilters: row.booking_filters,
     customFilters: row.custom_filters,
     filterRooms: row.filter_rooms,
+  };
+}
+
+function toTargetLastMinuteSettings(
+  row: TargetBookingSettingsRow,
+): BookingLastMinuteSettingsReadModel {
+  return {
+    lastMinuteDiscount: row.last_minute_discount,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -806,6 +926,21 @@ export function createPgBookingSettingsReadRepository(config: {
         bookingFilters: row.booking_filters,
         customFilters: row.custom_filters,
         filterRooms: row.filter_rooms,
+      };
+    },
+    async findLastMinuteSettingsByHotelId(hotelId) {
+      const result = await pool.query<BookingLastMinuteSettingsRow>(
+        `SELECT updated_at
+         FROM booking_hotels
+         WHERE id = $1`,
+        [hotelId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+
+      return {
+        lastMinuteDiscount: DEFAULT_LAST_MINUTE_SETTINGS,
+        updatedAt: row.updated_at,
       };
     },
     async updateAddonSettingsByHotelId(hotelId, settings) {
@@ -915,6 +1050,9 @@ export function createPgBookingSettingsReadRepository(config: {
         filterRooms: row.filter_rooms,
       };
     },
+    async updateLastMinuteSettingsByHotelId() {
+      return null;
+    },
     async close() {
       await pool.end();
     },
@@ -1011,7 +1149,9 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.supported_languages,
           settings.booking_filters,
           settings.custom_filters,
-          settings.filter_rooms
+          settings.filter_rooms,
+          settings.last_minute_discount,
+          settings.updated_at
         )
         SELECT
           source_link_status.source_link_count,
@@ -1028,7 +1168,9 @@ export function createPgTargetBookingSettingsRepository(config: {
           updated_settings.supported_languages,
           updated_settings.booking_filters,
           updated_settings.custom_filters,
-          updated_settings.filter_rooms
+          updated_settings.filter_rooms,
+          updated_settings.last_minute_discount,
+          updated_settings.updated_at
         FROM source_link_status
         LEFT JOIN updated_settings ON TRUE
         WHERE source_link_status.source_link_count > 0
@@ -1061,6 +1203,10 @@ export function createPgTargetBookingSettingsRepository(config: {
     async findRoomFilterSettingsByHotelId(hotelId) {
       const row = await findSettings(hotelId);
       return row ? toTargetRoomFilterSettings(row) : null;
+    },
+    async findLastMinuteSettingsByHotelId(hotelId) {
+      const row = await findSettings(hotelId);
+      return row ? toTargetLastMinuteSettings(row) : null;
     },
     async updateAddonSettingsByHotelId(hotelId, settings) {
       const row = await updateSettings(
@@ -1116,6 +1262,12 @@ export function createPgTargetBookingSettingsRepository(config: {
         ],
       );
       return row ? toTargetRoomFilterSettings(row) : null;
+    },
+    async updateLastMinuteSettingsByHotelId(hotelId, settings) {
+      const row = await updateSettings(hotelId, `last_minute_discount = $2::jsonb`, [
+        JSON.stringify(settings),
+      ]);
+      return row ? toTargetLastMinuteSettings(row) : null;
     },
     async close() {
       await pool.end();
@@ -1410,6 +1562,46 @@ export async function registerBookingSettingsRoutes(
     },
   );
 
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/settings/last-minute",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) {
+          return sendBookingLastMinuteSettingsError(reply, contractError);
+        }
+        throw error;
+      }
+
+      let settings: BookingLastMinuteSettingsReadModel | null;
+      try {
+        settings = (await repository.findLastMinuteSettingsByHotelId?.(hotelId)) ?? null;
+      } catch {
+        return sendBookingLastMinuteSettingsError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking last-minute settings are unavailable.",
+        });
+      }
+
+      if (!settings) {
+        return sendBookingLastMinuteSettingsError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "read_model",
+          message: "Booking hotel last-minute settings not found.",
+        });
+      }
+
+      return toLastMinuteSettingsResponse(settings);
+    },
+  );
+
   if (!writeRepository) return;
 
   app.put<{ Params: BookingHotelParams; Body: unknown }>(
@@ -1489,6 +1681,21 @@ export async function registerBookingSettingsRoutes(
         write: (hotelId, settings) =>
           writeRepository.updateRoomFilterSettingsByHotelId(hotelId, settings),
         toResponse: toRoomFilterSettingsResponse,
+      }),
+  );
+
+  app.put<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/last-minute",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseLastMinuteSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateLastMinuteSettingsByHotelId
+            ? writeRepository.updateLastMinuteSettingsByHotelId(hotelId, settings)
+            : Promise.resolve(null),
+        toResponse: toLastMinuteSettingsResponse,
       }),
   );
 }
@@ -1731,6 +1938,35 @@ function parseRoomFilterSettingsWriteBody(
   };
 }
 
+function parseLastMinuteSettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingLastMinuteSettingsBody> {
+  const parsed = expectStrictObject(body, ["enabled", "stackWithPromo", "tiers"]);
+  if (!parsed.ok) return parsed;
+
+  const details: string[] = [];
+  const enabled = expectBoolean(parsed.value, "enabled", details);
+  const stackWithPromo = expectBoolean(parsed.value, "stackWithPromo", details);
+  const tiers = normalizeLastMinuteTiers(parsed.value.tiers, details);
+
+  if (!enabled) {
+    if (stackWithPromo) details.push("stackWithPromo must be false when enabled is false.");
+    if (tiers.length > 0) details.push("tiers must be empty when enabled is false.");
+  } else if (tiers.length === 0) {
+    details.push("tiers must include at least one tier when enabled is true.");
+  }
+
+  if (details.length > 0) return { ok: false, details };
+  return {
+    ok: true,
+    value: {
+      enabled,
+      stackWithPromo,
+      tiers,
+    },
+  };
+}
+
 export function toAddonSettingsResponse(
   settings: BookingAddonSettingsReadModel,
 ): BookingAddonSettingsResponse {
@@ -1776,6 +2012,16 @@ export function toRoomFilterSettingsResponse(
     bookingFilters: parseLooseStringList(settings?.bookingFilters),
     customFilters: parseStringRecord(settings?.customFilters),
     filterRooms: parseStringArrayRecord(settings?.filterRooms),
+  };
+}
+
+export function toLastMinuteSettingsResponse(
+  settings: BookingLastMinuteSettingsReadModel,
+): BookingLastMinuteSettingsResponse {
+  const parsed = parseLastMinuteSettingsValue(settings.lastMinuteDiscount);
+  return {
+    ...parsed,
+    updatedAt: toIsoString(settings.updatedAt),
   };
 }
 
@@ -1855,6 +2101,121 @@ function parseStringArrayRecord(value: unknown): Record<string, string[]> {
         : [],
     ]),
   );
+}
+
+function parseLastMinuteSettingsValue(value: unknown): UpdateBookingLastMinuteSettingsBody {
+  const parsed = parseJsonIfString(value);
+  if (!isPlainRecord(parsed)) return DEFAULT_LAST_MINUTE_SETTINGS;
+
+  const enabled = parsed.enabled === true;
+  if (!enabled) return DEFAULT_LAST_MINUTE_SETTINGS;
+
+  const stackWithPromo = parsed.stackWithPromo === true;
+  const details: string[] = [];
+  const tiers = normalizeLastMinuteTiers(parsed.tiers, details);
+  if (details.length > 0 || tiers.length === 0) return DEFAULT_LAST_MINUTE_SETTINGS;
+
+  return {
+    enabled,
+    stackWithPromo,
+    tiers,
+  };
+}
+
+function normalizeLastMinuteTiers(value: unknown, details: string[]): BookingLastMinuteTier[] {
+  if (!Array.isArray(value)) {
+    details.push("tiers must be an array.");
+    return [];
+  }
+
+  const tiers: BookingLastMinuteTier[] = [];
+  value.forEach((entry, index) => {
+    if (!isPlainRecord(entry)) {
+      details.push(`tiers.${index} must be an object.`);
+      return;
+    }
+
+    const parsed = expectStrictObject(entry, ["daysBeforeMin", "daysBeforeMax", "discountPercent"]);
+    if (!parsed.ok) {
+      details.push(...parsed.details.map((detail) => `tiers.${index}.${detail}`));
+      return;
+    }
+
+    const daysBeforeMin = expectIntegerAtLeast(
+      parsed.value.daysBeforeMin,
+      `tiers.${index}.daysBeforeMin`,
+      0,
+      details,
+    );
+    const daysBeforeMax =
+      parsed.value.daysBeforeMax === null
+        ? null
+        : expectIntegerAtLeast(
+            parsed.value.daysBeforeMax,
+            `tiers.${index}.daysBeforeMax`,
+            daysBeforeMin,
+            details,
+          );
+    const discountPercent = expectNumberInRange(
+      parsed.value.discountPercent,
+      `tiers.${index}.discountPercent`,
+      0,
+      100,
+      details,
+    );
+
+    tiers.push({
+      daysBeforeMin,
+      daysBeforeMax,
+      discountPercent,
+    });
+  });
+
+  const sorted = tiers
+    .map((tier, index) => ({ tier, index }))
+    .sort((left, right) => left.tier.daysBeforeMin - right.tier.daysBeforeMin);
+  for (let index = 1; index < sorted.length; index += 1) {
+    const previous = sorted[index - 1]!;
+    const current = sorted[index]!;
+    const previousMax = previous.tier.daysBeforeMax ?? Number.POSITIVE_INFINITY;
+    if (current.tier.daysBeforeMin <= previousMax) {
+      details.push(`tiers.${current.index} overlaps tiers.${previous.index}.`);
+    }
+  }
+
+  return tiers;
+}
+
+function expectIntegerAtLeast(
+  value: unknown,
+  path: string,
+  min: number,
+  details: string[],
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min) {
+    details.push(`${path} must be an integer greater than or equal to ${min}.`);
+    return min;
+  }
+  return value;
+}
+
+function expectNumberInRange(
+  value: unknown,
+  path: string,
+  minExclusive: number,
+  maxInclusive: number,
+  details: string[],
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= minExclusive ||
+    value > maxInclusive
+  ) {
+    details.push(`${path} must be greater than ${minExclusive} and no more than ${maxInclusive}.`);
+    return minExclusive;
+  }
+  return value;
 }
 
 function expectStrictObject(
@@ -2074,6 +2435,15 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function toIsoString(value: string | Date | null | undefined): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toISOString();
+  }
+  return new Date(0).toISOString();
+}
+
 function sendBookingAddonSettingsError(
   reply: FastifyReply,
   error: BookingAddonSettingsError,
@@ -2105,6 +2475,13 @@ function sendBookingLocalizationSettingsError(
 function sendBookingRoomFilterSettingsError(
   reply: FastifyReply,
   error: BookingRoomFilterSettingsError | BookingSettingsAccessError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingLastMinuteSettingsError(
+  reply: FastifyReply,
+  error: BookingLastMinuteSettingsError | BookingSettingsAccessError,
 ): FastifyReply {
   return reply.status(error.statusCode).send(error);
 }
