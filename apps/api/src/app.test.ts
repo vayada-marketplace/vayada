@@ -9099,6 +9099,49 @@ describe("vayada-api", () => {
     ).toBe(pmsReservations[1].guestBookingId);
   });
 
+  it("rejects PMS reservation stay ranges mixed with list filters", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsRepository: {
+        ...pmsOperationsRepository,
+        async listReservationsByPropertyId() {
+          throw new Error("expected mixed stay range query to be rejected before list query");
+        },
+        async listReservationsOverlappingStayRangeByPropertyId() {
+          throw new Error("expected mixed stay range query to be rejected before overlap query");
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/reservations`,
+      query: {
+        stayFrom: "2026-08-15",
+        stayTo: "2026-08-18",
+        status: "confirmed",
+        arrivalFrom: "2026-08-01",
+        search: "Nora",
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      code: "invalid_query",
+      category: "validation",
+    });
+  });
+
   it("returns PMS reservation detail and not-found errors", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.read"],

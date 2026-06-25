@@ -1202,6 +1202,9 @@ export async function registerPmsOperationsRoutes(
       if ("error" in filters) return sendPmsOperationsError(reply, filters.error);
       const stayRange = toReservationStayRange(request.query);
       if ("error" in stayRange) return sendPmsOperationsError(reply, stayRange.error);
+      if (stayRange.value && hasReservationListFilters(filters.value)) {
+        return sendPmsOperationsError(reply, invalidReservationQueryError());
+      }
 
       try {
         const result = stayRange.value
@@ -3526,6 +3529,10 @@ function toReservationStayRange(
   if (!isDateOnly(from) || !isDateOnly(to)) return { error: invalidReservationQueryError() };
   if (daysInclusive(from, to) < 1) return { error: invalidReservationQueryError() };
   return { value: { from, to } };
+}
+
+function hasReservationListFilters(filters: PmsReservationListFilters): boolean {
+  return Boolean(filters.status || filters.arrivalFrom || filters.arrivalTo || filters.search);
 }
 
 function invalidReservationQueryError(): PmsOperationsError {
