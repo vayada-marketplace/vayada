@@ -23,6 +23,7 @@ export const CURRENCY_OPTIONS: CurrencyOption[] = [
   { code: "INR", name: "Indian Rupee", flag: "🇮🇳" },
   { code: "JPY", name: "Japanese Yen", flag: "🇯🇵" },
   { code: "KRW", name: "South Korean Won", flag: "🇰🇷" },
+  { code: "LKR", name: "Sri Lankan Rupee", flag: "🇱🇰" },
   { code: "MXN", name: "Mexican Peso", flag: "🇲🇽" },
   { code: "MYR", name: "Malaysian Ringgit", flag: "🇲🇾" },
   { code: "NOK", name: "Norwegian Krone", flag: "🇳🇴" },

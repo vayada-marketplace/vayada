@@ -159,6 +159,7 @@ function toSettingsAddonItem(item: BookingAddonItem): AddonItem {
     duration: item.duration ?? undefined,
     perPerson: item.pricingModel === "per_guest" || item.pricingModel === "per_guest_night",
     perNight: item.pricingModel === "per_night" || item.pricingModel === "per_guest_night",
+    sortOrder: item.sortOrder,
   };
 }
 
@@ -182,12 +183,43 @@ function toAddonWritableFields(values: AddonItemFormValues) {
   };
 }
 
-function toAddonCreateBody(values: AddonItemFormValues): CreateBookingAddonItemBody {
+function toAddonCreateBody(
+  values: AddonItemFormValues,
+  sortOrder: number,
+): CreateBookingAddonItemBody {
   return {
     ...toAddonWritableFields(values),
     publicVisible: true,
     status: "active",
+    sortOrder,
   };
+}
+
+function orderAddons(addons: AddonItem[]): AddonItem[] {
+  return addons
+    .map((addon, index) => ({ addon, index }))
+    .sort((left, right) => {
+      const leftOrder = left.addon.sortOrder ?? left.index;
+      const rightOrder = right.addon.sortOrder ?? right.index;
+      return leftOrder - rightOrder || left.index - right.index;
+    })
+    .map(({ addon }) => addon);
+}
+
+function nextAddonSortOrder(addons: AddonItem[]): number {
+  return addons.reduce((max, addon) => Math.max(max, addon.sortOrder ?? -1), -1) + 1;
+}
+
+function moveAddon(addons: AddonItem[], sourceAddonId: string, targetAddonId: string): AddonItem[] {
+  const ordered = orderAddons(addons);
+  const sourceIndex = ordered.findIndex((addon) => addon.id === sourceAddonId);
+  const targetIndex = ordered.findIndex((addon) => addon.id === targetAddonId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return ordered;
+
+  const [movedAddon] = ordered.splice(sourceIndex, 1);
+  if (!movedAddon) return ordered;
+  ordered.splice(targetIndex, 0, movedAddon);
+  return ordered.map((addon, index) => ({ ...addon, sortOrder: index }));
 }
 
 function toSettingsPromoCode(item: BookingPromoCode): PromoCodeItem {
@@ -371,7 +403,7 @@ export default function BookingFlowPage() {
           setBookingHotelId(selectedHotelId || property?.id || null);
           addonSettingsRef.current = settings;
           setAddonSettings(settings);
-          setAddons(addonItems);
+          setAddons(orderAddons(addonItems));
           setPromoCodes(promoItems);
           setBenefits(
             normalizeBookingBenefitsSettings(benefitsRes, DEFAULT_BENEFITS_SETTINGS).benefits,
@@ -442,9 +474,9 @@ export default function BookingFlowPage() {
     try {
       const saved = await createBookingAddonItem({
         hotelId: getBookingHotelIdForSave(),
-        body: toAddonCreateBody(values),
+        body: toAddonCreateBody(values, nextAddonSortOrder(addons)),
       });
-      setAddons((current) => [...current, toSettingsAddonItem(saved)]);
+      setAddons((current) => orderAddons([...current, toSettingsAddonItem(saved)]));
       showFeedback("success", t("bookingFlow.addons.feedback.createSuccess"));
     } catch {
       showFeedback("error", t("bookingFlow.addons.feedback.saveError"));
@@ -460,12 +492,42 @@ export default function BookingFlowPage() {
         body: toAddonWritableFields(values),
       });
       setAddons((current) =>
-        current.map((addon) => (addon.id === addonId ? toSettingsAddonItem(saved) : addon)),
+        orderAddons(
+          current.map((addon) => (addon.id === addonId ? toSettingsAddonItem(saved) : addon)),
+        ),
       );
       showFeedback("success", t("bookingFlow.addons.feedback.updateSuccess"));
     } catch {
       showFeedback("error", t("bookingFlow.addons.feedback.saveError"));
       throw new Error("Failed to save add-on.");
+    }
+  };
+
+  const handleReorderAddon = async (sourceAddonId: string, targetAddonId: string) => {
+    const previousAddons = addons;
+    const reorderedAddons = moveAddon(previousAddons, sourceAddonId, targetAddonId);
+    const previousOrderById = new Map(previousAddons.map((addon) => [addon.id, addon.sortOrder]));
+    const changedAddons = reorderedAddons.filter(
+      (addon) => previousOrderById.get(addon.id) !== addon.sortOrder,
+    );
+    if (changedAddons.length === 0) return;
+
+    setAddons(reorderedAddons);
+    try {
+      const hotelId = getBookingHotelIdForSave();
+      await Promise.all(
+        changedAddons.map((addon) =>
+          updateBookingAddonItem({
+            hotelId,
+            addonItemId: addon.id,
+            body: { sortOrder: addon.sortOrder ?? 0 },
+          }),
+        ),
+      );
+    } catch {
+      setAddons(previousAddons);
+      showFeedback("error", t("bookingFlow.addons.feedback.saveError"));
+      throw new Error("Failed to reorder add-ons.");
     }
   };
 
@@ -695,6 +757,7 @@ export default function BookingFlowPage() {
             onCreateAddon={handleCreateAddon}
             onUpdateAddon={handleUpdateAddon}
             onDeleteAddon={handleDeleteAddon}
+            onReorderAddon={handleReorderAddon}
           />
         )}
 

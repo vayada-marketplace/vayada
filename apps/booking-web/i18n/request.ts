@@ -8,7 +8,7 @@ export default getRequestConfig(async ({ requestLocale }) => {
 
   return {
     locale,
-    messages: (await import(`../messages/${locale}.json`)).default,
+    messages: await loadMessages(locale),
     // A missing translation key must never crash a checkout page. Return an
     // empty string so the `t('key') || 'fallback'` patterns in components
     // resolve to the inline fallback instead of rendering the raw key.
@@ -24,3 +24,12 @@ export default getRequestConfig(async ({ requestLocale }) => {
     },
   };
 });
+
+async function loadMessages(locale: string): Promise<Record<string, unknown>> {
+  try {
+    return (await import(`../messages/${locale}.json`)).default;
+  } catch (error) {
+    if (locale !== "nl") throw error;
+    return (await import("../messages/en.json")).default;
+  }
+}

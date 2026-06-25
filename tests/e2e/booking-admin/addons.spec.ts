@@ -47,6 +47,24 @@ test.describe("booking-admin add-ons settings cutover", () => {
         createdAt: "2026-06-01T10:00:00.000Z",
         updatedAt: "2026-06-01T10:00:00.000Z",
       },
+      {
+        addonItemId: "addon_breakfast_basket",
+        hotelId: BOOKING_ADMIN_HOTEL_ID,
+        propertyId: "property_alpenrose",
+        name: "Breakfast basket",
+        description: "A prepared breakfast delivered to the room.",
+        price: "28.00",
+        currency: "EUR",
+        category: "dining",
+        imageUrl: null,
+        duration: null,
+        pricingModel: "per_guest",
+        publicVisible: true,
+        status: "active",
+        sortOrder: 1,
+        createdAt: "2026-06-01T10:02:00.000Z",
+        updatedAt: "2026-06-01T10:02:00.000Z",
+      },
     ];
     await page.route(`**${BOOKING_ADMIN_ADDON_ITEMS_PATH}**`, async (route) => {
       const request = route.request();
@@ -69,7 +87,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
           pricingModel: body.pricingModel,
           publicVisible: body.publicVisible,
           status: body.status,
-          sortOrder: 1,
+          sortOrder: body.sortOrder ?? addonItems.length,
           createdAt: "2026-06-01T10:05:00.000Z",
           updatedAt: "2026-06-01T10:05:00.000Z",
         };
@@ -123,7 +141,15 @@ test.describe("booking-admin add-ons settings cutover", () => {
     await page.goto("/booking-flow");
     await page.getByRole("button", { name: /^Add-ons$/ }).click();
 
-    await expect(page.getByText("Airport transfer")).toBeVisible();
+    const addonNames = page.getByTestId("booking-addon-item-name");
+    await expect(addonNames).toHaveText(["Airport transfer", "Breakfast basket"]);
+
+    await page
+      .getByRole("button", { name: "Drag Airport transfer" })
+      .dragTo(page.getByTestId("booking-addon-item-addon_breakfast_basket"));
+
+    await expect(addonNames).toHaveText(["Breakfast basket", "Airport transfer"]);
+
     await page.getByRole("button", { name: "Add Experience" }).click();
     await page.getByLabel("Name").fill("Spa ritual");
     await page.getByLabel("Description").fill("Private treatment.");
@@ -159,7 +185,30 @@ test.describe("booking-admin add-ons settings cutover", () => {
       method: "GET",
       pathname: BOOKING_ADMIN_ADDON_ITEMS_PATH,
     });
-    expect(typedItemWrites).toEqual([
+    const reorderWrites = typedItemWrites.filter(
+      (write) =>
+        write.method === "PATCH" &&
+        typeof write.body === "object" &&
+        write.body !== null &&
+        "sortOrder" in write.body,
+    );
+    expect(reorderWrites).toEqual(
+      expect.arrayContaining([
+        {
+          method: "PATCH",
+          pathname: `${BOOKING_ADMIN_ADDON_ITEMS_PATH}/addon_airport_transfer`,
+          body: { sortOrder: 1 },
+        },
+        {
+          method: "PATCH",
+          pathname: `${BOOKING_ADMIN_ADDON_ITEMS_PATH}/addon_breakfast_basket`,
+          body: { sortOrder: 0 },
+        },
+      ]),
+    );
+
+    const nonReorderWrites = typedItemWrites.filter((write) => !reorderWrites.includes(write));
+    expect(nonReorderWrites).toEqual([
       {
         method: "POST",
         pathname: BOOKING_ADMIN_ADDON_ITEMS_PATH,
@@ -174,6 +223,7 @@ test.describe("booking-admin add-ons settings cutover", () => {
           pricingModel: "per_guest",
           publicVisible: true,
           status: "active",
+          sortOrder: 2,
         },
       },
       {

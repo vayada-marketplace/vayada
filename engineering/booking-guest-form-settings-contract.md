@@ -136,6 +136,11 @@ fields. All response values are booleans. If future guest-form settings add
 localized labels, required/optional modes, or per-market variants, that must be
 a contract change.
 
+VAY-901 confirmed that old-stack VAY-891 child guest-type settings are not part
+of this contract. Target parity for adult age threshold, children enabled state,
+and guest-facing age labels is split to VAY-929 because it needs contract,
+schema, migration/default, Booking Admin, and Booking Web changes together.
+
 ## Loading And Stale State
 
 The response has no stale-data marker in this slice. The booking-admin client
