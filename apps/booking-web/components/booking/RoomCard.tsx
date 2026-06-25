@@ -4,8 +4,12 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { getNonRefundableRate } from "@/lib/constants/booking";
-import { getFreeCancellationDays, isFlexibleCancellationExpired } from "@/lib/constants/booking";
+import {
+  getFlexibleNightlyRates,
+  getFreeCancellationDays,
+  getNonRefundableNightlyRates,
+  isFlexibleCancellationExpired,
+} from "@/lib/constants/booking";
 import RateOption from "./RateOption";
 
 interface RoomCardProps {
@@ -48,22 +52,34 @@ export default function RoomCard({
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
 
   const requiredRooms = Math.ceil(totalGuests / room.maxOccupancy);
-  // Per-night rates rounded in the displayed currency so nightly × nights matches
-  // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-  const flexibleNightly = convertAndRound(room.baseRate, room.currency);
-  const flexibleTotal = flexibleNightly * nights * requiredRooms;
-  const nonRefundableNightlyBase = getNonRefundableRate(room.baseRate, room.nonRefundableRate);
-  const nonRefundableNightly = convertAndRound(nonRefundableNightlyBase, room.currency);
-  const nonRefundableTotal = nonRefundableNightly * nights * requiredRooms;
-  const discount = Math.round((1 - nonRefundableNightlyBase / room.baseRate) * 100);
+  const flexibleRates = getFlexibleNightlyRates(room, nights);
+  const nonRefundableRates = getNonRefundableNightlyRates(room, nights);
+  const totalFromRates = (rates: number[]) =>
+    rates.reduce((sum, rate) => sum + convertAndRound(rate, room.currency), 0) * requiredRooms;
+  const averageFromRates = (rates: number[]) =>
+    rates.length > 0
+      ? Math.round((rates.reduce((sum, rate) => sum + rate, 0) / rates.length) * 100) / 100
+      : 0;
+  const flexibleTotal = totalFromRates(flexibleRates);
+  const nonRefundableTotal = totalFromRates(nonRefundableRates);
+  const flexibleNightly = nights > 0 ? flexibleTotal / nights : 0;
+  const nonRefundableNightly = nights > 0 ? nonRefundableTotal / nights : 0;
+  const flexibleNightlyBase = averageFromRates(flexibleRates);
+  const nonRefundableNightlyBase = averageFromRates(nonRefundableRates);
+  const discount =
+    flexibleNightlyBase > 0
+      ? Math.round((1 - nonRefundableNightlyBase / flexibleNightlyBase) * 100)
+      : 0;
   const soldOut = room.remainingRooms < requiredRooms;
   const hasLastMinuteDeal = !!(
     room.lastMinuteDiscountPercent && room.lastMinuteDiscountPercent > 0
   );
   const originalFlexibleTotal =
-    hasLastMinuteDeal && room.originalRate
-      ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
-      : null;
+    hasLastMinuteDeal && room.originalNightlyRates?.length === nights
+      ? totalFromRates(room.originalNightlyRates)
+      : hasLastMinuteDeal && room.originalRate
+        ? convertAndRound(room.originalRate, room.currency) * nights * requiredRooms
+        : null;
 
   const partialRefundTiers =
     room.partialRefundTiers && room.partialRefundTiers.length > 0
@@ -318,7 +334,7 @@ export default function RoomCard({
                   title={t("nonRefundableRate")}
                   description={t("nonRefundableDesc")}
                   totalLabel={formatPrice(nonRefundableTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(nonRefundableNightly * requiredRooms, selectedCurrency)}
+                  nightlyLabel={formatPrice(nonRefundableNightly, selectedCurrency)}
                   discountPercent={discount}
                   soldOut={soldOut}
                 />
@@ -332,7 +348,7 @@ export default function RoomCard({
                   title={t("flexibleRate")}
                   description={flexibleDescription}
                   totalLabel={formatPrice(flexibleTotal, selectedCurrency)}
-                  nightlyLabel={formatPrice(flexibleNightly * requiredRooms, selectedCurrency)}
+                  nightlyLabel={formatPrice(flexibleNightly, selectedCurrency)}
                   soldOut={soldOut}
                 />
               )}

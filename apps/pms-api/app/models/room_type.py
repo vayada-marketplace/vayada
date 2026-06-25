@@ -611,6 +611,9 @@ class RoomTypeResponse(BaseModel):
     size: int
     base_rate: float
     non_refundable_rate: float | None = None
+    nightly_rates: list[float] = []
+    non_refundable_nightly_rates: list[float] = []
+    original_nightly_rates: list[float] = []
     original_rate: float | None = None
     last_minute_discount_percent: int | None = None
     currency: str
