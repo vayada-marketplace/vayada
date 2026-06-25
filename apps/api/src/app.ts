@@ -105,10 +105,7 @@ import {
   registerPlatformAdminDashboardRoutes,
   type PlatformAdminDashboardRepository,
 } from "./routes/platform/admin/dashboard/bookingCompatible.js";
-import {
-  registerPmsLegacyAdminRoutes,
-  registerPmsOperationsRoutes,
-} from "./routes/pmsOperations.js";
+import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -327,11 +324,6 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     financeRepository: options.financeRepository,
   });
   if (options.pmsOperationsRepository) {
-    app.register(registerPmsLegacyAdminRoutes, {
-      prefix: "/admin",
-      repository: options.pmsOperationsRepository,
-      allowedOrigins: options.pmsOperationsAllowedOrigins,
-    });
     app.register(registerPmsOperationsRoutes, {
       prefix: "/api/pms",
       repository: options.pmsOperationsRepository,
