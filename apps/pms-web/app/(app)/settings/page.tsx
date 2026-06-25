@@ -12,7 +12,14 @@ import {
 import { bookingsService } from "@/services/bookings";
 import { channexService } from "@/services/channex";
 import { apiClient } from "@/services/api/client";
-import { pmsClient } from "@/services/api/pmsClient";
+import {
+  getPmsCalendarSettings,
+  getPmsPropertyProfile,
+  updatePmsCalendarSettings,
+  updatePmsPropertyProfile,
+  type PmsCalendarSettings,
+  type PmsPropertyProfile,
+} from "@/services/api/pmsPropertyClient";
 import { useTranslation } from "@/lib/i18n";
 import { SettingsLayout, type SettingsNavSection } from "@/components/settings/layout";
 import { PropertySection } from "@/components/settings/PropertySection";
@@ -118,8 +125,7 @@ export default function SettingsPage() {
       })
       .catch(() => {});
 
-    pmsClient
-      .get<any>("/admin/hotel")
+    getPmsPropertyProfile()
       .then((h) => {
         if (h.timezone) setTimezone(h.timezone);
         if (h.country) setCountry(h.country);
@@ -136,16 +142,7 @@ export default function SettingsPage() {
       .then((status) => setChannexConnected(Boolean(status.isConnected)))
       .catch(() => setChannexConnected(false));
 
-    pmsClient
-      .get<{
-        autoRearrangeEnabled: boolean;
-        autoOpenEnabled: boolean;
-        autoOpenMode: "rolling" | "fixed";
-        autoOpenMonths: 12 | 18 | 24;
-        autoOpenFixedMonth: string | null;
-        autoOpenThrough: string | null;
-        autoOpenWarnings: string[];
-      }>("/admin/calendar-settings")
+    getPmsCalendarSettings()
       .then((s) => {
         setAutoRearrange(Boolean(s.autoRearrangeEnabled));
         setAutoOpenEnabled(Boolean(s.autoOpenEnabled));
@@ -214,7 +211,7 @@ export default function SettingsPage() {
       // PATCH only the fields the form actually edits; the backend leaves
       // unsent fields untouched (so any address/lat-lon set during onboarding
       // or via a future OTA-specific flow is preserved).
-      await pmsClient.patch("/admin/hotel", { timezone, country });
+      await updatePmsPropertyProfile({ timezone, country });
       setSuccess("Property details saved");
     } catch (err: any) {
       setError(
@@ -235,7 +232,7 @@ export default function SettingsPage() {
     const previous = autoRearrange;
     setAutoRearrange(next);
     try {
-      await pmsClient.patch("/admin/calendar-settings", {
+      await updatePmsCalendarSettings({
         autoRearrangeEnabled: next,
       });
       setSuccess(
@@ -264,14 +261,7 @@ export default function SettingsPage() {
       if (autoOpenMode === "fixed" && /^\d{4}-\d{2}$/.test(autoOpenFixedMonth)) {
         payload.autoOpenFixedMonth = `${autoOpenFixedMonth}-01`;
       }
-      const saved = await pmsClient.patch<{
-        autoOpenEnabled: boolean;
-        autoOpenMode: "rolling" | "fixed";
-        autoOpenMonths: 12 | 18 | 24;
-        autoOpenFixedMonth: string | null;
-        autoOpenThrough: string | null;
-        autoOpenWarnings: string[];
-      }>("/admin/calendar-settings", payload);
+      const saved = await updatePmsCalendarSettings(payload as Partial<PmsCalendarSettings>);
       setAutoOpenEnabled(Boolean(saved.autoOpenEnabled));
       setAutoOpenMode(saved.autoOpenMode || "rolling");
       setAutoOpenMonths(saved.autoOpenMonths || 18);
@@ -297,7 +287,7 @@ export default function SettingsPage() {
     const previous = instantBook;
     setInstantBook(next);
     try {
-      await pmsClient.patch("/admin/hotel", { instant_book: next });
+      await updatePmsPropertyProfile({ instant_book: next });
       setSuccess(next ? "Instant booking enabled" : "Booking requests re-enabled");
     } catch (err: any) {
       setInstantBook(previous);
@@ -321,7 +311,7 @@ export default function SettingsPage() {
         sameDayBookingsEnabled,
         sameDayBookingCutoffTime: sameDayBookingsEnabled ? sameDayBookingCutoffTime : null,
       };
-      const h = await pmsClient.patch<any>("/admin/hotel", payload);
+      const h = await updatePmsPropertyProfile(payload as Partial<PmsPropertyProfile>);
       setSameDayBookingsEnabled(
         h.same_day_bookings_enabled ?? h.sameDayBookingsEnabled ?? sameDayBookingsEnabled,
       );

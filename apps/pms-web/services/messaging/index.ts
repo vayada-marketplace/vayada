@@ -1,4 +1,6 @@
 import { pmsClient } from "../api/pmsClient";
+import { isPmsOperationsReadModelEnabled } from "../api/pmsOperationsClient";
+import { getPmsMessagingUnreadCount } from "../api/pmsPropertyClient";
 import { getAuthBearerToken } from "../auth/sessionStore";
 import { buildQueryString } from "@/lib/utils/queryString";
 
@@ -111,5 +113,8 @@ export const messagingService = {
   markNoReplyNeeded: (id: string) =>
     pmsClient.post<MessageThread>(`/admin/messaging/threads/${id}/no-reply-needed`, {}),
 
-  unreadCount: () => pmsClient.get<UnreadCountResponse>("/admin/messaging/unread-count"),
+  unreadCount: () =>
+    isPmsOperationsReadModelEnabled()
+      ? getPmsMessagingUnreadCount()
+      : pmsClient.get<UnreadCountResponse>("/admin/messaging/unread-count"),
 };
