@@ -59,6 +59,8 @@ export interface PaymentSettings {
   specialRequestsEnabled?: boolean;
   arrivalTimeEnabled?: boolean;
   guestCountEnabled?: boolean;
+  adultAgeThreshold?: number;
+  childrenEnabled?: boolean;
   sameDayBookingsEnabled?: boolean;
   sameDayBookingCutoffTime?: string | null;
   termsText?: string;

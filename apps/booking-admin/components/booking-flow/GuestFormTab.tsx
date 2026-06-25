@@ -10,6 +10,10 @@ interface GuestFormTabProps {
   setArrivalTimeEnabled: (enabled: boolean) => void;
   guestCountEnabled: boolean;
   setGuestCountEnabled: (enabled: boolean) => void;
+  adultAgeThreshold: number;
+  setAdultAgeThreshold: (value: number) => void;
+  childrenEnabled: boolean;
+  setChildrenEnabled: (enabled: boolean) => void;
   onSave: () => void;
   saving: boolean;
 }
@@ -21,10 +25,15 @@ export default function GuestFormTab({
   setArrivalTimeEnabled,
   guestCountEnabled,
   setGuestCountEnabled,
+  adultAgeThreshold,
+  setAdultAgeThreshold,
+  childrenEnabled,
+  setChildrenEnabled,
   onSave,
   saving,
 }: GuestFormTabProps) {
   const { t } = useTranslation();
+  const childMaxAge = Math.max(0, adultAgeThreshold - 1);
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-5">
@@ -70,6 +79,50 @@ export default function GuestFormTab({
             label={t("bookingFlow.guestForm.numberOfGuests")}
             enabled={guestCountEnabled}
             onClick={() => setGuestCountEnabled(!guestCountEnabled)}
+          />
+        </div>
+        <div
+          className={`flex items-center justify-between gap-4 p-3 rounded-lg border transition-all ${childrenEnabled ? "border-primary-500 bg-primary-50/30" : "border-gray-200"}`}
+        >
+          <div>
+            <span className="text-[13px] font-medium text-gray-900">
+              {t("bookingFlow.guestForm.children")}
+            </span>
+            <p className="mt-0.5 text-[11px] text-gray-500">
+              {t("bookingFlow.guestForm.childrenDescription")}
+            </p>
+          </div>
+          <SwitchButton
+            label={t("bookingFlow.guestForm.children")}
+            enabled={childrenEnabled}
+            onClick={() => setChildrenEnabled(!childrenEnabled)}
+          />
+        </div>
+        <div className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <span className="text-[13px] font-medium text-gray-900">
+              {t("bookingFlow.guestForm.adultAgeThreshold")}
+            </span>
+            <p className="mt-0.5 text-[11px] text-gray-500">
+              {t("bookingFlow.guestForm.ageRange", {
+                adultAge: adultAgeThreshold,
+                childMaxAge,
+              })}
+            </p>
+          </div>
+          <input
+            type="number"
+            aria-label={t("bookingFlow.guestForm.adultAgeThreshold")}
+            min={1}
+            max={120}
+            value={adultAgeThreshold}
+            onChange={(event) => {
+              const next = Number.parseInt(event.target.value, 10);
+              if (Number.isFinite(next)) {
+                setAdultAgeThreshold(Math.min(120, Math.max(1, next)));
+              }
+            }}
+            className="h-9 w-24 rounded-md border border-gray-300 px-3 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
       </div>

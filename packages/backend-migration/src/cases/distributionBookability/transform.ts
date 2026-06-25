@@ -538,6 +538,7 @@ export async function transformDistributionBookability(client: pg.Client): Promi
         'minAdults', min_adults,
         'maxAdults', max_adults,
         'childrenSupported', children_supported,
+        'adultAgeThreshold', adult_age_threshold,
         'supportedCurrencies', supported_currencies,
         'supportedLocales', supported_locales
       ),

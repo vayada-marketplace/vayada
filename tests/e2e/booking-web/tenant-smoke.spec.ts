@@ -13,6 +13,11 @@ test.describe("booking-web tenant smoke", () => {
     expect(new URL(baseURL ?? page.url()).hostname.split(".")[0]).toBe(SEEDED_BOOKING_SLUG);
     await expect(page.getByRole("heading", { name: "Hotel Alpenrose", level: 1 })).toBeVisible();
     await expect(page.getByRole("button", { name: /Check Availability/i })).toBeVisible();
+    await page.getByText("2 Adults", { exact: true }).click();
+    const guestSelector = page.getByTestId("guest-selector");
+    await expect(guestSelector.getByText("Ages 18+", { exact: true })).toBeVisible();
+    await expect(guestSelector.getByText("Ages 0-17", { exact: true })).toBeVisible();
+    await guestSelector.getByRole("button", { name: "Done" }).click();
     await expect(page.getByRole("heading", { name: /Available Accommodations/i })).toBeVisible();
     await expect(page.getByText("Alpine Suite")).toBeVisible();
     await expect(page.getByRole("button", { name: /Select This Rate/i }).first()).toBeVisible();
@@ -58,6 +63,28 @@ test.describe("booking-web tenant smoke", () => {
     expect(
       graph.filter((node) => node["@type"] === "HotelRoom").every((node) => !node.offers),
     ).toBe(true);
+
+    await assertHealthy();
+  });
+
+  test("hides children in the guest selector when the target profile disables them", async ({
+    page,
+  }, testInfo) => {
+    const assertHealthy = watchPageHealth(page, testInfo);
+    await mockBookingApis(page, {
+      supportedQuoteParameters: {
+        childrenSupported: false,
+        adultAgeThreshold: 21,
+      },
+    });
+
+    await page.goto("/");
+
+    await page.getByText("2 Adults", { exact: true }).click();
+    const guestSelector = page.getByTestId("guest-selector");
+    await expect(guestSelector.getByText("Ages 21+", { exact: true })).toBeVisible();
+    await expect(guestSelector.getByText("Children", { exact: true })).toHaveCount(0);
+    await expect(guestSelector.getByText("Ages 0-20", { exact: true })).toHaveCount(0);
 
     await assertHealthy();
   });

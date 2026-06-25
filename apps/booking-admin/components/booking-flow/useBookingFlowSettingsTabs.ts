@@ -72,12 +72,16 @@ export function useGuestFormSettingsTab({
   const [specialRequestsEnabled, setSpecialRequestsEnabled] = useState(true);
   const [arrivalTimeEnabled, setArrivalTimeEnabled] = useState(false);
   const [guestCountEnabled, setGuestCountEnabled] = useState(false);
+  const [adultAgeThreshold, setAdultAgeThreshold] = useState(18);
+  const [childrenEnabled, setChildrenEnabled] = useState(true);
   const [savingGuestForm, setSavingGuestForm] = useState(false);
 
   const applyGuestFormSettings = useCallback((settings: BookingGuestFormSettings) => {
     setSpecialRequestsEnabled(settings.specialRequestsEnabled);
     setArrivalTimeEnabled(settings.arrivalTimeEnabled);
     setGuestCountEnabled(settings.guestCountEnabled);
+    setAdultAgeThreshold(settings.adultAgeThreshold);
+    setChildrenEnabled(settings.childrenEnabled);
   }, []);
 
   const handleSaveGuestForm = async () => {
@@ -89,6 +93,8 @@ export function useGuestFormSettingsTab({
           specialRequestsEnabled,
           arrivalTimeEnabled,
           guestCountEnabled,
+          adultAgeThreshold,
+          childrenEnabled,
         },
       });
       applyGuestFormSettings(saved);
@@ -107,6 +113,10 @@ export function useGuestFormSettingsTab({
     setArrivalTimeEnabled,
     guestCountEnabled,
     setGuestCountEnabled,
+    adultAgeThreshold,
+    setAdultAgeThreshold,
+    childrenEnabled,
+    setChildrenEnabled,
     savingGuestForm,
     applyGuestFormSettings,
     handleSaveGuestForm,

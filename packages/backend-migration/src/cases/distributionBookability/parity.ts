@@ -160,6 +160,8 @@ async function checkBookabilityProfile(
     booking_deep_links: boolean | null;
     min_rooms: number | null;
     max_rooms: number | null;
+    children_supported: boolean | null;
+    adult_age_threshold: number | null;
     catalog_public_id: string | null;
     catalog_slug: string | null;
     catalog_status: string | null;
@@ -187,6 +189,8 @@ async function checkBookabilityProfile(
        (profile.capabilities ->> 'bookingDeepLinks')::boolean AS booking_deep_links,
        (profile.supported_quote_parameters ->> 'minRooms')::integer AS min_rooms,
        (profile.supported_quote_parameters ->> 'maxRooms')::integer AS max_rooms,
+       (profile.supported_quote_parameters ->> 'childrenSupported')::boolean AS children_supported,
+       (profile.supported_quote_parameters ->> 'adultAgeThreshold')::integer AS adult_age_threshold,
        catalog.public_id AS catalog_public_id,
        catalog.canonical_slug AS catalog_slug,
        catalog.profile_status AS catalog_status,
@@ -224,6 +228,8 @@ async function checkBookabilityProfile(
     row.booking_deep_links === true &&
     row.min_rooms === 1 &&
     row.max_rooms === 4 &&
+    row.children_supported === true &&
+    row.adult_age_threshold === 18 &&
     row.catalog_public_id === check.publicId &&
     row.catalog_slug === check.canonicalSlug &&
     row.catalog_status === "complete" &&

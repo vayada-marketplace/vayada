@@ -176,6 +176,8 @@ type UpdateBookingGuestFormSettingsRequest = {
     specialRequestsEnabled: boolean;
     arrivalTimeEnabled: boolean;
     guestCountEnabled: boolean;
+    adultAgeThreshold: number;
+    childrenEnabled: boolean;
   };
 };
 
@@ -183,19 +185,27 @@ type BookingGuestFormSettings = {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  adultAgeThreshold: number;
+  childrenEnabled: boolean;
 };
 ```
 
 Validation and behavior:
 
-- All three booleans are required. Partial updates are not accepted by the typed
+- All five fields are required. Partial updates are not accepted by the typed
   route.
+- `adultAgeThreshold` must be an integer from `1` through `120`. Children age
+  labels are derived as `0` through `adultAgeThreshold - 1`; there are no
+  separate child age range fields.
+- `childrenEnabled` controls whether Booking Web exposes a children selector.
 - The Booking write is authoritative for this contract.
 - Until the PMS guest-facing flow reads these flags from a Booking-owned or
   distribution-owned model, the typed route owns the existing compatibility
   sync to PMS. PMS sync failure is non-fatal and must not fail the request after
   the Booking write succeeds; it should be logged or emitted through the
-  backend's operational telemetry.
+  backend's operational telemetry. The PMS compatibility PATCH still includes
+  only `special_requests_enabled`, `arrival_time_enabled`, and
+  `guest_count_enabled`.
 - The response returns the Booking settings state, not PMS sync state.
 
 ## Benefits Settings

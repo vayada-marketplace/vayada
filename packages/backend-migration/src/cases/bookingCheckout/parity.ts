@@ -295,6 +295,8 @@ async function checkBookingSettings(
     special_requests_enabled: boolean;
     arrival_time_enabled: boolean;
     guest_count_enabled: boolean;
+    adult_age_threshold: number;
+    children_enabled: boolean;
     benefits: unknown;
     default_currency: string;
     default_language: string;
@@ -314,6 +316,8 @@ async function checkBookingSettings(
        settings.special_requests_enabled,
        settings.arrival_time_enabled,
        settings.guest_count_enabled,
+       settings.adult_age_threshold,
+       settings.children_enabled,
        settings.benefits,
        settings.default_currency,
        settings.default_language,
@@ -346,6 +350,8 @@ async function checkBookingSettings(
     row.special_requests_enabled === settings.specialRequestsEnabled &&
     row.arrival_time_enabled === settings.arrivalTimeEnabled &&
     row.guest_count_enabled === settings.guestCountEnabled &&
+    row.adult_age_threshold === settings.adultAgeThreshold &&
+    row.children_enabled === settings.childrenEnabled &&
     sameJsonValue(row.benefits, settings.benefits) &&
     row.default_currency === settings.defaultCurrency &&
     row.default_language === settings.defaultLanguage &&

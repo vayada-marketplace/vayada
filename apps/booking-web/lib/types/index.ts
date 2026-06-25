@@ -20,6 +20,11 @@ export interface HotelBranding {
   faviconUrl?: string;
 }
 
+export interface GuestTypeSettings {
+  adultAgeThreshold: number;
+  childrenEnabled: boolean;
+}
+
 export interface PointOfInterest {
   id: string;
   label: string;
@@ -57,6 +62,7 @@ export interface Hotel {
   branding?: HotelBranding;
   defaultLanguage: string;
   supportedLanguages: string[];
+  guestTypeSettings?: GuestTypeSettings;
   referAGuestEnabled?: boolean;
   instantBook?: boolean;
   mapViewEnabled?: boolean;

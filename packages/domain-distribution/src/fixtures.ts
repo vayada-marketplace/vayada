@@ -212,6 +212,7 @@ function profileFixture(
         minAdults: 1,
         maxAdults: 8,
         childrenSupported: true,
+        adultAgeThreshold: 18,
         supportedCurrencies: ["EUR"],
         supportedLocales: ["en", "de"],
       },

@@ -88,6 +88,7 @@ const publicHotelProfile = {
       minAdults: 1,
       maxAdults: 8,
       childrenSupported: true,
+      adultAgeThreshold: 18,
       supportedCurrencies: hotel.supportedCurrencies,
       supportedLocales: hotel.supportedLanguages,
     },
@@ -302,7 +303,22 @@ const publicOffers = {
   dataSources: ["hotel_catalog", "booking", "pms", "finance", "distribution"],
 };
 
-export async function mockBookingApis(page: Page) {
+type MockBookingApisOptions = {
+  supportedQuoteParameters?: Partial<typeof publicHotelProfile.hotel.supportedQuoteParameters>;
+};
+
+export async function mockBookingApis(page: Page, options: MockBookingApisOptions = {}) {
+  const profile = {
+    ...publicHotelProfile,
+    hotel: {
+      ...publicHotelProfile.hotel,
+      supportedQuoteParameters: {
+        ...publicHotelProfile.hotel.supportedQuoteParameters,
+        ...options.supportedQuoteParameters,
+      },
+    },
+  };
+
   await page.route("**/api/events", async (route) => {
     await route.fulfill({ status: 204, body: "" });
   });
@@ -314,7 +330,7 @@ export async function mockBookingApis(page: Page) {
   await page.route(
     new RegExp(`/api/booking-web/hotels/${SEEDED_BOOKING_SLUG}(?:\\\\?.*)?$`),
     async (route) => {
-      await route.fulfill({ json: publicHotelProfile });
+      await route.fulfill({ json: profile });
     },
   );
 

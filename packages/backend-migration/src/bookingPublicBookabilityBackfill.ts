@@ -378,6 +378,7 @@ async function upsertTargetRows(
         minAdults: 1,
         maxAdults: maxAdults(input.snapshots),
         childrenSupported: true,
+        adultAgeThreshold: 18,
         supportedCurrencies,
         supportedLocales,
       }),

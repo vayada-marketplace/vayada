@@ -3,9 +3,8 @@
 This contract is the next narrow booking-flow settings vertical in
 [`frontend-backend-contract-migration.md`](frontend-backend-contract-migration.md),
 after [`BookingAddonSettings`](booking-addon-settings-contract.md). It covers
-the booking-admin Guest Form tab read surface for the three guest information
-toggles. It does not cover guest checkout form rendering, settings writes, PMS
-sync writes, or broader property settings.
+the booking-admin Guest Form tab read surface for the guest information toggles
+and guest-type settings. It does not cover broader property settings.
 
 The current legacy source is the Booking API property settings response from
 `apps/booking-api/app/routers/admin/settings.py`. The booking-admin screen reads
@@ -64,6 +63,8 @@ type BookingGuestFormSettings = {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  adultAgeThreshold: number;
+  childrenEnabled: boolean;
 };
 ```
 
@@ -74,6 +75,15 @@ Behavior:
 | `specialRequestsEnabled` | Whether the guest form should ask for free-text special requests. |
 | `arrivalTimeEnabled`     | Whether the guest form should ask for estimated arrival time.     |
 | `guestCountEnabled`      | Whether the guest form should ask for explicit guest count.       |
+| `adultAgeThreshold`      | Minimum age counted as an adult in guest-facing selectors.        |
+| `childrenEnabled`        | Whether guest-facing selectors expose a children count.           |
+
+The children age range is derived, not stored:
+
+```ts
+childrenAgeMin = 0;
+childrenAgeMax = adultAgeThreshold - 1;
+```
 
 Rows with `NULL`/missing legacy values default to:
 
@@ -81,7 +91,9 @@ Rows with `NULL`/missing legacy values default to:
 {
   "specialRequestsEnabled": true,
   "arrivalTimeEnabled": false,
-  "guestCountEnabled": false
+  "guestCountEnabled": false,
+  "adultAgeThreshold": 18,
+  "childrenEnabled": true
 }
 ```
 
@@ -132,14 +144,10 @@ rather than raw backend messages.
 ## Scalar Formats
 
 This contract has no money, currency, date, timestamp, pagination, or sorting
-fields. All response values are booleans. If future guest-form settings add
-localized labels, required/optional modes, or per-market variants, that must be
-a contract change.
-
-VAY-901 confirmed that old-stack VAY-891 child guest-type settings are not part
-of this contract. Target parity for adult age threshold, children enabled state,
-and guest-facing age labels is split to VAY-929 because it needs contract,
-schema, migration/default, Booking Admin, and Booking Web changes together.
+fields. `adultAgeThreshold` is an integer from `1` through `120`; all other
+response values are booleans. If future guest-form settings add localized
+labels, required/optional modes, or per-market variants, that must be a
+contract change.
 
 ## Loading And Stale State
 
@@ -164,6 +172,8 @@ Legacy Booking source fields:
 | `special_requests_enabled` | `specialRequestsEnabled` | `true`  |
 | `arrival_time_enabled`     | `arrivalTimeEnabled`     | `false` |
 | `guest_count_enabled`      | `guestCountEnabled`      | `false` |
+| n/a                        | `adultAgeThreshold`      | `18`    |
+| n/a                        | `childrenEnabled`        | `true`  |
 
 Legacy PMS compatibility:
 
@@ -174,9 +184,9 @@ Legacy PMS compatibility:
 - The current booking-admin save flow writes Booking first, then performs a
   best-effort PMS PATCH so guest-facing booking pages pick up the changes.
 - This read contract must not change PMS sync behavior. The typed write
-  contract keeps PMS sync as non-fatal compatibility behavior until the
-  guest-facing flow reads these flags from a Booking-owned or
-  distribution-owned model.
+  contract keeps PMS sync as non-fatal compatibility behavior for the three
+  PMS-owned fields only. Guest-type settings are stored in Booking target
+  settings and projected to Booking Web through public bookability.
 
 Removal condition: the target Booking/checkout settings read model implements
 the same response contract and the booking-admin Guest Form tab is cut over

@@ -161,6 +161,7 @@ Response shape:
       "minAdults": 1,
       "maxAdults": 8,
       "childrenSupported": true,
+      "adultAgeThreshold": 18,
       "supportedCurrencies": ["EUR", "USD"],
       "supportedLocales": ["en", "de"]
     }

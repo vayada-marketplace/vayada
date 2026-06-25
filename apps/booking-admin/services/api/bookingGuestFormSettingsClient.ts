@@ -21,6 +21,8 @@ export interface BookingGuestFormSettings {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  adultAgeThreshold: number;
+  childrenEnabled: boolean;
 }
 
 export type UpdateBookingGuestFormSettingsBody = BookingGuestFormSettings;

@@ -155,6 +155,8 @@ export type BookingGuestFormSettingsReadModel = {
   specialRequestsEnabled?: boolean | null;
   arrivalTimeEnabled?: boolean | null;
   guestCountEnabled?: boolean | null;
+  adultAgeThreshold?: number | null;
+  childrenEnabled?: boolean | null;
 };
 
 export type BookingBenefitsSettingsReadModel = {
@@ -200,6 +202,8 @@ export type BookingGuestFormSettingsResponse = {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  adultAgeThreshold: number;
+  childrenEnabled: boolean;
 };
 
 export type BookingBenefitsSettingsResponse = {
@@ -659,6 +663,8 @@ type BookingGuestFormSettingsRow = {
   special_requests_enabled: boolean | null;
   arrival_time_enabled: boolean | null;
   guest_count_enabled: boolean | null;
+  adult_age_threshold?: number | null;
+  children_enabled?: boolean | null;
 };
 
 type BookingBenefitsSettingsRow = {
@@ -688,6 +694,8 @@ type TargetBookingSettingsRow = {
   special_requests_enabled: boolean | null;
   arrival_time_enabled: boolean | null;
   guest_count_enabled: boolean | null;
+  adult_age_threshold: number | null;
+  children_enabled: boolean | null;
   benefits: unknown;
   default_currency: string | null;
   default_language: string | null;
@@ -766,6 +774,8 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     settings.special_requests_enabled,
     settings.arrival_time_enabled,
     settings.guest_count_enabled,
+    settings.adult_age_threshold,
+    settings.children_enabled,
     settings.benefits,
     settings.default_currency,
     settings.default_language,
@@ -797,6 +807,8 @@ function toTargetGuestFormSettings(
     specialRequestsEnabled: row.special_requests_enabled,
     arrivalTimeEnabled: row.arrival_time_enabled,
     guestCountEnabled: row.guest_count_enabled,
+    adultAgeThreshold: row.adult_age_threshold,
+    childrenEnabled: row.children_enabled,
   };
 }
 
@@ -879,6 +891,8 @@ export function createPgBookingSettingsReadRepository(config: {
         specialRequestsEnabled: row.special_requests_enabled,
         arrivalTimeEnabled: row.arrival_time_enabled,
         guestCountEnabled: row.guest_count_enabled,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
       };
     },
     async findBenefitsSettingsByHotelId(hotelId) {
@@ -982,6 +996,8 @@ export function createPgBookingSettingsReadRepository(config: {
         specialRequestsEnabled: row.special_requests_enabled,
         arrivalTimeEnabled: row.arrival_time_enabled,
         guestCountEnabled: row.guest_count_enabled,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
       };
     },
     async updateBenefitsSettingsByHotelId(hotelId, settings) {
@@ -1142,6 +1158,8 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.special_requests_enabled,
           settings.arrival_time_enabled,
           settings.guest_count_enabled,
+          settings.adult_age_threshold,
+          settings.children_enabled,
           settings.benefits,
           settings.default_currency,
           settings.default_language,
@@ -1161,6 +1179,8 @@ export function createPgTargetBookingSettingsRepository(config: {
           updated_settings.special_requests_enabled,
           updated_settings.arrival_time_enabled,
           updated_settings.guest_count_enabled,
+          updated_settings.adult_age_threshold,
+          updated_settings.children_enabled,
           updated_settings.benefits,
           updated_settings.default_currency,
           updated_settings.default_language,
@@ -1222,8 +1242,16 @@ export function createPgTargetBookingSettingsRepository(config: {
         hotelId,
         `special_requests_enabled = $2,
          arrival_time_enabled = $3,
-         guest_count_enabled = $4`,
-        [settings.specialRequestsEnabled, settings.arrivalTimeEnabled, settings.guestCountEnabled],
+         guest_count_enabled = $4,
+         adult_age_threshold = $5,
+         children_enabled = $6`,
+        [
+          settings.specialRequestsEnabled,
+          settings.arrivalTimeEnabled,
+          settings.guestCountEnabled,
+          settings.adultAgeThreshold,
+          settings.childrenEnabled,
+        ],
       );
       return row ? toTargetGuestFormSettings(row) : null;
     },
@@ -1791,6 +1819,8 @@ function parseGuestFormSettingsWriteBody(
     "specialRequestsEnabled",
     "arrivalTimeEnabled",
     "guestCountEnabled",
+    "adultAgeThreshold",
+    "childrenEnabled",
   ]);
   if (!parsed.ok) return parsed;
 
@@ -1798,6 +1828,11 @@ function parseGuestFormSettingsWriteBody(
   const specialRequestsEnabled = expectBoolean(parsed.value, "specialRequestsEnabled", details);
   const arrivalTimeEnabled = expectBoolean(parsed.value, "arrivalTimeEnabled", details);
   const guestCountEnabled = expectBoolean(parsed.value, "guestCountEnabled", details);
+  const adultAgeThreshold = expectInteger(parsed.value, "adultAgeThreshold", details, {
+    min: 1,
+    max: 120,
+  });
+  const childrenEnabled = expectBoolean(parsed.value, "childrenEnabled", details);
 
   if (details.length > 0) return { ok: false, details };
   return {
@@ -1806,6 +1841,8 @@ function parseGuestFormSettingsWriteBody(
       specialRequestsEnabled,
       arrivalTimeEnabled,
       guestCountEnabled,
+      adultAgeThreshold,
+      childrenEnabled,
     },
   };
 }
@@ -1983,6 +2020,8 @@ export function toGuestFormSettingsResponse(
     specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
     arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
     guestCountEnabled: settings.guestCountEnabled ?? false,
+    adultAgeThreshold: settings.adultAgeThreshold ?? 18,
+    childrenEnabled: settings.childrenEnabled ?? true,
   };
 }
 
@@ -2195,6 +2234,25 @@ function expectIntegerAtLeast(
   if (typeof value !== "number" || !Number.isInteger(value) || value < min) {
     details.push(`${path} must be an integer greater than or equal to ${min}.`);
     return min;
+  }
+  return value;
+}
+
+function expectInteger(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+  options: { min: number; max: number },
+): number {
+  const value = record[key];
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < options.min ||
+    value > options.max
+  ) {
+    details.push(`${key} must be an integer between ${options.min} and ${options.max}.`);
+    return options.min;
   }
   return value;
 }

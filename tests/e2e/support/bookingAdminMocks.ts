@@ -82,6 +82,8 @@ export interface BookingAdminGuestFormSettingsFixture {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  adultAgeThreshold: number;
+  childrenEnabled: boolean;
 }
 
 export interface BookingAdminLocalizationSettingsFixture {
@@ -212,6 +214,8 @@ const defaultGuestFormSettings: BookingAdminGuestFormSettingsFixture = {
   specialRequestsEnabled: true,
   arrivalTimeEnabled: false,
   guestCountEnabled: false,
+  adultAgeThreshold: 18,
+  childrenEnabled: true,
 };
 
 const defaultLocalizationSettings: BookingAdminLocalizationSettingsFixture = {
