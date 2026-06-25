@@ -939,7 +939,7 @@ describe("Ask Intelligence route", () => {
     });
   });
 
-  it("returns needs_clarification when explicit Ask scope is incomplete", async () => {
+  it("requires an explicit booking hotel resource in the Ask request body", async () => {
     const auditRepository = createInMemoryAskAuditRepository();
     app = buildAskApp({ auditRepository });
 
@@ -954,7 +954,7 @@ describe("Ask Intelligence route", () => {
       }),
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(400);
     expectValidAskAnswerEnvelope(response.body);
     expect(response.body.status).toBe("needs_clarification");
     expect(response.body.unavailableData[0].reason).toBe("missing_scope");
@@ -1053,6 +1053,72 @@ describe("Ask Intelligence route", () => {
     });
     expect(auditRepository.records[0]).toMatchObject({
       bookingHotelId: "booking_hotel_bellevue",
+      status: "not_authorized",
+    });
+  });
+
+  it("rejects a body organization that does not match the selected request context", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({ auditRepository });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload({
+        scope: {
+          organizationId: "org_other_hotel_group",
+          bookingHotelId: "booking_hotel_alpenrose",
+          dateRange: { from: "2026-06-01", to: "2026-06-30" },
+        },
+      }),
+    });
+
+    expect(response.statusCode).toBe(403);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("not_authorized");
+    expect(response.body.unavailableData[0]).toMatchObject({
+      unavailableDataId: "unavailable_ask_organization_scope",
+      reason: "not_linked_resource",
+    });
+    expect(auditRepository.records[0]).toMatchObject({
+      organizationId: "org_hotel_group",
+      bookingHotelId: "booking_hotel_alpenrose",
+      status: "not_authorized",
+      deniedToolCallIds: ["tool_call_ask_organization_denied"],
+    });
+  });
+
+  it("rejects stale selected-property state when the booking hotel is not linked", async () => {
+    const auditRepository = createInMemoryAskAuditRepository();
+    app = buildAskApp({ auditRepository });
+
+    const response = await injectJson<AskAnswer>(app, {
+      method: "POST",
+      url: "/api/ai/ask",
+      headers: { authorization: "Bearer valid-token" },
+      payload: askPayload({
+        scope: {
+          organizationId: "org_hotel_group",
+          bookingHotelId: "booking_hotel_stale_local_storage",
+          dateRange: { from: "2026-06-01", to: "2026-06-30" },
+        },
+      }),
+    });
+
+    expect(response.statusCode).toBe(403);
+    expectValidAskAnswerEnvelope(response.body);
+    expect(response.body.status).toBe("not_authorized");
+    expect(response.body.unavailableData[0]).toMatchObject({
+      reason: "not_linked_resource",
+      requestedResource: {
+        type: "booking_hotel",
+        id: "booking_hotel_stale_local_storage",
+      },
+    });
+    expect(auditRepository.records[0]).toMatchObject({
+      organizationId: "org_hotel_group",
+      bookingHotelId: "booking_hotel_stale_local_storage",
       status: "not_authorized",
     });
   });

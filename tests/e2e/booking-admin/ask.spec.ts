@@ -1,10 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { BOOKING_ADMIN_HOTEL_ID, mockBookingAdminShellRoutes } from "../support/bookingAdminMocks";
+import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
 test.describe("booking-admin Ask Intelligence", () => {
   test("asks a scoped question and renders the structured answer", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
+    const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "booking-admin-ask");
 
     await page.addInitScript(
       ({ hotelId, token }) => {
@@ -28,6 +30,7 @@ test.describe("booking-admin Ask Intelligence", () => {
 
     await page.route("**/api/ai/ask", async (route) => {
       expect(route.request().method()).toBe("POST");
+      expect(route.request().headers()["x-hotel-id"]).toBeUndefined();
       expect(route.request().postDataJSON()).toMatchObject({
         question: "Why did direct share change?",
         scope: {
@@ -94,6 +97,7 @@ test.describe("booking-admin Ask Intelligence", () => {
     await expect(page.getByText("booking.direct_booking_share")).toHaveCount(0);
     await expect(page.getByText("ev_share")).toHaveCount(0);
 
+    await assertNoLegacyCalls();
     await assertHealthy();
   });
 });

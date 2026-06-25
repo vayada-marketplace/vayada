@@ -9,6 +9,7 @@ describe("askIntelligence", () => {
 
   it("mints a booking compatibility token to resolve organization scope", async () => {
     vi.stubEnv("NEXT_PUBLIC_AUTH_API_URL", "https://api.localhost");
+    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
     const window = createWindowWithStorage();
     vi.stubGlobal("window", window);
     vi.stubGlobal("localStorage", window.localStorage);
@@ -28,8 +29,9 @@ describe("askIntelligence", () => {
       }
 
       expect(href).toBe("https://api.localhost/api/ai/ask");
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer workos-token");
-      expect(new Headers(init?.headers).get("x-hotel-id")).toBe("booking_hotel_alpenrose");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe("Bearer workos-token");
+      expect(headers.get("x-hotel-id")).toBeNull();
       expect(JSON.parse(String(init?.body))).toMatchObject({
         question: "Why did direct share change?",
         scope: {
@@ -58,6 +60,7 @@ describe("askIntelligence", () => {
 
   it("maps non-envelope failures to safe retry copy", async () => {
     vi.stubEnv("NEXT_PUBLIC_AUTH_API_URL", "https://api.localhost");
+    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
     const window = createWindowWithStorage();
     vi.stubGlobal("window", window);
     vi.stubGlobal("localStorage", window.localStorage);
