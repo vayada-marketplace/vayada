@@ -8111,7 +8111,7 @@ describe("vayada-api", () => {
     expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
   });
 
-  it("allows PMS Web setup-status compatibility checks from configured origins", async () => {
+  it("does not register retired PMS Web legacy admin helper routes", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.read"],
       entitlements: [
@@ -8124,35 +8124,36 @@ describe("vayada-api", () => {
       pmsOperationsAllowedOrigins: ["https://pms.localhost"],
     });
 
-    const preflight = await app.inject({
-      method: "OPTIONS",
-      url: "/admin/setup-status",
-      headers: {
-        origin: "https://pms.localhost",
-        "access-control-request-method": "GET",
-        "access-control-request-headers": "authorization,content-type,x-hotel-id",
-      },
-    });
-    const read = await app.inject({
-      method: "GET",
-      url: "/admin/setup-status",
-      headers: {
-        authorization: "Bearer valid-token",
-        origin: "https://pms.localhost",
-      },
-    });
+    const retiredRoutes = [
+      "/admin/setup-status",
+      "/admin/messaging/unread-count",
+      "/admin/bookings",
+      "/admin/hotel",
+      "/admin/hotels",
+      "/admin/payment-settings",
+      "/admin/calendar",
+      "/admin/calendar-settings",
+      "/admin/channex/status",
+      "/admin/channex/channels",
+      "/admin/channex/provision",
+    ];
 
-    expect(preflight.statusCode).toBe(204);
-    expect(preflight.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
-    expect(read.statusCode).toBe(200);
-    expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
-    expect(read.json()).toMatchObject({
-      registered: true,
-      setupComplete: true,
-      setup_complete: true,
-      roomCount: expect.any(Number),
-      room_count: expect.any(Number),
-    });
+    for (const url of retiredRoutes) {
+      for (const method of ["GET", "OPTIONS"] as const) {
+        const response = await app.inject({
+          method,
+          url,
+          headers: {
+            authorization: "Bearer valid-token",
+            origin: "https://pms.localhost",
+            "access-control-request-method": "GET",
+            "access-control-request-headers": "authorization,content-type,x-hotel-id",
+          },
+        });
+
+        expect(response.statusCode, `${method} ${url}`).toBe(404);
+      }
+    }
   });
 
   it("serves PMS Web target property facades from path-scoped PMS property access", async () => {
@@ -8307,334 +8308,6 @@ describe("vayada-api", () => {
     expect(response.json()).toMatchObject({
       code: "missing_resource_access",
       category: "authorization",
-    });
-  });
-
-  it("serves PMS Web legacy helper reads from scoped target PMS data and empty states", async () => {
-    const reservationRanges: Array<{ from: string; to: string }> = [];
-    const legacyRepository: PmsOperationsReadRepository = {
-      ...pmsOperationsRepository,
-      async listReservationsByPropertyId(propertyId, filters) {
-        expect(propertyId).toBe(pmsPropertyId);
-        expect(filters.limit).toBe(500);
-        expect(filters.offset).toBe(0);
-        return { items: pmsReservations, total: pmsReservations.length };
-      },
-      async listReservationsOverlappingStayRangeByPropertyId(propertyId, range) {
-        reservationRanges.push(range);
-        expect(propertyId).toBe(pmsPropertyId);
-        return { items: pmsReservations, total: pmsReservations.length };
-      },
-      async listRoomBlocksByPropertyId(propertyId, range) {
-        expect(propertyId).toBe(pmsPropertyId);
-        expect(range).toEqual({ from: "2026-08-15", to: "2026-08-18" });
-        return { items: pmsRoomBlocks, sourceFreshness: { owner: "pms", status: "fresh" } };
-      },
-    };
-
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.read", "pms.operations.manage"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-        },
-      ],
-      pmsOperationsRepository: legacyRepository,
-      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
-    });
-
-    const headers = {
-      authorization: "Bearer valid-token",
-      origin: "https://pms.localhost",
-    };
-    const preflight = await app.inject({
-      method: "OPTIONS",
-      url: "/admin/calendar",
-      headers: {
-        origin: "https://pms.localhost",
-        "access-control-request-method": "GET",
-        "access-control-request-headers": "authorization,content-type,x-hotel-id",
-      },
-    });
-    const unread = await app.inject({
-      method: "GET",
-      url: "/admin/messaging/unread-count",
-      headers,
-    });
-    const bookings = await app.inject({
-      method: "GET",
-      url: "/admin/bookings?limit=500&offset=0",
-      headers,
-    });
-    const hotel = await app.inject({ method: "GET", url: "/admin/hotel", headers });
-    const hotels = await app.inject({ method: "GET", url: "/admin/hotels", headers });
-    const hotelFromBookingHeader = await app.inject({
-      method: "GET",
-      url: "/admin/hotel",
-      headers: { ...headers, "x-hotel-id": "booking_hotel_alpenrose" },
-    });
-    const paymentSettings = await app.inject({
-      method: "GET",
-      url: "/admin/payment-settings",
-      headers,
-    });
-    const calendar = await app.inject({
-      method: "GET",
-      url: "/admin/calendar?start=2026-08-15&end=2026-08-18",
-      headers,
-    });
-    const channexStatus = await app.inject({
-      method: "GET",
-      url: "/admin/channex/status",
-      headers,
-    });
-    const channexChannels = await app.inject({
-      method: "GET",
-      url: "/admin/channex/channels",
-      headers,
-    });
-    const calendarSettings = await app.inject({
-      method: "GET",
-      url: "/admin/calendar-settings",
-      headers,
-    });
-    const calendarSettingsPatch = await app.inject({
-      method: "PATCH",
-      url: "/admin/calendar-settings",
-      headers,
-      payload: {
-        autoRearrangeEnabled: false,
-        autoOpenEnabled: true,
-        autoOpenMode: "fixed",
-        autoOpenMonths: 24,
-        autoOpenFixedMonth: "2026-12-01",
-      },
-    });
-    const hotelPatch = await app.inject({
-      method: "PATCH",
-      url: "/admin/hotel",
-      headers,
-      payload: {
-        timezone: "Europe/Vienna",
-        country: "AT",
-        instant_book: true,
-        sameDayBookingsEnabled: false,
-        sameDayBookingCutoffTime: null,
-      },
-    });
-
-    expect(preflight.statusCode).toBe(204);
-    expect(preflight.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
-    for (const response of [
-      unread,
-      bookings,
-      hotel,
-      hotels,
-      hotelFromBookingHeader,
-      paymentSettings,
-      calendar,
-      channexStatus,
-      channexChannels,
-      calendarSettings,
-      calendarSettingsPatch,
-      hotelPatch,
-    ]) {
-      expect(response.statusCode).toBe(200);
-      expect(response.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
-    }
-
-    expect(unread.json()).toEqual({ unreadCount: 0 });
-    expect(bookings.json()).toMatchObject({
-      total: pmsReservations.length,
-      limit: 500,
-      offset: 0,
-    });
-    expect(bookings.json().bookings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: pmsReservations[0].guestBookingId,
-          bookingReference: pmsReservations[0].bookingReference,
-          roomTypeId: pmsRoomTypes[0].roomTypeId,
-          roomName: pmsRoomTypes[0].name,
-        }),
-      ]),
-    );
-    expect(hotel.json()).toMatchObject({
-      id: pmsPropertyId,
-      timezone: "UTC",
-      country: "",
-      instant_book: false,
-      sameDayBookingsEnabled: true,
-    });
-    expect(hotels.json()).toEqual([
-      {
-        id: pmsPropertyId,
-        name: pmsPropertyId,
-        slug: pmsPropertyId,
-        location: "",
-        country: "",
-      },
-    ]);
-    expect(hotelFromBookingHeader.json()).toMatchObject({
-      id: pmsPropertyId,
-    });
-    expect(paymentSettings.json()).toMatchObject({
-      paymentSettings: {
-        defaultCurrency: "EUR",
-        onlineCardPayment: false,
-      },
-      cancellationPolicy: {
-        freeCancellationDays: 7,
-      },
-    });
-    const calendarBody = calendar.json();
-    expect(calendarBody.roomTypes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: pmsRoomTypes[0].roomTypeId, name: pmsRoomTypes[0].name }),
-      ]),
-    );
-    expect(calendarBody.rooms).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: pmsRooms[0].roomId, roomTypeName: pmsRoomTypes[0].name }),
-      ]),
-    );
-    expect(calendarBody.bookings).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: pmsReservations[1].guestBookingId,
-          status: "confirmed",
-        }),
-      ]),
-    );
-    expect(calendarBody.bookings).toEqual(
-      expect.not.arrayContaining([
-        expect.objectContaining({ id: pmsReservations[0].guestBookingId }),
-      ]),
-    );
-    expect(reservationRanges).toEqual([{ from: "2026-08-15", to: "2026-08-18" }]);
-    expect(calendarBody.blocks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: pmsRoomBlocks[0].blockId, endDate: "2026-08-16" }),
-      ]),
-    );
-    expect(channexStatus.json()).toMatchObject({
-      isConnected: false,
-      channexPropertyId: null,
-    });
-    expect(channexChannels.json()).toEqual({ channels: [] });
-    expect(calendarSettings.json()).toMatchObject({
-      autoRearrangeEnabled: true,
-      autoOpenEnabled: false,
-      autoOpenMode: "rolling",
-      autoOpenMonths: 18,
-    });
-    expect(calendarSettingsPatch.json()).toMatchObject({
-      autoRearrangeEnabled: false,
-      autoOpenEnabled: true,
-      autoOpenMode: "fixed",
-      autoOpenMonths: 24,
-      autoOpenFixedMonth: "2026-12-01",
-    });
-    expect(hotelPatch.json()).toMatchObject({
-      timezone: "Europe/Vienna",
-      country: "AT",
-      instant_book: true,
-      sameDayBookingsEnabled: false,
-      sameDayBookingCutoffTime: null,
-    });
-  });
-
-  it("rejects PMS Web legacy helper reads outside the linked PMS property", async () => {
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.read"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-        },
-      ],
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/admin/channex/status",
-      headers: {
-        authorization: "Bearer valid-token",
-        "x-hotel-id": "f6853000-0000-0000-0000-000000000999",
-      },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json()).toMatchObject({
-      code: "missing_resource_access",
-      category: "authorization",
-    });
-  });
-
-  it("requires PMS read permission before listing legacy PMS hotels", async () => {
-    app = buildAuthenticatedApp({
-      permissions: [],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-        },
-      ],
-      pmsOperationsAllowedOrigins: ["https://pms.localhost"],
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/admin/hotels",
-      headers: {
-        authorization: "Bearer valid-token",
-        origin: "https://pms.localhost",
-      },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
-    expect(response.json()).toMatchObject({
-      code: "missing_permission",
-      category: "authorization",
-    });
-  });
-
-  it("returns a structured PMS setup-status error when the read model is unavailable", async () => {
-    app = buildAuthenticatedApp({
-      permissions: ["pms.operations.read"],
-      entitlements: [
-        {
-          product: "pms",
-          key: "property-management",
-          status: "active",
-        },
-      ],
-      pmsOperationsRepository: {
-        ...pmsOperationsRepository,
-        async listRoomTypesByPropertyId() {
-          throw new Error("read model unavailable");
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/admin/setup-status",
-      headers: {
-        authorization: "Bearer valid-token",
-      },
-    });
-
-    expect(response.statusCode).toBe(500);
-    expect(response.json()).toMatchObject({
-      code: "read_model_unavailable",
-      category: "read_model",
-      message: "PMS room types read model is unavailable.",
     });
   });
 

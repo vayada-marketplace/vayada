@@ -94,8 +94,7 @@ const surfaceRules = {
     pathRule("/admin/payment-settings", "legacy PMS payment settings route"),
     pathRule("/admin/calendar", "legacy PMS calendar route"),
     pathRule("/admin/calendar-settings", "legacy PMS calendar settings route"),
-    pathRule("/admin/channex/status", "legacy PMS Channex status route"),
-    pathRule("/admin/channex/channels", "legacy PMS Channex channels route"),
+    pathPrefixRule("/admin/channex/", "legacy PMS Channex route"),
     headerOnPathPrefixRule(
       "/api/pms/properties/",
       "x-hotel-id",
