@@ -30,6 +30,7 @@ from app.services.booking_service import (
     guest_withdraw_booking,
     handle_guest_cancellation,
     lookup_booking,
+    quote_booking_request,
 )
 from app.utils import get_hotel_id_by_slug
 
@@ -71,6 +72,19 @@ async def post_booking(slug: str, data: BookingCreate):
         logger.error("Error creating booking for %s: %s", slug, e)
         raise HTTPException(status_code=500, detail="Internal server error")
     return result
+
+
+@router.post("/{slug}/bookings/quote")
+async def post_booking_quote(slug: str, data: BookingCreate):
+    """Return the authoritative final checkout quote before submission."""
+    try:
+        quote = await quote_booking_request(slug, data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error("Error quoting booking for %s: %s", slug, e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
+    return quote
 
 
 @router.post("/{slug}/bookings/{handle}/confirm-authorization")

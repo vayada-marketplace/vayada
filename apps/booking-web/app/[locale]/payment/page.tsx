@@ -15,7 +15,7 @@ import PolicyModal from "@/components/payment/PolicyModal";
 import { useHotel, useRooms, useAddons, useSlug } from "@/contexts/HotelContext";
 import { formatDate } from "@/lib/utils";
 import { useCurrency } from "@/contexts/CurrencyContext";
-import { bookingService } from "@/services/api/booking";
+import { bookingService, type BookingQuote } from "@/services/api/booking";
 import { ApiError } from "@/services/api/client";
 import { getFreeCancellationDays } from "@/lib/constants/booking";
 import { usePricing } from "@/lib/hooks/usePricing";
@@ -99,6 +99,9 @@ function PaymentPageContent() {
   const addonQuantities = guestDetails?.addonQuantities || {};
   const addonDates = guestDetails?.addonDates || {};
   const promoCodeParam = searchParams.get("promoCode") || "";
+  const selectedAddonIdsKey = selectedAddonIds.join("|");
+  const addonQuantitiesKey = JSON.stringify(addonQuantities);
+  const addonDatesKey = JSON.stringify(addonDates);
 
   const { room, nights, roomTotal, addonTotal, promoDiscount, discountAmount, grandTotal } =
     usePricing({
@@ -132,6 +135,9 @@ function PaymentPageContent() {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [checkoutQuote, setCheckoutQuote] = useState<BookingQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState("");
   // VAY-402: when the booking fails because the room is no longer available,
   // show a recovery CTA back to the room list instead of a dead-end error.
   const [soldOut, setSoldOut] = useState(false);
@@ -212,8 +218,82 @@ function PaymentPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, rateType, room?.id]);
 
+  const quoteReady = Boolean(guestDetails && room && slug && checkIn && checkOut);
+
+  useEffect(() => {
+    if (!quoteReady || !guestDetails || !room) {
+      setCheckoutQuote(null);
+      return;
+    }
+
+    let cancelled = false;
+    setQuoteLoading(true);
+    setQuoteError("");
+
+    bookingService
+      .quote(slug, {
+        ...guestDetails,
+        checkIn,
+        checkOut,
+        adults: adultsParam,
+        children: childrenParam,
+        numberOfRooms: roomsParam,
+        paymentMethod,
+        rateType,
+        addonIds: selectedAddonIds,
+        addonQuantities,
+        addonDates,
+        promoCode: promoCodeParam || undefined,
+      })
+      .then((quote) => {
+        if (!cancelled) setCheckoutQuote(quote);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setCheckoutQuote(null);
+        setQuoteError(err instanceof Error ? err.message : t("errorGeneric"));
+      })
+      .finally(() => {
+        if (!cancelled) setQuoteLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    slug,
+    quoteReady,
+    room?.id,
+    checkIn,
+    checkOut,
+    adultsParam,
+    childrenParam,
+    roomsParam,
+    paymentMethod,
+    rateType,
+    selectedAddonIdsKey,
+    addonQuantitiesKey,
+    addonDatesKey,
+    promoCodeParam,
+  ]);
+
+  const quotedCurrency = checkoutQuote?.currency || selectedCurrency;
+  const quotedRoomTotal = checkoutQuote?.roomTotal ?? roomTotal;
+  const quotedAddonTotal = checkoutQuote?.addonTotal ?? addonTotal;
+  const quotedPromoDiscount = checkoutQuote?.promoDiscount ?? discountAmount;
+  const quotedGrandTotal = checkoutQuote?.totalAmount ?? grandTotal;
+  const quotedDepositRequired = checkoutQuote?.depositRequired ?? depositRequired;
+  const quotedDepositPercentage = checkoutQuote?.depositPercentage ?? depositPercentage ?? 0;
+  const quotedDepositAmount = checkoutQuote?.depositAmount ?? depositAmount;
+  const quotedRemainingBalance = checkoutQuote?.balanceAmount ?? remainingBalance;
+
   const handleSubmit = async () => {
     if (!agreedToTerms || !guestDetails || !room) return;
+    if (!quoteReady || quoteLoading || !checkoutQuote) {
+      setError("Updating checkout total. Please wait a moment.");
+      return;
+    }
 
     setSubmitting(true);
     setError("");
@@ -233,6 +313,7 @@ function PaymentPageContent() {
         addonQuantities,
         addonDates,
         promoCode: promoCodeParam || undefined,
+        expectedTotalAmount: checkoutQuote.totalAmount,
       });
 
       const booking = result.booking;
@@ -309,13 +390,13 @@ function PaymentPageContent() {
           checkOut={checkOut}
           nights={nights}
           adults={adultsParam}
-          roomTotal={roomTotal}
+          roomTotal={quotedRoomTotal}
           addons={addons}
           selectedAddonIds={selectedAddonIds}
           addonQuantities={addonQuantities}
           addonDates={addonDates}
-          addonTotal={addonTotal}
-          grandTotal={grandTotal}
+          addonTotal={quotedAddonTotal}
+          grandTotal={quotedGrandTotal}
           booking={pendingBooking}
           draftId={draftId}
           slug={slug}
@@ -323,12 +404,12 @@ function PaymentPageContent() {
           formatDate={formatDate}
           locale={locale}
           roomsParam={roomsParam}
-          selectedCurrency={selectedCurrency}
+          selectedCurrency={quotedCurrency}
           convertAndRound={convertAndRound}
-          depositRequired={depositRequired}
-          depositPercentage={depositPercentage}
-          depositAmount={depositAmount}
-          remainingBalance={remainingBalance}
+          depositRequired={quotedDepositRequired}
+          depositPercentage={quotedDepositPercentage}
+          depositAmount={quotedDepositAmount}
+          remainingBalance={quotedRemainingBalance}
         />
       </StripeProvider>
     );
@@ -386,9 +467,9 @@ function PaymentPageContent() {
           </div>
         </div>
 
-        {error && (
+        {(error || quoteError) && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
-            <p>{error}</p>
+            <p>{error || quoteError}</p>
             {soldOut && (
               <button
                 type="button"
@@ -668,14 +749,14 @@ function PaymentPageContent() {
                   </p>
                 )}
 
-              {depositRequired && (
+              {quotedDepositRequired && (
                 <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 space-y-2">
                   <div className="flex items-center justify-between gap-4 text-sm">
                     <span className="font-semibold text-emerald-900">
-                      Deposit due now: {depositPercentage}%
+                      Deposit due now: {quotedDepositPercentage}%
                     </span>
                     <span className="font-bold text-emerald-900">
-                      {formatPrice(depositAmount, selectedCurrency)}
+                      {formatPrice(quotedDepositAmount, quotedCurrency)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-4 text-sm">
@@ -683,7 +764,7 @@ function PaymentPageContent() {
                       Remaining balance due at the property upon arrival
                     </span>
                     <span className="font-semibold text-emerald-900">
-                      {formatPrice(remainingBalance, selectedCurrency)}
+                      {formatPrice(quotedRemainingBalance, quotedCurrency)}
                     </span>
                   </div>
                 </div>
@@ -693,8 +774,8 @@ function PaymentPageContent() {
               {paymentMethod === "card" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    {depositRequired
-                      ? `You will be charged ${formatPrice(depositAmount, selectedCurrency)} now. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                    {quotedDepositRequired
+                      ? `You will be charged ${formatPrice(quotedDepositAmount, quotedCurrency)} now. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
                       : t("cardAuthExplanation") ||
                         "Your card will be authorized but not charged until the host accepts your booking. The hold will be released if the booking is declined or expires."}
                   </div>
@@ -724,8 +805,8 @@ function PaymentPageContent() {
               ) : paymentMethod === "bank_transfer" ? (
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
-                    {depositRequired
-                      ? `Please transfer ${formatPrice(depositAmount, selectedCurrency)}. The remaining ${formatPrice(remainingBalance, selectedCurrency)} is due at the property.`
+                    {quotedDepositRequired
+                      ? `Please transfer ${formatPrice(quotedDepositAmount, quotedCurrency)}. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
                       : t("bankTransferExplanation") ||
                         "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
                   </div>
@@ -786,7 +867,7 @@ function PaymentPageContent() {
                     </p>
                     <p className="text-sm text-gray-700">
                       <strong>{t("amountLabel")}:</strong>{" "}
-                      {formatPrice(grandTotal, selectedCurrency)}
+                      {formatPrice(quotedGrandTotal, quotedCurrency)}
                     </p>
                     <button
                       type="button"
@@ -864,8 +945,8 @@ function PaymentPageContent() {
                           terms: renderTermsLink,
                           cancellation: renderCancellationLink,
                           amount: formatPrice(
-                            depositRequired ? depositAmount : grandTotal,
-                            selectedCurrency,
+                            quotedDepositRequired ? quotedDepositAmount : quotedGrandTotal,
+                            quotedCurrency,
                           ),
                         })
                       : t.rich("agreeTermsProperty", {
@@ -927,14 +1008,16 @@ function PaymentPageContent() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={!agreedToTerms || submitting}
+                disabled={
+                  !agreedToTerms || submitting || !quoteReady || quoteLoading || !checkoutQuote
+                }
                 className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm flex items-center gap-2 ${
-                  agreedToTerms && !submitting
+                  agreedToTerms && !submitting && quoteReady && !quoteLoading && checkoutQuote
                     ? "bg-primary-600 text-white hover:bg-primary-700"
                     : "bg-gray-200 text-gray-400 cursor-not-allowed"
                 }`}
               >
-                {submitting ? (
+                {submitting || quoteLoading ? (
                   <>
                     <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                       <circle
@@ -951,7 +1034,7 @@ function PaymentPageContent() {
                         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                       />
                     </svg>
-                    {t("processing") || "Processing..."}
+                    {quoteLoading ? "Updating price..." : t("processing") || "Processing..."}
                   </>
                 ) : paymentMethod === "card" ? (
                   <>
@@ -1034,7 +1117,7 @@ function PaymentPageContent() {
                     {ts("rooms")} ({tc("nights", { count: nights })})
                   </span>
                   <span className="font-semibold text-gray-900">
-                    {formatPrice(roomTotal, selectedCurrency)}
+                    {formatPrice(quotedRoomTotal, quotedCurrency)}
                   </span>
                 </div>
                 {addons
@@ -1084,7 +1167,7 @@ function PaymentPageContent() {
                     {promoDiscount.type === "percentage" ? ` (-${promoDiscount.value}%)` : ""}
                   </span>
                   <span className="font-semibold text-primary-600">
-                    -{formatPrice(discountAmount, selectedCurrency)}
+                    -{formatPrice(quotedPromoDiscount, quotedCurrency)}
                   </span>
                 </div>
               )}
@@ -1095,23 +1178,23 @@ function PaymentPageContent() {
                   <span className="text-base font-bold text-gray-900">{tc("total")}</span>
                   <div className="text-right">
                     <p className="text-xl font-bold text-gray-900">
-                      {formatPrice(grandTotal, selectedCurrency)}
+                      {formatPrice(quotedGrandTotal, quotedCurrency)}
                     </p>
                     <p className="text-xs text-gray-500">{tc("includesTaxes")}</p>
                   </div>
                 </div>
-                {depositRequired && (
+                {quotedDepositRequired && (
                   <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Due now</span>
                       <span className="font-semibold text-gray-900">
-                        {formatPrice(depositAmount, selectedCurrency)}
+                        {formatPrice(quotedDepositAmount, quotedCurrency)}
                       </span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Due at arrival</span>
                       <span className="font-semibold text-gray-900">
-                        {formatPrice(remainingBalance, selectedCurrency)}
+                        {formatPrice(quotedRemainingBalance, quotedCurrency)}
                       </span>
                     </div>
                   </div>
