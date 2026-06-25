@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useAddons, useHotel, useRooms, useSlug } from "@/contexts/HotelContext";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import { calculateNights } from "@/lib/utils";
-import { calculatePromoDiscount, getNonRefundableRate } from "@/lib/constants/booking";
+import {
+  calculatePromoDiscount,
+  getFlexibleNightlyRates,
+  getNonRefundableNightlyRates,
+} from "@/lib/constants/booking";
 import { hotelService } from "@/services/api/hotel";
 
 export interface PromoDiscount {
@@ -72,14 +76,20 @@ export function usePricing({
   const nights = calculateNights(checkIn, checkOut);
   const roomCurrency = room?.currency || hotel?.currency || "EUR";
 
-  // Per-night rate rounded in the displayed currency so nightly × nights equals
-  // the shown total (avoids "$25 × 3 = $76" conversion rounding mismatch).
-  const nightlyRateBase =
+  // Sum exact stay nightly rates from PMS when available. Fallbacks keep
+  // cached/older room payloads working.
+  const nightlyRatesBase =
     rateType === "nonrefundable"
-      ? getNonRefundableRate(room?.baseRate ?? 0, room?.nonRefundableRate)
-      : (room?.baseRate ?? 0);
-  const nightlyRate = room ? convertAndRound(nightlyRateBase, roomCurrency) : 0;
-  const roomTotal = nightlyRate * nights * roomsParam;
+      ? getNonRefundableNightlyRates(room, nights)
+      : getFlexibleNightlyRates(room, nights);
+  const nightlyRates = nightlyRatesBase.map((rate) => convertAndRound(rate, roomCurrency));
+  const nightlyRate =
+    nightlyRates.length > 0
+      ? Math.round(
+          (nightlyRates.reduce((sum, rate) => sum + rate, 0) / nightlyRates.length) * 100,
+        ) / 100
+      : 0;
+  const roomTotal = nightlyRates.reduce((sum, rate) => sum + rate, 0) * roomsParam;
 
   // Sum addon line totals in the displayed currency. Each line is rounded
   // first so its shown price matches its contribution.

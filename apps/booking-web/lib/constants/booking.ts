@@ -1,10 +1,27 @@
-import { Addon } from "@/lib/types";
+import { Addon, RoomType } from "@/lib/types";
 
 /** Fallback multiplier for non-refundable pricing (15% discount) — only used if server doesn't provide a rate */
 export const NON_REFUNDABLE_DISCOUNT = 0.85;
 
 export function getNonRefundableRate(baseRate: number, nonRefundableRate?: number | null): number {
   return nonRefundableRate ?? Math.round(baseRate * NON_REFUNDABLE_DISCOUNT * 100) / 100;
+}
+
+function normalizeNightlyRates(rates: number[] | undefined, fallback: number, nights: number) {
+  if (nights <= 0) return [];
+  if (rates && rates.length === nights) return rates;
+  return Array.from({ length: nights }, () => fallback);
+}
+
+export function getFlexibleNightlyRates(room: RoomType | undefined, nights: number): number[] {
+  if (!room) return [];
+  return normalizeNightlyRates(room.nightlyRates, room.baseRate, nights);
+}
+
+export function getNonRefundableNightlyRates(room: RoomType | undefined, nights: number): number[] {
+  if (!room) return [];
+  const fallback = getNonRefundableRate(room.baseRate, room.nonRefundableRate);
+  return normalizeNightlyRates(room.nonRefundableNightlyRates, fallback, nights);
 }
 
 /** Parse the admin-selected cancellation policy string (e.g. "Free until 14 days before")
