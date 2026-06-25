@@ -40,8 +40,12 @@ async def upload_room_images(
             if not file_content:
                 continue
 
+            resize_enabled = settings.IMAGE_RESIZE_WIDTH > 0 or settings.IMAGE_RESIZE_HEIGHT > 0
             is_valid, error_message = validate_image(
-                file_content, file.filename or "image", file.content_type
+                file_content,
+                file.filename or "image",
+                file.content_type,
+                check_dimensions=not resize_enabled,
             )
             if not is_valid:
                 logger.warning(f"Skipping invalid image {file.filename}: {error_message}")
@@ -61,6 +65,15 @@ async def upload_room_images(
                     else None,
                 )
                 image_info = get_image_info(processed_content)
+
+            is_valid, error_message = validate_image(
+                processed_content,
+                file.filename or "image",
+                check_dimensions=True,
+            )
+            if not is_valid:
+                logger.warning(f"Skipping processed image {file.filename}: {error_message}")
+                continue
 
             file_key = generate_file_key("rooms", file.filename or "image.jpg", user_id)
 

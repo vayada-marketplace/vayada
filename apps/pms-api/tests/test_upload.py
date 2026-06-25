@@ -122,11 +122,11 @@ class TestImageUpload:
         )
 
     async def test_upload_large_image_resized(self, client, cleanup_database, mock_s3_operations):
-        """Images larger than 1920x1920 get resized down."""
+        """Phone-sized images over 4000px get resized down instead of rejected."""
         user = await create_test_user()
         await create_test_hotel(str(user["id"]))
 
-        image_data = make_test_image(3000, 2000)
+        image_data = make_test_image(4032, 3024)
         resp = await client.post(
             "/upload/images",
             files=[("files", ("huge.jpg", image_data, "image/jpeg"))],

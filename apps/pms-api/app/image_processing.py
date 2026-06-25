@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 def validate_image(
-    file_content: bytes, filename: str, content_type: str | None = None
+    file_content: bytes,
+    filename: str,
+    content_type: str | None = None,
+    check_dimensions: bool = True,
 ) -> tuple[bool, str | None]:
     max_size_bytes = settings.MAX_IMAGE_SIZE_MB * 1024 * 1024
     if len(file_content) > max_size_bytes:
@@ -28,7 +31,9 @@ def validate_image(
             return False, "Invalid image format. Allowed formats: JPEG, PNG, WEBP, GIF, AVIF"
 
         width, height = image.size
-        if width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT:
+        if check_dimensions and (
+            width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT
+        ):
             return (
                 False,
                 f"Image dimensions exceed maximum allowed size ({settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT})",
