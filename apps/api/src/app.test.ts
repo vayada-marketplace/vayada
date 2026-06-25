@@ -522,6 +522,8 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       specialRequestsEnabled: false,
       arrivalTimeEnabled: true,
       guestCountEnabled: true,
+      adultAgeThreshold: 21,
+      childrenEnabled: false,
     };
   },
   async findBenefitsSettingsByHotelId(hotelId) {
@@ -1943,6 +1945,7 @@ function targetPublicHotelProfileRow(): QueryResultRow {
       minAdults: 1,
       maxAdults: 6,
       childrenSupported: true,
+      adultAgeThreshold: 18,
       supportedCurrencies: ["EUR", "USD"],
       supportedLocales: ["en", "de"],
     },
@@ -3596,6 +3599,8 @@ describe("vayada-api", () => {
       specialRequestsEnabled: false,
       arrivalTimeEnabled: true,
       guestCountEnabled: true,
+      adultAgeThreshold: 21,
+      childrenEnabled: false,
     });
   });
 
@@ -3720,11 +3725,15 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        adultAgeThreshold: 21,
+        childrenEnabled: false,
       },
       expected: {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        adultAgeThreshold: 21,
+        childrenEnabled: false,
       },
     },
     {
@@ -3825,6 +3834,8 @@ describe("vayada-api", () => {
         specialRequestsEnabled: boolean;
         arrivalTimeEnabled: boolean;
         guestCountEnabled: boolean;
+        adultAgeThreshold: number;
+        childrenEnabled: boolean;
       };
       authHeader?: string;
     }> = [];
@@ -3847,6 +3858,8 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: true,
         guestCountEnabled: false,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
       },
     });
 
@@ -3855,6 +3868,8 @@ describe("vayada-api", () => {
       specialRequestsEnabled: true,
       arrivalTimeEnabled: true,
       guestCountEnabled: false,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
     });
     expect(syncCalls).toEqual([
       {
@@ -3864,6 +3879,8 @@ describe("vayada-api", () => {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: true,
           guestCountEnabled: false,
+          adultAgeThreshold: 18,
+          childrenEnabled: true,
         },
       },
     ]);
@@ -3888,6 +3905,8 @@ describe("vayada-api", () => {
         specialRequestsEnabled: false,
         arrivalTimeEnabled: true,
         guestCountEnabled: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
       },
     });
 
@@ -3896,6 +3915,8 @@ describe("vayada-api", () => {
       specialRequestsEnabled: false,
       arrivalTimeEnabled: true,
       guestCountEnabled: true,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
     });
   });
 
@@ -3914,7 +3935,20 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
         legacyField: true,
+      },
+    },
+    {
+      name: "guest-form guest-type",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+        adultAgeThreshold: 0,
+        childrenEnabled: "yes",
       },
     },
     {
@@ -5487,7 +5521,13 @@ describe("vayada-api", () => {
       async query<T extends QueryResultRow>(text: string, values?: readonly unknown[]) {
         queries.push({ text, values });
         return {
-          rows: [targetPublicHotelProfileRow()] as T[],
+          rows: [
+            {
+              ...targetPublicHotelProfileRow(),
+              bookingAdultAgeThreshold: 21,
+              bookingChildrenEnabled: false,
+            },
+          ] as unknown as T[],
         };
       },
       async end() {},
@@ -5515,6 +5555,16 @@ describe("vayada-api", () => {
           onlinePayment: true,
           payAtProperty: true,
           bookingDeepLinks: true,
+        },
+        supportedQuoteParameters: {
+          minRooms: 1,
+          maxRooms: 4,
+          minAdults: 1,
+          maxAdults: 6,
+          childrenSupported: false,
+          adultAgeThreshold: 21,
+          supportedCurrencies: ["EUR", "USD"],
+          supportedLocales: ["en", "de"],
         },
         trust: {
           profileComplete: true,
@@ -6143,6 +6193,8 @@ describe("vayada-api", () => {
       special_requests_enabled: boolean;
       arrival_time_enabled: boolean;
       guest_count_enabled: boolean;
+      adult_age_threshold: number;
+      children_enabled: boolean;
       benefits: string[];
       default_currency: string;
       default_language: string;
@@ -6167,6 +6219,8 @@ describe("vayada-api", () => {
       special_requests_enabled: false,
       arrival_time_enabled: true,
       guest_count_enabled: true,
+      adult_age_threshold: 18,
+      children_enabled: true,
       benefits: ["Free breakfast"],
       default_currency: "CHF",
       default_language: "de",
@@ -6208,6 +6262,8 @@ describe("vayada-api", () => {
           state.special_requests_enabled = values?.[1] as boolean;
           state.arrival_time_enabled = values?.[2] as boolean;
           state.guest_count_enabled = values?.[3] as boolean;
+          state.adult_age_threshold = values?.[4] as number;
+          state.children_enabled = values?.[5] as boolean;
         } else if (text.includes("benefits = $2::jsonb")) {
           state.benefits = JSON.parse(values?.[1] as string) as string[];
         } else if (text.includes("default_currency = $2")) {
@@ -6279,11 +6335,15 @@ describe("vayada-api", () => {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: false,
           guestCountEnabled: false,
+          adultAgeThreshold: 21,
+          childrenEnabled: false,
         },
         expected: {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: false,
           guestCountEnabled: false,
+          adultAgeThreshold: 21,
+          childrenEnabled: false,
         },
       },
       {
@@ -6549,6 +6609,8 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
       },
       "Bearer valid-token",
     );
@@ -6641,6 +6703,8 @@ describe("vayada-api", () => {
       specialRequestsEnabled: true,
       arrivalTimeEnabled: false,
       guestCountEnabled: false,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
     });
   });
 

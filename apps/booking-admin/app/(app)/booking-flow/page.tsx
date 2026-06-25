@@ -111,6 +111,8 @@ const DEFAULT_GUEST_FORM_SETTINGS: BookingGuestFormSettings = {
   specialRequestsEnabled: true,
   arrivalTimeEnabled: false,
   guestCountEnabled: false,
+  adultAgeThreshold: 18,
+  childrenEnabled: true,
 };
 
 const DEFAULT_BENEFITS_SETTINGS: BookingBenefitsSettings = {
@@ -311,6 +313,10 @@ export default function BookingFlowPage() {
     setArrivalTimeEnabled,
     guestCountEnabled,
     setGuestCountEnabled,
+    adultAgeThreshold,
+    setAdultAgeThreshold,
+    childrenEnabled,
+    setChildrenEnabled,
     savingGuestForm,
     applyGuestFormSettings,
     handleSaveGuestForm,
@@ -805,6 +811,10 @@ export default function BookingFlowPage() {
             setArrivalTimeEnabled={setArrivalTimeEnabled}
             guestCountEnabled={guestCountEnabled}
             setGuestCountEnabled={setGuestCountEnabled}
+            adultAgeThreshold={adultAgeThreshold}
+            setAdultAgeThreshold={setAdultAgeThreshold}
+            childrenEnabled={childrenEnabled}
+            setChildrenEnabled={setChildrenEnabled}
             onSave={handleSaveGuestForm}
             saving={savingGuestForm}
           />

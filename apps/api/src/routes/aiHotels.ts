@@ -78,6 +78,8 @@ type TargetPublicHotelProfileRow = {
   policies: unknown;
   capabilities: unknown;
   supportedQuoteParameters: unknown;
+  bookingAdultAgeThreshold: number | null;
+  bookingChildrenEnabled: boolean | null;
   publicSetupCompleteness: unknown;
   sourceFreshness: unknown;
   freshnessStatus: string;
@@ -306,6 +308,7 @@ export function toPublicHotelProfileProjection(
         minAdults: 1,
         maxAdults: 8,
         childrenSupported: true,
+        adultAgeThreshold: 18,
         supportedCurrencies,
         supportedLocales,
       },
@@ -408,6 +411,7 @@ function serializeHotelProfile(
       minAdults: hotel.supportedQuoteParameters.minAdults,
       maxAdults: hotel.supportedQuoteParameters.maxAdults,
       childrenSupported: hotel.supportedQuoteParameters.childrenSupported,
+      adultAgeThreshold: hotel.supportedQuoteParameters.adultAgeThreshold,
       supportedCurrencies: hotel.supportedQuoteParameters.supportedCurrencies.map(
         (currency) => currency,
       ),
@@ -514,12 +518,16 @@ const TARGET_PUBLIC_PROFILE_SELECT = `SELECT
            profile.policies,
            profile.capabilities,
            profile.supported_quote_parameters AS "supportedQuoteParameters",
+           settings.adult_age_threshold AS "bookingAdultAgeThreshold",
+           settings.children_enabled AS "bookingChildrenEnabled",
            profile.public_setup_completeness AS "publicSetupCompleteness",
            profile.source_freshness AS "sourceFreshness",
            profile.freshness_status AS "freshnessStatus",
            profile.data_sources AS "dataSources",
            profile.generated_at AS "generatedAt"
-         FROM distribution.public_hotel_bookability_profiles profile`;
+         FROM distribution.public_hotel_bookability_profiles profile
+         LEFT JOIN booking.booking_settings settings
+           ON settings.property_id = profile.property_id`;
 
 function toTargetPublicHotelProfileProjection(
   row: TargetPublicHotelProfileRow,
@@ -578,7 +586,10 @@ function toTargetPublicHotelProfileProjection(
         maxRooms: integerValue(quoteParameters["maxRooms"], 1),
         minAdults: integerValue(quoteParameters["minAdults"], 1),
         maxAdults: integerValue(quoteParameters["maxAdults"], 1),
-        childrenSupported: booleanValue(quoteParameters["childrenSupported"]),
+        childrenSupported:
+          row.bookingChildrenEnabled ?? booleanValue(quoteParameters["childrenSupported"]),
+        adultAgeThreshold:
+          row.bookingAdultAgeThreshold ?? integerValue(quoteParameters["adultAgeThreshold"], 18),
         supportedCurrencies: stringArray(
           quoteParameters["supportedCurrencies"],
           stringArray(row.supportedCurrencies, [row.defaultCurrency]),

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import { Hotel, RoomType, Addon } from "@/lib/types";
 import { hotelService } from "@/services/api/hotel";
 import { generateColorPalette } from "@/lib/utils/colors";
@@ -168,30 +168,28 @@ export function HotelProvider({
       });
   }, [locale, slug, slugResolved]);
 
-  const refetchRooms = async (
-    checkIn?: string,
-    checkOut?: string,
-    adults?: number,
-    children?: number,
-  ) => {
-    setRoomsLoading(true);
-    try {
-      if (!slug) return;
-      const roomsData = await hotelService.getRooms(
-        slug,
-        checkIn,
-        checkOut,
-        adults,
-        children,
-        locale,
-      );
-      setRooms(roomsData);
-    } catch (err) {
-      console.error("Failed to refetch rooms", err);
-    } finally {
-      setRoomsLoading(false);
-    }
-  };
+  const refetchRooms = useCallback(
+    async (checkIn?: string, checkOut?: string, adults?: number, children?: number) => {
+      setRoomsLoading(true);
+      try {
+        if (!slug) return;
+        const roomsData = await hotelService.getRooms(
+          slug,
+          checkIn,
+          checkOut,
+          adults,
+          children,
+          locale,
+        );
+        setRooms(roomsData);
+      } catch (err) {
+        console.error("Failed to refetch rooms", err);
+      } finally {
+        setRoomsLoading(false);
+      }
+    },
+    [locale, slug],
+  );
 
   // Record affiliate click once per session per (slug, ref). The
   // middleware drops the ref into a 30-day cookie on first arrival;

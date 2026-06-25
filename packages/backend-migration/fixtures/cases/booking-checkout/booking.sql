@@ -288,6 +288,8 @@ VALUES
       "specialRequestsEnabled": true,
       "arrivalTimeEnabled": true,
       "guestCountEnabled": false,
+      "adultAgeThreshold": 21,
+      "childrenEnabled": false,
       "benefits": ["Free breakfast", "Late checkout"],
       "defaultCurrency": "EUR",
       "defaultLanguage": "en",

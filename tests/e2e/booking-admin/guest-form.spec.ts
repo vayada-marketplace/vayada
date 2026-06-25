@@ -74,6 +74,8 @@ test.describe("booking-admin guest-form settings cutover", () => {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: false,
           guestCountEnabled: false,
+          adultAgeThreshold: 18,
+          childrenEnabled: true,
         },
       });
     });
@@ -93,13 +95,20 @@ test.describe("booking-admin guest-form settings cutover", () => {
     const specialRequestsToggle = page.getByRole("button", { name: "Special Requests" });
     const arrivalTimeToggle = page.getByRole("button", { name: "Estimated Arrival Time" });
     const guestCountToggle = page.getByRole("button", { name: "Number of Guests" });
+    const childrenToggle = page.getByRole("button", { name: "Children" });
+    const adultAgeInput = page.getByRole("spinbutton", { name: "Adult age threshold" });
 
     await expect(specialRequestsToggle).toHaveAttribute("aria-pressed", "true");
     await expect(arrivalTimeToggle).toHaveAttribute("aria-pressed", "false");
     await expect(guestCountToggle).toHaveAttribute("aria-pressed", "false");
+    await expect(childrenToggle).toHaveAttribute("aria-pressed", "true");
+    await expect(adultAgeInput).toHaveValue("18");
 
     await arrivalTimeToggle.click();
     await expect(arrivalTimeToggle).toHaveAttribute("aria-pressed", "true");
+    await childrenToggle.click();
+    await expect(childrenToggle).toHaveAttribute("aria-pressed", "false");
+    await adultAgeInput.fill("21");
 
     await page.getByRole("button", { name: /^Save Changes$/ }).click();
 
@@ -112,6 +121,8 @@ test.describe("booking-admin guest-form settings cutover", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: true,
         guestCountEnabled: false,
+        adultAgeThreshold: 21,
+        childrenEnabled: false,
       },
     ]);
     expect(bookingSettingsWrites).toEqual([]);

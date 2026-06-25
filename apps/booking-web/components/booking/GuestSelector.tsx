@@ -6,18 +6,23 @@ interface GuestSelectorProps {
   open: boolean;
   onClose: () => void;
   adults: number;
-  children: number;
+  childCount: number;
   onUpdate: (adults: number, children: number) => void;
+  adultAgeThreshold?: number;
+  childrenEnabled?: boolean;
 }
 
 export default function GuestSelector({
   open,
   onClose,
   adults,
-  children,
+  childCount,
   onUpdate,
+  adultAgeThreshold = 18,
+  childrenEnabled = true,
 }: GuestSelectorProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const childMaxAge = Math.max(0, adultAgeThreshold - 1);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -34,6 +39,7 @@ export default function GuestSelector({
   return (
     <div
       ref={ref}
+      data-testid="guest-selector"
       className="absolute right-0 top-full mt-3 bg-white rounded-2xl shadow-2xl border border-gray-100 p-5 z-50 w-72"
     >
       <h3 className="text-base font-bold text-gray-900 mb-4">Who&apos;s coming?</h3>
@@ -43,11 +49,11 @@ export default function GuestSelector({
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold text-gray-900">Adults</p>
-            <p className="text-xs text-gray-500">Ages 13+</p>
+            <p className="text-xs text-gray-500">Ages {adultAgeThreshold}+</p>
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => onUpdate(Math.max(1, adults - 1), children)}
+              onClick={() => onUpdate(Math.max(1, adults - 1), childCount)}
               disabled={adults <= 1}
               className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
@@ -55,7 +61,7 @@ export default function GuestSelector({
             </button>
             <span className="w-6 text-center font-semibold text-gray-900">{adults}</span>
             <button
-              onClick={() => onUpdate(Math.min(10, adults + 1), children)}
+              onClick={() => onUpdate(Math.min(10, adults + 1), childCount)}
               disabled={adults >= 10}
               className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
@@ -64,30 +70,31 @@ export default function GuestSelector({
           </div>
         </div>
 
-        {/* Children */}
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Children</p>
-            <p className="text-xs text-gray-500">Ages 0-12</p>
+        {childrenEnabled && (
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Children</p>
+              <p className="text-xs text-gray-500">Ages 0-{childMaxAge}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => onUpdate(adults, Math.max(0, childCount - 1))}
+                disabled={childCount <= 0}
+                className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <span className="text-lg leading-none">-</span>
+              </button>
+              <span className="w-6 text-center font-semibold text-gray-900">{childCount}</span>
+              <button
+                onClick={() => onUpdate(adults, Math.min(6, childCount + 1))}
+                disabled={childCount >= 6}
+                className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <span className="text-lg leading-none">+</span>
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => onUpdate(adults, Math.max(0, children - 1))}
-              disabled={children <= 0}
-              className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <span className="text-lg leading-none">-</span>
-            </button>
-            <span className="w-6 text-center font-semibold text-gray-900">{children}</span>
-            <button
-              onClick={() => onUpdate(adults, Math.min(6, children + 1))}
-              disabled={children >= 6}
-              className="w-9 h-9 rounded-full border border-gray-300 flex items-center justify-center text-gray-600 hover:border-gray-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <span className="text-lg leading-none">+</span>
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       <button

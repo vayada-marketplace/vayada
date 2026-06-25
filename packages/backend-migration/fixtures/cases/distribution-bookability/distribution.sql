@@ -186,6 +186,7 @@ SELECT
   1::integer AS min_adults,
   6::integer AS max_adults,
   TRUE::boolean AS children_supported,
+  18::integer AS adult_age_threshold,
   '[
     {
       "id": "f6898000-0000-0000-0000-000000000001",

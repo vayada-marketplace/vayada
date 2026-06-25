@@ -990,6 +990,8 @@ type TargetCheckoutConfigRow = QueryResultRow & {
   specialRequestsEnabled: boolean | null;
   arrivalTimeEnabled: boolean | null;
   guestCountEnabled: boolean | null;
+  adultAgeThreshold: number | null;
+  childrenEnabled: boolean | null;
   paymentsEnabled: boolean | null;
   acceptedMethods: string[] | null;
   depositPolicy: unknown;
@@ -1540,6 +1542,8 @@ async function loadTargetCheckoutConfig(
        bs.special_requests_enabled AS "specialRequestsEnabled",
        bs.arrival_time_enabled AS "arrivalTimeEnabled",
        bs.guest_count_enabled AS "guestCountEnabled",
+       bs.adult_age_threshold AS "adultAgeThreshold",
+       bs.children_enabled AS "childrenEnabled",
        fs.payments_enabled AS "paymentsEnabled",
        fs.accepted_methods AS "acceptedMethods",
        fs.deposit_policy AS "depositPolicy",
@@ -1576,6 +1580,8 @@ function serializeTargetCheckoutConfig(
     specialRequestsEnabled: row?.specialRequestsEnabled ?? true,
     arrivalTimeEnabled: row?.arrivalTimeEnabled ?? false,
     guestCountEnabled: row?.guestCountEnabled ?? false,
+    adultAgeThreshold: row?.adultAgeThreshold ?? 18,
+    childrenEnabled: row?.childrenEnabled ?? true,
     benefits: Array.isArray(row?.benefits) ? row?.benefits : [],
     cancellationSummary: stringValue(refundPolicy["summary"]),
     depositSummary: stringValue(depositPolicy["summary"]),

@@ -42,6 +42,16 @@ export type BookingWebPublicHotelResponse = {
       referralCodes: boolean;
       bookingDeepLinks: boolean;
     };
+    supportedQuoteParameters: {
+      minRooms: number;
+      maxRooms: number;
+      minAdults: number;
+      maxAdults: number;
+      childrenSupported: boolean;
+      adultAgeThreshold?: number;
+      supportedCurrencies: string[];
+      supportedLocales: string[];
+    };
   };
 };
 
@@ -255,6 +265,10 @@ export function toLegacyHotel(data: BookingWebPublicHotelResponse): Hotel {
     socialLinks: {},
     defaultLanguage: hotel.defaultLocale,
     supportedLanguages: hotel.supportedLocales,
+    guestTypeSettings: {
+      adultAgeThreshold: hotel.supportedQuoteParameters.adultAgeThreshold ?? 18,
+      childrenEnabled: hotel.supportedQuoteParameters.childrenSupported,
+    },
     referAGuestEnabled: hotel.capabilities.referralCodes,
     instantBook: hotel.capabilities.instantBook,
     mapViewEnabled: false,

@@ -131,6 +131,7 @@ export type PublicBookabilitySupportedQuoteParameters = {
   minAdults: number;
   maxAdults: number;
   childrenSupported: boolean;
+  adultAgeThreshold: number;
   supportedCurrencies: string[];
   supportedLocales: string[];
 };
@@ -662,6 +663,7 @@ function sanitizeSupportedQuoteParameters(
     minAdults: parameters.minAdults,
     maxAdults: parameters.maxAdults,
     childrenSupported: parameters.childrenSupported,
+    adultAgeThreshold: parameters.adultAgeThreshold,
     supportedCurrencies: copyStrings(parameters.supportedCurrencies),
     supportedLocales: copyStrings(parameters.supportedLocales),
   };
