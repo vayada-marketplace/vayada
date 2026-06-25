@@ -11,7 +11,24 @@ const legacyProductionHosts = new Set([
   "pms-api.vayada.com",
 ]);
 
+const legacyLocalHosts = new Set([
+  "api.marketplace.localhost",
+  "api.booking.localhost",
+  "api.pms.localhost",
+]);
+
+const legacyLocalPorts = new Set(["8000", "8001", "8002"]);
+
 const surfaceRules = {
+  "vayada-admin-marketplace-preview": [
+    legacyProductionHostRule(),
+    legacyLocalServiceRule(),
+    pathRule("/admin", "legacy root admin route"),
+    pathPrefixRule("/admin/", "legacy root admin route"),
+    pathRule("/super-admin", "legacy PMS super-admin route"),
+    pathPrefixRule("/super-admin/", "legacy PMS super-admin route"),
+    headerRule("x-hotel-id", "legacy X-Hotel-Id routing header"),
+  ],
   "booking-admin-benefits-settings": [
     legacyProductionHostRule(),
     pathRule("/admin/benefits", "legacy Booking Admin benefits route"),
@@ -122,6 +139,16 @@ function legacyProductionHostRule(): LegacyCallRule {
   return {
     name: "legacy production API host",
     matches: (_request, url) => legacyProductionHosts.has(url.hostname),
+  };
+}
+
+function legacyLocalServiceRule(): LegacyCallRule {
+  return {
+    name: "legacy local API service",
+    matches: (_request, url) =>
+      legacyLocalHosts.has(url.hostname) ||
+      ((url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
+        legacyLocalPorts.has(url.port)),
   };
 }
 

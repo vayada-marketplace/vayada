@@ -3,7 +3,10 @@
  */
 import { ApiErrorResponse } from "./client";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.vayada.com";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_AUTH_API_URL ||
+  "https://api.localhost";
 
 export interface MarketplaceListing {
   id: string;
