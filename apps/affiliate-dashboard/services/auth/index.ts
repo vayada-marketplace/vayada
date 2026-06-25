@@ -4,22 +4,13 @@ import {
   getAuthCsrfToken,
   getUserName,
   hasAuthenticatedSession,
-  hasCompatibilityToken,
-  isCompatibilityTokenEnabled,
   isLoggedInHint,
   setAuthKitSession,
-  setLegacyCompatibilityToken,
   type AuthKitSessionResponse,
 } from "./storage";
 
 const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
 const AFFILIATE_SURFACE = "affiliate-dashboard";
-
-type CompatibilityTokenResponse = {
-  accessToken: string;
-  expiresIn: number;
-  tokenType: "Bearer";
-};
 
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${AUTH_API_URL}${endpoint}`, {
@@ -42,22 +33,6 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   }
 
   return body as T;
-}
-
-async function attachAffiliateCompatibilityToken(): Promise<void> {
-  const csrfToken = getAuthCsrfToken();
-  if (!csrfToken) {
-    throw new Error("AuthKit session is missing a CSRF token.");
-  }
-
-  const response = await authFetch<CompatibilityTokenResponse>(
-    "/auth/compat/affiliate-dashboard-token",
-    {
-      method: "POST",
-      headers: { "x-vayada-csrf": csrfToken },
-    },
-  );
-  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
 }
 
 export const authService = {
@@ -85,14 +60,11 @@ export const authService = {
           );
 
     setAuthKitSession(response);
-    if (isCompatibilityTokenEnabled()) {
-      await attachAffiliateCompatibilityToken();
-    }
     return response;
   },
 
   ensureSession: async (): Promise<boolean> => {
-    if (hasAuthenticatedSession() && (!isCompatibilityTokenEnabled() || hasCompatibilityToken())) {
+    if (hasAuthenticatedSession()) {
       return true;
     }
     try {

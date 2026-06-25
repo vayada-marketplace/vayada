@@ -1,16 +1,42 @@
-/**
- * Mirrors PayoutSettings in pms-backend/app/routers/affiliate_dashboard.py.
- * Canonical per-user payout configuration (single row per affiliate user).
- */
-export interface PayoutSettings {
-  paymentMethod: string;
-  paypalEmail: string;
-  bankIban: string;
-  bankAccountHolder: string;
-  bankSwiftBic: string;
-  bankName: string;
-  bankCountry: string;
-  xenditChannelCode: string | null;
-  xenditAccountNumber: string | null;
-  xenditAccountHolderName: string | null;
+export type AffiliatePayoutProvider = "stripe" | "manual" | "bank_transfer";
+export type AffiliatePayoutSchedule = "manual" | "monthly" | "threshold";
+
+export interface AffiliatePayoutSettings {
+  payoutsEnabled: boolean;
+  payoutProvider: AffiliatePayoutProvider;
+  payoutCurrency: string;
+  payoutSchedule: AffiliatePayoutSchedule;
+  payoutThresholdAmount: string | null;
+  providerAccount: {
+    providerAccountId: string | null;
+    provider: AffiliatePayoutProvider | null;
+    status: string;
+    onboardingStatus: string;
+    payoutsEnabled: boolean;
+  };
+  sourceFreshness: Record<string, unknown>;
+}
+
+export interface PayoutSettingsResponse {
+  contractVersion: "finance-route-contracts.v1";
+  affiliateId: string;
+  marketplaceOrganizationId: string | null;
+  payoutSettings: AffiliatePayoutSettings;
+  commandMeta?: {
+    commandId: string;
+    idempotencyKey: string;
+    sideEffects: string[];
+    outboxEvents: string[];
+    jobs: unknown[];
+  };
+}
+
+export interface PayoutSettingsPatchCommand {
+  commandId: string;
+  idempotencyKey: string;
+  payoutsEnabled: boolean;
+  payoutProvider: AffiliatePayoutProvider;
+  payoutCurrency: string;
+  payoutSchedule: AffiliatePayoutSchedule;
+  payoutThresholdAmount: string | null;
 }

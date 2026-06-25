@@ -1,9 +1,8 @@
 /**
  * Local user-display data for the affiliate dashboard.
  *
- * AuthKit access tokens and PMS compatibility tokens are kept in memory only.
- * localStorage is limited to non-sensitive display hints for the navbar and
- * loading states.
+ * AuthKit access tokens are kept in memory only. localStorage is limited to
+ * non-sensitive display hints for the navbar and loading states.
  */
 
 const USER_KEYS = ["userId", "userEmail", "userName", "userType", "userStatus", "user"] as const;
@@ -30,11 +29,6 @@ export type AuthKitSessionResponse = {
 };
 
 let authKitSession: AuthKitSessionResponse | null = null;
-let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
-
-export function isCompatibilityTokenEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED === "true";
-}
 
 export function storeUser(data: StoredUser): void {
   if (typeof window === "undefined") return;
@@ -60,16 +54,8 @@ export function setAuthKitSession(session: AuthKitSessionResponse): void {
   });
 }
 
-export function setLegacyCompatibilityToken(token: string, expiresIn: number): void {
-  legacyCompatibilityToken = {
-    token,
-    expiresAt: Date.now() + expiresIn * 1000,
-  };
-}
-
 export function clearAuthData(): void {
   authKitSession = null;
-  legacyCompatibilityToken = null;
   if (typeof window === "undefined") return;
   for (const key of USER_KEYS) localStorage.removeItem(key);
   localStorage.setItem("isLoggedIn", "false");
@@ -92,25 +78,12 @@ export function getAuthCsrfToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
-  const compatibilityToken = getLegacyCompatibilityToken();
-  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
   if (authKitSession?.accessToken) return authKitSession.accessToken;
-  return null;
-}
-
-function getLegacyCompatibilityToken(): string | null {
-  if (legacyCompatibilityToken && Date.now() < legacyCompatibilityToken.expiresAt - 30_000) {
-    return legacyCompatibilityToken.token;
-  }
   return null;
 }
 
 export function hasAuthenticatedSession(): boolean {
   return Boolean(authKitSession?.accessToken);
-}
-
-export function hasCompatibilityToken(): boolean {
-  return Boolean(getLegacyCompatibilityToken());
 }
 
 /** Client-side hint based on the last successful login. The cookie is

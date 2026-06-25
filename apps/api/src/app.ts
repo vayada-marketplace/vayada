@@ -90,6 +90,10 @@ import {
   type FinanceXenditBankValidator,
 } from "./routes/finance.js";
 import {
+  registerAffiliateDashboardRoutes,
+  type AffiliateDashboardReadRepository,
+} from "./routes/affiliateDashboard.js";
+import {
   registerPlatformMediaRoutes,
   type PlatformMediaRoutesOptions,
 } from "./routes/platformMedia.js";
@@ -167,6 +171,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   bookingWebAttributionSink?: BookingWebAttributionSink;
   bookingWebPublicFetch?: BookingWebPublicRoutesOptions["fetch"];
   bookingWebPublicNow?: BookingWebPublicRoutesOptions["now"];
+  affiliateDashboardRepository?: Partial<AffiliateDashboardReadRepository>;
   financeRepository?: FinanceRoutesOptions["repository"];
   financeXenditBankValidator?: FinanceXenditBankValidator;
   financePublicHotelProfileRepository?: PublicHotelProfileRepository;
@@ -315,6 +320,11 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     settingsWriteRepository: options.bookingSettingsWriteRepository,
     guestFormSettingsSync: options.bookingGuestFormSettingsSync,
     customDomainRepository: options.bookingCustomDomainRepository,
+  });
+  app.register(registerAffiliateDashboardRoutes, {
+    prefix: "/api",
+    repository: options.affiliateDashboardRepository,
+    financeRepository: options.financeRepository,
   });
   if (options.pmsOperationsRepository) {
     app.register(registerPmsLegacyAdminRoutes, {

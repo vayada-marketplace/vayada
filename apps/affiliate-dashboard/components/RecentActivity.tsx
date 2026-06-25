@@ -3,6 +3,7 @@
 import useSWR from "swr";
 import { CursorArrowRaysIcon, CreditCardIcon, UserPlusIcon } from "@heroicons/react/24/outline";
 import DataState from "@/components/DataState";
+import { affiliateApiPaths } from "@/services/api/paths";
 import type { ActivitiesResponse, Activity } from "@/services/types";
 
 const iconMap = {
@@ -33,13 +34,13 @@ function timeAgo(iso: string): string {
 }
 
 function message(a: Activity): string {
-  if (a.type === "booking") return "New booking confirmed";
-  if (a.type === "click") return `${a.count} new link click${a.count === 1 ? "" : "s"}`;
+  if (a.activityType === "booking") return "New booking confirmed";
+  if (a.activityType === "click") return `${a.count} new link click${a.count === 1 ? "" : "s"}`;
   return "Guest created an account via your link";
 }
 
 export default function RecentActivity() {
-  const { data, error } = useSWR<ActivitiesResponse>("/affiliate/activity?limit=10");
+  const { data, error } = useSWR<ActivitiesResponse>(affiliateApiPaths.activity(10));
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -56,21 +57,21 @@ export default function RecentActivity() {
         {(items) => (
           <div className="space-y-3">
             {items.map((activity) => {
-              const Icon = iconMap[activity.type];
+              const Icon = iconMap[activity.activityType];
               return (
                 <div
-                  key={`${activity.type}-${activity.ts}-${activity.property}`}
+                  key={`${activity.activityType}-${activity.occurredAt}-${activity.propertyName}`}
                   className="flex items-start gap-3 py-2.5 border-b border-gray-100 last:border-0"
                 >
                   <div
-                    className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.type]}`}
+                    className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${colorMap[activity.activityType]}`}
                   >
                     <Icon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900">{message(activity)}</p>
                     <p className="text-xs text-muted mt-0.5">
-                      {activity.property} &middot; {timeAgo(activity.ts)}
+                      {activity.propertyName} &middot; {timeAgo(activity.occurredAt)}
                     </p>
                   </div>
                 </div>

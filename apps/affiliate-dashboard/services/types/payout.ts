@@ -1,19 +1,40 @@
-/**
- * Shape returned by /affiliate/payouts. The backend builds the dict
- * inline (not from the PayoutEntry pydantic model), so this type tracks
- * the actual JSON, including fields like bookingCount and reference.
- */
+export type FinancePayoutStatus =
+  | "pending"
+  | "scheduled"
+  | "processing"
+  | "paid"
+  | "failed"
+  | "canceled"
+  | "reversed";
+
 export interface Payout {
-  id: string;
-  date: string;
-  amount: number;
+  payoutId: string;
+  ownerScope: "property" | "organization" | "platform";
+  propertyId: string | null;
+  organizationId: string | null;
+  relatedPropertyId: string | null;
+  guestBookingId: string | null;
+  paymentId: string | null;
+  payoutStatus: FinancePayoutStatus;
+  amount: string;
+  feeAmount: string;
+  netAmount: string;
   currency: string;
-  method: string;
-  reference: string | null;
-  bookingCount: number;
-  status: string;
+  provider: string;
+  providerPayoutId: string | null;
+  scheduledAt: string | null;
+  paidAt: string | null;
+  failedAt: string | null;
+  failureCode: string | null;
+  retryCount: number;
 }
 
 export interface PayoutsResponse {
+  contractVersion: "finance-route-contracts.v1";
+  affiliateId: string;
   payouts: Payout[];
+  total: number;
+  limit: number;
+  offset: number;
+  sourceFreshness: Record<string, unknown>;
 }
