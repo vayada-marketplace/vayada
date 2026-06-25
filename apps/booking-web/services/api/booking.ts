@@ -15,6 +15,27 @@ export interface BookingRequestResponse {
   bookingReference?: string;
 }
 
+export interface BookingQuote {
+  roomTypeId: string;
+  roomName: string;
+  rateType: string;
+  paymentMethod: string;
+  nightlyRate: number;
+  numberOfRooms: number;
+  roomTotal: number;
+  addonTotal: number;
+  promoCode?: string | null;
+  promoDiscount: number;
+  lastMinuteDiscountPercent: number;
+  lastMinuteDiscountAmount: number;
+  totalAmount: number;
+  currency: string;
+  depositRequired: boolean;
+  depositPercentage?: number | null;
+  depositAmount: number;
+  balanceAmount: number;
+}
+
 export interface BankDetails {
   accountHolder: string;
   accountType?: "iban" | "account_number";
@@ -83,10 +104,43 @@ export const bookingService = {
       addonQuantities?: Record<string, number>;
       addonDates?: Record<string, string[]>;
       promoCode?: string;
+      expectedTotalAmount?: number;
     },
   ): Promise<BookingRequestResponse> {
     return bookingWebPublic.post(
       `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings`,
+      data,
+    );
+  },
+
+  async quote(
+    slug: string,
+    data: {
+      roomTypeId: string;
+      guestFirstName: string;
+      guestLastName: string;
+      guestEmail: string;
+      guestPhone: string;
+      guestCountry?: string;
+      specialRequests?: string;
+      estimatedArrivalTime?: string;
+      numberOfGuests?: number;
+      checkIn: string;
+      checkOut: string;
+      adults: number;
+      children: number;
+      numberOfRooms?: number;
+      referralCode?: string;
+      paymentMethod?: string;
+      rateType?: string;
+      addonIds?: string[];
+      addonQuantities?: Record<string, number>;
+      addonDates?: Record<string, string[]>;
+      promoCode?: string;
+    },
+  ): Promise<BookingQuote> {
+    return bookingWebPublic.post(
+      `/api/booking-web/hotels/${encodeURIComponent(slug)}/bookings/quote`,
       data,
     );
   },

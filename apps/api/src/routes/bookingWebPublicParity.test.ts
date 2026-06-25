@@ -542,6 +542,27 @@ describe("Booking Web public bootstrap parity", () => {
         if (input.pathname.endsWith("/bookings/lookup")) {
           return jsonResponse(legacyBooking);
         }
+        if (input.pathname.endsWith("/bookings/quote")) {
+          return jsonResponse({
+            roomTypeId: "room_deluxe",
+            roomName: "Deluxe Room",
+            rateType: "flexible",
+            paymentMethod: "pay_at_property",
+            nightlyRate: 187.5,
+            numberOfRooms: 1,
+            roomTotal: 562.5,
+            addonTotal: 0,
+            promoDiscount: 0,
+            lastMinuteDiscountPercent: 0,
+            lastMinuteDiscountAmount: 0,
+            totalAmount: 562.5,
+            currency: "EUR",
+            depositRequired: false,
+            depositPercentage: null,
+            depositAmount: 0,
+            balanceAmount: 562.5,
+          });
+        }
         if (input.pathname.endsWith("/bookings")) {
           return jsonResponse({
             booking: legacyBooking,
@@ -576,6 +597,17 @@ describe("Booking Web public bootstrap parity", () => {
         paymentMethod: "pay_at_property",
       },
     });
+    const quote = await app.inject({
+      method: "POST",
+      url: "/api/booking-web/hotels/hotel-alpenrose/bookings/quote",
+      payload: {
+        roomTypeId: "room_deluxe",
+        guestEmail: "guest@example.com",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        paymentMethod: "pay_at_property",
+      },
+    });
     const confirm = await app.inject({
       method: "POST",
       url: "/api/booking-web/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
@@ -602,11 +634,12 @@ describe("Booking Web public bootstrap parity", () => {
     expect([
       checkoutConfig.statusCode,
       create.statusCode,
+      quote.statusCode,
       confirm.statusCode,
       status.statusCode,
       lookup.statusCode,
       promo.statusCode,
-    ]).toEqual([200, 200, 200, 200, 200, 200]);
+    ]).toEqual([200, 200, 200, 200, 200, 200, 200]);
     expect(checkoutConfig.json()).toMatchObject({
       payAtPropertyEnabled: true,
       bankTransfer: true,
@@ -615,6 +648,10 @@ describe("Booking Web public bootstrap parity", () => {
     expect(checkoutConfig.json()).not.toHaveProperty("bankDetails");
     expect(checkoutConfig.json()).not.toHaveProperty("paypalEmail");
     expect(create.json()).toMatchObject({ bookingReference: "ALP-1001" });
+    expect(quote.json()).toMatchObject({
+      paymentMethod: "pay_at_property",
+      totalAmount: 562.5,
+    });
     expect(confirm.json()).toMatchObject({ bookingReference: "ALP-1001" });
     expect(status.json()).toMatchObject({ status: "confirmed", paymentStatus: "paid" });
     expect(lookup.json()).toMatchObject({ bookingReference: "ALP-1001" });
@@ -628,13 +665,15 @@ describe("Booking Web public bootstrap parity", () => {
     expect(legacyCalls.map((call) => `${call.method} ${call.path}`)).toEqual([
       "GET /api/hotels/hotel-alpenrose/payment-settings",
       "POST /api/hotels/hotel-alpenrose/bookings",
+      "POST /api/hotels/hotel-alpenrose/bookings/quote",
       "POST /api/hotels/hotel-alpenrose/bookings/draft_1/confirm-authorization",
       "GET /api/hotels/hotel-alpenrose/bookings/status?reference=ALP-1001&email=guest%40example.com",
       "POST /api/hotels/hotel-alpenrose/bookings/lookup",
       "GET /api/hotels/hotel-alpenrose/validate-promo?code=SUMMER10",
     ]);
     expect(legacyCalls[1]?.body).toMatchObject({ paymentMethod: "pay_at_property" });
-    expect(legacyCalls[4]?.body).toEqual({
+    expect(legacyCalls[2]?.body).toMatchObject({ paymentMethod: "pay_at_property" });
+    expect(legacyCalls[5]?.body).toEqual({
       bookingReference: "ALP-1001",
       guestEmail: "guest@example.com",
     });
@@ -991,6 +1030,15 @@ describe("Booking Web public bootstrap parity", () => {
         record(context);
         return { payAtPropertyEnabled: true, bankTransfer: true, paypalEnabled: false };
       },
+      async quoteBooking(_slug, _request, context) {
+        record(context);
+        return {
+          roomTypeId: "room_deluxe",
+          paymentMethod: "pay_at_property",
+          totalAmount: 562.5,
+          currency: "EUR",
+        };
+      },
       async createBooking(_slug, _request, context) {
         record(context);
         return {
@@ -1067,6 +1115,11 @@ describe("Booking Web public bootstrap parity", () => {
       }),
       app.inject({
         method: "POST",
+        url: "/api/booking-web/hotels/hotel-alpenrose/bookings/quote",
+        payload: { guestEmail: "guest@example.com", checkIn: "2026-09-12", checkOut: "2026-09-15" },
+      }),
+      app.inject({
+        method: "POST",
         url: "/api/booking-web/hotels/hotel-alpenrose/bookings/VAY-TARGET-1/confirm-authorization",
       }),
       app.inject({
@@ -1132,10 +1185,11 @@ describe("Booking Web public bootstrap parity", () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.statusCode)).toEqual(Array(15).fill(200));
+    expect(responses.map((response) => response.statusCode)).toEqual(Array(16).fill(200));
     expect(operations.map((entry) => entry.operation)).toEqual(
       expect.arrayContaining([
         "checkout-config",
+        "booking-quote",
         "booking-create",
         "booking-confirm-authorization",
         "booking-status",
@@ -1150,7 +1204,7 @@ describe("Booking Web public bootstrap parity", () => {
         "promo-validate",
       ]),
     );
-    expect(operations).toHaveLength(15);
+    expect(operations).toHaveLength(16);
     expect(operations.find((entry) => entry.operation === "booking-create")?.idempotencyKey).toBe(
       "guest-create-1",
     );

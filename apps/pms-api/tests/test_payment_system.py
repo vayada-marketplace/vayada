@@ -303,6 +303,142 @@ class TestCreateBookingRequest:
         assert body["clientSecret"] is None
         assert body["booking"]["status"] == "pending"
 
+    async def test_booking_quote_matches_created_booking_total(
+        self, client, hotel_with_rooms, monkeypatch
+    ):
+        """VAY-927: payment-step quote and stored booking total use one source."""
+        import json as _json
+
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await Database.execute(
+            """
+            UPDATE hotels
+               SET last_minute_discount = $1::jsonb,
+                   timezone = 'UTC'
+             WHERE id = $2
+            """,
+            _json.dumps(
+                {
+                    "enabled": True,
+                    "stackWithPromo": False,
+                    "tiers": [
+                        {"daysBeforeMin": 0, "daysBeforeMax": 7, "discountPercent": 4},
+                    ],
+                }
+            ),
+            str(hotel["id"]),
+        )
+        await Database.execute(
+            """
+            UPDATE room_types
+               SET base_rate = 585000,
+                   currency = 'IDR',
+                   non_refundable_enabled = true,
+                   non_refundable_discount = 15
+             WHERE id = $1
+            """,
+            str(room["id"]),
+        )
+        monkeypatch.setattr(
+            "app.services.booking_service.property_today",
+            lambda timezone: date(2026, 6, 28),
+        )
+
+        payload = {
+            "roomTypeId": str(room["id"]),
+            "guestFirstName": "Quote",
+            "guestLastName": "Match",
+            "guestEmail": "quote-match@test.com",
+            "guestPhone": "+1234567890",
+            "checkIn": "2026-07-01",
+            "checkOut": "2026-07-02",
+            "adults": 2,
+            "children": 0,
+            "paymentMethod": "pay_at_property",
+            "rateType": "flexible",
+        }
+
+        quote_resp = await client.post(f"/api/hotels/{hotel['slug']}/bookings/quote", json=payload)
+        assert quote_resp.status_code == 200, quote_resp.text
+        quote = quote_resp.json()
+        assert quote["currency"] == "IDR"
+        assert quote["roomTotal"] == 561600
+        assert quote["totalAmount"] == 561600
+
+        create_resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={**payload, "expectedTotalAmount": quote["totalAmount"]},
+        )
+        assert create_resp.status_code == 200, create_resp.text
+        booking = create_resp.json()["booking"]
+        assert booking["paymentMethod"] == "pay_at_property"
+        assert booking["totalAmount"] == quote["totalAmount"]
+
+        row = await Database.fetchrow(
+            "SELECT total_amount, payment_method FROM bookings WHERE id = $1",
+            booking["id"],
+        )
+        assert float(row["total_amount"]) == quote["totalAmount"]
+        assert row["payment_method"] == "pay_at_property"
+
+    async def test_booking_create_rejects_stale_expected_total(
+        self, client, hotel_with_rooms, monkeypatch
+    ):
+        """VAY-927: never silently snapshot a total different from checkout."""
+        import json as _json
+
+        hotel = hotel_with_rooms["hotel"]
+        room = hotel_with_rooms["room"]
+        await create_test_payment_settings(str(hotel["id"]), pay_at_property_enabled=True)
+        await Database.execute(
+            "UPDATE hotels SET last_minute_discount = $1::jsonb, timezone = 'UTC' WHERE id = $2",
+            _json.dumps(
+                {
+                    "enabled": True,
+                    "tiers": [
+                        {"daysBeforeMin": 0, "daysBeforeMax": 7, "discountPercent": 4},
+                    ],
+                }
+            ),
+            str(hotel["id"]),
+        )
+        await Database.execute(
+            "UPDATE room_types SET base_rate = 585000, currency = 'IDR' WHERE id = $1",
+            str(room["id"]),
+        )
+        monkeypatch.setattr(
+            "app.services.booking_service.property_today",
+            lambda timezone: date(2026, 6, 28),
+        )
+
+        resp = await client.post(
+            f"/api/hotels/{hotel['slug']}/bookings",
+            json={
+                "roomTypeId": str(room["id"]),
+                "guestFirstName": "Stale",
+                "guestLastName": "Quote",
+                "guestEmail": "stale-quote@test.com",
+                "guestPhone": "+1234567890",
+                "checkIn": "2026-07-01",
+                "checkOut": "2026-07-02",
+                "adults": 2,
+                "children": 0,
+                "paymentMethod": "pay_at_property",
+                "rateType": "flexible",
+                "expectedTotalAmount": 497250,
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "booking total changed" in resp.json()["detail"].lower()
+        count = await Database.fetchval(
+            "SELECT COUNT(*) FROM bookings WHERE guest_email = $1",
+            "stale-quote@test.com",
+        )
+        assert count == 0
+
     async def test_booking_rejected_when_method_not_allowed_for_rate(
         self, client, cleanup_database
     ):

@@ -10,7 +10,7 @@ import httpx
 
 from app.config import settings
 from app.database import Database
-from app.models.booking import BookingCreate, BookingResponse
+from app.models.booking import BookingCreate, BookingQuoteResponse, BookingResponse
 from app.repositories.affiliate_repo import AffiliateRepository
 from app.repositories.booking_draft_repo import BookingDraftRepository
 from app.repositories.booking_repo import BookingRepository
@@ -193,6 +193,15 @@ class PaymentOutcome:
     xendit_invoice_url: str | None = None
 
 
+@dataclass
+class BookingContext:
+    hotel: dict
+    hotel_id: str
+    instant_book: bool
+    room: dict
+    nights: int
+
+
 def _parse_rate_deposit_settings(raw) -> dict:
     if not raw:
         return {}
@@ -228,6 +237,45 @@ def _apply_deposit_snapshot(data: dict, deposit: DepositSnapshot) -> dict:
     data["deposit_amount"] = deposit.amount
     data["balance_amount"] = deposit.balance
     return data
+
+
+def _quote_to_response(
+    *,
+    data: BookingCreate,
+    room: dict,
+    pricing: BookingPricing,
+    deposit: DepositSnapshot,
+) -> BookingQuoteResponse:
+    return BookingQuoteResponse(
+        room_type_id=data.room_type_id,
+        room_name=room["name"],
+        rate_type=data.rate_type,
+        payment_method=data.payment_method,
+        nightly_rate=pricing.nightly_rate,
+        number_of_rooms=data.number_of_rooms,
+        room_total=pricing.room_total,
+        addon_total=pricing.addon_total,
+        promo_code=pricing.promo_code,
+        promo_discount=pricing.promo_discount,
+        last_minute_discount_percent=pricing.last_minute_discount_pct,
+        last_minute_discount_amount=pricing.last_minute_discount_amount,
+        total_amount=pricing.total_amount,
+        currency=room["currency"],
+        deposit_required=deposit.required,
+        deposit_percentage=deposit.percentage,
+        deposit_amount=deposit.amount,
+        balance_amount=deposit.balance,
+    )
+
+
+def _ensure_expected_total_matches(data: BookingCreate, pricing: BookingPricing) -> None:
+    if data.expected_total_amount is None:
+        return
+    if not math.isclose(float(data.expected_total_amount), pricing.total_amount, abs_tol=0.01):
+        raise ValueError(
+            "The booking total changed before submission. "
+            "Please refresh the checkout and try again."
+        )
 
 
 def _payment_amount_for_booking(total_amount: float, deposit: DepositSnapshot) -> float:
@@ -309,6 +357,98 @@ async def _increment_promo_use(slug: str, code: str) -> None:
             )
     except Exception as e:
         logger.warning("Failed to increment promo use count: %s", e)
+
+
+async def _prepare_booking_context(slug: str, data: BookingCreate) -> BookingContext:
+    """Validate the stay and load the records used by quote + create.
+
+    Keeping this shared prevents the payment page's authoritative quote from
+    drifting away from the final booking snapshot.
+    """
+    hotel = await Database.fetchrow(
+        "SELECT id, name, contact_email, last_minute_discount, instant_book, "
+        "timezone, same_day_bookings_enabled, same_day_booking_cutoff_time "
+        "FROM hotels WHERE slug = $1",
+        slug,
+    )
+    if not hotel:
+        raise ValueError("Hotel not found")
+    hotel_id = str(hotel["id"])
+    instant_book = bool(hotel.get("instant_book"))
+
+    room = await RoomTypeRepository.get_by_id(data.room_type_id)
+    if not room or str(room["hotel_id"]) != hotel_id:
+        raise ValueError("Room type not found")
+    if not room["is_active"]:
+        raise ValueError("Room type is not available")
+    if not room_allows_guest_mix(room, data.adults, data.children, units=data.number_of_rooms or 1):
+        raise ValueError("Guest mix exceeds this room's occupancy limits")
+    if is_same_day_booking_closed(
+        data.check_in,
+        same_day_bookings_enabled=bool(hotel.get("same_day_bookings_enabled", True)),
+        same_day_booking_cutoff_time=hotel.get("same_day_booking_cutoff_time"),
+        timezone=hotel.get("timezone"),
+    ):
+        raise ValueError(SAME_DAY_BOOKING_CLOSED_MESSAGE)
+
+    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
+    if not is_stay_sellable(data.check_in, data.check_out, room, calendar_settings):
+        raise ValueError("Room type is not available for the selected dates")
+
+    auto_rearrange_enabled = await HotelRepository.get_auto_rearrange_enabled(hotel_id)
+    available = await remaining_for_stay(
+        data.room_type_id,
+        room["total_rooms"],
+        data.check_in,
+        data.check_out,
+        hotel_id=hotel_id,
+        allow_rearrange=data.number_of_rooms <= 1 and auto_rearrange_enabled,
+    )
+    if available < data.number_of_rooms:
+        raise ValueError("Not enough rooms available for the selected dates")
+
+    nights = _nights(data.check_in, data.check_out)
+    if nights <= 0:
+        raise ValueError("Check-out must be after check-in")
+
+    seasons = RoomTypeRepository._parse_seasons(room)
+    min_stay = RoomTypeRepository._find_season_min_stay(seasons, data.check_in)
+    if min_stay and nights < min_stay:
+        raise ValueError(
+            f"This room requires a minimum stay of {min_stay} nights for the selected dates"
+        )
+    max_stay = RoomTypeRepository._find_stay_max_stay(seasons, data.check_in, data.check_out)
+    if max_stay and nights > max_stay:
+        raise ValueError(
+            f"This room has a maximum stay of {max_stay} nights for the selected dates. "
+            "Please shorten your stay."
+        )
+
+    min_advance = room.get("minimum_advance_days") or 0
+    if min_advance > 0:
+        days_until_checkin = (data.check_in - property_today(hotel.get("timezone"))).days
+        if days_until_checkin < min_advance:
+            raise ValueError(f"This room requires booking at least {min_advance} days in advance")
+
+    rate_methods_raw = room.get("rate_payment_methods")
+    if rate_methods_raw:
+        rate_methods = (
+            json.loads(rate_methods_raw) if isinstance(rate_methods_raw, str) else rate_methods_raw
+        )
+        allowed = rate_methods.get(data.rate_type) if isinstance(rate_methods, dict) else None
+        if allowed is not None and data.payment_method not in allowed:
+            raise ValueError(
+                f"Payment method '{data.payment_method}' is not allowed for the "
+                f"{data.rate_type} rate on this room. Allowed: {', '.join(allowed) or '(none)'}"
+            )
+
+    return BookingContext(
+        hotel=hotel,
+        hotel_id=hotel_id,
+        instant_book=instant_book,
+        room=room,
+        nights=nights,
+    )
 
 
 async def _compute_addon_total(
@@ -742,6 +882,24 @@ async def _create_booking_draft(
     }
 
 
+async def quote_booking_request(slug: str, data: BookingCreate) -> BookingQuoteResponse:
+    """Return the authoritative checkout quote for the current booking payload.
+
+    The payment page uses this instead of reconstructing totals in the browser,
+    and booking creation reruns the same code path before snapshotting the row.
+    """
+    context = await _prepare_booking_context(slug, data)
+    pricing = await _compute_booking_pricing(
+        slug,
+        data,
+        context.hotel,
+        context.room,
+        context.nights,
+    )
+    deposit = _resolve_deposit_snapshot(context.room, data.rate_type, pricing.total_amount)
+    return _quote_to_response(data=data, room=context.room, pricing=pricing, deposit=deposit)
+
+
 async def materialize_draft(
     draft: dict,
     *,
@@ -1020,88 +1178,16 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     """New guest-facing flow: validates + prices + creates booking +
     dispatches payment. Returns booking data + provider-specific
     handles (Stripe client_secret or Xendit invoice URL)."""
-    # ── Validate hotel + room ──────────────────────────────────────
-    hotel = await Database.fetchrow(
-        "SELECT id, name, contact_email, last_minute_discount, instant_book, "
-        "timezone, same_day_bookings_enabled, same_day_booking_cutoff_time "
-        "FROM hotels WHERE slug = $1",
-        slug,
-    )
-    if not hotel:
-        raise ValueError("Hotel not found")
-    hotel_id = str(hotel["id"])
-    instant_book = bool(hotel.get("instant_book"))
-
-    room = await RoomTypeRepository.get_by_id(data.room_type_id)
-    if not room or str(room["hotel_id"]) != hotel_id:
-        raise ValueError("Room type not found")
-    if not room["is_active"]:
-        raise ValueError("Room type is not available")
-    if not room_allows_guest_mix(room, data.adults, data.children, units=data.number_of_rooms or 1):
-        raise ValueError("Guest mix exceeds this room's occupancy limits")
-    if is_same_day_booking_closed(
-        data.check_in,
-        same_day_bookings_enabled=bool(hotel.get("same_day_bookings_enabled", True)),
-        same_day_booking_cutoff_time=hotel.get("same_day_booking_cutoff_time"),
-        timezone=hotel.get("timezone"),
-    ):
-        raise ValueError(SAME_DAY_BOOKING_CLOSED_MESSAGE)
-
-    # ── Validate stay window (availability, nights, min-stay, advance) ──
-    calendar_settings = await HotelRepository.get_calendar_settings(hotel_id)
-    if not is_stay_sellable(data.check_in, data.check_out, room, calendar_settings):
-        raise ValueError("Room type is not available for the selected dates")
-
-    auto_rearrange_enabled = await HotelRepository.get_auto_rearrange_enabled(hotel_id)
-    available = await remaining_for_stay(
-        data.room_type_id,
-        room["total_rooms"],
-        data.check_in,
-        data.check_out,
-        hotel_id=hotel_id,
-        allow_rearrange=data.number_of_rooms <= 1 and auto_rearrange_enabled,
-    )
-    if available < data.number_of_rooms:
-        raise ValueError("Not enough rooms available for the selected dates")
-
-    nights = _nights(data.check_in, data.check_out)
-    if nights <= 0:
-        raise ValueError("Check-out must be after check-in")
-
-    seasons = RoomTypeRepository._parse_seasons(room)
-    min_stay = RoomTypeRepository._find_season_min_stay(seasons, data.check_in)
-    if min_stay and nights < min_stay:
-        raise ValueError(
-            f"This room requires a minimum stay of {min_stay} nights for the selected dates"
-        )
-    max_stay = RoomTypeRepository._find_stay_max_stay(seasons, data.check_in, data.check_out)
-    if max_stay and nights > max_stay:
-        raise ValueError(
-            f"This room has a maximum stay of {max_stay} nights for the selected dates. "
-            "Please shorten your stay."
-        )
-
-    min_advance = room.get("minimum_advance_days") or 0
-    if min_advance > 0:
-        days_until_checkin = (data.check_in - property_today(hotel.get("timezone"))).days
-        if days_until_checkin < min_advance:
-            raise ValueError(f"This room requires booking at least {min_advance} days in advance")
-
-    # ── Validate payment method against the rate's allow-list ──────
-    rate_methods_raw = room.get("rate_payment_methods")
-    if rate_methods_raw:
-        rate_methods = (
-            json.loads(rate_methods_raw) if isinstance(rate_methods_raw, str) else rate_methods_raw
-        )
-        allowed = rate_methods.get(data.rate_type) if isinstance(rate_methods, dict) else None
-        if allowed is not None and data.payment_method not in allowed:
-            raise ValueError(
-                f"Payment method '{data.payment_method}' is not allowed for the "
-                f"{data.rate_type} rate on this room. Allowed: {', '.join(allowed) or '(none)'}"
-            )
+    context = await _prepare_booking_context(slug, data)
+    hotel = context.hotel
+    hotel_id = context.hotel_id
+    instant_book = context.instant_book
+    room = context.room
+    nights = context.nights
 
     # ── Compute pricing (rooms + addons + promo + last-minute discount) ──
     pricing = await _compute_booking_pricing(slug, data, hotel, room, nights)
+    _ensure_expected_total_matches(data, pricing)
     deposit = _resolve_deposit_snapshot(room, data.rate_type, pricing.total_amount)
 
     # ── Resolve affiliate ──────────────────────────────────────────
