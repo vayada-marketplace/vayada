@@ -33,6 +33,23 @@ Terraform should be the normal provisioning path:
 `target_backend_staging_secrets_preprovisioned = true` only as an escape hatch
 when the same four SSM parameters already exist outside the apply.
 
+## Provider secret source status
+
+Current status from the redacted VAY-794 provider exports:
+
+| Provider | Staging path                             | Source and intended use                                                                                                                                                                                                                                            | Provider owner                                                                       | Dashboard constraint                                                                                              |
+| -------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Stripe   | `/vayada/staging/stripe-webhook-secret`  | Copied from the existing live Stripe webhook signing secret for controlled observe-only replay on 2026-06-15; not synthetic. Future rehearsals should use a provider-approved secondary/staging endpoint or explicit Finance approval before reusing a live token. | Finance provider owner                                                               | One enabled live endpoint remains `https://pms-api.vayada.com/webhooks/stripe`; do not switch it for rehearsal.   |
+| Xendit   | `/vayada/staging/xendit-webhook-secret`  | Generated C1 fixture-signing placeholder; synthetic replay-only.                                                                                                                                                                                                   | Platform/runtime for the placeholder; Finance owner required before real Xendit use. | No real production or staging Xendit API/webhook runtime config was found; Xendit is non-blocking for current C1. |
+| Channex  | `/vayada/staging/channex-webhook-secret` | Rehearsal-managed staging token; replay-only until a real Channex webhook endpoint is configured.                                                                                                                                                                  | PMS channel-connectivity owner                                                       | `GET /api/v1/webhooks` returned no active Channex webhooks for the configured account.                            |
+
+Go/no-go input: Stripe and Channex can be used for controlled target-intake
+replay only while dashboards remain pointed at legacy or have no active webhook.
+Xendit stays synthetic-only and is not a VAY-794 blocker until real provider
+ownership is confirmed. The Stripe live-secret copy above is a recorded VAY-794
+exception, not a default for future rehearsals. Secret values must stay out of
+docs, issues, CI logs, and committed files.
+
 ## Database approach
 
 Use a temporary target database built from a reviewed target-schema snapshot for

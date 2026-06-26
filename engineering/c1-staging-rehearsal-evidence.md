@@ -481,6 +481,10 @@ target-dashboard-after-freeze-2026-06-16.json
 xendit-webhook-export-2026-06-15.json
 ```
 
+The staging provider secret sources and replay/go-no-go constraints are
+summarized in
+[`provider-rehearsal-secret-ownership.md`](provider-rehearsal-secret-ownership.md#provider-secret-source-status).
+
 Stripe export:
 
 - source: Stripe API `GET /v1/webhook_endpoints?limit=100`;
