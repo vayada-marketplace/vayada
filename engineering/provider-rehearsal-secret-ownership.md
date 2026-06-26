@@ -2,9 +2,8 @@
 
 _VAY-841 recommendation. References:
 [`c1-staging-rehearsal-evidence.md`](c1-staging-rehearsal-evidence.md),
-`/Users/flamurmaliqi/git/vayada-platform/infra/ssm.tf`,
-`/Users/flamurmaliqi/git/vayada-platform/infra/ecs.tf`, and
-`/Users/flamurmaliqi/git/vayada-platform/docs/environments.md`._
+and the `vayada-platform` repo's `infra/ssm.tf`, `infra/ecs.tf`, and
+`docs/environments.md`._
 
 ## Decision
 
