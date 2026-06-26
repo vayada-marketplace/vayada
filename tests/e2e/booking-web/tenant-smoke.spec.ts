@@ -183,12 +183,17 @@ async function publicStructuredDataGraph(page: Page) {
 }
 
 async function optimizedImageWidths(page: Page, selector: string): Promise<number[]> {
+  await page.waitForFunction((imageSelector) => {
+    return Array.from(document.querySelectorAll(imageSelector)).every((image) => {
+      const img = image as HTMLImageElement;
+      return img.complete && Boolean(img.currentSrc);
+    });
+  }, selector);
+
   const srcs = await page
     .locator(selector)
     .evaluateAll((images) =>
-      images
-        .map((image) => (image as HTMLImageElement).currentSrc || (image as HTMLImageElement).src)
-        .filter(Boolean),
+      images.map((image) => (image as HTMLImageElement).currentSrc).filter(Boolean),
     );
   const widths = srcs
     .map((src) => new URL(src, page.url()).searchParams.get("w"))
