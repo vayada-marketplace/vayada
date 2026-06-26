@@ -1004,23 +1004,6 @@ export async function registerPmsOperationsRoutes(
     },
   );
 
-  app.get<{ Params: PmsPropertyParams }>(
-    "/properties/:propertyId/payment-settings",
-    async (request, reply) => {
-      if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
-        return sendPmsOperationsError(reply, {
-          statusCode: 403,
-          code: "missing_permission",
-          category: "authorization",
-          message: "PMS operations origin is not allowed.",
-        });
-      }
-      const { propertyId } = request.params;
-      if (!enforcePmsOperationsReadPolicy(request, reply, propertyId)) return reply;
-      return legacyPmsPaymentSettings();
-    },
-  );
-
   app.patch<{ Params: PmsPropertyParams; Body: unknown }>(
     "/properties/:propertyId/payment-settings",
     async (request, reply) => {

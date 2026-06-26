@@ -18,6 +18,11 @@ import type {
 } from "@vayada/domain-booking";
 import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
+import {
+  setupIncompletePaymentSettings,
+  type CancellationPolicy,
+  type FinancePropertyReadRepository,
+} from "@vayada/domain-finance";
 import { readFileSync } from "node:fs";
 import type { QueryResult, QueryResultRow } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
@@ -833,6 +838,25 @@ const bookingReservationsRepository: BookingReservationsReadRepository = {
 };
 
 const pmsPropertyId = "f6853000-0000-0000-0000-000000000001";
+
+const financeCancellationPolicy: CancellationPolicy = {
+  freeCancellationDays: 5,
+  partialRefundPercent: 50,
+  refundMethod: "original_payment",
+  appliesTo: "direct_booking",
+  updatedAt: "2026-06-12T10:00:00.000Z",
+};
+
+const financeRepository: FinancePropertyReadRepository = {
+  async getPaymentSettings(requestedPropertyId) {
+    expect(requestedPropertyId).toBe(pmsPropertyId);
+    return setupIncompletePaymentSettings(requestedPropertyId, "2026-06-12T10:00:00.000Z", "CHF");
+  },
+  async getCancellationPolicy(requestedPropertyId) {
+    expect(requestedPropertyId).toBe(pmsPropertyId);
+    return financeCancellationPolicy;
+  },
+};
 
 const pmsRoomTypes: PmsRoomType[] = [
   {
@@ -2018,6 +2042,7 @@ function buildAuthenticatedApp(
     pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
     bookingGuestPiiPort?: BookingGuestPiiPort;
     pmsOperationsAllowedOrigins?: string[];
+    financeRepository?: FinancePropertyReadRepository;
     browserAllowedOrigins?: string[];
     linkedPmsPropertyId?: string | null;
   } = {},
@@ -2031,6 +2056,7 @@ function buildAuthenticatedApp(
     pmsOperationsCommandRepository: options.pmsOperationsCommandRepository,
     bookingGuestPiiPort: options.bookingGuestPiiPort,
     pmsOperationsAllowedOrigins: options.pmsOperationsAllowedOrigins,
+    financeRepository: options.financeRepository,
     bookingAddonItemsRepository: options.bookingAddonItemsRepository ?? bookingAddonItemsRepository,
     bookingPromoCodesRepository: options.bookingPromoCodesRepository ?? bookingPromoCodesRepository,
     bookingSettingsRepository: options.settingsRepository ?? bookingSettingsRepository,
@@ -8173,6 +8199,45 @@ describe("vayada-api", () => {
     );
     expect(read.statusCode).toBe(200);
     expect(read.headers["access-control-allow-origin"]).toBe("https://pms.localhost");
+  });
+
+  it("boots PMS operations with the finance payment-settings facade", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.read", "pms.finance.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      financeRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/payment-settings`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      paymentSettings: {
+        defaultCurrency: "CHF",
+        onlineCardPayment: false,
+        payAtPropertyEnabled: false,
+        bankTransfer: false,
+      },
+      cancellationPolicy: {
+        freeCancellationDays: 5,
+        partialRefundPct: 50,
+      },
+    });
   });
 
   it("does not register retired PMS Web legacy admin helper routes", async () => {
