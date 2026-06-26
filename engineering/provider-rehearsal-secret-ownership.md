@@ -94,10 +94,12 @@ Procedure for each rehearsal:
 
 4. Start or restart only the target/rehearsal runtime that reads the staging SSM
    parameter. Run the baseline dashboard command and record the CloudWatch log
-   stream before provider replay.
+   stream before provider replay. Update the lifecycle artifact with the SSM
+   parameter version returned above and the baseline dashboard log stream.
 5. Run provider replay and post-replay dashboard checks. Receipt rows,
    idempotency rows, job/event previews, dead letters, and scheduler-freeze
-   audit rows are disposable because they live only in this temporary DB.
+   audit rows are disposable because they live only in this temporary DB. Add
+   the post-replay dashboard log stream to the lifecycle artifact.
 6. After evidence capture, stop the rehearsal runtime, destroy the temporary DB
    and DB user, and clear or rotate `/vayada/staging/target-database-url` so it
    no longer points at a destroyed database. Update the lifecycle artifact with
