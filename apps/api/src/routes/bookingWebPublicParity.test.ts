@@ -17,6 +17,7 @@ import type {
   BookingWebAffiliateStripeConnectRequest,
 } from "./bookingWebAffiliate.js";
 import {
+  createTargetBookingWebCheckoutAdapter,
   recordTargetCheckoutCommand,
   resolveTargetCheckoutAmountSnapshot,
   type BookingWebCalendarReadPool,
@@ -1269,31 +1270,187 @@ describe("Booking Web public bootstrap parity", () => {
     expect(calls[0]?.text).toContain("response_resource_id = EXCLUDED.response_resource_id");
   });
 
-  it("requires target checkout creates to snapshot the expected quote total", () => {
-    expect(
-      resolveTargetCheckoutAmountSnapshot({
-        expectedTotalAmount: 561600,
-        totalAmount: 561600,
-        balanceAmount: 280800,
+  it("creates target checkout quotes from public offer snapshots", async () => {
+    const calls: Array<{ text: string; values: readonly unknown[] | undefined }> = [];
+    let ended = 0;
+    const pool = {
+      async query(text: string, values?: readonly unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("FROM hotel_catalog.property_slugs")) {
+          return {
+            rows: [
+              {
+                propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                displayName: "Hotel Alpenrose",
+                defaultLocale: "en",
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM hotel_catalog.properties p")) {
+          return {
+            rows: [
+              {
+                propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                defaultCurrency: "EUR",
+                depositPolicy: {},
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM distribution.public_room_offer_snapshots")) {
+          return {
+            rows: [
+              {
+                publicOfferKey: "room_deluxe:flexible",
+                roomTypeId: "room_deluxe",
+                ratePlanId: "flexible",
+                roomSummary: { name: "Deluxe Double Room" },
+                rateSummary: { name: "Flexible" },
+                occupancy: { maxAdults: 2, maxChildren: 1 },
+                publicPolicy: { deposit: "50% deposit required." },
+                paymentOptions: ["pay_at_property", "bank_transfer"],
+                availableRooms: 2,
+                roomTotal: "561.60",
+                taxesAndFees: "0.00",
+                discounts: "0.00",
+                currency: "EUR",
+                generatedAt: "2026-06-25T10:00:00.000Z",
+                sourceFreshness: { pms: { status: "fresh" } },
+              },
+            ],
+          };
+        }
+        if (text.includes("INSERT INTO booking.quote_sessions")) {
+          return {
+            rows: [
+              {
+                quoteSessionId: "49b3e1e1-95f8-47f2-8bf1-c2d18e3d7a66",
+                publicQuoteReference: "Q-TARGETQUOTE1",
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+      async end() {
+        ended += 1;
+      },
+    };
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      connectionString: "postgres://unused",
+      pool: pool as never,
+    });
+
+    const quote = await adapter.quoteBooking(
+      "hotel-alpenrose",
+      {
+        roomTypeId: "room_deluxe",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        adults: 2,
+        children: 0,
+        numberOfRooms: 1,
+        paymentMethod: "pay_at_property",
+        rateType: "flexible",
+      },
+      {
+        operation: "booking-quote",
+        requestId: "req-quote",
+        correlationId: "corr-quote",
+        idempotencyKey: "quote-key",
+        fingerprint: "a".repeat(64),
+        occurredAt: new Date("2026-06-25T12:00:00.000Z"),
+      },
+    );
+
+    const quoteSessionWrites = calls.filter((call) =>
+      call.text.includes("INSERT INTO booking.quote_sessions"),
+    ).length;
+    await expect(
+      adapter.quoteBooking("hotel-alpenrose", {
+        roomTypeId: "room_deluxe",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        adults: 2,
+        children: 0,
+        numberOfRooms: 1,
+        paymentMethod: "pay_at_property",
+        rateType: "flexible",
+        addonIds: ["airport_transfer"],
       }),
+    ).rejects.toThrow("add-on pricing");
+
+    expect(quote).toMatchObject({
+      quoteId: "Q-TARGETQUOTE1",
+      roomTypeId: "room_deluxe",
+      roomName: "Deluxe Double Room",
+      paymentMethod: "pay_at_property",
+      roomTotal: 561.6,
+      totalAmount: 561.6,
+      depositRequired: true,
+      depositPercentage: 50,
+      depositAmount: 280.8,
+      balanceAmount: 280.8,
+      currency: "EUR",
+    });
+    expect(
+      calls.filter((call) => call.text.includes("INSERT INTO booking.quote_sessions")),
+    ).toHaveLength(quoteSessionWrites);
+    const reserveIndex = calls.findIndex(
+      (call) =>
+        call.text.includes("INSERT INTO platform.idempotency_keys") &&
+        call.text.includes("'in_progress'"),
+    );
+    const quoteIndex = calls.findIndex((call) =>
+      call.text.includes("INSERT INTO booking.quote_sessions"),
+    );
+    expect(reserveIndex).toBeGreaterThanOrEqual(0);
+    expect(reserveIndex).toBeLessThan(quoteIndex);
+    expect(calls.some((call) => call.text.includes("platform.product_audit_events"))).toBe(true);
+    await adapter.close?.();
+    expect(ended).toBe(0);
+  });
+
+  it("requires target checkout creates to snapshot the expected quote total", () => {
+    const quote = {
+      totalAmount: "561600.00",
+      balanceAmount: "280800.00",
+    };
+
+    expect(
+      resolveTargetCheckoutAmountSnapshot(
+        {
+          expectedTotalAmount: 561600,
+          totalAmount: 561600,
+          balanceAmount: 280800,
+        },
+        quote,
+      ),
     ).toEqual({
       totalAmount: "561600.00",
       balanceAmount: "280800.00",
     });
 
     expect(() =>
-      resolveTargetCheckoutAmountSnapshot({
-        expectedTotalAmount: 561600,
-        totalAmount: 497250,
-      }),
+      resolveTargetCheckoutAmountSnapshot(
+        {
+          expectedTotalAmount: 497250,
+          totalAmount: 497250,
+        },
+        quote,
+      ),
     ).toThrow("Booking total changed");
 
     expect(() =>
-      resolveTargetCheckoutAmountSnapshot({
-        expectedTotalAmount: 561600,
-        balanceAmount: 700000,
-      }),
-    ).toThrow("Booking balance cannot exceed");
+      resolveTargetCheckoutAmountSnapshot(
+        {
+          expectedTotalAmount: 561600,
+          balanceAmount: 700000,
+        },
+        quote,
+      ),
+    ).toThrow("Booking balance changed");
 
     expect(() => resolveTargetCheckoutAmountSnapshot({ totalAmount: 561600 })).toThrow(
       "expectedTotalAmount is required",

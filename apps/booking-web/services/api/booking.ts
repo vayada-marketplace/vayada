@@ -16,6 +16,8 @@ export interface BookingRequestResponse {
 }
 
 export interface BookingQuote {
+  quoteId?: string;
+  expiresAt?: string;
   roomTypeId: string;
   roomName: string;
   rateType: string;
@@ -106,6 +108,7 @@ export const bookingService = {
       addonQuantities?: Record<string, number>;
       addonDates?: Record<string, string[]>;
       promoCode?: string;
+      quoteId?: string;
       expectedTotalAmount?: number;
       balanceAmount?: number;
     },

@@ -322,6 +322,7 @@ function PaymentPageContent() {
         addonQuantities,
         addonDates,
         promoCode: promoCodeParam || undefined,
+        quoteId: checkoutQuote.quoteId,
         expectedTotalAmount: checkoutQuote.totalAmount,
         balanceAmount: checkoutQuote.balanceAmount,
       });
