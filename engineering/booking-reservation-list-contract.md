@@ -8,7 +8,8 @@ route and frontend client are tightened.
 The current route adapter lives in
 [`apps/api/src/routes/bookingReservations.ts`](../apps/api/src/routes/bookingReservations.ts)
 and exports the `BookingReservationList` request, response, error, and contract
-types.
+types. The domain read model and repository port live in
+[`packages/domain-booking`](../packages/domain-booking/src/index.ts).
 
 ## Endpoint
 

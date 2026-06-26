@@ -15,6 +15,7 @@ import type {
   BookingGuestPiiCommandMeta,
   BookingGuestPiiPort,
   BookingGuestPiiProjection,
+  BookingReservationReadModel,
 } from "@vayada/domain-booking";
 import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution";
 import { PUBLIC_BOOKABILITY_FIXTURES } from "@vayada/domain-distribution/fixtures";
@@ -89,12 +90,14 @@ import {
 } from "./domains/pmsOperationsReadModel.js";
 import {
   createCompatibilityPmsBookingReservationsReadRepository,
-  toReservationResponse,
   type BookingReservationsReadPool,
   type BookingReservationListFilters,
-  type BookingReservationReadModel,
   type BookingReservationsReadRepository,
 } from "./routes/bookingReservations.js";
+import {
+  toBookingReservationReadModel,
+  type BookingReservationReadModelRow,
+} from "./platform/bookingReservationReadModel.js";
 import type {
   PmsAssignmentCommand,
   PmsAssignmentCommandResult,
@@ -782,23 +785,28 @@ const reservation: BookingReservationReadModel = {
   numberOfGuests: 2,
   checkIn: "2026-07-10",
   checkOut: "2026-07-12",
+  nights: 2,
   adults: 2,
   children: 0,
-  nightlyRate: "120.50",
+  nightlyRate: 120.5,
   numberOfRooms: 2,
-  totalAmount: "241.00",
+  totalRoomCapacity: 4,
+  totalAmount: 241,
   currency: "EUR",
   status: "confirmed",
   roomId: "room_101",
   roomNumber: "101",
-  assignedRooms: [{ roomId: "room_102", roomNumber: "102", position: 1 }],
+  assignedRooms: [
+    { roomId: "room_101", roomNumber: "101", position: 0 },
+    { roomId: "room_102", roomNumber: "102", position: 1 },
+  ],
   channel: "direct",
   paymentMethod: "card",
   paymentStatus: "captured",
   depositRequired: false,
   depositPercentage: null,
-  depositAmount: "0",
-  balanceAmount: "241.00",
+  depositAmount: 0,
+  balanceAmount: 241,
   checkInPendingFlags: [],
   checkedInAt: null,
   checkedOutAt: null,
@@ -808,14 +816,14 @@ const reservation: BookingReservationReadModel = {
   propertyPayoutAmount: null,
   addonIds: ["addon_breakfast"],
   addonNames: ["Breakfast"],
-  addonTotal: "30.00",
+  addonTotal: 30,
   addonQuantities: { addon_breakfast: 2 },
   addonDates: { addon_breakfast: ["2026-07-10"] },
   guestWithdrawn: false,
   promoCode: null,
-  promoDiscount: "0",
-  lastMinuteDiscountPercent: "0",
-  lastMinuteDiscountAmount: "0",
+  promoDiscount: 0,
+  lastMinuteDiscountPercent: 0,
+  lastMinuteDiscountAmount: 0,
   createdAt: "2026-06-01T12:00:00.000Z",
   updatedAt: "2026-06-02T12:00:00.000Z",
 };
@@ -5102,7 +5110,7 @@ describe("vayada-api", () => {
   });
 
   it("sanitizes invalid reservation numeric and date values from read models", () => {
-    const response = toReservationResponse({
+    const response = toBookingReservationReadModel({
       ...reservation,
       roomMaxOccupancy: Number.NaN,
       nightlyRate: "N/A",
@@ -5324,7 +5332,7 @@ describe("vayada-api", () => {
   it("serves booking reservations from the target read model without the legacy PMS URL", async () => {
     const queries: { text: string; values?: readonly unknown[] }[] = [];
     let poolClosed = false;
-    const targetReservation: BookingReservationReadModel = {
+    const targetReservation: BookingReservationReadModelRow = {
       ...reservation,
       id: "d6000000-0000-0000-0000-000000000682",
       bookingReference: "B-CHK-682",

@@ -28,6 +28,13 @@ Migrate one frontend surface at a time:
 This keeps the frontend rewrite bounded while still improving the backend API
 boundary instead of copying old backend quirks.
 
+Final ownership rules for post-rewrite contracts are recorded in
+[`api-contract-ownership.md`](api-contract-ownership.md). In short: domain
+contracts live in `packages/domain-*`, route-specific HTTP contracts live beside
+their `apps/api/src/routes/...` adapter, shared HTTP primitives live in
+`packages/backend-http`, and frontend surfaces consume typed API clients rather
+than a global DTO package.
+
 ## Principles
 
 - The frontend should depend on product API clients, not scattered raw `fetch`

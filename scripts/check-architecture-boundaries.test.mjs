@@ -257,6 +257,22 @@ test("fails when future marketplace domain code writes identity tables directly"
   }
 });
 
+test("fails when a global DTO package bucket is introduced", () => {
+  const root = createFixtureRoot({
+    "packages/dtos/src/index.ts": `
+      export type GlobalBookingDto = { id: string };
+    `,
+  });
+
+  try {
+    const result = runCheck(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /global DTO packages are forbidden/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("fails when PMS operations route code writes Booking guest PII directly", () => {
   const root = createFixtureRoot({
     "apps/api/src/routes/pmsOperations.ts": `
