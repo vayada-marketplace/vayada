@@ -17,7 +17,7 @@ import type {
 
 const user: IdentityUser = {
   userId: "user_platform_admin",
-  email: "admin@example.com",
+  email: "f.maliqi@vayada.com",
   status: "active",
 };
 
@@ -28,7 +28,7 @@ const session: AuthKitSession = {
   organizationId: "org_workos_platform",
   user: {
     id: "user_workos_platform",
-    email: "admin@example.com",
+    email: "f.maliqi@vayada.com",
     emailVerified: true,
     name: "Admin Example",
   },
@@ -101,6 +101,54 @@ describe("AuthKit session routes", () => {
         workosUserId: "user_workos_platform",
       }),
     ]);
+  });
+
+  it.each(["f.maliqi@vayada.com", "t.schreyer@vayada.com", "p.paetzold@vayada.com"])(
+    "allows named platform admin %s",
+    async (email) => {
+      app = buildAuthSessionApp({
+        authKitClient: createAuthKitClient({
+          async authenticateWithCode() {
+            return { ...session, user: { ...session.user, email } };
+          },
+        }),
+        identityRepository: createIdentityRepository({
+          userByProviderUserId: async () => ({ ...user, email }),
+        }),
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/auth/workos/callback?code=auth-code&state=callback-state",
+        headers: {
+          cookie: "vayada_workos_state=callback-state",
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().user.email).toBe(email);
+    },
+  );
+
+  it("normalizes configured platform admin allowlist emails", async () => {
+    app = buildAuthSessionApp({
+      surfacePolicies: {
+        "platform-admin": {
+          requiredOrganizationKind: "platform",
+          allowedUserEmails: [" F.MALIQI@VAYADA.COM "],
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
   });
 
   it("accepts callback state from duplicate cookies with multiple pending login attempts", async () => {
@@ -184,7 +232,7 @@ describe("AuthKit session routes", () => {
         commandType: "identity.user.create",
         idempotencyKey: "workos-jit:user_workos_platform",
         payload: expect.objectContaining({
-          email: "admin@example.com",
+          email: "f.maliqi@vayada.com",
           providerIdentity: expect.objectContaining({
             provider: "workos",
             providerUserId: "user_workos_platform",
@@ -245,6 +293,142 @@ describe("AuthKit session routes", () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json().message).toBe("No active membership for selected organization");
+  });
+
+  it("rejects callback for a platform admin role when the email is not allowlisted", async () => {
+    const email = "other@vayada.com";
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({
+        async authenticateWithCode() {
+          return { ...session, user: { ...session.user, email } };
+        },
+      }),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({ ...user, email }),
+      }),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("User is not allowed to access platform-admin");
+  });
+
+  it("rejects callback before JIT creation when the platform email is not allowlisted", async () => {
+    const commands: IdentityLifecycleCommand[] = [];
+    const email = "other@vayada.com";
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({
+        async authenticateWithCode() {
+          return { ...session, user: { ...session.user, email } };
+        },
+      }),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => null,
+      }),
+      lifecycleCommandBus: {
+        async execute(command) {
+          commands.push(command);
+          return {
+            status: "accepted",
+            commandId: command.commandId,
+            idempotencyKey: command.idempotencyKey,
+            userId: "user_jit_created",
+            events: [],
+          };
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("User is not allowed to access platform-admin");
+    expect(commands).toEqual([]);
+  });
+
+  it("rejects callback when an allowlisted platform email is not verified", async () => {
+    app = buildAuthSessionApp({
+      authKitClient: createAuthKitClient({
+        async authenticateWithCode() {
+          return { ...session, user: { ...session.user, emailVerified: false } };
+        },
+      }),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe(
+      "Platform-admin access requires a verified allowlisted email",
+    );
+  });
+
+  it("rejects callback when the selected organization is not the platform org", async () => {
+    app = buildAuthSessionApp({
+      identityRepository: createIdentityRepository({
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+      }),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Selected organization must be platform");
+  });
+
+  it("rejects callback when the platform membership is not platform_admin", async () => {
+    app = buildAuthSessionApp({
+      identityRepository: createIdentityRepository({
+        activeMembership: async () => ({
+          membershipId: "membership_platform",
+          status: "active",
+          roleKey: "platform_member",
+          workosMembershipId: "om_platform",
+          workosRoleSlugs: ["platform_member"],
+        }),
+      }),
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().message).toBe("Selected organization membership must be platform_admin");
   });
 
   it("rejects callback when AuthKit session has no selected organization", async () => {
@@ -335,7 +519,7 @@ describe("AuthKit session routes", () => {
     });
     expect(readJwtPayload(response.json().accessToken)).toMatchObject({
       sub: "user_platform_admin",
-      email: "admin@example.com",
+      email: "f.maliqi@vayada.com",
       type: "admin",
     });
   });
@@ -553,7 +737,7 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(200);
     expect(readJwtPayload(response.json().accessToken)).toMatchObject({
       sub: "user_platform_admin",
-      email: "admin@example.com",
+      email: "f.maliqi@vayada.com",
       type: "hotel",
       org: "org_hotel_group",
       surface: "pms-web",
