@@ -3,7 +3,7 @@
 _VAY-841 recommendation. References:
 [`c1-staging-rehearsal-evidence.md`](c1-staging-rehearsal-evidence.md),
 and the `vayada-platform` repo's `infra/ssm.tf`, `infra/ecs.tf`, and
-`docs/environments.md`._
+[`docs/environments.md`](https://github.com/vayada-marketplace/vayada-platform/blob/main/docs/environments.md#c1-staging-rehearsal-secret-cleanup)._
 
 ## Decision
 
@@ -214,7 +214,9 @@ running synthetic provider replay against it.
   only from a provider staging/secondary endpoint approved by the provider owner.
 - Rotate or delete the three provider replay secrets after each rehearsal
   window. Also drop the rehearsal DB user or destroy the temporary target DB
-  after evidence has been captured.
+  after evidence has been captured. VAY-794 is not complete until the
+  [`vayada-platform` cleanup runbook](https://github.com/vayada-marketplace/vayada-platform/blob/main/docs/environments.md#c1-staging-rehearsal-secret-cleanup)
+  has been run or a Linear comment records why cleanup is deferred.
 - Keep `/vayada/staging/*` IAM read access limited to the target/rehearsal ECS
   task execution roles, the platform deploy role, and named operators running
   the rehearsal. The one-off task should receive secrets through ECS secret
@@ -228,24 +230,22 @@ running synthetic provider replay against it.
 
 ## Follow-up tickets
 
-1. Platform/runtime: add owner and expiry tags for `/vayada/staging/*` SSM
-   parameters and document the post-rehearsal deletion or rotation command.
-2. Platform/runtime: add a one-off ECS rehearsal task definition and no-print
+1. Platform/runtime: add a one-off ECS rehearsal task definition and no-print
    workflow for C1 dashboard checks and provider replay, including a
    purpose-built rehearsal/ops image or dist-safe command, ECS `secrets`
    mappings for the four `/vayada/staging/*` paths, narrow execution-role
    SSM/KMS permissions, exact-host replay allowlisting, and CloudWatch log
    capture.
-3. Target-schema/migration: use the target DB snapshot lifecycle runbook above
+2. Target-schema/migration: use the target DB snapshot lifecycle runbook above
    for clone/rebuild, retention, and teardown before VAY-794 runs.
-4. Platform/runtime: isolate or disable `vayada-staging-pms-backend` production
+3. Platform/runtime: isolate or disable `vayada-staging-pms-backend` production
    dependencies before using it for scheduler-freeze evidence; replace auth,
    booking, SMTP, Stripe API, and Channex API secrets with staging/no-op/read-only
    values.
-5. Finance and PMS channel-connectivity: confirm whether staging provider
+4. Finance and PMS channel-connectivity: confirm whether staging provider
    secrets are synthetic replay-only or bound to real secondary provider
    endpoints before any future dashboard switch.
-6. App repo DX: align `c1-staging-rehearsal-evidence.md` with the current replay
+5. App repo DX: align `c1-staging-rehearsal-evidence.md` with the current replay
    script behavior: remote sends require `C1_REHEARSAL_ALLOW_SEND_TO_HOST` for
    the exact hostname.
 

@@ -484,6 +484,8 @@ xendit-webhook-export-2026-06-15.json
 The staging provider secret sources and replay/go-no-go constraints are
 summarized in
 [`provider-rehearsal-secret-ownership.md`](provider-rehearsal-secret-ownership.md#provider-secret-source-status).
+Post-rehearsal cleanup for VAY-794 must follow the
+[`vayada-platform` C1 staging rehearsal secret cleanup runbook](https://github.com/vayada-marketplace/vayada-platform/blob/main/docs/environments.md#c1-staging-rehearsal-secret-cleanup).
 
 Stripe export:
 
