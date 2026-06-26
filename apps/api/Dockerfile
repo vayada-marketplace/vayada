@@ -14,6 +14,8 @@ RUN npm ci
 RUN npm --workspace vayada-api run build
 RUN npm --workspace @vayada/backend-migration run build
 RUN npm prune --omit=dev
+COPY engineering/fixtures/c1-staging-rehearsal-replay ./engineering/fixtures/c1-staging-rehearsal-replay
+COPY scripts/c1-rehearsal-replay-fixtures.mjs ./scripts/c1-rehearsal-replay-fixtures.mjs
 
 FROM node:24-slim AS runtime
 
@@ -26,6 +28,8 @@ WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
+COPY --from=build /app/engineering/fixtures/c1-staging-rehearsal-replay ./engineering/fixtures/c1-staging-rehearsal-replay
+COPY --from=build /app/scripts/c1-rehearsal-replay-fixtures.mjs ./scripts/c1-rehearsal-replay-fixtures.mjs
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 

@@ -27,6 +27,7 @@
     "target:booking-public-bookability:backfill": "tsx src/cli/bookingPublicBookabilityBackfill.ts",
     "target:fixtures:smoke": "tsx src/cli/smoke.ts",
     "target:migrate:dist": "node dist/cli/migrate.js",
+    "target:c1-rehearsal:checks:dist": "node dist/cli/c1RehearsalChecks.js",
     "target:platform-identity:bootstrap:dist": "node dist/cli/platformIdentityBootstrap.js",
     "target:workos:backfill:dist": "node dist/cli/workosBackfill.js",
     "target:workos:audit:dist": "node dist/cli/workosLinkAudit.js",
