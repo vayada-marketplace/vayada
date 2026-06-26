@@ -340,7 +340,7 @@ function verifyStripeSignature(input: {
 function classifyXenditPayload(payload: Record<string, unknown>): {
   eventType: string;
   receiptKey: string;
-  kind: "invoice" | "payout";
+  kind: "invoice" | "payout" | "unsupported";
   providerObjectId: string;
   status: string;
 } {
@@ -361,8 +361,23 @@ function classifyXenditPayload(payload: Record<string, unknown>): {
     };
   }
 
+  if (event?.startsWith("v3_payout.") || optionalString(data, "payout_id")) {
+    const fallbackKey = sha256(stableStringify(canonicalPayload(payload)));
+    return {
+      eventType: event ?? "v3_payout.unsupported",
+      receiptKey: `webhook:xendit:payout:v3-disabled:${fallbackKey}`,
+      kind: "unsupported",
+      providerObjectId: "v3-disabled",
+      status: "unsupported_v3_payout",
+    };
+  }
+
   const payoutId = optionalString(data, "id") ?? optionalString(payload, "id");
-  const payoutStatus = optionalString(data, "status") ?? invoiceStatus ?? event ?? "unknown";
+  const payoutStatus =
+    optionalString(data, "status") ??
+    xenditPayoutStatusFromEvent(event) ??
+    invoiceStatus ??
+    "unknown";
   if (!payoutId) {
     const fallbackKey = sha256(stableStringify(canonicalPayload(payload)));
     return {
@@ -380,6 +395,19 @@ function classifyXenditPayload(payload: Record<string, unknown>): {
     providerObjectId: payoutId,
     status: payoutStatus,
   };
+}
+
+function xenditPayoutStatusFromEvent(event: string | undefined): string | undefined {
+  switch (event) {
+    case "payout.succeeded":
+      return "SUCCEEDED";
+    case "payout.failed":
+      return "FAILED";
+    case "payout.reversed":
+      return "REVERSED";
+    default:
+      return undefined;
+  }
 }
 
 function classifyChannexPayload(payload: Record<string, unknown>): {
@@ -549,7 +577,7 @@ function previewXenditEvent(
       return paymentPreview({
         provider: "xendit",
         domainEventType: "payment.captured",
-        semanticAction: `xendit-invoice-${classification.providerObjectId}`,
+        semanticAction: `xendit-status-${classification.status}`,
         paymentId: classification.providerObjectId,
         amount,
         domainEventKey: `payment.captured:xendit:${classification.providerObjectId}:${amount}:v1`,
@@ -559,12 +587,16 @@ function previewXenditEvent(
     return paymentPreview({
       provider: "xendit",
       domainEventType: "payment.terminal",
-      semanticAction: `xendit-invoice-${classification.providerObjectId}`,
+      semanticAction: `xendit-status-${classification.status}`,
       paymentId: classification.providerObjectId,
       amount,
       domainEventKey: `payment.terminal:xendit:${classification.providerObjectId}:${classification.status}:v1`,
       rawPayload: payload,
     });
+  }
+
+  if (classification.kind === "unsupported") {
+    return fallbackPreview("xendit", classification.receiptKey, classification.eventType, payload);
   }
 
   return payoutPreview({
