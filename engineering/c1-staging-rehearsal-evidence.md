@@ -5,7 +5,10 @@ VAY-794 rehearsal evidence is appended below as each staging gate is executed._
 
 ## Dashboard/check command
 
-Run against the target staging database:
+Before running VAY-794, use the
+[target DB snapshot lifecycle](provider-rehearsal-secret-ownership.md#target-db-snapshot-lifecycle)
+runbook to create or rebuild the disposable target database. Run the dashboard
+checks against that rehearsal-specific target database:
 
 ```bash
 TARGET_DATABASE_URL=<target-staging-database-url> \
