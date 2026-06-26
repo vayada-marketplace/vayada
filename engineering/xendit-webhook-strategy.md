@@ -112,7 +112,7 @@ secrets exist:
    invoice from payout.
 2. Use environment-specific public HTTPS URLs. For target-owned runtime, use
    the target API URL. During old-URL drain, keep the legacy URL reachable only
-   in `ack_only_with_receipt` or `proxy_to_target`.
+   through `proxy_to_target` unless durable legacy receipt storage exists.
 3. Store the dashboard webhook verification token as `XENDIT_WEBHOOK_SECRET`
    for the runtime receiving callbacks. This is not the same as
    `XENDIT_SECRET_KEY`.
@@ -123,8 +123,8 @@ secrets exist:
    events, token ownership, and test callback result. Do not print token values
    in docs or tickets.
 6. Because Xendit retries failed deliveries for roughly 24 hours, keep the old
-   URL reachable for the repo's existing 72-hour provider drain window unless
-   dashboard retry history proves there are no pending retries.
+   URL reachable only through `proxy_to_target` until durable legacy receipt
+   storage exists and dashboard ownership is locked down.
 
 Token behavior:
 
@@ -199,13 +199,13 @@ the same invoice cannot collapse onto one job key.
 
 ## Legacy `/webhooks/xendit` behavior by mode
 
-| Cutover phase/mode          | Legacy behavior                                                                                                                                                                          | Recommendation                                                                                                                                                                                                          |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Target `observe_only` phase | Legacy stays `mutating` if a real Xendit production callback is active; target receives only mirrored/synthetic/shadow traffic.                                                          | Do not add a separate legacy observe-only mode unless the provider can only point at legacy and a durable receipt store is added there.                                                                                 |
-| `mutating`                  | Legacy verifies token and mutates payments, bookings, payouts, and notifications inline.                                                                                                 | Allowed only before target owns the callback and only if target is not mutating the same provider events.                                                                                                               |
-| `ack_only_with_receipt`     | Legacy verifies token, computes `legacy:xendit:<sha256(payload)>`, returns 2xx, and does not mutate. The receipt is returned/logged but not durably persisted.                           | Use for short old-URL drain only when the target already has the receipt from another path. Prefer `proxy_to_target` for real callback delivery because current legacy ack-only can otherwise lose replayable payloads. |
-| `proxy_to_target`           | Legacy verifies token, forwards raw request body/headers to the configured target URL, and does not mutate locally.                                                                      | Preferred old-URL drain mode after target owns Xendit. Let target write the durable receipt; return non-2xx if target rejects so Xendit retries.                                                                        |
-| Rollback                    | Dashboard is repointed to legacy, target mode returns to `observe_only` or is disabled, and legacy returns to `mutating` only after target jobs are stopped and receipts are reconciled. | For payouts, stop target reconciliation/dispatch first; re-enable legacy `poll_xendit_processing_payouts` or manual reconcile only for payouts without successful target provider effects.                              |
+| Cutover phase/mode          | Legacy behavior                                                                                                                                                                          | Recommendation                                                                                                                                                                             |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Target `observe_only` phase | Legacy stays `mutating` if a real Xendit production callback is active; target receives only mirrored/synthetic/shadow traffic.                                                          | Do not add a separate legacy observe-only mode unless the provider can only point at legacy and a durable receipt store is added there.                                                    |
+| `mutating`                  | Legacy verifies token and mutates payments, bookings, payouts, and notifications inline.                                                                                                 | Allowed only before target owns the callback and only if target is not mutating the same provider events.                                                                                  |
+| `ack_only_with_receipt`     | Legacy verifies token, computes `legacy:xendit:<sha256(payload)>`, returns 2xx, and does not mutate. The receipt is returned/logged but not durably persisted.                           | Do not use as the real old-URL drain path until durable legacy receipt storage exists. Current legacy ack-only can lose replayable payloads.                                               |
+| `proxy_to_target`           | Legacy verifies token, forwards raw request body/headers to the configured target URL, and does not mutate locally.                                                                      | Preferred old-URL drain mode after target owns Xendit. Let target write the durable receipt; return non-2xx if target rejects so Xendit retries.                                           |
+| Rollback                    | Dashboard is repointed to legacy, target mode returns to `observe_only` or is disabled, and legacy returns to `mutating` only after target jobs are stopped and receipts are reconciled. | For payouts, stop target reconciliation/dispatch first; re-enable legacy `poll_xendit_processing_payouts` or manual reconcile only for payouts without successful target provider effects. |
 
 Legacy `POST /admin/xendit/reconcile-payouts` follows
 `FINANCE_XENDIT_PAYOUT_RECONCILIATION_LEGACY_MODE`:
