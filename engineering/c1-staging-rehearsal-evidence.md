@@ -130,7 +130,8 @@ C1_REHEARSAL_WEBHOOK_BASE_URL=https://api.staging.example.test \
 Send to staging target intake:
 
 ```bash
-C1_REHEARSAL_WEBHOOK_BASE_URL=https://api.staging.example.test \
+C1_REHEARSAL_WEBHOOK_BASE_URL=https://target-api.vayada.com \
+C1_REHEARSAL_ALLOW_SEND_TO_HOST=target-api.vayada.com \
 STRIPE_WEBHOOK_SECRET=<target-stripe-webhook-secret> \
 XENDIT_WEBHOOK_SECRET=<target-xendit-callback-token> \
 CHANNEX_WEBHOOK_SECRET=<target-channex-token> \
@@ -138,10 +139,10 @@ CHANNEX_WEBHOOK_SECRET=<target-channex-token> \
 ```
 
 `--send` is guarded so synthetic fixtures cannot be posted to arbitrary hosts.
-Dry runs do not need host approval. Real sends are allowed for local/staging
-hosts only (`localhost`, `*.localhost`, `127.0.0.1`, `::1`, `staging.*`,
-`*.staging`, or `*.staging.*`). If staging uses a different hostname, set
-`C1_REHEARSAL_ALLOW_SEND_TO_HOST=<host>` to allow that exact host for the run.
+Dry runs do not need host approval. Real sends are allowed only for local hosts
+by default (`localhost`, `*.localhost`, `127.0.0.1`, `::1`). Remote staging
+sends must set `C1_REHEARSAL_ALLOW_SEND_TO_HOST=<host>` to allow one exact host
+for the run.
 
 Use `--twice` during rehearsal to prove duplicate provider delivery creates one
 receipt, one normalized domain event, and no duplicate jobs. The script prints
