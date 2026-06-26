@@ -738,7 +738,11 @@ function assertAllowedUser(session: AuthKitSession, surfacePolicy: AuthSurfacePo
   if (!session.user.emailVerified) {
     throw new Error("Platform-admin access requires a verified allowlisted email");
   }
-  if (!surfacePolicy.allowedUserEmails.includes(session.user.email.trim().toLowerCase())) {
+  const userEmail = session.user.email.trim().toLowerCase();
+  const allowedUserEmails = surfacePolicy.allowedUserEmails.map((email) =>
+    email.trim().toLowerCase(),
+  );
+  if (!allowedUserEmails.includes(userEmail)) {
     throw new Error("User is not allowed to access platform-admin");
   }
 }

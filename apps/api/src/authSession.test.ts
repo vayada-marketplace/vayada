@@ -130,6 +130,27 @@ describe("AuthKit session routes", () => {
     },
   );
 
+  it("normalizes configured platform admin allowlist emails", async () => {
+    app = buildAuthSessionApp({
+      surfacePolicies: {
+        "platform-admin": {
+          requiredOrganizationKind: "platform",
+          allowedUserEmails: [" F.MALIQI@VAYADA.COM "],
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/workos/callback?code=auth-code&state=callback-state",
+      headers: {
+        cookie: "vayada_workos_state=callback-state",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
   it("accepts callback state from duplicate cookies with multiple pending login attempts", async () => {
     app = buildAuthSessionApp();
 
