@@ -1,13 +1,23 @@
-import pg from "pg";
-
 import type {
   BookingReservationListFilters,
-  BookingReservationReadModel,
-  BookingReservationsReadPool,
   BookingReservationsReadRepository,
-} from "../routes/bookingReservations.js";
+} from "@vayada/domain-booking";
+import pg, { type QueryResult, type QueryResultRow } from "pg";
 
-type TargetBookingReservationRow = BookingReservationReadModel;
+import {
+  toBookingReservationReadModel,
+  type BookingReservationReadModelRow,
+} from "./bookingReservationReadModel.js";
+
+type BookingReservationsReadPool = {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<Pick<QueryResult<T>, "rows">>;
+  end(): Promise<void>;
+};
+
+type TargetBookingReservationRow = BookingReservationReadModelRow;
 
 const TARGET_RESERVATION_STATUS_SQL = `CASE
   WHEN primary_assignment.assignment_status IN ('checked_in', 'in_house', 'checked_out')
@@ -320,7 +330,7 @@ export function createTargetBookingReservationsReadRepository(config: {
       ]);
 
       return {
-        reservations: reservationResult.rows,
+        reservations: reservationResult.rows.map(toBookingReservationReadModel),
         total: parseCount(countResult.rows[0]?.total),
       };
     },

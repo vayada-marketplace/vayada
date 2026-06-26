@@ -7,6 +7,18 @@ import process from "node:process";
 const repoRoot = resolveRepoRoot(process.argv.slice(2));
 
 const sourceFilePattern = /\.[cm]?[jt]sx?$/;
+const forbiddenPackageRoots = [
+  {
+    path: "packages/dtos",
+    message:
+      "global DTO packages are forbidden; put domain contracts in packages/domain-* or shared HTTP primitives in packages/backend-http",
+  },
+  {
+    path: "packages/shared-dtos",
+    message:
+      "global DTO packages are forbidden; put domain contracts in packages/domain-* or shared HTTP primitives in packages/backend-http",
+  },
+];
 
 // Temporary exceptions must be explicit and traceable. Add only when an issue
 // describes why the boundary cannot be enforced yet and when it will be removed.
@@ -178,6 +190,18 @@ const checks = [
 ];
 
 const violations = [];
+
+for (const forbiddenRoot of forbiddenPackageRoots) {
+  if (existsSync(path.join(repoRoot, forbiddenRoot.path))) {
+    violations.push({
+      check: "API contract ownership",
+      rule: "Global DTO package",
+      file: forbiddenRoot.path,
+      line: 1,
+      message: forbiddenRoot.message,
+    });
+  }
+}
 
 for (const check of checks) {
   for (const root of check.roots) {

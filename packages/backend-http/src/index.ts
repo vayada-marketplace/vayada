@@ -1,5 +1,45 @@
 import type { FastifyInstance, FastifyPluginOptions } from "fastify";
 
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+export type HttpErrorEnvelope<Code extends string = string, Category extends string = string> = {
+  statusCode: number;
+  code: Code;
+  category: Category;
+  message: string;
+};
+
+export type PaginationRequest = {
+  limit?: number;
+  offset?: number;
+};
+
+export type PageEnvelope<Item> = {
+  items: readonly Item[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type IdempotencyMetadata = {
+  idempotencyKey: string;
+  requestId: string;
+  correlationId?: string;
+  fingerprint?: string;
+};
+
+export type HttpRouteContract<
+  Request = unknown,
+  Response = unknown,
+  Error extends HttpErrorEnvelope = HttpErrorEnvelope,
+> = {
+  method: HttpMethod;
+  path: string;
+  request: Request;
+  response: Response;
+  error: Error;
+};
+
 export const routeGroups = ["marketplace", "booking", "pms", "platform", "ai"] as const;
 
 export type RouteGroup = (typeof routeGroups)[number];

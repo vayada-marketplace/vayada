@@ -104,6 +104,95 @@ export type BookingDashboardMetricsReadPort = {
   }): Promise<BookingSparklineReadModel>;
 };
 
+// ─── Booking reservations read model ────────────────────────────────────────
+// Owner: Booking/checkout read model. The HTTP route may keep legacy response
+// keys for Booking Admin, but this port is the product-domain read boundary.
+
+export type BookingAssignedRoom = {
+  roomId: string | null;
+  roomNumber: string | null;
+  position: number;
+};
+
+export type BookingReservationReadModel = {
+  id: string;
+  bookingReference: string;
+  roomTypeId: string;
+  roomName: string;
+  roomMaxOccupancy: number;
+  guestFirstName: string;
+  guestLastName: string;
+  guestEmail: string;
+  guestPhone: string;
+  guestCountry: string;
+  guestGender: string;
+  guestDateOfBirth: BookingDate | null;
+  guestPassportNumber: string;
+  specialRequests: string;
+  estimatedArrivalTime: string | null;
+  numberOfGuests: number | null;
+  checkIn: BookingDate;
+  checkOut: BookingDate;
+  nights: number;
+  adults: number;
+  children: number;
+  nightlyRate: number;
+  numberOfRooms: number;
+  totalRoomCapacity: number;
+  totalAmount: number;
+  currency: string;
+  status: string;
+  roomId: string | null;
+  roomNumber: string | null;
+  assignedRooms: BookingAssignedRoom[];
+  channel: string;
+  paymentMethod: string | null;
+  paymentStatus: string | null;
+  depositRequired: boolean;
+  depositPercentage: number | null;
+  depositAmount: number;
+  balanceAmount: number;
+  checkInPendingFlags: string[];
+  checkedInAt: BookingUtcDateTime | null;
+  checkedOutAt: BookingUtcDateTime | null;
+  hostResponseDeadline: BookingUtcDateTime | null;
+  platformFeeAmount: number | null;
+  affiliateCommissionAmount: number | null;
+  propertyPayoutAmount: number | null;
+  addonIds: string[];
+  addonNames: string[];
+  addonTotal: number;
+  addonQuantities: Record<string, number>;
+  addonDates: Record<string, string[]>;
+  guestWithdrawn: boolean;
+  promoCode: string | null;
+  promoDiscount: number;
+  lastMinuteDiscountPercent: number;
+  lastMinuteDiscountAmount: number;
+  createdAt: BookingUtcDateTime;
+  updatedAt: BookingUtcDateTime;
+};
+
+export type BookingReservationListResult = {
+  reservations: BookingReservationReadModel[];
+  total: number;
+};
+
+export type BookingReservationListFilters = {
+  status?: string;
+  search?: string;
+  limit: number;
+  offset: number;
+};
+
+export type BookingReservationsReadRepository = {
+  listReservationsByHotelId(
+    hotelId: string,
+    filters: BookingReservationListFilters,
+  ): Promise<BookingReservationListResult>;
+  close?(): Promise<void>;
+};
+
 export type BookingPrimaryGuest = PmsGuest;
 
 export type BookingGuestPiiRole = "booker" | "primary_guest" | "additional_guest";
