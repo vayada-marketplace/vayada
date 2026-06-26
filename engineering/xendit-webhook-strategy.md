@@ -87,7 +87,37 @@ Target `apps/api` already has generic provider webhook intake for Xendit in
 `ack_only_with_receipt`, persists receipts through
 `platform.external_webhook_events`, and creates Finance webhook jobs. Current
 target classification handles Invoice/Payment Link payloads and v2-style payout
-payloads with `data.id`; it does not yet handle v3 payout `data.payout_id`.
+payloads with `data.id`; v3 payout payloads with `data.payout_id` stay disabled
+and route to platform webhook review until a future Xendit v3 cutover selects
+that shape.
+
+### VAY-939 provider ownership status
+
+VAY-939 uses the redacted VAY-794 evidence artifact
+`engineering/evidence/vay-794/xendit-webhook-export-2026-06-15.json` as the
+current Xendit ownership record. No real production or staging
+`XENDIT_SECRET_KEY` or production `XENDIT_WEBHOOK_SECRET` was found in the
+discovered AWS SSM, Secrets Manager, ECS, or platform Terraform runtime
+namespace. The only discovered staging Xendit value is
+`/vayada/staging/xendit-webhook-secret`, and it is a generated C1 fixture-signing
+placeholder, not a confirmed provider dashboard token.
+
+Current decision:
+
+- Dashboard callback URLs: none exported or confirmed because no real Xendit API
+  key/dashboard owner was found.
+- Enabled events: none confirmed for production or staging.
+- Environment: Xendit remains inactive for real Booking/Finance runtime traffic
+  in the checked deployment evidence.
+- Token owner: no provider-owned dashboard token is confirmed. The synthetic C1
+  replay placeholder is Platform/runtime-owned rehearsal data.
+- C1 rehearsal: use Xendit only as synthetic target-intake replay coverage until
+  a provider owner supplies real test-mode or production dashboard config.
+
+Conclusion: Xendit is **synthetic-only and non-blocking** for the current C1
+cutover phase. Do not wire production secrets, switch callbacks, or enable
+mutating Xendit provider effects until provider ownership and real runtime usage
+are confirmed in a successor ticket.
 
 ## Selected and deferred callbacks
 
