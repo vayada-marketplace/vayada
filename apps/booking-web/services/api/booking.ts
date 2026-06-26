@@ -107,6 +107,7 @@ export const bookingService = {
       addonDates?: Record<string, string[]>;
       promoCode?: string;
       expectedTotalAmount?: number;
+      balanceAmount?: number;
     },
   ): Promise<BookingRequestResponse> {
     return bookingWebPublic.post(
