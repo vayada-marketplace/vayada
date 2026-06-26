@@ -18,6 +18,7 @@ import type {
 } from "./bookingWebAffiliate.js";
 import {
   recordTargetCheckoutCommand,
+  resolveTargetCheckoutAmountSnapshot,
   type BookingWebCalendarReadPool,
   type BookingWebCheckoutAdapter,
 } from "./bookingWebPublic.js";
@@ -159,7 +160,7 @@ const legacyRooms: LegacyRoomResponse[] = [
     nonRefundableCancellationPolicy: "Non-refundable from booking",
     ratePaymentMethods: {
       flexible: ["card", "pay_at_property"],
-      nonrefundable: ["xendit", "bank_transfer"],
+      nonrefundable: ["card", "bank_transfer"],
     },
     rateDepositSettings: {
       flexible: { enabled: false, percentage: null },
@@ -1268,6 +1269,37 @@ describe("Booking Web public bootstrap parity", () => {
     expect(calls[0]?.text).toContain("response_resource_id = EXCLUDED.response_resource_id");
   });
 
+  it("requires target checkout creates to snapshot the expected quote total", () => {
+    expect(
+      resolveTargetCheckoutAmountSnapshot({
+        expectedTotalAmount: 561600,
+        totalAmount: 561600,
+        balanceAmount: 280800,
+      }),
+    ).toEqual({
+      totalAmount: "561600.00",
+      balanceAmount: "280800.00",
+    });
+
+    expect(() =>
+      resolveTargetCheckoutAmountSnapshot({
+        expectedTotalAmount: 561600,
+        totalAmount: 497250,
+      }),
+    ).toThrow("Booking total changed");
+
+    expect(() =>
+      resolveTargetCheckoutAmountSnapshot({
+        expectedTotalAmount: 561600,
+        balanceAmount: 700000,
+      }),
+    ).toThrow("Booking balance cannot exceed");
+
+    expect(() => resolveTargetCheckoutAmountSnapshot({ totalAmount: 561600 })).toThrow(
+      "expectedTotalAmount is required",
+    );
+  });
+
   it("reports actionable parity mismatches by fixture case and field", () => {
     const mismatches = compareCalendarParity("calendar-unavailable-dates", legacyUnavailableDates, {
       calendar: {
@@ -1593,6 +1625,7 @@ function compareOffersParity(
     quote?: { offers?: Array<Record<string, unknown>> };
   };
   const firstOffer = actual.quote?.offers?.[0];
+  const secondOffer = actual.quote?.offers?.[1];
   return compareFields(caseId, [
     ["status", "bookable", actual.status],
     ["request.currency", firstLegacyRoom.currency, actual.request?.["currency"]],
@@ -1607,6 +1640,19 @@ function compareOffersParity(
     ],
     ["quote.offers[0].totals.roomTotal", 660, nested(firstOffer, "totals.roomTotal")],
     ["quote.offers[0].paymentOptions", ["card", "pay_at_property"], firstOffer?.["paymentOptions"]],
+    [
+      "quote.offers[0].policies.deposit",
+      "No deposit required.",
+      nested(firstOffer, "policies.deposit"),
+    ],
+    ["quote.offers[1].ratePlanId", "nonrefundable", secondOffer?.["ratePlanId"]],
+    ["quote.offers[1].totals.roomTotal", 594, nested(secondOffer, "totals.roomTotal")],
+    ["quote.offers[1].paymentOptions", ["card", "bank_transfer"], secondOffer?.["paymentOptions"]],
+    [
+      "quote.offers[1].policies.deposit",
+      "50% deposit required.",
+      nested(secondOffer, "policies.deposit"),
+    ],
   ]);
 }
 

@@ -696,6 +696,103 @@ describe("platform media upload routes", () => {
     expect(finalizeBody.sideEffects).toEqual(pmsRoomTypeMediaCase.expected.sideEffects);
   });
 
+  it("accepts valid large-dimension PMS room images and resizes display variants", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const app = buildMediaApp({
+      repository,
+      permissions: ["pms.operations.manage"],
+      resources: [
+        {
+          product: "pms",
+          resourceType: "pms_hotel",
+          resourceId: "pms_hotel_alpenrose",
+          relationship: "owner",
+        },
+      ],
+    });
+    const sourceSizeBytes = 9 * 1024 * 1024;
+
+    const create = await injectJson(app, {
+      method: "POST",
+      url: pmsRoomTypeMediaCase.request.path,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        ...pmsRoomTypeMediaCase.request.body,
+        files: [
+          {
+            clientFileId: "room-8k",
+            filename: "suite-8k.jpg",
+            contentType: "image/jpeg",
+            sizeBytes: sourceSizeBytes,
+          },
+        ],
+      },
+    });
+    const createBody = create.body as MediaCreateResponse;
+
+    expect(create.statusCode).toBe(201);
+
+    const finalize = await injectJson(app, {
+      method: "POST",
+      url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        files: [
+          {
+            uploadTargetId: createBody.uploadTargets[0]!.uploadTargetId,
+            contentType: "image/jpeg",
+            sizeBytes: sourceSizeBytes,
+            widthPx: 12000,
+            heightPx: 6750,
+          },
+        ],
+      },
+    });
+
+    expect(finalize.statusCode).toBe(200);
+    const mediaObject = (finalize.body as MediaFinalizeResponse).mediaObject;
+    expect(mediaObject).toMatchObject(pmsRoomTypeMediaCase.expected.mediaObject!);
+    expect(mediaObject.variants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ variantName: "original_safe", widthPx: 1920, heightPx: 1080 }),
+        expect.objectContaining({ variantName: "large", widthPx: 1280, heightPx: 720 }),
+        expect.objectContaining({ variantName: "thumbnail", widthPx: 320, heightPx: 180 }),
+        expect.objectContaining({ variantName: "blur_preview", widthPx: 32, heightPx: 18 }),
+      ]),
+    );
+    expect(mediaObject.variants.every((variant) => variant.sizeBytes < sourceSizeBytes)).toBe(true);
+  });
+
+  it("keeps oversized source-pixel rejection for non-PMS public images", async () => {
+    const repository = createInMemoryPlatformMediaRepository();
+    const app = buildMediaApp({ repository });
+
+    const create = await injectJson(app, {
+      method: "POST",
+      url: propertyGalleryCase.request.path,
+      headers: { authorization: "Bearer valid-token" },
+      payload: propertyGalleryCase.request.body,
+    });
+    const createBody = create.body as MediaCreateResponse;
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: `/api/media/upload-sessions/${createBody.uploadSession.sessionId}/finalize`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        files: propertyGalleryCase.finalize!.files.map((file) => ({
+          ...file,
+          uploadTargetId: createBody.uploadTargets[0]!.uploadTargetId,
+          widthPx: 12000,
+          heightPx: 6750,
+        })),
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect((response.body as ErrorResponse).code).toBe("invalid_media_dimensions");
+  });
+
   it("queues PMS import source image jobs instead of PMS-owned downloads", async () => {
     const repository = createInMemoryPlatformMediaRepository();
     const app = buildMediaApp({

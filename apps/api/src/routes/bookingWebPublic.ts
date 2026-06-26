@@ -1600,8 +1600,7 @@ async function createTargetGuestBooking(
     throw createHttpError(400, "Valid check-in and check-out dates are required.");
   }
   const currency = uppercaseCurrency(stringField(request, "currency") ?? "EUR");
-  const totalAmount = moneyField(request, "totalAmount") ?? moneyField(request, "total") ?? "0.00";
-  const balanceAmount = moneyField(request, "balanceAmount") ?? totalAmount;
+  const { totalAmount, balanceAmount } = resolveTargetCheckoutAmountSnapshot(request);
   const adults = integerField(request, "adults", 1);
   const children = integerField(request, "children", 0);
   const roomCount = integerField(request, "numberOfRooms", integerField(request, "roomCount", 1));
@@ -2341,6 +2340,33 @@ export async function recordTargetCheckoutCommand(
       JSON.stringify({ operation: input.context.operation, resourceId: input.resourceId }),
     ],
   );
+}
+
+export function resolveTargetCheckoutAmountSnapshot(request: BookingWebCheckoutRequest): {
+  totalAmount: string;
+  balanceAmount: string;
+} {
+  const expectedTotalAmount = moneyField(request, "expectedTotalAmount");
+  if (!expectedTotalAmount) {
+    throw createHttpError(
+      400,
+      "expectedTotalAmount is required for target checkout booking creation.",
+    );
+  }
+
+  const submittedTotalAmount = moneyField(request, "totalAmount") ?? moneyField(request, "total");
+  if (submittedTotalAmount && submittedTotalAmount !== expectedTotalAmount) {
+    throw createHttpError(409, "Booking total changed. Please refresh the checkout quote.");
+  }
+  const balanceAmount = moneyField(request, "balanceAmount") ?? expectedTotalAmount;
+  if (Number(balanceAmount) > Number(expectedTotalAmount)) {
+    throw createHttpError(409, "Booking balance cannot exceed the checkout total.");
+  }
+
+  return {
+    totalAmount: expectedTotalAmount,
+    balanceAmount,
+  };
 }
 
 export function createCompatibilityBookingWebAffiliateAdapter(config: {

@@ -323,6 +323,7 @@ function PaymentPageContent() {
         addonDates,
         promoCode: promoCodeParam || undefined,
         expectedTotalAmount: checkoutQuote.totalAmount,
+        balanceAmount: checkoutQuote.balanceAmount,
       });
 
       const booking = result.booking;

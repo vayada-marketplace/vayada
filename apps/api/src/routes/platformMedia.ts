@@ -300,6 +300,7 @@ export type PlatformMediaPurposePolicy = {
   maxFileSizeBytes: number;
   maxFileCount: number;
   maxImagePixels?: number;
+  resizeOversizedPublicImages?: boolean;
   privateOnly: boolean;
   targetResourceProduct: PlatformMediaResourceProduct;
   targetResourceType: string;
@@ -311,6 +312,15 @@ const imageExtensions = [".jpg", ".jpeg", ".png", ".webp"] as const;
 const publicImageVariants = ["original_safe", "large", "thumbnail", "blur_preview"] as const;
 const providerOriginalVariant = ["provider_original"] as const;
 const defaultMaxImagePixels = 60_000_000;
+const publicImageVariantMaxDimensions: Record<
+  Exclude<PlatformMediaVariantName, "provider_original">,
+  { widthPx: number; heightPx: number }
+> = {
+  original_safe: { widthPx: 1920, heightPx: 1920 },
+  large: { widthPx: 1280, heightPx: 720 },
+  thumbnail: { widthPx: 320, heightPx: 180 },
+  blur_preview: { widthPx: 32, heightPx: 18 },
+};
 
 const purposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePolicy> = {
   "property.hero_image": {
@@ -422,6 +432,7 @@ const purposePolicies: Record<PlatformMediaPurpose, PlatformMediaPurposePolicy> 
     maxFileSizeBytes: 10 * 1024 * 1024,
     maxFileCount: 20,
     maxImagePixels: defaultMaxImagePixels,
+    resizeOversizedPublicImages: true,
     privateOnly: false,
     targetResourceProduct: "pms",
     targetResourceType: "room_type",
@@ -849,16 +860,24 @@ export function createDeterministicPlatformMediaFinalizer(
       };
     },
     async generateVariants(input) {
-      return input.policy.requiredVariants.map((variantName) => ({
-        variantName,
-        visibility: input.session.effectiveVisibility,
-        storageKey: `${input.session.stagingPrefix}/${input.fileIndex + 1}/variants/${variantName}`,
-        contentType: normalizeContentType(input.file.inspection.contentType),
-        widthPx: input.file.inspection.widthPx,
-        heightPx: input.file.inspection.heightPx,
-        sizeBytes: input.file.inspection.sizeBytes,
-        publicCdnUrl: null,
-      }));
+      return input.policy.requiredVariants.map((variantName) => {
+        const dimensions = resizedVariantDimensions(
+          variantName,
+          input.file.inspection.widthPx,
+          input.file.inspection.heightPx,
+          input.policy.resizeOversizedPublicImages === true,
+        );
+        return {
+          variantName,
+          visibility: input.session.effectiveVisibility,
+          storageKey: `${input.session.stagingPrefix}/${input.fileIndex + 1}/variants/${variantName}`,
+          contentType: normalizeContentType(input.file.inspection.contentType),
+          widthPx: dimensions?.widthPx,
+          heightPx: dimensions?.heightPx,
+          sizeBytes: resizedVariantSize(input.file.inspection, dimensions),
+          publicCdnUrl: null,
+        };
+      });
     },
   };
 }
@@ -1371,6 +1390,7 @@ function validateFinalizedInspection(
     inspection.widthPx !== undefined &&
     inspection.heightPx !== undefined &&
     policy.maxImagePixels &&
+    !policy.resizeOversizedPublicImages &&
     inspection.widthPx * inspection.heightPx > policy.maxImagePixels
   ) {
     return {
@@ -1478,6 +1498,38 @@ function isSupportedSourceImageUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function resizedVariantDimensions(
+  variantName: PlatformMediaVariantName,
+  widthPx: number | undefined,
+  heightPx: number | undefined,
+  resizeOversizedPublicImages: boolean,
+): { widthPx: number; heightPx: number } | null {
+  if (
+    !widthPx ||
+    !heightPx ||
+    variantName === "provider_original" ||
+    !resizeOversizedPublicImages
+  ) {
+    return widthPx && heightPx ? { widthPx, heightPx } : null;
+  }
+  const max = publicImageVariantMaxDimensions[variantName];
+  const scale = Math.min(1, max.widthPx / widthPx, max.heightPx / heightPx);
+  return {
+    widthPx: Math.max(1, Math.round(widthPx * scale)),
+    heightPx: Math.max(1, Math.round(heightPx * scale)),
+  };
+}
+
+function resizedVariantSize(
+  inspection: PlatformMediaFinalizedFileInspection,
+  dimensions: { widthPx: number; heightPx: number } | null,
+): number {
+  if (!dimensions || !inspection.widthPx || !inspection.heightPx) return inspection.sizeBytes;
+  const originalPixels = inspection.widthPx * inspection.heightPx;
+  const variantPixels = dimensions.widthPx * dimensions.heightPx;
+  return Math.max(1, Math.round(inspection.sizeBytes * (variantPixels / originalPixels)));
 }
 
 function sourceFilename(sourceImageUrl: string, index: number): string {

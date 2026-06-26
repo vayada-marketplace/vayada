@@ -246,3 +246,18 @@ batch in cutover smoke:
 - VAY-894: Design Studio exposes the Italiana typography preset.
 - VAY-891: child guest-type settings require the split target contract/schema
   follow-up VAY-929 before cutover.
+
+## VAY-945 Post-Rollback Parity Checklist
+
+Include this post-rollback old-stack parity batch in the same Booking cutover
+smoke as VAY-901:
+
+- Checkout booking creates must persist the expected quote total/balance and
+  reject mismatched submitted totals. Server-authoritative stale quote
+  validation remains owned by VAY-927 with the full target quote endpoint.
+- Booking Web room cards, detail modals, payment quote requests, and quote
+  snapshots must use the same full-stay nightly pricing source for flexible,
+  non-refundable, and last-minute discounts.
+- Platform media uploads must reject unsupported content types but accept valid
+  large-dimension JPG, PNG, and WebP images within the byte limit by generating
+  bounded public display variants before storage/display.
