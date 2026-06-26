@@ -256,7 +256,7 @@ describe("target provider webhook routes", () => {
     expect(store.jobs.map((job) => job.jobKey)).toEqual([
       "payment.reconcile-status:payment:pi_stripe_123:stripe-event-evt_stripe_pi_succeeded:v1",
       "finance.reconcile-payout:payout:po_stripe_123:stripe-status-paid:v1",
-      "payment.reconcile-status:payment:inv_xendit_paid:xendit-invoice-inv_xendit_paid:v1",
+      "payment.reconcile-status:payment:inv_xendit_paid:xendit-status-PAID:v1",
       "finance.reconcile-payout:payout:po_xendit_123:xendit-status-SUCCEEDED:v1",
     ]);
     expect(store.auditEvents.map((event) => event.auditKey)).toEqual(
@@ -271,6 +271,105 @@ describe("target provider webhook routes", () => {
     expect(
       store.receipts.map((receipt) => receipt.normalizedPreview.payload.financeStatus),
     ).toEqual(["paid", "paid", "paid", "paid"]);
+    await app.close();
+  });
+
+  it("normalizes selected Xendit invoice and v2 payout states with status-aware jobs", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { xendit: "xendit-secret" },
+        modes: { xendit: "mutating" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+    const samples = [
+      xenditInvoicePayload({ status: "PAID", amount: 42000 }),
+      xenditInvoicePayload({ status: "EXPIRED", amount: 42000 }),
+      xenditPayoutPayload({
+        event: "payout.succeeded",
+        payoutId: "po_xendit_succeeded",
+        status: "SUCCEEDED",
+      }),
+      xenditPayoutPayload({
+        event: "payout.failed",
+        payoutId: "po_xendit_failed",
+        status: "FAILED",
+      }),
+      xenditPayoutPayload({
+        event: "payout.reversed",
+        payoutId: "po_xendit_reversed",
+      }),
+    ];
+
+    for (const payload of samples) {
+      const response = await postProviderPayload(app, "xendit", payload);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: "promoted" });
+    }
+
+    expect(store.receipts.map((receipt) => receipt.receiptKey)).toEqual([
+      "webhook:xendit:invoice:inv_xendit_stateful:PAID",
+      "webhook:xendit:invoice:inv_xendit_stateful:EXPIRED",
+      "webhook:xendit:payout:po_xendit_succeeded:SUCCEEDED",
+      "webhook:xendit:payout:po_xendit_failed:FAILED",
+      "webhook:xendit:payout:po_xendit_reversed:REVERSED",
+    ]);
+    expect(store.domainEvents.map((event) => event.domainEventKey)).toEqual([
+      "payment.captured:xendit:inv_xendit_stateful:42000:v1",
+      "payment.terminal:xendit:inv_xendit_stateful:EXPIRED:v1",
+      "payout.status:xendit:po_xendit_succeeded:SUCCEEDED:v1",
+      "payout.status:xendit:po_xendit_failed:FAILED:v1",
+      "payout.status:xendit:po_xendit_reversed:REVERSED:v1",
+    ]);
+    expect(store.jobs.map((job) => job.jobKey)).toEqual([
+      "payment.reconcile-status:payment:inv_xendit_stateful:xendit-status-PAID:v1",
+      "payment.reconcile-status:payment:inv_xendit_stateful:xendit-status-EXPIRED:v1",
+      "finance.reconcile-payout:payout:po_xendit_succeeded:xendit-status-SUCCEEDED:v1",
+      "finance.reconcile-payout:payout:po_xendit_failed:xendit-status-FAILED:v1",
+      "finance.reconcile-payout:payout:po_xendit_reversed:xendit-status-REVERSED:v1",
+    ]);
+    expect(
+      store.receipts.map((receipt) => receipt.normalizedPreview.payload.financeStatus),
+    ).toEqual(["paid", "canceled", "paid", "failed", "reversed"]);
+    await app.close();
+  });
+
+  it("leaves Xendit v3 payout payloads disabled for platform review", async () => {
+    const store = createMemoryProviderWebhookStore();
+    const app = buildApp({
+      providerWebhooks: {
+        secrets: { xendit: "xendit-secret" },
+        modes: { xendit: "mutating" },
+        store,
+        now: () => fixedNow,
+      },
+    });
+    const response = await postProviderPayload(app, "xendit", {
+      event: "v3_payout.succeeded",
+      data: {
+        payout_id: "po_xendit_v3_123",
+        status: "SUCCEEDED",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(store.receipts[0]?.receiptKey).toMatch(/^webhook:xendit:payout:v3-disabled:sha256:/);
+    expect(store.receipts[0]?.normalizedPreview).toMatchObject({
+      domainEventType: "xendit.webhook.received",
+      resourceProduct: "platform",
+      resourceType: "external_webhook",
+      queueName: "platform.webhooks",
+      jobType: "provider.webhook-review",
+      payload: {
+        provider: "xendit",
+        eventType: "v3_payout.succeeded",
+      },
+    });
+    expect(store.jobs[0]?.jobKey).toContain("provider.webhook-review:external_webhook");
+    expect(store.jobs[0]?.jobKey).not.toContain("finance.reconcile-payout");
     await app.close();
   });
 
@@ -771,12 +870,32 @@ function stripePayoutPayload(): Record<string, unknown> {
   };
 }
 
-function xenditPayoutPayload(): Record<string, unknown> {
+function xenditInvoicePayload(input: { status: "PAID" | "EXPIRED"; amount: number }) {
   return {
+    id: "inv_xendit_stateful",
+    external_id: "booking_123",
+    status: input.status,
+    amount: input.amount,
+    paid_amount: input.status === "PAID" ? input.amount : undefined,
+  };
+}
+
+function xenditPayoutPayload(
+  input: {
+    event: "payout.succeeded" | "payout.failed" | "payout.reversed";
+    payoutId: string;
+    status?: "SUCCEEDED" | "FAILED" | "REVERSED";
+  } = {
     event: "payout.succeeded",
+    payoutId: "po_xendit_123",
+    status: "SUCCEEDED",
+  },
+): Record<string, unknown> {
+  return {
+    event: input.event,
     data: {
-      id: "po_xendit_123",
-      status: "SUCCEEDED",
+      id: input.payoutId,
+      ...(input.status ? { status: input.status } : {}),
       amount: 42000,
     },
   };
