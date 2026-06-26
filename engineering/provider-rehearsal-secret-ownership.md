@@ -52,6 +52,59 @@ Reasoning:
   URL; a snapshot-backed target DB exercises the real schema without granting
   rehearsal commands access to production runtime secrets.
 
+### Target DB snapshot lifecycle
+
+Owner: Platform/runtime owns the temporary database, DB user, SSM pointer, and
+teardown. The target-schema migration owner owns the reviewed snapshot or rebuild
+input and signs off that migrations/parity checks are current before replay.
+
+Retention: destroy the rehearsal DB and DB user within 72 hours after the
+VAY-794 go/no-go decision. Any extension needs a Linear comment with a new expiry
+date and owner. Do not reuse a previous C1 rehearsal database for a new replay.
+
+Evidence location: record a redacted lifecycle artifact under
+`engineering/evidence/vay-794/target-db-lifecycle-YYYYMMDD.json`. The artifact
+should include the rehearsal id, source snapshot or rebuild commit, migration
+ledger, non-secret database identifier, owner, created/expires timestamps, SSM
+parameter version, CloudWatch dashboard log streams, and teardown timestamp. Do
+not include connection strings or secret values.
+
+Procedure for each rehearsal:
+
+1. Create a rehearsal-specific target DB from a reviewed RDS snapshot or rebuild
+   it from the accepted target-schema migration input. Use a unique database
+   name and user for the rehearsal. Do not point at the production target DB or a
+   standing shared staging DB.
+2. Apply target migrations against the temporary DB and run the target parity or
+   smoke checks required by the current cutover plan.
+3. Update `/vayada/staging/target-database-url` without printing the value:
+
+   ```bash
+   test -n "${TARGET_DATABASE_URL:-}"
+
+   aws ssm put-parameter \
+     --region eu-west-1 \
+     --name /vayada/staging/target-database-url \
+     --type SecureString \
+     --value "$TARGET_DATABASE_URL" \
+     --overwrite \
+     --query Version \
+     --output text
+   ```
+
+4. Start or restart only the target/rehearsal runtime that reads the staging SSM
+   parameter. Run the baseline dashboard command and record the CloudWatch log
+   stream before provider replay. Update the lifecycle artifact with the SSM
+   parameter version returned above and the baseline dashboard log stream.
+5. Run provider replay and post-replay dashboard checks. Receipt rows,
+   idempotency rows, job/event previews, dead letters, and scheduler-freeze
+   audit rows are disposable because they live only in this temporary DB. Add
+   the post-replay dashboard log stream to the lifecycle artifact.
+6. After evidence capture, stop the rehearsal runtime, destroy the temporary DB
+   and DB user, and clear or rotate `/vayada/staging/target-database-url` so it
+   no longer points at a destroyed database. Update the lifecycle artifact with
+   teardown time and owner.
+
 The frozen legacy PMS runtime is not part of the approved C1 provider-replay
 path. Current `vayada-platform` wiring for the optional
 `vayada-staging-pms-backend` service still injects several production
@@ -166,8 +219,8 @@ running synthetic provider replay against it.
    mappings for the four `/vayada/staging/*` paths, narrow execution-role
    SSM/KMS permissions, exact-host replay allowlisting, and CloudWatch log
    capture.
-3. Target-schema/migration: define the target DB snapshot clone/rebuild
-   procedure, retention window, and teardown owner for each C1 rehearsal.
+3. Target-schema/migration: use the target DB snapshot lifecycle runbook above
+   for clone/rebuild, retention, and teardown before VAY-794 runs.
 4. Platform/runtime: isolate or disable `vayada-staging-pms-backend` production
    dependencies before using it for scheduler-freeze evidence; replace auth,
    booking, SMTP, Stripe API, and Channex API secrets with staging/no-op/read-only
