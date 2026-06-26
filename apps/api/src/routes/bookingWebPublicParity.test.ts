@@ -1272,6 +1272,7 @@ describe("Booking Web public bootstrap parity", () => {
 
   it("creates target checkout quotes from public offer snapshots", async () => {
     const calls: Array<{ text: string; values: readonly unknown[] | undefined }> = [];
+    let ended = 0;
     const pool = {
       async query(text: string, values?: readonly unknown[]) {
         calls.push({ text, values });
@@ -1332,7 +1333,9 @@ describe("Booking Web public bootstrap parity", () => {
         }
         return { rows: [] };
       },
-      async end() {},
+      async end() {
+        ended += 1;
+      },
     };
     const adapter = createTargetBookingWebCheckoutAdapter({
       connectionString: "postgres://unused",
@@ -1361,6 +1364,23 @@ describe("Booking Web public bootstrap parity", () => {
       },
     );
 
+    const quoteSessionWrites = calls.filter((call) =>
+      call.text.includes("INSERT INTO booking.quote_sessions"),
+    ).length;
+    await expect(
+      adapter.quoteBooking("hotel-alpenrose", {
+        roomTypeId: "room_deluxe",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        adults: 2,
+        children: 0,
+        numberOfRooms: 1,
+        paymentMethod: "pay_at_property",
+        rateType: "flexible",
+        addonIds: ["airport_transfer"],
+      }),
+    ).rejects.toThrow("add-on pricing");
+
     expect(quote).toMatchObject({
       quoteId: "Q-TARGETQUOTE1",
       roomTypeId: "room_deluxe",
@@ -1374,10 +1394,22 @@ describe("Booking Web public bootstrap parity", () => {
       balanceAmount: 280.8,
       currency: "EUR",
     });
-    expect(calls.some((call) => call.text.includes("INSERT INTO booking.quote_sessions"))).toBe(
-      true,
+    expect(
+      calls.filter((call) => call.text.includes("INSERT INTO booking.quote_sessions")),
+    ).toHaveLength(quoteSessionWrites);
+    const reserveIndex = calls.findIndex(
+      (call) =>
+        call.text.includes("INSERT INTO platform.idempotency_keys") &&
+        call.text.includes("'in_progress'"),
     );
+    const quoteIndex = calls.findIndex((call) =>
+      call.text.includes("INSERT INTO booking.quote_sessions"),
+    );
+    expect(reserveIndex).toBeGreaterThanOrEqual(0);
+    expect(reserveIndex).toBeLessThan(quoteIndex);
     expect(calls.some((call) => call.text.includes("platform.product_audit_events"))).toBe(true);
+    await adapter.close?.();
+    expect(ended).toBe(0);
   });
 
   it("requires target checkout creates to snapshot the expected quote total", () => {

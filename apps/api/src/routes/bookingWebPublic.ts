@@ -1083,6 +1083,7 @@ type PgTargetBookingWebCheckoutAdapterConfig = {
 export function createTargetBookingWebCheckoutAdapter(
   config: PgTargetBookingWebCheckoutAdapterConfig,
 ): BookingWebCheckoutAdapter {
+  const ownsPool = !config.pool;
   const pool =
     config.pool ??
     new pg.Pool({
@@ -1159,6 +1160,10 @@ export function createTargetBookingWebCheckoutAdapter(
     },
     async quoteBooking(slug, request, context) {
       const property = await resolveTargetCheckoutProperty(pool, slug);
+      assertTargetQuotePricingInputsSupported(request);
+      if (context) {
+        await reserveTargetCheckoutCommand(pool, property.propertyId, context);
+      }
       const quote = await createTargetCheckoutQuote(
         pool,
         property,
@@ -1400,7 +1405,9 @@ export function createTargetBookingWebCheckoutAdapter(
       });
     },
     async close() {
-      await pool.end();
+      if (ownsPool) {
+        await pool.end();
+      }
     },
   };
 }
@@ -3471,6 +3478,30 @@ function assertTargetPaymentMethodReady(record: Record<string, unknown>): void {
     throw createHttpError(
       503,
       "Target card authorization is not configured for Booking Web checkout.",
+    );
+  }
+}
+
+function assertTargetQuotePricingInputsSupported(record: Record<string, unknown>): void {
+  const addonIds = Array.isArray(record["addonIds"]) ? record["addonIds"] : [];
+  const selectedAddons = Array.isArray(record["selectedAddons"]) ? record["selectedAddons"] : [];
+  const addonQuantities = objectValue(record["addonQuantities"]);
+  const addonDates = objectValue(record["addonDates"]);
+  if (
+    addonIds.length > 0 ||
+    selectedAddons.length > 0 ||
+    Object.keys(addonQuantities).length > 0 ||
+    Object.keys(addonDates).length > 0
+  ) {
+    throw createHttpError(
+      409,
+      "Target checkout add-on pricing is not configured. Please refresh without add-ons.",
+    );
+  }
+  if (stringField(record, "promoCode")) {
+    throw createHttpError(
+      409,
+      "Target checkout promo pricing is not configured. Please refresh without a promo code.",
     );
   }
 }
