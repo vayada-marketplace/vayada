@@ -51,8 +51,8 @@ describe("settingsService next-stack bootstrap data", () => {
       },
     ]);
     await expect(settingsService.getSetupStatus()).resolves.toMatchObject({
-      setup_complete: true,
-      missing_fields: [],
+      setup_complete: false,
+      missing_fields: ["property_settings"],
     });
     await expect(settingsService.getPropertySettings()).rejects.toThrow(
       "Property settings are not available on next-api yet.",

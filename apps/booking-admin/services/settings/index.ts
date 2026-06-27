@@ -361,8 +361,8 @@ export const settingsService = {
     }
     const hotels = listScopedBookingHotels();
     return {
-      setup_complete: hotels.length > 0,
-      missing_fields: hotels.length > 0 ? [] : ["property"],
+      setup_complete: false,
+      missing_fields: hotels.length > 0 ? ["property_settings"] : ["property"],
       prefill_data: null,
     };
   },

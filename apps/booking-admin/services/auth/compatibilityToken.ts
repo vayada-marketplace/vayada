@@ -22,10 +22,8 @@ export async function ensureBookingCompatibilityToken(): Promise<void> {
     method: "POST",
     credentials: "include",
     headers: { "x-vayada-csrf": csrfToken },
-  });
-  if (!response.ok) {
-    throw new Error("Booking compatibility token request failed.");
-  }
+  }).catch(() => null);
+  if (!response?.ok) return;
 
   const body = (await response.json()) as CompatibilityTokenResponse;
   setLegacyCompatibilityToken(body.accessToken, body.expiresIn);

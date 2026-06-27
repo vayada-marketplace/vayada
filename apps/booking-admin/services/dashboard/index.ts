@@ -161,24 +161,15 @@ function amount(value: Money): number {
   return Number(value.amountDecimal) || 0;
 }
 
-function emptyStats(): DashboardStats {
-  return {
-    revenue: 0,
-    revenue_previous: 0,
-    bookings: 0,
-    bookings_previous: 0,
-    avg_nightly_rate: 0,
-    avg_nightly_rate_previous: 0,
-    page_views: 0,
-    page_views_previous: 0,
-    next_arrival: null,
-    live_since: null,
-  };
-}
-
 function dashboardBasePath(): string | null {
   const hotelId = currentHotelId();
   return hotelId ? `/api/booking/properties/${encodeURIComponent(hotelId)}/dashboard` : null;
+}
+
+function requireDashboardBasePath(): string {
+  const basePath = dashboardBasePath();
+  if (!basePath) throw new Error("Booking hotel scope is unavailable.");
+  return basePath;
 }
 
 export const dashboardService = {
@@ -186,8 +177,7 @@ export const dashboardService = {
     if (!isNextApiTarget()) {
       return apiClient.get<DashboardStats>(`/admin/dashboard/stats?range=${range}`);
     }
-    const basePath = dashboardBasePath();
-    if (!basePath) return emptyStats();
+    const basePath = requireDashboardBasePath();
     const query = rangeQuery(range);
     const response = await apiClient.get<TargetDashboardStatsResponse>(
       `${basePath}/stats?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}&previousPeriodStart=${query.previousStart}&previousPeriodEnd=${query.previousEnd}`,
@@ -210,8 +200,7 @@ export const dashboardService = {
     if (!isNextApiTarget()) {
       return apiClient.get<BookingsBySource>(`/admin/dashboard/bookings-by-source?range=${range}`);
     }
-    const basePath = dashboardBasePath();
-    if (!basePath) return { total_revenue: 0, sources: [] };
+    const basePath = requireDashboardBasePath();
     const query = rangeQuery(range);
     const response = await apiClient.get<TargetSourceMixResponse>(
       `${basePath}/bookings-by-source?periodStart=${query.currentStart}&periodEnd=${query.currentEnd}`,
@@ -239,8 +228,7 @@ export const dashboardService = {
     if (!isNextApiTarget()) {
       return apiClient.get<Sparklines>(`/admin/dashboard/sparklines?range=${range}`);
     }
-    const basePath = dashboardBasePath();
-    if (!basePath) return { revenue: [], bookings: [], avg_rate: [], page_views: [] };
+    const basePath = requireDashboardBasePath();
     const query = rangeQuery(range);
     const response = await apiClient.get<TargetSparklinesResponse>(
       `${basePath}/sparklines?windowStart=${query.currentStart}&windowEnd=${query.currentEnd}`,

@@ -13,8 +13,9 @@ import { ensureBookingCompatibilityToken } from "../auth/compatibilityToken";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
 
-export function isNextApiTarget(): boolean {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || API_BASE_URL;
+export function isNextApiTarget(
+  apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || API_BASE_URL,
+): boolean {
   return apiBaseUrl.includes("next-api.vayada.com");
 }
 
@@ -87,7 +88,7 @@ export class ApiClient {
       "/auth/validate-token",
       "/auth/verify-email-change",
     ];
-    const legacyAdminRoute = endpoint.startsWith("/admin/") && !isNextApiTarget();
+    const legacyAdminRoute = endpoint.startsWith("/admin/") && !isNextApiTarget(this.baseURL);
     if (
       !publicAuthEndpoints.includes(endpoint) &&
       legacyAdminRoute &&
