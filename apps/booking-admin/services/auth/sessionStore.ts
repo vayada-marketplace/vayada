@@ -9,6 +9,7 @@ export type AuthKitSessionResponse = {
   accessToken: string;
   csrfToken?: string;
   organizationId?: string;
+  resources?: Record<string, string[]>;
   user: AuthUser;
 };
 
@@ -114,22 +115,43 @@ export function getAuthKitAccessToken(): string | null {
 }
 
 export function getAuthBearerToken(): string | null {
-  const compatibilityToken = currentCompatibilityToken();
-  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
   if (authKitSession?.accessToken) return authKitSession.accessToken;
   return getLegacyPasswordToken();
 }
 
-export function getScopedBookingHotelIds(): string[] {
-  const token = getAuthKitAccessToken() ?? getAuthBearerToken();
-  if (!token) return [];
+export function getLegacyAdminBearerToken(): string | null {
+  const compatibilityToken = currentCompatibilityToken();
+  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
+  if (isCompatibilityTokenEnabled()) return null;
+  return getAuthBearerToken();
+}
 
-  const payload = decodeJwtPayload(token);
-  const resources = isRecord(payload?.resources) ? payload.resources : null;
-  const bookingHotelIds = resources?.["booking:booking_hotel"];
-  return Array.isArray(bookingHotelIds)
-    ? bookingHotelIds.filter((resourceId): resourceId is string => typeof resourceId === "string")
-    : [];
+export function getLegacyCompatibilityToken(): string | null {
+  return currentCompatibilityToken();
+}
+
+export function getScopedBookingHotelIds(): string[] {
+  const sessionScope = authKitSession?.resources?.["booking:booking_hotel"];
+  const bookingHotelIds = new Set(
+    Array.isArray(sessionScope)
+      ? sessionScope.filter((resourceId): resourceId is string => typeof resourceId === "string")
+      : [],
+  );
+  const tokens = [getAuthBearerToken(), getAuthKitAccessToken()].filter((token): token is string =>
+    Boolean(token),
+  );
+
+  for (const token of tokens) {
+    const payload = decodeJwtPayload(token);
+    const resources = isRecord(payload?.resources) ? payload.resources : null;
+    const scopedIds = resources?.["booking:booking_hotel"];
+    if (!Array.isArray(scopedIds)) continue;
+    for (const resourceId of scopedIds) {
+      if (typeof resourceId === "string") bookingHotelIds.add(resourceId);
+    }
+  }
+
+  return Array.from(bookingHotelIds);
 }
 
 export function getSelectedOrganizationId(): string | null {

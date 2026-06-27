@@ -1,4 +1,5 @@
-import { apiClient } from "../api/client";
+import { apiClient, isNextApiTarget } from "../api/client";
+import { getScopedBookingHotelIds, isAuthKitLoginEnabled } from "../auth/sessionStore";
 import {
   getBookingRoomFilterSettings,
   updateBookingRoomFilterSettings,
@@ -139,10 +140,41 @@ function unsupportedDesignUpdateKeys(data: DesignSettingsUpdate): string[] {
   );
 }
 
-async function resolveBookingHotelId(): Promise<string> {
+function listScopedBookingHotels(): HotelSummary[] {
+  return getScopedBookingHotelIds().map((id, index) => ({
+    id,
+    name: index === 0 ? "My Property" : `Property ${index + 1}`,
+    slug: "",
+    location: "",
+    country: "",
+  }));
+}
+
+function getSelectedOrScopedBookingHotelId(): string | null {
   const selectedHotelId =
     typeof window !== "undefined" ? window.localStorage.getItem("selectedHotelId") : null;
-  if (selectedHotelId) return selectedHotelId;
+  if (!isAuthKitLoginEnabled() || !isNextApiTarget()) return selectedHotelId;
+
+  const scopedHotelIds = getScopedBookingHotelIds();
+  if (selectedHotelId && scopedHotelIds.includes(selectedHotelId)) return selectedHotelId;
+
+  const fallbackHotelId = scopedHotelIds[0] ?? null;
+  if (typeof window !== "undefined") {
+    if (fallbackHotelId) {
+      window.localStorage.setItem("selectedHotelId", fallbackHotelId);
+    } else {
+      window.localStorage.removeItem("selectedHotelId");
+    }
+  }
+  return fallbackHotelId;
+}
+
+async function resolveBookingHotelId(): Promise<string> {
+  const hotelId = getSelectedOrScopedBookingHotelId();
+  if (hotelId) return hotelId;
+  if (isAuthKitLoginEnabled() && isNextApiTarget()) {
+    throw new Error("Booking hotel id is required.");
+  }
 
   const property = await apiClient.get<PropertySettings>("/admin/settings/property");
   if (property.id) return property.id;
@@ -240,7 +272,10 @@ export interface HotelDeletionImpact {
 }
 
 export const settingsService = {
-  listHotels: () => apiClient.get<HotelSummary[]>("/admin/hotels"),
+  listHotels: async () =>
+    isAuthKitLoginEnabled() && isNextApiTarget()
+      ? listScopedBookingHotels()
+      : apiClient.get<HotelSummary[]>("/admin/hotels"),
 
   listAllHotels: () => apiClient.get<SuperAdminHotel[]>("/admin/superadmin/hotels"),
 
@@ -252,7 +287,10 @@ export const settingsService = {
 
   deleteHotel: (hotelId: string) => apiClient.delete<void>(`/admin/hotels/${hotelId}`),
 
-  getPropertySettings: () => apiClient.get<PropertySettings>("/admin/settings/property"),
+  getPropertySettings: () =>
+    isAuthKitLoginEnabled() && isNextApiTarget()
+      ? Promise.reject(new Error("Property settings are not available on next-api yet."))
+      : apiClient.get<PropertySettings>("/admin/settings/property"),
 
   updatePropertySettings: (data: PropertySettingsUpdate) =>
     apiClient.patch<PropertySettings>("/admin/settings/property", data),
@@ -317,5 +355,15 @@ export const settingsService = {
   disconnectCustomDomain: async (): Promise<void> =>
     deleteBookingCustomDomain({ hotelId: await resolveBookingHotelId() }),
 
-  getSetupStatus: () => apiClient.get<SetupStatusResponse>("/admin/settings/setup-status"),
+  getSetupStatus: async () => {
+    if (!isAuthKitLoginEnabled() || !isNextApiTarget()) {
+      return apiClient.get<SetupStatusResponse>("/admin/settings/setup-status");
+    }
+    const hotels = listScopedBookingHotels();
+    return {
+      setup_complete: hotels.length > 0,
+      missing_fields: hotels.length > 0 ? [] : ["property"],
+      prefill_data: null,
+    };
+  },
 };
