@@ -11,9 +11,7 @@ import { pmsClient } from "./pmsClient";
 
 const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_URL || "https://api.pms.localhost";
 // The next API does not expose the legacy PMS module-activation route yet.
-// Keep next booking-admin smoke stable without changing canonical PMS behavior.
-const NEXT_STACK_ACTIVE_MODULES = ["affiliates"];
-const STATIC_ACTIVATION_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+// Fail closed for next booking-admin until a per-hotel source of truth exists.
 
 function isHotelContextMismatch(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -43,21 +41,11 @@ function selectedHotelId(): string {
   return window.localStorage.getItem("selectedHotelId") || "default";
 }
 
-function nextStackActivation(moduleId: string, isActive: boolean): ModuleActivation {
-  return {
-    moduleId,
-    isActive,
-    activatedAt: isActive ? STATIC_ACTIVATION_TIMESTAMP : null,
-    deactivatedAt: isActive ? null : STATIC_ACTIVATION_TIMESTAMP,
-    updatedAt: STATIC_ACTIVATION_TIMESTAMP,
-  };
-}
-
 function nextStackActivations(): ModuleActivationsResponse {
   return {
     hotelId: selectedHotelId(),
-    activeModules: NEXT_STACK_ACTIVE_MODULES,
-    activations: NEXT_STACK_ACTIVE_MODULES.map((moduleId) => nextStackActivation(moduleId, true)),
+    activeModules: [],
+    activations: [],
   };
 }
 

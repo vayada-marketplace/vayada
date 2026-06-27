@@ -24,7 +24,7 @@ describe("moduleActivationClient", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses static next-stack activations instead of the legacy PMS route", async () => {
+  it("fails closed for next-stack activations instead of calling the legacy PMS route", async () => {
     vi.stubEnv("NEXT_PUBLIC_PMS_URL", "https://next-api.vayada.com");
     const { moduleActivationClient } = await import("./moduleActivationClient");
 
@@ -33,8 +33,8 @@ describe("moduleActivationClient", () => {
     expect(pmsClientMock.patch).not.toHaveBeenCalled();
     expect(response).toMatchObject({
       hotelId: "booking_hotel_alpenrose",
-      activeModules: ["affiliates"],
-      activations: [{ moduleId: "affiliates", isActive: true }],
+      activeModules: [],
+      activations: [],
     });
     await expect(moduleActivationClient.update("affiliates", false)).rejects.toThrow(
       "Module activation update for affiliates is not supported",
