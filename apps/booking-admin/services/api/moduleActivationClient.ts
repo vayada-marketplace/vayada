@@ -6,7 +6,12 @@ import {
   type ModuleActivationsResponse,
 } from "@vayada/feature-hub";
 
+import { isNextApiTarget } from "./client";
 import { pmsClient } from "./pmsClient";
+
+const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_URL || "https://api.pms.localhost";
+// The next API does not expose the legacy PMS module-activation route yet.
+// Fail closed for next booking-admin until a per-hotel source of truth exists.
 
 function isHotelContextMismatch(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -31,16 +36,41 @@ async function retryWithoutStaleHotelContext<T>(request: () => Promise<T>): Prom
   }
 }
 
+function selectedHotelId(): string {
+  if (typeof window === "undefined") return "default";
+  return window.localStorage.getItem("selectedHotelId") || "default";
+}
+
+function nextStackActivations(): ModuleActivationsResponse {
+  return {
+    hotelId: selectedHotelId(),
+    activeModules: [],
+    activations: [],
+  };
+}
+
 export const moduleActivationClient: FeatureActivationClient = {
-  list: () =>
-    retryWithoutStaleHotelContext(() =>
+  list: () => {
+    if (isNextApiTarget(PMS_BASE_URL)) {
+      return Promise.resolve(nextStackActivations());
+    }
+    return retryWithoutStaleHotelContext(() =>
       pmsClient.get<ModuleActivationsResponse>("/admin/module-activations"),
-    ),
-  update: (moduleId: string, isActive: boolean) =>
-    retryWithoutStaleHotelContext(() =>
+    );
+  },
+  update: (moduleId: string, isActive: boolean) => {
+    if (isNextApiTarget(PMS_BASE_URL)) {
+      return Promise.reject(
+        new Error(
+          `Module activation update for ${moduleId} is not supported when PMS URL targets next-api.`,
+        ),
+      );
+    }
+    return retryWithoutStaleHotelContext(() =>
       pmsClient.patch<ModuleActivation>(`/admin/module-activations/${moduleId}`, {
         moduleId,
         isActive,
       }),
-    ),
+    );
+  },
 };
