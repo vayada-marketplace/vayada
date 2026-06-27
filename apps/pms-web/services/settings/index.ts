@@ -74,7 +74,7 @@ export const pmsSettingsService = {
     return {
       registered: properties.length > 0,
       setupComplete: properties.length > 0,
-      roomCount: properties.length,
+      roomCount: 0,
     };
   },
 
