@@ -65,7 +65,18 @@ export interface CheckoutInspectionTemplate {
 }
 
 export const pmsSettingsService = {
-  getSetupStatus: () => pmsClient.get<PmsSetupStatus>("/admin/setup-status"),
+  getSetupStatus: async () => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.get<PmsSetupStatus>("/admin/setup-status");
+    }
+
+    const properties = await listPmsProperties();
+    return {
+      registered: properties.length > 0,
+      setupComplete: properties.length > 0,
+      roomCount: 0,
+    };
+  },
 
   listHotels: () =>
     isPmsOperationsReadModelEnabled()
