@@ -2,7 +2,7 @@
  * Authentication service for booking engine admin
  */
 
-import { apiClient, ApiErrorResponse } from "../api/client";
+import { apiClient, ApiErrorResponse, isNextApiTarget } from "../api/client";
 import {
   clearAuthData,
   getAuthBearerToken,
@@ -13,11 +13,11 @@ import {
   isAuthKitLoginEnabled,
   isCompatibilityTokenEnabled,
   isLegacyPasswordFallbackEnabled,
-  setLegacyCompatibilityToken,
   setAuthKitSession,
   setLegacyPasswordSession,
   type AuthKitSessionResponse,
 } from "./sessionStore";
+import { ensureBookingCompatibilityToken } from "./compatibilityToken";
 
 const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
 const AUTH_SURFACE = "booking-admin";
@@ -60,11 +60,6 @@ export interface RegisterResponse {
   status: string;
 }
 
-type CompatibilityTokenResponse = {
-  accessToken: string;
-  expiresIn: number;
-};
-
 async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${AUTH_API_BASE_URL}${endpoint}`, {
     ...options,
@@ -90,17 +85,6 @@ async function authFetch<T>(endpoint: string, options: RequestInit = {}): Promis
   return body as T;
 }
 
-async function attachBookingCompatibilityToken(): Promise<void> {
-  const csrfToken = getAuthCsrfToken();
-  if (!csrfToken) return;
-
-  const response = await authFetch<CompatibilityTokenResponse>("/auth/compat/booking-admin-token", {
-    method: "POST",
-    headers: { "x-vayada-csrf": csrfToken },
-  });
-  setLegacyCompatibilityToken(response.accessToken, response.expiresIn);
-}
-
 function storeLegacyLoginResponse(response: LoginResponse): void {
   setLegacyPasswordSession({
     token: response.access_token!,
@@ -123,7 +107,7 @@ export const authService = {
 
   ensureBookingCompatibilityToken: async (): Promise<void> => {
     if (!isCompatibilityTokenEnabled()) return;
-    await attachBookingCompatibilityToken();
+    await ensureBookingCompatibilityToken();
   },
 
   startHostedLogin: (loginHint?: string): void => {
@@ -148,6 +132,13 @@ export const authService = {
         : await authFetch<AuthKitSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
 
     setAuthKitSession(response);
+    if (!isNextApiTarget() && isCompatibilityTokenEnabled()) {
+      try {
+        await ensureBookingCompatibilityToken();
+      } catch {
+        /* Legacy admin routes will surface their normal auth error if the bridge is unavailable. */
+      }
+    }
     return response;
   },
 

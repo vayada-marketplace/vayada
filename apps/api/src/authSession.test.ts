@@ -622,6 +622,86 @@ describe("AuthKit session routes", () => {
     );
   });
 
+  it("returns booking resource scope on normal AuthKit session reads", async () => {
+    const hotelSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_group",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://admin.booking.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return hotelSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(hotelSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_hotel",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [
+          {
+            product: "booking",
+            resourceType: "booking_hotel",
+            resourceId: "booking_hotel_alpenrose",
+            relationship: "owner",
+            status: "active",
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "booking-admin": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://admin.booking.localhost/login",
+          requiredResourceLink: { product: "booking", resourceType: "booking_hotel" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/session?surface=booking-admin",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://admin.booking.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      accessToken: "workos-access-token",
+      organizationId: "org_workos_hotel_group",
+      organizationKind: "hotel_group",
+      resources: {
+        "booking:booking_hotel": ["booking_hotel_alpenrose"],
+      },
+      user: {
+        id: "user_hotel_admin",
+        email: "hotel@example.com",
+      },
+    });
+  });
+
   it("rejects hotel-admin compatibility tokens when resource links are missing", async () => {
     const hotelSession: AuthKitSession = {
       ...session,

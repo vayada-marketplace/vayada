@@ -262,7 +262,13 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       return reply.redirect(callbackReturnUrl);
     }
     return reply.send(
-      toSessionResponse(session, resolution.user, csrfToken, resolution.organizationKind),
+      toSessionResponse(
+        session,
+        resolution.user,
+        csrfToken,
+        resolution.organizationKind,
+        resolution.resourceScope,
+      ),
     );
   });
 
@@ -292,6 +298,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         resolution.user,
         readCookie(request, CSRF_COOKIE),
         resolution.organizationKind,
+        resolution.resourceScope,
       ),
     );
   });
@@ -337,6 +344,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           resolution.user,
           readCookie(request, CSRF_COOKIE),
           resolution.organizationKind,
+          resolution.resourceScope,
         ),
       );
   });
@@ -779,12 +787,17 @@ function toSessionResponse(
   user: IdentityUser,
   csrfToken?: string,
   organizationKind?: OrganizationKind,
+  resourceScope?: IdentityResolution["resourceScope"],
 ) {
+  const resources = resourceScope
+    ? { [resourceScopeKey(resourceScope)]: resourceScope.resourceIds }
+    : undefined;
   return {
     accessToken: session.accessToken,
     csrfToken,
     organizationId: session.organizationId,
     organizationKind,
+    resources,
     user: {
       id: user.userId,
       email: user.email,

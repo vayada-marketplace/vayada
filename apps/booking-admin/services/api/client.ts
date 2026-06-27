@@ -2,10 +2,22 @@
  * API client configuration
  */
 
-import { clearAuthData, getAuthBearerToken } from "../auth/sessionStore";
+import {
+  clearAuthData,
+  getAuthBearerToken,
+  getLegacyAdminBearerToken,
+  isCompatibilityTokenEnabled,
+} from "../auth/sessionStore";
+import { ensureBookingCompatibilityToken } from "../auth/compatibilityToken";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
 const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
+
+export function isNextApiTarget(
+  apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || API_BASE_URL,
+): boolean {
+  return apiBaseUrl.includes("next-api.vayada.com");
+}
 
 export const omitHotelContext: RequestInit = {
   headers: { [OMIT_HOTEL_CONTEXT_HEADER]: "true" },
@@ -76,7 +88,19 @@ export class ApiClient {
       "/auth/validate-token",
       "/auth/verify-email-change",
     ];
-    const token = publicAuthEndpoints.includes(endpoint) ? null : getAuthBearerToken();
+    const legacyAdminRoute = endpoint.startsWith("/admin/") && !isNextApiTarget(this.baseURL);
+    if (
+      !publicAuthEndpoints.includes(endpoint) &&
+      legacyAdminRoute &&
+      isCompatibilityTokenEnabled()
+    ) {
+      await ensureBookingCompatibilityToken();
+    }
+    const token = publicAuthEndpoints.includes(endpoint)
+      ? null
+      : legacyAdminRoute
+        ? getLegacyAdminBearerToken()
+        : getAuthBearerToken();
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
