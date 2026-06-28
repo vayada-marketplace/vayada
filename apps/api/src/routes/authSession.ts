@@ -83,7 +83,6 @@ export type AuthSurfacePolicy = {
   logoutReturnUrl?: string;
   legacyJwtSecret?: string;
   legacyJwtUserType?: string;
-  allowedUserEmails?: readonly string[];
   requiredMembershipRoleKey?: string;
   requiredResourceLink?: RequiredResourceLink;
 };
@@ -110,11 +109,6 @@ const STATE_COOKIE = "vayada_workos_state";
 const CSRF_COOKIE = "vayada_auth_csrf";
 const DEFAULT_SURFACE: AuthSurface = "platform-admin";
 const MAX_PENDING_AUTH_STATES = 5;
-const PLATFORM_ADMIN_ALLOWED_EMAILS = [
-  "f.maliqi@vayada.com",
-  "t.schreyer@vayada.com",
-  "p.paetzold@vayada.com",
-] as const;
 
 type AuthStateContext = {
   state: string;
@@ -451,7 +445,6 @@ function getSurfacePolicy(
     logoutReturnUrl: options.logoutReturnUrl,
     legacyJwtSecret: options.legacyMarketplaceJwtSecret,
     legacyJwtUserType: "admin",
-    allowedUserEmails: PLATFORM_ADMIN_ALLOWED_EMAILS,
     requiredMembershipRoleKey: "platform_admin",
   };
   if (surface === DEFAULT_SURFACE) {
@@ -594,7 +587,6 @@ async function resolveOrCreateIdentity(
   options: AuthSessionRouteOptions,
   surfacePolicy: AuthSurfacePolicy,
 ): Promise<IdentityResolution> {
-  assertAllowedUser(session, surfacePolicy);
   let user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
   if (!user) {
     const result = await options.lifecycleCommandBus.execute({
@@ -636,7 +628,6 @@ async function resolveExistingIdentity(
   surfacePolicy: AuthSurfacePolicy,
 ): Promise<IdentityResolution> {
   const verified = await options.tokenVerifier(session.accessToken);
-  assertAllowedUser(session, surfacePolicy);
   const user = await options.identityRepository.findUserByProviderUserId(
     "workos",
     verified.workosUserId,
@@ -739,20 +730,6 @@ async function resolveOrganizationAccess(
     };
   }
   return { organizationId: organization.organizationId, organizationKind: organization.kind };
-}
-
-function assertAllowedUser(session: AuthKitSession, surfacePolicy: AuthSurfacePolicy): void {
-  if (!surfacePolicy.allowedUserEmails) return;
-  if (!session.user.emailVerified) {
-    throw new Error("Platform-admin access requires a verified allowlisted email");
-  }
-  const userEmail = session.user.email.trim().toLowerCase();
-  const allowedUserEmails = surfacePolicy.allowedUserEmails.map((email) =>
-    email.trim().toLowerCase(),
-  );
-  if (!allowedUserEmails.includes(userEmail)) {
-    throw new Error("User is not allowed to access platform-admin");
-  }
 }
 
 function findRequiredResourceLinks(

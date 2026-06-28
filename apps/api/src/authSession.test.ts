@@ -103,8 +103,8 @@ describe("AuthKit session routes", () => {
     ]);
   });
 
-  it.each(["f.maliqi@vayada.com", "t.schreyer@vayada.com", "p.paetzold@vayada.com"])(
-    "allows named platform admin %s",
+  it.each(["flamur.maliqi2811@gmail.com", "other@vayada.com"])(
+    "allows linked platform admin %s",
     async (email) => {
       app = buildAuthSessionApp({
         authKitClient: createAuthKitClient({
@@ -129,27 +129,6 @@ describe("AuthKit session routes", () => {
       expect(response.json().user.email).toBe(email);
     },
   );
-
-  it("normalizes configured platform admin allowlist emails", async () => {
-    app = buildAuthSessionApp({
-      surfacePolicies: {
-        "platform-admin": {
-          requiredOrganizationKind: "platform",
-          allowedUserEmails: [" F.MALIQI@VAYADA.COM "],
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/auth/workos/callback?code=auth-code&state=callback-state",
-      headers: {
-        cookie: "vayada_workos_state=callback-state",
-      },
-    });
-
-    expect(response.statusCode).toBe(200);
-  });
 
   it("accepts callback state from duplicate cookies with multiple pending login attempts", async () => {
     app = buildAuthSessionApp();
@@ -293,93 +272,6 @@ describe("AuthKit session routes", () => {
 
     expect(response.statusCode).toBe(403);
     expect(response.json().message).toBe("No active membership for selected organization");
-  });
-
-  it("rejects callback for a platform admin role when the email is not allowlisted", async () => {
-    const email = "other@vayada.com";
-    app = buildAuthSessionApp({
-      authKitClient: createAuthKitClient({
-        async authenticateWithCode() {
-          return { ...session, user: { ...session.user, email } };
-        },
-      }),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => ({ ...user, email }),
-      }),
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/auth/workos/callback?code=auth-code&state=callback-state",
-      headers: {
-        cookie: "vayada_workos_state=callback-state",
-      },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json().message).toBe("User is not allowed to access platform-admin");
-  });
-
-  it("rejects callback before JIT creation when the platform email is not allowlisted", async () => {
-    const commands: IdentityLifecycleCommand[] = [];
-    const email = "other@vayada.com";
-    app = buildAuthSessionApp({
-      authKitClient: createAuthKitClient({
-        async authenticateWithCode() {
-          return { ...session, user: { ...session.user, email } };
-        },
-      }),
-      identityRepository: createIdentityRepository({
-        userByProviderUserId: async () => null,
-      }),
-      lifecycleCommandBus: {
-        async execute(command) {
-          commands.push(command);
-          return {
-            status: "accepted",
-            commandId: command.commandId,
-            idempotencyKey: command.idempotencyKey,
-            userId: "user_jit_created",
-            events: [],
-          };
-        },
-      },
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/auth/workos/callback?code=auth-code&state=callback-state",
-      headers: {
-        cookie: "vayada_workos_state=callback-state",
-      },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json().message).toBe("User is not allowed to access platform-admin");
-    expect(commands).toEqual([]);
-  });
-
-  it("rejects callback when an allowlisted platform email is not verified", async () => {
-    app = buildAuthSessionApp({
-      authKitClient: createAuthKitClient({
-        async authenticateWithCode() {
-          return { ...session, user: { ...session.user, emailVerified: false } };
-        },
-      }),
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/auth/workos/callback?code=auth-code&state=callback-state",
-      headers: {
-        cookie: "vayada_workos_state=callback-state",
-      },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json().message).toBe(
-      "Platform-admin access requires a verified allowlisted email",
-    );
   });
 
   it("rejects callback when the selected organization is not the platform org", async () => {
