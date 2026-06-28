@@ -23,40 +23,6 @@ import { usePricing } from "@/lib/hooks/usePricing";
 import { useBookingSteps } from "@/lib/hooks/useBookingSteps";
 import { GuestDetailsDraft, readGuestDetails, saveLastBooking } from "@/lib/storage/bookingDraft";
 
-type CheckoutBankDetails = {
-  accountHolder: string;
-  accountType?: "iban" | "account_number";
-  iban: string;
-  accountNumber?: string;
-  bankName: string;
-  swift: string;
-};
-
-const compact = (value?: string | null) => (value || "").trim();
-
-function getBankIdentifier(details: CheckoutBankDetails | null) {
-  if (!details) return { label: "IBAN", value: "" };
-  if (details.accountType === "account_number") {
-    return { label: "Account Number", value: compact(details.accountNumber) };
-  }
-  return { label: "IBAN", value: compact(details.iban) };
-}
-
-function formatIban(value: string) {
-  return value
-    .replace(/\s+/g, "")
-    .replace(/(.{4})/g, "$1 ")
-    .trim();
-}
-
-function isBankDetailsComplete(details?: CheckoutBankDetails | null) {
-  if (!details) return false;
-  const identifier = getBankIdentifier(details).value;
-  return [details.bankName, details.accountHolder, identifier, details.swift].every((value) =>
-    Boolean(compact(value)),
-  );
-}
-
 function PaymentPageContent() {
   const router = useRouter();
   const locale = useLocale();
@@ -134,8 +100,6 @@ function PaymentPageContent() {
   const [paypalEnabled, setPaypalEnabled] = useState(false);
   const [paypalEmail, setPaypalEmail] = useState("");
   const [paypalPaymentWindowHours, setPaypalPaymentWindowHours] = useState(24);
-  const [bankDetails, setBankDetails] = useState<CheckoutBankDetails | null>(null);
-  const [copiedBankIdentifier, setCopiedBankIdentifier] = useState(false);
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(["cash", "card"]);
   const [termsText, setTermsText] = useState("");
   const [cancellationPolicyText, setCancellationPolicyText] = useState("");
@@ -190,9 +154,7 @@ function PaymentPageContent() {
         setPayAtPropertyEnabled(settings.payAtPropertyEnabled);
         setOnlineCardPayment(settings.onlineCardPayment || false);
         setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false);
-        const hasCompleteBankDetails = isBankDetailsComplete(settings.bankDetails);
-        setBankTransferEnabled((settings.bankTransfer || false) && hasCompleteBankDetails);
-        setBankDetails(settings.bankDetails || null);
+        setBankTransferEnabled(settings.bankTransfer || false);
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods);
         setTermsText(settings.termsText || "");
         setCancellationPolicyText(settings.cancellationPolicyText || "");
@@ -212,7 +174,7 @@ function PaymentPageContent() {
           card: !!settings.onlineCardPayment,
           pay_at_property: !!settings.payAtPropertyEnabled && !depositRequired,
           paypal: !!settings.paypalEnabled && !!settings.paypalEmail,
-          bank_transfer: !!settings.bankTransfer && hasCompleteBankDetails,
+          bank_transfer: !!settings.bankTransfer,
           xendit: !!settings.xenditPaymentsEnabled,
         };
         for (const m of preference) {
@@ -298,7 +260,11 @@ function PaymentPageContent() {
   const quotedRemainingBalance = checkoutQuote?.balanceAmount ?? remainingBalance;
 
   const handleSubmit = async () => {
-    if (!agreedToTerms || !guestDetails || !room) return;
+    if (!guestDetails || !room) return;
+    if (!agreedToTerms) {
+      setError(t("termsRequired"));
+      return;
+    }
     if (!quoteReady || quoteLoading || !checkoutQuote) {
       setError(tc("pricingUpdating"));
       return;
@@ -429,22 +395,6 @@ function PaymentPageContent() {
       </StripeProvider>
     );
   }
-
-  const bankIdentifier = getBankIdentifier(bankDetails);
-  const bankIdentifierDisplay =
-    bankDetails?.accountType === "account_number"
-      ? bankIdentifier.value
-      : formatIban(bankIdentifier.value);
-  const copyBankIdentifier = async () => {
-    if (!bankIdentifier.value || !navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(bankIdentifier.value);
-      setCopiedBankIdentifier(true);
-      window.setTimeout(() => setCopiedBankIdentifier(false), 1800);
-    } catch {
-      // ignore clipboard failures (e.g. blocked permissions / insecure context)
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -825,55 +775,10 @@ function PaymentPageContent() {
                           deposit: formatPrice(quotedDepositAmount, quotedCurrency),
                           remaining: formatPrice(quotedRemainingBalance, quotedCurrency),
                         }) ||
-                        `Please transfer ${formatPrice(quotedDepositAmount, quotedCurrency)}. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property. Your booking will be confirmed once we verify the payment.`
+                        `Submit your booking request now. If the property accepts it, we'll email the bank transfer details for the ${formatPrice(quotedDepositAmount, quotedCurrency)} deposit. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
                       : t("bankTransferExplanation") ||
-                        "Please transfer the total amount to the bank account below. Your booking will be confirmed once we verify the payment."}
+                        "Submit your booking request now. If the property accepts it, we'll email the bank transfer details and payment deadline."}
                   </div>
-                  {bankDetails && isBankDetailsComplete(bankDetails) && (
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
-                      <p className="text-sm text-gray-700">
-                        <strong>{t("bankName") || "Bank"}:</strong> {bankDetails.bankName}
-                      </p>
-                      <p className="text-sm text-gray-700">
-                        <strong>{t("accountHolder") || "Account Holder"}:</strong>{" "}
-                        {bankDetails.accountHolder}
-                      </p>
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-700">
-                        <p className="min-w-0 break-words">
-                          <strong>
-                            {bankIdentifier.label === "Account Number"
-                              ? t("accountNumber") || "Account Number"
-                              : "IBAN"}
-                            :
-                          </strong>{" "}
-                          {bankIdentifierDisplay}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={copyBankIdentifier}
-                          className="self-start sm:self-auto inline-flex items-center gap-1.5 rounded-full border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-white transition-colors"
-                        >
-                          <svg
-                            className="h-3.5 w-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                            />
-                          </svg>
-                          {copiedBankIdentifier ? t("copied") : t("copy")}
-                        </button>
-                      </div>
-                      <p className="text-sm text-gray-700">
-                        <strong>BIC/SWIFT:</strong> {bankDetails.swift}
-                      </p>
-                    </div>
-                  )}
                 </div>
               ) : paymentMethod === "paypal" ? (
                 <div className="space-y-3">
@@ -1027,11 +932,9 @@ function PaymentPageContent() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={
-                  !agreedToTerms || submitting || !quoteReady || quoteLoading || !checkoutQuote
-                }
+                disabled={submitting || !quoteReady || quoteLoading || !checkoutQuote}
                 className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm flex items-center gap-2 ${
-                  agreedToTerms && !submitting && quoteReady && !quoteLoading && checkoutQuote
+                  !submitting && quoteReady && !quoteLoading && checkoutQuote
                     ? "bg-primary-600 text-white hover:bg-primary-700"
                     : "bg-gray-200 text-gray-400 cursor-not-allowed"
                 }`}
