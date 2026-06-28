@@ -1,3 +1,5 @@
+import { setApiBearerTokenProvider } from "@vayada/marketplace-shared/api/client";
+
 export type AuthUser = {
   id: string;
   email: string;
@@ -17,6 +19,8 @@ const LEGACY_EXPIRES_AT_KEY = "token_expires_at";
 
 let authKitSession: AuthKitSessionResponse | null = null;
 let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
+
+setApiBearerTokenProvider(() => getAuthBearerToken());
 
 export function isAuthKitLoginEnabled(): boolean {
   return process.env.NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED !== "false";
