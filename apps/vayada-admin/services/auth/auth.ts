@@ -21,6 +21,8 @@ import {
 } from "./sessionStore";
 
 const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
+const PLATFORM_AUTH_SURFACE = "platform-admin";
+const PLATFORM_WORKOS_ORG_ID = process.env.NEXT_PUBLIC_PLATFORM_WORKOS_ORG_ID;
 
 export interface RegisterRequest {
   name: string;
@@ -109,6 +111,8 @@ export const authService = {
 
   startHostedLogin: (loginHint?: string): void => {
     const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
+    url.searchParams.set("surface", PLATFORM_AUTH_SURFACE);
+    if (PLATFORM_WORKOS_ORG_ID) url.searchParams.set("organization_id", PLATFORM_WORKOS_ORG_ID);
     if (loginHint) url.searchParams.set("login_hint", loginHint);
     window.location.href = url.toString();
   },
