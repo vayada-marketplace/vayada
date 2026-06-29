@@ -14,8 +14,38 @@ describe("settingsService next-stack bootstrap data", () => {
     vi.stubGlobal("window", { localStorage: storage });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
-        throw new Error("legacy admin route should not be called");
+      vi.fn(async (url: RequestInfo | URL) => {
+        const href = String(url);
+        if (href.endsWith("/api/booking/hotels/booking_hotel_alpenrose/settings/property")) {
+          return new Response(
+            JSON.stringify({
+              id: "booking_hotel_alpenrose",
+              slug: "hotel-alpenrose",
+              property_name: "Hotel Alpenrose",
+              reservation_email: "reservations@example.com",
+              phone_number: "+43 1 2345",
+              whatsapp_number: "+43 1 6789",
+              address: "Alpenweg 1, Innsbruck",
+              default_currency: "EUR",
+              default_language: "de",
+              supported_currencies: ["EUR"],
+              supported_languages: ["de", "en"],
+              check_in_time: "15:00",
+              check_out_time: "11:00",
+              pay_at_property_enabled: true,
+              pay_at_hotel_methods: ["cash"],
+              online_card_payment: false,
+              bank_transfer: false,
+              free_cancellation_days: 7,
+              email_notifications: true,
+              new_booking_alerts: true,
+              payment_alerts: true,
+              ota_booking_alerts: false,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        throw new Error(`unexpected request: ${href}`);
       }),
     );
     process.env.NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED = "true";
@@ -54,10 +84,14 @@ describe("settingsService next-stack bootstrap data", () => {
       setup_complete: false,
       missing_fields: ["property_settings"],
     });
-    await expect(settingsService.getPropertySettings()).rejects.toThrow(
-      "Property settings are not available on next-api yet.",
-    );
-    expect(fetch).not.toHaveBeenCalled();
+    await expect(settingsService.getPropertySettings()).resolves.toMatchObject({
+      id: "booking_hotel_alpenrose",
+      property_name: "Hotel Alpenrose",
+    });
+    await expect(
+      settingsService.updatePropertySettings({ property_name: "Updated" }),
+    ).rejects.toThrow("Property settings save is not available on next-api yet.");
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 

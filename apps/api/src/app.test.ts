@@ -511,6 +511,36 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       financeProperty: true,
     };
   },
+  async findPropertySettingsByHotelId(hotelId) {
+    if (hotelId !== "booking_hotel_alpenrose") {
+      return null;
+    }
+
+    return {
+      id: "booking_hotel_alpenrose",
+      slug: "hotel-alpenrose",
+      propertyName: "Hotel Alpenrose",
+      reservationEmail: "reservations@alpenrose.example",
+      phoneNumber: "+43 1 2345",
+      whatsappNumber: "+43 1 6789",
+      address: "Alpenweg 1, Innsbruck",
+      city: "Innsbruck",
+      country: "AT",
+      instagram: "https://instagram.com/alpenrose",
+      facebook: "https://facebook.com/alpenrose",
+      defaultCurrency: "CHF",
+      defaultLanguage: "de",
+      supportedCurrencies: ["CHF", "EUR"],
+      supportedLanguages: ["de", "en"],
+      checkInTime: "15:00",
+      checkOutTime: "11:00",
+      specialRequestsEnabled: false,
+      arrivalTimeEnabled: true,
+      guestCountEnabled: true,
+      cancellationPolicyText: "Free cancellation until seven days before arrival.",
+      acceptedPaymentMethods: ["pay_at_property", "cash", "card", "bank_transfer"],
+    };
+  },
   async findAddonSettingsByHotelId(hotelId) {
     if (hotelId !== "booking_hotel_alpenrose") {
       return null;
@@ -3617,6 +3647,45 @@ describe("vayada-api", () => {
     });
   });
 
+  it("returns booking property settings with auth, policy, and the legacy-compatible shape", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      id: "booking_hotel_alpenrose",
+      slug: "hotel-alpenrose",
+      property_name: "Hotel Alpenrose",
+      reservation_email: "reservations@alpenrose.example",
+      phone_number: "+43 1 2345",
+      whatsapp_number: "+43 1 6789",
+      address: "Alpenweg 1, Innsbruck",
+      city: "Innsbruck",
+      country: "AT",
+      default_currency: "CHF",
+      default_language: "de",
+      supported_currencies: ["CHF", "EUR"],
+      supported_languages: ["de", "en"],
+      check_in_time: "15:00",
+      check_out_time: "11:00",
+      pay_at_property_enabled: true,
+      pay_at_hotel_methods: ["cash"],
+      online_card_payment: true,
+      bank_transfer: true,
+      special_requests_enabled: false,
+      arrival_time_enabled: true,
+      guest_count_enabled: true,
+      cancellation_policy_text: "Free cancellation until seven days before arrival.",
+    });
+  });
+
   it("returns booking guest-form settings with auth, policy, and the documented legacy-compatible shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -6276,6 +6345,31 @@ describe("vayada-api", () => {
         values?: readonly unknown[],
       ): Promise<Pick<QueryResult<T>, "rows">> {
         queries.push({ text, values });
+        if (text.includes("property.display_name AS property_name")) {
+          return {
+            rows: [
+              {
+                source_link_count: 1,
+                id: "d3000000-0000-0000-0000-000000000682",
+                slug: "hotel-alpenrose",
+                property_name: "Hotel Alpenrose",
+                reservation_email: "reservations@alpenrose.example",
+                phone_number: "+43 1 2345",
+                whatsapp_number: "+43 1 6789",
+                address: "Alpenweg 1, Innsbruck, AT",
+                city: "Innsbruck",
+                country: "AT",
+                instagram: null,
+                facebook: null,
+                check_in_time: "15:00",
+                check_out_time: "11:00",
+                cancellation_policy_text: "Free cancellation until seven days before arrival.",
+                accepted_payment_methods: ["pay_at_property", "manual_card"],
+                ...state,
+              },
+            ] as unknown as T[],
+          };
+        }
         if (text.includes("finance.payment_settings")) {
           return {
             rows: [
@@ -6337,6 +6431,29 @@ describe("vayada-api", () => {
     app = buildAuthenticatedApp({
       settingsRepository: targetRepository,
       settingsWriteRepository: targetRepository,
+    });
+
+    const propertySettingsResponse = await injectJson(app, {
+      method: "GET",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+    expect(propertySettingsResponse.statusCode).toBe(200);
+    expect(propertySettingsResponse.body).toMatchObject({
+      id: "d3000000-0000-0000-0000-000000000682",
+      slug: "hotel-alpenrose",
+      property_name: "Hotel Alpenrose",
+      default_currency: "CHF",
+      default_language: "de",
+      pay_at_property_enabled: true,
+      pay_at_hotel_methods: ["card"],
+      online_card_payment: false,
+      bank_transfer: false,
+      special_requests_enabled: false,
+      arrival_time_enabled: true,
+      guest_count_enabled: true,
     });
 
     const propertyLinkResponse = await injectJson(app, {
@@ -6458,7 +6575,9 @@ describe("vayada-api", () => {
     const settingsQueries = queries.filter((query) =>
       query.text.includes("booking.booking_settings"),
     );
-    expect(settingsQueries.every((query) => query.text.includes("source_links"))).toBe(true);
+    expect(
+      settingsQueries.every((query) => query.text.includes("scoped_property_candidates")),
+    ).toBe(true);
     const sql = queries.map((query) => query.text).join("\n");
     expect(sql).toContain("relationship = 'canonical_input'");
     expect(sql).toContain("status = 'active'");
@@ -6469,6 +6588,86 @@ describe("vayada-api", () => {
     await app.close();
     app = null;
     expect(poolClosed).toBe(true);
+  });
+
+  it("loads target booking property settings when the booking resource id is already a property UUID", async () => {
+    const propertyId = "d3000000-0000-0000-0000-000000000682";
+    const queries: { text: string; values?: readonly unknown[] }[] = [];
+    const pool: BookingSettingsPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              source_link_count: 1,
+              id: propertyId,
+              slug: "hotel-alpenrose",
+              property_name: "Hotel Alpenrose",
+              reservation_email: null,
+              phone_number: null,
+              whatsapp_number: null,
+              address: null,
+              city: null,
+              country: null,
+              instagram: null,
+              facebook: null,
+              check_in_time: null,
+              check_out_time: null,
+              cancellation_policy_text: null,
+              accepted_payment_methods: [],
+              show_addons_step: true,
+              group_addons_by_category: true,
+              special_requests_enabled: true,
+              arrival_time_enabled: false,
+              guest_count_enabled: false,
+              adult_age_threshold: 18,
+              children_enabled: true,
+              benefits: [],
+              default_currency: "EUR",
+              default_language: "en",
+              supported_currencies: [],
+              supported_languages: ["en"],
+              booking_filters: [],
+              custom_filters: {},
+              filter_rooms: {},
+              last_minute_discount: { enabled: false, stackWithPromo: false, tiers: [] },
+              updated_at: "2026-06-22T10:00:00.000Z",
+            },
+          ] as unknown as T[],
+        };
+      },
+      async end() {},
+    };
+    const targetRepository = createPgTargetBookingSettingsRepository({
+      connectionString: "postgresql://target-db",
+      pool,
+    });
+    app = buildAuthenticatedApp({
+      linkedHotelId: propertyId,
+      settingsRepository: targetRepository,
+      settingsWriteRepository: targetRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "GET",
+      url: `/api/booking/hotels/${propertyId}/settings/property`,
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      id: propertyId,
+      slug: "hotel-alpenrose",
+      property_name: "Hotel Alpenrose",
+    });
+    expect(queries[0]?.values?.[0]).toBe(propertyId);
+    expect(queries[0]?.text).toContain("property.id::text = $1");
+    expect(queries[0]?.text).not.toMatch(/\bFROM\s+booking_hotels\b/i);
   });
 
   it("serves target booking add-on items without legacy queries or retired rows", async () => {

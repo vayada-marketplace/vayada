@@ -1,4 +1,4 @@
-import { apiClient, isNextApiTarget } from "../api/client";
+import { apiClient, isNextApiTarget, omitHotelContext } from "../api/client";
 import { getScopedBookingHotelIds, isAuthKitLoginEnabled } from "../auth/sessionStore";
 import {
   getBookingRoomFilterSettings,
@@ -181,6 +181,14 @@ async function resolveBookingHotelId(): Promise<string> {
   throw new Error("Booking hotel id is required.");
 }
 
+async function getTargetPropertySettings(): Promise<PropertySettings> {
+  const hotelId = await resolveBookingHotelId();
+  return apiClient.get<PropertySettings>(
+    `/api/booking/hotels/${encodeURIComponent(hotelId)}/settings/property`,
+    omitHotelContext,
+  );
+}
+
 export interface SetupPrefillData {
   property_name?: string;
   reservation_email?: string;
@@ -289,11 +297,13 @@ export const settingsService = {
 
   getPropertySettings: () =>
     isAuthKitLoginEnabled() && isNextApiTarget()
-      ? Promise.reject(new Error("Property settings are not available on next-api yet."))
+      ? getTargetPropertySettings()
       : apiClient.get<PropertySettings>("/admin/settings/property"),
 
   updatePropertySettings: (data: PropertySettingsUpdate) =>
-    apiClient.patch<PropertySettings>("/admin/settings/property", data),
+    isAuthKitLoginEnabled() && isNextApiTarget()
+      ? Promise.reject(new Error("Property settings save is not available on next-api yet."))
+      : apiClient.patch<PropertySettings>("/admin/settings/property", data),
 
   // Explicit create endpoint for the setup wizard — unlike
   // updatePropertySettings (which silently updates the user's existing
