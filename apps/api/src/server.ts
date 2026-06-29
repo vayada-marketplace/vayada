@@ -44,6 +44,7 @@ import {
   createTargetFinancePublicHotelPropertyResolver,
   createXenditBankValidator,
 } from "./routes/finance.js";
+import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivations.js";
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
 import { createPgMarketplaceHotelProfileStatusRepository } from "./routes/marketplaceHotelProfileStatus.js";
@@ -180,6 +181,12 @@ const pmsOperationsCommandRepository =
         readRepository: pmsOperationsRepository,
       })
     : undefined;
+
+const pmsModuleActivationRepository = config.auth
+  ? createPgPmsModuleActivationRepository({
+      connectionString: config.auth.databaseUrl,
+    })
+  : undefined;
 
 const financeRepository =
   config.financeSource === "target"
@@ -356,6 +363,7 @@ const app = buildApp({
   bookingPromoCodesRepository,
   bookingDashboardMetricsReadPort,
   pmsOperationsRepository,
+  pmsModuleActivationRepository,
   pmsOperationsCommandRepository,
   bookingGuestPiiPort,
   financeRepository,
