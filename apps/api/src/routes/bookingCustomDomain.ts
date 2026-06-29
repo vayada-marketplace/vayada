@@ -88,6 +88,26 @@ type TargetCustomDomainRow = {
   updatedAt: string | Date | null;
 };
 
+const TARGET_BOOKING_CUSTOM_DOMAIN_SCOPED_PROPERTY_CTE = `scoped_property_candidates AS (
+  SELECT property_id, 0 AS priority
+  FROM hotel_catalog.property_source_links
+  WHERE source_system = 'booking'
+    AND source_table = 'booking_hotels'
+    AND source_id = $1
+    AND relationship = 'canonical_input'
+    AND status = 'active'
+  UNION ALL
+  SELECT property.id AS property_id, 1 AS priority
+  FROM hotel_catalog.properties property
+  WHERE property.id::text = $1
+),
+scoped_property AS (
+  SELECT property_id
+  FROM scoped_property_candidates
+  ORDER BY priority
+  LIMIT 1
+)`;
+
 class BookingCustomDomainConflictError extends Error {
   constructor() {
     super("Domain is already connected to another property.");
@@ -115,16 +135,7 @@ export function createTargetBookingCustomDomainRepository(config: {
   return {
     async findByBookingHotelId(hotelId) {
       const result = await pool.query<TargetCustomDomainRow>(
-        `WITH scoped_property AS (
-           SELECT property_id
-           FROM hotel_catalog.property_source_links
-           WHERE source_system = 'booking'
-             AND source_table = 'booking_hotels'
-             AND source_id = $1
-             AND relationship = 'canonical_input'
-             AND status = 'active'
-           LIMIT 1
-         )
+        `WITH ${TARGET_BOOKING_CUSTOM_DOMAIN_SCOPED_PROPERTY_CTE}
          SELECT
            $1::text AS "hotelId",
            scoped_property.property_id::text AS "propertyId",
@@ -213,16 +224,7 @@ export function createTargetBookingCustomDomainRepository(config: {
     },
     async deleteForBookingHotelId(hotelId) {
       const result = await pool.query<{ propertyId: string }>(
-        `WITH scoped_property AS (
-           SELECT property_id
-           FROM hotel_catalog.property_source_links
-           WHERE source_system = 'booking'
-             AND source_table = 'booking_hotels'
-             AND source_id = $1
-             AND relationship = 'canonical_input'
-             AND status = 'active'
-           LIMIT 1
-         ),
+        `WITH ${TARGET_BOOKING_CUSTOM_DOMAIN_SCOPED_PROPERTY_CTE},
          clear_public_profile AS (
            UPDATE hotel_catalog.property_public_profile_read_model profile
               SET property_domain_id = NULL,
@@ -382,14 +384,9 @@ async function findPropertyIdByBookingHotelId(
   hotelId: string,
 ): Promise<string | null> {
   const result = await pool.query<{ propertyId: string }>(
-    `SELECT property_id::text AS "propertyId"
-     FROM hotel_catalog.property_source_links
-     WHERE source_system = 'booking'
-       AND source_table = 'booking_hotels'
-       AND source_id = $1
-       AND relationship = 'canonical_input'
-       AND status = 'active'
-     LIMIT 1`,
+    `WITH ${TARGET_BOOKING_CUSTOM_DOMAIN_SCOPED_PROPERTY_CTE}
+     SELECT property_id::text AS "propertyId"
+     FROM scoped_property`,
     [hotelId],
   );
 
