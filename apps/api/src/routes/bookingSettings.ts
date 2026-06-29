@@ -1001,9 +1001,9 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE = `
         default_locale = $11,
         supported_locales = $12::text[],
         location = jsonb_strip_nulls(jsonb_build_object(
-          'rawMarketplaceLocation', $3,
-          'city', $4,
-          'countryCode', $5
+          'rawMarketplaceLocation', $3::text,
+          'city', $4::text,
+          'countryCode', $5::text
         )),
         public_contacts = (
           SELECT COALESCE(
@@ -1017,9 +1017,9 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE = `
           WHERE NULLIF(contact.value, '') IS NOT NULL
         ),
         public_policy = jsonb_strip_nulls(jsonb_build_object(
-          'checkInTime', $7,
-          'checkOutTime', $8,
-          'cancellationSummary', $9
+          'checkInTime', $7::text,
+          'checkOutTime', $8::text,
+          'cancellationSummary', $9::text
         )),
         projected_at = now()
     FROM target_property
@@ -2323,7 +2323,8 @@ async function handleBookingSettingsWrite<TBody, TStored>(input: {
   let stored: TStored | null;
   try {
     stored = await input.write(hotelId, parsed.value);
-  } catch {
+  } catch (error) {
+    input.request.log.error({ err: error, hotelId }, "Booking settings write failed");
     return sendBookingSettingsWriteError(input.reply, {
       statusCode: 500,
       code: "write_model_unavailable",

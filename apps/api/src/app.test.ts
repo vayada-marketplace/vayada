@@ -6722,6 +6722,13 @@ describe("vayada-api", () => {
       bank_transfer: false,
       cancellation_policy_text: "Target cancellation policy.",
     });
+    const propertyUpdateQuery = queries.find((query) =>
+      query.text.includes("UPDATE hotel_catalog.property_public_profile_read_model profile"),
+    );
+    expect(propertyUpdateQuery?.text).toContain("'rawMarketplaceLocation', $3::text");
+    expect(propertyUpdateQuery?.text).toContain("'city', $4::text");
+    expect(propertyUpdateQuery?.text).toContain("'countryCode', $5::text");
+    expect(propertyUpdateQuery?.text).toContain("'cancellationSummary', $9::text");
 
     const cases = [
       {
