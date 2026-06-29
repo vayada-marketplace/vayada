@@ -260,6 +260,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         session,
         resolution.user,
         csrfToken,
+        resolution.organizationId,
         resolution.organizationKind,
         resolution.resourceScope,
       ),
@@ -291,6 +292,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
         session,
         resolution.user,
         readCookie(request, CSRF_COOKIE),
+        resolution.organizationId,
         resolution.organizationKind,
         resolution.resourceScope,
       ),
@@ -337,6 +339,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           session,
           resolution.user,
           readCookie(request, CSRF_COOKIE),
+          resolution.organizationId,
           resolution.organizationKind,
           resolution.resourceScope,
         ),
@@ -763,6 +766,7 @@ function toSessionResponse(
   session: AuthKitSession,
   user: IdentityUser,
   csrfToken?: string,
+  organizationId?: string,
   organizationKind?: OrganizationKind,
   resourceScope?: IdentityResolution["resourceScope"],
 ) {
@@ -772,7 +776,8 @@ function toSessionResponse(
   return {
     accessToken: session.accessToken,
     csrfToken,
-    organizationId: session.organizationId,
+    organizationId,
+    workosOrganizationId: session.organizationId,
     organizationKind,
     resources,
     user: {

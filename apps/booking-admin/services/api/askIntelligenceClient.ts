@@ -98,13 +98,10 @@ export async function askIntelligence(
 }
 
 async function resolveOrganizationId(): Promise<string | null> {
-  const existing = getSelectedOrganizationId();
-  if (existing) return existing;
-
   try {
     await authService.ensureBookingCompatibilityToken();
   } catch {
-    return null;
+    /* Fall back to the current session below. */
   }
   return getSelectedOrganizationId();
 }

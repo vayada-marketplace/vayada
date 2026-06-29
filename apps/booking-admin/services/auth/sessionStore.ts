@@ -155,14 +155,13 @@ export function getScopedBookingHotelIds(): string[] {
 }
 
 export function getSelectedOrganizationId(): string | null {
-  if (authKitSession?.organizationId) return authKitSession.organizationId;
-  if (!isCompatibilityTokenEnabled()) return null;
+  if (isCompatibilityTokenEnabled()) {
+    const token = currentCompatibilityToken() ?? getLegacyPasswordToken();
+    const payload = token ? decodeJwtPayload(token) : null;
+    if (typeof payload?.org === "string") return payload.org;
+  }
 
-  const token = currentCompatibilityToken() ?? getLegacyPasswordToken();
-  if (!token) return null;
-
-  const payload = decodeJwtPayload(token);
-  return typeof payload?.org === "string" ? payload.org : null;
+  return authKitSession?.organizationId ?? null;
 }
 
 export function getLegacyPasswordToken(): string | null {

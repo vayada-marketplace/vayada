@@ -81,7 +81,8 @@ describe("AuthKit session routes", () => {
     expect(response.json()).toMatchObject({
       accessToken: "workos-access-token",
       csrfToken: expect.any(String),
-      organizationId: "org_workos_platform",
+      organizationId: "org_platform",
+      workosOrganizationId: "org_workos_platform",
       user: {
         id: "user_platform_admin",
         workosUserId: "user_workos_platform",
@@ -582,7 +583,8 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       accessToken: "workos-access-token",
-      organizationId: "org_workos_hotel_group",
+      organizationId: "org_hotel_group",
+      workosOrganizationId: "org_workos_hotel_group",
       organizationKind: "hotel_group",
       resources: {
         "booking:booking_hotel": ["booking_hotel_alpenrose"],
@@ -875,7 +877,8 @@ describe("AuthKit session routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       accessToken: "workos-access-token",
-      organizationId: "org_workos_creator_workspace",
+      organizationId: "org_creator_workspace",
+      workosOrganizationId: "org_workos_creator_workspace",
       organizationKind: "creator_workspace",
       user: {
         id: "user_creator",
