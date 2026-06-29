@@ -1,7 +1,15 @@
 import { apiClient } from "../api/client";
 import { pmsClient } from "../api/pmsClient";
-import { isPmsOperationsReadModelEnabled } from "../api/pmsOperationsClient";
-import { getPmsPropertyProfile, listPmsProperties } from "../api/pmsPropertyClient";
+import {
+  isPmsOperationsReadModelEnabled,
+  pmsOperationsClient,
+  pmsOperationsRequestOptions,
+} from "../api/pmsOperationsClient";
+import {
+  getPmsPropertyProfile,
+  listPmsProperties,
+  resolveSelectedPmsPropertyId,
+} from "../api/pmsPropertyClient";
 
 export interface PmsSetupStatus {
   registered: boolean;
@@ -64,6 +72,101 @@ export interface CheckoutInspectionTemplate {
   updatedBy: string | null;
 }
 
+interface PmsOperationsTemplateStep {
+  stepId: string;
+  label: string;
+  required: boolean;
+}
+
+interface PmsOperationsTemplateResponse {
+  template: {
+    steps: PmsOperationsTemplateStep[];
+    updatedAt: string | null;
+    updatedByUserId: string | null;
+  };
+}
+
+function propertyTemplateEndpoint(propertyId: string, suffix: string): string {
+  return `/api/pms/properties/${encodeURIComponent(propertyId)}/${suffix}`;
+}
+
+function commandId(prefix: string): string {
+  const id =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}:${id}`;
+}
+
+function toOperationsSteps(
+  steps: Array<{ id: string; label: string; required: boolean }>,
+): PmsOperationsTemplateStep[] {
+  return steps.map((step) => ({
+    stepId: step.id,
+    label: step.label,
+    required: step.required,
+  }));
+}
+
+function toCheckinTemplate(response: PmsOperationsTemplateResponse): CheckinChecklistTemplate {
+  return {
+    steps: response.template.steps.map((step, position) => ({
+      id: step.stepId,
+      label: step.label,
+      prompt: "",
+      type: "checkbox",
+      required: step.required,
+      system: false,
+      position,
+    })),
+    updatedAt: response.template.updatedAt,
+    updatedBy: response.template.updatedByUserId,
+  };
+}
+
+function toCheckoutTemplate(response: PmsOperationsTemplateResponse): CheckoutInspectionTemplate {
+  return {
+    steps: response.template.steps.map((step, position) => ({
+      id: step.stepId,
+      label: step.label,
+      okLabel: "OK",
+      negativeLabel: "Issue",
+      notePrompt: "Add details...",
+      required: step.required,
+      position,
+    })),
+    updatedAt: response.template.updatedAt,
+    updatedBy: response.template.updatedByUserId,
+  };
+}
+
+async function getOperationsTemplate(
+  suffix: "check-in-checklist" | "check-out-inspection",
+): Promise<PmsOperationsTemplateResponse> {
+  const propertyId = await resolveSelectedPmsPropertyId(`loading ${suffix}`);
+  return pmsOperationsClient.get<PmsOperationsTemplateResponse>(
+    propertyTemplateEndpoint(propertyId, suffix),
+    pmsOperationsRequestOptions,
+  );
+}
+
+async function updateOperationsTemplate(
+  suffix: "check-in-checklist" | "check-out-inspection",
+  steps: PmsOperationsTemplateStep[],
+): Promise<PmsOperationsTemplateResponse> {
+  const propertyId = await resolveSelectedPmsPropertyId(`saving ${suffix}`);
+  const id = commandId(`pms.${suffix}`);
+  return pmsOperationsClient.put<PmsOperationsTemplateResponse>(
+    propertyTemplateEndpoint(propertyId, suffix),
+    { commandId: id, idempotencyKey: id, steps },
+    pmsOperationsRequestOptions,
+  );
+}
+
+function unavailablePropertySettings(): Promise<never> {
+  return Promise.reject(new Error("Property settings are not available on next-api yet."));
+}
+
 export const pmsSettingsService = {
   getSetupStatus: async () => {
     if (!isPmsOperationsReadModelEnabled()) {
@@ -90,19 +193,37 @@ export const pmsSettingsService = {
 };
 
 export const settingsService = {
-  getPropertySettings: () => apiClient.get<PropertySettings>("/admin/settings/property"),
+  getPropertySettings: () =>
+    isPmsOperationsReadModelEnabled()
+      ? unavailablePropertySettings()
+      : apiClient.get<PropertySettings>("/admin/settings/property"),
 
   updatePropertySettings: (data: PropertySettingsUpdate) =>
-    apiClient.patch<PropertySettings>("/admin/settings/property", data),
+    isPmsOperationsReadModelEnabled()
+      ? unavailablePropertySettings()
+      : apiClient.patch<PropertySettings>("/admin/settings/property", data),
 
-  getCheckinChecklist: () => pmsClient.get<CheckinChecklistTemplate>("/admin/check-in-checklist"),
+  getCheckinChecklist: async () =>
+    isPmsOperationsReadModelEnabled()
+      ? toCheckinTemplate(await getOperationsTemplate("check-in-checklist"))
+      : pmsClient.get<CheckinChecklistTemplate>("/admin/check-in-checklist"),
 
   updateCheckinChecklist: (steps: CheckinChecklistStep[]) =>
-    pmsClient.put<CheckinChecklistTemplate>("/admin/check-in-checklist", { steps }),
+    isPmsOperationsReadModelEnabled()
+      ? updateOperationsTemplate("check-in-checklist", toOperationsSteps(steps)).then(
+          toCheckinTemplate,
+        )
+      : pmsClient.put<CheckinChecklistTemplate>("/admin/check-in-checklist", { steps }),
 
   getCheckoutInspection: () =>
-    pmsClient.get<CheckoutInspectionTemplate>("/admin/check-out-inspection"),
+    isPmsOperationsReadModelEnabled()
+      ? getOperationsTemplate("check-out-inspection").then(toCheckoutTemplate)
+      : pmsClient.get<CheckoutInspectionTemplate>("/admin/check-out-inspection"),
 
   updateCheckoutInspection: (steps: CheckoutInspectionStep[]) =>
-    pmsClient.put<CheckoutInspectionTemplate>("/admin/check-out-inspection", { steps }),
+    isPmsOperationsReadModelEnabled()
+      ? updateOperationsTemplate("check-out-inspection", toOperationsSteps(steps)).then(
+          toCheckoutTemplate,
+        )
+      : pmsClient.put<CheckoutInspectionTemplate>("/admin/check-out-inspection", { steps }),
 };
