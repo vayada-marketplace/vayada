@@ -14,9 +14,38 @@ describe("settingsService next-stack bootstrap data", () => {
     vi.stubGlobal("window", { localStorage: storage });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: RequestInfo | URL) => {
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
         const href = String(url);
         if (href.endsWith("/api/booking/hotels/booking_hotel_alpenrose/settings/property")) {
+          if (init?.method === "PATCH") {
+            return new Response(
+              JSON.stringify({
+                id: "booking_hotel_alpenrose",
+                slug: "hotel-alpenrose",
+                property_name: "Updated",
+                reservation_email: "reservations@example.com",
+                phone_number: "+43 1 2345",
+                whatsapp_number: "+43 1 6789",
+                address: "Alpenweg 1, Innsbruck",
+                default_currency: "EUR",
+                default_language: "de",
+                supported_currencies: ["EUR"],
+                supported_languages: ["de", "en"],
+                check_in_time: "15:00",
+                check_out_time: "11:00",
+                pay_at_property_enabled: true,
+                pay_at_hotel_methods: ["cash"],
+                online_card_payment: false,
+                bank_transfer: false,
+                free_cancellation_days: 7,
+                email_notifications: true,
+                new_booking_alerts: true,
+                payment_alerts: true,
+                ota_booking_alerts: false,
+              }),
+              { headers: { "content-type": "application/json" } },
+            );
+          }
           return new Response(
             JSON.stringify({
               id: "booking_hotel_alpenrose",
@@ -90,8 +119,15 @@ describe("settingsService next-stack bootstrap data", () => {
     });
     await expect(
       settingsService.updatePropertySettings({ property_name: "Updated" }),
-    ).rejects.toThrow("Property settings save is not available on next-api yet.");
-    expect(fetch).toHaveBeenCalledTimes(1);
+    ).resolves.toMatchObject({
+      id: "booking_hotel_alpenrose",
+      property_name: "Updated",
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringMatching(/\/api\/booking\/hotels\/booking_hotel_alpenrose\/settings\/property$/),
+      expect.objectContaining({ method: "PATCH" }),
+    );
   });
 });
 

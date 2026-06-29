@@ -618,6 +618,39 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
 };
 
 const bookingSettingsWriteRepository: BookingSettingsWriteRepository = {
+  async updatePropertySettingsByHotelId(hotelId, settings) {
+    expect(hotelId).toBe("booking_hotel_alpenrose");
+    return {
+      id: hotelId,
+      slug: "hotel-alpenrose",
+      propertyName: settings.propertyName ?? "Hotel Alpenrose",
+      reservationEmail: settings.reservationEmail ?? "reservations@alpenrose.example",
+      phoneNumber: settings.phoneNumber ?? "+43 1 2345",
+      whatsappNumber: settings.whatsappNumber ?? "+43 1 6789",
+      address: settings.address ?? "Alpenweg 1, Innsbruck",
+      city: settings.city ?? "Innsbruck",
+      country: settings.country ?? "AT",
+      instagram: settings.instagram ?? "https://instagram.com/alpenrose",
+      facebook: settings.facebook ?? "https://facebook.com/alpenrose",
+      defaultCurrency: settings.defaultCurrency ?? "CHF",
+      defaultLanguage: settings.defaultLanguage ?? "de",
+      supportedCurrencies: settings.supportedCurrencies ?? ["CHF", "EUR"],
+      supportedLanguages: settings.supportedLanguages ?? ["de", "en"],
+      checkInTime: settings.checkInTime ?? "15:00",
+      checkOutTime: settings.checkOutTime ?? "11:00",
+      specialRequestsEnabled: settings.specialRequestsEnabled ?? false,
+      arrivalTimeEnabled: settings.arrivalTimeEnabled ?? true,
+      guestCountEnabled: settings.guestCountEnabled ?? true,
+      cancellationPolicyText:
+        settings.cancellationPolicyText ?? "Free cancellation until seven days before arrival.",
+      acceptedPaymentMethods: settings.acceptedPaymentMethods ?? [
+        "pay_at_property",
+        "cash",
+        "card",
+        "bank_transfer",
+      ],
+    };
+  },
   async updateAddonSettingsByHotelId(hotelId, settings) {
     expect(hotelId).toBe("booking_hotel_alpenrose");
     return settings;
@@ -3686,6 +3719,95 @@ describe("vayada-api", () => {
     });
   });
 
+  it("updates booking property settings from the legacy-compatible admin payload", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: "Updated Alpenrose",
+        reservation_email: "new-reservations@alpenrose.example",
+        phone_number: "+43 1 9999",
+        whatsapp_number: "+43 1 8888",
+        address: "Updated street 1",
+        city: "Innsbruck",
+        country: "AT",
+        instagram: "https://instagram.com/updated-alpenrose",
+        facebook: "https://facebook.com/updated-alpenrose",
+        default_currency: " eur ",
+        default_language: "en-US",
+        supported_currencies: ["CHF", "EUR"],
+        supported_languages: ["de", "en-US"],
+        check_in_time: "16:00",
+        check_out_time: "10:00",
+        special_requests_enabled: true,
+        arrival_time_enabled: false,
+        guest_count_enabled: false,
+        cancellation_policy_text: "Free cancellation until one day before arrival.",
+        pay_at_property_enabled: true,
+        pay_at_hotel_methods: ["cash", "card"],
+        online_card_payment: true,
+        bank_transfer: true,
+        paypal_enabled: false,
+        billing_pending_switch: "",
+        points_of_interest: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toMatchObject({
+      id: "booking_hotel_alpenrose",
+      property_name: "Updated Alpenrose",
+      reservation_email: "new-reservations@alpenrose.example",
+      phone_number: "+43 1 9999",
+      whatsapp_number: "+43 1 8888",
+      address: "Updated street 1",
+      city: "Innsbruck",
+      country: "AT",
+      default_currency: "EUR",
+      default_language: "en-US",
+      supported_currencies: ["CHF"],
+      supported_languages: ["de"],
+      check_in_time: "16:00",
+      check_out_time: "10:00",
+      pay_at_property_enabled: true,
+      pay_at_hotel_methods: ["cash", "card"],
+      online_card_payment: true,
+      bank_transfer: true,
+      special_requests_enabled: true,
+      arrival_time_enabled: false,
+      guest_count_enabled: false,
+      cancellation_policy_text: "Free cancellation until one day before arrival.",
+    });
+  });
+
+  it("rejects invalid booking property settings payloads", async () => {
+    app = buildAuthenticatedApp();
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: " ",
+        default_currency: "euro",
+        check_in_time: "25:00",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({
+      code: "invalid_payload",
+      category: "validation",
+    });
+  });
+
   it("returns booking guest-form settings with auth, policy, and the documented legacy-compatible shape", async () => {
     app = buildAuthenticatedApp();
 
@@ -6380,6 +6502,39 @@ describe("vayada-api", () => {
       },
       updated_at: "2026-06-22T10:00:00.000Z",
     };
+    const propertyState: {
+      id: string;
+      slug: string;
+      property_name: string;
+      reservation_email: string | null;
+      phone_number: string | null;
+      whatsapp_number: string | null;
+      address: string | null;
+      city: string | null;
+      country: string | null;
+      instagram: string | null;
+      facebook: string | null;
+      check_in_time: string | null;
+      check_out_time: string | null;
+      cancellation_policy_text: string | null;
+      accepted_payment_methods: string[];
+    } = {
+      id: "d3000000-0000-0000-0000-000000000682",
+      slug: "hotel-alpenrose",
+      property_name: "Hotel Alpenrose",
+      reservation_email: "reservations@alpenrose.example",
+      phone_number: "+43 1 2345",
+      whatsapp_number: "+43 1 6789",
+      address: "Alpenweg 1, Innsbruck, AT",
+      city: "Innsbruck",
+      country: "AT",
+      instagram: null as string | null,
+      facebook: null as string | null,
+      check_in_time: "15:00",
+      check_out_time: "11:00",
+      cancellation_policy_text: "Free cancellation until seven days before arrival.",
+      accepted_payment_methods: ["pay_at_property", "manual_card"],
+    };
     const pool: BookingSettingsPool = {
       async query<T extends QueryResultRow = QueryResultRow>(
         text: string,
@@ -6391,22 +6546,47 @@ describe("vayada-api", () => {
             rows: [
               {
                 source_link_count: 1,
-                id: "d3000000-0000-0000-0000-000000000682",
-                slug: "hotel-alpenrose",
-                property_name: "Hotel Alpenrose",
-                reservation_email: "reservations@alpenrose.example",
-                phone_number: "+43 1 2345",
-                whatsapp_number: "+43 1 6789",
-                address: "Alpenweg 1, Innsbruck, AT",
-                city: "Innsbruck",
-                country: "AT",
-                instagram: null,
-                facebook: null,
-                check_in_time: "15:00",
-                check_out_time: "11:00",
-                cancellation_policy_text: "Free cancellation until seven days before arrival.",
-                accepted_payment_methods: ["pay_at_property", "manual_card"],
+                ...propertyState,
                 ...state,
+              },
+            ] as unknown as T[],
+          };
+        }
+        if (text.includes("UPDATE hotel_catalog.properties property")) {
+          propertyState.property_name = values?.[1] as string;
+          propertyState.address = values?.[2] as string;
+          propertyState.city = values?.[3] as string;
+          propertyState.country = values?.[4] as string;
+          const contacts = JSON.parse(values?.[5] as string) as {
+            channel_type: string;
+            value: string;
+          }[];
+          propertyState.reservation_email =
+            contacts.find((contact) => contact.channel_type === "email")?.value ?? null;
+          propertyState.phone_number =
+            contacts.find((contact) => contact.channel_type === "phone")?.value ?? null;
+          propertyState.whatsapp_number =
+            contacts.find((contact) => contact.channel_type === "whatsapp")?.value ?? null;
+          propertyState.instagram =
+            contacts.find((contact) => contact.channel_type === "instagram")?.value ?? null;
+          propertyState.facebook =
+            contacts.find((contact) => contact.channel_type === "facebook")?.value ?? null;
+          propertyState.check_in_time = values?.[6] as string;
+          propertyState.check_out_time = values?.[7] as string;
+          propertyState.cancellation_policy_text = values?.[8] as string;
+          state.default_currency = values?.[9] as string;
+          state.default_language = values?.[10] as string;
+          state.supported_currencies = values?.[12] as string[];
+          state.supported_languages = values?.[13] as string[];
+          state.special_requests_enabled = values?.[14] as boolean;
+          state.arrival_time_enabled = values?.[15] as boolean;
+          state.guest_count_enabled = values?.[16] as boolean;
+          propertyState.accepted_payment_methods = values?.[17] as string[];
+          return {
+            rows: [
+              {
+                source_link_count: 1,
+                id: propertyState.id,
               },
             ] as unknown as T[],
           };
@@ -6513,6 +6693,55 @@ describe("vayada-api", () => {
         pmsProperty: true,
         financeProperty: true,
       },
+    });
+
+    const propertyPatchResponse = await injectJson(app, {
+      method: "PATCH",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/property",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        property_name: "Target Alpenrose",
+        reservation_email: "target@alpenrose.example",
+        phone_number: "+43 1 1111",
+        whatsapp_number: "+43 1 2222",
+        address: "Target lane 1",
+        city: "Vienna",
+        country: "AT",
+        instagram: "https://instagram.com/target-alpenrose",
+        facebook: "https://facebook.com/target-alpenrose",
+        default_currency: "EUR",
+        default_language: "en",
+        supported_currencies: ["CHF", "EUR"],
+        supported_languages: ["de", "en"],
+        check_in_time: "14:00",
+        check_out_time: "10:00",
+        special_requests_enabled: true,
+        arrival_time_enabled: false,
+        guest_count_enabled: false,
+        cancellation_policy_text: "Target cancellation policy.",
+        pay_at_property_enabled: true,
+        pay_at_hotel_methods: ["cash", "card"],
+        online_card_payment: true,
+        bank_transfer: true,
+      },
+    });
+    expect(propertyPatchResponse.statusCode).toBe(200);
+    expect(propertyPatchResponse.body).toMatchObject({
+      property_name: "Target Alpenrose",
+      reservation_email: "target@alpenrose.example",
+      address: "Target lane 1",
+      city: "Vienna",
+      default_currency: "EUR",
+      default_language: "en",
+      supported_currencies: ["CHF"],
+      supported_languages: ["de"],
+      pay_at_property_enabled: true,
+      pay_at_hotel_methods: ["cash", "card"],
+      online_card_payment: true,
+      bank_transfer: true,
+      cancellation_policy_text: "Target cancellation policy.",
     });
 
     const cases = [
