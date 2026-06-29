@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
 import { bookingsService } from "@/services/bookings";
 import { pmsSettingsService, settingsService, HotelSummary } from "@/services/settings";
+import { isPmsOperationsReadModelEnabled } from "@/services/api/pmsOperationsClient";
 import {
   getArrivalsToday,
   getDeparturesToday,
@@ -50,6 +51,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
   const [searchOpen, setSearchOpen] = useState(false);
   const [hotels, setHotels] = useState<HotelSummary[]>([]);
   const [selectedHotel, setSelectedHotel] = useState<HotelSummary | null>(null);
+  const currencyEditable = !isPmsOperationsReadModelEnabled();
 
   const [userName, setUserName] = useState("");
   const [userEmail, setUserEmail] = useState("");
@@ -113,16 +115,18 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
       })
       .catch(() => {});
 
-    settingsService
-      .getPropertySettings()
-      .then((settings) => {
-        if (settings.default_currency) setCurrency(settings.default_currency);
-      })
-      .catch(() => {});
-  }, []);
+    if (currencyEditable) {
+      settingsService
+        .getPropertySettings()
+        .then((settings) => {
+          if (settings.default_currency) setCurrency(settings.default_currency);
+        })
+        .catch(() => {});
+    }
+  }, [currencyEditable]);
 
   const handleCurrencyChange = async (code: string) => {
-    if (code === currency || savingCurrency) return;
+    if (!currencyEditable || code === currency || savingCurrency) return;
     setSavingCurrency(true);
     try {
       await settingsService.updatePropertySettings({ default_currency: code });
@@ -369,7 +373,7 @@ export default function Header({ onMenuToggle }: { onMenuToggle?: () => void }) 
                       e.stopPropagation();
                       setCurrencyOpen(!currencyOpen);
                     }}
-                    disabled={savingCurrency}
+                    disabled={savingCurrency || !currencyEditable}
                     className="w-full flex items-center justify-between px-3.5 py-2 text-[13px] text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
                   >
                     <span>{t("layout.header.currency")}</span>
