@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { RoomType } from "@/lib/types";
@@ -77,6 +77,7 @@ export default function RoomDetailModal({
     }
   }, [showFlexibleRate, selectedRate, room.nonRefundableRate]);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const navigatingAwayRef = useRef(false);
   const { formatPrice, convertAndRound, selectedCurrency } = useCurrency();
   const tc = useTranslations("common");
   const t = useTranslations("home");
@@ -125,6 +126,7 @@ export default function RoomDetailModal({
     return () => {
       window.removeEventListener("popstate", onPop);
       if (
+        !navigatingAwayRef.current &&
         !closedByPop &&
         typeof window !== "undefined" &&
         (window.history.state as { vayRoomModal?: boolean } | null)?.vayRoomModal
@@ -157,6 +159,16 @@ export default function RoomDetailModal({
   const nonRefundableNightlyLabel = nonRefundableVaries
     ? tc("fromPrice", { price: formatPrice(nonRefundableFromNightly, selectedCurrency) })
     : formatPrice(nonRefundableFromNightly, selectedCurrency);
+  const handleSelectRate = () => {
+    if (soldOut || selectRateDisabled) return;
+    navigatingAwayRef.current = true;
+    try {
+      onSelectRate(selectedRate);
+    } catch (error) {
+      navigatingAwayRef.current = false;
+      throw error;
+    }
+  };
 
   // Rate option buttons — shared between mobile scroll body and desktop sticky footer
   const rateOptionsJsx = (
@@ -623,9 +635,7 @@ export default function RoomDetailModal({
               {rateOptionsJsx}
               <button
                 data-testid={`select-rate-modal-desktop-${room.id}`}
-                onClick={() => {
-                  if (!soldOut && !selectRateDisabled) onSelectRate(selectedRate);
-                }}
+                onClick={handleSelectRate}
                 disabled={soldOut || selectRateDisabled}
                 aria-busy={selectRatePending}
                 aria-live={selectRatePending ? "polite" : undefined}
@@ -672,9 +682,7 @@ export default function RoomDetailModal({
         <div className="md:hidden flex-shrink-0 border-t border-gray-100 bg-white px-6 py-4">
           <button
             data-testid={`select-rate-modal-mobile-${room.id}`}
-            onClick={() => {
-              if (!soldOut && !selectRateDisabled) onSelectRate(selectedRate);
-            }}
+            onClick={handleSelectRate}
             disabled={soldOut || selectRateDisabled}
             aria-busy={selectRatePending}
             aria-live={selectRatePending ? "polite" : undefined}

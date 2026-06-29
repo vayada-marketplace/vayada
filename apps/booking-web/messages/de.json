@@ -209,10 +209,10 @@
     "payAtPropertyExplanation": "Jetzt ist keine Zahlung erforderlich. Sie zahlen direkt in der Unterkunft beim Check-in. Wir prüfen Ihre Buchungsanfrage.",
     "payAtPropertyExplanationInstant": "Jetzt ist keine Zahlung erforderlich. Sie zahlen direkt in der Unterkunft beim Check-in. Ihre Buchung wird sofort bestätigt.",
     "bankTransfer": "Banküberweisung",
-    "bankTransferNote": "Überweisen Sie direkt auf unser Bankkonto",
+    "bankTransferNote": "Wir senden Bankdaten nach Annahme per E-Mail",
     "nonRefundablePaymentHint": "Zahlung vor Ort und Banküberweisung sind bei nicht erstattbaren Tarifen nicht verfügbar.",
-    "bankTransferExplanation": "Bitte überweisen Sie den Gesamtbetrag auf das unten angegebene Bankkonto. Ihre Buchung wird bestätigt, sobald wir die Zahlung verifiziert haben.",
-    "bankTransferDepositExplanation": "Bitte überweisen Sie {deposit}. Der Restbetrag von {remaining} ist in der Unterkunft fällig. Ihre Buchung wird bestätigt, sobald wir die Zahlung verifiziert haben.",
+    "bankTransferExplanation": "Senden Sie jetzt Ihre Buchungsanfrage. Wenn wir sie annehmen, senden wir Ihnen die Bankdaten und Zahlungsfrist per E-Mail.",
+    "bankTransferDepositExplanation": "Senden Sie jetzt Ihre Buchungsanfrage. Wenn wir sie annehmen, senden wir Ihnen die Bankdaten für die Anzahlung von {deposit} per E-Mail. Der Restbetrag von {remaining} ist beim Check-in bei uns fällig.",
     "paypalLabel": "Mit PayPal bezahlen",
     "paypalHelper": "Senden Sie die Zahlung manuell; wir bestätigen sie nach Erhalt.",
     "paypalInstructions": "Senden Sie die Zahlung an die unten angegebene PayPal-E-Mail und geben Sie nach Erstellung der Buchung Ihre Buchungsreferenz in der PayPal-Notiz an. Ihre Buchung wird bestätigt, sobald wir die Zahlung verifiziert haben, normalerweise innerhalb von {hours} Stunden.",
@@ -237,6 +237,7 @@
     "errorSoldOut": "Dieses Zimmer ist leider gerade ausgebucht. Bitte wählen Sie ein anderes Zimmer oder andere Daten.",
     "errorSameDaySoldOut": "Same-Day-Buchungen sind heute nicht mehr möglich. Bitte wählen Sie morgen oder ein anderes verfügbares Datum.",
     "errorGeneric": "Bei der Erstellung Ihrer Buchung ist etwas schiefgegangen. Bitte versuchen Sie es erneut oder wählen Sie ein anderes Zimmer.",
+    "termsRequired": "Bitte akzeptieren Sie die Allgemeinen Geschäftsbedingungen vor dem Absenden.",
     "chooseAnotherRoom": "Anderes Zimmer wählen"
   },
   "myBooking": {

@@ -209,10 +209,10 @@
     "payAtPropertyExplanation": "Tidak diperlukan pembayaran sekarang. Anda akan membayar langsung di properti saat check-in. Kami akan meninjau permintaan pemesanan Anda.",
     "payAtPropertyExplanationInstant": "Tidak diperlukan pembayaran sekarang. Anda akan membayar langsung di properti saat check-in. Pemesanan Anda akan langsung dikonfirmasi.",
     "bankTransfer": "Transfer Bank",
-    "bankTransferNote": "Transfer langsung ke rekening bank kami",
+    "bankTransferNote": "Kami akan mengirim detail bank setelah kami menerimanya",
     "nonRefundablePaymentHint": "Bayar di properti dan transfer bank tidak tersedia untuk tarif non-refundable.",
-    "bankTransferExplanation": "Silakan transfer jumlah total ke rekening bank di bawah ini. Pemesanan Anda akan dikonfirmasi setelah kami memverifikasi pembayaran.",
-    "bankTransferDepositExplanation": "Silakan transfer {deposit}. Sisa {remaining} dibayar di properti. Pemesanan Anda akan dikonfirmasi setelah kami memverifikasi pembayaran.",
+    "bankTransferExplanation": "Kirim permintaan pemesanan sekarang. Jika kami menerimanya, kami akan mengirim detail transfer bank dan batas waktu pembayaran melalui email.",
+    "bankTransferDepositExplanation": "Kirim permintaan pemesanan sekarang. Jika kami menerimanya, kami akan mengirim detail transfer bank untuk deposit {deposit} melalui email. Sisa {remaining} dibayar kepada kami saat check-in.",
     "paypalLabel": "Bayar dengan PayPal",
     "paypalHelper": "Kirim pembayaran secara manual; kami akan mengonfirmasi setelah menerimanya.",
     "paypalInstructions": "Kirim pembayaran ke email PayPal di bawah ini dan sertakan referensi pemesanan Anda di catatan PayPal setelah pemesanan dibuat. Pemesanan Anda akan dikonfirmasi setelah kami memverifikasi pembayaran, biasanya dalam {hours} jam.",
@@ -237,6 +237,7 @@
     "errorSoldOut": "Sayangnya kamar ini baru saja terjual habis. Silakan pilih kamar lain atau tanggal yang berbeda.",
     "errorSameDaySoldOut": "Pemesanan hari yang sama tidak lagi tersedia untuk hari ini. Silakan pilih esok hari atau tanggal lain yang tersedia.",
     "errorGeneric": "Terjadi kesalahan saat membuat pemesanan Anda. Silakan coba lagi, atau pilih kamar lain.",
+    "termsRequired": "Harap setujui Syarat dan Ketentuan sebelum mengirim.",
     "chooseAnotherRoom": "Pilih kamar lain"
   },
   "myBooking": {

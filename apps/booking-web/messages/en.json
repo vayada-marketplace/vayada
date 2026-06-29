@@ -187,10 +187,10 @@
     "payAtPropertyExplanation": "No payment is required now. You will pay directly at the property upon check-in. We'll review your booking request.",
     "payAtPropertyExplanationInstant": "No payment is required now. You will pay directly at the property upon check-in. Your booking will be confirmed instantly.",
     "bankTransfer": "Bank Transfer",
-    "bankTransferNote": "Transfer directly to our bank account",
+    "bankTransferNote": "We'll email bank details after acceptance",
     "nonRefundablePaymentHint": "Pay at Property and Bank Transfer are not available for non-refundable rates.",
-    "bankTransferExplanation": "Please transfer the total amount to the bank account below. Your booking will be confirmed once we verify the payment.",
-    "bankTransferDepositExplanation": "Please transfer {deposit}. The remaining {remaining} is due at the property. Your booking will be confirmed once we verify the payment.",
+    "bankTransferExplanation": "Submit your booking request now. If we accept it, we'll email the bank transfer details and payment deadline.",
+    "bankTransferDepositExplanation": "Submit your booking request now. If we accept it, we'll email the bank transfer details for the {deposit} deposit. The remaining {remaining} is due with us at check-in.",
     "paypalLabel": "Pay by PayPal",
     "paypalHelper": "Send payment manually; we'll confirm it once received.",
     "paypalInstructions": "Send payment to the PayPal email below and include your booking reference in the PayPal note after your booking is created. Your booking will be confirmed once we verify the payment, typically within {hours} hours.",
@@ -237,6 +237,7 @@
     "errorSoldOut": "Unfortunately this room just sold out. Please choose another room or different dates.",
     "errorSameDaySoldOut": "Same-day bookings are no longer available for today. Please select tomorrow or another available date.",
     "errorGeneric": "Something went wrong while creating your booking. Please try again, or pick another room.",
+    "termsRequired": "Please accept the Terms and Conditions before submitting.",
     "chooseAnotherRoom": "Choose another room"
   },
   "myBooking": {
