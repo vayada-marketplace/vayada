@@ -49,6 +49,7 @@ describe("askIntelligence", () => {
     setAuthKitSession({
       accessToken: "workos-token",
       csrfToken: "csrf-token",
+      organizationId: "org_workos_hotel_group",
       user: { id: "user_1", email: "owner@example.com", status: "active" },
     });
 

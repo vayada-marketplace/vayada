@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearAuthData, getScopedBookingHotelIds, setAuthKitSession } from "./sessionStore";
+import {
+  clearAuthData,
+  getScopedBookingHotelIds,
+  getSelectedOrganizationId,
+  setAuthKitSession,
+  setLegacyCompatibilityToken,
+} from "./sessionStore";
 
 const originalCompatibilityFlag = process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED;
 
@@ -35,6 +41,22 @@ describe("sessionStore booking resource scope", () => {
 
     expect(getScopedBookingHotelIds()).toEqual(["booking_hotel_alpenrose"]);
   });
+
+  it("prefers the internal organization id from the compatibility token", () => {
+    process.env.NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED = "true";
+    setAuthKitSession({
+      accessToken: "workos-access-token",
+      organizationId: "org_workos_hotel_group",
+      user: {
+        id: "user_1",
+        email: "owner@example.com",
+        status: "active",
+      },
+    });
+    setLegacyCompatibilityToken(fakeJwt({ org: "org_hotel_group" }), 900);
+
+    expect(getSelectedOrganizationId()).toBe("org_hotel_group");
+  });
 });
 
 function createMemoryStorage(): Storage {
@@ -49,4 +71,8 @@ function createMemoryStorage(): Storage {
     removeItem: (key) => values.delete(key),
     setItem: (key, value) => values.set(key, value),
   };
+}
+
+function fakeJwt(payload: Record<string, unknown>): string {
+  return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
 }
