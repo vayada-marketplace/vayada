@@ -55,6 +55,7 @@ jobs:
             NEXT_PUBLIC_MARKETPLACE_LEGACY_UPLOADS_ENABLED=false
             NEXT_PUBLIC_PMS_URL=https://next-pms.vayada.com
             NEXT_PUBLIC_BOOKING_ADMIN_URL=https://next-booking-admin.vayada.com
+            NEXT_PUBLIC_MARKETPLACE_URL=https://next-marketplace.vayada.com
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
