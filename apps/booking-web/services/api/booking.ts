@@ -59,6 +59,7 @@ export interface PaymentSettings {
   specialRequestsEnabled?: boolean;
   arrivalTimeEnabled?: boolean;
   guestCountEnabled?: boolean;
+  phoneRequired?: boolean;
   sameDayBookingsEnabled?: boolean;
   sameDayBookingCutoffTime?: string | null;
   termsText?: string;

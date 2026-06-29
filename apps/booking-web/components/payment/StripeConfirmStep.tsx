@@ -118,7 +118,9 @@ export default function StripeConfirmStep({
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <HeroSection heroImage={hotel.heroImage} hotelName={hotel.name} compact />
+      <div className="hidden min-[769px]:block">
+        <HeroSection heroImage={hotel.heroImage} hotelName={hotel.name} compact />
+      </div>
 
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="bg-white rounded-2xl border border-gray-200 p-8">

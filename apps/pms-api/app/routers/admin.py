@@ -406,6 +406,7 @@ async def get_guest_form_settings(user_id: str = Depends(require_hotel_admin)):
         special_requests_enabled=row["special_requests_enabled"],
         arrival_time_enabled=row["arrival_time_enabled"],
         guest_count_enabled=row["guest_count_enabled"],
+        phone_required=row["phone_required"],
     )
 
 
@@ -422,6 +423,7 @@ async def update_guest_form_settings(
         special_requests_enabled=row["special_requests_enabled"],
         arrival_time_enabled=row["arrival_time_enabled"],
         guest_count_enabled=row["guest_count_enabled"],
+        phone_required=row["phone_required"],
     )
 
 

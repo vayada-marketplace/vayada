@@ -7,6 +7,7 @@ from app.services import email_service
 from app.services.email_service import (
     _render_request_status_email,
     send_booking_request_notification,
+    send_guest_booking_accepted,
     send_guest_booking_requested,
     send_host_booking_accepted,
     send_host_booking_expired,
@@ -140,7 +141,7 @@ async def test_host_emails_cc_ops_recipients(sender, expected_headline):
 
 
 @pytest.mark.asyncio
-async def test_guest_bank_transfer_request_email_includes_full_bank_details():
+async def test_guest_bank_transfer_request_email_hides_bank_details():
     sent = []
     booking = {
         **BOOKING,
@@ -162,12 +163,67 @@ async def test_guest_bank_transfer_request_email_includes_full_bank_details():
 
     assert len(sent) == 1
     html = sent[0][2]
+    assert "another email with bank transfer details" in html
+    assert "Bank Transfer Details" not in html
+    assert "Vayada Bank" not in html
+    assert "Hotel Sunshine GmbH" not in html
+    assert "DE89370400440532013000" not in html
+    assert "VAYADEF0" not in html
+    assert "VAY-ABC123" in html
+
+
+@pytest.mark.asyncio
+async def test_guest_bank_transfer_accepted_email_includes_full_bank_details():
+    sent = []
+    booking = {
+        **BOOKING,
+        "payment_method": "bank_transfer",
+        "bank_details": {
+            "payout_bank_name": "Vayada Bank",
+            "payout_account_holder": "Hotel Sunshine GmbH",
+            "payout_account_type": "iban",
+            "payout_iban": "DE89370400440532013000",
+            "payout_swift": "VAYADEF0",
+        },
+    }
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, subject, html_body))
+
+    with patch.object(email_service, "_send_email", side_effect=fake_send):
+        await send_guest_booking_accepted("alice@example.com", booking)
+
+    assert len(sent) == 1
+    assert sent[0][1] == "Action needed, complete your transfer to confirm your stay"
+    html = sent[0][2]
+    assert "Your room is reserved" in html
+    assert "holding your room for the next 72 hours" in html
+    assert "To confirm your stay" in html
+    assert "Once we receive your payment, we'll send a final confirmation" in html
     assert "Bank Transfer Details" in html
     assert "Vayada Bank" in html
     assert "Hotel Sunshine GmbH" in html
     assert "DE89370400440532013000" in html
     assert "VAYADEF0" in html
     assert "VAY-ABC123" in html
+    assert "Your Booking is Confirmed" not in html
+    assert "The hotel will contact you shortly" not in html
+
+
+@pytest.mark.asyncio
+async def test_guest_card_accepted_email_ends_after_welcome_line():
+    sent = []
+
+    async def fake_send(to, subject, html_body, reply_to=None):
+        sent.append((to, subject, html_body))
+
+    with patch.object(email_service, "_send_email", side_effect=fake_send):
+        await send_guest_booking_accepted("alice@example.com", BOOKING)
+
+    assert len(sent) == 1
+    html = sent[0][2]
+    assert "We look forward to welcoming you!" in html
+    assert "The hotel will contact you shortly" not in html
 
 
 @pytest.mark.asyncio

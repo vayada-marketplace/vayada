@@ -1120,9 +1120,8 @@ async def _process_payment_method(
         )
 
     elif payment_method == "bank_transfer":
-        # Bank transfer — guest transfers directly, hotel verifies manually.
-        # Always uses the request flow (no money has moved, so we cannot
-        # auto-confirm even when the hotel has instant-book on).
+        # Bank transfer — guest transfers after the host accepts, then the
+        # hotel verifies manually.
         await PaymentRepository.create(
             booking_id=booking_id,
             amount=_payment_amount_for_booking(total_amount, deposit),
@@ -1131,8 +1130,11 @@ async def _process_payment_method(
             payment_purpose=_payment_purpose_for_booking(deposit),
         )
         await BookingRepository.update_payment_status(booking_id, "awaiting_transfer")
-        booking = await BookingRepository.get_by_id(booking_id)
-        _create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        if use_request_flow:
+            booking = await BookingRepository.get_by_id(booking_id)
+            _create_task(send_booking_request_notification(hotel["contact_email"], booking))
+        else:
+            await _finalize_accepted_booking(booking_id, capture_card=False)
 
     elif payment_method == "paypal":
         await PaymentRepository.create(
@@ -1240,10 +1242,10 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
         ):
             raise ValueError("PayPal is not enabled for this hotel")
 
-    # Manual off-platform methods always stay in the request flow,
-    # even when instant_book is on — there's no money yet, so we can't
-    # auto-confirm.
-    use_request_flow = (not instant_book) or payment_method in ("bank_transfer", "paypal")
+    # PayPal still needs property-side verification before confirmation.
+    # Bank transfer can instant-confirm by sending transfer instructions
+    # immediately while keeping payment_status='awaiting_transfer'.
+    use_request_flow = (not instant_book) or payment_method == "paypal"
     payment_window_hours = (
         int(be_payment_info.get("paypal_payment_window_hours") or HOST_RESPONSE_HOURS)
         if payment_method == "paypal"
@@ -1371,10 +1373,7 @@ async def create_booking_request(slug: str, data: BookingCreate) -> dict:
     # Guest "request received" email only for the request flow;
     # _finalize_accepted_booking sends the equivalent under instant-book.
     if use_request_flow:
-        guest_email_booking = booking
-        if payment_method == "bank_transfer" and bank_transfer_info:
-            guest_email_booking = {**booking, "bank_details": bank_transfer_info}
-        _create_task(send_guest_booking_requested(data.guest_email, guest_email_booking))
+        _create_task(send_guest_booking_requested(data.guest_email, booking))
 
     # Push updated availability to Channex so OTAs reflect the reduced inventory
     _create_task(push_availability_for_room_type(hotel_id, data.room_type_id))
@@ -1528,6 +1527,8 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
 
     if payment_method in ("card", "xendit", "paypal"):
         new_payment_status = "captured"
+    elif payment_method == "bank_transfer":
+        new_payment_status = "awaiting_transfer"
     else:
         new_payment_status = "pay_at_property"
     await BookingRepository.update_booking_accepted(
@@ -1551,7 +1552,19 @@ async def _finalize_accepted_booking(booking_id: str, *, capture_card: bool = Tr
         )
 
     updated = await BookingRepository.get_by_id(booking_id)
-    _create_task(send_guest_booking_accepted(updated["guest_email"], updated))
+    guest_email_booking = updated
+    if payment_method == "bank_transfer":
+        bank_details = await hotel_identity_service.get_guest_payment_info_by_slug(
+            updated.get("hotel_slug") or ""
+        )
+        if bank_details:
+            guest_email_booking = {**updated, "bank_details": bank_details}
+        else:
+            logger.warning(
+                "Accepted bank-transfer booking %s has no bank details for guest email",
+                updated.get("booking_reference"),
+            )
+    _create_task(send_guest_booking_accepted(updated["guest_email"], guest_email_booking))
     hotel = await Database.fetchrow(
         "SELECT contact_email FROM hotels WHERE id = $1", booking["hotel_id"]
     )

@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import quote, urlparse
@@ -331,13 +332,34 @@ def _bank_transfer_details_html(booking: dict) -> str:
     if not rows_html:
         return ""
     reference = escape(str(booking.get("booking_reference") or ""))
-    amount = escape(f"{booking.get('currency', '')} {float(booking.get('total_amount') or 0):.2f}")
+    transfer_amount = (
+        booking.get("deposit_amount")
+        if booking.get("deposit_required") and booking.get("deposit_amount") is not None
+        else booking.get("total_amount")
+    )
+    amount = escape(f"{booking.get('currency', '')} {float(transfer_amount or 0):.2f}")
+    balance_html = ""
+    if booking.get("deposit_required"):
+        balance = escape(
+            f"{booking.get('currency', '')} {float(booking.get('balance_amount') or 0):.2f}"
+        )
+        balance_html = f'<p class="detail"><strong>Remaining balance:</strong> {balance} — due at the property upon check-in</p>'
     return f"""
     <h3>Bank Transfer Details</h3>
     <p class="detail">Please include your booking reference <strong>{reference}</strong> with the transfer.</p>
     <p class="detail"><strong>Amount:</strong> {amount}</p>
+    {balance_html}
     {rows_html}
     """
+
+
+def _bank_transfer_deadline_text(booking: dict) -> str:
+    deadline = booking.get("payment_deadline") or booking.get("bank_transfer_deadline")
+    if hasattr(deadline, "strftime"):
+        return deadline.strftime("%d %b %Y, %H:%M UTC")
+    if deadline:
+        return str(deadline)
+    return (datetime.now(UTC) + timedelta(hours=72)).strftime("%d %b %Y, %H:%M UTC")
 
 
 async def send_booking_request_notification(hotel_email: str, booking: dict):
@@ -373,12 +395,21 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
         await _send_email(guest_email, subject, _wrap_html(content))
         return
 
+    payment_method = booking.get("payment_method", "card")
+    payment_note = ""
+    if payment_method == "card":
+        payment_note = '<p class="detail">Your card has been authorized. It will only be charged if the host accepts your booking.</p>'
+    elif payment_method == "bank_transfer":
+        payment_note = '<p class="detail">If the host accepts your booking, you will receive another email with bank transfer details and the amount to transfer.</p>'
+    elif payment_method == "pay_at_property":
+        payment_note = '<p class="detail">If the host accepts your booking, payment is due at the property upon check-in.</p>'
+
     subject = f"Booking Request Submitted — {booking['booking_reference']}"
     content = f"""
     <h2>Booking Request Submitted</h2>
     <p class="detail">Your booking request at <strong>{booking["hotel_name"]}</strong> has been submitted successfully.</p>
     <p class="detail">The host will review your request and respond within <strong>24 hours</strong>.</p>
-    {_bank_transfer_details_html(booking)}
+    {payment_note}
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
@@ -389,24 +420,40 @@ async def send_guest_booking_requested(guest_email: str, booking: dict):
 
 
 async def send_guest_booking_accepted(guest_email: str, booking: dict):
-    """Notify guest that their booking has been accepted and payment captured."""
-    subject = f"Booking Confirmed — {booking['booking_reference']}"
+    """Notify guest that their booking has been accepted."""
     payment_method = booking.get("payment_method", "card")
-    payment_note = (
-        "Your card has been charged."
-        if payment_method == "card"
-        else "Please pay at the property upon arrival."
-    )
+    if payment_method == "bank_transfer":
+        deadline = _bank_transfer_deadline_text(booking)
+        subject = "Action needed, complete your transfer to confirm your stay"
+        content = f"""
+        <h2>Your room is reserved</h2>
+        <p class="detail">Good news, your booking request at <strong>{booking["hotel_name"]}</strong> has been accepted. We're holding your room for the next 72 hours. To confirm your stay, please complete the bank transfer below by {deadline}. If we don't receive your transfer by then, the room will be released and the booking cancelled.</p>
+        {_bank_transfer_details_html(booking)}
+        <hr class="divider">
+        {_booking_details_html(booking)}
+        <hr class="divider">
+        <p class="detail">Once we receive your payment, we'll send a final confirmation. Reference {booking["booking_reference"]}.</p>
+        {_my_booking_button_html(booking, guest_email)}
+        """
+        await _send_email(guest_email, subject, _wrap_html(content))
+        return
+
+    subject = f"Booking Confirmed — {booking['booking_reference']}"
+    if payment_method == "card":
+        payment_note = "Your card has been charged."
+    elif payment_method == "paypal":
+        payment_note = "The property has verified your PayPal payment."
+    else:
+        payment_note = "Payment is due at the property upon check-in."
 
     content = f"""
     <h2>Your Booking is Confirmed!</h2>
-    <p class="detail">Great news — your booking at <strong>{booking["hotel_name"]}</strong> has been accepted by the host.</p>
+    <p class="detail">Great news, your booking at <strong>{booking["hotel_name"]}</strong> has been accepted by the host.</p>
     <p class="detail">{payment_note}</p>
     <hr class="divider">
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
-    <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))
@@ -545,7 +592,6 @@ async def send_guest_admin_booking_confirmed(guest_email: str, booking: dict):
     {_booking_details_html(booking)}
     <hr class="divider">
     <p class="detail">We look forward to welcoming you!</p>
-    <p class="detail">The hotel will contact you shortly with your confirmation documents and all the details for your stay.</p>
     {_my_booking_button_html(booking, guest_email)}
     """
     await _send_email(guest_email, subject, _wrap_html(content))

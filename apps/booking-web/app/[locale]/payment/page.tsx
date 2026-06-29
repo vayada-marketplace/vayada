@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense, type ReactNode } from "react";
+import { useState, useEffect, useRef, Suspense, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -9,6 +9,7 @@ import { Booking } from "@/lib/types";
 import BookingFooter from "@/components/layout/BookingFooter";
 import HeroSection from "@/components/booking/HeroSection";
 import StepIndicator from "@/components/booking/StepIndicator";
+import MobileStaySummary from "@/components/booking/MobileStaySummary";
 import StripeProvider from "@/components/StripeProvider";
 import StripeConfirmStep from "@/components/payment/StripeConfirmStep";
 import PolicyModal from "@/components/payment/PolicyModal";
@@ -39,13 +40,6 @@ function getBankIdentifier(details: CheckoutBankDetails | null) {
     return { label: "Account Number", value: compact(details.accountNumber) };
   }
   return { label: "IBAN", value: compact(details.iban) };
-}
-
-function formatIban(value: string) {
-  return value
-    .replace(/\s+/g, "")
-    .replace(/(.{4})/g, "$1 ")
-    .trim();
 }
 
 function isBankDetailsComplete(details?: CheckoutBankDetails | null) {
@@ -126,13 +120,12 @@ function PaymentPageContent() {
   const [paypalEnabled, setPaypalEnabled] = useState(false);
   const [paypalEmail, setPaypalEmail] = useState("");
   const [paypalPaymentWindowHours, setPaypalPaymentWindowHours] = useState(24);
-  const [bankDetails, setBankDetails] = useState<CheckoutBankDetails | null>(null);
-  const [copiedBankIdentifier, setCopiedBankIdentifier] = useState(false);
   const [payAtHotelMethods, setPayAtHotelMethods] = useState<string[]>(["cash", "card"]);
   const [termsText, setTermsText] = useState("");
   const [cancellationPolicyText, setCancellationPolicyText] = useState("");
   const [policyModal, setPolicyModal] = useState<null | "terms" | "cancellation">(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [termsError, setTermsError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [checkoutQuote, setCheckoutQuote] = useState<BookingQuote | null>(null);
@@ -146,6 +139,7 @@ function PaymentPageContent() {
   // VAY-388: draft id returned for card payments — passed to
   // confirmAuthorization once Stripe authorizes the card.
   const [draftId, setDraftId] = useState<string | null>(null);
+  const termsRef = useRef<HTMLDivElement>(null);
 
   // Load guest details from the booking draft (set by /book on submit)
   useEffect(() => {
@@ -184,7 +178,6 @@ function PaymentPageContent() {
         setXenditPaymentsEnabled(settings.xenditPaymentsEnabled || false);
         const hasCompleteBankDetails = isBankDetailsComplete(settings.bankDetails);
         setBankTransferEnabled((settings.bankTransfer || false) && hasCompleteBankDetails);
-        setBankDetails(settings.bankDetails || null);
         if (settings.payAtHotelMethods) setPayAtHotelMethods(settings.payAtHotelMethods);
         setTermsText(settings.termsText || "");
         setCancellationPolicyText(settings.cancellationPolicyText || "");
@@ -289,7 +282,12 @@ function PaymentPageContent() {
   const quotedRemainingBalance = checkoutQuote?.balanceAmount ?? remainingBalance;
 
   const handleSubmit = async () => {
-    if (!agreedToTerms || !guestDetails || !room) return;
+    if (!agreedToTerms) {
+      setTermsError(true);
+      termsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    if (!guestDetails || !room) return;
     if (!quoteReady || quoteLoading || !checkoutQuote) {
       setError("Updating checkout total. Please wait a moment.");
       return;
@@ -415,36 +413,69 @@ function PaymentPageContent() {
     );
   }
 
-  const bankIdentifier = getBankIdentifier(bankDetails);
-  const bankIdentifierDisplay =
-    bankDetails?.accountType === "account_number"
-      ? bankIdentifier.value
-      : formatIban(bankIdentifier.value);
-  const copyBankIdentifier = async () => {
-    if (!bankIdentifier.value || !navigator.clipboard) return;
-    try {
-      await navigator.clipboard.writeText(bankIdentifier.value);
-      setCopiedBankIdentifier(true);
-      window.setTimeout(() => setCopiedBankIdentifier(false), 1800);
-    } catch {
-      // ignore clipboard failures (e.g. blocked permissions / insecure context)
-    }
-  };
+  const paymentTitle = "Review your reservation";
+  const submitLabel = paymentMethod === "bank_transfer" ? "Submit Booking" : "Complete Booking";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <HeroSection
-        heroImage={hotel.heroImage}
-        hotelName={hotel.name}
-        description={hotel.description}
-      />
+      <div className="hidden min-[769px]:block">
+        <HeroSection
+          heroImage={hotel.heroImage}
+          hotelName={hotel.name}
+          description={hotel.description}
+        />
+      </div>
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header + Step Indicator */}
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-10 gap-4">
-          <h2 className="text-3xl font-heading text-gray-900">{t("securePayment")}</h2>
+          <h2 className="text-3xl font-heading text-gray-900">{paymentTitle}</h2>
           <StepIndicator steps={STEPS} currentStep={currentStep} />
         </div>
+
+        <MobileStaySummary
+          room={room}
+          roomCount={roomsParam}
+          checkIn={checkIn}
+          checkOut={checkOut}
+          checkInTime={hotel.checkInTime}
+          checkOutTime={hotel.checkOutTime}
+          nights={nights}
+          adults={adultsParam}
+          childGuests={childrenParam}
+          roomTotal={roomTotal}
+          grandTotal={grandTotal}
+          selectedCurrency={selectedCurrency}
+          addons={addons}
+          selectedAddonIds={selectedAddonIds}
+          addonQuantities={addonQuantities}
+          addonDates={addonDates}
+          promoCode={promoCodeParam}
+          promoDiscountText={
+            promoDiscount?.type === "percentage" ? ` (-${promoDiscount.value}%)` : ""
+          }
+          discountAmount={discountAmount}
+          labels={{
+            title: tb("bookingSummary"),
+            checkIn: tb("checkIn"),
+            checkOut: tb("checkOut"),
+            duration: tb("duration"),
+            guests: tc("guests"),
+            total: tc("total"),
+            includesTaxes: tc("includesTaxes"),
+            nights: tc("nights", { count: nights }),
+            checkInFrom: hotel.checkInTime
+              ? tc("checkInFrom", { time: hotel.checkInTime })
+              : undefined,
+            checkOutBy: hotel.checkOutTime
+              ? tc("checkOutBy", { time: hotel.checkOutTime })
+              : undefined,
+          }}
+          locale={locale}
+          formatDate={formatDate}
+          formatPrice={formatPrice}
+          convertAndRound={convertAndRound}
+        />
 
         {/* Guest confirmation banner */}
         <div className="flex items-center justify-between mb-8">
@@ -505,7 +536,7 @@ function PaymentPageContent() {
                     d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
                   />
                 </svg>
-                <h3 className="text-lg font-bold text-gray-900">{t("paymentDetails")}</h3>
+                <h3 className="text-lg font-bold text-gray-900">Choose payment method</h3>
               </div>
 
               {/* Payment method tabs */}
@@ -806,55 +837,13 @@ function PaymentPageContent() {
                 <div className="space-y-3">
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
                     {quotedDepositRequired
-                      ? `Please transfer ${formatPrice(quotedDepositAmount, quotedCurrency)}. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
-                      : t("bankTransferExplanation") ||
-                        "Please transfer the total amount to the bank account below. Your booking will be confirmed once the hotel verifies the payment."}
+                      ? hotel.instantBook
+                        ? `Your booking will be confirmed instantly. You'll receive an email with our bank details for ${formatPrice(quotedDepositAmount, quotedCurrency)}. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
+                        : `After we review and accept your booking, you'll receive an email with our bank details for ${formatPrice(quotedDepositAmount, quotedCurrency)}. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
+                      : hotel.instantBook
+                        ? "Your booking will be confirmed instantly. You'll receive an email with our bank details and the transfer amount."
+                        : "After we review and accept your booking, you'll receive an email with our bank details and the transfer amount. Please transfer within the payment window to confirm your reservation."}
                   </div>
-                  {bankDetails && isBankDetailsComplete(bankDetails) && (
-                    <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl space-y-2">
-                      <p className="text-sm text-gray-700">
-                        <strong>{t("bankName") || "Bank"}:</strong> {bankDetails.bankName}
-                      </p>
-                      <p className="text-sm text-gray-700">
-                        <strong>{t("accountHolder") || "Account Holder"}:</strong>{" "}
-                        {bankDetails.accountHolder}
-                      </p>
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-700">
-                        <p className="min-w-0 break-words">
-                          <strong>
-                            {bankIdentifier.label === "Account Number"
-                              ? t("accountNumber") || "Account Number"
-                              : "IBAN"}
-                            :
-                          </strong>{" "}
-                          {bankIdentifierDisplay}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={copyBankIdentifier}
-                          className="self-start sm:self-auto inline-flex items-center gap-1.5 rounded-full border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-white transition-colors"
-                        >
-                          <svg
-                            className="h-3.5 w-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                            />
-                          </svg>
-                          {copiedBankIdentifier ? t("copied") : t("copy")}
-                        </button>
-                      </div>
-                      <p className="text-sm text-gray-700">
-                        <strong>BIC/SWIFT:</strong> {bankDetails.swift}
-                      </p>
-                    </div>
-                  )}
                 </div>
               ) : paymentMethod === "paypal" ? (
                 <div className="space-y-3">
@@ -889,11 +878,41 @@ function PaymentPageContent() {
               )}
             </div>
 
-            {/* Terms Agreement */}
+            {/* Cancellation Policy */}
             <div className="bg-white rounded-2xl border border-gray-200 p-6">
+              <h3 className="text-base font-bold text-gray-900 mb-2">
+                {t("cancellationPolicyTitle")}
+              </h3>
+              <p className="text-sm text-gray-600">
+                {t("cancellationPolicyDesc", {
+                  date: formatDate(
+                    new Date(
+                      new Date(checkIn).getTime() -
+                        getFreeCancellationDays(room?.cancellationPolicy) * 86400000,
+                    )
+                      .toISOString()
+                      .slice(0, 10),
+                    locale,
+                  ),
+                })}
+              </p>
+            </div>
+
+            {/* Terms Agreement */}
+            <div
+              ref={termsRef}
+              className={`bg-white rounded-2xl border p-6 ${
+                termsError ? "border-red-300 ring-2 ring-red-100" : "border-gray-200"
+              }`}
+            >
               <label className="flex items-start gap-3 cursor-pointer">
                 <button
-                  onClick={() => setAgreedToTerms(!agreedToTerms)}
+                  type="button"
+                  onClick={() => {
+                    setAgreedToTerms(!agreedToTerms);
+                    if (!agreedToTerms) setTermsError(false);
+                  }}
+                  aria-describedby={termsError ? "terms-error" : undefined}
                   className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-colors ${
                     agreedToTerms ? "bg-primary-600 border-primary-600" : "border-gray-300"
                   }`}
@@ -940,42 +959,37 @@ function PaymentPageContent() {
                         {chunks}
                       </button>
                     );
-                    return paymentMethod === "card"
-                      ? t.rich("agreeTerms", {
-                          terms: renderTermsLink,
-                          cancellation: renderCancellationLink,
-                          amount: formatPrice(
-                            quotedDepositRequired ? quotedDepositAmount : quotedGrandTotal,
-                            quotedCurrency,
-                          ),
-                        })
-                      : t.rich("agreeTermsProperty", {
-                          terms: renderTermsLink,
-                          cancellation: renderCancellationLink,
-                        });
+                    if (paymentMethod === "card") {
+                      return t.rich("agreeTerms", {
+                        terms: renderTermsLink,
+                        cancellation: renderCancellationLink,
+                        amount: formatPrice(
+                          quotedDepositRequired ? quotedDepositAmount : quotedGrandTotal,
+                          quotedCurrency,
+                        ),
+                      });
+                    }
+                    if (paymentMethod === "bank_transfer") {
+                      return (
+                        <>
+                          I agree to the {renderTermsLink("Terms and Conditions")} and{" "}
+                          {renderCancellationLink("Cancellation Policy")}. I understand that bank
+                          transfer details will be provided after my booking is accepted.
+                        </>
+                      );
+                    }
+                    return t.rich("agreeTermsProperty", {
+                      terms: renderTermsLink,
+                      cancellation: renderCancellationLink,
+                    });
                   })()}
                 </span>
               </label>
-            </div>
-
-            {/* Cancellation Policy */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6">
-              <h3 className="text-base font-bold text-gray-900 mb-2">
-                {t("cancellationPolicyTitle")}
-              </h3>
-              <p className="text-sm text-gray-600">
-                {t("cancellationPolicyDesc", {
-                  date: formatDate(
-                    new Date(
-                      new Date(checkIn).getTime() -
-                        getFreeCancellationDays(room?.cancellationPolicy) * 86400000,
-                    )
-                      .toISOString()
-                      .slice(0, 10),
-                    locale,
-                  ),
-                })}
-              </p>
+              {termsError && (
+                <p id="terms-error" className="mt-3 text-sm font-medium text-red-600">
+                  Please agree to the Terms and Conditions and Cancellation Policy to continue.
+                </p>
+              )}
             </div>
 
             {/* Action buttons */}
@@ -1008,11 +1022,9 @@ function PaymentPageContent() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={
-                  !agreedToTerms || submitting || !quoteReady || quoteLoading || !checkoutQuote
-                }
+                disabled={submitting}
                 className={`px-8 py-3 font-semibold rounded-full transition-colors text-sm flex items-center gap-2 ${
-                  agreedToTerms && !submitting && quoteReady && !quoteLoading && checkoutQuote
+                  !submitting
                     ? "bg-primary-600 text-white hover:bg-primary-700"
                     : "bg-gray-200 text-gray-400 cursor-not-allowed"
                 }`}
@@ -1038,7 +1050,7 @@ function PaymentPageContent() {
                   </>
                 ) : paymentMethod === "card" ? (
                   <>
-                    {t("continueToPayment") || "Continue to Payment"}
+                    {submitLabel}
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path
                         strokeLinecap="round"
@@ -1048,17 +1060,15 @@ function PaymentPageContent() {
                       />
                     </svg>
                   </>
-                ) : hotel.instantBook ? (
-                  t("confirmBooking") || "Confirm Booking"
                 ) : (
-                  t("submitRequest") || "Submit Booking Request"
+                  submitLabel
                 )}
               </button>
             </div>
           </div>
 
           {/* Right Sidebar — Order Summary */}
-          <div className="lg:col-span-1">
+          <div className="max-[768px]:hidden lg:col-span-1">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 sticky top-8">
               <h3 className="text-lg font-bold text-gray-900 mb-5">{t("orderSummary")}</h3>
 

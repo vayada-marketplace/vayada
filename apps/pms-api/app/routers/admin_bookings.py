@@ -698,7 +698,10 @@ async def mark_booking_paid(
         },
         actor_user_id=user_id,
     )
-    return await _admin_response(await BookingRepository.get_by_id(booking_id))
+    full_updated = await BookingRepository.get_by_id(booking_id)
+    if booking.get("payment_method") == "bank_transfer":
+        asyncio.create_task(send_guest_confirmation(full_updated["guest_email"], full_updated))
+    return await _admin_response(full_updated)
 
 
 @router.post("/bookings/{booking_id}/arrival-charge", response_model=BookingAdminResponse)

@@ -35,6 +35,7 @@ _GUEST_FORM_COLUMNS = {
     "special_requests_enabled",
     "arrival_time_enabled",
     "guest_count_enabled",
+    "phone_required",
 }
 
 _CALENDAR_SETTINGS_COLUMNS = {
@@ -213,7 +214,7 @@ class HotelRepository:
     @staticmethod
     async def get_guest_form_settings(hotel_id: str) -> dict | None:
         row = await Database.fetchrow(
-            "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled "
+            "SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled, phone_required "
             "FROM hotels WHERE id = $1",
             hotel_id,
         )

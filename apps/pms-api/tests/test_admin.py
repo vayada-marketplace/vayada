@@ -2,9 +2,11 @@
 Tests for /admin endpoints — hotel registration, setup status, room CRUD, booking management.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from app.database import Database
 
 from tests.conftest import (
     create_test_booking,
@@ -1296,6 +1298,31 @@ class TestAdminBookings:
         assert charged.status_code == 200
         assert charged.json()["totalAmount"] == 625
         assert charged.json()["paymentStatus"] == "unpaid"
+
+    async def test_mark_paid_sends_bank_transfer_final_confirmation(
+        self, client, hotel_with_booking
+    ):
+        user = hotel_with_booking["user"]
+        booking = hotel_with_booking["booking"]
+        await Database.execute(
+            "UPDATE bookings SET payment_method = 'bank_transfer', payment_status = 'awaiting_transfer' WHERE id = $1",
+            booking["id"],
+        )
+        sent = []
+
+        async def fake_send(guest_email, sent_booking):
+            sent.append((guest_email, sent_booking["booking_reference"]))
+
+        with patch("app.routers.admin_bookings.send_guest_confirmation", side_effect=fake_send):
+            resp = await client.post(
+                f"/admin/bookings/{booking['id']}/mark-paid",
+                headers=get_auth_headers(user["token"]),
+            )
+            await asyncio.sleep(0)
+
+        assert resp.status_code == 200
+        assert resp.json()["paymentStatus"] == "captured"
+        assert sent == [(booking["guest_email"], booking["booking_reference"])]
 
     async def test_invalid_booking_status(self, client, hotel_with_booking):
         user = hotel_with_booking["user"]

@@ -164,6 +164,13 @@ export interface RoomCreate {
   sortOrder?: number;
 }
 
+export interface LocationSuggestion {
+  id: string;
+  label: string;
+  latitude: number;
+  longitude: number;
+}
+
 export const individualRoomsService = {
   list: () => pmsClient.get<Room[]>("/admin/rooms"),
 
@@ -184,6 +191,12 @@ export const benefitsService = {
 
 export const roomsService = {
   list: () => pmsClient.get<RoomType[]>("/admin/room-types"),
+
+  searchLocations: (query: string, options?: RequestInit) =>
+    pmsClient.get<{ results: LocationSuggestion[] }>(
+      `/admin/geocode/search?q=${encodeURIComponent(query)}`,
+      options,
+    ),
 
   get: (id: string) => pmsClient.get<RoomType>(`/admin/room-types/${id}`),
 
