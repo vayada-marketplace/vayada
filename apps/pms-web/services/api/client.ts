@@ -10,7 +10,11 @@ const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
 export function isNextApiTarget(
   apiBaseUrl = process.env.NEXT_PUBLIC_AUTH_API_URL || API_BASE_URL,
 ): boolean {
-  return apiBaseUrl.includes("next-api.vayada.com");
+  try {
+    return new URL(apiBaseUrl).hostname === "next-api.vayada.com";
+  } catch {
+    return false;
+  }
 }
 
 export const omitHotelContext: RequestInit = {
