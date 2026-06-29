@@ -6574,14 +6574,6 @@ describe("vayada-api", () => {
           propertyState.check_in_time = values?.[6] as string;
           propertyState.check_out_time = values?.[7] as string;
           propertyState.cancellation_policy_text = values?.[8] as string;
-          state.default_currency = values?.[9] as string;
-          state.default_language = values?.[10] as string;
-          state.supported_currencies = values?.[12] as string[];
-          state.supported_languages = values?.[13] as string[];
-          state.special_requests_enabled = values?.[14] as boolean;
-          state.arrival_time_enabled = values?.[15] as boolean;
-          state.guest_count_enabled = values?.[16] as boolean;
-          propertyState.accepted_payment_methods = values?.[17] as string[];
           return {
             rows: [
               {
@@ -6711,20 +6703,9 @@ describe("vayada-api", () => {
         country: "AT",
         instagram: "https://instagram.com/target-alpenrose",
         facebook: "https://facebook.com/target-alpenrose",
-        default_currency: "EUR",
-        default_language: "en",
-        supported_currencies: ["CHF", "EUR"],
-        supported_languages: ["de", "en"],
         check_in_time: "14:00",
         check_out_time: "10:00",
-        special_requests_enabled: true,
-        arrival_time_enabled: false,
-        guest_count_enabled: false,
         cancellation_policy_text: "Target cancellation policy.",
-        pay_at_property_enabled: true,
-        pay_at_hotel_methods: ["cash", "card"],
-        online_card_payment: true,
-        bank_transfer: true,
       },
     });
     expect(propertyPatchResponse.statusCode).toBe(200);
@@ -6733,14 +6714,12 @@ describe("vayada-api", () => {
       reservation_email: "target@alpenrose.example",
       address: "Target lane 1",
       city: "Vienna",
-      default_currency: "EUR",
-      default_language: "en",
-      supported_currencies: ["CHF"],
-      supported_languages: ["de"],
+      default_currency: "CHF",
+      default_language: "de",
       pay_at_property_enabled: true,
-      pay_at_hotel_methods: ["cash", "card"],
-      online_card_payment: true,
-      bank_transfer: true,
+      pay_at_hotel_methods: ["card"],
+      online_card_payment: false,
+      bank_transfer: false,
       cancellation_policy_text: "Target cancellation policy.",
     });
 
