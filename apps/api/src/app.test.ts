@@ -6729,6 +6729,9 @@ describe("vayada-api", () => {
     expect(propertyUpdateQuery?.text).toContain("'city', $4::text");
     expect(propertyUpdateQuery?.text).toContain("'countryCode', $5::text");
     expect(propertyUpdateQuery?.text).toContain("'cancellationSummary', $9::text");
+    expect(propertyUpdateQuery?.text).toContain("default_locale = $10");
+    expect(propertyUpdateQuery?.text).toContain("supported_locales = $11::text[]");
+    expect(propertyUpdateQuery?.text).not.toContain("$12");
 
     const cases = [
       {
