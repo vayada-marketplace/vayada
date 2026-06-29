@@ -78,6 +78,8 @@ const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2
 const PROPERTY_MAP_CENTERING_UNAVAILABLE =
   "Automatic property map centering is not available on next-api yet.";
 const BILLING_PLAN_SWITCH_UNAVAILABLE = "Billing plan switching is not available on next-api yet.";
+const PAYMENT_SETTINGS_UNAVAILABLE =
+  "Billing and payment settings are not available on next-api yet.";
 
 function readBookingHotelId(settings: PropertySettings): string {
   if (settings.id?.trim()) return settings.id.trim();
@@ -193,27 +195,9 @@ function buildNextApiSettingsUpdate(
   }
 
   if (section === "billing") {
-    if (settings.paypal_enabled) {
-      return { ok: false, message: "PayPal settings are not available on next-api yet." };
-    }
-    if (
-      (settings.payout_account_holder || "").trim() ||
-      (settings.payout_iban || "").trim() ||
-      (settings.payout_account_number || "").trim() ||
-      (settings.payout_bank_name || "").trim() ||
-      (settings.payout_swift || "").trim()
-    ) {
-      return { ok: false, message: "Payout details are not available on next-api yet." };
-    }
     return {
-      ok: true,
-      data: {
-        default_currency: settings.default_currency,
-        pay_at_property_enabled: settings.pay_at_property_enabled,
-        pay_at_hotel_methods: settings.pay_at_hotel_methods,
-        online_card_payment: settings.online_card_payment,
-        bank_transfer: settings.bank_transfer,
-      },
+      ok: false,
+      message: PAYMENT_SETTINGS_UNAVAILABLE,
     };
   }
 
@@ -423,6 +407,10 @@ export default function SettingsPage() {
     setPaymentError("");
     setPaymentSuccess("");
     try {
+      if (isNextApiTarget()) {
+        setPaymentError(PAYMENT_SETTINGS_UNAVAILABLE);
+        return false;
+      }
       if (!paymentSettingsLoaded) {
         setPaymentError("Payment settings did not load. Refresh before saving payments.");
         return false;

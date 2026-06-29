@@ -1116,66 +1116,6 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE = `
         policy_source_owner = EXCLUDED.policy_source_owner,
         updated_at = now()
     RETURNING property_id
-  ),
-  upserted_settings AS (
-    INSERT INTO booking.booking_settings (
-      property_id,
-      default_currency,
-      default_language,
-      supported_currencies,
-      supported_languages,
-      special_requests_enabled,
-      arrival_time_enabled,
-      guest_count_enabled,
-      updated_at
-    )
-    SELECT
-      target_property.property_id,
-      $10,
-      $11,
-      $13::text[],
-      $14::text[],
-      $15,
-      $16,
-      $17,
-      now()
-    FROM target_property
-    ON CONFLICT (property_id) DO UPDATE
-    SET default_currency = EXCLUDED.default_currency,
-        default_language = EXCLUDED.default_language,
-        supported_currencies = EXCLUDED.supported_currencies,
-        supported_languages = EXCLUDED.supported_languages,
-        special_requests_enabled = EXCLUDED.special_requests_enabled,
-        arrival_time_enabled = EXCLUDED.arrival_time_enabled,
-        guest_count_enabled = EXCLUDED.guest_count_enabled,
-        updated_at = now()
-    RETURNING property_id
-  ),
-  upserted_finance AS (
-    INSERT INTO finance.payment_settings (
-      property_id,
-      payments_enabled,
-      accepted_methods,
-      default_currency,
-      source_system,
-      source_settings_id,
-      updated_at
-    )
-    SELECT
-      target_property.property_id,
-      cardinality($18::text[]) > 0,
-      $18::text[],
-      $10,
-      'booking',
-      $1,
-      now()
-    FROM target_property
-    ON CONFLICT (property_id) DO UPDATE
-    SET payments_enabled = EXCLUDED.payments_enabled,
-        accepted_methods = EXCLUDED.accepted_methods,
-        default_currency = EXCLUDED.default_currency,
-        updated_at = now()
-    RETURNING property_id
   )
   SELECT source_link_status.source_link_count,
          target_property.property_id::text AS id
