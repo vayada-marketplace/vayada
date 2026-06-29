@@ -4533,6 +4533,47 @@ describe("vayada-api", () => {
     expect(queries[0]!.values).toEqual(["booking_hotel_alpenrose"]);
   });
 
+  it("resolves booking custom-domain target property ids from direct property UUIDs", async () => {
+    const propertyId = "43303cea-963c-445a-9522-a05145fe0918";
+    const queries: Array<{ text: string; values?: readonly unknown[] }> = [];
+    const pool: BookingCustomDomainPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ) {
+        queries.push({ text, values });
+        return {
+          rows: [
+            {
+              hotelId: propertyId,
+              propertyId,
+              domain: null,
+              verificationStatus: null,
+              verifiedAt: null,
+              updatedAt: null,
+            } as unknown as T,
+          ],
+        };
+      },
+      async end() {},
+    };
+    const repository = createTargetBookingCustomDomainRepository({
+      connectionString: "postgres://target",
+      pool,
+    });
+
+    await expect(repository.findByBookingHotelId(propertyId)).resolves.toMatchObject({
+      hotelId: propertyId,
+      propertyId,
+      domain: null,
+    });
+
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.text).toContain("hotel_catalog.properties");
+    expect(queries[0]!.text).toContain("property.id::text = $1");
+    expect(queries[0]!.values).toEqual([propertyId]);
+  });
+
   it("lists booking add-on items with the typed target route", async () => {
     app = buildAuthenticatedApp();
 
