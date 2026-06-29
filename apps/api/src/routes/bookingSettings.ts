@@ -988,8 +988,8 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE = `
   updated_property AS (
     UPDATE hotel_catalog.properties property
     SET display_name = $2,
-        default_locale = $11,
-        supported_locales = $12::text[],
+        default_locale = $10,
+        supported_locales = $11::text[],
         updated_at = now()
     FROM target_property
     WHERE property.id = target_property.property_id
@@ -998,8 +998,8 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE = `
   updated_public_profile AS (
     UPDATE hotel_catalog.property_public_profile_read_model profile
     SET display_name = $2,
-        default_locale = $11,
-        supported_locales = $12::text[],
+        default_locale = $10,
+        supported_locales = $11::text[],
         location = jsonb_strip_nulls(jsonb_build_object(
           'rawMarketplaceLocation', $3::text,
           'city', $4::text,
@@ -1212,12 +1212,7 @@ function targetPropertySettingsWriteValues(
   current: BookingPropertySettingsReadModel,
   update: UpdateBookingPropertySettingsBody,
 ): readonly unknown[] {
-  const defaultCurrency = update.defaultCurrency ?? current.defaultCurrency ?? "EUR";
   const defaultLanguage = update.defaultLanguage ?? current.defaultLanguage ?? "en";
-  const supportedCurrencies = withoutDefaultCode(
-    update.supportedCurrencies ?? parseStringList(current.supportedCurrencies, []),
-    defaultCurrency,
-  );
   const supportedLanguages = withoutDefaultCode(
     update.supportedLanguages ?? parseStringList(current.supportedLanguages, []),
     defaultLanguage,
@@ -1247,15 +1242,8 @@ function targetPropertySettingsWriteValues(
         ? update.cancellationPolicyText
         : current.cancellationPolicyText,
     ),
-    defaultCurrency,
     defaultLanguage,
     propertySupportedLocales,
-    supportedCurrencies,
-    supportedLanguages,
-    update.specialRequestsEnabled ?? current.specialRequestsEnabled ?? true,
-    update.arrivalTimeEnabled ?? current.arrivalTimeEnabled ?? false,
-    update.guestCountEnabled ?? current.guestCountEnabled ?? false,
-    update.acceptedPaymentMethods ?? parseStringList(current.acceptedPaymentMethods, []),
   ];
 }
 
