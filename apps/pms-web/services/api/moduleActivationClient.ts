@@ -7,11 +7,16 @@ import {
 } from "@vayada/feature-hub";
 
 import { isNextApiTarget } from "./client";
+import { pmsOperationsClient, pmsOperationsRequestOptions } from "./pmsOperationsClient";
+import { resolveSelectedPmsPropertyId } from "./pmsPropertyClient";
 import { pmsClient } from "./pmsClient";
 
 const PMS_BASE_URL = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
-// The next API does not expose the legacy PMS module-activation route yet.
-// Fail closed until the target backend has a per-property source of truth.
+
+function moduleActivationsEndpoint(propertyId: string, moduleId?: string): string {
+  const base = `/api/pms/properties/${encodeURIComponent(propertyId)}/module-activations`;
+  return moduleId ? `${base}/${encodeURIComponent(moduleId)}` : base;
+}
 
 function isHotelContextMismatch(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -36,34 +41,26 @@ async function retryWithoutStaleHotelContext<T>(request: () => Promise<T>): Prom
   }
 }
 
-function selectedHotelId(): string {
-  if (typeof window === "undefined") return "default";
-  return window.localStorage.getItem("selectedHotelId") || "default";
-}
-
-function nextStackActivations(): ModuleActivationsResponse {
-  return {
-    hotelId: selectedHotelId(),
-    activeModules: [],
-    activations: [],
-  };
-}
-
 export const moduleActivationClient: FeatureActivationClient = {
-  list: () => {
+  list: async () => {
     if (isNextApiTarget(PMS_BASE_URL)) {
-      return Promise.resolve(nextStackActivations());
+      const propertyId = await resolveSelectedPmsPropertyId("loading module activations");
+      return pmsOperationsClient.get<ModuleActivationsResponse>(
+        moduleActivationsEndpoint(propertyId),
+        pmsOperationsRequestOptions,
+      );
     }
     return retryWithoutStaleHotelContext(() =>
       pmsClient.get<ModuleActivationsResponse>("/admin/module-activations"),
     );
   },
-  update: (moduleId: string, isActive: boolean) => {
+  update: async (moduleId: string, isActive: boolean) => {
     if (isNextApiTarget(PMS_BASE_URL)) {
-      return Promise.reject(
-        new Error(
-          `Module activation update for ${moduleId} is not supported when PMS API URL targets next-api.`,
-        ),
+      const propertyId = await resolveSelectedPmsPropertyId("updating module activations");
+      return pmsOperationsClient.patch<ModuleActivation>(
+        moduleActivationsEndpoint(propertyId, moduleId),
+        { moduleId, isActive },
+        pmsOperationsRequestOptions,
       );
     }
     return retryWithoutStaleHotelContext(() =>

@@ -106,6 +106,10 @@ import {
   type PlatformAdminDashboardRepository,
 } from "./routes/platform/admin/dashboard/bookingCompatible.js";
 import { registerPmsOperationsRoutes } from "./routes/pmsOperations.js";
+import {
+  registerPmsModuleActivationRoutes,
+  type PmsModuleActivationRepository,
+} from "./routes/pmsModuleActivations.js";
 
 export type ApiAuthOptions = Omit<BackendAuthPluginOptions, "authorizationResolver"> & {
   rolePermissionRepository: RolePermissionRepository;
@@ -120,6 +124,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   providerWebhooks?: ProviderWebhookRoutesOptions;
   bookingReservationsRepository?: BookingReservationsReadRepository;
   pmsOperationsRepository?: PmsOperationsReadRepository;
+  pmsModuleActivationRepository?: PmsModuleActivationRepository;
   pmsCheckoutChargeMarkPaidFreezeEnabled?: boolean;
   pmsOperationsCommandRepository?: PmsOperationsCommandRepository;
   bookingGuestPiiPort?: BookingGuestPiiPort;
@@ -330,6 +335,13 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
       checkoutChargeMarkPaidFreezeEnabled: options.pmsCheckoutChargeMarkPaidFreezeEnabled,
       commandRepository: options.pmsOperationsCommandRepository,
       bookingGuestPiiPort: options.bookingGuestPiiPort,
+      allowedOrigins: options.pmsOperationsAllowedOrigins,
+    });
+  }
+  if (options.pmsModuleActivationRepository) {
+    app.register(registerPmsModuleActivationRoutes, {
+      prefix: "/api/pms",
+      repository: options.pmsModuleActivationRepository,
       allowedOrigins: options.pmsOperationsAllowedOrigins,
     });
   }
