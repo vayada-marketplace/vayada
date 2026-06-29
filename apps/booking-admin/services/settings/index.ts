@@ -189,6 +189,17 @@ async function getTargetPropertySettings(): Promise<PropertySettings> {
   );
 }
 
+async function updateTargetPropertySettings(
+  data: PropertySettingsUpdate,
+): Promise<PropertySettings> {
+  const hotelId = await resolveBookingHotelId();
+  return apiClient.patch<PropertySettings>(
+    `/api/booking/hotels/${encodeURIComponent(hotelId)}/settings/property`,
+    data,
+    omitHotelContext,
+  );
+}
+
 export interface SetupPrefillData {
   property_name?: string;
   reservation_email?: string;
@@ -302,7 +313,7 @@ export const settingsService = {
 
   updatePropertySettings: (data: PropertySettingsUpdate) =>
     isAuthKitLoginEnabled() && isNextApiTarget()
-      ? Promise.reject(new Error("Property settings save is not available on next-api yet."))
+      ? updateTargetPropertySettings(data)
       : apiClient.patch<PropertySettings>("/admin/settings/property", data),
 
   // Explicit create endpoint for the setup wizard — unlike

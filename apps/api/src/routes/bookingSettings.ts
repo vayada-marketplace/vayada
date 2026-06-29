@@ -146,6 +146,12 @@ export const BOOKING_LAST_MINUTE_SETTINGS_WRITE_CONTRACT = {
   method: "PUT",
 } as const;
 
+export const BOOKING_PROPERTY_SETTINGS_WRITE_CONTRACT = {
+  ...BOOKING_HOTEL_PROPERTY_LINK_CONTRACT,
+  method: "PATCH",
+  path: "/api/booking/hotels/:hotelId/settings/property",
+} as const;
+
 export type BookingAddonSettingsReadModel = {
   showAddonsStep?: boolean | null;
   groupAddonsByCategory?: boolean | null;
@@ -304,7 +310,34 @@ export type UpdateBookingLastMinuteSettingsBody = Omit<
   "updatedAt"
 >;
 
+export type UpdateBookingPropertySettingsBody = {
+  propertyName?: string;
+  reservationEmail?: string | null;
+  phoneNumber?: string | null;
+  whatsappNumber?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+  defaultCurrency?: string;
+  defaultLanguage?: string;
+  supportedCurrencies?: string[];
+  supportedLanguages?: string[];
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  specialRequestsEnabled?: boolean;
+  arrivalTimeEnabled?: boolean;
+  guestCountEnabled?: boolean;
+  cancellationPolicyText?: string | null;
+  acceptedPaymentMethods?: string[];
+};
+
 export type BookingSettingsWriteRepository = {
+  updatePropertySettingsByHotelId?(
+    hotelId: string,
+    settings: UpdateBookingPropertySettingsBody,
+  ): Promise<BookingPropertySettingsReadModel | null>;
   updateAddonSettingsByHotelId(
     hotelId: string,
     settings: UpdateBookingAddonSettingsBody,
@@ -574,6 +607,10 @@ export type UpdateBookingLastMinuteSettingsRequest = BookingLastMinuteSettingsRe
   body: UpdateBookingLastMinuteSettingsBody;
 };
 
+export type UpdateBookingPropertySettingsRequest = BookingAddonSettingsRequest & {
+  body: UpdateBookingPropertySettingsBody;
+};
+
 export type BookingAddonSettingsContract = {
   method: typeof BOOKING_ADDON_SETTINGS_CONTRACT.method;
   path: typeof BOOKING_ADDON_SETTINGS_CONTRACT.path;
@@ -678,6 +715,14 @@ export type UpdateBookingLastMinuteSettingsContract = {
   error: BookingSettingsWriteError;
 };
 
+export type UpdateBookingPropertySettingsContract = {
+  method: typeof BOOKING_PROPERTY_SETTINGS_WRITE_CONTRACT.method;
+  path: typeof BOOKING_PROPERTY_SETTINGS_WRITE_CONTRACT.path;
+  request: UpdateBookingPropertySettingsRequest;
+  response: BookingPropertySettingsResponse;
+  error: BookingSettingsWriteError;
+};
+
 type BookingHotelParams = {
   hotelId: string;
 };
@@ -771,6 +816,11 @@ type TargetBookingPropertyLinkQueryRow = {
   propertyId: string | null;
   pmsProperty: boolean;
   financeProperty: boolean;
+};
+
+type TargetBookingPropertySettingsUpdateRow = {
+  source_link_count: number | string;
+  id: string | null;
 };
 
 const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
@@ -927,6 +977,213 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
   WHERE source_link_status.source_link_count > 0
 `;
 
+const TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE = `
+  ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE},
+  target_property AS (
+    SELECT source_link_status.property_id
+    FROM source_link_status
+    WHERE source_link_status.source_link_count = 1
+      AND source_link_status.property_id IS NOT NULL
+  ),
+  updated_property AS (
+    UPDATE hotel_catalog.properties property
+    SET display_name = $2,
+        default_locale = $11,
+        supported_locales = $12::text[],
+        updated_at = now()
+    FROM target_property
+    WHERE property.id = target_property.property_id
+    RETURNING property.id
+  ),
+  updated_public_profile AS (
+    UPDATE hotel_catalog.property_public_profile_read_model profile
+    SET display_name = $2,
+        default_locale = $11,
+        supported_locales = $12::text[],
+        location = jsonb_strip_nulls(jsonb_build_object(
+          'rawMarketplaceLocation', $3,
+          'city', $4,
+          'countryCode', $5
+        )),
+        public_contacts = (
+          SELECT COALESCE(
+            jsonb_agg(
+              jsonb_build_object('type', contact.channel_type, 'value', contact.value)
+              ORDER BY contact.channel_type, contact.value
+            ),
+            '[]'::jsonb
+          )
+          FROM jsonb_to_recordset($6::jsonb) AS contact(channel_type text, value text)
+          WHERE NULLIF(contact.value, '') IS NOT NULL
+        ),
+        public_policy = jsonb_strip_nulls(jsonb_build_object(
+          'checkInTime', $7,
+          'checkOutTime', $8,
+          'cancellationSummary', $9
+        )),
+        projected_at = now()
+    FROM target_property
+    WHERE profile.property_id = target_property.property_id
+    RETURNING profile.property_id
+  ),
+  upserted_location AS (
+    INSERT INTO hotel_catalog.property_locations (
+      property_id,
+      raw_marketplace_location,
+      city,
+      country_code,
+      address_public,
+      source_confidence,
+      updated_at
+    )
+    SELECT
+      target_property.property_id,
+      $3,
+      $4,
+      NULLIF($5::text, '')::char(2),
+      TRUE,
+      'high',
+      now()
+    FROM target_property
+    ON CONFLICT (property_id) DO UPDATE
+    SET raw_marketplace_location = EXCLUDED.raw_marketplace_location,
+        city = EXCLUDED.city,
+        country_code = EXCLUDED.country_code,
+        address_public = TRUE,
+        source_confidence = EXCLUDED.source_confidence,
+        updated_at = now()
+    RETURNING property_id
+  ),
+  deleted_contacts AS (
+    DELETE FROM hotel_catalog.property_contact_channels contact
+    USING target_property
+    WHERE contact.property_id = target_property.property_id
+      AND contact.channel_type = ANY(
+        ARRAY['email', 'phone', 'whatsapp', 'instagram', 'facebook']::text[]
+      )
+    RETURNING contact.property_id
+  ),
+  contact_input AS (
+    SELECT target_property.property_id, contact.channel_type, contact.value
+    FROM target_property
+    JOIN jsonb_to_recordset($6::jsonb) AS contact(channel_type text, value text) ON TRUE
+  ),
+  upserted_contacts AS (
+    INSERT INTO hotel_catalog.property_contact_channels (
+      property_id,
+      channel_type,
+      value,
+      is_public,
+      source_system,
+      updated_at
+    )
+    SELECT
+      contact_input.property_id,
+      contact_input.channel_type,
+      contact_input.value,
+      TRUE,
+      'booking',
+      now()
+    FROM contact_input
+    WHERE NULLIF(contact_input.value, '') IS NOT NULL
+    ON CONFLICT (property_id, channel_type, value) DO UPDATE
+    SET is_public = TRUE,
+        source_system = EXCLUDED.source_system,
+        updated_at = now()
+    RETURNING property_id
+  ),
+  upserted_policy AS (
+    INSERT INTO hotel_catalog.property_policy_summaries (
+      property_id,
+      check_in_time,
+      check_out_time,
+      cancellation_summary,
+      policy_source_owner,
+      updated_at
+    )
+    SELECT
+      target_property.property_id,
+      NULLIF($7::text, '')::time,
+      NULLIF($8::text, '')::time,
+      $9,
+      'booking',
+      now()
+    FROM target_property
+    ON CONFLICT (property_id) DO UPDATE
+    SET check_in_time = EXCLUDED.check_in_time,
+        check_out_time = EXCLUDED.check_out_time,
+        cancellation_summary = EXCLUDED.cancellation_summary,
+        policy_source_owner = EXCLUDED.policy_source_owner,
+        updated_at = now()
+    RETURNING property_id
+  ),
+  upserted_settings AS (
+    INSERT INTO booking.booking_settings (
+      property_id,
+      default_currency,
+      default_language,
+      supported_currencies,
+      supported_languages,
+      special_requests_enabled,
+      arrival_time_enabled,
+      guest_count_enabled,
+      updated_at
+    )
+    SELECT
+      target_property.property_id,
+      $10,
+      $11,
+      $13::text[],
+      $14::text[],
+      $15,
+      $16,
+      $17,
+      now()
+    FROM target_property
+    ON CONFLICT (property_id) DO UPDATE
+    SET default_currency = EXCLUDED.default_currency,
+        default_language = EXCLUDED.default_language,
+        supported_currencies = EXCLUDED.supported_currencies,
+        supported_languages = EXCLUDED.supported_languages,
+        special_requests_enabled = EXCLUDED.special_requests_enabled,
+        arrival_time_enabled = EXCLUDED.arrival_time_enabled,
+        guest_count_enabled = EXCLUDED.guest_count_enabled,
+        updated_at = now()
+    RETURNING property_id
+  ),
+  upserted_finance AS (
+    INSERT INTO finance.payment_settings (
+      property_id,
+      payments_enabled,
+      accepted_methods,
+      default_currency,
+      source_system,
+      source_settings_id,
+      updated_at
+    )
+    SELECT
+      target_property.property_id,
+      cardinality($18::text[]) > 0,
+      $18::text[],
+      $10,
+      'booking',
+      $1,
+      now()
+    FROM target_property
+    ON CONFLICT (property_id) DO UPDATE
+    SET payments_enabled = EXCLUDED.payments_enabled,
+        accepted_methods = EXCLUDED.accepted_methods,
+        default_currency = EXCLUDED.default_currency,
+        updated_at = now()
+    RETURNING property_id
+  )
+  SELECT source_link_status.source_link_count,
+         target_property.property_id::text AS id
+  FROM source_link_status
+  LEFT JOIN target_property ON TRUE
+  WHERE source_link_status.source_link_count > 0
+`;
+
 function toTargetAddonSettings(row: TargetBookingSettingsRow): BookingAddonSettingsReadModel {
   return {
     showAddonsStep: row.show_addons_step,
@@ -1009,6 +1266,97 @@ function toTargetPropertySettings(
     cancellationPolicyText: row.cancellation_policy_text,
     acceptedPaymentMethods: row.accepted_payment_methods,
   };
+}
+
+function targetPropertySettingsWriteValues(
+  current: BookingPropertySettingsReadModel,
+  update: UpdateBookingPropertySettingsBody,
+): readonly unknown[] {
+  const defaultCurrency = update.defaultCurrency ?? current.defaultCurrency ?? "EUR";
+  const defaultLanguage = update.defaultLanguage ?? current.defaultLanguage ?? "en";
+  const supportedCurrencies = withoutDefaultCode(
+    update.supportedCurrencies ?? parseStringList(current.supportedCurrencies, []),
+    defaultCurrency,
+  );
+  const supportedLanguages = withoutDefaultCode(
+    update.supportedLanguages ?? parseStringList(current.supportedLanguages, []),
+    defaultLanguage,
+  );
+  const propertySupportedLocales = withDefaultCode(defaultLanguage, supportedLanguages);
+  const contacts = targetPropertyContactInputs({
+    reservationEmail:
+      update.reservationEmail !== undefined ? update.reservationEmail : current.reservationEmail,
+    phoneNumber: update.phoneNumber !== undefined ? update.phoneNumber : current.phoneNumber,
+    whatsappNumber:
+      update.whatsappNumber !== undefined ? update.whatsappNumber : current.whatsappNumber,
+    instagram: update.instagram !== undefined ? update.instagram : current.instagram,
+    facebook: update.facebook !== undefined ? update.facebook : current.facebook,
+  });
+
+  return [
+    normalizedRequiredText(update.propertyName ?? current.propertyName, "Property"),
+    nullableText(update.address !== undefined ? update.address : current.address),
+    nullableText(update.city !== undefined ? update.city : current.city),
+    nullableText(update.country !== undefined ? update.country : current.country)?.toUpperCase() ??
+      null,
+    JSON.stringify(contacts),
+    nullableText(update.checkInTime !== undefined ? update.checkInTime : current.checkInTime),
+    nullableText(update.checkOutTime !== undefined ? update.checkOutTime : current.checkOutTime),
+    nullableText(
+      update.cancellationPolicyText !== undefined
+        ? update.cancellationPolicyText
+        : current.cancellationPolicyText,
+    ),
+    defaultCurrency,
+    defaultLanguage,
+    propertySupportedLocales,
+    supportedCurrencies,
+    supportedLanguages,
+    update.specialRequestsEnabled ?? current.specialRequestsEnabled ?? true,
+    update.arrivalTimeEnabled ?? current.arrivalTimeEnabled ?? false,
+    update.guestCountEnabled ?? current.guestCountEnabled ?? false,
+    update.acceptedPaymentMethods ?? parseStringList(current.acceptedPaymentMethods, []),
+  ];
+}
+
+function targetPropertyContactInputs(input: {
+  reservationEmail?: string | null;
+  phoneNumber?: string | null;
+  whatsappNumber?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+}): { channel_type: string; value: string }[] {
+  const contacts: [string, string | null | undefined][] = [
+    ["email", input.reservationEmail],
+    ["phone", input.phoneNumber],
+    ["whatsapp", input.whatsappNumber],
+    ["instagram", input.instagram],
+    ["facebook", input.facebook],
+  ];
+
+  return contacts.flatMap(([channelType, value]) => {
+    const text = nullableText(value);
+    return text ? [{ channel_type: channelType, value: text }] : [];
+  });
+}
+
+function nullableText(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function normalizedRequiredText(value: string | null | undefined, fallback: string): string {
+  return nullableText(value) ?? fallback;
+}
+
+function withoutDefaultCode(codes: readonly string[], defaultCode: string): string[] {
+  return [...new Set(codes.map((code) => code.trim()).filter(Boolean))].filter(
+    (code) => code !== defaultCode,
+  );
+}
+
+function withDefaultCode(defaultCode: string, extraCodes: readonly string[]): string[] {
+  return [defaultCode, ...withoutDefaultCode(extraCodes, defaultCode)];
 }
 
 export function createPgBookingSettingsReadRepository(config: {
@@ -1385,6 +1733,23 @@ export function createPgTargetBookingSettingsRepository(config: {
       return findPropertyLink(hotelId);
     },
     async findPropertySettingsByHotelId(hotelId) {
+      return findPropertySettings(hotelId);
+    },
+    async updatePropertySettingsByHotelId(hotelId, settings) {
+      const current = await findPropertySettings(hotelId);
+      if (!current) return null;
+      const result = await pool.query<TargetBookingPropertySettingsUpdateRow>(
+        TARGET_BOOKING_PROPERTY_SETTINGS_UPDATE,
+        [hotelId, ...targetPropertySettingsWriteValues(current, settings)],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      if (Number(row.source_link_count) > 1) {
+        throw new Error(
+          `Duplicate active canonical booking hotel source links found for booking hotel ${hotelId}`,
+        );
+      }
+      if (!row.id) return null;
       return findPropertySettings(hotelId);
     },
     async findAddonSettingsByHotelId(hotelId) {
@@ -1864,6 +2229,23 @@ export async function registerBookingSettingsRoutes(
 
   if (!writeRepository) return;
 
+  app.patch<{ Params: BookingHotelParams; Body: unknown }>(
+    "/hotels/:hotelId/settings/property",
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parsePropertySettingsWriteBody,
+        write: (hotelId, settings) => {
+          if (!writeRepository.updatePropertySettingsByHotelId) {
+            throw new Error("Booking property settings write model is unavailable.");
+          }
+          return writeRepository.updatePropertySettingsByHotelId(hotelId, settings);
+        },
+        toResponse: toPropertySettingsResponse,
+      }),
+  );
+
   app.put<{ Params: BookingHotelParams; Body: unknown }>(
     "/hotels/:hotelId/settings/addons",
     async (request, reply) =>
@@ -2022,6 +2404,77 @@ async function handleBookingSettingsWrite<TBody, TStored>(input: {
   await input.afterWrite?.(hotelId, parsed.value, stored, input.request);
 
   return input.toResponse(stored);
+}
+
+function parsePropertySettingsWriteBody(
+  body: unknown,
+): ValidationResult<UpdateBookingPropertySettingsBody> {
+  if (!isPlainRecord(body)) {
+    return { ok: false, details: ["body must be an object."] };
+  }
+
+  const details: string[] = [];
+  const value: UpdateBookingPropertySettingsBody = {};
+  const propertyName = expectOptionalRequiredString(body, "property_name", details);
+  if (propertyName !== undefined) value.propertyName = propertyName;
+  assignOptionalNullableString(value, "reservationEmail", body, "reservation_email", details);
+  assignOptionalNullableString(value, "phoneNumber", body, "phone_number", details);
+  assignOptionalNullableString(value, "whatsappNumber", body, "whatsapp_number", details);
+  assignOptionalNullableString(value, "address", body, "address", details);
+  assignOptionalNullableString(value, "city", body, "city", details);
+  assignOptionalNullableString(value, "instagram", body, "instagram", details);
+  assignOptionalNullableString(value, "facebook", body, "facebook", details);
+
+  const country = expectOptionalNullableString(body, "country", details);
+  if (country !== undefined) {
+    const normalizedCountry = country?.toUpperCase() ?? null;
+    if (normalizedCountry && !/^[A-Z]{2}$/.test(normalizedCountry)) {
+      details.push("country must be a two-letter country code.");
+    }
+    value.country = normalizedCountry;
+  }
+
+  const defaultCurrency = expectOptionalCurrencyCode(body, "default_currency", details);
+  if (defaultCurrency !== undefined) value.defaultCurrency = defaultCurrency;
+  const defaultLanguage = expectOptionalLanguageCode(body, "default_language", details);
+  if (defaultLanguage !== undefined) value.defaultLanguage = defaultLanguage;
+  const supportedCurrencies = expectOptionalCurrencyList(body, "supported_currencies", details);
+  if (supportedCurrencies !== undefined) {
+    value.supportedCurrencies =
+      defaultCurrency === undefined
+        ? supportedCurrencies
+        : withoutDefaultCode(supportedCurrencies, defaultCurrency);
+  }
+  const supportedLanguages = expectOptionalLanguageList(body, "supported_languages", details);
+  if (supportedLanguages !== undefined) {
+    value.supportedLanguages =
+      defaultLanguage === undefined
+        ? supportedLanguages
+        : withoutDefaultCode(supportedLanguages, defaultLanguage);
+  }
+
+  const checkInTime = expectOptionalTime(body, "check_in_time", details);
+  if (checkInTime !== undefined) value.checkInTime = checkInTime;
+  const checkOutTime = expectOptionalTime(body, "check_out_time", details);
+  if (checkOutTime !== undefined) value.checkOutTime = checkOutTime;
+  assignOptionalBoolean(value, "specialRequestsEnabled", body, "special_requests_enabled", details);
+  assignOptionalBoolean(value, "arrivalTimeEnabled", body, "arrival_time_enabled", details);
+  assignOptionalBoolean(value, "guestCountEnabled", body, "guest_count_enabled", details);
+  assignOptionalNullableString(
+    value,
+    "cancellationPolicyText",
+    body,
+    "cancellation_policy_text",
+    details,
+  );
+
+  const acceptedPaymentMethods = expectOptionalAcceptedPaymentMethods(body, details);
+  if (acceptedPaymentMethods !== undefined) {
+    value.acceptedPaymentMethods = acceptedPaymentMethods;
+  }
+
+  if (details.length > 0) return { ok: false, details };
+  return { ok: true, value };
 }
 
 function parseAddonSettingsWriteBody(
@@ -2524,6 +2977,237 @@ function normalizeLastMinuteTiers(value: unknown, details: string[]): BookingLas
   }
 
   return tiers;
+}
+
+type NullablePropertySettingsStringKey =
+  | "reservationEmail"
+  | "phoneNumber"
+  | "whatsappNumber"
+  | "address"
+  | "city"
+  | "instagram"
+  | "facebook"
+  | "cancellationPolicyText";
+
+type BooleanPropertySettingsKey =
+  | "specialRequestsEnabled"
+  | "arrivalTimeEnabled"
+  | "guestCountEnabled";
+
+function assignOptionalNullableString(
+  target: UpdateBookingPropertySettingsBody,
+  targetKey: NullablePropertySettingsStringKey,
+  record: Record<string, unknown>,
+  sourceKey: string,
+  details: string[],
+): void {
+  const value = expectOptionalNullableString(record, sourceKey, details);
+  if (value !== undefined) target[targetKey] = value;
+}
+
+function assignOptionalBoolean(
+  target: UpdateBookingPropertySettingsBody,
+  targetKey: BooleanPropertySettingsKey,
+  record: Record<string, unknown>,
+  sourceKey: string,
+  details: string[],
+): void {
+  const value = expectOptionalBoolean(record, sourceKey, details);
+  if (value !== undefined) target[targetKey] = value;
+}
+
+function expectOptionalRequiredString(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (typeof value !== "string") {
+    details.push(`${key} must be a string.`);
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    details.push(`${key} must not be empty.`);
+    return undefined;
+  }
+  return normalized;
+}
+
+function expectOptionalNullableString(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string | null | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    details.push(`${key} must be a string or null.`);
+    return undefined;
+  }
+  return nullableText(value);
+}
+
+function expectOptionalBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): boolean | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (typeof value !== "boolean") {
+    details.push(`${key} must be a boolean.`);
+    return undefined;
+  }
+  return value;
+}
+
+function expectOptionalTime(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string | null | undefined {
+  const value = expectOptionalNullableString(record, key, details);
+  if (value === undefined || value === null) return value;
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    details.push(`${key} must be a HH:MM time.`);
+  }
+  return value;
+}
+
+function expectOptionalCurrencyCode(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return normalizeCurrencyCode(expectString(record, key, details), key, details);
+}
+
+function expectOptionalLanguageCode(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  return normalizeLanguageCode(expectString(record, key, details), key, details);
+}
+
+function expectOptionalCurrencyList(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string[] | undefined {
+  return expectOptionalCodeList(record, key, details, normalizeCurrencyCode);
+}
+
+function expectOptionalLanguageList(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+): string[] | undefined {
+  return expectOptionalCodeList(record, key, details, normalizeLanguageCode);
+}
+
+function expectOptionalCodeList(
+  record: Record<string, unknown>,
+  key: string,
+  details: string[],
+  normalize: (value: string | undefined, path: string, details: string[]) => string,
+): string[] | undefined {
+  if (!Object.hasOwn(record, key)) return undefined;
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    details.push(`${key} must be an array.`);
+    return [];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  value.forEach((entry, index) => {
+    if (typeof entry !== "string") {
+      details.push(`${key}.${index} must be a string.`);
+      return;
+    }
+    const normalized = normalize(entry, `${key}.${index}`, details);
+    if (!normalized) return;
+    if (seen.has(normalized)) {
+      details.push(`${key}.${index} duplicates another code.`);
+      return;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result;
+}
+
+function expectOptionalAcceptedPaymentMethods(
+  record: Record<string, unknown>,
+  details: string[],
+): string[] | undefined {
+  const paymentKeys = [
+    "pay_at_property_enabled",
+    "pay_at_hotel_methods",
+    "online_card_payment",
+    "bank_transfer",
+  ];
+  if (!paymentKeys.some((key) => Object.hasOwn(record, key))) return undefined;
+  for (const key of paymentKeys) {
+    if (!Object.hasOwn(record, key)) {
+      details.push(`${key} is required when updating payment methods.`);
+    }
+  }
+
+  const payAtPropertyEnabled = expectOptionalBoolean(record, "pay_at_property_enabled", details);
+  const onlineCardPayment = expectOptionalBoolean(record, "online_card_payment", details);
+  const bankTransfer = expectOptionalBoolean(record, "bank_transfer", details);
+  const payAtHotelMethods = expectPayAtHotelMethods(record, details);
+  if (payAtPropertyEnabled && payAtHotelMethods.length === 0) {
+    details.push(
+      "pay_at_hotel_methods must include cash or card when pay_at_property_enabled is true.",
+    );
+  }
+
+  const methods: string[] = [];
+  if (payAtPropertyEnabled) {
+    methods.push("pay_at_property");
+    if (payAtHotelMethods.includes("cash")) methods.push("cash");
+    if (payAtHotelMethods.includes("card")) methods.push("manual_card");
+  }
+  if (onlineCardPayment) methods.push("card");
+  if (bankTransfer) methods.push("bank_transfer");
+  return [...new Set(methods)];
+}
+
+function expectPayAtHotelMethods(record: Record<string, unknown>, details: string[]): string[] {
+  const value = record.pay_at_hotel_methods;
+  if (!Array.isArray(value)) {
+    details.push("pay_at_hotel_methods must be an array.");
+    return [];
+  }
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+  value.forEach((entry, index) => {
+    if (typeof entry !== "string") {
+      details.push(`pay_at_hotel_methods.${index} must be a string.`);
+      return;
+    }
+    const normalized = entry.trim();
+    if (normalized !== "cash" && normalized !== "card") {
+      details.push(`pay_at_hotel_methods.${index} must be cash or card.`);
+      return;
+    }
+    if (seen.has(normalized)) {
+      details.push(`pay_at_hotel_methods.${index} duplicates another method.`);
+      return;
+    }
+    seen.add(normalized);
+    result.push(normalized);
+  });
+  return result;
 }
 
 function expectIntegerAtLeast(

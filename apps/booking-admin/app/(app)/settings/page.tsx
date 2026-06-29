@@ -29,6 +29,7 @@ import {
 import {
   settingsService,
   type PropertySettings,
+  type PropertySettingsUpdate,
   type CustomDomainStatus,
 } from "@/services/settings";
 import { ToggleSwitch, FeedbackAlert, PasswordField, SaveButton } from "@/components/ui";
@@ -76,8 +77,7 @@ type PmsPaymentSettingsResponse = {
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
 const PROPERTY_MAP_CENTERING_UNAVAILABLE =
   "Automatic property map centering is not available on next-api yet.";
-const PROPERTY_SETTINGS_WRITE_UNAVAILABLE =
-  "These settings are read-only on next-api until the property-settings write endpoint is available.";
+const BILLING_PLAN_SWITCH_UNAVAILABLE = "Billing plan switching is not available on next-api yet.";
 
 function readBookingHotelId(settings: PropertySettings): string {
   if (settings.id?.trim()) return settings.id.trim();
@@ -141,6 +141,91 @@ const DEFAULT_SETTINGS: PropertySettings = {
   points_of_interest: [],
 };
 
+type NextApiSettingsUpdate =
+  | { ok: true; data: PropertySettingsUpdate }
+  | { ok: false; message: string };
+
+function buildNextApiSettingsUpdate(
+  section: Section,
+  settings: PropertySettings,
+): NextApiSettingsUpdate {
+  if (section === "property") {
+    if ((settings.tiktok || "").trim() || (settings.youtube || "").trim()) {
+      return {
+        ok: false,
+        message: "TikTok and YouTube links are not available on next-api yet.",
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        property_name: settings.property_name,
+        reservation_email: settings.reservation_email,
+        phone_number: settings.phone_number,
+        whatsapp_number: settings.whatsapp_number,
+        address: settings.address,
+        city: settings.city,
+        country: settings.country,
+        instagram: settings.instagram,
+        facebook: settings.facebook,
+      },
+    };
+  }
+
+  if (section === "booking") {
+    if (
+      (settings.terms_text || "").trim() ||
+      settings.map_view_enabled ||
+      settings.refer_a_guest_enabled
+    ) {
+      return {
+        ok: false,
+        message:
+          "Terms text, map view, and refer-a-guest settings are not available on next-api yet.",
+      };
+    }
+    return {
+      ok: true,
+      data: {
+        cancellation_policy_text: settings.cancellation_policy_text,
+      },
+    };
+  }
+
+  if (section === "billing") {
+    if (settings.paypal_enabled) {
+      return { ok: false, message: "PayPal settings are not available on next-api yet." };
+    }
+    if (
+      (settings.payout_account_holder || "").trim() ||
+      (settings.payout_iban || "").trim() ||
+      (settings.payout_account_number || "").trim() ||
+      (settings.payout_bank_name || "").trim() ||
+      (settings.payout_swift || "").trim()
+    ) {
+      return { ok: false, message: "Payout details are not available on next-api yet." };
+    }
+    return {
+      ok: true,
+      data: {
+        default_currency: settings.default_currency,
+        pay_at_property_enabled: settings.pay_at_property_enabled,
+        pay_at_hotel_methods: settings.pay_at_hotel_methods,
+        online_card_payment: settings.online_card_payment,
+        bank_transfer: settings.bank_transfer,
+      },
+    };
+  }
+
+  if (section === "location") {
+    return { ok: false, message: "Location map settings are not available on next-api yet." };
+  }
+  if (section === "notifications") {
+    return { ok: false, message: "Notification settings are not available on next-api yet." };
+  }
+  return { ok: false, message: "This settings section is not saved by property settings." };
+}
+
 export default function SettingsPage() {
   const { t } = useTranslation();
   const [activeSection, setActiveSection] = useState<Section>("property");
@@ -192,10 +277,8 @@ export default function SettingsPage() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
-  const propertySettingsWriteUnavailable = isNextApiTarget();
-  const propertySettingsWriteDisabled = saving || propertySettingsWriteUnavailable;
-  const showPropertySettingsWriteNotice =
-    propertySettingsWriteUnavailable && activeSection !== "account" && activeSection !== "payments";
+  const billingPlanSwitchUnavailable = isNextApiTarget();
+  const billingPlanSwitchDisabled = saving || billingPlanSwitchUnavailable;
 
   const handleChangeEmail = async () => {
     try {
@@ -379,17 +462,20 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
-    if (propertySettingsWriteUnavailable) {
-      setFeedback({ type: "error", message: PROPERTY_SETTINGS_WRITE_UNAVAILABLE });
-      return;
-    }
-
     const paypalEmail = (settings.paypal_email || "").trim();
     const normalizedSettings =
       paypalEmail === (settings.paypal_email || "")
         ? settings
         : { ...settings, paypal_email: paypalEmail };
-    if (settings.paypal_enabled) {
+    const nextApiSettingsUpdate = isNextApiTarget()
+      ? buildNextApiSettingsUpdate(activeSection, normalizedSettings)
+      : null;
+    if (nextApiSettingsUpdate && !nextApiSettingsUpdate.ok) {
+      setFeedback({ type: "error", message: nextApiSettingsUpdate.message });
+      return;
+    }
+
+    if (!nextApiSettingsUpdate && settings.paypal_enabled) {
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(paypalEmail)) {
         setFeedback({ type: "error", message: "Enter a valid PayPal email to enable PayPal." });
         setActiveSection("billing");
@@ -426,7 +512,8 @@ export default function SettingsPage() {
     try {
       setSaving(true);
       setFeedback(null);
-      const data = await settingsService.updatePropertySettings(normalizedSettings);
+      const savePayload = nextApiSettingsUpdate ? nextApiSettingsUpdate.data : normalizedSettings;
+      const data = await settingsService.updatePropertySettings(savePayload);
       setSettings(data);
       setFeedback({ type: "success", message: t("settings.feedback.saveSuccess") });
     } catch (err: unknown) {
@@ -437,8 +524,8 @@ export default function SettingsPage() {
   };
 
   const updateBillingPendingSwitch = async (billing_pending_switch: string | null) => {
-    if (propertySettingsWriteUnavailable) {
-      setFeedback({ type: "error", message: PROPERTY_SETTINGS_WRITE_UNAVAILABLE });
+    if (billingPlanSwitchUnavailable) {
+      setFeedback({ type: "error", message: BILLING_PLAN_SWITCH_UNAVAILABLE });
       return;
     }
 
@@ -593,11 +680,6 @@ export default function SettingsPage() {
       {/* Feedback banner */}
       {feedback && (
         <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
-      )}
-      {showPropertySettingsWriteNotice && (
-        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">
-          {PROPERTY_SETTINGS_WRITE_UNAVAILABLE}
-        </div>
       )}
 
       {/* Property tab */}
@@ -773,11 +855,7 @@ export default function SettingsPage() {
 
               {/* Save button */}
               <div className="flex justify-end">
-                <SaveButton
-                  onClick={handleSave}
-                  saving={saving}
-                  disabled={propertySettingsWriteUnavailable}
-                >
+                <SaveButton onClick={handleSave} saving={saving}>
                   {t("common.save")}
                 </SaveButton>
               </div>
@@ -955,11 +1033,7 @@ export default function SettingsPage() {
 
           {/* Save button */}
           <div className="flex justify-end">
-            <SaveButton
-              onClick={handleSave}
-              saving={saving}
-              disabled={propertySettingsWriteUnavailable}
-            >
+            <SaveButton onClick={handleSave} saving={saving}>
               {t("common.save")}
             </SaveButton>
           </div>
@@ -1169,11 +1243,7 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <SaveButton
-              onClick={handleSave}
-              saving={saving}
-              disabled={propertySettingsWriteUnavailable}
-            >
+            <SaveButton onClick={handleSave} saving={saving}>
               {t("common.save")}
             </SaveButton>
           </div>
@@ -1225,11 +1295,7 @@ export default function SettingsPage() {
 
           {/* Save button */}
           <div className="flex justify-end">
-            <SaveButton
-              onClick={handleSave}
-              saving={saving}
-              disabled={propertySettingsWriteUnavailable}
-            >
+            <SaveButton onClick={handleSave} saving={saving}>
               {t("common.save")}
             </SaveButton>
           </div>
@@ -1412,7 +1478,7 @@ export default function SettingsPage() {
                 !settings.billing_pending_switch && (
                   <button
                     onClick={() => updateBillingPendingSwitch("commission")}
-                    disabled={propertySettingsWriteDisabled}
+                    disabled={billingPlanSwitchDisabled}
                     className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                   >
                     {t("settings.billing.switchFromNextMonth")}
@@ -1421,7 +1487,7 @@ export default function SettingsPage() {
               {settings.billing_pending_switch === "commission" && (
                 <button
                   onClick={() => updateBillingPendingSwitch(null)}
-                  disabled={propertySettingsWriteDisabled}
+                  disabled={billingPlanSwitchDisabled}
                   className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
                   {t("settings.billing.cancelSwitch")}
@@ -1479,7 +1545,7 @@ export default function SettingsPage() {
               {settings.billing_active_plan !== "fixed" && !settings.billing_pending_switch && (
                 <button
                   onClick={() => updateBillingPendingSwitch("fixed")}
-                  disabled={propertySettingsWriteDisabled}
+                  disabled={billingPlanSwitchDisabled}
                   className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
                   {t("settings.billing.switchFromNextMonth")}
@@ -1488,7 +1554,7 @@ export default function SettingsPage() {
               {settings.billing_pending_switch === "fixed" && (
                 <button
                   onClick={() => updateBillingPendingSwitch(null)}
-                  disabled={propertySettingsWriteDisabled}
+                  disabled={billingPlanSwitchDisabled}
                   className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
                   {t("settings.billing.cancelSwitch")}
@@ -1996,11 +2062,7 @@ export default function SettingsPage() {
               </button>
             </div>
             <div className="flex justify-end pt-4">
-              <SaveButton
-                onClick={handleSave}
-                saving={saving}
-                disabled={propertySettingsWriteUnavailable}
-              >
+              <SaveButton onClick={handleSave} saving={saving}>
                 {t("common.save")}
               </SaveButton>
             </div>
@@ -2120,11 +2182,7 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <SaveButton
-                  onClick={handleSave}
-                  saving={saving}
-                  disabled={propertySettingsWriteUnavailable}
-                >
+                <SaveButton onClick={handleSave} saving={saving}>
                   {t("common.save")}
                 </SaveButton>
               </div>
