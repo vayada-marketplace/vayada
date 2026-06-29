@@ -7,6 +7,12 @@ import { clearAuthData, getAuthBearerToken } from "../auth/sessionStore";
 const API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.booking.localhost";
 const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
 
+export function isNextApiTarget(
+  apiBaseUrl = process.env.NEXT_PUBLIC_AUTH_API_URL || API_BASE_URL,
+): boolean {
+  return apiBaseUrl.includes("next-api.vayada.com");
+}
+
 export const omitHotelContext: RequestInit = {
   headers: { [OMIT_HOTEL_CONTEXT_HEADER]: "true" },
 };
