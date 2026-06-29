@@ -162,7 +162,12 @@ export default function RoomDetailModal({
   const handleSelectRate = () => {
     if (soldOut || selectRateDisabled) return;
     navigatingAwayRef.current = true;
-    onSelectRate(selectedRate);
+    try {
+      onSelectRate(selectedRate);
+    } catch (error) {
+      navigatingAwayRef.current = false;
+      throw error;
+    }
   };
 
   // Rate option buttons — shared between mobile scroll body and desktop sticky footer

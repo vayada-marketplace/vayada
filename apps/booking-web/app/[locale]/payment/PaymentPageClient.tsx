@@ -775,9 +775,9 @@ function PaymentPageContent() {
                           deposit: formatPrice(quotedDepositAmount, quotedCurrency),
                           remaining: formatPrice(quotedRemainingBalance, quotedCurrency),
                         }) ||
-                        `Submit your booking request now. If the property accepts it, we'll email the bank transfer details for the ${formatPrice(quotedDepositAmount, quotedCurrency)} deposit. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due at the property.`
+                        `Submit your booking request now. If we accept it, we'll email the bank transfer details for the ${formatPrice(quotedDepositAmount, quotedCurrency)} deposit. The remaining ${formatPrice(quotedRemainingBalance, quotedCurrency)} is due with us at check-in.`
                       : t("bankTransferExplanation") ||
-                        "Submit your booking request now. If the property accepts it, we'll email the bank transfer details and payment deadline."}
+                        "Submit your booking request now. If we accept it, we'll email the bank transfer details and payment deadline."}
                   </div>
                 </div>
               ) : paymentMethod === "paypal" ? (
