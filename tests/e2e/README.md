@@ -86,7 +86,7 @@ All network calls are mocked via `mockBookingApis`. No seeded backend is require
 
 ## Auth App Smokes
 
-The smoke tests for `affiliate-dashboard`, `booking-admin`, `marketplace-web`, `pms-web`, and `vayada-admin` navigate to `/login` and verify the login shell renders without errors. The AuthKit-backed admin pages now immediately redirect to hosted auth, so their smoke only asserts the local redirecting state and that the removed legacy controls stay gone.
+The smoke tests for `affiliate-dashboard` and `vayada-admin` navigate to `/login` and verify the login shell renders without errors. AuthKit-backed product pages (`booking-admin`, `marketplace-web`, and `pms-web`) immediately redirect to hosted auth, so their smoke asserts the local redirect target and surface.
 
 ## No Legacy Call Guard
 

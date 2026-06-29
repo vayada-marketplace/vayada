@@ -18,6 +18,7 @@ env:
   APP_DIR: apps/pms-web
   NEXT_API_URL: https://next-api.vayada.com
   NEXT_BOOKING_ADMIN_URL: https://next-booking-admin.vayada.com
+  NEXT_MARKETPLACE_URL: https://next-marketplace.vayada.com
 
 jobs:
   build-and-push:
@@ -54,6 +55,7 @@ jobs:
             NEXT_PUBLIC_PMS_OPERATIONS_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_PLATFORM_MEDIA_API_URL=${{ env.NEXT_API_URL }}
             NEXT_PUBLIC_BOOKING_ADMIN_URL=${{ env.NEXT_BOOKING_ADMIN_URL }}
+            NEXT_PUBLIC_MARKETPLACE_URL=${{ env.NEXT_MARKETPLACE_URL }}
             NEXT_PUBLIC_PMS_OPERATIONS_READS_ENABLED=true
             NEXT_PUBLIC_AUTHKIT_LOGIN_ENABLED=true
             NEXT_PUBLIC_AUTHKIT_LEGACY_FALLBACK_ENABLED=false
