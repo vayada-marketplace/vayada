@@ -193,6 +193,31 @@ export type BookingHotelPropertyLinkReadModel = {
   financeProperty: boolean;
 };
 
+export type BookingPropertySettingsReadModel = {
+  id: string;
+  slug?: string | null;
+  propertyName?: string | null;
+  reservationEmail?: string | null;
+  phoneNumber?: string | null;
+  whatsappNumber?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  instagram?: string | null;
+  facebook?: string | null;
+  defaultCurrency?: string | null;
+  defaultLanguage?: string | null;
+  supportedCurrencies?: unknown;
+  supportedLanguages?: unknown;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  specialRequestsEnabled?: boolean | null;
+  arrivalTimeEnabled?: boolean | null;
+  guestCountEnabled?: boolean | null;
+  cancellationPolicyText?: string | null;
+  acceptedPaymentMethods?: unknown;
+};
+
 export type BookingAddonSettingsResponse = {
   showAddonsStep: boolean;
   groupAddonsByCategory: boolean;
@@ -240,6 +265,8 @@ export type BookingHotelPropertyLinkResponse = {
   };
 };
 
+export type BookingPropertySettingsResponse = Record<string, unknown>;
+
 export type BookingAddonSettings = BookingAddonSettingsResponse;
 export type BookingGuestFormSettings = BookingGuestFormSettingsResponse;
 export type BookingBenefitsSettings = BookingBenefitsSettingsResponse;
@@ -249,6 +276,7 @@ export type BookingLastMinuteSettings = BookingLastMinuteSettingsResponse;
 
 export type BookingSettingsReadRepository = {
   findPropertyLinkByHotelId?(hotelId: string): Promise<BookingHotelPropertyLinkReadModel | null>;
+  findPropertySettingsByHotelId?(hotelId: string): Promise<BookingPropertySettingsReadModel | null>;
   findAddonSettingsByHotelId(hotelId: string): Promise<BookingAddonSettingsReadModel | null>;
   findGuestFormSettingsByHotelId(
     hotelId: string,
@@ -713,6 +741,25 @@ type TargetBookingSettingsQueryRow = TargetBookingSettingsRow & {
   source_link_count: number | string;
 };
 
+type TargetBookingPropertySettingsRow = TargetBookingSettingsRow & {
+  source_link_count: number | string;
+  id: string;
+  slug: string | null;
+  property_name: string | null;
+  reservation_email: string | null;
+  phone_number: string | null;
+  whatsapp_number: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  cancellation_policy_text: string | null;
+  accepted_payment_methods: unknown;
+};
+
 const DEFAULT_LAST_MINUTE_SETTINGS: UpdateBookingLastMinuteSettingsBody = {
   enabled: false,
   stackWithPromo: false,
@@ -727,7 +774,11 @@ type TargetBookingPropertyLinkQueryRow = {
 };
 
 const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
-  WITH source_links AS (
+  WITH scoped_property_candidates AS (
+    SELECT property.id AS property_id
+    FROM hotel_catalog.properties property
+    WHERE property.id::text = $1
+    UNION
     SELECT property_id
     FROM hotel_catalog.property_source_links
     WHERE source_system = 'booking'
@@ -739,7 +790,7 @@ const TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE = `
   source_link_status AS (
     SELECT count(*)::int AS source_link_count,
            min(property_id::text)::uuid AS property_id
-    FROM source_links
+    FROM scoped_property_candidates
   )
 `;
 
@@ -761,6 +812,89 @@ const TARGET_BOOKING_PROPERTY_LINK_SELECT = `
       WHERE payment_settings.property_id = source_link_status.property_id
     ) AS "financeProperty"
   FROM source_link_status
+  WHERE source_link_status.source_link_count > 0
+`;
+
+const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
+  ${TARGET_BOOKING_SETTINGS_SOURCE_LINK_CTE}
+  SELECT
+    source_link_status.source_link_count,
+    property.id::text AS id,
+    slug.slug,
+    property.display_name AS property_name,
+    contact.reservation_email,
+    contact.phone_number,
+    contact.whatsapp_number,
+    contact.instagram,
+    contact.facebook,
+    COALESCE(
+      NULLIF(location.raw_marketplace_location, ''),
+      NULLIF(
+        concat_ws(
+          ', ',
+          NULLIF(location.street_address, ''),
+          NULLIF(location.city, ''),
+          NULLIF(location.region, ''),
+          NULLIF(location.postal_code, ''),
+          NULLIF(location.country_code, '')
+        ),
+        ''
+      )
+    ) AS address,
+    location.city,
+    location.country_code AS country,
+    to_char(policy.check_in_time, 'HH24:MI') AS check_in_time,
+    to_char(policy.check_out_time, 'HH24:MI') AS check_out_time,
+    policy.cancellation_summary AS cancellation_policy_text,
+    settings.show_addons_step,
+    settings.group_addons_by_category,
+    settings.special_requests_enabled,
+    settings.arrival_time_enabled,
+    settings.guest_count_enabled,
+    settings.adult_age_threshold,
+    settings.children_enabled,
+    settings.benefits,
+    settings.default_currency,
+    settings.default_language,
+    settings.supported_currencies,
+    settings.supported_languages,
+    settings.booking_filters,
+    settings.custom_filters,
+    settings.filter_rooms,
+    settings.last_minute_discount,
+    settings.updated_at,
+    finance.accepted_methods AS accepted_payment_methods
+  FROM source_link_status
+  JOIN hotel_catalog.properties property
+    ON property.id = source_link_status.property_id
+  LEFT JOIN LATERAL (
+    SELECT property_slug.slug
+    FROM hotel_catalog.property_slugs property_slug
+    WHERE property_slug.property_id = property.id
+      AND property_slug.purpose = 'canonical'
+      AND property_slug.status = 'active'
+    ORDER BY property_slug.updated_at DESC, property_slug.id
+    LIMIT 1
+  ) slug ON TRUE
+  LEFT JOIN hotel_catalog.property_locations location
+    ON location.property_id = property.id
+  LEFT JOIN LATERAL (
+    SELECT
+      max(value) FILTER (WHERE channel_type = 'email') AS reservation_email,
+      max(value) FILTER (WHERE channel_type = 'phone') AS phone_number,
+      max(value) FILTER (WHERE channel_type = 'whatsapp') AS whatsapp_number,
+      max(value) FILTER (WHERE channel_type = 'instagram') AS instagram,
+      max(value) FILTER (WHERE channel_type = 'facebook') AS facebook
+    FROM hotel_catalog.property_contact_channels
+    WHERE property_id = property.id
+      AND is_public = TRUE
+  ) contact ON TRUE
+  LEFT JOIN hotel_catalog.property_policy_summaries policy
+    ON policy.property_id = property.id
+  LEFT JOIN booking.booking_settings settings
+    ON settings.property_id = property.id
+  LEFT JOIN finance.payment_settings finance
+    ON finance.property_id = property.id
   WHERE source_link_status.source_link_count > 0
 `;
 
@@ -845,6 +979,35 @@ function toTargetLastMinuteSettings(
   return {
     lastMinuteDiscount: row.last_minute_discount,
     updatedAt: row.updated_at,
+  };
+}
+
+function toTargetPropertySettings(
+  row: TargetBookingPropertySettingsRow,
+): BookingPropertySettingsReadModel {
+  return {
+    id: row.id,
+    slug: row.slug,
+    propertyName: row.property_name,
+    reservationEmail: row.reservation_email,
+    phoneNumber: row.phone_number,
+    whatsappNumber: row.whatsapp_number,
+    address: row.address,
+    city: row.city,
+    country: row.country,
+    instagram: row.instagram,
+    facebook: row.facebook,
+    defaultCurrency: row.default_currency,
+    defaultLanguage: row.default_language,
+    supportedCurrencies: row.supported_currencies,
+    supportedLanguages: row.supported_languages,
+    checkInTime: row.check_in_time,
+    checkOutTime: row.check_out_time,
+    specialRequestsEnabled: row.special_requests_enabled,
+    arrivalTimeEnabled: row.arrival_time_enabled,
+    guestCountEnabled: row.guest_count_enabled,
+    cancellationPolicyText: row.cancellation_policy_text,
+    acceptedPaymentMethods: row.accepted_payment_methods,
   };
 }
 
@@ -1136,6 +1299,23 @@ export function createPgTargetBookingSettingsRepository(config: {
     };
   }
 
+  async function findPropertySettings(
+    hotelId: string,
+  ): Promise<BookingPropertySettingsReadModel | null> {
+    const result = await pool.query<TargetBookingPropertySettingsRow>(
+      TARGET_BOOKING_PROPERTY_SETTINGS_SELECT,
+      [hotelId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    if (Number(row.source_link_count) > 1) {
+      throw new Error(
+        `Duplicate active canonical booking hotel source links found for booking hotel ${hotelId}`,
+      );
+    }
+    return toTargetPropertySettings(row);
+  }
+
   async function updateSettings(
     hotelId: string,
     setClause: string,
@@ -1203,6 +1383,9 @@ export function createPgTargetBookingSettingsRepository(config: {
   return {
     async findPropertyLinkByHotelId(hotelId) {
       return findPropertyLink(hotelId);
+    },
+    async findPropertySettingsByHotelId(hotelId) {
+      return findPropertySettings(hotelId);
     },
     async findAddonSettingsByHotelId(hotelId) {
       const row = await findSettings(hotelId);
@@ -1401,6 +1584,55 @@ export async function registerBookingSettingsRoutes(
       }
 
       return toPropertyLinkResponse(hotelId, propertyLink);
+    },
+  );
+
+  app.get<{ Params: BookingHotelParams }>(
+    "/hotels/:hotelId/settings/property",
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) {
+          return sendBookingPropertySettingsError(reply, contractError);
+        }
+        throw error;
+      }
+
+      if (!repository.findPropertySettingsByHotelId) {
+        return sendBookingPropertySettingsError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking property settings are unavailable.",
+        });
+      }
+
+      let settings: BookingPropertySettingsReadModel | null;
+      try {
+        settings = await repository.findPropertySettingsByHotelId(hotelId);
+      } catch {
+        return sendBookingPropertySettingsError(reply, {
+          statusCode: 500,
+          code: "read_model_unavailable",
+          category: "read_model",
+          message: "Booking property settings are unavailable.",
+        });
+      }
+
+      if (!settings) {
+        return sendBookingPropertySettingsError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "read_model",
+          message: "Booking property settings not found.",
+        });
+      }
+
+      return toPropertySettingsResponse(settings);
     },
   );
 
@@ -2079,6 +2311,75 @@ export function toPropertyLinkResponse(
   };
 }
 
+export function toPropertySettingsResponse(
+  settings: BookingPropertySettingsReadModel,
+): BookingPropertySettingsResponse {
+  const localization = toLocalizationSettingsResponse(settings);
+  const guestForm = toGuestFormSettingsResponse(settings);
+  const acceptedMethods = parseStringList(settings.acceptedPaymentMethods, []);
+  const payAtHotelMethods: string[] = [];
+  if (acceptedMethods.includes("cash")) payAtHotelMethods.push("cash");
+  if (acceptedMethods.includes("manual_card")) payAtHotelMethods.push("card");
+
+  return {
+    id: settings.id,
+    slug: settings.slug ?? "",
+    property_name: settings.propertyName ?? "",
+    reservation_email: settings.reservationEmail ?? "",
+    phone_number: settings.phoneNumber ?? "",
+    whatsapp_number: settings.whatsappNumber ?? "",
+    address: settings.address ?? "",
+    city: settings.city ?? "",
+    country: settings.country ?? "",
+    instagram: settings.instagram ?? "",
+    facebook: settings.facebook ?? "",
+    tiktok: "",
+    youtube: "",
+    default_currency: localization.defaultCurrency,
+    default_language: localization.defaultLanguage,
+    supported_currencies: localization.supportedCurrencies,
+    supported_languages: localization.supportedLanguages,
+    check_in_time: settings.checkInTime ?? "15:00",
+    check_out_time: settings.checkOutTime ?? "11:00",
+    check_in_from: settings.checkInTime ?? "15:00",
+    check_in_until: settings.checkInTime ?? "15:00",
+    check_out_from: settings.checkOutTime ?? "11:00",
+    check_out_until: settings.checkOutTime ?? "11:00",
+    pay_at_property_enabled: acceptedMethods.includes("pay_at_property"),
+    pay_at_hotel_methods: payAtHotelMethods,
+    online_card_payment: acceptedMethods.some((method) => method === "card" || method === "xendit"),
+    bank_transfer: acceptedMethods.includes("bank_transfer"),
+    paypal_enabled: false,
+    paypal_email: "",
+    paypal_payment_window_hours: 24,
+    special_requests_enabled: guestForm.specialRequestsEnabled,
+    arrival_time_enabled: guestForm.arrivalTimeEnabled,
+    guest_count_enabled: guestForm.guestCountEnabled,
+    refer_a_guest_enabled: false,
+    map_view_enabled: false,
+    free_cancellation_days: 7,
+    email_notifications: true,
+    new_booking_alerts: true,
+    payment_alerts: true,
+    ota_booking_alerts: false,
+    billing_active_plan: "commission",
+    billing_commission_rate: 5,
+    billing_fixed_fee: 49,
+    billing_pending_switch: null,
+    billing_switch_effective_date: null,
+    payout_account_holder: "",
+    payout_account_type: "iban",
+    payout_iban: "",
+    payout_account_number: "",
+    payout_bank_name: "",
+    payout_swift: "",
+    terms_text: "",
+    cancellation_policy_text: settings.cancellationPolicyText ?? "",
+    show_room_detail_map: false,
+    points_of_interest: [],
+  };
+}
+
 // Mirrors the legacy booking-api `parse_json` handling of
 // `booking_hotels.benefits`: the JSONB value may arrive as a native array, a
 // JSON-encoded string, or NULL. NULL, malformed, and non-list values all
@@ -2545,6 +2846,13 @@ function sendBookingLastMinuteSettingsError(
 }
 
 function sendBookingPropertyLinkError(
+  reply: FastifyReply,
+  error: BookingHotelPropertyLinkError | BookingSettingsAccessError,
+): FastifyReply {
+  return reply.status(error.statusCode).send(error);
+}
+
+function sendBookingPropertySettingsError(
   reply: FastifyReply,
   error: BookingHotelPropertyLinkError | BookingSettingsAccessError,
 ): FastifyReply {

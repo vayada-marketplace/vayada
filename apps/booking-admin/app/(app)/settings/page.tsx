@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { apiClient } from "@/services/api/client";
+import { apiClient, isNextApiTarget } from "@/services/api/client";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import {
   buildFinancePaymentSettingsBody,
@@ -76,6 +76,8 @@ type PmsPaymentSettingsResponse = {
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
 const PROPERTY_MAP_CENTERING_UNAVAILABLE =
   "Automatic property map centering is not available on next-api yet.";
+const PROPERTY_SETTINGS_WRITE_UNAVAILABLE =
+  "These settings are read-only on next-api until the property-settings write endpoint is available.";
 
 function readBookingHotelId(settings: PropertySettings): string {
   if (settings.id?.trim()) return settings.id.trim();
@@ -190,6 +192,10 @@ export default function SettingsPage() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
+  const propertySettingsWriteUnavailable = isNextApiTarget();
+  const propertySettingsWriteDisabled = saving || propertySettingsWriteUnavailable;
+  const showPropertySettingsWriteNotice =
+    propertySettingsWriteUnavailable && activeSection !== "account" && activeSection !== "payments";
 
   const handleChangeEmail = async () => {
     try {
@@ -373,6 +379,11 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
+    if (propertySettingsWriteUnavailable) {
+      setFeedback({ type: "error", message: PROPERTY_SETTINGS_WRITE_UNAVAILABLE });
+      return;
+    }
+
     const paypalEmail = (settings.paypal_email || "").trim();
     const normalizedSettings =
       paypalEmail === (settings.paypal_email || "")
@@ -418,8 +429,28 @@ export default function SettingsPage() {
       const data = await settingsService.updatePropertySettings(normalizedSettings);
       setSettings(data);
       setFeedback({ type: "success", message: t("settings.feedback.saveSuccess") });
-    } catch {
-      setFeedback({ type: "error", message: t("settings.feedback.saveError") });
+    } catch (err: unknown) {
+      setFeedback({ type: "error", message: errorMessage(err, t("settings.feedback.saveError")) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateBillingPendingSwitch = async (billing_pending_switch: string | null) => {
+    if (propertySettingsWriteUnavailable) {
+      setFeedback({ type: "error", message: PROPERTY_SETTINGS_WRITE_UNAVAILABLE });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setFeedback(null);
+      await settingsService.updatePropertySettings({
+        billing_pending_switch: billing_pending_switch ?? "",
+      });
+      setSettings((s) => ({ ...s, billing_pending_switch }));
+    } catch (err: unknown) {
+      setFeedback({ type: "error", message: errorMessage(err, t("settings.feedback.saveError")) });
     } finally {
       setSaving(false);
     }
@@ -562,6 +593,11 @@ export default function SettingsPage() {
       {/* Feedback banner */}
       {feedback && (
         <FeedbackAlert type={feedback.type} message={feedback.message} className="mb-4" />
+      )}
+      {showPropertySettingsWriteNotice && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] font-medium text-amber-800">
+          {PROPERTY_SETTINGS_WRITE_UNAVAILABLE}
+        </div>
       )}
 
       {/* Property tab */}
@@ -737,7 +773,11 @@ export default function SettingsPage() {
 
               {/* Save button */}
               <div className="flex justify-end">
-                <SaveButton onClick={handleSave} saving={saving}>
+                <SaveButton
+                  onClick={handleSave}
+                  saving={saving}
+                  disabled={propertySettingsWriteUnavailable}
+                >
                   {t("common.save")}
                 </SaveButton>
               </div>
@@ -915,7 +955,11 @@ export default function SettingsPage() {
 
           {/* Save button */}
           <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving}>
+            <SaveButton
+              onClick={handleSave}
+              saving={saving}
+              disabled={propertySettingsWriteUnavailable}
+            >
               {t("common.save")}
             </SaveButton>
           </div>
@@ -1125,7 +1169,11 @@ export default function SettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving}>
+            <SaveButton
+              onClick={handleSave}
+              saving={saving}
+              disabled={propertySettingsWriteUnavailable}
+            >
               {t("common.save")}
             </SaveButton>
           </div>
@@ -1177,7 +1225,11 @@ export default function SettingsPage() {
 
           {/* Save button */}
           <div className="flex justify-end">
-            <SaveButton onClick={handleSave} saving={saving}>
+            <SaveButton
+              onClick={handleSave}
+              saving={saving}
+              disabled={propertySettingsWriteUnavailable}
+            >
               {t("common.save")}
             </SaveButton>
           </div>
@@ -1359,32 +1411,18 @@ export default function SettingsPage() {
               {settings.billing_active_plan !== "commission" &&
                 !settings.billing_pending_switch && (
                   <button
-                    onClick={async () => {
-                      try {
-                        await settingsService.updatePropertySettings({
-                          billing_pending_switch: "commission",
-                        });
-                        setSettings((s) => ({ ...s, billing_pending_switch: "commission" }));
-                      } catch {
-                        /* */
-                      }
-                    }}
-                    className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    onClick={() => updateBillingPendingSwitch("commission")}
+                    disabled={propertySettingsWriteDisabled}
+                    className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                   >
                     {t("settings.billing.switchFromNextMonth")}
                   </button>
                 )}
               {settings.billing_pending_switch === "commission" && (
                 <button
-                  onClick={async () => {
-                    try {
-                      await settingsService.updatePropertySettings({ billing_pending_switch: "" });
-                      setSettings((s) => ({ ...s, billing_pending_switch: null }));
-                    } catch {
-                      /* */
-                    }
-                  }}
-                  className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
+                  onClick={() => updateBillingPendingSwitch(null)}
+                  disabled={propertySettingsWriteDisabled}
+                  className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
                   {t("settings.billing.cancelSwitch")}
                 </button>
@@ -1440,32 +1478,18 @@ export default function SettingsPage() {
               </div>
               {settings.billing_active_plan !== "fixed" && !settings.billing_pending_switch && (
                 <button
-                  onClick={async () => {
-                    try {
-                      await settingsService.updatePropertySettings({
-                        billing_pending_switch: "fixed",
-                      });
-                      setSettings((s) => ({ ...s, billing_pending_switch: "fixed" }));
-                    } catch {
-                      /* */
-                    }
-                  }}
-                  className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  onClick={() => updateBillingPendingSwitch("fixed")}
+                  disabled={propertySettingsWriteDisabled}
+                  className="w-full py-2 text-[12px] font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
                   {t("settings.billing.switchFromNextMonth")}
                 </button>
               )}
               {settings.billing_pending_switch === "fixed" && (
                 <button
-                  onClick={async () => {
-                    try {
-                      await settingsService.updatePropertySettings({ billing_pending_switch: "" });
-                      setSettings((s) => ({ ...s, billing_pending_switch: null }));
-                    } catch {
-                      /* */
-                    }
-                  }}
-                  className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors"
+                  onClick={() => updateBillingPendingSwitch(null)}
+                  disabled={propertySettingsWriteDisabled}
+                  className="w-full py-2 text-[12px] font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
                 >
                   {t("settings.billing.cancelSwitch")}
                 </button>
@@ -1972,7 +1996,11 @@ export default function SettingsPage() {
               </button>
             </div>
             <div className="flex justify-end pt-4">
-              <SaveButton onClick={handleSave} saving={saving}>
+              <SaveButton
+                onClick={handleSave}
+                saving={saving}
+                disabled={propertySettingsWriteUnavailable}
+              >
                 {t("common.save")}
               </SaveButton>
             </div>
@@ -2092,7 +2120,11 @@ export default function SettingsPage() {
               </div>
 
               <div className="flex justify-end pt-2">
-                <SaveButton onClick={handleSave} saving={saving}>
+                <SaveButton
+                  onClick={handleSave}
+                  saving={saving}
+                  disabled={propertySettingsWriteUnavailable}
+                >
                   {t("common.save")}
                 </SaveButton>
               </div>
