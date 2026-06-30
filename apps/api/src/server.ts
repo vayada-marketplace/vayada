@@ -48,6 +48,7 @@ import { createPgPmsModuleActivationRepository } from "./routes/pmsModuleActivat
 import { createPgMarketplaceCollaborationReadRepository } from "./routes/marketplaceCollaborations.js";
 import { createPgMarketplaceAdminRepository } from "./routes/marketplaceAdmin.js";
 import { createPgMarketplaceHotelProfileStatusRepository } from "./routes/marketplaceHotelProfileStatus.js";
+import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import { createPgIdentityAdminUsersReadRepository } from "./routes/identityAdminUsers.js";
 import { createPgIdentityPrivacyRepository } from "./routes/identityPrivacy.js";
 import {
@@ -209,6 +210,12 @@ const financePublicHotelPropertyResolver =
         connectionString: config.targetDatabaseUrl!,
       })
     : undefined;
+
+const sharedHotelSetupStatusRepository = config.targetDatabaseUrl
+  ? createPgSharedHotelSetupStatusRepository({
+      connectionString: config.targetDatabaseUrl,
+    })
+  : undefined;
 
 const xenditBankValidator = config.xenditSecretKey
   ? createXenditBankValidator({
@@ -409,6 +416,7 @@ const app = buildApp({
           connectionString: config.targetDatabaseUrl!,
         })
       : undefined,
+  sharedHotelSetupStatusRepository,
   marketplaceDiscoveryAllowedOrigins: config.marketplaceDiscoveryAllowedOrigins,
   identityPrivacyRepository: config.auth
     ? createPgIdentityPrivacyRepository({
