@@ -101,6 +101,57 @@ Invalid `returnTo` values are ignored and returned as `null`. Invalid or
 unauthorized `propertyId` values return a `403` or `404` from the route adapter;
 they must not silently select a different property.
 
+## Shared Property Profile Commands
+
+VAY-969 adds the shared profile read/write path used by the first-run setup
+wizard:
+
+```http
+GET  /api/hotel-setup/properties/:propertyId/profile
+POST /api/hotel-setup/properties
+PUT  /api/hotel-setup/properties/:propertyId/profile
+```
+
+`POST /properties` creates a canonical `hotel_catalog.properties` row and a
+direct active `identity.organization_resource_links` row for the resolved
+`hotel_group` organization:
+
+```text
+organization_id = selected hotel_group organization
+product = 'hotel_catalog'
+resource_type = 'property'
+resource_id = hotel_catalog.properties.id
+relationship = 'owner'
+```
+
+It must not create an organization, billing boundary, membership boundary,
+permission boundary, or data boundary. Additional properties are represented as
+additional canonical property rows linked to the same hotel-group organization.
+
+`GET` and `PUT` require the selected organization to have an active direct
+`hotel_catalog/property` owner or operator link for the requested property.
+
+Writes persist only shared property basics in the canonical catalog:
+
+- display name
+- location
+- public website and phone
+- short and long description
+- media references
+
+Validation failures return field-addressable `422` responses:
+
+```ts
+{
+  code: "invalid_shared_property_profile";
+  detail: string;
+  fields: Record<string, string[]>;
+}
+```
+
+Shared profile completion is computed from canonical catalog fields, not from
+Booking, PMS, or Marketplace product profile rows.
+
 ## Authorization
 
 The route is available only to authenticated users in an active

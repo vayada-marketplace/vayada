@@ -17,6 +17,8 @@ import {
   type SharedHotelSetupProductSelection,
   type SharedHotelSetupStatus,
   type SharedHotelSetupStatusRepository,
+  type SharedPropertyProfile,
+  type SharedPropertyProfileInput,
   type SharedProductActivation,
   type SharedSetupProperty,
 } from "./routes/sharedHotelSetupStatus.js";
@@ -47,6 +49,7 @@ describe("shared hotel setup status route", () => {
     app = buildSharedSetupApp({
       linkedResources: [],
       repository: {
+        ...unusedPropertyProfileMethods(),
         async getHotelSetupStatus(input) {
           calls.push(input);
           return { hotelGroupDisplayName: "Alpenrose Hotel Group", properties: [] };
@@ -192,10 +195,189 @@ describe("shared hotel setup status route", () => {
     });
   });
 
+  it("creates the first shared property profile inside the resolved hotel group", async () => {
+    const input = completeProfileInput("Alpenrose Munich");
+    const calls: Array<{ organizationId: string; profile: SharedPropertyProfileInput }> = [];
+    app = buildSharedSetupApp({
+      linkedResources: [],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        async createPropertyProfile(call) {
+          calls.push(call);
+          return profileResponse(propertyId, call.profile);
+        },
+        async getPropertyProfile() {
+          throw new Error("create route must not read a property profile first");
+        },
+        async updatePropertyProfile() {
+          throw new Error("create route must not update an existing property");
+        },
+      },
+    });
+
+    const response = await injectJson<SharedPropertyProfile>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token" },
+      payload: input,
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toMatchObject({
+      propertyId,
+      displayName: "Alpenrose Munich",
+      sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+    });
+    expect(calls).toEqual([{ organizationId, profile: input }]);
+  });
+
+  it("adds another shared property profile under the same hotel group", async () => {
+    const input = completeProfileInput("Alpenrose Vienna");
+    app = buildSharedSetupApp({
+      linkedResources: [propertyLink(propertyId)],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        async createPropertyProfile({ organizationId: orgId, profile }) {
+          expect(orgId).toBe(organizationId);
+          expect(profile.displayName).toBe("Alpenrose Vienna");
+          return profileResponse(secondPropertyId, profile);
+        },
+        async getPropertyProfile() {
+          throw new Error("create route must not read a property profile first");
+        },
+        async updatePropertyProfile() {
+          throw new Error("create route must not update an existing property");
+        },
+      },
+    });
+
+    const response = await injectJson<SharedPropertyProfile>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token" },
+      payload: input,
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toMatchObject({
+      propertyId: secondPropertyId,
+      displayName: "Alpenrose Vienna",
+    });
+  });
+
+  it("reads and updates shared property profile basics for an owned property", async () => {
+    const profiles = new Map<string, SharedPropertyProfile>([
+      [propertyId, profileResponse(propertyId, incompleteProfileInput())],
+    ]);
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: profileRepository(profiles),
+    });
+
+    const readResponse = await injectJson<SharedPropertyProfile>(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(readResponse.statusCode).toBe(200);
+    expect(readResponse.body.sharedProfile).toMatchObject({
+      status: "incomplete",
+      missingFields: ["location", "website", "phone", "description", "media"],
+    });
+
+    const updateInput = completeProfileInput("Alpenrose Munich Updated");
+    const updateResponse = await injectJson<SharedPropertyProfile>(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/profile`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: updateInput,
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.body).toMatchObject({
+      propertyId,
+      displayName: "Alpenrose Munich Updated",
+      sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+    });
+    expect(profiles.get(propertyId)).toMatchObject({ displayName: "Alpenrose Munich Updated" });
+  });
+
+  it("rejects shared property profile reads and writes outside the selected hotel group", async () => {
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        async getPropertyProfile() {
+          throw new Error("unauthorized profile read must not hit the repository");
+        },
+        async createPropertyProfile() {
+          throw new Error("create is not used by this test");
+        },
+        async updatePropertyProfile() {
+          throw new Error("unauthorized profile update must not hit the repository");
+        },
+      },
+    });
+
+    const readResponse = await injectJson<{ code: string }>(app, {
+      method: "GET",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/profile`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(readResponse.statusCode).toBe(403);
+    expect(readResponse.body.code).toBe("missing_property_resource_link");
+
+    const updateResponse = await injectJson<{ code: string }>(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/profile`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: completeProfileInput(),
+    });
+    expect(updateResponse.statusCode).toBe(403);
+    expect(updateResponse.body.code).toBe("missing_property_resource_link");
+  });
+
+  it("returns field-level validation errors for shared property profile writes", async () => {
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+      },
+    });
+
+    const response = await injectJson<{ fields: Record<string, string[]> }>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        displayName: "",
+        website: "ftp://alpenrose.example",
+        location: { countryCode: "DEU", latitude: 48.1, addressPublic: "false" },
+        media: [{ url: "not-a-url", mediaType: "cover" }],
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(Object.keys(response.body.fields).sort()).toEqual([
+      "displayName",
+      "location.addressPublic",
+      "location.countryCode",
+      "location.latitude",
+      "location.longitude",
+      "media.0.mediaType",
+      "media.0.url",
+      "website",
+    ]);
+  });
+
   it("rejects non-hotel organizations in the normal hotel setup flow", async () => {
     app = buildSharedSetupApp({
       organizationKind: "creator_workspace",
       repository: {
+        ...unusedPropertyProfileMethods(),
         async getHotelSetupStatus() {
           throw new Error("non-hotel organizations must not hit the repository");
         },
@@ -218,6 +400,7 @@ describe("shared hotel setup status route", () => {
   it("rejects an explicit propertyId that is not linked to the selected hotel group", async () => {
     app = buildSharedSetupApp({
       repository: {
+        ...unusedPropertyProfileMethods(),
         async getHotelSetupStatus() {
           throw new Error("unauthorized property must not hit the repository");
         },
@@ -241,6 +424,7 @@ describe("shared hotel setup status route", () => {
     app = buildSharedSetupApp({
       permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
       repository: {
+        ...unusedPropertyProfileMethods(),
         async getHotelSetupStatus() {
           throw new Error("unauthorized property must not hit the repository");
         },
@@ -521,6 +705,15 @@ describe("shared hotel setup status route", () => {
     expect(setupSql).toContain("FROM unnest($2::uuid[])");
     expect(setupSql).toContain("hotel_catalog.properties");
     expect(setupSql).toContain("hotel_catalog.property_product_selections");
+    expect(setupSql).toContain("COALESCE(catalog_location.location, public_profile.location");
+    expect(setupSql).toContain("COALESCE(catalog_media.media, '[]'::jsonb)");
+    expect(setupSql).toContain("COALESCE(catalog_contacts.public_contacts, '[]'::jsonb)");
+    expect(setupSql).not.toContain("COALESCE(catalog_media.media, public_profile.media");
+    expect(setupSql).not.toContain(
+      "COALESCE(catalog_contacts.public_contacts, public_profile.public_contacts",
+    );
+    expect(setupSql).toContain("AND media.source_system = 'platform'");
+    expect(setupSql).toContain("AND contact.source_system = 'platform'");
     expect(setupSql).not.toContain("property_source_links");
     expect(
       setupSql.match(
@@ -528,6 +721,146 @@ describe("shared hotel setup status route", () => {
       ),
     ).toHaveLength(3);
     expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
+  });
+
+  it("computes shared profile completion from canonical property profile data", async () => {
+    const query = vi.fn(async (_text: string, _values?: readonly unknown[]) => ({
+      rows: [
+        profileRow({
+          profileStatus: "complete",
+          phone: null,
+          media: [],
+        }),
+      ],
+    }));
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const profile = await repository.getPropertyProfile({ organizationId, propertyId });
+
+    expect(profile).toMatchObject({
+      propertyId,
+      sharedProfile: {
+        status: "incomplete",
+        completionPercent: 67,
+        missingFields: ["phone", "media"],
+      },
+    });
+    const sql = query.mock.calls[0]![0];
+    expect(sql).toContain("JOIN identity.organization_resource_links link");
+    expect(sql).toContain("link.product = 'hotel_catalog'");
+    expect(sql).toContain("link.resource_type = 'property'");
+    expect(sql).toContain("AND media.source_system = 'platform'");
+    expect(sql).toContain("AND source_system = 'platform'");
+    expect(sql).not.toContain("property_source_links");
+    expect(query.mock.calls[0]![1]).toEqual([organizationId, propertyId]);
+  });
+
+  it("creates shared property profiles with a canonical resource link but no organization insert", async () => {
+    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
+      if (text.includes("INSERT INTO hotel_catalog.properties")) {
+        return { rows: [{ propertyId }] };
+      }
+      return { rows: [profileRow()] };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    await expect(
+      repository.createPropertyProfile({
+        organizationId,
+        profile: completeProfileInput(),
+      }),
+    ).resolves.toMatchObject({
+      propertyId,
+      sharedProfile: { status: "complete" },
+    });
+
+    const createSql = query.mock.calls[0]![0];
+    expect(createSql).toContain("INSERT INTO hotel_catalog.properties");
+    expect(createSql).toContain("INSERT INTO identity.organization_resource_links");
+    expect(createSql).toContain("'hotel_catalog'");
+    expect(createSql).toContain("'property'");
+    expect(createSql).toContain("AND contact.source_system = 'platform'");
+    expect(createSql).toContain("AND media.source_system = 'platform'");
+    expect(createSql).not.toContain("INSERT INTO identity.organizations");
+    expect(createSql).not.toContain("property_source_links");
+    expect(query.mock.calls[0]![1]).toMatchObject([
+      organizationId,
+      expect.objectContaining({ display_name: "Alpenrose Munich" }),
+      "complete",
+      [],
+    ]);
+  });
+
+  it("updates shared property profiles only through an existing canonical resource link", async () => {
+    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
+      if (text.includes("UPDATE hotel_catalog.properties")) {
+        return { rows: [{ propertyId }] };
+      }
+      return { rows: [profileRow({ displayName: "Alpenrose Munich Updated" })] };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    await expect(
+      repository.updatePropertyProfile({
+        organizationId,
+        propertyId,
+        profile: completeProfileInput("Alpenrose Munich Updated"),
+      }),
+    ).resolves.toMatchObject({
+      propertyId,
+      displayName: "Alpenrose Munich Updated",
+    });
+
+    const updateSql = query.mock.calls[0]![0];
+    expect(updateSql).toContain("JOIN identity.organization_resource_links link");
+    expect(updateSql).toContain("UPDATE hotel_catalog.properties");
+    expect(updateSql).toContain("AND contact.source_system = 'platform'");
+    expect(updateSql).toContain("AND media.source_system = 'platform'");
+    expect(updateSql).not.toContain("INSERT INTO identity.organization_resource_links");
+    expect(updateSql).not.toContain("property_source_links");
+    expect(query.mock.calls[0]![1]).toMatchObject([
+      organizationId,
+      propertyId,
+      expect.objectContaining({ display_name: "Alpenrose Munich Updated" }),
+      "complete",
+      [],
+    ]);
   });
 
   it("requires active product entitlements before marking selected products active", async () => {
@@ -891,8 +1224,23 @@ function identityRepository(options: {
   };
 }
 
+function unusedStatusMethods(): Pick<
+  SharedHotelSetupStatusRepository,
+  "getHotelSetupStatus" | "setPropertyProductSelections"
+> {
+  return {
+    async getHotelSetupStatus() {
+      throw new Error("setup status reads are not used by this repository");
+    },
+    async setPropertyProductSelections() {
+      throw new Error("product selection writes are not used by this repository");
+    },
+  };
+}
+
 function repositoryWith(properties: SharedSetupProperty[]): SharedHotelSetupStatusRepository {
   return {
+    ...unusedPropertyProfileMethods(),
     async getHotelSetupStatus() {
       return { hotelGroupDisplayName: "Alpenrose Hotel Group", properties };
     },
@@ -902,10 +1250,33 @@ function repositoryWith(properties: SharedSetupProperty[]): SharedHotelSetupStat
   };
 }
 
+function profileRepository(
+  profiles: Map<string, SharedPropertyProfile>,
+): SharedHotelSetupStatusRepository {
+  return {
+    ...unusedStatusMethods(),
+    async getPropertyProfile({ propertyId: id }) {
+      return profiles.get(id) ?? null;
+    },
+    async createPropertyProfile({ profile }) {
+      const created = profileResponse(secondPropertyId, profile);
+      profiles.set(secondPropertyId, created);
+      return created;
+    },
+    async updatePropertyProfile({ propertyId: id, profile }) {
+      if (!profiles.has(id)) return null;
+      const updated = profileResponse(id, profile);
+      profiles.set(id, updated);
+      return updated;
+    },
+  };
+}
+
 function statefulSelectionRepository(propertyIds: string[]): SharedHotelSetupStatusRepository {
   const selectedByProperty = new Map<string, Set<SharedHotelSetupEntryProduct>>();
 
   return {
+    ...unusedPropertyProfileMethods(),
     async getHotelSetupStatus() {
       return {
         hotelGroupDisplayName: "Alpenrose Hotel Group",
@@ -939,6 +1310,147 @@ function statefulSelectionRepository(propertyIds: string[]): SharedHotelSetupSta
         updatedAt: "2026-06-30T08:00:00.000Z",
       };
     },
+  };
+}
+
+function unusedPropertyProfileMethods(): Pick<
+  SharedHotelSetupStatusRepository,
+  "getPropertyProfile" | "createPropertyProfile" | "updatePropertyProfile"
+> {
+  return {
+    async getPropertyProfile() {
+      throw new Error("property profile reads are not used by this repository");
+    },
+    async createPropertyProfile() {
+      throw new Error("property profile creates are not used by this repository");
+    },
+    async updatePropertyProfile() {
+      throw new Error("property profile updates are not used by this repository");
+    },
+  };
+}
+
+function completeProfileInput(displayName = "Alpenrose Munich"): SharedPropertyProfileInput {
+  return {
+    displayName,
+    location: {
+      countryCode: "DE",
+      region: "Bavaria",
+      city: "Munich",
+      streetAddress: "Marienplatz 1",
+      postalCode: "80331",
+      rawMarketplaceLocation: null,
+      timezone: "Europe/Berlin",
+      latitude: 48.137,
+      longitude: 11.575,
+      addressPublic: true,
+      mapDisplayMode: "exact",
+    },
+    website: "https://alpenrose.example/",
+    phone: "+49 123",
+    shortDescription: "A city hotel in Munich.",
+    longDescription: null,
+    media: [
+      {
+        mediaType: "hero_image",
+        url: "https://cdn.example/alpenrose.jpg",
+        altText: "Alpenrose exterior",
+        sortOrder: 0,
+      },
+    ],
+  };
+}
+
+function incompleteProfileInput(): SharedPropertyProfileInput {
+  return {
+    ...completeProfileInput(),
+    location: {
+      countryCode: null,
+      region: null,
+      city: null,
+      streetAddress: null,
+      postalCode: null,
+      rawMarketplaceLocation: null,
+      timezone: null,
+      latitude: null,
+      longitude: null,
+      addressPublic: true,
+      mapDisplayMode: "hidden",
+    },
+    website: null,
+    phone: null,
+    shortDescription: null,
+    longDescription: null,
+    media: [],
+  };
+}
+
+function profileResponse(id: string, profile: SharedPropertyProfileInput): SharedPropertyProfile {
+  const missingFields = profileMissingFields(profile);
+  return {
+    propertyId: id,
+    publicId: `property-${id.slice(0, 8)}`,
+    ...profile,
+    sharedProfile: {
+      status: missingFields.length === 0 ? "complete" : "incomplete",
+      completionPercent:
+        missingFields.length === 0 ? 100 : Math.round(((6 - missingFields.length) / 6) * 100),
+      missingFields,
+    },
+    updatedAt: "2026-06-30T08:00:00.000Z",
+  };
+}
+
+function profileMissingFields(
+  profile: SharedPropertyProfileInput,
+): SharedPropertyProfile["sharedProfile"]["missingFields"] {
+  const missing: SharedPropertyProfile["sharedProfile"]["missingFields"] = [];
+  if (!profile.displayName.trim()) missing.push("displayName");
+  if (
+    !profile.location.city &&
+    !profile.location.countryCode &&
+    !profile.location.rawMarketplaceLocation
+  ) {
+    missing.push("location");
+  }
+  if (!profile.website) missing.push("website");
+  if (!profile.phone) missing.push("phone");
+  if (!profile.shortDescription && !profile.longDescription) missing.push("description");
+  if (profile.media.length === 0) missing.push("media");
+  return missing;
+}
+
+function profileRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    propertyId,
+    publicId: "property-aaaaaaaa",
+    displayName: "Alpenrose Munich",
+    profileStatus: "complete",
+    countryCode: "DE",
+    region: "Bavaria",
+    city: "Munich",
+    streetAddress: "Marienplatz 1",
+    postalCode: "80331",
+    rawMarketplaceLocation: null,
+    timezone: "Europe/Berlin",
+    latitude: "48.137",
+    longitude: "11.575",
+    addressPublic: true,
+    mapDisplayMode: "exact",
+    shortDescription: "A city hotel in Munich.",
+    longDescription: null,
+    website: "https://alpenrose.example/",
+    phone: "+49 123",
+    media: [
+      {
+        mediaType: "hero_image",
+        url: "https://cdn.example/alpenrose.jpg",
+        altText: "Alpenrose exterior",
+        sortOrder: 0,
+      },
+    ],
+    updatedAt: "2026-06-30T08:00:00.000Z",
+    ...overrides,
   };
 }
 
