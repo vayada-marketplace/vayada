@@ -304,7 +304,7 @@ function nextAction(
       propertyId: property.propertyId,
       product: entryProduct,
       missingSteps: activation.missingSteps,
-      reasonCodes: ["entry_product_activation_incomplete"],
+      reasonCodes: activationReasonCodes(activation, "entry_product_activation_incomplete"),
     };
   }
 
@@ -320,7 +320,10 @@ function nextAction(
       propertyId: property.propertyId,
       product: incompleteProduct.product,
       missingSteps: incompleteProduct.missingSteps,
-      reasonCodes: [`${incompleteProduct.product}_activation_incomplete`],
+      reasonCodes: activationReasonCodes(
+        incompleteProduct,
+        `${incompleteProduct.product}_activation_incomplete`,
+      ),
     };
   }
 
@@ -342,6 +345,16 @@ function nextAction(
     propertyId: property.propertyId,
     reasonCodes: ["no_products_selected"],
   };
+}
+
+function activationReasonCodes<Product extends SharedHotelSetupEntryProduct>(
+  activation: SharedProductActivation<Product>,
+  fallback: string,
+): string[] {
+  if (activation.missingSteps.length === 0 && activation.statusReasons.length > 0) {
+    return activation.statusReasons;
+  }
+  return [fallback];
 }
 
 function safeReturnTo(value: string | undefined, request: FastifyRequest): string | null {

@@ -67,6 +67,7 @@ export function createPgSharedHotelSetupStatusRepository(config: {
     throw new Error("Shared hotel setup status repository connectionString must not be empty");
   }
 
+  const ownsPool = config.pool === undefined;
   const pool =
     config.pool ??
     new pg.Pool({
@@ -104,7 +105,9 @@ export function createPgSharedHotelSetupStatusRepository(config: {
       };
     },
     async close() {
-      await pool.end();
+      if (ownsPool) {
+        await pool.end();
+      }
     },
   };
 }
@@ -176,6 +179,7 @@ function bookingActivation(row: SharedHotelSetupRow): SharedProductActivation<"b
   }
 
   const missingSteps: string[] = [];
+  if (!row.bookingEntitlementActive) missingSteps.push("productEntitlement");
   if (!row.hasBookingSettings) missingSteps.push("bookingSettings");
   if (row.bookabilityStatus !== "public") missingSteps.push("publicBookability");
   if (row.bookabilityStatus === "public" && row.bookabilityFreshnessStatus !== "fresh") {
@@ -393,7 +397,11 @@ function sharedHotelSetupStatusSql(): string {
           AND (starts_at IS NULL OR starts_at <= now())
           AND (expires_at IS NULL OR expires_at > now())
         ) AS active,
-        bool_or(status = 'suspended') AS suspended,
+        bool_or(
+          status = 'suspended'
+          AND (starts_at IS NULL OR starts_at <= now())
+          AND (expires_at IS NULL OR expires_at > now())
+        ) AS suspended,
         max(updated_at) AS updated_at
       FROM identity.product_entitlements
       WHERE organization_id = $1::uuid
@@ -416,7 +424,11 @@ function sharedHotelSetupStatusSql(): string {
           AND (starts_at IS NULL OR starts_at <= now())
           AND (expires_at IS NULL OR expires_at > now())
         ) AS active,
-        bool_or(status = 'suspended') AS suspended,
+        bool_or(
+          status = 'suspended'
+          AND (starts_at IS NULL OR starts_at <= now())
+          AND (expires_at IS NULL OR expires_at > now())
+        ) AS suspended,
         max(updated_at) AS updated_at
       FROM identity.product_entitlements
       WHERE organization_id = $1::uuid
@@ -439,7 +451,11 @@ function sharedHotelSetupStatusSql(): string {
           AND (starts_at IS NULL OR starts_at <= now())
           AND (expires_at IS NULL OR expires_at > now())
         ) AS active,
-        bool_or(status = 'suspended') AS suspended,
+        bool_or(
+          status = 'suspended'
+          AND (starts_at IS NULL OR starts_at <= now())
+          AND (expires_at IS NULL OR expires_at > now())
+        ) AS suspended,
         max(updated_at) AS updated_at
       FROM identity.product_entitlements
       WHERE organization_id = $1::uuid
