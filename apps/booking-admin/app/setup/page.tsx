@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { authService } from "@/services/auth";
 import { settingsService } from "@/services/settings";
 import { createBookingAddonItem } from "@/services/api/bookingAddonItemsClient";
@@ -29,6 +29,7 @@ import {
 import { CheckIcon } from "@heroicons/react/24/outline";
 import { uploadSingleImage, uploadImages } from "@/lib/utils/uploadImage";
 import { getCurrencySymbol } from "@/lib/utils";
+import { SharedHotelSetupPage } from "@/components/setup/SharedHotelSetupPage";
 
 import {
   AddonsStep,
@@ -118,7 +119,7 @@ function readPositiveInteger(value: unknown): number | null {
   return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
 }
 
-export default function SetupPage() {
+function BookingProductSetupPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(1);
@@ -1214,6 +1215,32 @@ export default function SetupPage() {
           stepIndicators={stepIndicators}
         />
       )}
+    </div>
+  );
+}
+
+export default function SetupPage() {
+  return (
+    <Suspense fallback={<SetupLoading />}>
+      <SetupPageContent />
+    </Suspense>
+  );
+}
+
+function SetupPageContent() {
+  const searchParams = useSearchParams();
+
+  if (searchParams.get("legacy") === "booking") {
+    return <BookingProductSetupPage />;
+  }
+
+  return <SharedHotelSetupPage defaultEntryProduct="booking" defaultReturnTo="/dashboard" />;
+}
+
+function SetupLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-gray-950" />
     </div>
   );
 }
