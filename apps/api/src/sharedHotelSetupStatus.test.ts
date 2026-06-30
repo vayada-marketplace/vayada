@@ -373,6 +373,31 @@ describe("shared hotel setup status route", () => {
     ]);
   });
 
+  it("rejects non-object location payloads for shared property profile writes", async () => {
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        ...unusedStatusMethods(),
+        ...unusedPropertyProfileMethods(),
+      },
+    });
+
+    const response = await injectJson<{ fields: Record<string, string[]> }>(app, {
+      method: "POST",
+      url: "/api/hotel-setup/properties",
+      headers: { authorization: "Bearer valid-token" },
+      payload: {
+        ...completeProfileInput(),
+        location: "Berlin",
+      },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body.fields).toEqual({
+      location: ["location must be an object."],
+    });
+  });
+
   it("rejects non-hotel organizations in the normal hotel setup flow", async () => {
     app = buildSharedSetupApp({
       organizationKind: "creator_workspace",
@@ -723,6 +748,55 @@ describe("shared hotel setup status route", () => {
     expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
   });
 
+  it("treats public WhatsApp contacts as satisfying shared profile phone completion", async () => {
+    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
+      if (text.includes("FROM identity.organizations")) {
+        return { rows: [{ displayName: "Alpenrose Hotel Group" }] };
+      }
+      return {
+        rows: [
+          {
+            propertyId,
+            publicId: "alpenrose-munich",
+            displayName: "Alpenrose Munich",
+            profileStatus: "complete",
+            location: { city: "Munich", countryCode: "DE" },
+            descriptions: { shortDescription: "City hotel" },
+            media: [{ url: "https://example.test/photo.jpg" }],
+            publicContacts: [
+              { type: "website", value: "https://alpenrose.example" },
+              { type: "whatsapp", value: "+49 123" },
+            ],
+          },
+        ],
+      };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const status = await repository.getHotelSetupStatus({
+      organizationId,
+      propertyIds: [propertyId],
+    });
+
+    expect(status.properties[0]!.sharedProfile).toEqual({
+      status: "complete",
+      completionPercent: 100,
+      missingFields: [],
+    });
+  });
+
   it("computes shared profile completion from canonical property profile data", async () => {
     const query = vi.fn(async (_text: string, _values?: readonly unknown[]) => ({
       rows: [
@@ -761,10 +835,41 @@ describe("shared hotel setup status route", () => {
     expect(sql).toContain("JOIN identity.organization_resource_links link");
     expect(sql).toContain("link.product = 'hotel_catalog'");
     expect(sql).toContain("link.resource_type = 'property'");
+    expect(sql).toContain("WHERE channel_type = 'whatsapp'");
+    expect(sql).toContain("channel_type IN ('website', 'phone', 'whatsapp')");
     expect(sql).toContain("AND media.source_system = 'platform'");
     expect(sql).toContain("AND source_system = 'platform'");
     expect(sql).not.toContain("property_source_links");
     expect(query.mock.calls[0]![1]).toEqual([organizationId, propertyId]);
+  });
+
+  it("normalizes nullable display names when reading shared property profiles", async () => {
+    const query = vi.fn(async (_text: string, _values?: readonly unknown[]) => ({
+      rows: [profileRow({ displayName: null })],
+    }));
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const profile = await repository.getPropertyProfile({ organizationId, propertyId });
+
+    expect(profile).toMatchObject({
+      displayName: "",
+      sharedProfile: {
+        status: "incomplete",
+        missingFields: ["displayName"],
+      },
+    });
   });
 
   it("creates shared property profiles with a canonical resource link but no organization insert", async () => {
@@ -1405,17 +1510,21 @@ function profileMissingFields(
   profile: SharedPropertyProfileInput,
 ): SharedPropertyProfile["sharedProfile"]["missingFields"] {
   const missing: SharedPropertyProfile["sharedProfile"]["missingFields"] = [];
-  if (!profile.displayName.trim()) missing.push("displayName");
+  if (!nonEmpty(profile.displayName)) missing.push("displayName");
   if (
-    !profile.location.city &&
-    !profile.location.countryCode &&
-    !profile.location.rawMarketplaceLocation
+    ![
+      profile.location.city,
+      profile.location.countryCode,
+      profile.location.rawMarketplaceLocation,
+    ].some((value) => nonEmpty(value))
   ) {
     missing.push("location");
   }
-  if (!profile.website) missing.push("website");
-  if (!profile.phone) missing.push("phone");
-  if (!profile.shortDescription && !profile.longDescription) missing.push("description");
+  if (!nonEmpty(profile.website)) missing.push("website");
+  if (!nonEmpty(profile.phone)) missing.push("phone");
+  if (!nonEmpty(profile.shortDescription) && !nonEmpty(profile.longDescription)) {
+    missing.push("description");
+  }
   if (profile.media.length === 0) missing.push("media");
   return missing;
 }
@@ -1452,6 +1561,10 @@ function profileRow(overrides: Record<string, unknown> = {}): Record<string, unk
     updatedAt: "2026-06-30T08:00:00.000Z",
     ...overrides,
   };
+}
+
+function nonEmpty(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function setupProperty(

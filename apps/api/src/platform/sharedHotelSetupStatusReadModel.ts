@@ -76,7 +76,7 @@ type ProductSelectionRow = {
 type SharedPropertyProfileRow = {
   propertyId: string;
   publicId: string;
-  displayName: string;
+  displayName: string | null;
   profileStatus: string | null;
   countryCode: string | null;
   region: string | null;
@@ -273,7 +273,7 @@ async function writePropertyProfile(
 function toSharedPropertyProfile(row: SharedPropertyProfileRow): SharedPropertyProfile {
   const media = mediaItems(row.media);
   const profile: SharedPropertyProfileInput = {
-    displayName: row.displayName,
+    displayName: nonEmpty(row.displayName) ?? "",
     location: {
       countryCode: nonEmpty(row.countryCode),
       region: nonEmpty(row.region),
@@ -632,13 +632,16 @@ function propertyProfileSql(): string {
     LEFT JOIN LATERAL (
       SELECT
         max(value) FILTER (WHERE channel_type = 'website') AS website,
-        max(value) FILTER (WHERE channel_type = 'phone') AS phone,
+        COALESCE(
+          max(value) FILTER (WHERE channel_type = 'phone'),
+          max(value) FILTER (WHERE channel_type = 'whatsapp')
+        ) AS phone,
         max(updated_at) AS updated_at
       FROM hotel_catalog.property_contact_channels
       WHERE property_id = property.id
         AND is_public = TRUE
         AND source_system = 'platform'
-        AND channel_type IN ('website', 'phone')
+        AND channel_type IN ('website', 'phone', 'whatsapp')
     ) contact ON TRUE
     LEFT JOIN LATERAL (
       SELECT

@@ -130,6 +130,9 @@ additional canonical property rows linked to the same hotel-group organization.
 
 `GET` and `PUT` require the selected organization to have an active direct
 `hotel_catalog/property` owner or operator link for the requested property.
+Write commands also require `hotel_catalog.setup.manage`: `POST /properties`
+requires it for the selected hotel group, and `PUT /properties/:propertyId/profile`
+requires it in addition to the direct property-link check.
 
 Writes persist only shared property basics in the canonical catalog:
 
