@@ -51,6 +51,7 @@ export type PermissionKey =
   | "platform.property.status.manage"
   | "platform.user.suspend"
   | "hotel_catalog.setup.read"
+  | "hotel_catalog.setup.manage"
   | "intelligence.ask.read"
   | "booking.settings.manage"
   | "booking.settings.read"

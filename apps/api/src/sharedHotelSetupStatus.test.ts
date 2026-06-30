@@ -13,6 +13,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import { createPgSharedHotelSetupStatusRepository } from "./platform/sharedHotelSetupStatusReadModel.js";
 import {
+  type SharedHotelSetupEntryProduct,
+  type SharedHotelSetupProductSelection,
   type SharedHotelSetupStatus,
   type SharedHotelSetupStatusRepository,
   type SharedProductActivation,
@@ -48,6 +50,9 @@ describe("shared hotel setup status route", () => {
         async getHotelSetupStatus(input) {
           calls.push(input);
           return { hotelGroupDisplayName: "Alpenrose Hotel Group", properties: [] };
+        },
+        async setPropertyProductSelections() {
+          throw new Error("product selection writes are not used by this test");
         },
       },
     });
@@ -134,11 +139,67 @@ describe("shared hotel setup status route", () => {
     });
   });
 
+  it("stores different selected products for different canonical properties", async () => {
+    app = buildSharedSetupApp({
+      linkedResources: [propertyLink(propertyId), propertyLink(secondPropertyId)],
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: statefulSelectionRepository([propertyId, secondPropertyId]),
+    });
+
+    const firstSelection = await injectJson<SharedHotelSetupProductSelection>(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${propertyId}/products`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { selectedProducts: ["marketplace", "booking"] },
+    });
+    expect(firstSelection.statusCode).toBe(200);
+    expect(firstSelection.body).toMatchObject({
+      propertyId,
+      selectedProducts: ["booking", "marketplace"],
+    });
+
+    const secondSelection = await injectJson<SharedHotelSetupProductSelection>(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/products`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { selectedProducts: ["pms"] },
+    });
+    expect(secondSelection.statusCode).toBe(200);
+    expect(secondSelection.body).toMatchObject({
+      propertyId: secondPropertyId,
+      selectedProducts: ["pms"],
+    });
+
+    const status = await injectJson<SharedHotelSetupStatus>(app, {
+      method: "GET",
+      url: "/api/hotel-setup/status",
+      headers: { authorization: "Bearer valid-token" },
+    });
+    expect(status.statusCode).toBe(200);
+    expect(
+      status.body.properties.find((property) => property.propertyId === propertyId)!.products,
+    ).toMatchObject({
+      booking: { status: "selected_incomplete" },
+      pms: { status: "not_selected" },
+      marketplace: { status: "selected_incomplete" },
+    });
+    expect(
+      status.body.properties.find((property) => property.propertyId === secondPropertyId)!.products,
+    ).toMatchObject({
+      booking: { status: "not_selected" },
+      pms: { status: "selected_incomplete" },
+      marketplace: { status: "not_selected" },
+    });
+  });
+
   it("rejects non-hotel organizations in the normal hotel setup flow", async () => {
     app = buildSharedSetupApp({
       organizationKind: "creator_workspace",
       repository: {
         async getHotelSetupStatus() {
+          throw new Error("non-hotel organizations must not hit the repository");
+        },
+        async setPropertyProductSelections() {
           throw new Error("non-hotel organizations must not hit the repository");
         },
       },
@@ -160,6 +221,9 @@ describe("shared hotel setup status route", () => {
         async getHotelSetupStatus() {
           throw new Error("unauthorized property must not hit the repository");
         },
+        async setPropertyProductSelections() {
+          throw new Error("unauthorized property must not hit the repository");
+        },
       },
     });
 
@@ -167,6 +231,30 @@ describe("shared hotel setup status route", () => {
       method: "GET",
       url: `/api/hotel-setup/status?propertyId=${secondPropertyId}`,
       headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.body.code).toBe("missing_property_resource_link");
+  });
+
+  it("rejects product selection writes for properties outside the selected hotel group", async () => {
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: {
+        async getHotelSetupStatus() {
+          throw new Error("unauthorized property must not hit the repository");
+        },
+        async setPropertyProductSelections() {
+          throw new Error("unauthorized property must not hit the repository");
+        },
+      },
+    });
+
+    const response = await injectJson<{ code: string }>(app, {
+      method: "PUT",
+      url: `/api/hotel-setup/properties/${secondPropertyId}/products`,
+      headers: { authorization: "Bearer valid-token" },
+      payload: { selectedProducts: ["booking", "pms"] },
     });
 
     expect(response.statusCode).toBe(403);
@@ -208,6 +296,25 @@ describe("shared hotel setup status route", () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.body.code).toBe("property_setup_status_not_found");
+  });
+
+  it("returns 404 before product selection writes when a linked property has no catalog row", async () => {
+    app = buildSharedSetupApp({
+      permissions: ["hotel_catalog.setup.read", "hotel_catalog.setup.manage"],
+      repository: repositoryWith([]),
+    });
+
+    for (const selectedProducts of [[], ["booking"]] as const) {
+      const response = await injectJson<{ code: string }>(app, {
+        method: "PUT",
+        url: `/api/hotel-setup/properties/${propertyId}/products`,
+        headers: { authorization: "Bearer valid-token" },
+        payload: { selectedProducts },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.body.code).toBe("property_setup_status_not_found");
+    }
   });
 
   it("keeps complete shared profile separate from incomplete Marketplace activation", async () => {
@@ -335,6 +442,8 @@ describe("shared hotel setup status route", () => {
               { type: "website", value: "https://alpenrose.example" },
               { type: "phone", value: "+49 123" },
             ],
+            bookingSelected: true,
+            bookingSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             hasBookingSettings: true,
             bookingEntitlementActive: true,
             bookingEntitlementSuspended: false,
@@ -344,6 +453,8 @@ describe("shared hotel setup status route", () => {
             bookabilityUpdatedAt: "2026-06-30T08:01:00.000Z",
             paymentsEnabled: true,
             paymentSettingsUpdatedAt: "2026-06-30T08:02:00.000Z",
+            pmsSelected: true,
+            pmsSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             pmsEntitlementActive: true,
             pmsEntitlementSuspended: false,
             pmsRoomTypeCount: 1,
@@ -351,6 +462,8 @@ describe("shared hotel setup status route", () => {
             pmsRoomCount: 3,
             pmsRatePlanCount: 1,
             pmsRateUpdatedAt: "2026-06-30T08:04:00.000Z",
+            marketplaceSelected: true,
+            marketplaceSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             marketplaceEntitlementActive: false,
             marketplaceEntitlementSuspended: false,
             marketplaceProfileStatus: "pending",
@@ -397,7 +510,7 @@ describe("shared hotel setup status route", () => {
             pms: { status: "active" },
             marketplace: {
               status: "selected_incomplete",
-              missingSteps: ["collaborationOffer", "creatorRequirements"],
+              missingSteps: ["productEntitlement", "collaborationOffer", "creatorRequirements"],
             },
           },
         },
@@ -407,6 +520,7 @@ describe("shared hotel setup status route", () => {
     const setupSql = query.mock.calls[1]![0];
     expect(setupSql).toContain("FROM unnest($2::uuid[])");
     expect(setupSql).toContain("hotel_catalog.properties");
+    expect(setupSql).toContain("hotel_catalog.property_product_selections");
     expect(setupSql).not.toContain("property_source_links");
     expect(
       setupSql.match(
@@ -416,7 +530,7 @@ describe("shared hotel setup status route", () => {
     expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
   });
 
-  it("requires an active booking entitlement before marking Booking active", async () => {
+  it("requires active product entitlements before marking selected products active", async () => {
     const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
       if (text.includes("FROM identity.organizations")) {
         return { rows: [{ displayName: "Alpenrose Hotel Group" }] };
@@ -435,6 +549,8 @@ describe("shared hotel setup status route", () => {
               { type: "website", value: "https://alpenrose.example" },
               { type: "phone", value: "+49 123" },
             ],
+            bookingSelected: true,
+            bookingSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             hasBookingSettings: true,
             bookingEntitlementActive: false,
             bookingEntitlementSuspended: false,
@@ -444,19 +560,25 @@ describe("shared hotel setup status route", () => {
             bookabilityUpdatedAt: "2026-06-30T08:01:00.000Z",
             paymentsEnabled: true,
             paymentSettingsUpdatedAt: "2026-06-30T08:02:00.000Z",
+            pmsSelected: true,
+            pmsSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             pmsEntitlementActive: false,
             pmsEntitlementSuspended: false,
-            pmsRoomTypeCount: 0,
-            pmsRoomCount: 0,
-            pmsRatePlanCount: 0,
+            pmsRoomTypeCount: 1,
+            pmsRoomUpdatedAt: "2026-06-30T08:03:00.000Z",
+            pmsRoomCount: 1,
+            pmsRatePlanCount: 1,
+            pmsRateUpdatedAt: "2026-06-30T08:04:00.000Z",
+            marketplaceSelected: true,
+            marketplaceSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             marketplaceEntitlementActive: false,
             marketplaceEntitlementSuspended: false,
-            marketplaceProfileStatus: null,
-            marketplaceProfileComplete: null,
-            marketplaceListingCount: 0,
-            marketplaceVerifiedListingCount: 0,
-            marketplaceOfferingCount: 0,
-            marketplaceRequirementCount: 0,
+            marketplaceProfileStatus: "verified",
+            marketplaceProfileComplete: true,
+            marketplaceListingCount: 1,
+            marketplaceVerifiedListingCount: 1,
+            marketplaceOfferingCount: 1,
+            marketplaceRequirementCount: 1,
           },
         ],
       };
@@ -485,6 +607,137 @@ describe("shared hotel setup status route", () => {
       missingSteps: ["productEntitlement"],
       statusReasons: ["booking_activation_incomplete"],
     });
+    expect(status.properties[0]!.products.pms).toMatchObject({
+      status: "selected_incomplete",
+      missingSteps: ["productEntitlement"],
+      statusReasons: ["pms_activation_incomplete"],
+    });
+    expect(status.properties[0]!.products.marketplace).toMatchObject({
+      status: "selected_incomplete",
+      missingSteps: ["productEntitlement"],
+      statusReasons: ["marketplace_activation_incomplete"],
+    });
+  });
+
+  it("returns selected products from the write CTE instead of a stale base-table snapshot", async () => {
+    const query = vi.fn(async (_text: string, _values?: readonly unknown[]) => ({
+      rows: [
+        { product: "booking", updatedAt: "2026-06-30T08:00:00.000Z" },
+        { product: "marketplace", updatedAt: "2026-06-30T08:01:00.000Z" },
+      ],
+    }));
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    await expect(
+      repository.setPropertyProductSelections({
+        organizationId,
+        propertyId,
+        selectedProducts: ["marketplace", "booking"],
+      }),
+    ).resolves.toEqual({
+      propertyId,
+      selectedProducts: ["booking", "marketplace"],
+      updatedAt: "2026-06-30T08:01:00.000Z",
+    });
+
+    const selectionSql = query.mock.calls[0]![0];
+    expect(selectionSql).toContain("FROM upserted");
+    expect(selectionSql).toContain("FROM unselected");
+    expect(selectionSql).toContain("WHERE FALSE");
+    expect(selectionSql).not.toContain(
+      "FROM hotel_catalog.property_product_selections\n    WHERE organization_id = $1::uuid",
+    );
+    expect(query.mock.calls[0]![1]).toEqual([
+      organizationId,
+      propertyId,
+      ["marketplace", "booking"],
+    ]);
+  });
+
+  it("does not treat product rows or entitlements as product-selection intent", async () => {
+    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
+      if (text.includes("FROM identity.organizations")) {
+        return { rows: [{ displayName: "Alpenrose Hotel Group" }] };
+      }
+      return {
+        rows: [
+          {
+            propertyId,
+            publicId: "alpenrose-munich",
+            displayName: "Alpenrose Munich",
+            profileStatus: "complete",
+            location: { city: "Munich", countryCode: "DE" },
+            descriptions: { shortDescription: "City hotel" },
+            media: [{ url: "https://example.test/photo.jpg" }],
+            publicContacts: [
+              { type: "website", value: "https://alpenrose.example" },
+              { type: "phone", value: "+49 123" },
+            ],
+            bookingSelected: false,
+            bookingSelectionUpdatedAt: null,
+            hasBookingSettings: true,
+            bookingEntitlementActive: true,
+            bookingEntitlementSuspended: false,
+            bookabilityStatus: "public",
+            bookabilityFreshnessStatus: "fresh",
+            paymentsEnabled: true,
+            pmsSelected: false,
+            pmsSelectionUpdatedAt: null,
+            pmsEntitlementActive: true,
+            pmsEntitlementSuspended: false,
+            pmsRoomTypeCount: 1,
+            pmsRoomCount: 1,
+            pmsRatePlanCount: 1,
+            marketplaceSelected: false,
+            marketplaceSelectionUpdatedAt: null,
+            marketplaceEntitlementActive: true,
+            marketplaceEntitlementSuspended: false,
+            marketplaceProfileStatus: "verified",
+            marketplaceProfileComplete: true,
+            marketplaceListingCount: 1,
+            marketplaceVerifiedListingCount: 1,
+            marketplaceOfferingCount: 1,
+            marketplaceRequirementCount: 1,
+          },
+        ],
+      };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const status = await repository.getHotelSetupStatus({
+      organizationId,
+      propertyIds: [propertyId],
+    });
+
+    expect(status.properties[0]!.products).toMatchObject({
+      booking: { status: "not_selected" },
+      pms: { status: "not_selected" },
+      marketplace: { status: "not_selected" },
+    });
   });
 
   it("treats suspended product entitlements as suspended activation status", async () => {
@@ -506,17 +759,24 @@ describe("shared hotel setup status route", () => {
               { type: "website", value: "https://alpenrose.example" },
               { type: "phone", value: "+49 123" },
             ],
+            bookingSelected: false,
+            bookingSelectionUpdatedAt: null,
             hasBookingSettings: false,
             bookingEntitlementActive: false,
             bookingEntitlementSuspended: false,
             bookabilityStatus: null,
             paymentsEnabled: null,
+            pmsSelected: true,
+            pmsSelectionUpdatedAt: "2026-06-30T07:59:00.000Z",
             pmsEntitlementActive: true,
             pmsEntitlementSuspended: true,
             pmsEntitlementUpdatedAt: "2026-06-30T08:04:00.000Z",
             pmsRoomTypeCount: 1,
             pmsRoomCount: 3,
             pmsRatePlanCount: 1,
+            pmsRateUpdatedAt: "2026-06-30T08:03:00.000Z",
+            marketplaceSelected: false,
+            marketplaceSelectionUpdatedAt: null,
             marketplaceEntitlementActive: false,
             marketplaceEntitlementSuspended: false,
             marketplaceProfileStatus: null,
@@ -572,6 +832,8 @@ describe("shared hotel setup status route", () => {
     expect(end).not.toHaveBeenCalled();
   });
 });
+
+const productOrder: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms", "marketplace"];
 
 function buildSharedSetupApp(options: {
   repository: SharedHotelSetupStatusRepository;
@@ -633,6 +895,49 @@ function repositoryWith(properties: SharedSetupProperty[]): SharedHotelSetupStat
   return {
     async getHotelSetupStatus() {
       return { hotelGroupDisplayName: "Alpenrose Hotel Group", properties };
+    },
+    async setPropertyProductSelections() {
+      throw new Error("product selection writes are not used by this repository");
+    },
+  };
+}
+
+function statefulSelectionRepository(propertyIds: string[]): SharedHotelSetupStatusRepository {
+  const selectedByProperty = new Map<string, Set<SharedHotelSetupEntryProduct>>();
+
+  return {
+    async getHotelSetupStatus() {
+      return {
+        hotelGroupDisplayName: "Alpenrose Hotel Group",
+        properties: propertyIds.map((id) => {
+          const selected = selectedByProperty.get(id) ?? new Set<SharedHotelSetupEntryProduct>();
+          return setupProperty(id, {
+            products: {
+              booking: selected.has("booking")
+                ? activation("booking", "selected_incomplete", ["productEntitlement"])
+                : activation("booking", "not_selected"),
+              pms: selected.has("pms")
+                ? activation("pms", "selected_incomplete", ["roomTypes", "rooms", "ratePlans"])
+                : activation("pms", "not_selected"),
+              marketplace: selected.has("marketplace")
+                ? activation("marketplace", "selected_incomplete", [
+                    "creatorPitch",
+                    "collaborationOffer",
+                    "creatorRequirements",
+                  ])
+                : activation("marketplace", "not_selected"),
+            },
+          });
+        }),
+      };
+    },
+    async setPropertyProductSelections({ propertyId: id, selectedProducts }) {
+      selectedByProperty.set(id, new Set(selectedProducts));
+      return {
+        propertyId: id,
+        selectedProducts: productOrder.filter((product) => selectedProducts.includes(product)),
+        updatedAt: "2026-06-30T08:00:00.000Z",
+      };
     },
   };
 }

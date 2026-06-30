@@ -1,3 +1,4 @@
+import type { PermissionKey } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { enforceRoutePolicy } from "./policy.js";
@@ -80,11 +81,22 @@ export type SharedHotelSetupStatus = {
   updatedAt: string;
 };
 
+export type SharedHotelSetupProductSelection = {
+  propertyId: string;
+  selectedProducts: SharedHotelSetupEntryProduct[];
+  updatedAt: string;
+};
+
 export type SharedHotelSetupStatusRepository = {
   getHotelSetupStatus(input: { organizationId: string; propertyIds: string[] }): Promise<{
     hotelGroupDisplayName: string | null;
     properties: SharedSetupProperty[];
   }>;
+  setPropertyProductSelections(input: {
+    organizationId: string;
+    propertyId: string;
+    selectedProducts: SharedHotelSetupEntryProduct[];
+  }): Promise<SharedHotelSetupProductSelection>;
   close?(): Promise<void>;
 };
 
@@ -97,6 +109,14 @@ type SharedHotelSetupQuery = {
   entryProduct?: string;
   returnTo?: string;
   propertyId?: string;
+};
+
+type SharedHotelSetupProductSelectionParams = {
+  propertyId?: string;
+};
+
+type SharedHotelSetupProductSelectionBody = {
+  selectedProducts?: unknown;
 };
 
 const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms", "marketplace"];
@@ -163,15 +183,52 @@ export async function registerSharedHotelSetupStatusRoutes(
       updatedAt: now().toISOString(),
     } satisfies SharedHotelSetupStatus;
   });
+
+  app.put("/properties/:propertyId/products", async (request, reply) => {
+    const params = request.params as SharedHotelSetupProductSelectionParams;
+    const propertyId = parsePropertyId(params.propertyId, reply);
+    if (propertyId === false || propertyId === null) return reply;
+
+    const body = request.body as SharedHotelSetupProductSelectionBody | undefined;
+    const selectedProducts = parseSelectedProducts(body, reply);
+    if (selectedProducts === false) return reply;
+
+    const access = resolveSharedSetupAccess(
+      request,
+      reply,
+      propertyId,
+      "hotel_catalog.setup.manage",
+    );
+    if (!access) return reply;
+
+    const status = await repository.getHotelSetupStatus({
+      organizationId: access.organizationId,
+      propertyIds: [propertyId],
+    });
+    const authorizedProperties = filterAuthorizedProperties(status.properties, [propertyId]);
+    if (!authorizedProperties.some((item) => item.propertyId === propertyId)) {
+      return reply.status(404).send({
+        code: "property_setup_status_not_found",
+        detail: "Setup status was not found for the selected property.",
+      });
+    }
+
+    return repository.setPropertyProductSelections({
+      organizationId: access.organizationId,
+      propertyId,
+      selectedProducts,
+    });
+  });
 }
 
 function resolveSharedSetupAccess(
   request: FastifyRequest,
   reply: FastifyReply,
   requestedPropertyId: string | null,
+  permission: PermissionKey = "hotel_catalog.setup.read",
 ): { organizationId: string; propertyIds: string[] } | null {
   try {
-    const context = enforceRoutePolicy(request, { permission: "hotel_catalog.setup.read" });
+    const context = enforceRoutePolicy(request, { permission });
     if (context.selectedOrganization.kind !== "hotel_group") {
       reply.status(403).send({ detail: "This endpoint is only available for hotel groups." });
       return null;
@@ -240,6 +297,35 @@ function parsePropertyId(value: string | undefined, reply: FastifyReply): string
     detail: "propertyId must be a UUID.",
   });
   return false;
+}
+
+function parseSelectedProducts(
+  body: SharedHotelSetupProductSelectionBody | undefined,
+  reply: FastifyReply,
+): SharedHotelSetupEntryProduct[] | false {
+  if (!body || !Array.isArray(body.selectedProducts)) {
+    reply.status(422).send({
+      code: "invalid_selected_products",
+      detail: "selectedProducts must be an array of booking, pms, or marketplace.",
+    });
+    return false;
+  }
+
+  if (
+    !body.selectedProducts.every(
+      (value): value is SharedHotelSetupEntryProduct =>
+        typeof value === "string" && (ENTRY_PRODUCTS as readonly string[]).includes(value),
+    )
+  ) {
+    reply.status(422).send({
+      code: "invalid_selected_products",
+      detail: "selectedProducts must contain only booking, pms, or marketplace.",
+    });
+    return false;
+  }
+
+  const requested = new Set(body.selectedProducts);
+  return ENTRY_PRODUCTS.filter((product) => requested.has(product));
 }
 
 function filterAuthorizedProperties(
