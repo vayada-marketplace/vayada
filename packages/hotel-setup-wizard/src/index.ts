@@ -10,6 +10,41 @@ export {
 } from "./LastMinuteStep";
 export { default as PoliciesStep } from "./PoliciesStep";
 export {
+  default as SharedFirstRunPropertySetupWizard,
+  type SharedFirstRunProductContinueInput,
+  type SharedFirstRunPropertySetupWizardProps,
+} from "./SharedFirstRunPropertySetupWizard";
+export {
+  createSharedHotelSetupApi,
+  type SharedHotelSetupApi,
+  type SharedHotelSetupHttpClient,
+  type SharedHotelSetupStatusParams,
+} from "./sharedHotelSetupApi";
+export {
+  SHARED_HOTEL_SETUP_PRODUCTS,
+  isSafeSharedHotelSetupReturnTo,
+  isSharedHotelSetupProductSelectable,
+  parseSharedHotelSetupEntryProduct,
+  resolveSharedFirstRunSetupView,
+  safeSharedHotelSetupReturnTo,
+  selectedProductsForProperty,
+  type SharedFirstRunSetupScreen,
+  type SharedFirstRunSetupViewModel,
+  type SharedHotelSetupEntryProduct,
+  type SharedHotelSetupNextAction,
+  type SharedHotelSetupProduct,
+  type SharedHotelSetupProductSelection,
+  type SharedHotelSetupProductStatus,
+  type SharedHotelSetupStatus,
+  type SharedProductActivation,
+  type SharedPropertyProfile,
+  type SharedPropertyProfileInput,
+  type SharedPropertyProfileLocation,
+  type SharedPropertyProfileMedia,
+  type SharedPropertyProfileMissingField,
+  type SharedSetupProperty,
+} from "./sharedFirstRunSetupFlow";
+export {
   default as PropertyStep,
   type CountryOption,
   type CurrencyOption,
@@ -32,8 +67,4 @@ export {
   type PartialRefundTier,
   type RoomType,
 } from "./RoomsStep";
-export {
-  useSetupWizardState,
-  type RoomTab,
-  type SetupWizardOptions,
-} from "./useSetupWizardState";
+export { useSetupWizardState, type RoomTab, type SetupWizardOptions } from "./useSetupWizardState";

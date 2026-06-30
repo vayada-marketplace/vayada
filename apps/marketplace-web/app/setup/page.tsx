@@ -1,12 +1,16 @@
 "use client";
 
 import { Suspense } from "react";
+import { ROUTES } from "@/lib/constants";
 import { SharedHotelSetupPage } from "@/components/setup/SharedHotelSetupPage";
 
-export default function PmsSetupPage() {
+export default function MarketplaceSetupPage() {
   return (
     <Suspense fallback={<SetupLoading />}>
-      <SharedHotelSetupPage defaultEntryProduct="pms" defaultReturnTo="/dashboard" />
+      <SharedHotelSetupPage
+        defaultEntryProduct="marketplace"
+        defaultReturnTo={ROUTES.MARKETPLACE}
+      />
     </Suspense>
   );
 }
