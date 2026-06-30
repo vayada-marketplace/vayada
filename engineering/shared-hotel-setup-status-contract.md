@@ -123,7 +123,7 @@ type SharedHotelSetupStatus = {
     selectedPropertyId: string | null;
   };
   properties: SharedSetupProperty[];
-  nextAction: SharedSetupNextAction;
+  nextAction: SharedHotelSetupNextAction;
   updatedAt: string;
 };
 
@@ -160,7 +160,7 @@ type SharedProductActivation<Product extends "booking" | "pms" | "marketplace"> 
   updatedAt: string | null;
 };
 
-type SharedSetupNextAction =
+type SharedHotelSetupNextAction =
   | { action: "create_property"; reasonCodes: string[] }
   | { action: "select_property"; reasonCodes: string[] }
   | {

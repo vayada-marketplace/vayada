@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOTEL_ACTIVE_STATUSES,
   HOTEL_CATALOG_SETUP_FIELDS,
+  SHARED_HOTEL_SETUP_NEXT_ACTIONS,
   SHARED_HOTEL_SETUP_PRODUCTS,
   SHARED_HOTEL_SETUP_READ_PERMISSION,
   SHARED_HOTEL_SETUP_STATUS_CONTRACT_VERSION,
@@ -58,13 +59,28 @@ describe("@vayada/domain-hotels", () => {
       "disabled",
       "private",
     ]);
-    expect(SHARED_PROPERTY_PROFILE_MISSING_FIELDS).toContain("displayName");
+    expect(SHARED_PROPERTY_PROFILE_MISSING_FIELDS).toEqual([
+      "displayName",
+      "location",
+      "website",
+      "phone",
+      "description",
+      "media",
+    ]);
     expect(SHARED_PRODUCT_ACTIVATION_STATUSES).toEqual([
       "not_selected",
       "selected_incomplete",
       "active",
       "suspended",
       "unavailable",
+    ]);
+    expect(SHARED_HOTEL_SETUP_NEXT_ACTIONS).toEqual([
+      "create_property",
+      "select_property",
+      "complete_shared_profile",
+      "select_products",
+      "complete_product_activation",
+      "enter_product",
     ]);
   });
 
