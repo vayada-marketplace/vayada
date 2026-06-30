@@ -468,7 +468,11 @@ function parseSharedPropertyProfile(
 ): SharedPropertyProfileInput | false {
   const errors: Record<string, string[]> = {};
   const input = objectValue(body);
-  const location = objectValue(input["location"]);
+  const rawLocation = input["location"];
+  if (rawLocation !== undefined && rawLocation !== null && !isObjectRecord(rawLocation)) {
+    addFieldError(errors, "location", "location must be an object.");
+  }
+  const location = objectValue(rawLocation);
 
   const displayName = requiredString(input["displayName"], "displayName", errors, {
     maxLength: 200,
@@ -707,9 +711,11 @@ function addFieldError(errors: Record<string, string[]>, field: string, message:
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
+  return isObjectRecord(value) ? value : {};
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function filterAuthorizedProperties(
