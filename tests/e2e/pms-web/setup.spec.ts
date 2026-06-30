@@ -1,4 +1,10 @@
 import { expect, test } from "@playwright/test";
+import type {
+  SharedHotelSetupProduct,
+  SharedHotelSetupProductStatus,
+  SharedHotelSetupStatus,
+  SharedPropertyProfile,
+} from "@vayada/hotel-setup-wizard";
 import { mockPmsWebAuthenticatedSession } from "../support/pmsWebMocks";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -70,7 +76,7 @@ async function mockSharedSetupApi(
   });
 }
 
-function emptyStatus() {
+function emptyStatus(): SharedHotelSetupStatus {
   return {
     contractVersion: "shared-hotel-setup-status.v1",
     entry: { entryProduct: "pms", returnTo: "/dashboard" },
@@ -82,7 +88,7 @@ function emptyStatus() {
   };
 }
 
-function completeStatus() {
+function completeStatus(): SharedHotelSetupStatus {
   return {
     ...emptyStatus(),
     selection: { state: "single_property", selectedPropertyId: propertyId },
@@ -104,7 +110,7 @@ function completeStatus() {
   };
 }
 
-function propertyProfile() {
+function propertyProfile(): SharedPropertyProfile {
   return {
     propertyId,
     publicId: "prop_alpenrose",
@@ -139,7 +145,7 @@ function propertyProfile() {
   };
 }
 
-function product(productName: "booking" | "pms" | "marketplace", status: "not_selected") {
+function product(productName: SharedHotelSetupProduct, status: SharedHotelSetupProductStatus) {
   return {
     product: productName,
     status,

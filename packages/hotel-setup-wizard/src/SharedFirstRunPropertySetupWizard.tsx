@@ -86,6 +86,7 @@ export default function SharedFirstRunPropertySetupWizard({
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   const [profileReloadToken, setProfileReloadToken] = useState(0);
+  const [loadedProfile, setLoadedProfile] = useState<SharedPropertyProfile | null>(null);
   const [draft, setDraft] = useState<ProfileDraft>(EMPTY_DRAFT);
   const [selectedProducts, setSelectedProducts] = useState<SharedHotelSetupProduct[]>([
     entryProduct,
@@ -131,6 +132,7 @@ export default function SharedFirstRunPropertySetupWizard({
     const propertyId = view.profileMode === "update" ? view.selectedPropertyId : null;
     if (!propertyId) {
       setProfileLoadFailed(false);
+      setLoadedProfile(null);
       setDraft(EMPTY_DRAFT);
       return;
     }
@@ -144,10 +146,12 @@ export default function SharedFirstRunPropertySetupWizard({
       .getPropertyProfile(propertyId)
       .then((nextProfile) => {
         if (cancelled) return;
+        setLoadedProfile(nextProfile);
         setDraft(draftFromProfile(nextProfile));
       })
       .catch((err) => {
         if (cancelled) return;
+        setLoadedProfile(null);
         setProfileLoadFailed(true);
         setError(errorMessage(err));
       })
@@ -194,11 +198,16 @@ export default function SharedFirstRunPropertySetupWizard({
 
     setSaving(true);
     try {
-      const input = profileInputFromDraft(draft);
+      if (view.profileMode === "update" && !loadedProfile) {
+        setError("The existing property profile could not be loaded.");
+        return;
+      }
+      const input = profileInputFromDraft(draft, loadedProfile);
       const saved =
         view.profileMode === "update" && view.selectedPropertyId
           ? await api.updatePropertyProfile(view.selectedPropertyId, input)
           : await api.createPropertyProfile(input);
+      setLoadedProfile(saved);
       setForceCreateProperty(false);
       await reloadStatus(saved.propertyId);
     } catch (err) {
@@ -264,6 +273,7 @@ export default function SharedFirstRunPropertySetupWizard({
           onSelect={handleSelectProperty}
           onAdd={() => {
             setDraft(EMPTY_DRAFT);
+            setLoadedProfile(null);
             setForceCreateProperty(true);
           }}
         />
@@ -820,8 +830,11 @@ function draftFromProfile(profile: SharedPropertyProfile): ProfileDraft {
   };
 }
 
-function profileInputFromDraft(draft: ProfileDraft): SharedPropertyProfileInput {
-  const mediaUrl = nullIfBlank(draft.mediaUrl);
+function profileInputFromDraft(
+  draft: ProfileDraft,
+  existingProfile: SharedPropertyProfile | null,
+): SharedPropertyProfileInput {
+  const existingLocation = existingProfile?.location;
   return {
     displayName: draft.displayName.trim(),
     location: {
@@ -830,28 +843,44 @@ function profileInputFromDraft(draft: ProfileDraft): SharedPropertyProfileInput 
       city: nullIfBlank(draft.city),
       streetAddress: nullIfBlank(draft.streetAddress),
       postalCode: nullIfBlank(draft.postalCode),
-      rawMarketplaceLocation: null,
+      rawMarketplaceLocation: existingLocation?.rawMarketplaceLocation ?? null,
       timezone: nullIfBlank(draft.timezone),
-      latitude: null,
-      longitude: null,
-      addressPublic: true,
-      mapDisplayMode: "hidden",
+      latitude: existingLocation?.latitude ?? null,
+      longitude: existingLocation?.longitude ?? null,
+      addressPublic: existingLocation?.addressPublic ?? true,
+      mapDisplayMode: existingLocation?.mapDisplayMode ?? "hidden",
     },
     website: nullIfBlank(draft.website),
     phone: nullIfBlank(draft.phone),
     shortDescription: nullIfBlank(draft.shortDescription),
     longDescription: nullIfBlank(draft.longDescription),
-    media: mediaUrl
-      ? [
-          {
-            mediaType: "gallery_image",
-            url: mediaUrl,
-            altText: null,
-            sortOrder: 0,
-          },
-        ]
-      : [],
+    media: mediaFromDraft(draft, existingProfile),
   };
+}
+
+function mediaFromDraft(
+  draft: ProfileDraft,
+  existingProfile: SharedPropertyProfile | null,
+): SharedPropertyProfileInput["media"] {
+  const mediaUrl = nullIfBlank(draft.mediaUrl);
+  const [firstMedia, ...remainingMedia] = existingProfile?.media ?? [];
+
+  if (!mediaUrl) {
+    return remainingMedia;
+  }
+
+  if (firstMedia) {
+    return [{ ...firstMedia, url: mediaUrl }, ...remainingMedia];
+  }
+
+  return [
+    {
+      mediaType: "gallery_image",
+      url: mediaUrl,
+      altText: null,
+      sortOrder: 0,
+    },
+  ];
 }
 
 function nullIfBlank(value: string): string | null {

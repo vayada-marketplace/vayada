@@ -28,15 +28,22 @@ export function SharedHotelSetupPage({
 
   useEffect(() => {
     let cancelled = false;
-    authService.ensureSession().then((ok) => {
-      if (cancelled) return;
-      if (!ok || !authService.isHotelAdmin()) {
-        router.replace("/login");
-        return;
-      }
-      setAuthorized(true);
-      setCheckingAuth(false);
-    });
+    void authService
+      .ensureSession()
+      .then((ok) => {
+        if (cancelled) return;
+        if (!ok || !authService.isHotelAdmin()) {
+          router.replace("/login");
+          return;
+        }
+        setAuthorized(true);
+      })
+      .catch(() => {
+        if (!cancelled) router.replace("/login");
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingAuth(false);
+      });
     return () => {
       cancelled = true;
     };
