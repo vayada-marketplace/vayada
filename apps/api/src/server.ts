@@ -306,6 +306,8 @@ const app = buildApp({
                 config.authSession.authPmsWebLogoutUrl ?? config.authSession.authLogoutUrl,
               legacyJwtSecret: config.authSession.authLegacyPmsJwtSecret,
               legacyJwtUserType: "hotel",
+              requireExplicitOrganizationSelection: true,
+              selectedOrganizationCookieName: "vayada_pms_selected_org",
               requiredResourceLink: {
                 product: "pms",
                 resourceType: "pms_property",

@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
 import { authService } from "@/services/auth";
+import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { HotelIcon, ProfileIcon, CalendarIcon, MessageIcon } from "@/components/ui";
 import { ArrowRightOnRectangleIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { AppSwitcher } from "./AppSwitcher";
@@ -40,22 +41,39 @@ export default function AuthenticatedNavigation() {
     let cancelled = false;
     authService
       .ensureSession()
-      .then((authenticated) => {
+      .then(async (authenticated) => {
         if (cancelled) return;
         if (!authenticated) {
-          router.replace("/login");
+          router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
           return;
         }
-        setUserType(localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null);
+        const currentUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
+        if (currentUserType === "hotel") {
+          const returnTo =
+            typeof window === "undefined"
+              ? ROUTES.MARKETPLACE
+              : `${window.location.pathname}${window.location.search}`;
+          const decision = await resolveMarketplaceSetupGuard(returnTo);
+          if (cancelled) return;
+          localStorage.setItem(
+            STORAGE_KEYS.PROFILE_COMPLETE,
+            String(decision.action === "enter_product"),
+          );
+          if (decision.action === "redirect_to_setup") {
+            router.replace(decision.redirectPath);
+            return;
+          }
+        }
+        setUserType(currentUserType);
       })
       .catch((error) => {
         console.error("Failed to verify marketplace session:", error);
-        if (!cancelled) router.replace("/login");
+        if (!cancelled) router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
       });
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [pathname, router]);
 
   // Save collapsed state to localStorage
   useEffect(() => {
@@ -216,4 +234,12 @@ export default function AuthenticatedNavigation() {
       </header>
     </SidebarContext.Provider>
   );
+}
+
+function loginPathForCurrentRoute(fallbackReturnTo: string): string {
+  const returnTo =
+    typeof window === "undefined"
+      ? fallbackReturnTo
+      : `${window.location.pathname}${window.location.search}`;
+  return `${ROUTES.LOGIN}?returnTo=${encodeURIComponent(returnTo)}`;
 }

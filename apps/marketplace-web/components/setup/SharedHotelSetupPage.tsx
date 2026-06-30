@@ -62,6 +62,7 @@ export function SharedHotelSetupPage({
   const initialAddProperty = searchParams.get("mode") === "add";
 
   const handleProductContinue = (input: SharedFirstRunProductContinueInput) => {
+    localStorage.setItem("selectedSharedPropertyId", input.propertyId);
     if (isSafeSharedHotelSetupReturnTo(input.returnTo)) {
       router.push(input.returnTo);
       return;

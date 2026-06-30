@@ -16,6 +16,7 @@ export type IdentityUser = {
 export type IdentityOrganization = {
   organizationId: string;
   workosOrgId: string | null;
+  name?: string;
   kind: OrganizationKind;
   status: OrganizationStatus;
 };
@@ -36,6 +37,11 @@ export type IdentityResourceLink = {
   status: string;
 };
 
+export type IdentityMembershipOrganization = IdentityOrganization & {
+  name: string;
+  membership: IdentityMembership;
+};
+
 /** Read-only identity queries needed to resolve a RequestContext. */
 export interface IdentityRepository {
   findUserByProviderUserId(provider: string, providerUserId: string): Promise<IdentityUser | null>;
@@ -43,6 +49,8 @@ export interface IdentityRepository {
   findOrganizationByWorkosOrgId(workosOrgId: string): Promise<IdentityOrganization | null>;
 
   findActiveMembership(userId: string, organizationId: string): Promise<IdentityMembership | null>;
+
+  listMembershipOrganizations?(userId: string): Promise<IdentityMembershipOrganization[]>;
 
   findLinkedResources(organizationId: string): Promise<IdentityResourceLink[]>;
 }
@@ -91,11 +99,12 @@ export function createPgIdentityRepository(config: RepositoryConfig): IdentityRe
     async findOrganizationByWorkosOrgId(workosOrgId) {
       const result = await pool.query<{
         id: string;
+        name: string;
         workos_org_id: string | null;
         kind: OrganizationKind;
         status: OrganizationStatus;
       }>(
-        `SELECT id, workos_org_id, kind, status
+        `SELECT id, name, workos_org_id, kind, status
          FROM identity.organizations
          WHERE workos_org_id = $1
          LIMIT 1`,
@@ -106,6 +115,7 @@ export function createPgIdentityRepository(config: RepositoryConfig): IdentityRe
       return {
         organizationId: row.id,
         workosOrgId: row.workos_org_id,
+        name: row.name,
         kind: row.kind,
         status: row.status,
       };
@@ -134,6 +144,53 @@ export function createPgIdentityRepository(config: RepositoryConfig): IdentityRe
         workosMembershipId: row.workos_membership_id,
         workosRoleSlugs: row.workos_role_slugs,
       };
+    },
+
+    async listMembershipOrganizations(userId) {
+      const result = await pool.query<{
+        organization_id: string;
+        organization_name: string;
+        workos_org_id: string | null;
+        organization_kind: OrganizationKind;
+        organization_status: OrganizationStatus;
+        membership_id: string;
+        membership_status: MembershipStatus;
+        role_key: string;
+        workos_membership_id: string | null;
+        workos_role_slugs: string[];
+      }>(
+        `SELECT
+           o.id AS organization_id,
+           o.name AS organization_name,
+           o.workos_org_id,
+           o.kind AS organization_kind,
+           o.status AS organization_status,
+           om.id AS membership_id,
+           om.status AS membership_status,
+           om.role_key,
+           om.workos_membership_id,
+           om.workos_role_slugs
+         FROM identity.organization_memberships om
+         JOIN identity.organizations o ON o.id = om.organization_id
+         WHERE om.user_id = $1
+         ORDER BY o.name ASC`,
+        [userId],
+      );
+
+      return result.rows.map((row) => ({
+        organizationId: row.organization_id,
+        workosOrgId: row.workos_org_id,
+        name: row.organization_name,
+        kind: row.organization_kind,
+        status: row.organization_status,
+        membership: {
+          membershipId: row.membership_id,
+          status: row.membership_status,
+          roleKey: row.role_key,
+          workosMembershipId: row.workos_membership_id,
+          workosRoleSlugs: row.workos_role_slugs,
+        },
+      }));
     },
 
     async findLinkedResources(organizationId) {

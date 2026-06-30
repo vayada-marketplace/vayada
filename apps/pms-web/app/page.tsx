@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
-import { checkPmsSetupStatus } from "@/lib/utils/setupStatus";
+import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 
 export default function Home() {
   const router = useRouter();
@@ -18,20 +18,14 @@ export default function Home() {
         return;
       }
 
-      const status = await checkPmsSetupStatus();
+      const decision = await resolvePmsSetupGuard("/dashboard");
       if (cancelled) return;
 
-      if (!status || !status.registered) {
-        // Not registered in PMS — send to booking engine onboarding
-        router.replace("/login");
-        return;
-      }
-
-      if (!status.setupComplete) {
-        router.replace("/setup");
-      } else {
-        router.replace("/dashboard");
-      }
+      localStorage.setItem(
+        "pmsSetupComplete",
+        decision.action === "enter_product" ? "true" : "false",
+      );
+      router.replace(decision.action === "enter_product" ? "/dashboard" : decision.redirectPath);
     }
     redirect();
     return () => {

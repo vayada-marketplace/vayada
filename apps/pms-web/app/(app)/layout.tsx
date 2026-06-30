@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import { authService } from "@/services/auth";
+import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -13,14 +14,35 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    authService.ensureSession().then((authorized) => {
-      if (cancelled) return;
-      if (!authorized || !authService.isHotelAdmin()) {
-        router.replace("/login");
-      } else {
+    async function authorize() {
+      try {
+        const authorized = await authService.ensureSession();
+        if (cancelled) return;
+        if (!authorized || !authService.isHotelAdmin()) {
+          router.replace(loginPathForCurrentRoute("/dashboard"));
+          return;
+        }
+
+        const returnTo =
+          typeof window === "undefined"
+            ? "/dashboard"
+            : `${window.location.pathname}${window.location.search}`;
+        const decision = await resolvePmsSetupGuard(returnTo);
+        if (cancelled) return;
+        localStorage.setItem(
+          "pmsSetupComplete",
+          decision.action === "enter_product" ? "true" : "false",
+        );
+        if (decision.action === "redirect_to_setup") {
+          router.replace(decision.redirectPath);
+          return;
+        }
         setIsAuthorized(true);
+      } catch {
+        if (!cancelled) router.replace(loginPathForCurrentRoute("/dashboard"));
       }
-    });
+    }
+    void authorize();
     return () => {
       cancelled = true;
     };
@@ -56,4 +78,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+function loginPathForCurrentRoute(fallbackReturnTo: string): string {
+  const returnTo =
+    typeof window === "undefined"
+      ? fallbackReturnTo
+      : `${window.location.pathname}${window.location.search}`;
+  return `/login?returnTo=${encodeURIComponent(returnTo)}`;
 }

@@ -123,6 +123,38 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     }),
   );
+  await page.route("**/api/hotel-setup/status**", (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "shared-hotel-setup-status.v1",
+        entry: { entryProduct: "pms", returnTo: "/dashboard" },
+        hotelGroup: { organizationId: "org_pms_owner", displayName: "Alpenrose Hotel Group" },
+        selection: { state: "single_property", selectedPropertyId: PMS_WEB_PROPERTY_ID },
+        properties: [
+          {
+            propertyId: PMS_WEB_PROPERTY_ID,
+            publicId: "prop_alpenrose",
+            displayName: "Alpenrose Munich",
+            locationSummary: "Munich, DE",
+            sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+            products: {
+              booking: product("booking", "not_selected"),
+              pms: product("pms", "active"),
+              marketplace: product("marketplace", "not_selected"),
+            },
+          },
+        ],
+        nextAction: {
+          action: "enter_product",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          product: "pms",
+          returnTo: "/dashboard",
+          reasonCodes: ["ready"],
+        },
+        updatedAt: "2026-06-30T00:00:00.000Z",
+      },
+    }),
+  );
   await page.route("**/admin/module-activations", (route) =>
     route.fulfill({ json: { activations: [] } }),
   );
@@ -234,6 +266,16 @@ function targetList<T>(items: T[]) {
     propertyId: PMS_WEB_PROPERTY_ID,
     items,
     sourceFreshness: {},
+  };
+}
+
+function product(productName: string, status: string) {
+  return {
+    product: productName,
+    status,
+    missingSteps: [],
+    statusReasons: [],
+    updatedAt: null,
   };
 }
 

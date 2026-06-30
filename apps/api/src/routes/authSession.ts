@@ -2,6 +2,7 @@ import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import type {
   IdentityLifecycleCommandBus,
   IdentityLifecycleCommandResult,
+  IdentityMembershipOrganization,
   IdentityResourceLink,
   IdentityRepository,
   IdentityUser,
@@ -85,6 +86,8 @@ export type AuthSurfacePolicy = {
   legacyJwtUserType?: string;
   requiredMembershipRoleKey?: string;
   requiredResourceLink?: RequiredResourceLink;
+  requireExplicitOrganizationSelection?: boolean;
+  selectedOrganizationCookieName?: string;
 };
 
 export type AuthSessionRouteOptions = {
@@ -116,6 +119,20 @@ type AuthStateContext = {
   returnTo?: string;
 };
 
+type AuthOrganizationCandidate = {
+  organizationId: string;
+  workosOrganizationId: string;
+  displayName: string;
+  kind: OrganizationKind;
+};
+
+type OrganizationAccessOptions = {
+  requireResourceLink?: boolean;
+  skipSelection?: boolean;
+  explicitOrganizationSelection?: boolean;
+  selectedWorkosOrganizationId?: string | null;
+};
+
 export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptions> = async (
   app: FastifyInstance,
   options: AuthSessionRouteOptions,
@@ -128,7 +145,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       return_to?: string;
     };
     const surface = parseSurface(query.surface);
-    getSurfacePolicy(surface, options);
+    const surfacePolicy = getSurfacePolicy(surface, options);
     const returnTo = query.return_to
       ? validateReturnTo(query.return_to, options.allowedOrigins)
       : undefined;
@@ -143,10 +160,19 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     reply
       .headers({
         "set-cookie": [
-          ...clearHostOnlyCookies([STATE_COOKIE, SESSION_COOKIE, CSRF_COOKIE], {
-            secure: options.cookieSecure,
-            domain: options.cookieDomain,
-          }),
+          ...clearHostOnlyCookies(
+            [
+              STATE_COOKIE,
+              SESSION_COOKIE,
+              CSRF_COOKIE,
+              ...selectedOrganizationCookieNames(surfacePolicy),
+            ],
+            {
+              secure: options.cookieSecure,
+              domain: options.cookieDomain,
+            },
+          ),
+          ...clearSelectedOrganizationCookieHeaders(surfacePolicy, options),
           serializeCookie(
             STATE_COOKIE,
             encodeStateCookie(
@@ -215,8 +241,24 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     });
     let resolution: IdentityResolution;
     try {
-      resolution = await resolveOrCreateIdentity(session, request, options, surfacePolicy);
+      resolution = await resolveOrCreateIdentity(
+        session,
+        request,
+        options,
+        surfacePolicy,
+        organizationAccessOptionsFromRequest(request, surfacePolicy),
+      );
     } catch (error) {
+      if (error instanceof OrganizationSelectionRequiredError) {
+        return sendOrganizationSelectionRedirect(
+          reply,
+          session,
+          error,
+          stateContext.returnTo ?? surfacePolicy.callbackReturnUrl,
+          surfacePolicy,
+          options,
+        );
+      }
       return reply.code(403).send(toAuthError(error));
     }
     await options.productAuditSink.record({
@@ -224,8 +266,8 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
       actorUserId: resolution.user.userId,
       organizationId: resolution.organizationId,
       workosUserId: session.user.id,
-      workosOrgId: session.organizationId,
-      workosSessionId: session.sessionId,
+      workosOrgId: resolution.session.organizationId,
+      workosSessionId: resolution.session.sessionId,
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
@@ -238,7 +280,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           secure: options.cookieSecure,
           domain: options.cookieDomain,
         }),
-        serializeCookie(SESSION_COOKIE, session.sealedSession, {
+        serializeCookie(SESSION_COOKIE, resolution.session.sealedSession, {
           maxAge: 60 * 60 * 24 * 7,
           secure: options.cookieSecure,
           domain: options.cookieDomain,
@@ -249,6 +291,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
           domain: options.cookieDomain,
           httpOnly: false,
         }),
+        ...selectedOrganizationCookieHeaders(resolution.session, surfacePolicy, options),
       ],
     });
     const callbackReturnUrl = stateContext.returnTo ?? surfacePolicy.callbackReturnUrl;
@@ -257,7 +300,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
     return reply.send(
       toSessionResponse(
-        session,
+        resolution.session,
         resolution.user,
         csrfToken,
         resolution.organizationId,
@@ -283,13 +326,39 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
     let resolution: IdentityResolution;
     try {
-      resolution = await resolveExistingIdentity(session, options, surfacePolicy);
+      resolution = await resolveExistingIdentity(
+        session,
+        options,
+        surfacePolicy,
+        organizationAccessOptionsFromRequest(request, surfacePolicy),
+      );
     } catch (error) {
+      if (error instanceof OrganizationSelectionRequiredError) {
+        return sendOrganizationSelectionResponse(reply, error, readCookie(request, CSRF_COOKIE));
+      }
       return reply.code(403).send(toAuthError(error));
+    }
+    const setCookieHeaders = [
+      ...(resolution.session.sealedSession !== session.sealedSession
+        ? [
+            serializeCookie(SESSION_COOKIE, resolution.session.sealedSession, {
+              maxAge: 60 * 60 * 24 * 7,
+              secure: options.cookieSecure,
+              domain: options.cookieDomain,
+            }),
+          ]
+        : []),
+      ...selectedOrganizationCookieHeaders(resolution.session, surfacePolicy, options),
+    ];
+    if (setCookieHeaders.length > 0) {
+      reply.header(
+        "set-cookie",
+        setCookieHeaders.length === 1 ? setCookieHeaders[0] : setCookieHeaders,
+      );
     }
     return reply.send(
       toSessionResponse(
-        session,
+        resolution.session,
         resolution.user,
         readCookie(request, CSRF_COOKIE),
         resolution.organizationId,
@@ -321,22 +390,33 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     }
     let resolution: IdentityResolution;
     try {
-      resolution = await resolveExistingIdentity(session, options, surfacePolicy);
+      resolution = await resolveExistingIdentity(
+        session,
+        options,
+        surfacePolicy,
+        organizationAccessOptionsFromRequest(request, surfacePolicy, {
+          explicitOrganizationSelection: Boolean(body?.organizationId),
+        }),
+      );
     } catch (error) {
+      if (error instanceof OrganizationSelectionRequiredError) {
+        return sendOrganizationSelectionResponse(reply, error, readCookie(request, CSRF_COOKIE));
+      }
       return reply.code(403).send(toAuthError(error));
     }
+    const setCookieHeaders = [
+      serializeCookie(SESSION_COOKIE, resolution.session.sealedSession, {
+        maxAge: 60 * 60 * 24 * 7,
+        secure: options.cookieSecure,
+        domain: options.cookieDomain,
+      }),
+      ...selectedOrganizationCookieHeaders(resolution.session, surfacePolicy, options),
+    ];
     reply
-      .header(
-        "set-cookie",
-        serializeCookie(SESSION_COOKIE, session.sealedSession, {
-          maxAge: 60 * 60 * 24 * 7,
-          secure: options.cookieSecure,
-          domain: options.cookieDomain,
-        }),
-      )
+      .header("set-cookie", setCookieHeaders.length === 1 ? setCookieHeaders[0] : setCookieHeaders)
       .send(
         toSessionResponse(
-          session,
+          resolution.session,
           resolution.user,
           readCookie(request, CSRF_COOKIE),
           resolution.organizationId,
@@ -397,6 +477,7 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
             domain: options.cookieDomain,
             httpOnly: false,
           }),
+          ...clearSelectedOrganizationCookieHeaders(surfacePolicy, options),
         ],
       })
       .send({ logoutUrl });
@@ -545,7 +626,14 @@ function registerCompatibilityTokenRoute(
     }
     let resolution: IdentityResolution;
     try {
-      resolution = await resolveExistingIdentity(session, options, surfacePolicy);
+      resolution = await resolveExistingIdentity(
+        session,
+        options,
+        surfacePolicy,
+        organizationAccessOptionsFromRequest(request, surfacePolicy, {
+          requireResourceLink: true,
+        }),
+      );
     } catch (error) {
       return reply.code(403).send(toAuthError(error));
     }
@@ -559,9 +647,9 @@ function registerCompatibilityTokenRoute(
       organizationId: resolution.organizationId,
       surface: route.surface,
       resourceScope,
-      workosUserId: session.user.id,
-      workosOrgId: session.organizationId,
-      workosSessionId: session.sessionId,
+      workosUserId: resolution.session.user.id,
+      workosOrgId: resolution.session.organizationId,
+      workosSessionId: resolution.session.sessionId,
       requestId: request.id,
       occurredAt: new Date().toISOString(),
     });
@@ -589,6 +677,7 @@ async function resolveOrCreateIdentity(
   request: FastifyRequest,
   options: AuthSessionRouteOptions,
   surfacePolicy: AuthSurfacePolicy,
+  accessOptions: OrganizationAccessOptions = {},
 ): Promise<IdentityResolution> {
   let user = await options.identityRepository.findUserByProviderUserId("workos", session.user.id);
   if (!user) {
@@ -621,7 +710,13 @@ async function resolveOrCreateIdentity(
       externalId: user.userId,
     });
   }
-  const access = await resolveOrganizationAccess(session, user.userId, options, surfacePolicy);
+  const access = await resolveOrganizationAccess(
+    session,
+    user,
+    options,
+    surfacePolicy,
+    accessOptions,
+  );
   return { user, ...access };
 }
 
@@ -629,6 +724,7 @@ async function resolveExistingIdentity(
   session: AuthKitSession,
   options: AuthSessionRouteOptions,
   surfacePolicy: AuthSurfacePolicy,
+  accessOptions: OrganizationAccessOptions = {},
 ): Promise<IdentityResolution> {
   const verified = await options.tokenVerifier(session.accessToken);
   const user = await options.identityRepository.findUserByProviderUserId(
@@ -640,14 +736,16 @@ async function resolveExistingIdentity(
   }
   const access = await resolveOrganizationAccess(
     { ...session, organizationId: verified.workosOrgId ?? session.organizationId },
-    user.userId,
+    user,
     options,
     surfacePolicy,
+    accessOptions,
   );
   return { user, ...access };
 }
 
 type IdentityResolution = {
+  session: AuthKitSession;
   user: IdentityUser;
   organizationId?: string;
   organizationKind?: OrganizationKind;
@@ -677,11 +775,15 @@ async function findUserAfterLifecycle(
 
 async function resolveOrganizationAccess(
   session: AuthKitSession,
-  userId: string,
+  user: IdentityUser,
   options: AuthSessionRouteOptions,
   surfacePolicy: AuthSurfacePolicy,
+  accessOptions: OrganizationAccessOptions = {},
 ): Promise<Omit<IdentityResolution, "user">> {
   if (!session.organizationId) {
+    if (!accessOptions.skipSelection) {
+      return resolveSelectableOrganization(session, user, options, surfacePolicy, accessOptions);
+    }
     throw new Error("AuthKit session is missing selected organization");
   }
   const organization = await options.identityRepository.findOrganizationByWorkosOrgId(
@@ -694,6 +796,19 @@ async function resolveOrganizationAccess(
     throw new Error(`Organization ${organization.organizationId} is not active`);
   }
   if (!matchesOrganizationKind(organization.kind, surfacePolicy.requiredOrganizationKind)) {
+    if (!accessOptions.skipSelection) {
+      try {
+        return await resolveSelectableOrganization(
+          session,
+          user,
+          options,
+          surfacePolicy,
+          accessOptions,
+        );
+      } catch (error) {
+        if (error instanceof OrganizationSelectionRequiredError) throw error;
+      }
+    }
     throw new Error(
       `Selected organization must be ${requiredOrganizationKindLabel(
         surfacePolicy.requiredOrganizationKind,
@@ -701,7 +816,7 @@ async function resolveOrganizationAccess(
     );
   }
   const membership = await options.identityRepository.findActiveMembership(
-    userId,
+    user.userId,
     organization.organizationId,
   );
   if (!membership || membership.status !== "active") {
@@ -715,15 +830,33 @@ async function resolveOrganizationAccess(
       `Selected organization membership must be ${surfacePolicy.requiredMembershipRoleKey}`,
     );
   }
+  if (shouldRequireOrganizationSelection(session, surfacePolicy, accessOptions)) {
+    const candidates = await findSurfaceOrganizationCandidates(
+      user.userId,
+      options.identityRepository,
+      surfacePolicy,
+    );
+    if (candidates.length > 1) {
+      throw new OrganizationSelectionRequiredError(session, user, candidates);
+    }
+  }
   if (surfacePolicy.requiredResourceLink) {
     const links = await options.identityRepository.findLinkedResources(organization.organizationId);
     const matchingLinks = findRequiredResourceLinks(links, surfacePolicy.requiredResourceLink);
-    if (matchingLinks.length === 0) {
+    if (matchingLinks.length === 0 && accessOptions.requireResourceLink) {
       throw new Error(
         `Selected organization is missing an active ${surfacePolicy.requiredResourceLink.product}/${surfacePolicy.requiredResourceLink.resourceType} resource link`,
       );
     }
+    if (matchingLinks.length === 0) {
+      return {
+        session,
+        organizationId: organization.organizationId,
+        organizationKind: organization.kind,
+      };
+    }
     return {
+      session,
       organizationId: organization.organizationId,
       organizationKind: organization.kind,
       resourceScope: {
@@ -732,7 +865,209 @@ async function resolveOrganizationAccess(
       },
     };
   }
-  return { organizationId: organization.organizationId, organizationKind: organization.kind };
+  return {
+    session,
+    organizationId: organization.organizationId,
+    organizationKind: organization.kind,
+  };
+}
+
+class OrganizationSelectionRequiredError extends Error {
+  constructor(
+    readonly session: AuthKitSession,
+    readonly user: IdentityUser,
+    readonly candidates: AuthOrganizationCandidate[],
+  ) {
+    super("Organization selection is required");
+  }
+}
+
+async function resolveSelectableOrganization(
+  session: AuthKitSession,
+  user: IdentityUser,
+  options: AuthSessionRouteOptions,
+  surfacePolicy: AuthSurfacePolicy,
+  accessOptions: OrganizationAccessOptions,
+): Promise<Omit<IdentityResolution, "user">> {
+  const candidates = await findSurfaceOrganizationCandidates(
+    user.userId,
+    options.identityRepository,
+    surfacePolicy,
+  );
+
+  if (candidates.length === 1) {
+    const refreshed = await options.authKitClient.refreshSession({
+      sealedSession: session.sealedSession,
+      organizationId: candidates[0]!.workosOrganizationId,
+    });
+    if (!refreshed) {
+      throw new Error("Unable to refresh AuthKit session for selected organization");
+    }
+    return resolveOrganizationAccess(refreshed, user, options, surfacePolicy, {
+      ...accessOptions,
+      skipSelection: true,
+    });
+  }
+
+  if (candidates.length > 1) {
+    throw new OrganizationSelectionRequiredError(session, user, candidates);
+  }
+
+  throw new Error(
+    `No active ${requiredOrganizationKindLabel(
+      surfacePolicy.requiredOrganizationKind,
+    )} organization is available for this surface`,
+  );
+}
+
+function shouldRequireOrganizationSelection(
+  session: AuthKitSession,
+  surfacePolicy: AuthSurfacePolicy,
+  accessOptions: OrganizationAccessOptions,
+): boolean {
+  return (
+    surfacePolicy.requireExplicitOrganizationSelection === true &&
+    accessOptions.skipSelection !== true &&
+    accessOptions.explicitOrganizationSelection !== true &&
+    Boolean(session.organizationId) &&
+    accessOptions.selectedWorkosOrganizationId !== session.organizationId
+  );
+}
+
+async function findSurfaceOrganizationCandidates(
+  userId: string,
+  repository: IdentityRepository,
+  surfacePolicy: AuthSurfacePolicy,
+): Promise<AuthOrganizationCandidate[]> {
+  if (!repository.listMembershipOrganizations) {
+    throw new Error("Identity repository does not support organization selection");
+  }
+  const memberships = await repository.listMembershipOrganizations(userId);
+  return memberships
+    .filter((membership) => isSurfaceOrganizationCandidate(membership, surfacePolicy))
+    .map((membership) => ({
+      organizationId: membership.organizationId,
+      workosOrganizationId: membership.workosOrgId!,
+      displayName: membership.name,
+      kind: membership.kind,
+    }));
+}
+
+function isSurfaceOrganizationCandidate(
+  membership: IdentityMembershipOrganization,
+  surfacePolicy: AuthSurfacePolicy,
+): boolean {
+  return (
+    membership.status === "active" &&
+    membership.membership.status === "active" &&
+    Boolean(membership.workosOrgId) &&
+    matchesOrganizationKind(membership.kind, surfacePolicy.requiredOrganizationKind) &&
+    (!surfacePolicy.requiredMembershipRoleKey ||
+      membership.membership.roleKey === surfacePolicy.requiredMembershipRoleKey)
+  );
+}
+
+function sendOrganizationSelectionRedirect(
+  reply: FastifyReply,
+  session: AuthKitSession,
+  error: OrganizationSelectionRequiredError,
+  callbackReturnUrl: string | undefined,
+  surfacePolicy: AuthSurfacePolicy,
+  options: AuthSessionRouteOptions,
+) {
+  const csrfToken = randomBytes(24).toString("base64url");
+  reply.headers({
+    "set-cookie": [
+      serializeCookie(STATE_COOKIE, "", {
+        maxAge: 0,
+        secure: options.cookieSecure,
+        domain: options.cookieDomain,
+      }),
+      serializeCookie(SESSION_COOKIE, session.sealedSession, {
+        maxAge: 60 * 60 * 24 * 7,
+        secure: options.cookieSecure,
+        domain: options.cookieDomain,
+      }),
+      serializeCookie(CSRF_COOKIE, csrfToken, {
+        maxAge: 60 * 60 * 24 * 7,
+        secure: options.cookieSecure,
+        domain: options.cookieDomain,
+        httpOnly: false,
+      }),
+      ...clearSelectedOrganizationCookieHeaders(surfacePolicy, options),
+    ],
+  });
+  if (callbackReturnUrl) {
+    return reply.redirect(callbackReturnUrl);
+  }
+  return sendOrganizationSelectionResponse(reply, error, csrfToken);
+}
+
+function sendOrganizationSelectionResponse(
+  reply: FastifyReply,
+  error: OrganizationSelectionRequiredError,
+  csrfToken?: string,
+) {
+  return reply.send({
+    organizationSelectionRequired: true,
+    csrfToken,
+    organizations: error.candidates,
+    user: {
+      id: error.user.userId,
+      email: error.user.email,
+      status: error.user.status,
+      workosUserId: error.session.user.id,
+    },
+  });
+}
+
+function organizationAccessOptionsFromRequest(
+  request: FastifyRequest,
+  surfacePolicy: AuthSurfacePolicy,
+  overrides: OrganizationAccessOptions = {},
+): OrganizationAccessOptions {
+  const selectedOrganizationCookieName = surfacePolicy.selectedOrganizationCookieName;
+  return {
+    selectedWorkosOrganizationId: selectedOrganizationCookieName
+      ? (readCookie(request, selectedOrganizationCookieName) ?? null)
+      : null,
+    ...overrides,
+  };
+}
+
+function selectedOrganizationCookieNames(surfacePolicy: AuthSurfacePolicy): string[] {
+  return surfacePolicy.selectedOrganizationCookieName
+    ? [surfacePolicy.selectedOrganizationCookieName]
+    : [];
+}
+
+function selectedOrganizationCookieHeaders(
+  session: AuthKitSession,
+  surfacePolicy: AuthSurfacePolicy,
+  options: AuthSessionRouteOptions,
+): string[] {
+  const cookieName = surfacePolicy.selectedOrganizationCookieName;
+  if (!cookieName || !session.organizationId) return [];
+  return [
+    serializeCookie(cookieName, session.organizationId, {
+      maxAge: 60 * 60 * 24 * 7,
+      secure: options.cookieSecure,
+      domain: options.cookieDomain,
+    }),
+  ];
+}
+
+function clearSelectedOrganizationCookieHeaders(
+  surfacePolicy: AuthSurfacePolicy,
+  options: AuthSessionRouteOptions,
+): string[] {
+  return selectedOrganizationCookieNames(surfacePolicy).map((name) =>
+    serializeCookie(name, "", {
+      maxAge: 0,
+      secure: options.cookieSecure,
+      domain: options.cookieDomain,
+    }),
+  );
 }
 
 function findRequiredResourceLinks(

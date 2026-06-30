@@ -13,6 +13,7 @@ test.describe("marketplace-web smoke", () => {
     const returnTo = new URL(hostedLoginUrl.searchParams.get("return_to") ?? "");
     expect(returnTo.pathname).toBe("/login");
     expect(returnTo.searchParams.get("auth")).toBe("callback");
+    expect(returnTo.searchParams.get("returnTo")).toBe("/marketplace");
   });
 
   test("login callback renders locally", async ({ request }) => {

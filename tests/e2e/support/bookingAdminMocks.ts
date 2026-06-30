@@ -299,6 +299,38 @@ export async function mockBookingAdminShellRoutes(
       },
     }),
   );
+  await page.route("**/api/hotel-setup/status**", (route) =>
+    route.fulfill({
+      json: {
+        contractVersion: "shared-hotel-setup-status.v1",
+        entry: { entryProduct: "booking", returnTo: "/dashboard" },
+        hotelGroup: { organizationId: "org_hotel_group", displayName: "Alpenrose Hotel Group" },
+        selection: { state: "single_property", selectedPropertyId: BOOKING_ADMIN_PROPERTY_ID },
+        properties: [
+          {
+            propertyId: BOOKING_ADMIN_PROPERTY_ID,
+            publicId: "prop_alpenrose",
+            displayName: "Alpenrose",
+            locationSummary: "Munich, DE",
+            sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+            products: {
+              booking: product("booking", "active"),
+              pms: product("pms", "not_selected"),
+              marketplace: product("marketplace", "not_selected"),
+            },
+          },
+        ],
+        nextAction: {
+          action: "enter_product",
+          propertyId: BOOKING_ADMIN_PROPERTY_ID,
+          product: "booking",
+          returnTo: "/dashboard",
+          reasonCodes: ["ready"],
+        },
+        updatedAt: "2026-06-30T00:00:00.000Z",
+      },
+    }),
+  );
   await page.route(`**${BOOKING_ADMIN_PROPERTY_LINK_PATH}*`, (route) =>
     route.fulfill({
       json: {
@@ -327,6 +359,16 @@ export async function mockBookingAdminShellRoutes(
       ? route.fulfill({ status: 204 })
       : route.fulfill({ json: options.customDomain ?? defaultCustomDomain }),
   );
+}
+
+function product(productName: string, status: string) {
+  return {
+    product: productName,
+    status,
+    missingSteps: [],
+    statusReasons: [],
+    updatedAt: null,
+  };
 }
 
 export async function mockBookingAdminBookingFlow(

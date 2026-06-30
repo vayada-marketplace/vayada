@@ -20,8 +20,10 @@ test.describe("booking-admin smoke", () => {
 
     const loginUrl = new URL(loginRequests[0]!);
     expect(loginUrl.searchParams.get("surface")).toBe("booking-admin");
-    expect(loginUrl.searchParams.get("return_to")).toBe(
-      `${new URL(baseURL!).origin}/login?auth=callback`,
-    );
+    const returnTo = new URL(loginUrl.searchParams.get("return_to") ?? "");
+    expect(returnTo.origin).toBe(new URL(baseURL!).origin);
+    expect(returnTo.pathname).toBe("/login");
+    expect(returnTo.searchParams.get("auth")).toBe("callback");
+    expect(returnTo.searchParams.get("returnTo")).toBe("/dashboard");
   });
 });
