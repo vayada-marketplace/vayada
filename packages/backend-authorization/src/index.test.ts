@@ -365,6 +365,48 @@ describe("authorization helpers", () => {
       false,
     ],
     [
+      "allows hotel setup reader with a direct canonical property link",
+      contextFor({
+        kind: "hotel_group",
+        roleKey: "operator",
+        permissions: ["hotel_catalog.setup.read"],
+        linkedResources: [
+          {
+            product: "hotel_catalog",
+            resourceType: "property",
+            resourceId: "c2c3d4e5-0000-0000-0000-000000000001",
+            relationship: "operator",
+            status: "active",
+          },
+        ],
+      }),
+      requirement(
+        "hotel_catalog.setup.read",
+        "hotel_catalog",
+        "property",
+        "c2c3d4e5-0000-0000-0000-000000000001",
+        ["owner", "operator"],
+      ),
+      true,
+    ],
+    [
+      "denies shared setup when only a product-native hotel link exists",
+      contextFor({
+        kind: "hotel_group",
+        roleKey: "operator",
+        permissions: ["hotel_catalog.setup.read"],
+        linkedResources: [linkedResource("booking", "booking_hotel", "booking_hotel_alpenrose")],
+      }),
+      requirement(
+        "hotel_catalog.setup.read",
+        "hotel_catalog",
+        "property",
+        "c2c3d4e5-0000-0000-0000-000000000001",
+        ["owner", "operator"],
+      ),
+      false,
+    ],
+    [
       "allows creator owner with profile permission and creator profile link",
       creatorContext,
       requirement(

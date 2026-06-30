@@ -487,6 +487,12 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
           relationship: "owner",
         },
         {
+          product: "hotel_catalog",
+          resource_type: "property",
+          resource_id: "c2c3d4e5-0000-0000-0000-000000000001",
+          relationship: "owner",
+        },
+        {
           product: "pms",
           resource_type: "pms_hotel",
           resource_id: "pms_hotel_alpenrose",
@@ -497,12 +503,49 @@ describe.skipIf(!TEST_DATABASE_URL)("rebuild with fixture loading (integration)"
       const perms = await client.query(
         `SELECT count(*)::int AS count FROM identity.permission_catalog`,
       );
-      expect(perms.rows[0].count).toBe(20);
+      expect(perms.rows[0].count).toBe(23);
 
       const entitlements = await client.query(
         `SELECT count(*)::int AS count FROM identity.product_entitlements`,
       );
       expect(entitlements.rows[0].count).toBe(2);
+    } finally {
+      await client.end();
+    }
+  });
+
+  it("backfills canonical property links after product fixture transforms", async () => {
+    const result = await rebuild({
+      connectionString: TEST_DATABASE_URL!,
+      migrationsDir: MIGRATIONS_DIR,
+      environment: "local",
+      schemas: [...DEFAULT_TARGET_SCHEMAS],
+      fixtureCase: "booking-checkout",
+      fixturesDir: FIXTURES_DIR,
+    });
+
+    expect(result.failed).toBeNull();
+
+    const client = new pg.Client({ connectionString: TEST_DATABASE_URL });
+    await client.connect();
+    try {
+      const propertyLinks = await client.query(
+        `SELECT organization_id::text, product, resource_type, resource_id, relationship, status
+         FROM identity.organization_resource_links
+         WHERE product = 'hotel_catalog'
+         ORDER BY organization_id, resource_id`,
+      );
+
+      expect(propertyLinks.rows).toEqual([
+        {
+          organization_id: "d2000000-0000-0000-0000-000000000682",
+          product: "hotel_catalog",
+          resource_type: "property",
+          resource_id: "d3000000-0000-0000-0000-000000000682",
+          relationship: "owner",
+          status: "active",
+        },
+      ]);
     } finally {
       await client.end();
     }

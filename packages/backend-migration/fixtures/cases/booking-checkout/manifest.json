@@ -6,7 +6,7 @@
     "identity.users": 1,
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
-    "identity.organization_resource_links": 1,
+    "identity.organization_resource_links": 2,
     "identity.product_entitlements": 1,
     "hotel_catalog.properties": 1,
     "hotel_catalog.property_source_links": 1,

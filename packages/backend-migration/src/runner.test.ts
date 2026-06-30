@@ -257,6 +257,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
     expect(result.applied).toContain("0011");
     expect(result.applied).toContain("0015");
     expect(result.applied).toContain("0016");
+    expect(result.applied).toContain("0024");
 
     const verifyClient = new pg.Client({ connectionString: TEST_DATABASE_URL });
     await verifyClient.connect();
@@ -280,6 +281,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
         "direct_booking_summary_read_model",
         "guest_bookings",
         "promo_applications",
+        "promo_definitions",
         "quote_sessions",
       ]);
 
@@ -597,7 +599,7 @@ describe.skipIf(!TEST_DATABASE_URL)("target schema migrations (integration)", ()
           AND ccu.constraint_name = tc.constraint_name
          WHERE tc.table_schema = 'pms'
            AND tc.constraint_type = 'FOREIGN KEY'
-           AND ccu.table_schema NOT IN ('booking', 'hotel_catalog', 'identity', 'pms')
+           AND ccu.table_schema NOT IN ('booking', 'hotel_catalog', 'identity', 'platform', 'pms')
          ORDER BY tc.constraint_name`,
       );
 

@@ -5,7 +5,7 @@
   "expectedOwners": {
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
-    "identity.organization_resource_links": 2,
+    "identity.organization_resource_links": 3,
     "identity.product_entitlements": 2,
     "hotel_catalog.properties": 1,
     "hotel_catalog.property_source_links": 2,
