@@ -25,6 +25,8 @@ type SharedHotelSetupRow = {
   descriptions: unknown;
   media: unknown;
   publicContacts: unknown;
+  bookingSelected: boolean;
+  bookingSelectionUpdatedAt: unknown;
   hasBookingSettings: boolean;
   bookingSettingsUpdatedAt: unknown;
   bookingEntitlementActive: boolean;
@@ -35,6 +37,8 @@ type SharedHotelSetupRow = {
   bookabilityUpdatedAt: unknown;
   paymentsEnabled: boolean | null;
   paymentSettingsUpdatedAt: unknown;
+  pmsSelected: boolean;
+  pmsSelectionUpdatedAt: unknown;
   pmsEntitlementActive: boolean;
   pmsEntitlementSuspended: boolean;
   pmsEntitlementUpdatedAt: unknown;
@@ -43,6 +47,8 @@ type SharedHotelSetupRow = {
   pmsRoomCount: number | string;
   pmsRatePlanCount: number | string;
   pmsRateUpdatedAt: unknown;
+  marketplaceSelected: boolean;
+  marketplaceSelectionUpdatedAt: unknown;
   marketplaceEntitlementActive: boolean;
   marketplaceEntitlementSuspended: boolean;
   marketplaceEntitlementUpdatedAt: unknown;
@@ -57,6 +63,13 @@ type SharedHotelSetupRow = {
   marketplaceRequirementCount: number | string;
   marketplaceRequirementUpdatedAt: unknown;
 };
+
+type ProductSelectionRow = {
+  product: SharedHotelSetupEntryProduct;
+  updatedAt: unknown;
+};
+
+const PRODUCT_ORDER: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms", "marketplace"];
 
 export function createPgSharedHotelSetupStatusRepository(config: {
   connectionString: string;
@@ -102,6 +115,20 @@ export function createPgSharedHotelSetupStatusRepository(config: {
       return {
         hotelGroupDisplayName: hotelGroup.rows[0]?.displayName ?? null,
         properties: result.rows.map(toSharedSetupProperty),
+      };
+    },
+    async setPropertyProductSelections({ organizationId, propertyId, selectedProducts }) {
+      const result = await pool.query<ProductSelectionRow>(propertyProductSelectionsSql(), [
+        organizationId,
+        propertyId,
+        selectedProducts,
+      ]);
+      const selected = new Set(result.rows.map((row) => row.product));
+
+      return {
+        propertyId,
+        selectedProducts: PRODUCT_ORDER.filter((product) => selected.has(product)),
+        updatedAt: latest(...result.rows.map((row) => row.updatedAt)) ?? new Date().toISOString(),
       };
     },
     async close() {
@@ -152,13 +179,7 @@ function sharedProfileMissingFields(row: SharedHotelSetupRow): SharedPropertyPro
 }
 
 function bookingActivation(row: SharedHotelSetupRow): SharedProductActivation<"booking"> {
-  const selected =
-    row.bookingEntitlementActive ||
-    row.bookingEntitlementSuspended ||
-    row.hasBookingSettings ||
-    row.bookabilityStatus !== null ||
-    row.paymentsEnabled !== null;
-  if (!selected) return notSelected("booking");
+  if (!row.bookingSelected) return notSelected("booking");
   if (row.bookingEntitlementSuspended) {
     return productActivation(
       "booking",
@@ -194,6 +215,7 @@ function bookingActivation(row: SharedHotelSetupRow): SharedProductActivation<"b
         [],
         [],
         latest(
+          row.bookingSelectionUpdatedAt,
           row.bookingSettingsUpdatedAt,
           row.bookabilityUpdatedAt,
           row.paymentSettingsUpdatedAt,
@@ -206,6 +228,7 @@ function bookingActivation(row: SharedHotelSetupRow): SharedProductActivation<"b
         missingSteps,
         ["booking_activation_incomplete"],
         latest(
+          row.bookingSelectionUpdatedAt,
           row.bookingSettingsUpdatedAt,
           row.bookabilityUpdatedAt,
           row.paymentSettingsUpdatedAt,
@@ -218,9 +241,7 @@ function pmsActivation(row: SharedHotelSetupRow): SharedProductActivation<"pms">
   const roomTypes = toCount(row.pmsRoomTypeCount);
   const rooms = toCount(row.pmsRoomCount);
   const ratePlans = toCount(row.pmsRatePlanCount);
-  const selected =
-    row.pmsEntitlementActive || row.pmsEntitlementSuspended || roomTypes + rooms + ratePlans > 0;
-  if (!selected) return notSelected("pms");
+  if (!row.pmsSelected) return notSelected("pms");
   if (row.pmsEntitlementSuspended) {
     return productActivation(
       "pms",
@@ -232,6 +253,7 @@ function pmsActivation(row: SharedHotelSetupRow): SharedProductActivation<"pms">
   }
 
   const missingSteps: string[] = [];
+  if (!row.pmsEntitlementActive) missingSteps.push("productEntitlement");
   if (roomTypes === 0) missingSteps.push("roomTypes");
   if (rooms === 0) missingSteps.push("rooms");
   if (ratePlans === 0) missingSteps.push("ratePlans");
@@ -242,26 +264,29 @@ function pmsActivation(row: SharedHotelSetupRow): SharedProductActivation<"pms">
         "active",
         [],
         [],
-        latest(row.pmsRoomUpdatedAt, row.pmsRateUpdatedAt, row.pmsEntitlementUpdatedAt),
+        latest(
+          row.pmsSelectionUpdatedAt,
+          row.pmsRoomUpdatedAt,
+          row.pmsRateUpdatedAt,
+          row.pmsEntitlementUpdatedAt,
+        ),
       )
     : productActivation(
         "pms",
         "selected_incomplete",
         missingSteps,
         ["pms_activation_incomplete"],
-        latest(row.pmsRoomUpdatedAt, row.pmsRateUpdatedAt, row.pmsEntitlementUpdatedAt),
+        latest(
+          row.pmsSelectionUpdatedAt,
+          row.pmsRoomUpdatedAt,
+          row.pmsRateUpdatedAt,
+          row.pmsEntitlementUpdatedAt,
+        ),
       );
 }
 
 function marketplaceActivation(row: SharedHotelSetupRow): SharedProductActivation<"marketplace"> {
-  const selected =
-    row.marketplaceEntitlementActive ||
-    row.marketplaceEntitlementSuspended ||
-    row.marketplaceProfileStatus !== null ||
-    toCount(row.marketplaceListingCount) > 0 ||
-    toCount(row.marketplaceOfferingCount) > 0 ||
-    toCount(row.marketplaceRequirementCount) > 0;
-  if (!selected) return notSelected("marketplace");
+  if (!row.marketplaceSelected) return notSelected("marketplace");
   if (row.marketplaceEntitlementSuspended) {
     return productActivation(
       "marketplace",
@@ -291,6 +316,7 @@ function marketplaceActivation(row: SharedHotelSetupRow): SharedProductActivatio
   }
 
   const missingSteps: string[] = [];
+  if (!row.marketplaceEntitlementActive) missingSteps.push("productEntitlement");
   if (row.marketplaceProfileComplete !== true) missingSteps.push("creatorPitch");
   if (
     toCount(row.marketplaceVerifiedListingCount) === 0 ||
@@ -329,6 +355,7 @@ function productActivation<Product extends SharedHotelSetupEntryProduct>(
 
 function marketplaceUpdatedAt(row: SharedHotelSetupRow): string | null {
   return latest(
+    row.marketplaceSelectionUpdatedAt,
     row.marketplaceEntitlementUpdatedAt,
     row.marketplaceProfileUpdatedAt,
     row.marketplaceListingUpdatedAt,
@@ -348,6 +375,8 @@ function sharedHotelSetupStatusSql(): string {
       COALESCE(public_profile.descriptions, '{}'::jsonb) AS "descriptions",
       COALESCE(public_profile.media, '[]'::jsonb) AS "media",
       COALESCE(public_profile.public_contacts, '[]'::jsonb) AS "publicContacts",
+      booking_selection.id IS NOT NULL AS "bookingSelected",
+      booking_selection.updated_at AS "bookingSelectionUpdatedAt",
       booking_settings.property_id IS NOT NULL AS "hasBookingSettings",
       booking_settings.updated_at AS "bookingSettingsUpdatedAt",
       COALESCE(booking_entitlement.active, FALSE) AS "bookingEntitlementActive",
@@ -358,6 +387,8 @@ function sharedHotelSetupStatusSql(): string {
       bookability.updated_at AS "bookabilityUpdatedAt",
       payment_settings.payments_enabled AS "paymentsEnabled",
       payment_settings.updated_at AS "paymentSettingsUpdatedAt",
+      pms_selection.id IS NOT NULL AS "pmsSelected",
+      pms_selection.updated_at AS "pmsSelectionUpdatedAt",
       COALESCE(pms_entitlement.active, FALSE) AS "pmsEntitlementActive",
       COALESCE(pms_entitlement.suspended, FALSE) AS "pmsEntitlementSuspended",
       pms_entitlement.updated_at AS "pmsEntitlementUpdatedAt",
@@ -366,6 +397,8 @@ function sharedHotelSetupStatusSql(): string {
       COALESCE(pms_rooms.count, 0) AS "pmsRoomCount",
       COALESCE(pms_rate_plans.count, 0) AS "pmsRatePlanCount",
       pms_rate_plans.updated_at AS "pmsRateUpdatedAt",
+      marketplace_selection.id IS NOT NULL AS "marketplaceSelected",
+      marketplace_selection.updated_at AS "marketplaceSelectionUpdatedAt",
       COALESCE(marketplace_entitlement.active, FALSE) AS "marketplaceEntitlementActive",
       COALESCE(marketplace_entitlement.suspended, FALSE) AS "marketplaceEntitlementSuspended",
       marketplace_entitlement.updated_at AS "marketplaceEntitlementUpdatedAt",
@@ -384,12 +417,22 @@ function sharedHotelSetupStatusSql(): string {
       ON property.id = scoped.property_id
     LEFT JOIN hotel_catalog.property_public_profile_read_model public_profile
       ON public_profile.property_id = property.id
+    LEFT JOIN hotel_catalog.property_product_selections booking_selection
+      ON booking_selection.organization_id = $1::uuid
+     AND booking_selection.property_id = property.id
+     AND booking_selection.product = 'booking'
+     AND booking_selection.status = 'selected'
     LEFT JOIN booking.booking_settings booking_settings
       ON booking_settings.property_id = property.id
     LEFT JOIN distribution.public_hotel_bookability_profiles bookability
       ON bookability.property_id = property.id
     LEFT JOIN finance.payment_settings payment_settings
       ON payment_settings.property_id = property.id
+    LEFT JOIN hotel_catalog.property_product_selections pms_selection
+      ON pms_selection.organization_id = $1::uuid
+     AND pms_selection.property_id = property.id
+     AND pms_selection.product = 'pms'
+     AND pms_selection.status = 'selected'
     LEFT JOIN LATERAL (
       SELECT
         bool_or(
@@ -444,6 +487,11 @@ function sharedHotelSetupStatusSql(): string {
           )
         )
     ) pms_entitlement ON TRUE
+    LEFT JOIN hotel_catalog.property_product_selections marketplace_selection
+      ON marketplace_selection.organization_id = $1::uuid
+     AND marketplace_selection.property_id = property.id
+     AND marketplace_selection.product = 'marketplace'
+     AND marketplace_selection.status = 'selected'
     LEFT JOIN LATERAL (
       SELECT
         bool_or(
@@ -525,6 +573,48 @@ function sharedHotelSetupStatusSql(): string {
         AND listing.listing_status <> 'archived'
     ) marketplace_requirements ON TRUE
     ORDER BY array_position($2::uuid[], property.id)
+  `;
+}
+
+function propertyProductSelectionsSql(): string {
+  return `
+    WITH requested(product) AS (
+      SELECT DISTINCT unnest($3::text[])
+    ),
+    upserted AS (
+      INSERT INTO hotel_catalog.property_product_selections
+        (organization_id, property_id, product, status)
+      SELECT $1::uuid, $2::uuid, product, 'selected'
+      FROM requested
+      ON CONFLICT (organization_id, property_id, product)
+      DO UPDATE SET status = 'selected', updated_at = now()
+      RETURNING product, updated_at
+    ),
+    unselected AS (
+      UPDATE hotel_catalog.property_product_selections
+      SET status = 'unselected', updated_at = now()
+      WHERE organization_id = $1::uuid
+        AND property_id = $2::uuid
+        AND status = 'selected'
+        AND NOT (product = ANY($3::text[]))
+      RETURNING product, updated_at
+    ),
+    selected_after_write AS (
+      SELECT product, updated_at
+      FROM upserted
+      UNION ALL
+      SELECT product, updated_at
+      FROM unselected
+      WHERE FALSE
+    )
+    SELECT product, updated_at
+    FROM selected_after_write
+    ORDER BY CASE product
+      WHEN 'booking' THEN 1
+      WHEN 'pms' THEN 2
+      WHEN 'marketplace' THEN 3
+      ELSE 4
+    END
   `;
 }
 
