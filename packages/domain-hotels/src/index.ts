@@ -57,6 +57,156 @@ export const HOTEL_ACTIVE_STATUSES = ["active", "suspended", "archived"] as cons
 export type HotelActiveStatus = (typeof HOTEL_ACTIVE_STATUSES)[number];
 
 // ---------------------------------------------------------------------------
+// Shared hotel setup status contract
+// ---------------------------------------------------------------------------
+
+export const SHARED_HOTEL_SETUP_STATUS_CONTRACT_VERSION = "shared-hotel-setup-status.v1" as const;
+
+export type SharedHotelSetupStatusContractVersion =
+  typeof SHARED_HOTEL_SETUP_STATUS_CONTRACT_VERSION;
+
+export const SHARED_HOTEL_SETUP_PRODUCTS = ["booking", "pms", "marketplace"] as const;
+
+export type SharedHotelSetupProduct = (typeof SHARED_HOTEL_SETUP_PRODUCTS)[number];
+
+export const SHARED_HOTEL_SETUP_ENTRY_PRODUCTS = SHARED_HOTEL_SETUP_PRODUCTS;
+
+export type SharedHotelSetupEntryProduct = (typeof SHARED_HOTEL_SETUP_ENTRY_PRODUCTS)[number];
+
+export const SHARED_HOTEL_SETUP_READ_PERMISSION = "hotel_catalog.setup.read" as const;
+
+export type SharedHotelSetupReadPermission = typeof SHARED_HOTEL_SETUP_READ_PERMISSION;
+
+export const SHARED_PROPERTY_ACCESS_RESOURCE = {
+  product: "hotel_catalog",
+  resourceType: "property",
+} as const;
+
+export type SharedPropertyAccessResource = typeof SHARED_PROPERTY_ACCESS_RESOURCE;
+
+export const SHARED_PROPERTY_ACCESS_RELATIONSHIPS = ["owner", "operator"] as const;
+
+export type SharedPropertyAccessRelationship =
+  (typeof SHARED_PROPERTY_ACCESS_RELATIONSHIPS)[number];
+
+export const SHARED_PROPERTY_SELECTION_STATES = [
+  "no_property",
+  "single_property",
+  "multiple_properties",
+] as const;
+
+export type SharedPropertySelectionState = (typeof SHARED_PROPERTY_SELECTION_STATES)[number];
+
+export const SHARED_PROPERTY_PROFILE_STATUSES = [
+  "incomplete",
+  "complete",
+  "disabled",
+  "private",
+] as const;
+
+export type SharedPropertyProfileStatus = (typeof SHARED_PROPERTY_PROFILE_STATUSES)[number];
+
+export const SHARED_PROPERTY_PROFILE_MISSING_FIELDS = [
+  "displayName",
+  "location",
+  "website",
+  "phone",
+  "description",
+  "media",
+] as const;
+
+export type SharedPropertyProfileMissingField =
+  (typeof SHARED_PROPERTY_PROFILE_MISSING_FIELDS)[number];
+
+export const SHARED_PRODUCT_ACTIVATION_STATUSES = [
+  "not_selected",
+  "selected_incomplete",
+  "active",
+  "suspended",
+  "unavailable",
+] as const;
+
+export type SharedProductActivationStatus = (typeof SHARED_PRODUCT_ACTIVATION_STATUSES)[number];
+
+export const SHARED_HOTEL_SETUP_NEXT_ACTIONS = [
+  "create_property",
+  "select_property",
+  "complete_shared_profile",
+  "select_products",
+  "complete_product_activation",
+  "enter_product",
+] as const;
+
+export type SharedHotelSetupNextActionName = (typeof SHARED_HOTEL_SETUP_NEXT_ACTIONS)[number];
+
+export type SharedProductActivation<
+  Product extends SharedHotelSetupProduct = SharedHotelSetupProduct,
+> = {
+  product: Product;
+  status: SharedProductActivationStatus;
+  missingSteps: string[];
+  statusReasons: string[];
+  updatedAt: HotelUtcDateTime | null;
+};
+
+export type SharedSetupProperty = {
+  propertyId: HotelId;
+  publicId: string;
+  displayName: string | null;
+  locationSummary: string | null;
+  sharedProfile: {
+    status: SharedPropertyProfileStatus;
+    completionPercent: number;
+    missingFields: SharedPropertyProfileMissingField[];
+  };
+  products: { [Product in SharedHotelSetupProduct]: SharedProductActivation<Product> };
+};
+
+export type SharedHotelSetupNextAction =
+  | { action: "create_property"; reasonCodes: string[] }
+  | { action: "select_property"; reasonCodes: string[] }
+  | {
+      action: "complete_shared_profile";
+      propertyId: HotelId;
+      missingFields: SharedPropertyProfileMissingField[];
+      reasonCodes: string[];
+    }
+  | { action: "select_products"; propertyId: HotelId; reasonCodes: string[] }
+  | {
+      action: "complete_product_activation";
+      propertyId: HotelId;
+      product: SharedHotelSetupProduct;
+      missingSteps: string[];
+      reasonCodes: string[];
+    }
+  | {
+      action: "enter_product";
+      propertyId: HotelId;
+      product: SharedHotelSetupProduct;
+      returnTo: string | null;
+      reasonCodes: string[];
+    };
+
+export type SharedHotelSetupStatus = {
+  contractVersion: SharedHotelSetupStatusContractVersion;
+  entry: {
+    entryProduct: SharedHotelSetupEntryProduct | null;
+    returnTo: string | null;
+  };
+  hotelGroup: {
+    organizationId: string;
+    displayName: string;
+  };
+  selection: {
+    state: SharedPropertySelectionState;
+    selectedPropertyId: HotelId | null;
+  };
+  properties: SharedSetupProperty[];
+  nextAction: SharedHotelSetupNextAction;
+  updatedAt: HotelUtcDateTime;
+};
+
+// ---------------------------------------------------------------------------
 // Hotel identity read model
 //
 // Replaces all PMS reads from `booking_hotels.name`, `booking_hotels.slug`,
