@@ -62,6 +62,10 @@ import {
   type MarketplaceHotelProfileStatusRepository,
 } from "./routes/marketplaceHotelProfileStatus.js";
 import {
+  registerSharedHotelSetupStatusRoutes,
+  type SharedHotelSetupStatusRepository,
+} from "./routes/sharedHotelSetupStatus.js";
+import {
   registerIdentityAdminUserRoutes,
   type IdentityAdminUsersReadRepository,
   type IdentityAdminUserRoutesOptions,
@@ -144,6 +148,7 @@ type BuildAppOptions = Pick<FastifyServerOptions, "logger"> & {
   marketplaceAdminRepository?: MarketplaceAdminRepository;
   marketplaceAdminLegacySuperadminFallbackEnabled?: MarketplaceAdminRoutesOptions["legacySuperadminFallbackEnabled"];
   marketplaceHotelProfileStatusRepository?: MarketplaceHotelProfileStatusRepository;
+  sharedHotelSetupStatusRepository?: SharedHotelSetupStatusRepository;
   identityPrivacyRepository?: IdentityPrivacyRepository;
   identityLifecycleCommandBus?: IdentityLifecycleCommandBus;
   identityAdminUsersReadRepository?: IdentityAdminUsersReadRepository;
@@ -295,6 +300,12 @@ export function buildApp(options: BuildAppOptions = {}): FastifyInstance {
     app.register(registerMarketplaceHotelProfileStatusRoutes, {
       prefix: "/api/marketplace",
       repository: options.marketplaceHotelProfileStatusRepository,
+    });
+  }
+  if (options.sharedHotelSetupStatusRepository) {
+    app.register(registerSharedHotelSetupStatusRoutes, {
+      prefix: "/api/hotel-setup",
+      repository: options.sharedHotelSetupStatusRepository,
     });
   }
   if (options.identityPrivacyRepository) {
