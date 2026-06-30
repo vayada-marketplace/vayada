@@ -4,7 +4,7 @@
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
     "identity.role_permission_grants": 35,
-    "identity.organization_resource_links": 3,
+    "identity.organization_resource_links": 4,
     "identity.product_entitlements": 3,
     "hotel_catalog.properties": 1,
     "hotel_catalog.property_source_links": 3,

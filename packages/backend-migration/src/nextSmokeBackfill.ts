@@ -80,6 +80,12 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
       source: "VAY-874",
     });
     await upsertResourceLink(client, hotelOrg.organizationId, {
+      product: "hotel_catalog",
+      resourceType: "property",
+      resourceId: marketplaceProfile.resourceId,
+      relationship: "owner",
+    });
+    await upsertResourceLink(client, hotelOrg.organizationId, {
       product: "marketplace",
       resourceType: "hotel_profile",
       resourceId: marketplaceProfile.resourceId,
@@ -126,6 +132,10 @@ export async function runNextSmokeBackfill(config: NextSmokeBackfillConfig) {
       bookingHotelId,
       hotelOrganization: hotelOrg,
       bookingEntitlement: `booking:booking-engine:booking_hotel:${bookingHotelId}`,
+      property: {
+        resourceId: marketplaceProfile.resourceId,
+        resourceLink: `hotel_catalog:property:${marketplaceProfile.resourceId}`,
+      },
       marketplace: {
         hotelProfileResourceId: marketplaceProfile.resourceId,
         sourceHotelProfileId: marketplaceProfile.sourceHotelProfileId,

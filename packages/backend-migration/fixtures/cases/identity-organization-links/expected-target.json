@@ -4,10 +4,10 @@
     "identity.external_identities": 1,
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
-    "identity.organization_resource_links": 2,
+    "identity.organization_resource_links": 3,
     "identity.product_entitlements": 2,
-    "identity.permission_catalog": 20,
-    "identity.role_permission_grants": 34
+    "identity.permission_catalog": 23,
+    "identity.role_permission_grants": 38
   },
   "idStability": {
     "identity.users": ["a1b2c3d4-0000-0000-0000-000000000001"],
@@ -42,6 +42,14 @@
       },
       {
         "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
+        "product": "hotel_catalog",
+        "resourceType": "property",
+        "resourceId": "c2c3d4e5-0000-0000-0000-000000000001",
+        "relationship": "owner",
+        "status": "active"
+      },
+      {
+        "organizationId": "b2c3d4e5-0000-0000-0000-000000000001",
         "product": "pms",
         "resourceType": "pms_hotel",
         "resourceId": "pms_hotel_alpenrose",
@@ -70,6 +78,21 @@
       }
     ],
     "rolePermissionGrants": [
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "hotel_owner",
+        "permissionKey": "hotel_catalog.setup.read"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "owner",
+        "permissionKey": "hotel_catalog.setup.read"
+      },
+      {
+        "organizationKind": "hotel_group",
+        "roleKey": "operator",
+        "permissionKey": "hotel_catalog.setup.read"
+      },
       {
         "organizationKind": "hotel_group",
         "roleKey": "hotel_owner",
@@ -109,7 +132,8 @@
       "marketplace.collaboration.read",
       "marketplace.collaboration.review",
       "booking.analytics.read",
-      "intelligence.ask.read"
+      "intelligence.ask.read",
+      "hotel_catalog.setup.read"
     ]
   }
 }

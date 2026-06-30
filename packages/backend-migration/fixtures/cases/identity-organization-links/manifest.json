@@ -1,13 +1,13 @@
 {
   "caseId": "identity-organization-links",
-  "description": "One hotel owner with a WorkOS-linked identity, a hotel-group organization, an active membership, and two product resource links (booking hotel owner + PMS hotel operator). Validates the minimal identity domain transform from auth-db source data.",
+  "description": "One hotel owner with a WorkOS-linked identity, a hotel-group organization, an active membership, product resource links, and a direct canonical hotel_catalog/property ownership link. Validates the minimal identity domain transform from auth-db source data.",
   "sourceDatabases": ["auth"],
   "expectedOwners": {
     "identity.users": 1,
     "identity.external_identities": 1,
     "identity.organizations": 1,
     "identity.organization_memberships": 1,
-    "identity.organization_resource_links": 2,
+    "identity.organization_resource_links": 3,
     "identity.product_entitlements": 2
   },
   "expectedFailures": [],

@@ -17,7 +17,13 @@ export type OrganizationStatus = "active" | "suspended" | "archived";
 
 export type MembershipStatus = "active" | "pending" | "inactive" | "suspended";
 
-export type Product = "platform" | "marketplace" | "booking" | "pms" | "affiliate";
+export type Product =
+  | "platform"
+  | "hotel_catalog"
+  | "marketplace"
+  | "booking"
+  | "pms"
+  | "affiliate";
 
 export type ResourceType =
   | "platform"
@@ -44,6 +50,7 @@ export type PermissionKey =
   | "platform.finance.read"
   | "platform.property.status.manage"
   | "platform.user.suspend"
+  | "hotel_catalog.setup.read"
   | "intelligence.ask.read"
   | "booking.settings.manage"
   | "booking.settings.read"

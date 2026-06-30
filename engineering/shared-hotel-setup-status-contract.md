@@ -57,6 +57,29 @@ No VAY-967 route should fall back to `property_source_links` to infer ownership.
 If direct property links are missing, the property is not in the status
 response.
 
+## VAY-975 Compatibility Audit
+
+`property_source_links` remains an active provenance and product-record mapping
+table. A runtime `rg "property_source_links"` audit still finds active
+dependencies that are intentionally retained:
+
+- Booking/settings and product profile routes: blocked on VAY-967 and VAY-969
+  because those routes still need product-to-property mapping until the shared
+  setup API and profile write path own canonical property routing.
+- Migration transforms, parity checks, and smoke backfill scripts: retained by
+  VAY-975 because they need source/product provenance to create direct canonical
+  links during backfill and fixture rebuild.
+- Product-specific Booking, PMS, and Marketplace reads/writes: out of scope for
+  VAY-975 because current product tables remain active sources of truth before a
+  reviewed cutover ticket removes them.
+
+VAY-967 must authorize shared setup by reading direct active
+`identity.organization_resource_links` rows for `hotel_catalog/property` under
+the resolved `hotel_group` organization. If a route needs product-specific
+Booking, PMS, or Marketplace state after authorization, it may use
+`property_source_links` only as product provenance/mapping from an already
+authorized canonical property.
+
 ## Endpoint
 
 ```http

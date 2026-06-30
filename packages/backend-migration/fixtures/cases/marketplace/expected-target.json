@@ -3,7 +3,7 @@
     "identity.users": 3,
     "identity.organizations": 2,
     "identity.organization_memberships": 2,
-    "identity.organization_resource_links": 3,
+    "identity.organization_resource_links": 4,
     "identity.product_entitlements": 3,
     "hotel_catalog.properties": 1,
     "hotel_catalog.property_source_links": 2,

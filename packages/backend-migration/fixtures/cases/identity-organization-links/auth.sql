@@ -140,6 +140,28 @@ VALUES
     'active',
     '2026-01-01T00:00:00Z',
     '2026-01-02T00:00:00Z'
+  ),
+  (
+    'canonical-property-owner',
+    'a1b2c3d4-0000-0000-0000-000000000001',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'hotel_group',
+    'Hotel Alpenrose Group',
+    'hotel-alpenrose-group',
+    'active',
+    'org_workos_hotel_group',
+    'b2c3d4e5-0000-0000-0000-000000000001',
+    'active',
+    'hotel_owner',
+    'om_hotel_owner',
+    ARRAY['hotel_owner'],
+    'hotel_catalog',
+    'property',
+    'c2c3d4e5-0000-0000-0000-000000000001',
+    'owner',
+    'active',
+    '2026-01-01T00:00:00Z',
+    '2026-01-02T00:00:00Z'
   );
 
 INSERT INTO migration_source_auth.identity_entitlement_inputs

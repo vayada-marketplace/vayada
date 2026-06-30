@@ -1,5 +1,6 @@
 import type pg from "pg";
 
+import { backfillCanonicalPropertyResourceLinks } from "./canonicalPropertyLinks.js";
 import { getTransformHandler } from "./cases/registry.js";
 
 export type TransformConfig = {
@@ -16,6 +17,7 @@ export async function transformFixtureCase(
   await client.query("BEGIN");
   try {
     await transform(client);
+    await backfillCanonicalPropertyResourceLinks(client);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
