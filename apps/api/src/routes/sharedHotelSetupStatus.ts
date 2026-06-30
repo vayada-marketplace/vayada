@@ -87,11 +87,62 @@ export type SharedHotelSetupProductSelection = {
   updatedAt: string;
 };
 
+export type SharedPropertyProfileLocation = {
+  countryCode: string | null;
+  region: string | null;
+  city: string | null;
+  streetAddress: string | null;
+  postalCode: string | null;
+  rawMarketplaceLocation: string | null;
+  timezone: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  addressPublic: boolean;
+  mapDisplayMode: "hidden" | "approximate" | "exact";
+};
+
+export type SharedPropertyProfileMedia = {
+  mediaType: "hero_image" | "gallery_image" | "logo";
+  url: string;
+  altText: string | null;
+  sortOrder: number;
+};
+
+export type SharedPropertyProfileInput = {
+  displayName: string;
+  location: SharedPropertyProfileLocation;
+  website: string | null;
+  phone: string | null;
+  shortDescription: string | null;
+  longDescription: string | null;
+  media: SharedPropertyProfileMedia[];
+};
+
+export type SharedPropertyProfile = SharedPropertyProfileInput & {
+  propertyId: string;
+  publicId: string;
+  sharedProfile: SharedSetupProperty["sharedProfile"];
+  updatedAt: string;
+};
+
 export type SharedHotelSetupStatusRepository = {
   getHotelSetupStatus(input: { organizationId: string; propertyIds: string[] }): Promise<{
     hotelGroupDisplayName: string | null;
     properties: SharedSetupProperty[];
   }>;
+  getPropertyProfile(input: {
+    organizationId: string;
+    propertyId: string;
+  }): Promise<SharedPropertyProfile | null>;
+  createPropertyProfile(input: {
+    organizationId: string;
+    profile: SharedPropertyProfileInput;
+  }): Promise<SharedPropertyProfile>;
+  updatePropertyProfile(input: {
+    organizationId: string;
+    propertyId: string;
+    profile: SharedPropertyProfileInput;
+  }): Promise<SharedPropertyProfile | null>;
   setPropertyProductSelections(input: {
     organizationId: string;
     propertyId: string;
@@ -119,8 +170,17 @@ type SharedHotelSetupProductSelectionBody = {
   selectedProducts?: unknown;
 };
 
+type SharedPropertyProfileParams = {
+  propertyId?: string;
+};
+
+type SharedPropertyProfileBody = Record<string, unknown> | undefined;
+
 const ENTRY_PRODUCTS: readonly SharedHotelSetupEntryProduct[] = ["booking", "pms", "marketplace"];
+const MEDIA_TYPES = ["hero_image", "gallery_image", "logo"] as const;
+const MAP_DISPLAY_MODES = ["hidden", "approximate", "exact"] as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TIMEZONE_PATTERN = /^[A-Za-z_]+\/[A-Za-z0-9_+./-]+$/;
 
 export async function registerSharedHotelSetupStatusRoutes(
   app: FastifyInstance,
@@ -182,6 +242,80 @@ export async function registerSharedHotelSetupStatusRoutes(
       nextAction: nextAction(authorizedProperties, selectedPropertyId, entryProduct, returnTo),
       updatedAt: now().toISOString(),
     } satisfies SharedHotelSetupStatus;
+  });
+
+  app.get("/properties/:propertyId/profile", async (request, reply) => {
+    const params = request.params as SharedPropertyProfileParams;
+    const propertyId = parsePropertyId(params.propertyId, reply);
+    if (propertyId === false || propertyId === null) return reply;
+
+    const access = resolveSharedSetupAccess(request, reply, propertyId);
+    if (!access) return reply;
+
+    const profile = await repository.getPropertyProfile({
+      organizationId: access.organizationId,
+      propertyId,
+    });
+    if (!profile) {
+      return reply.status(404).send({
+        code: "property_profile_not_found",
+        detail: "Shared property profile was not found for the selected property.",
+      });
+    }
+
+    return profile;
+  });
+
+  app.post("/properties", async (request, reply) => {
+    const profileInput = parseSharedPropertyProfile(
+      request.body as SharedPropertyProfileBody,
+      reply,
+    );
+    if (profileInput === false) return reply;
+
+    const access = resolveSharedSetupAccess(request, reply, null, "hotel_catalog.setup.manage");
+    if (!access) return reply;
+
+    const profile = await repository.createPropertyProfile({
+      organizationId: access.organizationId,
+      profile: profileInput,
+    });
+
+    return reply.status(201).send(profile);
+  });
+
+  app.put("/properties/:propertyId/profile", async (request, reply) => {
+    const params = request.params as SharedPropertyProfileParams;
+    const propertyId = parsePropertyId(params.propertyId, reply);
+    if (propertyId === false || propertyId === null) return reply;
+
+    const profileInput = parseSharedPropertyProfile(
+      request.body as SharedPropertyProfileBody,
+      reply,
+    );
+    if (profileInput === false) return reply;
+
+    const access = resolveSharedSetupAccess(
+      request,
+      reply,
+      propertyId,
+      "hotel_catalog.setup.manage",
+    );
+    if (!access) return reply;
+
+    const profile = await repository.updatePropertyProfile({
+      organizationId: access.organizationId,
+      propertyId,
+      profile: profileInput,
+    });
+    if (!profile) {
+      return reply.status(404).send({
+        code: "property_profile_not_found",
+        detail: "Shared property profile was not found for the selected property.",
+      });
+    }
+
+    return profile;
   });
 
   app.put("/properties/:propertyId/products", async (request, reply) => {
@@ -326,6 +460,256 @@ function parseSelectedProducts(
 
   const requested = new Set(body.selectedProducts);
   return ENTRY_PRODUCTS.filter((product) => requested.has(product));
+}
+
+function parseSharedPropertyProfile(
+  body: SharedPropertyProfileBody,
+  reply: FastifyReply,
+): SharedPropertyProfileInput | false {
+  const errors: Record<string, string[]> = {};
+  const input = objectValue(body);
+  const location = objectValue(input["location"]);
+
+  const displayName = requiredString(input["displayName"], "displayName", errors, {
+    maxLength: 200,
+  });
+  const website = optionalUrl(input["website"], "website", errors);
+  const phone = optionalString(input["phone"], "phone", errors, { maxLength: 64 });
+  const shortDescription = optionalString(input["shortDescription"], "shortDescription", errors, {
+    maxLength: 500,
+  });
+  const longDescription = optionalString(input["longDescription"], "longDescription", errors, {
+    maxLength: 5000,
+  });
+  const parsedLocation = parseLocation(location, errors);
+  const media = parseMedia(input["media"], errors);
+
+  if (Object.keys(errors).length > 0 || !displayName || media === false) {
+    reply.status(422).send({
+      code: "invalid_shared_property_profile",
+      detail: "Shared property profile contains invalid fields.",
+      fields: errors,
+    });
+    return false;
+  }
+
+  return {
+    displayName,
+    location: parsedLocation,
+    website,
+    phone,
+    shortDescription,
+    longDescription,
+    media,
+  };
+}
+
+function parseLocation(
+  location: Record<string, unknown>,
+  errors: Record<string, string[]>,
+): SharedPropertyProfileLocation {
+  const countryCode = optionalString(location["countryCode"], "location.countryCode", errors, {
+    maxLength: 2,
+  });
+  if (countryCode && !/^[A-Za-z]{2}$/.test(countryCode)) {
+    addFieldError(errors, "location.countryCode", "countryCode must be a two-letter code.");
+  }
+
+  const timezone = optionalString(location["timezone"], "location.timezone", errors, {
+    maxLength: 80,
+  });
+  if (timezone && !TIMEZONE_PATTERN.test(timezone)) {
+    addFieldError(errors, "location.timezone", "timezone must be an IANA timezone.");
+  }
+
+  const latitude = optionalNumber(location["latitude"], "location.latitude", errors, {
+    min: -90,
+    max: 90,
+  });
+  const longitude = optionalNumber(location["longitude"], "location.longitude", errors, {
+    min: -180,
+    max: 180,
+  });
+  if ((latitude === null) !== (longitude === null)) {
+    addFieldError(errors, "location.latitude", "latitude and longitude must be provided together.");
+    addFieldError(
+      errors,
+      "location.longitude",
+      "latitude and longitude must be provided together.",
+    );
+  }
+
+  const mapDisplayMode = optionalEnum(
+    location["mapDisplayMode"],
+    "location.mapDisplayMode",
+    MAP_DISPLAY_MODES,
+    errors,
+    "hidden",
+  );
+  const addressPublicValue = location["addressPublic"];
+  let addressPublic = true;
+  if (addressPublicValue !== undefined && addressPublicValue !== null) {
+    if (typeof addressPublicValue === "boolean") {
+      addressPublic = addressPublicValue;
+    } else {
+      addFieldError(errors, "location.addressPublic", "location.addressPublic must be a boolean.");
+    }
+  }
+
+  return {
+    countryCode: countryCode?.toUpperCase() ?? null,
+    region: optionalString(location["region"], "location.region", errors, { maxLength: 120 }),
+    city: optionalString(location["city"], "location.city", errors, { maxLength: 120 }),
+    streetAddress: optionalString(location["streetAddress"], "location.streetAddress", errors, {
+      maxLength: 240,
+    }),
+    postalCode: optionalString(location["postalCode"], "location.postalCode", errors, {
+      maxLength: 32,
+    }),
+    rawMarketplaceLocation: optionalString(
+      location["rawMarketplaceLocation"],
+      "location.rawMarketplaceLocation",
+      errors,
+      { maxLength: 240 },
+    ),
+    timezone,
+    latitude,
+    longitude,
+    addressPublic,
+    mapDisplayMode,
+  };
+}
+
+function parseMedia(
+  value: unknown,
+  errors: Record<string, string[]>,
+): SharedPropertyProfileMedia[] | false {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    addFieldError(errors, "media", "media must be an array.");
+    return false;
+  }
+
+  return value.map((item, index) => {
+    const media = objectValue(item);
+    const field = `media.${index}`;
+    const url = optionalUrl(media["url"], `${field}.url`, errors);
+    if (!url) {
+      addFieldError(errors, `${field}.url`, "url is required.");
+    }
+
+    return {
+      mediaType: optionalEnum(
+        media["mediaType"],
+        `${field}.mediaType`,
+        MEDIA_TYPES,
+        errors,
+        "gallery_image",
+      ),
+      url: url ?? "",
+      altText: optionalString(media["altText"], `${field}.altText`, errors, {
+        maxLength: 240,
+      }),
+      sortOrder: index,
+    };
+  });
+}
+
+function requiredString(
+  value: unknown,
+  field: string,
+  errors: Record<string, string[]>,
+  options: { maxLength: number },
+): string | null {
+  const parsed = optionalString(value, field, errors, options);
+  if (!parsed) {
+    addFieldError(errors, field, `${field} is required.`);
+  }
+  return parsed;
+}
+
+function optionalString(
+  value: unknown,
+  field: string,
+  errors: Record<string, string[]>,
+  options: { maxLength: number },
+): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string") {
+    addFieldError(errors, field, `${field} must be a string.`);
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > options.maxLength) {
+    addFieldError(errors, field, `${field} is too long.`);
+    return null;
+  }
+  return trimmed;
+}
+
+function optionalUrl(
+  value: unknown,
+  field: string,
+  errors: Record<string, string[]>,
+): string | null {
+  const parsed = optionalString(value, field, errors, { maxLength: 2048 });
+  if (!parsed) return null;
+
+  try {
+    const url = new URL(parsed);
+    if (url.protocol === "https:" || url.protocol === "http:") {
+      return url.toString();
+    }
+  } catch {
+    // Add a field error below.
+  }
+
+  addFieldError(errors, field, `${field} must be an http or https URL.`);
+  return null;
+}
+
+function optionalNumber(
+  value: unknown,
+  field: string,
+  errors: Record<string, string[]>,
+  options: { min: number; max: number },
+): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    addFieldError(errors, field, `${field} must be a number.`);
+    return null;
+  }
+  if (value < options.min || value > options.max) {
+    addFieldError(errors, field, `${field} is out of range.`);
+    return null;
+  }
+  return value;
+}
+
+function optionalEnum<T extends readonly string[]>(
+  value: unknown,
+  field: string,
+  allowed: T,
+  errors: Record<string, string[]>,
+  fallback: T[number],
+): T[number] {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "string" && (allowed as readonly string[]).includes(value)) {
+    return value as T[number];
+  }
+  addFieldError(errors, field, `${field} is invalid.`);
+  return fallback;
+}
+
+function addFieldError(errors: Record<string, string[]>, field: string, message: string): void {
+  errors[field] = [...(errors[field] ?? []), message];
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function filterAuthorizedProperties(
