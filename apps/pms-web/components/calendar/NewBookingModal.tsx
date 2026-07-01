@@ -177,14 +177,17 @@ export default function NewBookingModal({
           setNightlyRate(String(res.nightlyRate));
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return;
-        // Fall back to baseRate so the field is still useful if the API fails.
-        const fallback = selectedRoomType.baseRate;
-        setResolvedRate(fallback);
+        setResolvedRate(null);
         if (!userEditedRate.current) {
-          setNightlyRate(String(fallback));
+          setNightlyRate("");
         }
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Resolved room rates are not available on PMS next-stack yet.",
+        );
       });
     return () => {
       cancelled = true;

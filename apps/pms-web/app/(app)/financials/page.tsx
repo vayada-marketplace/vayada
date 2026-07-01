@@ -13,10 +13,16 @@ type Tab = "invoices" | "payments";
 export default function FinancialsPage() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<FinancialsSummary | null>(null);
+  const [summaryError, setSummaryError] = useState("");
   const [tab, setTab] = useState<Tab>("invoices");
 
   useEffect(() => {
-    financialsService.summary().then(setSummary).catch(console.error);
+    financialsService
+      .summary()
+      .then(setSummary)
+      .catch((err: unknown) =>
+        setSummaryError(err instanceof Error ? err.message : "Financials are unavailable."),
+      );
   }, []);
 
   return (
@@ -59,6 +65,12 @@ export default function FinancialsPage() {
           </button>
         </div>
       </div>
+
+      {summaryError && (
+        <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {summaryError}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-gray-200 mb-5">

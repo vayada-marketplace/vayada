@@ -1,14 +1,10 @@
-import { pmsClient } from "../api/pmsClient";
-import {
-  isPmsOperationsReadModelEnabled,
-  pmsOperationsClient,
-  pmsOperationsRequestOptions,
-} from "../api/pmsOperationsClient";
+import { pmsOperationsClient, pmsOperationsRequestOptions } from "../api/pmsOperationsClient";
 import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
-import { buildQueryString } from "@/lib/utils/queryString";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import type { CheckinStepType } from "@/services/settings";
 
 export interface AssignedRoom {
+  assignmentId: string | null;
   roomId: string | null;
   roomNumber: string | null;
   position: number;
@@ -105,6 +101,72 @@ export type BookingListParams = Record<string, string | number | undefined> & {
   offset?: number;
 };
 
+function commandMetadata(prefix: string): { commandId: string; idempotencyKey: string } {
+  const random =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const commandId = `${prefix}:${random}`;
+  return { commandId, idempotencyKey: commandId };
+}
+
+async function reservationEndpoint(guestBookingId: string, suffix = ""): Promise<string> {
+  const propertyId = await resolveSelectedPmsPropertyId("updating booking");
+  return propertyEndpoint(
+    propertyId,
+    `reservations/${encodeURIComponent(guestBookingId)}${suffix}`,
+  );
+}
+
+async function refreshBooking(guestBookingId: string): Promise<Booking> {
+  return pmsOperationsBookingsReadService.get(guestBookingId);
+}
+
+function toCheckoutCharge(charge: PmsCheckoutCharge, bookingId: string): CheckoutCharge {
+  return {
+    id: charge.chargeId,
+    bookingId,
+    label: charge.label,
+    amount: moneyAmount(charge.amount),
+    originalAmount: moneyAmount(charge.originalAmount),
+    status: charge.status === "void" ? "waived" : charge.status,
+    createdAt: charge.createdAt,
+    settledAt: charge.settledAt,
+    waivedAt: charge.waivedAt,
+  };
+}
+
+function toBookingNote(note: PmsPrivateNote, bookingId: string): BookingNote {
+  return {
+    id: note.noteId,
+    bookingId,
+    authorUserId: note.authorUserId ?? "",
+    authorName: note.authorDisplayName,
+    body: note.body,
+    source: "booking-detail",
+    createdAt: note.createdAt,
+  };
+}
+
+function toAdditionalGuest(guest: PmsBookingGuestPii, position: number): BookingAdditionalGuest {
+  return {
+    id: guest.guestId,
+    bookingId: guest.guestBookingId,
+    position,
+    firstName: guest.firstName,
+    lastName: guest.lastName,
+    gender: "",
+    nationality: guest.countryCode ?? "",
+    dateOfBirth: null,
+    email: guest.email ?? "",
+    phone: guest.phone ?? "",
+    passportNumber: "",
+    roomPosition: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
 type PmsOperationsMoney = {
   amountDecimal: string;
   currency: string;
@@ -125,6 +187,7 @@ type PmsOperationalReservation = {
   stay: { checkIn: string; checkOut: string; adults: number; children: number };
   primaryGuest: { displayName: string; email: string | null; phone: string | null };
   assignments: Array<{
+    assignmentId?: string | null;
     roomTypeId: string;
     roomId: string | null;
     roomNumber: string | null;
@@ -153,8 +216,60 @@ type PmsOperationsReservationListResponse = PmsOperationsListResponse<PmsOperati
 type PmsOperationsReservationDetailResponse = {
   contractVersion: "pms-operations.v1";
   propertyId: string;
-  item: PmsOperationalReservation;
+  item: PmsOperationalReservation & { additionalGuests?: PmsBookingGuestPii[] };
   sourceFreshness: Record<string, string | number | boolean | null>;
+};
+
+type PmsOperationsCommandResponse = {
+  contractVersion: "pms-operations.v1";
+  propertyId: string;
+  reservation: PmsOperationalReservation;
+};
+
+type PmsPrivateNote = {
+  noteId: string;
+  body: string;
+  authorUserId: string | null;
+  authorDisplayName: string;
+  createdAt: string;
+};
+
+type PmsPrivateNotesResponse = {
+  items: PmsPrivateNote[];
+};
+
+type PmsCheckoutCharge = {
+  chargeId: string;
+  label: string;
+  amount: PmsOperationsMoney;
+  originalAmount: PmsOperationsMoney;
+  status: "pending" | "paid" | "waived" | "void";
+  createdAt: string;
+  settledAt: string | null;
+  waivedAt: string | null;
+};
+
+type PmsCheckoutChargesResponse = {
+  items: PmsCheckoutCharge[];
+};
+
+type PmsCheckoutChargeCommandResponse = {
+  charge: PmsCheckoutCharge;
+};
+
+type PmsBookingGuestPii = {
+  guestId: string;
+  guestBookingId: string;
+  displayName: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  phone: string | null;
+  countryCode: string | null;
+};
+
+type PmsAdditionalGuestsResponse = {
+  items: PmsBookingGuestPii[];
 };
 
 export interface PaymentSettings {
@@ -289,11 +404,6 @@ export interface CheckoutRecord {
 
 export const bookingsService = {
   list: async (params?: BookingListParams) => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      const qs = buildQueryString(params);
-      return pmsClient.get<BookingListResponse>(`/admin/bookings${qs}`);
-    }
-
     return pmsOperationsBookingsReadService.list(params);
   },
 
@@ -315,16 +425,12 @@ export const bookingsService = {
   },
 
   get: async (id: string) => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<Booking>(`/admin/bookings/${id}`);
-    }
-
     return pmsOperationsBookingsReadService.get(id);
   },
 
   update: (
-    id: string,
-    data: Partial<{
+    _id: string,
+    _data: Partial<{
       checkIn: string;
       checkOut: string;
       guestFirstName: string;
@@ -343,82 +449,155 @@ export const bookingsService = {
       addonDates: Record<string, string[]>;
       specialRequests: string;
     }>,
-  ) => pmsClient.patch<Booking>(`/admin/bookings/${id}`, data),
+  ) => unsupportedPmsNextStackFeature<Booking>("Booking detail updates"),
 
-  updateStatus: (id: string, status: "confirmed" | "cancelled") =>
-    pmsClient.patch<Booking>(`/admin/bookings/${id}/status`, { status }),
+  updateStatus: (_id: string, _status: "confirmed" | "cancelled") =>
+    unsupportedPmsNextStackFeature<Booking>("Booking confirmation or cancellation"),
 
-  completeCheckIn: (
+  completeCheckIn: async (
     id: string,
     pendingFlags: string[],
     stepResults: CheckinStepResult[] = [],
     pendingFlagDetails: CheckinPendingFlag[] = [],
-  ) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/check-in`, {
-      pendingFlags,
-      stepResults,
-      pendingFlagDetails,
-    }),
+  ) => {
+    await pmsOperationsClient.post<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/check-in"),
+      {
+        ...commandMetadata("pms.check-in"),
+        pendingFlags,
+        stepResults,
+        pendingFlagDetails,
+      },
+      pmsOperationsRequestOptions,
+    );
+    return refreshBooking(id);
+  },
 
-  listCheckoutCharges: (id: string) =>
-    pmsClient.get<{ charges: CheckoutCharge[] }>(`/admin/bookings/${id}/checkout-charges`),
+  listCheckoutCharges: async (id: string) => {
+    const response = await pmsOperationsClient.get<PmsCheckoutChargesResponse>(
+      await reservationEndpoint(id, "/checkout-charges"),
+      pmsOperationsRequestOptions,
+    );
+    return { charges: response.items.map((charge) => toCheckoutCharge(charge, id)) };
+  },
 
-  addCheckoutCharge: (id: string, label: string, amount: number) =>
-    pmsClient.post<CheckoutCharge>(`/admin/bookings/${id}/checkout-charges`, { label, amount }),
+  addCheckoutCharge: async (id: string, label: string, amount: number) => {
+    const response = await pmsOperationsClient.post<PmsCheckoutChargeCommandResponse>(
+      await reservationEndpoint(id, "/checkout-charges"),
+      {
+        ...commandMetadata("pms.checkout-charge.create"),
+        label,
+        amountDecimal: amount.toFixed(2),
+        currency: "EUR",
+      },
+      pmsOperationsRequestOptions,
+    );
+    return toCheckoutCharge(response.charge, id);
+  },
 
-  markCheckoutChargePaid: (id: string, chargeId: string) =>
-    pmsClient.post<CheckoutCharge>(`/admin/bookings/${id}/checkout-charges/${chargeId}/paid`, {}),
+  markCheckoutChargePaid: async (id: string, chargeId: string) => {
+    const response = await pmsOperationsClient.post<PmsCheckoutChargeCommandResponse>(
+      await reservationEndpoint(id, `/checkout-charges/${encodeURIComponent(chargeId)}/paid`),
+      commandMetadata("pms.checkout-charge.paid"),
+      pmsOperationsRequestOptions,
+    );
+    return toCheckoutCharge(response.charge, id);
+  },
 
-  waiveCheckoutCharge: (id: string, chargeId: string) =>
-    pmsClient.post<CheckoutCharge>(`/admin/bookings/${id}/checkout-charges/${chargeId}/waive`, {}),
+  waiveCheckoutCharge: async (id: string, chargeId: string) => {
+    const response = await pmsOperationsClient.post<PmsCheckoutChargeCommandResponse>(
+      await reservationEndpoint(id, `/checkout-charges/${encodeURIComponent(chargeId)}/waive`),
+      commandMetadata("pms.checkout-charge.waive"),
+      pmsOperationsRequestOptions,
+    );
+    return toCheckoutCharge(response.charge, id);
+  },
 
-  getCheckoutRecord: (id: string) =>
-    pmsClient.get<CheckoutRecord | null>(`/admin/bookings/${id}/checkout-record`),
+  getCheckoutRecord: (_id: string) =>
+    unsupportedPmsNextStackFeature<CheckoutRecord | null>("Checkout record reads"),
 
-  completeCheckOut: (
+  completeCheckOut: async (
     id: string,
     inspectionResults: CheckoutInspectionResult[],
     pendingFlags: CheckoutInspectionResult[],
     checkoutNotes?: string,
-  ) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/check-out`, {
-      inspectionResults,
-      pendingFlags,
-      checkoutNotes,
-    }),
+  ) => {
+    await pmsOperationsClient.post<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/check-out"),
+      {
+        ...commandMetadata("pms.check-out"),
+        inspectionResults,
+        pendingFlags: pendingFlags.map((flag) => flag.stepId),
+        chargesSettled: [],
+        checkoutNotes,
+      },
+      pmsOperationsRequestOptions,
+    );
+    return refreshBooking(id);
+  },
 
-  markPaid: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/mark-paid`, {}),
+  markPaid: (_id: string) => unsupportedPmsNextStackFeature<Booking>("Booking payment marking"),
 
-  addArrivalCharge: (id: string, amount: number, description?: string) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/arrival-charge`, { amount, description }),
+  addArrivalCharge: (_id: string, _amount: number, _description?: string) =>
+    unsupportedPmsNextStackFeature<Booking>("Arrival charges"),
 
-  acceptBooking: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/accept`, {}),
+  acceptBooking: (_id: string) => unsupportedPmsNextStackFeature<Booking>("Booking acceptance"),
 
-  rejectBooking: (id: string, reason?: string) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/reject`, { reason }),
+  rejectBooking: (_id: string, _reason?: string) =>
+    unsupportedPmsNextStackFeature<Booking>("Booking rejection"),
 
-  assignRoom: (id: string, roomId: string) =>
-    pmsClient.patch<Booking>(`/admin/bookings/${id}/assign-room`, { roomId }),
+  assignRoom: async (id: string, roomId: string) => {
+    await pmsOperationsClient.patch<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/assignments"),
+      { ...commandMetadata("pms.assignment.assign"), action: "assign", roomId },
+      pmsOperationsRequestOptions,
+    );
+    return refreshBooking(id);
+  },
 
-  moveRoom: (id: string, roomId: string, fromRoomId?: string) =>
-    pmsClient.patch<Booking>(`/admin/bookings/${id}/move-room`, {
-      roomId,
-      ...(fromRoomId ? { fromRoomId } : {}),
-    }),
-
-  swapRoom: (id: string, partnerBookingId: string, partnerDestinationRoomId?: string) =>
-    pmsClient.patch<Booking>(`/admin/bookings/${id}/swap-room`, {
-      partnerBookingId,
-      ...(partnerDestinationRoomId ? { partnerDestinationRoomId } : {}),
-    }),
-
-  unassignRoom: (id: string) => pmsClient.patch<Booking>(`/admin/bookings/${id}/unassign-room`, {}),
-
-  getPaymentSettings: async () => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<PaymentSettingsResponse>("/admin/payment-settings");
+  moveRoom: async (id: string, roomId: string, sourceAssignmentRef?: string) => {
+    const booking = await refreshBooking(id);
+    const sourceAssignment = sourceAssignmentRef
+      ? booking.assignedRooms.find(
+          (assignment) =>
+            assignment.assignmentId === sourceAssignmentRef ||
+            assignment.roomId === sourceAssignmentRef,
+        )
+      : booking.assignedRooms[0];
+    if (sourceAssignmentRef && !sourceAssignment) {
+      return unsupportedPmsNextStackFeature<Booking>(
+        "Multi-room moves without assignment identity",
+      );
     }
 
+    await pmsOperationsClient.patch<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/assignments"),
+      {
+        ...commandMetadata("pms.assignment.move"),
+        action: "move",
+        roomId,
+        ...(sourceAssignment?.assignmentId
+          ? { assignmentId: sourceAssignment.assignmentId }
+          : { position: sourceAssignment?.position ?? 0 }),
+      },
+      pmsOperationsRequestOptions,
+    );
+    return refreshBooking(id);
+  },
+
+  swapRoom: (_id: string, _partnerBookingId: string, _partnerDestinationRoomId?: string) =>
+    unsupportedPmsNextStackFeature<Booking>("Room swaps"),
+
+  unassignRoom: async (id: string) => {
+    await pmsOperationsClient.patch<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/assignments"),
+      { ...commandMetadata("pms.assignment.unassign"), action: "unassign", roomId: null },
+      pmsOperationsRequestOptions,
+    );
+    return refreshBooking(id);
+  },
+
+  getPaymentSettings: async () => {
     const propertyId = await resolveSelectedPmsPropertyId("loading payment settings");
     return pmsOperationsClient.get<PaymentSettingsResponse>(
       propertyEndpoint(propertyId, "payment-settings"),
@@ -427,10 +606,6 @@ export const bookingsService = {
   },
 
   updatePaymentSettings: async (data: Partial<PaymentSettings>) => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.patch("/admin/payment-settings", data);
-    }
-
     const propertyId = await resolveSelectedPmsPropertyId("saving payment settings");
     return pmsOperationsClient.patch(
       propertyEndpoint(propertyId, "payment-settings"),
@@ -439,58 +614,110 @@ export const bookingsService = {
     );
   },
 
-  updateCancellationPolicy: (data: Partial<CancellationPolicy>) =>
-    pmsClient.patch("/admin/cancellation-policy", data),
+  updateCancellationPolicy: (_data: Partial<CancellationPolicy>) =>
+    unsupportedPmsNextStackFeature("Cancellation policy updates"),
 
-  createStripeAccount: (email: string, country: string) =>
-    pmsClient.post<{ accountId: string }>("/admin/stripe/connect-account", { email, country }),
+  createStripeAccount: (_email: string, _country: string) =>
+    unsupportedPmsNextStackFeature<{ accountId: string }>("Stripe account creation"),
 
   getStripeOnboardingLink: () =>
-    pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link"),
+    unsupportedPmsNextStackFeature<{ url: string }>("Stripe onboarding links"),
 
   // Guest-initiated booking change requests (VAY-379)
-  getChangeRequest: (id: string) =>
-    pmsClient.get<BookingChangeRequest | null>(`/admin/bookings/${id}/change-request`),
+  getChangeRequest: (_id: string) =>
+    unsupportedPmsNextStackFeature<BookingChangeRequest | null>("Booking change requests"),
 
-  approveChangeRequest: (id: string) =>
-    pmsClient.post<BookingChangeRequest>(`/admin/bookings/${id}/change-request/approve`, {}),
+  approveChangeRequest: (_id: string) =>
+    unsupportedPmsNextStackFeature<BookingChangeRequest>("Booking change request approval"),
 
-  declineChangeRequest: (id: string, reason?: string) =>
-    pmsClient.post<BookingChangeRequest>(`/admin/bookings/${id}/change-request/decline`, {
-      reason,
-    }),
+  declineChangeRequest: (_id: string, _reason?: string) =>
+    unsupportedPmsNextStackFeature<BookingChangeRequest>("Booking change request decline"),
 
   // VAY-495 booking detail — internal notes, additional guests, cancel-with-reason.
-  listNotes: (id: string) => pmsClient.get<{ notes: BookingNote[] }>(`/admin/bookings/${id}/notes`),
+  listNotes: async (id: string) => {
+    const response = await pmsOperationsClient.get<PmsPrivateNotesResponse>(
+      await reservationEndpoint(id, "/notes"),
+      pmsOperationsRequestOptions,
+    );
+    return { notes: response.items.map((note) => toBookingNote(note, id)) };
+  },
 
-  createNote: (id: string, body: string, source?: BookingNote["source"]) =>
-    pmsClient.post<BookingNote>(`/admin/bookings/${id}/notes`, { body, source }),
+  createNote: async (id: string, body: string, _source?: BookingNote["source"]) => {
+    const response = await pmsOperationsClient.post<{ note: PmsPrivateNote }>(
+      await reservationEndpoint(id, "/notes"),
+      { ...commandMetadata("pms.note.create"), body },
+      pmsOperationsRequestOptions,
+    );
+    return toBookingNote(response.note, id);
+  },
 
-  deleteNote: (id: string, noteId: string) =>
-    pmsClient.delete<void>(`/admin/bookings/${id}/notes/${noteId}`),
+  deleteNote: async (id: string, noteId: string) => {
+    await pmsOperationsClient.delete<void>(await reservationEndpoint(id, `/notes/${noteId}`), {
+      ...pmsOperationsRequestOptions,
+      body: JSON.stringify(commandMetadata("pms.note.delete")),
+    });
+  },
 
-  listAdditionalGuests: (id: string) =>
-    pmsClient.get<{ guests: BookingAdditionalGuest[] }>(`/admin/bookings/${id}/additional-guests`),
+  listAdditionalGuests: async (id: string) => {
+    const response = await pmsOperationsClient.get<PmsAdditionalGuestsResponse>(
+      await reservationEndpoint(id, "/additional-guests"),
+      pmsOperationsRequestOptions,
+    );
+    return { guests: response.items.map(toAdditionalGuest) };
+  },
 
-  listAvailableAddons: (id: string) =>
-    pmsClient.get<BookingAddon[]>(`/admin/bookings/${id}/addons`),
+  listAvailableAddons: (_id: string) =>
+    unsupportedPmsNextStackFeature<BookingAddon[]>("Booking add-ons"),
 
-  createAdditionalGuest: (id: string, data: BookingAdditionalGuestPayload) =>
-    pmsClient.post<BookingAdditionalGuest>(`/admin/bookings/${id}/additional-guests`, data),
+  createAdditionalGuest: async (id: string, data: BookingAdditionalGuestPayload) => {
+    const response = await pmsOperationsClient.post<{ additionalGuest: PmsBookingGuestPii }>(
+      await reservationEndpoint(id, "/additional-guests"),
+      {
+        ...commandMetadata("pms.additional-guest.create"),
+        guest: toPmsAdditionalGuestPayload(data, { requireNames: true }),
+      },
+      pmsOperationsRequestOptions,
+    );
+    return toAdditionalGuest(response.additionalGuest, 0);
+  },
 
-  updateAdditionalGuest: (id: string, guestId: string, data: BookingAdditionalGuestPayload) =>
-    pmsClient.patch<BookingAdditionalGuest>(
-      `/admin/bookings/${id}/additional-guests/${guestId}`,
-      data,
-    ),
+  updateAdditionalGuest: async (
+    id: string,
+    guestId: string,
+    data: BookingAdditionalGuestPayload,
+  ) => {
+    const response = await pmsOperationsClient.patch<{ additionalGuest: PmsBookingGuestPii }>(
+      await reservationEndpoint(id, `/additional-guests/${encodeURIComponent(guestId)}`),
+      {
+        ...commandMetadata("pms.additional-guest.update"),
+        guest: toPmsAdditionalGuestPayload(data),
+      },
+      pmsOperationsRequestOptions,
+    );
+    return toAdditionalGuest(response.additionalGuest, 0);
+  },
 
-  deleteAdditionalGuest: (id: string, guestId: string) =>
-    pmsClient.delete<void>(`/admin/bookings/${id}/additional-guests/${guestId}`),
+  deleteAdditionalGuest: async (id: string, guestId: string) => {
+    await pmsOperationsClient.delete<void>(
+      await reservationEndpoint(id, `/additional-guests/${encodeURIComponent(guestId)}`),
+      {
+        ...pmsOperationsRequestOptions,
+        body: JSON.stringify(commandMetadata("pms.additional-guest.delete")),
+      },
+    );
+  },
 
-  cancelWithReason: (id: string, reason: string) =>
-    pmsClient.post<Booking>(`/admin/bookings/${id}/cancel`, { reason }),
+  cancelWithReason: (_id: string, _reason: string) =>
+    unsupportedPmsNextStackFeature<Booking>("Booking cancellation"),
 
-  markNoShow: (id: string) => pmsClient.post<Booking>(`/admin/bookings/${id}/no-show`, {}),
+  markNoShow: async (id: string) => {
+    await pmsOperationsClient.post<PmsOperationsCommandResponse>(
+      await reservationEndpoint(id, "/no-show"),
+      commandMetadata("pms.no-show"),
+      pmsOperationsRequestOptions,
+    );
+    return refreshBooking(id);
+  },
 };
 
 const pmsOperationsBookingsReadService = {
@@ -601,6 +828,7 @@ function toBooking(
     roomId: primaryAssignment?.roomId ?? null,
     roomNumber: primaryAssignment?.roomNumber ?? null,
     assignedRooms: reservation.assignments.map((assignment) => ({
+      assignmentId: assignment.assignmentId ?? null,
       roomId: assignment.roomId,
       roomNumber: assignment.roomNumber,
       position: assignment.position,
@@ -626,6 +854,30 @@ function toBooking(
     createdAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
     updatedAt: `${reservation.stay.checkIn}T00:00:00.000Z`,
   };
+}
+
+function toPmsAdditionalGuestPayload(
+  data: BookingAdditionalGuestPayload,
+  options: { requireNames?: boolean } = {},
+): Record<string, string | null> {
+  if ("roomPosition" in data) {
+    throw new Error("Additional guest room assignment is not available on PMS next-stack yet.");
+  }
+
+  const payload: Record<string, string | null> = {};
+  if (data.firstName !== undefined) payload.firstName = data.firstName;
+  if (data.lastName !== undefined) payload.lastName = data.lastName;
+  if (data.email !== undefined) payload.email = data.email || null;
+  if (data.phone !== undefined) payload.phone = data.phone || null;
+  if (data.nationality !== undefined) payload.countryCode = data.nationality || null;
+  if (options.requireNames && (!payload.firstName || !payload.lastName)) {
+    throw new Error("Additional guest creation requires first and last name on PMS next-stack.");
+  }
+  if (!options.requireNames && Object.keys(payload).length === 0) {
+    throw new Error("Additional guest updates require a supported guest field.");
+  }
+
+  return payload;
 }
 
 function splitGuestName(displayName: string): [string, string] {

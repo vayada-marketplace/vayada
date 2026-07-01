@@ -1,4 +1,4 @@
-import { apiClient } from "../api/client";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 
 export interface CustomDomainConnectResponse {
   domain: string;
@@ -15,10 +15,10 @@ export interface CustomDomainStatus {
 }
 
 export const customDomainService = {
-  connect: (domain: string) =>
-    apiClient.post<CustomDomainConnectResponse>("/admin/settings/custom-domain", { domain }),
+  connect: (_domain: string) =>
+    unsupportedPmsNextStackFeature<CustomDomainConnectResponse>("Custom domain connection"),
 
-  disconnect: () => apiClient.delete<{ removed: string }>("/admin/settings/custom-domain"),
+  disconnect: () => unsupportedPmsNextStackFeature<{ removed: string }>("Custom domain removal"),
 
-  getStatus: () => apiClient.get<CustomDomainStatus>("/admin/settings/custom-domain/status"),
+  getStatus: () => unsupportedPmsNextStackFeature<CustomDomainStatus>("Custom domain status"),
 };

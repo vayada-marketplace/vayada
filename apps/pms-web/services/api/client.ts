@@ -88,18 +88,10 @@ export class ApiClient {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
-    const omitHotelContextHeader = headers[OMIT_HOTEL_CONTEXT_HEADER] === "true";
     delete headers[OMIT_HOTEL_CONTEXT_HEADER];
 
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    // Legacy `/admin/*` compatibility routes still use the hotel context
-    // header. Target routes carry the resource id in the path.
-    const hotelId = typeof window !== "undefined" ? localStorage.getItem("selectedHotelId") : null;
-    if (hotelId && endpoint.startsWith("/admin/") && !omitHotelContextHeader) {
-      headers["X-Hotel-Id"] = hotelId;
     }
 
     const config: RequestInit = {

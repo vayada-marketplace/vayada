@@ -1,15 +1,10 @@
-import { apiClient } from "../api/client";
-import { pmsClient } from "../api/pmsClient";
-import {
-  isPmsOperationsReadModelEnabled,
-  pmsOperationsClient,
-  pmsOperationsRequestOptions,
-} from "../api/pmsOperationsClient";
+import { pmsOperationsClient, pmsOperationsRequestOptions } from "../api/pmsOperationsClient";
 import {
   getPmsPropertyProfile,
   listPmsProperties,
   resolveSelectedPmsPropertyId,
 } from "../api/pmsPropertyClient";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 
 export interface PmsSetupStatus {
   registered: boolean;
@@ -163,16 +158,8 @@ async function updateOperationsTemplate(
   );
 }
 
-function unavailablePropertySettings(): Promise<never> {
-  return Promise.reject(new Error("Property settings are not available on next-api yet."));
-}
-
 export const pmsSettingsService = {
   getSetupStatus: async () => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<PmsSetupStatus>("/admin/setup-status");
-    }
-
     const properties = await listPmsProperties();
     return {
       registered: properties.length > 0,
@@ -181,49 +168,31 @@ export const pmsSettingsService = {
     };
   },
 
-  listHotels: () =>
-    isPmsOperationsReadModelEnabled()
-      ? listPmsProperties()
-      : pmsClient.get<HotelSummary[]>("/admin/hotels"),
+  listHotels: () => listPmsProperties(),
 
-  getHotelDetails: () =>
-    isPmsOperationsReadModelEnabled()
-      ? getPmsPropertyProfile()
-      : pmsClient.get<HotelDetails>("/admin/hotel"),
+  getHotelDetails: () => getPmsPropertyProfile(),
 };
 
 export const settingsService = {
   getPropertySettings: () =>
-    isPmsOperationsReadModelEnabled()
-      ? unavailablePropertySettings()
-      : apiClient.get<PropertySettings>("/admin/settings/property"),
+    unsupportedPmsNextStackFeature<PropertySettings>("Property currency settings"),
 
-  updatePropertySettings: (data: PropertySettingsUpdate) =>
-    isPmsOperationsReadModelEnabled()
-      ? unavailablePropertySettings()
-      : apiClient.patch<PropertySettings>("/admin/settings/property", data),
+  updatePropertySettings: (_data: PropertySettingsUpdate) =>
+    unsupportedPmsNextStackFeature<PropertySettings>("Property currency settings"),
 
   getCheckinChecklist: async () =>
-    isPmsOperationsReadModelEnabled()
-      ? toCheckinTemplate(await getOperationsTemplate("check-in-checklist"))
-      : pmsClient.get<CheckinChecklistTemplate>("/admin/check-in-checklist"),
+    toCheckinTemplate(await getOperationsTemplate("check-in-checklist")),
 
   updateCheckinChecklist: (steps: CheckinChecklistStep[]) =>
-    isPmsOperationsReadModelEnabled()
-      ? updateOperationsTemplate("check-in-checklist", toOperationsSteps(steps)).then(
-          toCheckinTemplate,
-        )
-      : pmsClient.put<CheckinChecklistTemplate>("/admin/check-in-checklist", { steps }),
+    updateOperationsTemplate("check-in-checklist", toOperationsSteps(steps)).then(
+      toCheckinTemplate,
+    ),
 
   getCheckoutInspection: () =>
-    isPmsOperationsReadModelEnabled()
-      ? getOperationsTemplate("check-out-inspection").then(toCheckoutTemplate)
-      : pmsClient.get<CheckoutInspectionTemplate>("/admin/check-out-inspection"),
+    getOperationsTemplate("check-out-inspection").then(toCheckoutTemplate),
 
   updateCheckoutInspection: (steps: CheckoutInspectionStep[]) =>
-    isPmsOperationsReadModelEnabled()
-      ? updateOperationsTemplate("check-out-inspection", toOperationsSteps(steps)).then(
-          toCheckoutTemplate,
-        )
-      : pmsClient.put<CheckoutInspectionTemplate>("/admin/check-out-inspection", { steps }),
+    updateOperationsTemplate("check-out-inspection", toOperationsSteps(steps)).then(
+      toCheckoutTemplate,
+    ),
 };

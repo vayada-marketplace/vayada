@@ -366,13 +366,9 @@ function AdditionalGuestRow({
       await onSave({
         firstName: form.firstName,
         lastName: form.lastName,
-        gender: form.gender,
         nationality: form.nationality,
-        dateOfBirth: form.dateOfBirth || null,
         email: form.email,
         phone: form.phone,
-        passportNumber: form.passportNumber,
-        roomPosition: form.roomPosition === "" ? null : Number(form.roomPosition),
       });
     } finally {
       setSaving(false);
@@ -425,28 +421,10 @@ function AdditionalGuestRow({
               value={form.lastName}
               onChange={(v) => setForm({ ...form, lastName: v })}
             />
-            <SelectField
-              label="Gender"
-              value={form.gender}
-              onChange={(v) => setForm({ ...form, gender: v })}
-              options={[
-                { value: "", label: "—" },
-                { value: "female", label: "Female" },
-                { value: "male", label: "Male" },
-                { value: "other", label: "Other" },
-                { value: "prefer_not_to_say", label: "Prefer not to say" },
-              ]}
-            />
             <Field
               label="Nationality"
               value={form.nationality}
               onChange={(v) => setForm({ ...form, nationality: v })}
-            />
-            <Field
-              label="Date of birth"
-              type="date"
-              value={form.dateOfBirth}
-              onChange={(v) => setForm({ ...form, dateOfBirth: v })}
             />
             <Field
               label="Email (optional)"
@@ -460,26 +438,12 @@ function AdditionalGuestRow({
               value={form.phone}
               onChange={(v) => setForm({ ...form, phone: v })}
             />
-            <Field
-              label="Passport / ID (optional)"
-              value={form.passportNumber}
-              onChange={(v) => setForm({ ...form, passportNumber: v })}
-            />
-            {roomOptions.length > 1 && (
-              <SelectField
-                label="Room"
-                value={form.roomPosition}
-                onChange={(v) => setForm({ ...form, roomPosition: v })}
-                options={[
-                  { value: "", label: "Unassigned" },
-                  ...roomOptions.map((r) => ({
-                    value: String(r.position),
-                    label: r.label,
-                  })),
-                ]}
-              />
-            )}
           </div>
+          {roomOptions.length > 1 && (
+            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Additional guest room assignment is not available on PMS next-stack yet.
+            </p>
+          )}
           <div className="mt-4 flex justify-end gap-2">
             <button
               onClick={() => {
@@ -1180,6 +1144,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
   const [cancelling, setCancelling] = useState(false);
   const [allRooms, setAllRooms] = useState<Room[]>([]);
   const [moveTarget, setMoveTarget] = useState<{
+    assignmentId: string | null;
     fromRoomId: string | null;
     fromRoomNumber: string | null;
   } | null>(null);
@@ -1430,11 +1395,19 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     }
   };
 
-  const handleMoveRoom = async (fromRoomId: string | null, toRoomId: string) => {
+  const handleMoveRoom = async (
+    assignmentId: string | null,
+    fromRoomId: string | null,
+    toRoomId: string,
+  ) => {
     // The backend can move the primary or any extra; primary is identified
     // by omitting from_room_id. Pass it through unconditionally if we have it
     // so multi-room cases are unambiguous.
-    const updated = await bookingsService.moveRoom(id, toRoomId, fromRoomId || undefined);
+    const updated = await bookingsService.moveRoom(
+      id,
+      toRoomId,
+      assignmentId || fromRoomId || undefined,
+    );
     setBooking(updated);
   };
 
@@ -1461,18 +1434,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     setBooking(updated);
   };
 
-  const handleAssignGuests = async (changes: Record<string, number | null>) => {
-    // Issue PATCH calls in parallel; build a fresh list from the updated
-    // rows so the UI doesn't go through a stale render.
-    const updatedGuests = await Promise.all(
-      Object.entries(changes).map(([guestId, roomPosition]) =>
-        bookingsService.updateAdditionalGuest(id, guestId, { roomPosition }),
-      ),
-    );
-    setGuests((prev) => {
-      const byId = new Map(updatedGuests.map((g) => [g.id, g]));
-      return prev.map((g) => byId.get(g.id) || g);
-    });
+  const handleAssignGuests = async (_changes: Record<string, number | null>) => {
+    throw new Error("Additional guest room assignment is not available on PMS next-stack yet.");
   };
 
   const handleCancelBooking = async () => {
@@ -1553,6 +1516,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
     const assigned = booking.assignedRooms.find((a) => a.position === idx);
     return {
       position: idx,
+      assignmentId: assigned?.assignmentId ?? null,
       roomId: assigned?.roomId ?? null,
       roomNumber: assigned?.roomNumber ?? null,
     };
@@ -1838,8 +1802,8 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                         label: row.roomNumber ? `Room ${row.roomNumber}` : `Room slot ${idx + 1}`,
                       })
                     }
-                    disabled={isCancelled}
-                    title="Assign which additional guests are staying in this room"
+                    disabled
+                    title="Additional guest room assignment is not available on PMS next-stack yet"
                     className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <PencilSquareIcon className="w-3.5 h-3.5" />
@@ -1848,6 +1812,7 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
                   <button
                     onClick={() =>
                       setMoveTarget({
+                        assignmentId: row.assignmentId,
                         fromRoomId: row.roomId,
                         fromRoomNumber: row.roomNumber,
                       })
@@ -2659,7 +2624,9 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
           fromRoomNumber={moveTarget.fromRoomNumber}
           candidates={moveCandidates}
           onClose={() => setMoveTarget(null)}
-          onMove={(toRoomId) => handleMoveRoom(moveTarget.fromRoomId, toRoomId)}
+          onMove={(toRoomId) =>
+            handleMoveRoom(moveTarget.assignmentId, moveTarget.fromRoomId, toRoomId)
+          }
         />
       )}
 

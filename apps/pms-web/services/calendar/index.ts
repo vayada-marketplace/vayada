@@ -1,10 +1,6 @@
-import { pmsClient } from "../api/pmsClient";
-import {
-  isPmsOperationsReadModelEnabled,
-  pmsOperationsClient,
-  pmsOperationsRequestOptions,
-} from "../api/pmsOperationsClient";
+import { pmsOperationsClient, pmsOperationsRequestOptions } from "../api/pmsOperationsClient";
 import { propertyEndpoint, resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import { BookingAddon } from "../bookings";
 
 export interface CalendarRoomType {
@@ -169,39 +165,35 @@ export interface CreateAdminBookingPayload {
 }
 
 export const calendarService = {
-  getCalendarData: async (start: string, end: string) => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<CalendarData>(`/admin/calendar?start=${start}&end=${end}`);
-    }
+  getCalendarData: (start: string, end: string) =>
+    pmsOperationsCalendarReadService.getCalendarData(start, end),
 
-    return pmsOperationsCalendarReadService.getCalendarData(start, end);
-  },
+  createRoomBlock: (_data: CreateRoomBlockPayload) =>
+    unsupportedPmsNextStackFeature<CalendarBlock[]>("Room block creation"),
 
-  createRoomBlock: (data: CreateRoomBlockPayload) =>
-    pmsClient.post<CalendarBlock[]>("/admin/room-blocks", data),
+  updateRoomBlock: (_blockId: string, _data: UpdateRoomBlockPayload) =>
+    unsupportedPmsNextStackFeature<CalendarBlock>("Room block updates"),
 
-  updateRoomBlock: (blockId: string, data: UpdateRoomBlockPayload) =>
-    pmsClient.patch<CalendarBlock>(`/admin/room-blocks/${blockId}`, data),
+  deleteRoomBlock: (_blockId: string) =>
+    unsupportedPmsNextStackFeature<void>("Room block deletion"),
 
-  deleteRoomBlock: (blockId: string) => pmsClient.delete(`/admin/room-blocks/${blockId}`),
+  createAdminBooking: (_data: CreateAdminBookingPayload) =>
+    unsupportedPmsNextStackFeature("Manual booking creation"),
 
-  createAdminBooking: (data: CreateAdminBookingPayload) => pmsClient.post("/admin/bookings", data),
-
-  listAvailableAddons: (roomId: string) =>
-    pmsClient.get<BookingAddon[]>(`/admin/bookings/addons/available?room_id=${roomId}`),
+  listAvailableAddons: (_roomId: string) =>
+    unsupportedPmsNextStackFeature<BookingAddon[]>("Booking add-ons"),
 
   // Booking-engine-equivalent nightly rate for the given room type and check-in
   // date — used by the New Booking modal so the pre-filled rate matches what
   // the guest would have been quoted (seasons / daily overrides / weekend
   // surcharge), instead of just the raw base_rate which can be 0 when the
   // property prices entirely via seasons.
-  getResolvedRate: (roomTypeId: string, checkIn: string) =>
-    pmsClient.get<{ nightlyRate: number; currency: string }>(
-      `/admin/room-types/${roomTypeId}/resolved-rate?check_in=${checkIn}`,
+  getResolvedRate: (_roomTypeId: string, _checkIn: string) =>
+    unsupportedPmsNextStackFeature<{ nightlyRate: number; currency: string }>(
+      "Resolved room rates",
     ),
 
-  reorderRooms: (orderedRoomIds: string[]) =>
-    pmsClient.patch("/admin/rooms/reorder", { orderedRoomIds }),
+  reorderRooms: (_orderedRoomIds: string[]) => unsupportedPmsNextStackFeature("Room reordering"),
 };
 
 const pmsOperationsCalendarReadService = {
