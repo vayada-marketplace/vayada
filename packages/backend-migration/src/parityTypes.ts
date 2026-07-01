@@ -108,6 +108,7 @@ export type ExpectedTarget = {
       specialRequestsEnabled: boolean;
       arrivalTimeEnabled: boolean;
       guestCountEnabled: boolean;
+      phoneRequired: boolean;
       adultAgeThreshold: number;
       childrenEnabled: boolean;
       benefits: string[];

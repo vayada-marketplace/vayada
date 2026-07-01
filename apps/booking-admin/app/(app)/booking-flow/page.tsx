@@ -111,6 +111,7 @@ const DEFAULT_GUEST_FORM_SETTINGS: BookingGuestFormSettings = {
   specialRequestsEnabled: true,
   arrivalTimeEnabled: false,
   guestCountEnabled: false,
+  phoneRequired: true,
   adultAgeThreshold: 18,
   childrenEnabled: true,
 };
@@ -313,6 +314,8 @@ export default function BookingFlowPage() {
     setArrivalTimeEnabled,
     guestCountEnabled,
     setGuestCountEnabled,
+    phoneRequired,
+    setPhoneRequired,
     adultAgeThreshold,
     setAdultAgeThreshold,
     childrenEnabled,
@@ -811,6 +814,8 @@ export default function BookingFlowPage() {
             setArrivalTimeEnabled={setArrivalTimeEnabled}
             guestCountEnabled={guestCountEnabled}
             setGuestCountEnabled={setGuestCountEnabled}
+            phoneRequired={phoneRequired}
+            setPhoneRequired={setPhoneRequired}
             adultAgeThreshold={adultAgeThreshold}
             setAdultAgeThreshold={setAdultAgeThreshold}
             childrenEnabled={childrenEnabled}

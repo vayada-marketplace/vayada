@@ -142,6 +142,7 @@
     "lastName": "Nachname",
     "emailAddress": "E-Mail-Adresse",
     "phoneNumber": "Telefonnummer",
+    "optional": "(optional)",
     "phoneCountryCode": "Ländervorwahl",
     "selectCountryCode": "Ländervorwahl",
     "searchCountryCode": "Land oder Vorwahl suchen",

@@ -77,6 +77,7 @@ const updateCases: Array<UpdateCase<unknown>> = [
       specialRequestsEnabled: true,
       arrivalTimeEnabled: true,
       guestCountEnabled: false,
+      phoneRequired: false,
       adultAgeThreshold: 18,
       childrenEnabled: true,
     } satisfies BookingGuestFormSettings,

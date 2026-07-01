@@ -161,6 +161,7 @@ export type BookingGuestFormSettingsReadModel = {
   specialRequestsEnabled?: boolean | null;
   arrivalTimeEnabled?: boolean | null;
   guestCountEnabled?: boolean | null;
+  phoneRequired?: boolean | null;
   adultAgeThreshold?: number | null;
   childrenEnabled?: boolean | null;
 };
@@ -233,6 +234,7 @@ export type BookingGuestFormSettingsResponse = {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  phoneRequired: boolean;
   adultAgeThreshold: number;
   childrenEnabled: boolean;
 };
@@ -736,6 +738,7 @@ type BookingGuestFormSettingsRow = {
   special_requests_enabled: boolean | null;
   arrival_time_enabled: boolean | null;
   guest_count_enabled: boolean | null;
+  phone_required?: boolean | null;
   adult_age_threshold?: number | null;
   children_enabled?: boolean | null;
 };
@@ -767,6 +770,7 @@ type TargetBookingSettingsRow = {
   special_requests_enabled: boolean | null;
   arrival_time_enabled: boolean | null;
   guest_count_enabled: boolean | null;
+  phone_required: boolean | null;
   adult_age_threshold: number | null;
   children_enabled: boolean | null;
   benefits: unknown;
@@ -901,6 +905,7 @@ const TARGET_BOOKING_PROPERTY_SETTINGS_SELECT = `
     settings.special_requests_enabled,
     settings.arrival_time_enabled,
     settings.guest_count_enabled,
+    settings.phone_required,
     settings.adult_age_threshold,
     settings.children_enabled,
     settings.benefits,
@@ -958,6 +963,7 @@ const TARGET_BOOKING_SETTINGS_SELECT = `
     settings.special_requests_enabled,
     settings.arrival_time_enabled,
     settings.guest_count_enabled,
+    settings.phone_required,
     settings.adult_age_threshold,
     settings.children_enabled,
     settings.benefits,
@@ -1138,6 +1144,7 @@ function toTargetGuestFormSettings(
     specialRequestsEnabled: row.special_requests_enabled,
     arrivalTimeEnabled: row.arrival_time_enabled,
     guestCountEnabled: row.guest_count_enabled,
+    phoneRequired: row.phone_required,
     adultAgeThreshold: row.adult_age_threshold,
     childrenEnabled: row.children_enabled,
   };
@@ -1614,6 +1621,7 @@ export function createPgTargetBookingSettingsRepository(config: {
           settings.special_requests_enabled,
           settings.arrival_time_enabled,
           settings.guest_count_enabled,
+          settings.phone_required,
           settings.adult_age_threshold,
           settings.children_enabled,
           settings.benefits,
@@ -1635,6 +1643,7 @@ export function createPgTargetBookingSettingsRepository(config: {
           updated_settings.special_requests_enabled,
           updated_settings.arrival_time_enabled,
           updated_settings.guest_count_enabled,
+          updated_settings.phone_required,
           updated_settings.adult_age_threshold,
           updated_settings.children_enabled,
           updated_settings.benefits,
@@ -1719,12 +1728,14 @@ export function createPgTargetBookingSettingsRepository(config: {
         `special_requests_enabled = $2,
          arrival_time_enabled = $3,
          guest_count_enabled = $4,
-         adult_age_threshold = $5,
-         children_enabled = $6`,
+         phone_required = $5,
+         adult_age_threshold = $6,
+         children_enabled = $7`,
         [
           settings.specialRequestsEnabled,
           settings.arrivalTimeEnabled,
           settings.guestCountEnabled,
+          settings.phoneRequired,
           settings.adultAgeThreshold,
           settings.childrenEnabled,
         ],
@@ -2189,30 +2200,90 @@ export async function registerBookingSettingsRoutes(
 
   app.put<{ Params: BookingHotelParams; Body: unknown }>(
     "/hotels/:hotelId/settings/guest-form",
-    async (request, reply) =>
-      handleBookingSettingsWrite({
-        request,
-        reply,
-        parseBody: parseGuestFormSettingsWriteBody,
-        write: (hotelId, settings) =>
-          writeRepository.updateGuestFormSettingsByHotelId(hotelId, settings),
-        afterWrite: async (hotelId, _settings, stored, request) => {
-          if (!guestFormSettingsSync) return;
-          try {
-            await guestFormSettingsSync.syncGuestFormSettingsByHotelId(
-              hotelId,
-              toGuestFormSettingsResponse(stored),
-              request.headers.authorization,
-            );
-          } catch (error) {
-            request.log.warn(
-              { err: error, hotelId },
-              "PMS guest-form settings sync failed after Booking settings write",
-            );
-          }
-        },
-        toResponse: toGuestFormSettingsResponse,
-      }),
+    async (request, reply) => {
+      const { hotelId } = request.params;
+
+      try {
+        enforceBookingSettingsPolicy(request, hotelId);
+      } catch (error) {
+        const contractError = toBookingSettingsAccessError(error, request, hotelId);
+        if (contractError) return sendBookingSettingsWriteError(reply, contractError);
+        throw error;
+      }
+
+      let current: BookingGuestFormSettingsReadModel | null;
+      try {
+        current = await repository.findGuestFormSettingsByHotelId(hotelId);
+      } catch (error) {
+        request.log.error({ err: error, hotelId }, "Booking guest-form settings read failed");
+        return sendBookingSettingsWriteError(reply, {
+          statusCode: 500,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Booking settings could not be saved.",
+        });
+      }
+      if (!current) {
+        return sendBookingSettingsWriteError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "write_model",
+          message: "Booking settings target not found.",
+        });
+      }
+
+      const parsed = parseGuestFormSettingsWriteBody(
+        request.body,
+        toGuestFormSettingsResponse(current).phoneRequired,
+      );
+      if (!parsed.ok) {
+        return sendBookingSettingsWriteError(reply, {
+          statusCode: 422,
+          code: "invalid_payload",
+          category: "validation",
+          message: "Booking settings payload is invalid.",
+          details: parsed.details,
+        });
+      }
+
+      let stored: BookingGuestFormSettingsReadModel | null;
+      try {
+        stored = await writeRepository.updateGuestFormSettingsByHotelId(hotelId, parsed.value);
+      } catch (error) {
+        request.log.error({ err: error, hotelId }, "Booking settings write failed");
+        return sendBookingSettingsWriteError(reply, {
+          statusCode: 500,
+          code: "write_model_unavailable",
+          category: "write_model",
+          message: "Booking settings could not be saved.",
+        });
+      }
+      if (!stored) {
+        return sendBookingSettingsWriteError(reply, {
+          statusCode: 404,
+          code: "not_found",
+          category: "write_model",
+          message: "Booking settings target not found.",
+        });
+      }
+
+      if (guestFormSettingsSync) {
+        try {
+          await guestFormSettingsSync.syncGuestFormSettingsByHotelId(
+            hotelId,
+            toGuestFormSettingsResponse(stored),
+            request.headers.authorization,
+          );
+        } catch (error) {
+          request.log.warn(
+            { err: error, hotelId },
+            "PMS guest-form settings sync failed after Booking settings write",
+          );
+        }
+      }
+
+      return toGuestFormSettingsResponse(stored);
+    },
   );
 
   app.put<{ Params: BookingHotelParams; Body: unknown }>(
@@ -2428,25 +2499,44 @@ function parseAddonSettingsWriteBody(
 
 function parseGuestFormSettingsWriteBody(
   body: unknown,
+  currentPhoneRequired?: boolean,
 ): ValidationResult<UpdateBookingGuestFormSettingsBody> {
-  const parsed = expectStrictObject(body, [
+  if (!isPlainRecord(body)) {
+    return { ok: false, details: ["body must be an object."] };
+  }
+
+  const details: string[] = [];
+  const expectedKeys = [
     "specialRequestsEnabled",
     "arrivalTimeEnabled",
     "guestCountEnabled",
+    "phoneRequired",
     "adultAgeThreshold",
     "childrenEnabled",
-  ]);
-  if (!parsed.ok) return parsed;
+  ];
+  const requiredKeys = expectedKeys.filter(
+    (key) => key !== "phoneRequired" || currentPhoneRequired === undefined,
+  );
+  const expected = new Set(expectedKeys);
+  for (const key of Object.keys(body)) {
+    if (!expected.has(key)) details.push(`${key} is not allowed.`);
+  }
+  for (const key of requiredKeys) {
+    if (!Object.hasOwn(body, key)) details.push(`${key} is required.`);
+  }
+  if (details.length > 0) return { ok: false, details };
 
-  const details: string[] = [];
-  const specialRequestsEnabled = expectBoolean(parsed.value, "specialRequestsEnabled", details);
-  const arrivalTimeEnabled = expectBoolean(parsed.value, "arrivalTimeEnabled", details);
-  const guestCountEnabled = expectBoolean(parsed.value, "guestCountEnabled", details);
-  const adultAgeThreshold = expectInteger(parsed.value, "adultAgeThreshold", details, {
+  const specialRequestsEnabled = expectBoolean(body, "specialRequestsEnabled", details);
+  const arrivalTimeEnabled = expectBoolean(body, "arrivalTimeEnabled", details);
+  const guestCountEnabled = expectBoolean(body, "guestCountEnabled", details);
+  const phoneRequired = Object.hasOwn(body, "phoneRequired")
+    ? expectBoolean(body, "phoneRequired", details)
+    : (currentPhoneRequired ?? true);
+  const adultAgeThreshold = expectInteger(body, "adultAgeThreshold", details, {
     min: 1,
     max: 120,
   });
-  const childrenEnabled = expectBoolean(parsed.value, "childrenEnabled", details);
+  const childrenEnabled = expectBoolean(body, "childrenEnabled", details);
 
   if (details.length > 0) return { ok: false, details };
   return {
@@ -2455,6 +2545,7 @@ function parseGuestFormSettingsWriteBody(
       specialRequestsEnabled,
       arrivalTimeEnabled,
       guestCountEnabled,
+      phoneRequired,
       adultAgeThreshold,
       childrenEnabled,
     },
@@ -2634,6 +2725,7 @@ export function toGuestFormSettingsResponse(
     specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
     arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
     guestCountEnabled: settings.guestCountEnabled ?? false,
+    phoneRequired: settings.phoneRequired ?? true,
     adultAgeThreshold: settings.adultAgeThreshold ?? 18,
     childrenEnabled: settings.childrenEnabled ?? true,
   };

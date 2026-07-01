@@ -142,6 +142,7 @@
     "lastName": "Apellido",
     "emailAddress": "Correo Electrónico",
     "phoneNumber": "Número de Teléfono",
+    "optional": "(opcional)",
     "phoneCountryCode": "Código de país",
     "selectCountryCode": "Código de país",
     "searchCountryCode": "Buscar país o código",

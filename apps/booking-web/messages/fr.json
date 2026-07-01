@@ -142,6 +142,7 @@
     "lastName": "Nom de famille",
     "emailAddress": "Adresse e-mail",
     "phoneNumber": "Numéro de téléphone",
+    "optional": "(facultatif)",
     "phoneCountryCode": "Indicatif",
     "selectCountryCode": "Indicatif",
     "searchCountryCode": "Rechercher un pays ou un indicatif",

@@ -381,6 +381,8 @@
   "bookingFlow.guestForm.recommended": "推荐",
   "bookingFlow.guestForm.estimatedArrivalTime": "预计到达时间",
   "bookingFlow.guestForm.numberOfGuests": "客人人数",
+  "bookingFlow.guestForm.phoneNumber": "电话号码",
+  "bookingFlow.guestForm.phoneDescription": "要求客人在结账时输入电话号码。",
   "bookingFlow.guestForm.children": "Children",
   "bookingFlow.guestForm.childrenDescription": "Allow guests to add children to bookings.",
   "bookingFlow.guestForm.adultAgeThreshold": "Adult age threshold",

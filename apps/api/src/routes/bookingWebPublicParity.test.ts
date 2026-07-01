@@ -1412,6 +1412,180 @@ describe("Booking Web public bootstrap parity", () => {
     expect(ended).toBe(0);
   });
 
+  it("exposes target checkout phone required settings", async () => {
+    const pool = {
+      async query(text: string) {
+        if (text.includes("FROM hotel_catalog.property_slugs")) {
+          return {
+            rows: [
+              {
+                propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                displayName: "Hotel Alpenrose",
+                defaultLocale: "en",
+              },
+            ],
+          };
+        }
+        if (text.includes("FROM hotel_catalog.properties p")) {
+          return {
+            rows: [
+              {
+                propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                defaultCurrency: "EUR",
+                phoneRequired: false,
+                acceptedMethods: ["pay_at_property"],
+                depositPolicy: {},
+                refundPolicy: {},
+              },
+            ],
+          };
+        }
+        return { rows: [] };
+      },
+      async end() {},
+    };
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      connectionString: "postgres://unused",
+      pool: pool as never,
+    });
+
+    await expect(adapter.getCheckoutConfig("hotel-alpenrose")).resolves.toMatchObject({
+      phoneRequired: false,
+    });
+  });
+
+  it("validates target booking phone against phone required settings", async () => {
+    const createAdapter = (phoneRequired: boolean) => {
+      const calls: string[] = [];
+      const pool = {
+        async query(text: string) {
+          calls.push(text);
+          if (text.includes("FROM hotel_catalog.property_slugs")) {
+            return {
+              rows: [
+                {
+                  propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                  displayName: "Hotel Alpenrose",
+                  defaultLocale: "en",
+                },
+              ],
+            };
+          }
+          if (text.includes("FROM platform.idempotency_keys")) return { rows: [] };
+          if (text.includes("FROM booking.quote_sessions")) {
+            return {
+              rows: [
+                {
+                  quoteSessionId: "49b3e1e1-95f8-47f2-8bf1-c2d18e3d7a66",
+                  publicQuoteReference: "Q-TARGETQUOTE1",
+                  requestedCheckIn: "2026-09-12",
+                  requestedCheckOut: "2026-09-15",
+                  adults: 2,
+                  children: 0,
+                  roomCount: 1,
+                  currency: "EUR",
+                  status: "active",
+                  selectedOfferSnapshot: {
+                    roomTypeId: "room_deluxe",
+                    paymentMethod: "pay_at_property",
+                  },
+                  totals: { totalAmount: "100.00", balanceAmount: "100.00" },
+                  policySnapshot: {},
+                  expiresAt: "2026-09-12T12:00:00.000Z",
+                },
+              ],
+            };
+          }
+          if (text.includes("FROM hotel_catalog.properties p")) {
+            return {
+              rows: [
+                {
+                  propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                  defaultCurrency: "EUR",
+                  phoneRequired,
+                  acceptedMethods: ["pay_at_property"],
+                  depositPolicy: {},
+                  refundPolicy: {},
+                },
+              ],
+            };
+          }
+          if (text.includes("SELECT * FROM booking_row")) {
+            return {
+              rows: [
+                {
+                  guestBookingId: "3c6a35e2-1436-455a-bf05-96d2f4559421",
+                  propertyId: "a9fccec2-eb4c-4c35-bfd3-02a748c2e117",
+                  publicReference: "B-OPTIONAL",
+                  lifecycleStatus: "confirmed",
+                  paymentStatus: "unpaid",
+                  checkIn: "2026-09-12",
+                  checkOut: "2026-09-15",
+                  adults: 2,
+                  children: 0,
+                  roomCount: 1,
+                  currency: "EUR",
+                  totalAmount: "100.00",
+                  balanceAmount: "100.00",
+                  bookingMetadata: {},
+                  createdAt: "2026-06-25T12:00:00.000Z",
+                },
+              ],
+            };
+          }
+          return { rows: [] };
+        },
+        async end() {},
+      };
+      return {
+        adapter: createTargetBookingWebCheckoutAdapter({
+          connectionString: "postgres://unused",
+          pool: pool as never,
+        }),
+        calls,
+      };
+    };
+    const request = {
+      quoteId: "Q-TARGETQUOTE1",
+      roomTypeId: "room_deluxe",
+      guestEmail: "guest@example.com",
+      checkIn: "2026-09-12",
+      checkOut: "2026-09-15",
+      adults: 2,
+      children: 0,
+      numberOfRooms: 1,
+      paymentMethod: "pay_at_property",
+      expectedTotalAmount: 100,
+      balanceAmount: 100,
+    };
+    const context = {
+      operation: "booking-create",
+      requestId: "req-create",
+      correlationId: "corr-create",
+      idempotencyKey: "create-key",
+      fingerprint: "b".repeat(64),
+      occurredAt: new Date("2026-06-25T12:00:00.000Z"),
+    };
+
+    const requiredPhone = createAdapter(true);
+    await expect(
+      requiredPhone.adapter.createBooking("hotel-alpenrose", request, context),
+    ).rejects.toThrow("Guest phone is required");
+    expect(requiredPhone.calls.some((text) => text.includes("platform.idempotency_keys"))).toBe(
+      false,
+    );
+
+    const optionalPhone = createAdapter(false);
+    await expect(
+      optionalPhone.adapter.createBooking("hotel-alpenrose", request, context),
+    ).resolves.toMatchObject({
+      bookingReference: "B-OPTIONAL",
+    });
+    expect(optionalPhone.calls.some((text) => text.includes("platform.idempotency_keys"))).toBe(
+      true,
+    );
+  });
+
   it("requires target checkout creates to snapshot the expected quote total", () => {
     const quote = {
       totalAmount: "561600.00",

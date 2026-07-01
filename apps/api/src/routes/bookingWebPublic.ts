@@ -990,6 +990,7 @@ type TargetCheckoutConfigRow = QueryResultRow & {
   specialRequestsEnabled: boolean | null;
   arrivalTimeEnabled: boolean | null;
   guestCountEnabled: boolean | null;
+  phoneRequired: boolean | null;
   adultAgeThreshold: number | null;
   childrenEnabled: boolean | null;
   paymentsEnabled: boolean | null;
@@ -1135,6 +1136,7 @@ export function createTargetBookingWebCheckoutAdapter(
       }
       assertTargetPaymentMethodReady(request);
       const property = await resolveTargetCheckoutProperty(pool, slug);
+      const guestPhone = await resolveTargetGuestPhone(pool, property.propertyId, request);
       await reserveTargetCheckoutCommand(pool, property.propertyId, context);
       const quote = await loadTargetCheckoutQuoteSnapshot(
         pool,
@@ -1142,7 +1144,14 @@ export function createTargetBookingWebCheckoutAdapter(
         request,
         context.occurredAt,
       );
-      const booking = await createTargetGuestBooking(pool, property, request, context, quote);
+      const booking = await createTargetGuestBooking(
+        pool,
+        property,
+        request,
+        context,
+        quote,
+        guestPhone,
+      );
       await enqueuePmsReservationHandoff(pool, property.propertyId, booking, context, "create");
       const body = serializeTargetBooking(booking);
       await recordTargetCheckoutCommand(pool, {
@@ -1616,6 +1625,7 @@ async function loadTargetCheckoutConfig(
        bs.special_requests_enabled AS "specialRequestsEnabled",
        bs.arrival_time_enabled AS "arrivalTimeEnabled",
        bs.guest_count_enabled AS "guestCountEnabled",
+       bs.phone_required AS "phoneRequired",
        bs.adult_age_threshold AS "adultAgeThreshold",
        bs.children_enabled AS "childrenEnabled",
        fs.payments_enabled AS "paymentsEnabled",
@@ -1654,6 +1664,7 @@ function serializeTargetCheckoutConfig(
     specialRequestsEnabled: row?.specialRequestsEnabled ?? true,
     arrivalTimeEnabled: row?.arrivalTimeEnabled ?? false,
     guestCountEnabled: row?.guestCountEnabled ?? false,
+    phoneRequired: row?.phoneRequired ?? true,
     adultAgeThreshold: row?.adultAgeThreshold ?? 18,
     childrenEnabled: row?.childrenEnabled ?? true,
     benefits: Array.isArray(row?.benefits) ? row?.benefits : [],
@@ -2107,6 +2118,7 @@ async function createTargetGuestBooking(
   request: BookingWebCheckoutRequest,
   context: BookingWebCheckoutCommandContext,
   quote: TargetCheckoutQuoteSnapshot,
+  guestPhone: string | null,
 ): Promise<TargetBookingRow> {
   const { totalAmount, balanceAmount } = resolveTargetCheckoutAmountSnapshot(request, quote);
   const publicReference = `B-${context.fingerprint.slice(0, 10).toUpperCase()}`;
@@ -2334,7 +2346,7 @@ async function createTargetGuestBooking(
       stringField(request, "firstName") ?? stringField(request, "guestFirstName") ?? "Guest",
       stringField(request, "lastName") ?? stringField(request, "guestLastName") ?? "Guest",
       stringField(request, "guestEmail") ?? stringField(request, "email"),
-      stringField(request, "phone") ?? stringField(request, "guestPhone"),
+      guestPhone,
       uppercaseCountry(stringField(request, "country") ?? stringField(request, "countryCode")),
       stringField(request, "arrivalTime") ?? stringField(request, "estimatedArrivalTime"),
       stringField(request, "specialRequests"),
@@ -2347,6 +2359,19 @@ async function createTargetGuestBooking(
     throw createHttpError(409, "Checkout quote is no longer available. Please refresh.");
   }
   return booking;
+}
+
+async function resolveTargetGuestPhone(
+  pool: BookingWebCalendarReadPool,
+  propertyId: string,
+  request: BookingWebCheckoutRequest,
+): Promise<string | null> {
+  const settings = await loadTargetCheckoutConfig(pool, propertyId);
+  const guestPhone = stringField(request, "phone") ?? stringField(request, "guestPhone");
+  if ((settings?.phoneRequired ?? true) && !guestPhone) {
+    throw createHttpError(400, "Guest phone is required.");
+  }
+  return guestPhone;
 }
 
 async function withGuestLifecycleMutation(
