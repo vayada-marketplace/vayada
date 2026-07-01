@@ -695,6 +695,123 @@ describe("AuthKit session routes", () => {
     });
   });
 
+  it("returns a PMS organization selector from the compatibility token route when selection is required", async () => {
+    const pmsSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_alpenrose",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(pmsSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_alpenrose",
+          workosOrgId: "org_workos_hotel_alpenrose",
+          name: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_alpenrose",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_alpenrose",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_hotel_alpenrose",
+            workosOrgId: "org_workos_hotel_alpenrose",
+            name: "Alpenrose Hotel Group",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_alpenrose",
+              status: "active",
+              roleKey: "hotel_owner",
+              workosMembershipId: "om_alpenrose",
+              workosRoleSlugs: ["hotel_owner"],
+            },
+          },
+          {
+            organizationId: "org_hotel_salzburg",
+            workosOrgId: "org_workos_hotel_salzburg",
+            name: "Alpenrose Salzburg",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_salzburg",
+              status: "active",
+              roleKey: "hotel_admin",
+              workosMembershipId: "om_salzburg",
+              workosRoleSlugs: ["hotel_admin"],
+            },
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          legacyJwtSecret: "legacy-pms-secret",
+          legacyJwtUserType: "hotel",
+          requireExplicitOrganizationSelection: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/pms-web-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      organizationSelectionRequired: true,
+      csrfToken: "csrf-token",
+      user: {
+        id: "user_hotel_admin",
+        email: "hotel@example.com",
+      },
+      organizations: [
+        {
+          organizationId: "org_hotel_alpenrose",
+          workosOrganizationId: "org_workos_hotel_alpenrose",
+          displayName: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+        },
+        {
+          organizationId: "org_hotel_salzburg",
+          workosOrganizationId: "org_workos_hotel_salzburg",
+          displayName: "Alpenrose Salzburg",
+          kind: "hotel_group",
+        },
+      ],
+    });
+  });
+
   it("stores the explicitly selected PMS organization after refresh", async () => {
     const pmsSession: AuthKitSession = {
       ...session,

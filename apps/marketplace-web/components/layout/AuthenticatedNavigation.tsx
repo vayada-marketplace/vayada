@@ -28,6 +28,7 @@ export default function AuthenticatedNavigation() {
   const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [userType, setUserType] = useState<UserType | null>(null);
+  const [setupGuardError, setSetupGuardError] = useState(false);
 
   // Load collapsed state from localStorage on mount
   useEffect(() => {
@@ -53,8 +54,19 @@ export default function AuthenticatedNavigation() {
             typeof window === "undefined"
               ? ROUTES.MARKETPLACE
               : `${window.location.pathname}${window.location.search}`;
-          const decision = await resolveMarketplaceSetupGuard(returnTo);
+          let decision: Awaited<ReturnType<typeof resolveMarketplaceSetupGuard>>;
+          try {
+            decision = await resolveMarketplaceSetupGuard(returnTo);
+          } catch (error) {
+            console.error("Failed to verify marketplace setup:", error);
+            if (!cancelled) {
+              setSetupGuardError(true);
+              setUserType(currentUserType);
+            }
+            return;
+          }
           if (cancelled) return;
+          setSetupGuardError(false);
           localStorage.setItem(
             STORAGE_KEYS.PROFILE_COMPLETE,
             String(decision.action === "enter_product"),
@@ -64,6 +76,7 @@ export default function AuthenticatedNavigation() {
             return;
           }
         }
+        setSetupGuardError(false);
         setUserType(currentUserType);
       })
       .catch((error) => {
@@ -232,6 +245,25 @@ export default function AuthenticatedNavigation() {
           </Link>
         </div>
       </header>
+      {setupGuardError && (
+        <div
+          role="status"
+          className={`fixed top-12 left-0 right-0 z-40 border-b border-amber-200 bg-amber-50 text-amber-900 transition-all duration-200 ${
+            isCollapsed ? "md:pl-14" : "md:pl-52"
+          }`}
+        >
+          <div className="flex min-h-10 items-center justify-between gap-3 px-3 py-2 text-xs md:px-4">
+            <span>Unable to verify setup. Refresh the page to try again.</span>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="shrink-0 rounded border border-amber-300 px-2 py-1 font-medium hover:bg-amber-100"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
     </SidebarContext.Provider>
   );
 }

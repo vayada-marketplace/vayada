@@ -443,9 +443,12 @@ export const registerAuthSessionRoutes: FastifyPluginAsync<AuthSessionRouteOptio
     if (sealedSession) {
       const session = await options.authKitClient.authenticateSession({ sealedSession });
       if (session) {
-        const resolution = await resolveExistingIdentity(session, options, surfacePolicy).catch(
-          () => null,
-        );
+        const resolution = await resolveExistingIdentity(
+          session,
+          options,
+          surfacePolicy,
+          organizationAccessOptionsFromRequest(request, surfacePolicy),
+        ).catch(() => null);
         await options.productAuditSink.record({
           action: "auth.logout",
           actorUserId: resolution?.user.userId,
@@ -635,6 +638,9 @@ function registerCompatibilityTokenRoute(
         }),
       );
     } catch (error) {
+      if (error instanceof OrganizationSelectionRequiredError) {
+        return sendOrganizationSelectionResponse(reply, error, readCookie(request, CSRF_COOKIE));
+      }
       return reply.code(403).send(toAuthError(error));
     }
     const expiresIn = 15 * 60;

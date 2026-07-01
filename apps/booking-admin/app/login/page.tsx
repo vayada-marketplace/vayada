@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeRelativeReturnTo } from "@vayada/hotel-setup-wizard/returnTo";
 import { authService } from "@/services/auth";
 import {
   isAuthOrganizationSelectionResponse,
@@ -20,7 +21,7 @@ function LoginContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [organizationSelection, setOrganizationSelection] =
     useState<AuthOrganizationSelectionResponse | null>(null);
-  const returnTo = safeReturnTo(searchParams.get("returnTo"), "/dashboard");
+  const returnTo = safeRelativeReturnTo(searchParams.get("returnTo"), "/dashboard");
 
   const redirectAfterLogin = useCallback(
     async (loginResponse: { is_superadmin?: boolean }) => {
@@ -147,8 +148,4 @@ export default function LoginPage() {
       <LoginContent />
     </Suspense>
   );
-}
-
-function safeReturnTo(value: string | null, fallback: string): string {
-  return value && value.startsWith("/") && !value.startsWith("//") ? value : fallback;
 }

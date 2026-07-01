@@ -50,44 +50,51 @@ export default function MarketplacePage() {
     setUserType(storedUserType);
 
     let cancelled = false;
-    (async () => {
-      const authenticated = await authService.ensureSession();
-      if (cancelled) return;
-      if (!authenticated) {
-        router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
-        return;
-      }
-      const refreshedUserType =
-        (localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null) ?? storedUserType;
-      setUserType(refreshedUserType);
-      if (refreshedUserType === "hotel") {
-        const decision = await resolveMarketplaceSetupGuard(currentReturnTo(ROUTES.MARKETPLACE));
+    void (async () => {
+      try {
+        const authenticated = await authService.ensureSession();
         if (cancelled) return;
-        localStorage.setItem(
-          STORAGE_KEYS.PROFILE_COMPLETE,
-          String(decision.action === "enter_product"),
-        );
-        if (decision.action === "redirect_to_setup") {
-          router.replace(decision.redirectPath);
+        if (!authenticated) {
+          router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
           return;
         }
-        setProfileReady(true);
-        return;
-      }
+        const refreshedUserType =
+          (localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null) ?? storedUserType;
+        setUserType(refreshedUserType);
+        if (refreshedUserType === "hotel") {
+          const decision = await resolveMarketplaceSetupGuard(currentReturnTo(ROUTES.MARKETPLACE));
+          if (cancelled) return;
+          localStorage.setItem(
+            STORAGE_KEYS.PROFILE_COMPLETE,
+            String(decision.action === "enter_product"),
+          );
+          if (decision.action === "redirect_to_setup") {
+            router.replace(decision.redirectPath);
+            return;
+          }
+          setProfileReady(true);
+          return;
+        }
 
-      if (refreshedUserType !== "creator") {
+        if (refreshedUserType !== "creator") {
+          setProfileReady(true);
+          return;
+        }
+        const status = await checkProfileStatus(refreshedUserType);
+        if (cancelled) return;
+        if (!status || !status.profile_complete) {
+          localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
+          router.replace(ROUTES.PROFILE_COMPLETE);
+          return;
+        }
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
         setProfileReady(true);
-        return;
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to verify marketplace session:", error);
+        setError("Failed to verify your session. Please refresh the page.");
+        setLoading(false);
       }
-      const status = await checkProfileStatus(refreshedUserType);
-      if (cancelled) return;
-      if (!status || !status.profile_complete) {
-        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
-        router.replace(ROUTES.PROFILE_COMPLETE);
-        return;
-      }
-      localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
-      setProfileReady(true);
     })();
 
     return () => {

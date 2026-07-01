@@ -162,7 +162,6 @@ export const authService = {
         : await authFetch<AuthSessionResponse>(
             `/auth/session?${new URLSearchParams({
               surface: AUTH_SURFACE,
-              ...(organizationId ? { organizationId } : {}),
             }).toString()}`,
           );
 

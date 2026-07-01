@@ -114,7 +114,7 @@ export function clearAuthData(): void {
 }
 
 export function getAuthCsrfToken(): string | null {
-  return authKitSession?.csrfToken ?? pendingOrganizationSelectionCsrfToken;
+  return pendingOrganizationSelectionCsrfToken ?? authKitSession?.csrfToken ?? null;
 }
 
 export function getAuthBearerToken(): string | null {

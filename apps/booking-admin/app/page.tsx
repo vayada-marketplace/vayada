@@ -11,10 +11,24 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     async function redirect() {
-      const authorized = await authService.ensureSession();
+      let authorized = false;
+      try {
+        authorized = await authService.ensureSession();
+      } catch (error) {
+        console.error("Failed to verify booking admin session:", error);
+        if (!cancelled) router.replace("/login");
+        return;
+      }
       if (cancelled) return;
       if (authorized && authService.isHotelAdmin()) {
-        const decision = await resolveBookingSetupGuard("/dashboard");
+        let decision: Awaited<ReturnType<typeof resolveBookingSetupGuard>>;
+        try {
+          decision = await resolveBookingSetupGuard("/dashboard");
+        } catch (error) {
+          console.error("Failed to verify booking setup:", error);
+          if (!cancelled) router.replace("/login");
+          return;
+        }
         if (cancelled) return;
         localStorage.setItem(
           "setupComplete",
@@ -25,7 +39,7 @@ export default function Home() {
         router.replace("/login");
       }
     }
-    redirect();
+    void redirect();
     return () => {
       cancelled = true;
     };

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { firstSearchParam, safeRelativeReturnTo } from "@vayada/hotel-setup-wizard/returnTo";
 import { LoginContent } from "./LoginContent";
 
 const AUTH_API_BASE_URL =
@@ -11,19 +12,10 @@ type LoginPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-function firstParam(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function safeReturnTo(value: string | string[] | undefined, fallback: string): string {
-  const raw = firstParam(value);
-  return raw && raw.startsWith("/") && !raw.startsWith("//") ? raw : fallback;
-}
-
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {};
-  const returnTo = safeReturnTo(params.returnTo, "/marketplace");
-  if (firstParam(params.auth) === "callback") {
+  const returnTo = safeRelativeReturnTo(params.returnTo, "/marketplace");
+  if (firstSearchParam(params.auth) === "callback") {
     return <LoginContent returnTo={returnTo} />;
   }
 
@@ -33,7 +25,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   callbackUrl.searchParams.set("returnTo", returnTo);
   url.searchParams.set("return_to", callbackUrl.toString());
 
-  const loginHint = firstParam(params.login_hint);
+  const loginHint = firstSearchParam(params.login_hint);
   if (loginHint) {
     url.searchParams.set("login_hint", loginHint);
   }

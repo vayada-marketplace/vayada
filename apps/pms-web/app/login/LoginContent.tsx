@@ -100,12 +100,12 @@ export function LoginContent({ returnTo = "/dashboard" }: LoginContentProps) {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-gray-900">
-            {organizationSelection ? "Choose hotel group" : t("auth.login.title")}
+            {organizationSelection ? t("auth.login.chooseHotelGroup") : t("auth.login.title")}
           </h1>
           <p className="text-[13px] text-gray-500 mt-1">
             {organizationSelection
-              ? "Select the hotel group you want to manage."
-              : "Redirecting to sign in..."}
+              ? t("auth.login.chooseHotelGroupSubtitle")
+              : t("auth.login.redirecting")}
           </p>
         </div>
 

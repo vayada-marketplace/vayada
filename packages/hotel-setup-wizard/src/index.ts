@@ -50,6 +50,7 @@ export {
   resolveSharedHotelSetupGuardDecision,
   type SharedHotelSetupGuardDecision,
 } from "./sharedHotelSetupGuard";
+export { firstSearchParam, safeRelativeReturnTo, type ReturnToParam } from "./returnTo";
 export {
   default as PropertyStep,
   type CountryOption,
