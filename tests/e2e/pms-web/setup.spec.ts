@@ -14,6 +14,7 @@ test.describe("pms-web shared setup", () => {
   test("walks first-property setup into product selection", async ({ page }, testInfo) => {
     const assertHealthy = watchPageHealth(page, testInfo);
     let created = false;
+    const statusRequests: URL[] = [];
 
     await mockPmsWebAuthenticatedSession(page);
     await mockSharedSetupApi(
@@ -22,6 +23,7 @@ test.describe("pms-web shared setup", () => {
       () => {
         created = true;
       },
+      statusRequests,
     );
 
     await page.goto("/setup?entryProduct=pms&returnTo=/dashboard");
@@ -39,6 +41,18 @@ test.describe("pms-web shared setup", () => {
     await expect(page.getByRole("heading", { level: 2, name: "Choose products" })).toBeVisible();
     await expect(page.getByText("Alpenrose Munich")).toBeVisible();
     await expect(page.getByLabel("PMS")).toBeChecked();
+    expect(statusRequests.length).toBeGreaterThan(0);
+    expect(
+      statusRequests.every(
+        (url) =>
+          url.searchParams.get("entryProduct") === "pms" &&
+          url.searchParams.get("returnTo") === "/dashboard",
+      ),
+    ).toBe(true);
+    expect(statusRequests.some((url) => !url.searchParams.has("propertyId"))).toBe(true);
+    expect(statusRequests.some((url) => url.searchParams.get("propertyId") === propertyId)).toBe(
+      true,
+    );
 
     await assertHealthy();
   });
@@ -48,6 +62,7 @@ async function mockSharedSetupApi(
   page: Parameters<typeof mockPmsWebAuthenticatedSession>[0],
   isCreated: () => boolean,
   markCreated: () => void,
+  statusRequests: URL[],
 ) {
   await page.route("**/api/hotel-setup/**", async (route) => {
     const request = route.request();
@@ -57,6 +72,7 @@ async function mockSharedSetupApi(
 
     const url = new URL(request.url());
     if (url.pathname === "/api/hotel-setup/status") {
+      statusRequests.push(url);
       return route.fulfill({
         headers: corsHeaders(),
         json: isCreated() ? completeStatus() : emptyStatus(),

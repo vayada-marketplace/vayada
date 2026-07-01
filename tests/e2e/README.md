@@ -88,6 +88,23 @@ All network calls are mocked via `mockBookingApis`. No seeded backend is require
 
 The smoke tests for `affiliate-dashboard` and `vayada-admin` navigate to `/login` and verify the login shell renders without errors. AuthKit-backed product pages (`booking-admin`, `marketplace-web`, and `pms-web`) immediately redirect to hosted auth, so their smoke asserts the local redirect target and surface.
 
+## Shared Hotel Setup Smoke
+
+The focused first-run setup smoke lives in `tests/e2e/pms-web/setup.spec.ts`.
+It enters through PMS at `/setup?entryProduct=pms&returnTo=/dashboard`, mocks an
+empty shared hotel setup status, creates the first property under the resolved
+hotel-group organization, and verifies the flow reaches product selection with
+PMS preselected.
+
+Run just that coverage from the repo root:
+
+```bash
+npm run e2e:pms-web -- tests/e2e/pms-web/setup.spec.ts
+```
+
+Use `E2E_START_SERVERS=1` with the same command when portless apps are not
+already running.
+
 ## No Legacy Call Guard
 
 Migrated next-stack specs can opt into `watchNoLegacyCalls(page, testInfo, surface)`
