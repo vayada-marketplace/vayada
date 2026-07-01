@@ -3,11 +3,13 @@ import { createSharedHotelSetupStatusMock, sharedHotelSetupProduct } from "./sha
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
+export const BOOKING_ADMIN_ORGANIZATION_ID = "org_hotel_group";
 export const BOOKING_ADMIN_HOTEL_SLUG = "hotel-alpenrose";
 export const BOOKING_ADMIN_ROOMS_PATH = `/api/pms/properties/${BOOKING_ADMIN_HOTEL_ID}/rooms`;
 export const BOOKING_ADMIN_ADDON_ITEMS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/addon-items`;
 export const BOOKING_ADMIN_PROMO_CODES_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/promo-codes`;
 export const BOOKING_ADMIN_PROPERTY_LINK_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/property-link`;
+export const BOOKING_ADMIN_PROPERTY_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/property`;
 export const BOOKING_ADMIN_ADDON_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/addons`;
 export const BOOKING_ADMIN_BENEFITS_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/benefits`;
 export const BOOKING_ADMIN_GUEST_FORM_SETTINGS_PATH = `/api/booking/hotels/${BOOKING_ADMIN_HOTEL_ID}/settings/guest-form`;
@@ -253,19 +255,25 @@ export const defaultCustomDomain: BookingAdminCustomDomainFixture = {
 };
 
 export async function mockBookingAdminAuthenticatedSession(page: Page): Promise<void> {
-  await page.addInitScript((hotelId) => {
-    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
-    window.localStorage.setItem("access_token", "e2e-booking-admin-token");
-    window.localStorage.setItem("token_expires_at", String(oneHourFromNow));
-    window.localStorage.setItem("isLoggedIn", "true");
-    window.localStorage.setItem("userType", "hotel");
-    window.localStorage.setItem("isSuperAdmin", "false");
-    window.localStorage.setItem("selectedHotelId", hotelId);
-    window.localStorage.setItem(
-      "user",
-      JSON.stringify({ id: "user_1", email: "owner@example.com", type: "hotel" }),
-    );
-  }, BOOKING_ADMIN_HOTEL_ID);
+  await page.addInitScript(
+    ({ hotelId, token }) => {
+      const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+      window.localStorage.setItem("access_token", token);
+      window.localStorage.setItem("token_expires_at", String(oneHourFromNow));
+      window.localStorage.setItem("isLoggedIn", "true");
+      window.localStorage.setItem("userType", "hotel");
+      window.localStorage.setItem("isSuperAdmin", "false");
+      window.localStorage.setItem("selectedHotelId", hotelId);
+      window.localStorage.setItem(
+        "user",
+        JSON.stringify({ id: "user_1", email: "owner@example.com", type: "hotel" }),
+      );
+    },
+    {
+      hotelId: BOOKING_ADMIN_HOTEL_ID,
+      token: fakeBookingAdminJwt(),
+    },
+  );
 }
 
 export async function mockBookingAdminShellRoutes(
@@ -273,8 +281,9 @@ export async function mockBookingAdminShellRoutes(
   options: BookingAdminShellMocksOptions = {},
 ): Promise<void> {
   const propertySettings = options.propertySettings ?? defaultBookingAdminPropertySettings;
-  await page.route("**/admin/module-activations", (route) =>
-    route.fulfill({ json: { activations: [] } }),
+  await page.route(
+    `**/api/pms/properties/${BOOKING_ADMIN_PROPERTY_ID}/module-activations`,
+    (route) => route.fulfill({ json: { activations: [] } }),
   );
   await page.route("**/admin/hotels", (route) =>
     route.fulfill({
@@ -288,7 +297,7 @@ export async function mockBookingAdminShellRoutes(
     }),
   );
   await page.route("**/admin/superadmin/hotels", (route) => route.fulfill({ json: [] }));
-  await page.route("**/admin/settings/property", (route) =>
+  await page.route(`**${BOOKING_ADMIN_PROPERTY_SETTINGS_PATH}*`, (route) =>
     route.fulfill({ json: propertySettings }),
   );
   await page.route("**/admin/settings/setup-status", (route) =>
@@ -354,6 +363,15 @@ export async function mockBookingAdminShellRoutes(
       ? route.fulfill({ status: 204 })
       : route.fulfill({ json: options.customDomain ?? defaultCustomDomain }),
   );
+}
+
+function fakeBookingAdminJwt(): string {
+  return `header.${Buffer.from(
+    JSON.stringify({
+      org: BOOKING_ADMIN_ORGANIZATION_ID,
+      resources: { "booking:booking_hotel": [BOOKING_ADMIN_HOTEL_ID] },
+    }),
+  ).toString("base64url")}.signature`;
 }
 
 export async function mockBookingAdminBookingFlow(
