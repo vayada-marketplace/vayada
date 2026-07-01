@@ -1,4 +1,5 @@
 import {
+  buildSharedHotelSetupRedirectPath,
   resolveSharedHotelSetupGuard,
   type SharedHotelSetupApi,
   type SharedHotelSetupGuardDecision,
@@ -9,6 +10,18 @@ import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 type HotelSelectionStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const SELECTED_SHARED_PROPERTY_ID_KEY = "selectedSharedPropertyId";
+
+export function marketplaceSetupRedirectPath(returnTo: string): string {
+  return buildSharedHotelSetupRedirectPath({ entryProduct: "marketplace", returnTo });
+}
+
+export function isMarketplaceActivationDecision(decision: SharedHotelSetupGuardDecision): boolean {
+  return (
+    decision.action === "redirect_to_setup" &&
+    decision.setupAction === "complete_product_activation" &&
+    canOpenMarketplaceProfileTools(decision)
+  );
+}
 
 export async function resolveMarketplaceSetupGuard(
   returnTo: string,
@@ -42,4 +55,24 @@ export function readSelectedSharedPropertyId(
 
 function browserStorage(): HotelSelectionStorage | null {
   return typeof window === "undefined" ? null : window.localStorage;
+}
+
+const MARKETPLACE_PROFILE_TOOL_STEPS = new Set([
+  "creatorPitch",
+  "collaborationOffer",
+  "creatorRequirements",
+  "marketplaceListing",
+]);
+
+export function canOpenMarketplaceProfileTools(input: {
+  product: string | null;
+  productStatus: string | null;
+  missingSteps: string[];
+}): boolean {
+  return (
+    input.product === "marketplace" &&
+    input.productStatus === "selected_incomplete" &&
+    input.missingSteps.length > 0 &&
+    input.missingSteps.every((step) => MARKETPLACE_PROFILE_TOOL_STEPS.has(step))
+  );
 }

@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { hotelService } from "@/services/api/hotels";
 import { ApiErrorResponse } from "@/services/api/client";
 import { checkProfileStatus } from "@/lib/utils";
 import { STORAGE_KEYS } from "@/lib/constants";
-import { ROUTES } from "@/lib/constants/routes";
 import { transformHotelProfile } from "@/components/profile/transforms";
 import { formatErrorForModal } from "./useErrorModal";
 import type { HotelProfileStatus } from "@/lib/types";
@@ -13,7 +11,6 @@ import type { ProfileHotelProfile } from "@/components/profile/types";
 export function useHotelProfile(
   showError: (title: string, message: string | string[], details?: string) => void,
 ) {
-  const router = useRouter();
   const [hotelProfile, setHotelProfile] = useState<ProfileHotelProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileStatus, setProfileStatus] = useState<HotelProfileStatus | null>(null);
@@ -59,17 +56,10 @@ export function useHotelProfile(
       const status = (await checkProfileStatus("hotel")) as HotelProfileStatus | null;
       setProfileStatus(status);
 
-      // Treat a missing status (e.g. endpoint 404'd because profile row
-      // doesn't exist yet) the same as an incomplete profile — send the
-      // user straight to the completion flow.
-      if (!status || !status.profile_complete) {
-        setIsProfileIncomplete(true);
-        setHotelProfile(null);
-        router.push(ROUTES.PROFILE_COMPLETE);
-        return;
-      }
-
       setIsProfileIncomplete(false);
+      if (status?.missing_listings) {
+        setActiveHotelTab("listings");
+      }
 
       try {
         const apiProfile = await hotelService.getMyProfile();

@@ -5,6 +5,7 @@ import { PencilIcon, PlusIcon } from "@heroicons/react/24/solid";
 import { BuildingOffice2Icon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import { Button, ErrorModal } from "@/components/ui";
 import { ROUTES } from "@/lib/constants/routes";
+import { marketplaceSetupRedirectPath } from "@/lib/utils/sharedSetupGuard";
 import { ProfilePictureModal } from "../ProfilePictureModal";
 import { DeleteConfirmModal } from "../DeleteConfirmModal";
 import { HotelOverviewTab } from "./HotelOverviewTab";
@@ -86,14 +87,17 @@ export function HotelProfile() {
               />
             </svg>
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">Complete Your Profile</h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">Activate Creator Marketplace</h3>
           <p className="text-gray-600 mb-6">
             {(profileStatus as HotelProfileStatus)?.missing_fields
-              ? `Please complete the following: ${(profileStatus as HotelProfileStatus).missing_fields.join(", ")}`
-              : "Your profile setup is not complete. Please finish the onboarding process."}
+              ? `Please finish the shared setup first: ${(profileStatus as HotelProfileStatus).missing_fields.join(", ")}`
+              : "Finish the shared setup before activating this property for Marketplace."}
           </p>
-          <Button variant="primary" onClick={() => router.push(ROUTES.PROFILE_COMPLETE)}>
-            Complete Profile
+          <Button
+            variant="primary"
+            onClick={() => router.push(marketplaceSetupRedirectPath(ROUTES.PROFILE))}
+          >
+            Continue Setup
           </Button>
         </div>
       </div>
@@ -124,8 +128,11 @@ export function HotelProfile() {
             Your profile status is being checked, but profile data endpoints are currently
             unavailable.
           </p>
-          <Button variant="primary" onClick={() => router.push(ROUTES.PROFILE_COMPLETE)}>
-            Go to Profile Completion
+          <Button
+            variant="primary"
+            onClick={() => router.push(marketplaceSetupRedirectPath(ROUTES.PROFILE))}
+          >
+            Continue Setup
           </Button>
         </div>
       </div>

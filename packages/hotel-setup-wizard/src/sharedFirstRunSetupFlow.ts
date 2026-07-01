@@ -221,10 +221,14 @@ export function resolveSharedFirstRunSetupView(
   }
 
   if (status.nextAction.action === "complete_product_activation") {
+    const selectedProperty = findProperty(status, status.nextAction.propertyId);
     return propertyActionView(status, status.nextAction.propertyId, {
       screen: "product_activation",
       product: status.nextAction.product,
-      title: "Continue setup",
+      title:
+        status.nextAction.product === "marketplace"
+          ? `Set up Marketplace for ${selectedProperty?.displayName ?? "selected property"}`
+          : "Continue setup",
     });
   }
 

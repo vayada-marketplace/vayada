@@ -1,7 +1,10 @@
 import {
   isSafeSharedHotelSetupReturnTo,
   type SharedHotelSetupEntryProduct,
+  type SharedHotelSetupNextAction,
+  type SharedHotelSetupProduct,
   type SharedHotelSetupStatus,
+  type SharedProductActivation,
 } from "./sharedFirstRunSetupFlow";
 import type { SharedHotelSetupApi } from "./sharedHotelSetupApi";
 
@@ -15,6 +18,10 @@ export type SharedHotelSetupGuardDecision =
       action: "redirect_to_setup";
       propertyId: string | null;
       redirectPath: string;
+      setupAction: SharedHotelSetupNextAction["action"];
+      product: SharedHotelSetupProduct | null;
+      productStatus: SharedProductActivation<SharedHotelSetupProduct>["status"] | null;
+      missingSteps: string[];
     };
 
 export function resolveSharedHotelSetupGuardDecision(
@@ -35,10 +42,21 @@ export function resolveSharedHotelSetupGuardDecision(
     };
   }
 
+  const propertyId = "propertyId" in status.nextAction ? status.nextAction.propertyId : null;
+  const product = "product" in status.nextAction ? status.nextAction.product : null;
+  const selectedProperty = propertyId
+    ? status.properties.find((property) => property.propertyId === propertyId)
+    : null;
+  const activation = product && selectedProperty ? selectedProperty.products[product] : null;
+
   return {
     action: "redirect_to_setup",
-    propertyId: "propertyId" in status.nextAction ? status.nextAction.propertyId : null,
+    propertyId,
     redirectPath: buildSharedHotelSetupRedirectPath(input),
+    setupAction: status.nextAction.action,
+    product,
+    productStatus: activation?.status ?? null,
+    missingSteps: "missingSteps" in status.nextAction ? status.nextAction.missingSteps : [],
   };
 }
 

@@ -6,7 +6,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
 import { authService } from "@/services/auth";
-import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
+import {
+  isMarketplaceActivationDecision,
+  resolveMarketplaceSetupGuard,
+} from "@/lib/utils/sharedSetupGuard";
 import { HotelIcon, ProfileIcon, CalendarIcon, MessageIcon } from "@/components/ui";
 import { ArrowRightOnRectangleIcon, ViewColumnsIcon } from "@heroicons/react/24/outline";
 import { AppSwitcher } from "./AppSwitcher";
@@ -71,7 +74,9 @@ export default function AuthenticatedNavigation() {
             STORAGE_KEYS.PROFILE_COMPLETE,
             String(decision.action === "enter_product"),
           );
-          if (decision.action === "redirect_to_setup") {
+          const allowMarketplaceActivationProfile =
+            pathname === ROUTES.PROFILE && isMarketplaceActivationDecision(decision);
+          if (decision.action === "redirect_to_setup" && !allowMarketplaceActivationProfile) {
             router.replace(decision.redirectPath);
             return;
           }

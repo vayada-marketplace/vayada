@@ -544,12 +544,13 @@ function marketplaceActivation(row: SharedHotelSetupRow): SharedProductActivatio
   }
 
   const missingSteps: string[] = [];
+  const listingCount = toCount(row.marketplaceListingCount);
+  const verifiedListingCount = toCount(row.marketplaceVerifiedListingCount);
+  const offeringCount = toCount(row.marketplaceOfferingCount);
   if (!row.marketplaceEntitlementActive) missingSteps.push("productEntitlement");
   if (row.marketplaceProfileComplete !== true) missingSteps.push("creatorPitch");
-  if (
-    toCount(row.marketplaceVerifiedListingCount) === 0 ||
-    toCount(row.marketplaceOfferingCount) === 0
-  ) {
+  if (listingCount === 0) missingSteps.push("marketplaceListing");
+  if (verifiedListingCount === 0 || offeringCount === 0) {
     missingSteps.push("collaborationOffer");
   }
   if (toCount(row.marketplaceRequirementCount) === 0) missingSteps.push("creatorRequirements");

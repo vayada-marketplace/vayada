@@ -27,6 +27,7 @@ export const ROUTES = {
   VERIFY_EMAIL: "/verify-email",
   PROFILE: "/profile",
   PROFILE_COMPLETE: "/profile/complete",
+  SETUP: "/setup",
 
   // Hotel routes
   HOTEL_DASHBOARD: "/hotel/dashboard",
