@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createSharedHotelSetupApi,
   isSharedHotelSetupProductSelectable,
   resolveSharedFirstRunSetupView,
   selectedProductsForProperty,
@@ -73,6 +74,13 @@ describe("resolveSharedFirstRunSetupView", () => {
     });
   });
 
+  it("preselects the entry product when the shared profile reaches product selection", () => {
+    const setupProperty = property("property-1");
+    setupProperty.products.booking.status = "active";
+
+    expect(selectedProductsForProperty(setupProperty, "pms")).toEqual(["pms", "booking"]);
+  });
+
   it("excludes unavailable and suspended products from selected products", () => {
     const setupProperty = property("property-1");
     setupProperty.products.booking.status = "active";
@@ -83,6 +91,32 @@ describe("resolveSharedFirstRunSetupView", () => {
     expect(isSharedHotelSetupProductSelectable(setupProperty, "booking")).toBe(true);
     expect(isSharedHotelSetupProductSelectable(setupProperty, "pms")).toBe(false);
     expect(isSharedHotelSetupProductSelectable(setupProperty, "marketplace")).toBe(false);
+  });
+
+  it("keeps entry product, return path, and selected property on status reads", async () => {
+    const endpoints: string[] = [];
+    const api = createSharedHotelSetupApi({
+      async get<T>(endpoint: string) {
+        endpoints.push(endpoint);
+        return status({ properties: [] }) as T;
+      },
+      async post() {
+        throw new Error("post is not used by this test");
+      },
+      async put() {
+        throw new Error("put is not used by this test");
+      },
+    });
+
+    await api.getStatus({
+      entryProduct: "pms",
+      returnTo: "/dashboard?view=rooms",
+      propertyId: "property-1",
+    });
+
+    expect(endpoints).toEqual([
+      "/api/hotel-setup/status?entryProduct=pms&returnTo=%2Fdashboard%3Fview%3Drooms&propertyId=property-1",
+    ]);
   });
 });
 
