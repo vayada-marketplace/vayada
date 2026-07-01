@@ -1,4 +1,5 @@
 import type { Page, Route } from "@playwright/test";
+import { createSharedHotelSetupStatusMock, sharedHotelSetupProduct } from "./sharedHotelSetupMocks";
 
 export const PMS_WEB_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
 export const PMS_WEB_ROOM_TYPE_ID = "room_type_alpine_suite";
@@ -121,6 +122,32 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
           workosUserId: "workos_user_pms_owner",
         },
       },
+    }),
+  );
+  await page.route("**/api/hotel-setup/status**", (route) =>
+    route.fulfill({
+      json: createSharedHotelSetupStatusMock({
+        entryProduct: "pms",
+        returnTo: "/dashboard",
+        organizationId: "org_pms_owner",
+        organizationDisplayName: "Alpenrose Hotel Group",
+        propertyId: PMS_WEB_PROPERTY_ID,
+        publicId: "prop_alpenrose",
+        propertyDisplayName: "Alpenrose Munich",
+        locationSummary: "Munich, DE",
+        products: {
+          booking: sharedHotelSetupProduct("booking", "not_selected"),
+          pms: sharedHotelSetupProduct("pms", "active"),
+          marketplace: sharedHotelSetupProduct("marketplace", "not_selected"),
+        },
+        nextAction: {
+          action: "enter_product",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          product: "pms",
+          returnTo: "/dashboard",
+          reasonCodes: ["ready"],
+        },
+      }),
     }),
   );
   await page.route("**/admin/module-activations", (route) =>

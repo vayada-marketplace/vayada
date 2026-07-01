@@ -2,9 +2,13 @@
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeRelativeReturnTo } from "@vayada/hotel-setup-wizard/returnTo";
 import { authService } from "@/services/auth";
-import { isSetupComplete } from "@/lib/utils/setupStatus";
-import { settingsService } from "@/services/settings";
+import {
+  isAuthOrganizationSelectionResponse,
+  type AuthOrganizationSelectionResponse,
+} from "@/services/auth/sessionStore";
+import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { useTranslation } from "@/lib/i18n";
 
 function LoginContent() {
@@ -15,6 +19,9 @@ function LoginContent() {
     searchParams.get("expired") === "true" ? t("auth.login.errorSessionExpired") : "",
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [organizationSelection, setOrganizationSelection] =
+    useState<AuthOrganizationSelectionResponse | null>(null);
+  const returnTo = safeRelativeReturnTo(searchParams.get("returnTo"), "/dashboard");
 
   const redirectAfterLogin = useCallback(
     async (loginResponse: { is_superadmin?: boolean }) => {
@@ -24,43 +31,49 @@ function LoginContent() {
         return;
       }
 
-      const complete = await isSetupComplete();
-      if (!complete) {
-        localStorage.setItem("setupComplete", "false");
-        router.push("/setup");
-        return;
-      }
-
-      const hotelList = await settingsService.listHotels();
-      localStorage.setItem("setupComplete", "true");
-
-      if (hotelList.length > 1) {
-        localStorage.removeItem("selectedHotelId");
-        router.push("/choose-property");
-        return;
-      }
-
-      if (hotelList.length === 1) {
-        localStorage.setItem("selectedHotelId", hotelList[0].id);
-      }
-      router.push("/dashboard");
+      const decision = await resolveBookingSetupGuard(returnTo);
+      localStorage.setItem("setupComplete", decision.action === "enter_product" ? "true" : "false");
+      router.push(decision.action === "enter_product" ? returnTo : decision.redirectPath);
     },
-    [router],
+    [returnTo, router],
+  );
+
+  const handleOrganizationSelect = useCallback(
+    async (workosOrganizationId: string) => {
+      setSubmitError("");
+      setIsSubmitting(true);
+      try {
+        const response = await authService.refreshSession(workosOrganizationId);
+        if (isAuthOrganizationSelectionResponse(response)) {
+          setOrganizationSelection(response);
+          return;
+        }
+        await redirectAfterLogin({});
+      } catch (error) {
+        setSubmitError(error instanceof Error ? error.message : t("auth.login.errorUnexpected"));
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [redirectAfterLogin, t],
   );
 
   useEffect(() => {
     if (searchParams.get("auth") !== "callback") {
-      authService.startHostedLogin();
+      authService.startHostedLogin(undefined, returnTo);
       return;
     }
     let cancelled = false;
     setIsSubmitting(true);
     authService
       .refreshSession()
-      .then(async () => {
-        if (!cancelled) {
-          await redirectAfterLogin({});
+      .then(async (response) => {
+        if (cancelled) return;
+        if (isAuthOrganizationSelectionResponse(response)) {
+          setOrganizationSelection(response);
+          return;
         }
+        await redirectAfterLogin({});
       })
       .catch((error) => {
         if (cancelled) return;
@@ -74,7 +87,7 @@ function LoginContent() {
     return () => {
       cancelled = true;
     };
-  }, [redirectAfterLogin, searchParams, t]);
+  }, [redirectAfterLogin, returnTo, searchParams, t]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
@@ -83,9 +96,31 @@ function LoginContent() {
           <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
             <span className="text-white font-bold text-[16px]">B</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900">{t("auth.login.title")}</h1>
-          <p className="text-[13px] text-gray-500 mt-1">Redirecting to sign in...</p>
+          <h1 className="text-xl font-bold text-gray-900">
+            {organizationSelection ? "Choose hotel group" : t("auth.login.title")}
+          </h1>
+          <p className="text-[13px] text-gray-500 mt-1">
+            {organizationSelection
+              ? "Select the hotel group you want to manage."
+              : "Redirecting to sign in..."}
+          </p>
         </div>
+
+        {organizationSelection && (
+          <div className="mb-5 space-y-2">
+            {organizationSelection.organizations.map((organization) => (
+              <button
+                key={organization.workosOrganizationId}
+                type="button"
+                onClick={() => handleOrganizationSelect(organization.workosOrganizationId)}
+                disabled={isSubmitting}
+                className="w-full rounded-lg border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-900 transition-colors hover:border-primary-300 hover:bg-primary-50 disabled:opacity-60"
+              >
+                {organization.displayName}
+              </button>
+            ))}
+          </div>
+        )}
 
         {submitError && (
           <div className="space-y-5">
@@ -94,7 +129,7 @@ function LoginContent() {
             </div>
             <button
               type="button"
-              onClick={() => authService.startHostedLogin()}
+              onClick={() => authService.startHostedLogin(undefined, returnTo)}
               disabled={isSubmitting}
               className="w-full px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-60"
             >

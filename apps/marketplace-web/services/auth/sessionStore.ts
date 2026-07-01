@@ -17,10 +17,29 @@ export type AuthKitSessionResponse = {
   user: AuthUser;
 };
 
+export type AuthOrganizationOption = {
+  organizationId: string;
+  workosOrganizationId: string;
+  displayName: string;
+  kind: "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+};
+
+export type AuthOrganizationSelectionResponse = {
+  organizationSelectionRequired: true;
+  csrfToken?: string;
+  organizations: AuthOrganizationOption[];
+  user: AuthUser;
+};
+
+export type AuthSessionResponse = AuthKitSessionResponse | AuthOrganizationSelectionResponse;
+
 const LEGACY_TOKEN_KEY = "access_token";
 const LEGACY_EXPIRES_AT_KEY = "token_expires_at";
+const SELECTED_SHARED_PROPERTY_ID_KEY = "selectedSharedPropertyId";
+const SELECTED_SHARED_PROPERTY_ORG_ID_KEY = "selectedSharedPropertyOrganizationId";
 
 let authKitSession: AuthKitSessionResponse | null = null;
+let pendingOrganizationSelectionCsrfToken: string | null = null;
 
 // Marketplace shared API calls need the in-memory AuthKit bearer token before
 // any page-level bootstrap code runs, so the provider is intentionally wired on import.
@@ -32,8 +51,10 @@ export function isAuthKitLoginEnabled(): boolean {
 
 export function setAuthKitSession(session: AuthKitSessionResponse): void {
   authKitSession = session;
+  pendingOrganizationSelectionCsrfToken = null;
   if (typeof window === "undefined") return;
 
+  clearSharedPropertySelectionIfOrganizationChanged(session.organizationId);
   localStorage.removeItem(LEGACY_TOKEN_KEY);
   localStorage.removeItem(LEGACY_EXPIRES_AT_KEY);
 
@@ -65,8 +86,15 @@ export function setAuthKitSession(session: AuthKitSessionResponse): void {
   );
 }
 
+export function setPendingOrganizationSelection(
+  selection: AuthOrganizationSelectionResponse,
+): void {
+  pendingOrganizationSelectionCsrfToken = selection.csrfToken ?? null;
+}
+
 export function clearAuthData(): void {
   authKitSession = null;
+  pendingOrganizationSelectionCsrfToken = null;
   if (typeof window === "undefined") return;
 
   localStorage.removeItem(LEGACY_TOKEN_KEY);
@@ -78,13 +106,15 @@ export function clearAuthData(): void {
   localStorage.removeItem(STORAGE_KEYS.USER_STATUS);
   localStorage.removeItem(STORAGE_KEYS.IS_SUPERADMIN);
   localStorage.removeItem(STORAGE_KEYS.USER);
+  localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+  localStorage.removeItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
   localStorage.setItem(STORAGE_KEYS.IS_LOGGED_IN, "false");
   localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
   localStorage.setItem(STORAGE_KEYS.HAS_PROFILE, "false");
 }
 
 export function getAuthCsrfToken(): string | null {
-  return authKitSession?.csrfToken ?? null;
+  return pendingOrganizationSelectionCsrfToken ?? authKitSession?.csrfToken ?? null;
 }
 
 export function getAuthBearerToken(): string | null {
@@ -97,6 +127,28 @@ export function hasAuthenticatedSession(): boolean {
 
 export function currentUserType(): UserType | null {
   return userTypeForOrganizationKind(authKitSession?.organizationKind);
+}
+
+export function isAuthOrganizationSelectionResponse(
+  response: AuthSessionResponse,
+): response is AuthOrganizationSelectionResponse {
+  return "organizationSelectionRequired" in response && response.organizationSelectionRequired;
+}
+
+function clearSharedPropertySelectionIfOrganizationChanged(organizationId?: string): void {
+  const storedOrganizationId = localStorage.getItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
+  const hasSelectedProperty = Boolean(localStorage.getItem(SELECTED_SHARED_PROPERTY_ID_KEY));
+
+  if (!organizationId) {
+    if (hasSelectedProperty) localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
+    return;
+  }
+
+  if (hasSelectedProperty && storedOrganizationId !== organizationId) {
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+  }
+  localStorage.setItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY, organizationId);
 }
 
 function userTypeForOrganizationKind(

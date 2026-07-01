@@ -281,6 +281,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_hotel_group",
           workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
           kind: "hotel_group",
           status: "active",
         }),
@@ -324,7 +325,7 @@ describe("AuthKit session routes", () => {
     expect(response.json().message).toBe("Selected organization membership must be platform_admin");
   });
 
-  it("rejects callback when AuthKit session has no selected organization", async () => {
+  it("rejects callback when AuthKit session has no selected organization and no surface candidates", async () => {
     app = buildAuthSessionApp({
       authKitClient: createAuthKitClient({
         async authenticateWithCode() {
@@ -345,7 +346,582 @@ describe("AuthKit session routes", () => {
     });
 
     expect(response.statusCode).toBe(403);
-    expect(response.json().message).toBe("AuthKit session is missing selected organization");
+    expect(response.json().message).toBe(
+      "No active platform organization is available for this surface",
+    );
+  });
+
+  it("auto-selects a single PMS hotel-group organization without showing a selector", async () => {
+    const noOrgSession: AuthKitSession = {
+      ...session,
+      organizationId: undefined,
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    const pmsSession: AuthKitSession = {
+      ...noOrgSession,
+      accessToken: "pms-workos-access-token",
+      sealedSession: "pms-sealed-session",
+      organizationId: "org_workos_hotel_group",
+    };
+    let refreshedOrganizationId: string | undefined;
+
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return noOrgSession;
+        },
+        async refreshSession(input) {
+          refreshedOrganizationId = input.organizationId;
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(noOrgSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_hotel_group",
+            workosOrgId: "org_workos_hotel_group",
+            name: "Alpenrose Hotel Group",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_hotel",
+              status: "active",
+              roleKey: "hotel_owner",
+              workosMembershipId: "om_hotel",
+              workosRoleSlugs: ["hotel_owner"],
+            },
+          },
+        ],
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_hotel",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          requireExplicitOrganizationSelection: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/session?surface=pms-web",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(refreshedOrganizationId).toBe("org_workos_hotel_group");
+    expect(response.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("vayada_workos_session=pms-sealed-session"),
+        expect.stringContaining("vayada_pms_selected_org=org_workos_hotel_group"),
+      ]),
+    );
+    expect(response.json()).toMatchObject({
+      accessToken: "pms-workos-access-token",
+      organizationId: "org_hotel_group",
+      workosOrganizationId: "org_workos_hotel_group",
+      organizationKind: "hotel_group",
+      user: {
+        id: "user_hotel_admin",
+        email: "hotel@example.com",
+      },
+    });
+    expect(response.json().organizationSelectionRequired).toBeUndefined();
+    expect(response.json().resources).toBeUndefined();
+  });
+
+  it("returns a PMS organization selector filtered to active hotel groups", async () => {
+    const noOrgSession: AuthKitSession = {
+      ...session,
+      organizationId: undefined,
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return noOrgSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(noOrgSession),
+      identityRepository: createIdentityRepository({
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_platform",
+            workosOrgId: "org_workos_platform",
+            name: "Vayada Platform",
+            kind: "platform",
+            status: "active",
+            membership: {
+              membershipId: "membership_platform",
+              status: "active",
+              roleKey: "platform_admin",
+              workosMembershipId: "om_platform",
+              workosRoleSlugs: ["platform_admin"],
+            },
+          },
+          {
+            organizationId: "org_creator",
+            workosOrgId: "org_workos_creator",
+            name: "Creator Workspace",
+            kind: "creator_workspace",
+            status: "active",
+            membership: {
+              membershipId: "membership_creator",
+              status: "active",
+              roleKey: "creator_owner",
+              workosMembershipId: "om_creator",
+              workosRoleSlugs: ["creator_owner"],
+            },
+          },
+          {
+            organizationId: "org_hotel_alpenrose",
+            workosOrgId: "org_workos_hotel_alpenrose",
+            name: "Alpenrose Hotel Group",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_alpenrose",
+              status: "active",
+              roleKey: "hotel_owner",
+              workosMembershipId: "om_alpenrose",
+              workosRoleSlugs: ["hotel_owner"],
+            },
+          },
+          {
+            organizationId: "org_hotel_salzburg",
+            workosOrgId: "org_workos_hotel_salzburg",
+            name: "Alpenrose Salzburg",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_salzburg",
+              status: "active",
+              roleKey: "hotel_admin",
+              workosMembershipId: "om_salzburg",
+              workosRoleSlugs: ["hotel_admin"],
+            },
+          },
+          {
+            organizationId: "org_hotel_archived",
+            workosOrgId: "org_workos_hotel_archived",
+            name: "Archived Hotel",
+            kind: "hotel_group",
+            status: "archived",
+            membership: {
+              membershipId: "membership_archived",
+              status: "active",
+              roleKey: "hotel_admin",
+              workosMembershipId: "om_archived",
+              workosRoleSlugs: ["hotel_admin"],
+            },
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/session?surface=pms-web",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      organizationSelectionRequired: true,
+      csrfToken: "csrf-token",
+      organizations: [
+        {
+          organizationId: "org_hotel_alpenrose",
+          workosOrganizationId: "org_workos_hotel_alpenrose",
+          displayName: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+        },
+        {
+          organizationId: "org_hotel_salzburg",
+          workosOrganizationId: "org_workos_hotel_salzburg",
+          displayName: "Alpenrose Salzburg",
+          kind: "hotel_group",
+        },
+      ],
+    });
+  });
+
+  it("requires PMS organization selection when an ambient WorkOS org is ambiguous", async () => {
+    const pmsSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_alpenrose",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(pmsSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_alpenrose",
+          workosOrgId: "org_workos_hotel_alpenrose",
+          name: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_alpenrose",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_alpenrose",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_hotel_alpenrose",
+            workosOrgId: "org_workos_hotel_alpenrose",
+            name: "Alpenrose Hotel Group",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_alpenrose",
+              status: "active",
+              roleKey: "hotel_owner",
+              workosMembershipId: "om_alpenrose",
+              workosRoleSlugs: ["hotel_owner"],
+            },
+          },
+          {
+            organizationId: "org_hotel_salzburg",
+            workosOrgId: "org_workos_hotel_salzburg",
+            name: "Alpenrose Salzburg",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_salzburg",
+              status: "active",
+              roleKey: "hotel_admin",
+              workosMembershipId: "om_salzburg",
+              workosRoleSlugs: ["hotel_admin"],
+            },
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          requireExplicitOrganizationSelection: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/session?surface=pms-web",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      organizationSelectionRequired: true,
+      csrfToken: "csrf-token",
+      organizations: [
+        {
+          organizationId: "org_hotel_alpenrose",
+          workosOrganizationId: "org_workos_hotel_alpenrose",
+          displayName: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+        },
+        {
+          organizationId: "org_hotel_salzburg",
+          workosOrganizationId: "org_workos_hotel_salzburg",
+          displayName: "Alpenrose Salzburg",
+          kind: "hotel_group",
+        },
+      ],
+    });
+  });
+
+  it("returns a PMS organization selector from the compatibility token route when selection is required", async () => {
+    const pmsSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_alpenrose",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(pmsSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_alpenrose",
+          workosOrgId: "org_workos_hotel_alpenrose",
+          name: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_alpenrose",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_alpenrose",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_hotel_alpenrose",
+            workosOrgId: "org_workos_hotel_alpenrose",
+            name: "Alpenrose Hotel Group",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_alpenrose",
+              status: "active",
+              roleKey: "hotel_owner",
+              workosMembershipId: "om_alpenrose",
+              workosRoleSlugs: ["hotel_owner"],
+            },
+          },
+          {
+            organizationId: "org_hotel_salzburg",
+            workosOrgId: "org_workos_hotel_salzburg",
+            name: "Alpenrose Salzburg",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_salzburg",
+              status: "active",
+              roleKey: "hotel_admin",
+              workosMembershipId: "om_salzburg",
+              workosRoleSlugs: ["hotel_admin"],
+            },
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          legacyJwtSecret: "legacy-pms-secret",
+          legacyJwtUserType: "hotel",
+          requireExplicitOrganizationSelection: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/compat/pms-web-token",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      organizationSelectionRequired: true,
+      csrfToken: "csrf-token",
+      user: {
+        id: "user_hotel_admin",
+        email: "hotel@example.com",
+      },
+      organizations: [
+        {
+          organizationId: "org_hotel_alpenrose",
+          workosOrganizationId: "org_workos_hotel_alpenrose",
+          displayName: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+        },
+        {
+          organizationId: "org_hotel_salzburg",
+          workosOrganizationId: "org_workos_hotel_salzburg",
+          displayName: "Alpenrose Salzburg",
+          kind: "hotel_group",
+        },
+      ],
+    });
+  });
+
+  it("stores the explicitly selected PMS organization after refresh", async () => {
+    const pmsSession: AuthKitSession = {
+      ...session,
+      accessToken: "pms-workos-access-token",
+      sealedSession: "pms-sealed-session",
+      organizationId: "org_workos_hotel_salzburg",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    let refreshedOrganizationId: string | undefined;
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async refreshSession(input) {
+          refreshedOrganizationId = input.organizationId;
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(pmsSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_salzburg",
+          workosOrgId: "org_workos_hotel_salzburg",
+          name: "Alpenrose Salzburg",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_salzburg",
+          status: "active",
+          roleKey: "hotel_admin",
+          workosMembershipId: "om_salzburg",
+          workosRoleSlugs: ["hotel_admin"],
+        }),
+        membershipOrganizations: async () => [
+          {
+            organizationId: "org_hotel_alpenrose",
+            workosOrgId: "org_workos_hotel_alpenrose",
+            name: "Alpenrose Hotel Group",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_alpenrose",
+              status: "active",
+              roleKey: "hotel_owner",
+              workosMembershipId: "om_alpenrose",
+              workosRoleSlugs: ["hotel_owner"],
+            },
+          },
+          {
+            organizationId: "org_hotel_salzburg",
+            workosOrgId: "org_workos_hotel_salzburg",
+            name: "Alpenrose Salzburg",
+            kind: "hotel_group",
+            status: "active",
+            membership: {
+              membershipId: "membership_salzburg",
+              status: "active",
+              roleKey: "hotel_admin",
+              workosMembershipId: "om_salzburg",
+              workosRoleSlugs: ["hotel_admin"],
+            },
+          },
+        ],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          requireExplicitOrganizationSelection: true,
+          selectedOrganizationCookieName: "vayada_pms_selected_org",
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/auth/session/refresh",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+        "x-vayada-csrf": "csrf-token",
+      },
+      payload: {
+        organizationId: "org_workos_hotel_salzburg",
+        surface: "pms-web",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(refreshedOrganizationId).toBe("org_workos_hotel_salzburg");
+    expect(response.headers["set-cookie"]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("vayada_workos_session=pms-sealed-session"),
+        expect.stringContaining("vayada_pms_selected_org=org_workos_hotel_salzburg"),
+      ]),
+    );
+    expect(response.json()).toMatchObject({
+      organizationId: "org_hotel_salzburg",
+      workosOrganizationId: "org_workos_hotel_salzburg",
+      organizationKind: "hotel_group",
+    });
   });
 
   it("refreshes a sealed session and returns an in-memory bearer token", async () => {
@@ -445,6 +1021,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_hotel_group",
           workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
           kind: "hotel_group",
           status: "active",
         }),
@@ -542,6 +1119,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_hotel_group",
           workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
           kind: "hotel_group",
           status: "active",
         }),
@@ -596,6 +1174,77 @@ describe("AuthKit session routes", () => {
     });
   });
 
+  it("allows normal PMS session reads before a PMS product resource link exists", async () => {
+    const pmsSession: AuthKitSession = {
+      ...session,
+      organizationId: "org_workos_hotel_group",
+      user: {
+        ...session.user,
+        id: "user_workos_hotel",
+        email: "hotel@example.com",
+      },
+    };
+    app = buildAuthSessionApp({
+      allowedOrigins: ["https://pms.localhost"],
+      authKitClient: createAuthKitClient({
+        async authenticateSession() {
+          return pmsSession;
+        },
+      }),
+      tokenVerifier: createTokenVerifier(pmsSession),
+      identityRepository: createIdentityRepository({
+        userByProviderUserId: async () => ({
+          userId: "user_hotel_admin",
+          email: "hotel@example.com",
+          status: "active",
+        }),
+        organizationByWorkosOrgId: async () => ({
+          organizationId: "org_hotel_group",
+          workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
+          kind: "hotel_group",
+          status: "active",
+        }),
+        activeMembership: async () => ({
+          membershipId: "membership_hotel",
+          status: "active",
+          roleKey: "hotel_owner",
+          workosMembershipId: "om_hotel",
+          workosRoleSlugs: ["hotel_owner"],
+        }),
+        linkedResources: async () => [],
+      }),
+      surfacePolicies: {
+        "pms-web": {
+          requiredOrganizationKind: "hotel_group",
+          logoutReturnUrl: "https://pms.localhost/login",
+          requiredResourceLink: { product: "pms", resourceType: "pms_property" },
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/auth/session?surface=pms-web",
+      headers: {
+        cookie: "vayada_workos_session=sealed-session; vayada_auth_csrf=csrf-token",
+        origin: "https://pms.localhost",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      organizationId: "org_hotel_group",
+      workosOrganizationId: "org_workos_hotel_group",
+      organizationKind: "hotel_group",
+      user: {
+        id: "user_hotel_admin",
+        email: "hotel@example.com",
+      },
+    });
+    expect(response.json().resources).toBeUndefined();
+  });
+
   it("rejects hotel-admin compatibility tokens when resource links are missing", async () => {
     const hotelSession: AuthKitSession = {
       ...session,
@@ -613,6 +1262,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_hotel_group",
           workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
           kind: "hotel_group",
           status: "active",
         }),
@@ -667,6 +1317,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_hotel_group",
           workosOrgId: "org_workos_hotel_group",
+          name: "Alpenrose Hotel Group",
           kind: "hotel_group",
           status: "active",
         }),
@@ -749,6 +1400,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_affiliate_partner",
           workosOrgId: "org_workos_affiliate_partner",
+          name: "Vayada Affiliate Partner",
           kind: "affiliate_partner",
           status: "active",
         }),
@@ -846,6 +1498,7 @@ describe("AuthKit session routes", () => {
         organizationByWorkosOrgId: async () => ({
           organizationId: "org_creator_workspace",
           workosOrgId: "org_workos_creator_workspace",
+          name: "Creator Workspace",
           kind: "creator_workspace",
           status: "active",
         }),
@@ -1058,6 +1711,7 @@ function createIdentityRepository(
     userByProviderUserId?: IdentityRepository["findUserByProviderUserId"];
     organizationByWorkosOrgId?: IdentityRepository["findOrganizationByWorkosOrgId"];
     activeMembership?: IdentityRepository["findActiveMembership"];
+    membershipOrganizations?: IdentityRepository["listMembershipOrganizations"];
     linkedResources?: IdentityRepository["findLinkedResources"];
   } = {},
 ): IdentityRepository {
@@ -1068,6 +1722,7 @@ function createIdentityRepository(
       (async () => ({
         organizationId: "org_platform",
         workosOrgId: "org_workos_platform",
+        name: "Vayada Platform",
         kind: "platform",
         status: "active",
       })),
@@ -1080,6 +1735,7 @@ function createIdentityRepository(
         workosMembershipId: "om_platform",
         workosRoleSlugs: ["platform_admin"],
       })),
+    listMembershipOrganizations: overrides.membershipOrganizations ?? (async () => []),
     findLinkedResources: overrides.linkedResources ?? (async () => []),
   };
 }

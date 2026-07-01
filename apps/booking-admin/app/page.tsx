@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/services/auth";
-import { isSetupComplete } from "@/lib/utils/setupStatus";
+import { resolveBookingSetupGuard } from "@/lib/utils/sharedSetupGuard";
 
 export default function Home() {
   const router = useRouter();
@@ -11,17 +11,35 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     async function redirect() {
-      const authorized = await authService.ensureSession();
+      let authorized = false;
+      try {
+        authorized = await authService.ensureSession();
+      } catch (error) {
+        console.error("Failed to verify booking admin session:", error);
+        if (!cancelled) router.replace("/login");
+        return;
+      }
       if (cancelled) return;
       if (authorized && authService.isHotelAdmin()) {
-        const complete = await isSetupComplete();
+        let decision: Awaited<ReturnType<typeof resolveBookingSetupGuard>>;
+        try {
+          decision = await resolveBookingSetupGuard("/dashboard");
+        } catch (error) {
+          console.error("Failed to verify booking setup:", error);
+          if (!cancelled) router.replace("/login");
+          return;
+        }
         if (cancelled) return;
-        router.replace(complete ? "/dashboard" : "/setup");
+        localStorage.setItem(
+          "setupComplete",
+          decision.action === "enter_product" ? "true" : "false",
+        );
+        router.replace(decision.action === "enter_product" ? "/dashboard" : decision.redirectPath);
       } else {
         router.replace("/login");
       }
     }
-    redirect();
+    void redirect();
     return () => {
       cancelled = true;
     };

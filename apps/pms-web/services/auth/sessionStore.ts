@@ -12,10 +12,29 @@ export type AuthKitSessionResponse = {
   user: AuthUser;
 };
 
+export type AuthOrganizationOption = {
+  organizationId: string;
+  workosOrganizationId: string;
+  displayName: string;
+  kind: "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+};
+
+export type AuthOrganizationSelectionResponse = {
+  organizationSelectionRequired: true;
+  csrfToken?: string;
+  organizations: AuthOrganizationOption[];
+  user: AuthUser;
+};
+
+export type AuthSessionResponse = AuthKitSessionResponse | AuthOrganizationSelectionResponse;
+
 const LEGACY_TOKEN_KEY = "access_token";
 const LEGACY_EXPIRES_AT_KEY = "token_expires_at";
+const SELECTED_SHARED_PROPERTY_ID_KEY = "selectedSharedPropertyId";
+const SELECTED_SHARED_PROPERTY_ORG_ID_KEY = "selectedSharedPropertyOrganizationId";
 
 let authKitSession: AuthKitSessionResponse | null = null;
+let pendingOrganizationSelectionCsrfToken: string | null = null;
 let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
 
 export function isAuthKitLoginEnabled(): boolean {
@@ -32,7 +51,9 @@ export function isCompatibilityTokenEnabled(): boolean {
 
 export function setAuthKitSession(session: AuthKitSessionResponse): void {
   authKitSession = session;
+  pendingOrganizationSelectionCsrfToken = null;
   if (typeof window === "undefined") return;
+  clearSharedPropertySelectionIfOrganizationChanged(session.organizationId);
   localStorage.removeItem(LEGACY_TOKEN_KEY);
   localStorage.removeItem(LEGACY_EXPIRES_AT_KEY);
   localStorage.setItem("isLoggedIn", "true");
@@ -62,6 +83,12 @@ export function setLegacyCompatibilityToken(token: string, expiresIn: number): v
   localStorage.setItem(LEGACY_EXPIRES_AT_KEY, String(legacyCompatibilityToken.expiresAt));
 }
 
+export function setPendingOrganizationSelection(
+  selection: AuthOrganizationSelectionResponse,
+): void {
+  pendingOrganizationSelectionCsrfToken = selection.csrfToken ?? null;
+}
+
 export function setLegacyPasswordSession(input: {
   token: string;
   expiresIn: number;
@@ -88,6 +115,7 @@ export function setLegacyPasswordSession(input: {
 
 export function clearAuthData(): void {
   authKitSession = null;
+  pendingOrganizationSelectionCsrfToken = null;
   legacyCompatibilityToken = null;
   if (typeof window === "undefined") return;
 
@@ -99,11 +127,13 @@ export function clearAuthData(): void {
   localStorage.removeItem("userType");
   localStorage.removeItem("userStatus");
   localStorage.removeItem("user");
+  localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+  localStorage.removeItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
   localStorage.setItem("isLoggedIn", "false");
 }
 
 export function getAuthCsrfToken(): string | null {
-  return authKitSession?.csrfToken ?? null;
+  return pendingOrganizationSelectionCsrfToken ?? authKitSession?.csrfToken ?? null;
 }
 
 export function getAuthBearerToken(): string | null {
@@ -147,4 +177,26 @@ export function hasHotelAccessMarker(): boolean {
   if (authKitSession) return true;
   if (typeof window === "undefined") return false;
   return localStorage.getItem("userType") === "hotel";
+}
+
+export function isAuthOrganizationSelectionResponse(
+  response: AuthSessionResponse,
+): response is AuthOrganizationSelectionResponse {
+  return "organizationSelectionRequired" in response && response.organizationSelectionRequired;
+}
+
+function clearSharedPropertySelectionIfOrganizationChanged(organizationId?: string): void {
+  const storedOrganizationId = localStorage.getItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
+  const hasSelectedProperty = Boolean(localStorage.getItem(SELECTED_SHARED_PROPERTY_ID_KEY));
+
+  if (!organizationId) {
+    if (hasSelectedProperty) localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
+    return;
+  }
+
+  if (hasSelectedProperty && storedOrganizationId !== organizationId) {
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+  }
+  localStorage.setItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY, organizationId);
 }

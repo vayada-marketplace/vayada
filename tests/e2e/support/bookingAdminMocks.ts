@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { createSharedHotelSetupStatusMock, sharedHotelSetupProduct } from "./sharedHotelSetupMocks";
 
 export const BOOKING_ADMIN_HOTEL_ID = "booking_hotel_alpenrose";
 export const BOOKING_ADMIN_PROPERTY_ID = "f6853000-0000-0000-0000-000000000001";
@@ -297,6 +298,32 @@ export async function mockBookingAdminShellRoutes(
         missing_fields: [],
         prefill_data: null,
       },
+    }),
+  );
+  await page.route("**/api/hotel-setup/status**", (route) =>
+    route.fulfill({
+      json: createSharedHotelSetupStatusMock({
+        entryProduct: "booking",
+        returnTo: "/dashboard",
+        organizationId: "org_hotel_group",
+        organizationDisplayName: "Alpenrose Hotel Group",
+        propertyId: BOOKING_ADMIN_PROPERTY_ID,
+        publicId: "prop_alpenrose",
+        propertyDisplayName: "Alpenrose",
+        locationSummary: "Munich, DE",
+        products: {
+          booking: sharedHotelSetupProduct("booking", "active"),
+          pms: sharedHotelSetupProduct("pms", "not_selected"),
+          marketplace: sharedHotelSetupProduct("marketplace", "not_selected"),
+        },
+        nextAction: {
+          action: "enter_product",
+          propertyId: BOOKING_ADMIN_PROPERTY_ID,
+          product: "booking",
+          returnTo: "/dashboard",
+          reasonCodes: ["ready"],
+        },
+      }),
     }),
   );
   await page.route(`**${BOOKING_ADMIN_PROPERTY_LINK_PATH}*`, (route) =>

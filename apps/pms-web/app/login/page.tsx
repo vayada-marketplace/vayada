@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { firstSearchParam, safeRelativeReturnTo } from "@vayada/hotel-setup-wizard/returnTo";
 import { LoginContent } from "./LoginContent";
 
 const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
@@ -10,8 +11,9 @@ type LoginPageProps = {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = (await searchParams) ?? {};
-  if (params.auth === "callback") {
-    return <LoginContent />;
+  const returnTo = safeRelativeReturnTo(params.returnTo, "/dashboard");
+  if (firstSearchParam(params.auth) === "callback") {
+    return <LoginContent returnTo={returnTo} />;
   }
 
   const headerList = await headers();
@@ -20,6 +22,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   const origin = host ? `${proto}://${host}` : "https://pms.vayada.com";
   const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
   url.searchParams.set("surface", "pms-web");
-  url.searchParams.set("return_to", `${origin}/login?auth=callback`);
+  const callbackUrl = new URL("/login?auth=callback", origin);
+  callbackUrl.searchParams.set("returnTo", returnTo);
+  url.searchParams.set("return_to", callbackUrl.toString());
   redirect(url.toString());
 }

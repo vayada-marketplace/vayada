@@ -13,6 +13,7 @@ import { hotelService } from "@/services/api/hotels";
 import { creatorService } from "@/services/api/creators";
 import { ApiErrorResponse } from "@/services/api/client";
 import { checkProfileStatus } from "@/lib/utils";
+import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { authService } from "@/services/auth";
 
 export default function MarketplacePage() {
@@ -49,29 +50,51 @@ export default function MarketplacePage() {
     setUserType(storedUserType);
 
     let cancelled = false;
-    (async () => {
-      const authenticated = await authService.ensureSession();
-      if (cancelled) return;
-      if (!authenticated) {
-        router.replace(ROUTES.LOGIN);
-        return;
-      }
-      const refreshedUserType =
-        (localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null) ?? storedUserType;
-      setUserType(refreshedUserType);
-      if (refreshedUserType !== "hotel" && refreshedUserType !== "creator") {
+    void (async () => {
+      try {
+        const authenticated = await authService.ensureSession();
+        if (cancelled) return;
+        if (!authenticated) {
+          router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
+          return;
+        }
+        const sessionUserType = authService.getUserType();
+        const refreshedUserType = sessionUserType ?? storedUserType;
+        setUserType(refreshedUserType);
+        if (sessionUserType === "hotel") {
+          const decision = await resolveMarketplaceSetupGuard(currentReturnTo(ROUTES.MARKETPLACE));
+          if (cancelled) return;
+          localStorage.setItem(
+            STORAGE_KEYS.PROFILE_COMPLETE,
+            String(decision.action === "enter_product"),
+          );
+          if (decision.action === "redirect_to_setup") {
+            router.replace(decision.redirectPath);
+            return;
+          }
+          setProfileReady(true);
+          return;
+        }
+
+        if (refreshedUserType !== "creator") {
+          setProfileReady(true);
+          return;
+        }
+        const status = await checkProfileStatus(refreshedUserType);
+        if (cancelled) return;
+        if (!status || !status.profile_complete) {
+          localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
+          router.replace(ROUTES.PROFILE_COMPLETE);
+          return;
+        }
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
         setProfileReady(true);
-        return;
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to verify marketplace session:", error);
+        setError("Failed to verify your session. Please refresh the page.");
+        setLoading(false);
       }
-      const status = await checkProfileStatus(refreshedUserType);
-      if (cancelled) return;
-      if (!status || !status.profile_complete) {
-        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
-        router.replace(ROUTES.PROFILE_COMPLETE);
-        return;
-      }
-      localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "true");
-      setProfileReady(true);
     })();
 
     return () => {
@@ -467,4 +490,16 @@ export default function MarketplacePage() {
       </div>
     </main>
   );
+}
+
+function loginPathForCurrentRoute(fallbackReturnTo: string): string {
+  return `${ROUTES.LOGIN}?returnTo=${encodeURIComponent(currentReturnTo(fallbackReturnTo))}`;
+}
+
+function currentReturnTo(fallbackReturnTo: string): string {
+  const returnTo =
+    typeof window === "undefined"
+      ? fallbackReturnTo
+      : `${window.location.pathname}${window.location.search}`;
+  return returnTo;
 }

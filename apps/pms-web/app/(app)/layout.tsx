@@ -5,26 +5,80 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import { authService } from "@/services/auth";
+import { resolvePmsSetupGuard } from "@/lib/utils/sharedSetupGuard";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [setupGuardError, setSetupGuardError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    authService.ensureSession().then((authorized) => {
+    async function authorize() {
+      let authorized = false;
+      try {
+        authorized = await authService.ensureSession();
+      } catch (error) {
+        console.error("Failed to verify PMS session:", error);
+        if (!cancelled) router.replace(loginPathForCurrentRoute("/dashboard"));
+        return;
+      }
       if (cancelled) return;
       if (!authorized || !authService.isHotelAdmin()) {
-        router.replace("/login");
-      } else {
-        setIsAuthorized(true);
+        router.replace(loginPathForCurrentRoute("/dashboard"));
+        return;
       }
-    });
+
+      const returnTo =
+        typeof window === "undefined"
+          ? "/dashboard"
+          : `${window.location.pathname}${window.location.search}`;
+      let decision: Awaited<ReturnType<typeof resolvePmsSetupGuard>>;
+      try {
+        decision = await resolvePmsSetupGuard(returnTo);
+      } catch (error) {
+        console.error("Failed to verify PMS setup:", error);
+        if (!cancelled) {
+          setSetupGuardError(true);
+        }
+        return;
+      }
+      if (cancelled) return;
+      setSetupGuardError(false);
+      localStorage.setItem(
+        "pmsSetupComplete",
+        decision.action === "enter_product" ? "true" : "false",
+      );
+      if (decision.action === "redirect_to_setup") {
+        router.replace(decision.redirectPath);
+        return;
+      }
+      setIsAuthorized(true);
+    }
+    void authorize();
     return () => {
       cancelled = true;
     };
   }, [router]);
+
+  if (setupGuardError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-sm rounded-lg border border-amber-200 bg-white p-6 text-center shadow-sm">
+          <h1 className="text-base font-semibold text-gray-950">Unable to verify setup</h1>
+          <p className="mt-2 text-sm text-gray-600">Refresh the page to try again.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 rounded-md bg-gray-950 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthorized) {
     return null;
@@ -56,4 +110,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     </div>
   );
+}
+
+function loginPathForCurrentRoute(fallbackReturnTo: string): string {
+  const returnTo =
+    typeof window === "undefined"
+      ? fallbackReturnTo
+      : `${window.location.pathname}${window.location.search}`;
+  return `/login?returnTo=${encodeURIComponent(returnTo)}`;
 }

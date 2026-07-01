@@ -10,12 +10,14 @@ import {
   getLegacyPasswordToken,
   hasAuthenticatedSession,
   hasHotelAccessMarker,
+  isAuthOrganizationSelectionResponse,
   isAuthKitLoginEnabled,
   isCompatibilityTokenEnabled,
   isLegacyPasswordFallbackEnabled,
   setAuthKitSession,
   setLegacyPasswordSession,
-  type AuthKitSessionResponse,
+  setPendingOrganizationSelection,
+  type AuthSessionResponse,
 } from "./sessionStore";
 import { ensureBookingCompatibilityToken } from "./compatibilityToken";
 
@@ -110,27 +112,35 @@ export const authService = {
     await ensureBookingCompatibilityToken();
   },
 
-  startHostedLogin: (loginHint?: string): void => {
+  startHostedLogin: (loginHint?: string, returnTo?: string): void => {
     const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/login`);
     url.searchParams.set("surface", AUTH_SURFACE);
     if (typeof window !== "undefined") {
-      url.searchParams.set("return_to", `${window.location.origin}/login?auth=callback`);
+      const callbackUrl = new URL("/login?auth=callback", window.location.origin);
+      if (returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")) {
+        callbackUrl.searchParams.set("returnTo", returnTo);
+      }
+      url.searchParams.set("return_to", callbackUrl.toString());
     }
     if (loginHint) url.searchParams.set("login_hint", loginHint);
     window.location.href = url.toString();
   },
 
-  refreshSession: async (organizationId?: string): Promise<AuthKitSessionResponse> => {
+  refreshSession: async (organizationId?: string): Promise<AuthSessionResponse> => {
     const csrfToken = getAuthCsrfToken();
     const response =
       organizationId && csrfToken
-        ? await authFetch<AuthKitSessionResponse>("/auth/session/refresh", {
+        ? await authFetch<AuthSessionResponse>("/auth/session/refresh", {
             method: "POST",
             headers: { "x-vayada-csrf": csrfToken },
             body: JSON.stringify({ organizationId, surface: AUTH_SURFACE }),
           })
-        : await authFetch<AuthKitSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
+        : await authFetch<AuthSessionResponse>(`/auth/session?surface=${AUTH_SURFACE}`);
 
+    if (isAuthOrganizationSelectionResponse(response)) {
+      setPendingOrganizationSelection(response);
+      return response;
+    }
     setAuthKitSession(response);
     if (!isNextApiTarget() && isCompatibilityTokenEnabled()) {
       try {
@@ -150,7 +160,8 @@ export const authService = {
       return true;
     }
     try {
-      await authService.refreshSession();
+      const response = await authService.refreshSession();
+      if (isAuthOrganizationSelectionResponse(response)) return false;
       return true;
     } catch {
       clearAuthData();

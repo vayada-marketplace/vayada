@@ -13,6 +13,7 @@
     "./LastMinuteStep": "./src/LastMinuteStep.tsx",
     "./PoliciesStep": "./src/PoliciesStep.tsx",
     "./PropertyStep": "./src/PropertyStep.tsx",
+    "./returnTo": "./src/returnTo.ts",
     "./RoomsStep": "./src/RoomsStep.tsx"
   },
   "peerDependencies": {

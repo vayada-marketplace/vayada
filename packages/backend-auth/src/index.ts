@@ -83,6 +83,7 @@ export {
 export {
   createPgIdentityRepository,
   type IdentityMembership,
+  type IdentityMembershipOrganization,
   type IdentityOrganization,
   type IdentityRepository,
   type IdentityResourceLink,

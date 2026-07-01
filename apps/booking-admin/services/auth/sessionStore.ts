@@ -13,10 +13,29 @@ export type AuthKitSessionResponse = {
   user: AuthUser;
 };
 
+export type AuthOrganizationOption = {
+  organizationId: string;
+  workosOrganizationId: string;
+  displayName: string;
+  kind: "platform" | "hotel_group" | "creator_workspace" | "affiliate_partner";
+};
+
+export type AuthOrganizationSelectionResponse = {
+  organizationSelectionRequired: true;
+  csrfToken?: string;
+  organizations: AuthOrganizationOption[];
+  user: AuthUser;
+};
+
+export type AuthSessionResponse = AuthKitSessionResponse | AuthOrganizationSelectionResponse;
+
 const LEGACY_TOKEN_KEY = "access_token";
 const LEGACY_EXPIRES_AT_KEY = "token_expires_at";
+const SELECTED_SHARED_PROPERTY_ID_KEY = "selectedSharedPropertyId";
+const SELECTED_SHARED_PROPERTY_ORG_ID_KEY = "selectedSharedPropertyOrganizationId";
 
 let authKitSession: AuthKitSessionResponse | null = null;
+let pendingOrganizationSelectionCsrfToken: string | null = null;
 let legacyCompatibilityToken: { token: string; expiresAt: number } | null = null;
 
 export function isAuthKitLoginEnabled(): boolean {
@@ -33,7 +52,9 @@ export function isCompatibilityTokenEnabled(): boolean {
 
 export function setAuthKitSession(session: AuthKitSessionResponse): void {
   authKitSession = session;
+  pendingOrganizationSelectionCsrfToken = null;
   if (typeof window === "undefined") return;
+  clearSharedPropertySelectionIfOrganizationChanged(session.organizationId);
   localStorage.removeItem(LEGACY_TOKEN_KEY);
   localStorage.removeItem(LEGACY_EXPIRES_AT_KEY);
   localStorage.setItem("isLoggedIn", "true");
@@ -60,6 +81,12 @@ export function setLegacyCompatibilityToken(token: string, expiresIn: number): v
     token,
     expiresAt: Date.now() + expiresIn * 1000,
   };
+}
+
+export function setPendingOrganizationSelection(
+  selection: AuthOrganizationSelectionResponse,
+): void {
+  pendingOrganizationSelectionCsrfToken = selection.csrfToken ?? null;
 }
 
 export function setLegacyPasswordSession(input: {
@@ -90,6 +117,7 @@ export function setLegacyPasswordSession(input: {
 
 export function clearAuthData(): void {
   authKitSession = null;
+  pendingOrganizationSelectionCsrfToken = null;
   legacyCompatibilityToken = null;
   if (typeof window === "undefined") return;
 
@@ -102,12 +130,14 @@ export function clearAuthData(): void {
   localStorage.removeItem("userStatus");
   localStorage.removeItem("user");
   localStorage.removeItem("selectedHotelId");
+  localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+  localStorage.removeItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
   localStorage.removeItem("isSuperAdmin");
   localStorage.setItem("isLoggedIn", "false");
 }
 
 export function getAuthCsrfToken(): string | null {
-  return authKitSession?.csrfToken ?? null;
+  return pendingOrganizationSelectionCsrfToken ?? authKitSession?.csrfToken ?? null;
 }
 
 export function getAuthKitAccessToken(): string | null {
@@ -195,11 +225,33 @@ export function hasHotelAccessMarker(): boolean {
   );
 }
 
+export function isAuthOrganizationSelectionResponse(
+  response: AuthSessionResponse,
+): response is AuthOrganizationSelectionResponse {
+  return "organizationSelectionRequired" in response && response.organizationSelectionRequired;
+}
+
 function currentCompatibilityToken(): string | null {
   if (!legacyCompatibilityToken) return null;
   return Date.now() < legacyCompatibilityToken.expiresAt - 30_000
     ? legacyCompatibilityToken.token
     : null;
+}
+
+function clearSharedPropertySelectionIfOrganizationChanged(organizationId?: string): void {
+  const storedOrganizationId = localStorage.getItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
+  const hasSelectedProperty = Boolean(localStorage.getItem(SELECTED_SHARED_PROPERTY_ID_KEY));
+
+  if (!organizationId) {
+    if (hasSelectedProperty) localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY);
+    return;
+  }
+
+  if (hasSelectedProperty && storedOrganizationId !== organizationId) {
+    localStorage.removeItem(SELECTED_SHARED_PROPERTY_ID_KEY);
+  }
+  localStorage.setItem(SELECTED_SHARED_PROPERTY_ORG_ID_KEY, organizationId);
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {

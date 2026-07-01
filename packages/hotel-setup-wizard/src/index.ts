@@ -45,6 +45,13 @@ export {
   type SharedSetupProperty,
 } from "./sharedFirstRunSetupFlow";
 export {
+  buildSharedHotelSetupRedirectPath,
+  resolveSharedHotelSetupGuard,
+  resolveSharedHotelSetupGuardDecision,
+  type SharedHotelSetupGuardDecision,
+} from "./sharedHotelSetupGuard";
+export { firstSearchParam, safeRelativeReturnTo, type ReturnToParam } from "./returnTo";
+export {
   default as PropertyStep,
   type CountryOption,
   type CurrencyOption,
