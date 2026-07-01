@@ -13,8 +13,6 @@ export function useHotelProfile(
 ) {
   const [hotelProfile, setHotelProfile] = useState<ProfileHotelProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [profileStatus, setProfileStatus] = useState<HotelProfileStatus | null>(null);
-  const [isProfileIncomplete, setIsProfileIncomplete] = useState(false);
   const [activeHotelTab, setActiveHotelTab] = useState<"overview" | "listings">("overview");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -54,9 +52,6 @@ export function useHotelProfile(
     setLoading(true);
     try {
       const status = (await checkProfileStatus("hotel")) as HotelProfileStatus | null;
-      setProfileStatus(status);
-
-      setIsProfileIncomplete(false);
       if (status?.missing_listings) {
         setActiveHotelTab("listings");
       }
@@ -78,7 +73,6 @@ export function useHotelProfile(
         "Failed to check profile status:",
         error instanceof Error ? error : String(error),
       );
-      setIsProfileIncomplete(false);
     } finally {
       setLoading(false);
     }
@@ -375,8 +369,6 @@ export function useHotelProfile(
     hotelProfile,
     setHotelProfile,
     loading,
-    profileStatus,
-    isProfileIncomplete,
     activeHotelTab,
     setActiveHotelTab,
     email,

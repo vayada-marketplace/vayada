@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   SHARED_HOTEL_SETUP_PRODUCTS,
+  canOpenMarketplaceProfileTools,
   isSharedHotelSetupProductSelectable,
   resolveSharedFirstRunSetupView,
   selectedProductsForProperty,
@@ -81,13 +82,6 @@ const MARKETPLACE_ACTIVATION_STEPS: Record<string, { title: string; description:
     description: "Add the listing details and photos creators use for discovery.",
   },
 };
-
-const MARKETPLACE_PROFILE_TOOL_STEPS = new Set([
-  "creatorPitch",
-  "collaborationOffer",
-  "creatorRequirements",
-  "marketplaceListing",
-]);
 
 const EMPTY_DRAFT: ProfileDraft = {
   displayName: "",
@@ -751,7 +745,11 @@ function ProductContinue({
   const missingSteps = activation?.missingSteps ?? [];
   const isBlockedMarketplaceActivation =
     isMarketplaceActivation &&
-    !canOpenMarketplaceProfileTools(activation?.status, activation?.missingSteps ?? []);
+    !canOpenMarketplaceProfileTools({
+      product,
+      productStatus: activation?.status ?? null,
+      missingSteps,
+    });
   return (
     <div>
       <div className="mb-5">
@@ -822,17 +820,6 @@ function marketplaceBlockedActivationCopy(
     return "Marketplace activation is not available for this property. Contact support if this looks wrong.";
   }
   return "Marketplace activation is not ready for this property yet.";
-}
-
-function canOpenMarketplaceProfileTools(
-  status: SharedProductActivation<"marketplace">["status"] | undefined,
-  missingSteps: string[],
-): boolean {
-  return (
-    status === "selected_incomplete" &&
-    missingSteps.length > 0 &&
-    missingSteps.every((step) => MARKETPLACE_PROFILE_TOOL_STEPS.has(step))
-  );
 }
 
 function marketplaceActivationStepCopy(step: string): { title: string; description: string } {

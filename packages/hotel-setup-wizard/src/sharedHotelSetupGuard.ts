@@ -56,7 +56,9 @@ export function resolveSharedHotelSetupGuardDecision(
     setupAction: status.nextAction.action,
     product,
     productStatus: activation?.status ?? null,
-    missingSteps: "missingSteps" in status.nextAction ? status.nextAction.missingSteps : [],
+    missingSteps:
+      activation?.missingSteps ??
+      ("missingSteps" in status.nextAction ? status.nextAction.missingSteps : []),
   };
 }
 

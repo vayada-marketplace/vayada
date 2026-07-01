@@ -15,7 +15,6 @@ import { ManagePhotosModal } from "./ManagePhotosModal";
 import { useHotelProfile } from "@/hooks/useHotelProfile";
 import { useListingManagement } from "@/hooks/useListingManagement";
 import { useErrorModal } from "@/hooks/useErrorModal";
-import type { HotelProfileStatus } from "@/lib/types";
 
 export function HotelProfile() {
   const router = useRouter();
@@ -34,8 +33,6 @@ export function HotelProfile() {
     hotelProfile,
     setHotelProfile,
     loading,
-    profileStatus,
-    isProfileIncomplete,
     activeHotelTab,
     setActiveHotelTab,
     phone,
@@ -64,42 +61,6 @@ export function HotelProfile() {
             className="h-40 animate-pulse rounded-lg border border-gray-200 bg-white shadow-sm"
           />
         ))}
-      </div>
-    );
-  }
-
-  if (isProfileIncomplete) {
-    return (
-      <div className="rounded-lg border border-gray-200 bg-white p-10 text-center shadow-sm">
-        <div className="max-w-md mx-auto">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary-50 flex items-center justify-center">
-            <svg
-              className="w-8 h-8 text-primary-600"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-              />
-            </svg>
-          </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">Activate Creator Marketplace</h3>
-          <p className="text-gray-600 mb-6">
-            {(profileStatus as HotelProfileStatus)?.missing_fields
-              ? `Please finish the shared setup first: ${(profileStatus as HotelProfileStatus).missing_fields.join(", ")}`
-              : "Finish the shared setup before activating this property for Marketplace."}
-          </p>
-          <Button
-            variant="primary"
-            onClick={() => router.push(marketplaceSetupRedirectPath(ROUTES.PROFILE))}
-          >
-            Continue Setup
-          </Button>
-        </div>
       </div>
     );
   }

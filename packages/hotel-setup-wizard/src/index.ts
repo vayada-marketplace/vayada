@@ -21,7 +21,9 @@ export {
   type SharedHotelSetupStatusParams,
 } from "./sharedHotelSetupApi";
 export {
+  MARKETPLACE_PROFILE_TOOL_STEPS,
   SHARED_HOTEL_SETUP_PRODUCTS,
+  canOpenMarketplaceProfileTools,
   isSafeSharedHotelSetupReturnTo,
   isSharedHotelSetupProductSelectable,
   parseSharedHotelSetupEntryProduct,
