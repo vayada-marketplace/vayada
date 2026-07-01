@@ -661,6 +661,34 @@ describe("finance route contracts", () => {
     ]);
   });
 
+  it("issues target Stripe onboarding links when the client sends the provider account ref", async () => {
+    const provider = fakeStripeConnectProvider();
+    const target = targetStripeProviderAccountPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+      stripeConnectProvider: provider,
+    });
+    target.existingAccount = {
+      providerAccountId: "f7000000-0000-0000-0000-000000000686",
+      providerAccountRef: "acct_target_property_686",
+      status: "setup_incomplete",
+      onboardingStatus: "invited",
+      onboardingUrl: "https://connect.stripe.test/onboard/acct_target_property_686/1",
+    };
+
+    const result = await repository.issueStripeOnboardingLink!(
+      stripePropertyOnboardingLinkTargetCommand("acct_target_property_686"),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("Unexpected Stripe onboarding-link failure");
+    expect(result.response.providerAccountId).toBe("f7000000-0000-0000-0000-000000000686");
+    expect(result.response.onboardingUrl).toBe(
+      "https://connect.stripe.test/onboard/acct_target_property_686/2",
+    );
+  });
+
   it("passes F1i affiliate payout settings and payout ledger fixtures in target mode", async () => {
     app = buildFinanceApp({
       permissions: ["affiliate.payout.manage"],
@@ -2906,6 +2934,29 @@ function stripePropertyTargetCommand(
       email: "owner@example.test",
       country: "AT",
     },
+  };
+}
+
+function stripePropertyOnboardingLinkTargetCommand(
+  providerAccountId: string,
+): IssueStripeOnboardingLinkCommand {
+  return {
+    commandType: "finance.provider_account.stripe.onboarding_link.issue",
+    commandId: "cmd-stripe-property-link-target",
+    idempotencyKey: "finance-stripe-property-link-target",
+    propertyId,
+    audit: {
+      actor: {
+        kind: "user",
+        userId: "f1000000-0000-0000-0000-000000000686",
+        organizationId: affiliateOrganizationId,
+      },
+      requestId: "req_stripe_property_link_target",
+      correlationId: "corr_stripe_property_link_target",
+      reason: "Stripe property onboarding-link target test",
+      requestedAt: "2026-06-12T12:00:00.000Z",
+    },
+    payload: { providerAccountId },
   };
 }
 

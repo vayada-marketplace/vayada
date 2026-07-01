@@ -1,5 +1,5 @@
-import { apiClient, isNextApiTarget, omitHotelContext } from "../api/client";
-import { getScopedBookingHotelIds, isAuthKitLoginEnabled } from "../auth/sessionStore";
+import { apiClient, omitHotelContext } from "../api/client";
+import { getSelectedBookingHotelId, listScopedBookingHotelIds } from "../api/bookingHotelScope";
 import {
   getBookingRoomFilterSettings,
   updateBookingRoomFilterSettings,
@@ -13,10 +13,8 @@ import {
 } from "../api/bookingCustomDomainClient";
 
 export interface PropertySettings {
-  // booking_hotels.id — unified across both backend databases after
-  // the multi-hotel-ids migration. Populated by POST /admin/hotels
-  // and by GET /admin/settings/property. Used to set selectedHotelId
-  // and to pass bookingHotelId to the PMS register-hotel endpoint.
+  // booking_hotels.id. Used to set selectedHotelId and resolve the
+  // canonical property link for target Booking/PMS/Finance routes.
   id?: string;
   slug: string;
   property_name: string;
@@ -141,7 +139,7 @@ function unsupportedDesignUpdateKeys(data: DesignSettingsUpdate): string[] {
 }
 
 function listScopedBookingHotels(): HotelSummary[] {
-  return getScopedBookingHotelIds().map((id, index) => ({
+  return listScopedBookingHotelIds().map((id, index) => ({
     id,
     name: index === 0 ? "My Property" : `Property ${index + 1}`,
     slug: "",
@@ -150,34 +148,9 @@ function listScopedBookingHotels(): HotelSummary[] {
   }));
 }
 
-function getSelectedOrScopedBookingHotelId(): string | null {
-  const selectedHotelId =
-    typeof window !== "undefined" ? window.localStorage.getItem("selectedHotelId") : null;
-  if (!isAuthKitLoginEnabled() || !isNextApiTarget()) return selectedHotelId;
-
-  const scopedHotelIds = getScopedBookingHotelIds();
-  if (selectedHotelId && scopedHotelIds.includes(selectedHotelId)) return selectedHotelId;
-
-  const fallbackHotelId = scopedHotelIds[0] ?? null;
-  if (typeof window !== "undefined") {
-    if (fallbackHotelId) {
-      window.localStorage.setItem("selectedHotelId", fallbackHotelId);
-    } else {
-      window.localStorage.removeItem("selectedHotelId");
-    }
-  }
-  return fallbackHotelId;
-}
-
 async function resolveBookingHotelId(): Promise<string> {
-  const hotelId = getSelectedOrScopedBookingHotelId();
+  const hotelId = getSelectedBookingHotelId();
   if (hotelId) return hotelId;
-  if (isAuthKitLoginEnabled() && isNextApiTarget()) {
-    throw new Error("Booking hotel id is required.");
-  }
-
-  const property = await apiClient.get<PropertySettings>("/admin/settings/property");
-  if (property.id) return property.id;
   throw new Error("Booking hotel id is required.");
 }
 
@@ -291,39 +264,34 @@ export interface HotelDeletionImpact {
 }
 
 export const settingsService = {
-  listHotels: async () =>
-    isAuthKitLoginEnabled() && isNextApiTarget()
-      ? listScopedBookingHotels()
-      : apiClient.get<HotelSummary[]>("/admin/hotels"),
+  listHotels: async () => listScopedBookingHotels(),
 
-  listAllHotels: () => apiClient.get<SuperAdminHotel[]>("/admin/superadmin/hotels"),
+  listAllHotels: () => unavailableTargetRoute<SuperAdminHotel[]>("Platform hotel list"),
 
-  updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) =>
-    apiClient.patch(`/admin/superadmin/hotels/${hotelId}/billing`, data),
+  updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) => {
+    void hotelId;
+    void data;
+    return unavailableTargetRoute("Platform hotel billing updates");
+  },
 
-  getHotelDeletionImpact: (hotelId: string) =>
-    apiClient.get<HotelDeletionImpact>(`/admin/hotels/${hotelId}/deletion-impact`),
+  getHotelDeletionImpact: (hotelId: string) => {
+    void hotelId;
+    return unavailableTargetRoute<HotelDeletionImpact>("Hotel deletion impact");
+  },
 
-  deleteHotel: (hotelId: string) => apiClient.delete<void>(`/admin/hotels/${hotelId}`),
+  deleteHotel: (hotelId: string) => {
+    void hotelId;
+    return unavailableTargetRoute<void>("Hotel deletion");
+  },
 
-  getPropertySettings: () =>
-    isAuthKitLoginEnabled() && isNextApiTarget()
-      ? getTargetPropertySettings()
-      : apiClient.get<PropertySettings>("/admin/settings/property"),
+  getPropertySettings: () => getTargetPropertySettings(),
 
-  updatePropertySettings: (data: PropertySettingsUpdate) =>
-    isAuthKitLoginEnabled() && isNextApiTarget()
-      ? updateTargetPropertySettings(data)
-      : apiClient.patch<PropertySettings>("/admin/settings/property", data),
+  updatePropertySettings: (data: PropertySettingsUpdate) => updateTargetPropertySettings(data),
 
-  // Explicit create endpoint for the setup wizard — unlike
-  // updatePropertySettings (which silently updates the user's existing
-  // hotel when no X-Hotel-Id header is present), this always creates
-  // a new property and returns its id. That id must then be written
-  // to localStorage.selectedHotelId so subsequent wizard calls carry
-  // the correct X-Hotel-Id header.
-  createHotel: (data: PropertySettingsUpdate) =>
-    apiClient.post<PropertySettings>("/admin/hotels", data),
+  createHotel: (data: PropertySettingsUpdate) => {
+    void data;
+    return unavailableTargetRoute<PropertySettings>("Legacy Booking setup creation");
+  },
 
   changePassword: (current_password: string, new_password: string) =>
     apiClient.post("/auth/change-password", { current_password, new_password }),
@@ -377,14 +345,15 @@ export const settingsService = {
     deleteBookingCustomDomain({ hotelId: await resolveBookingHotelId() }),
 
   getSetupStatus: async () => {
-    if (!isAuthKitLoginEnabled() || !isNextApiTarget()) {
-      return apiClient.get<SetupStatusResponse>("/admin/settings/setup-status");
-    }
     const hotels = listScopedBookingHotels();
     return {
-      setup_complete: false,
-      missing_fields: hotels.length > 0 ? ["property_settings"] : ["property"],
+      setup_complete: hotels.length > 0,
+      missing_fields: hotels.length > 0 ? [] : ["property"],
       prefill_data: null,
     };
   },
 };
+
+function unavailableTargetRoute<T>(surface: string): Promise<T> {
+  return Promise.reject(new Error(`${surface} is not available on the target API yet.`));
+}

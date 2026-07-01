@@ -16,7 +16,6 @@ import {
   buildFinancePaymentSettingsBody,
   updateFinancePaymentSettings,
 } from "@/services/api/financePaymentSettingsClient";
-import { pmsClient } from "@/services/api/pmsClient";
 import { checkSetupStatus } from "@/lib/utils/setupStatus";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/branding";
 import {
@@ -303,9 +302,6 @@ function BookingProductSetupPage() {
       // button routes to /setup?mode=add for users who already have
       // >= 1 hotel. Skip the setup_complete redirect in that case
       // — the user explicitly came here to create a NEW property.
-      // Also clear any stale selectedHotelId so the wizard's first
-      // API call (POST /admin/hotels) doesn't accidentally carry an
-      // X-Hotel-Id header pointing at an existing hotel.
       const urlParams =
         typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
       const addMode = urlParams?.get("mode") === "add";
@@ -390,9 +386,6 @@ function BookingProductSetupPage() {
         return;
       }
 
-      // Clear any stale hotel selection so the explicit create below
-      // doesn't accidentally carry an X-Hotel-Id header pointing at
-      // some other hotel.
       localStorage.removeItem("selectedHotelId");
       const failedRooms: string[] = [];
 
@@ -434,11 +427,6 @@ function BookingProductSetupPage() {
         refer_a_guest_enabled: enableReferAGuest,
       };
 
-      // 1. Explicitly create a new hotel (multi-hotel-safe). This
-      // returns the new hotel's id, which we immediately persist so
-      // every subsequent step in the wizard carries the right
-      // X-Hotel-Id header and the PMS register call gets the same id
-      // as the booking-engine row.
       const savedSettings = await settingsService.createHotel(propertyPayload);
       const createdHotelId = savedSettings.id;
       if (createdHotelId) {
@@ -521,79 +509,9 @@ function BookingProductSetupPage() {
         booking_filters: bookingFilters,
       });
 
-      // 3. Register hotel in PMS with the SAME id as booking-engine
       if (selectedPms === "vayada") {
-        const pmsSlug =
-          savedSettings?.slug ||
-          propertyName
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/^-|-$/g, "");
-        try {
-          await pmsClient.post("/admin/register-hotel", {
-            name: propertyName,
-            slug: pmsSlug,
-            contactEmail: reservationEmail,
-            // Passing the booking_hotel_id unifies the PMS and booking
-            // engine ids for this hotel. Without it, PMS would
-            // generate its own UUID and we'd be back to the two-id
-            // problem the multi-hotel migration was built to fix.
-            bookingHotelId: savedSettings?.id,
-          });
-        } catch {
-          // Non-fatal: hotel may already be registered (idempotent)
-        }
         localStorage.setItem("pmsProvider", "vayada");
-
-        // 4. Create room types
-        for (const r of rooms) {
-          try {
-            const bedSummary = r.beds.map((b) => `${b.count} ${b.type}`).join(", ");
-            await pmsClient.post("/admin/room-types", {
-              name: r.name,
-              category: r.category,
-              bedType: bedSummary,
-              maxOccupancy: r.maxOccupancy,
-              maxAdults: r.maxAdults,
-              maxChildren: r.maxChildren,
-              bedrooms: r.bedrooms,
-              bathrooms: r.bathrooms,
-              size: r.roomSize ? Number(r.roomSize) : 0,
-              totalRooms: r.totalRooms,
-              description: r.description,
-              baseRate:
-                Number(r.baseRate) || (r.seasons.length > 0 ? Number(r.seasons[0].rate) || 0 : 0),
-              nonRefundableRate: r.nonRefundableRate ? Number(r.nonRefundableRate) : undefined,
-              nonRefundableEnabled: r.nonRefundableEnabled,
-              nonRefundableDiscount:
-                r.nonRefundableEnabled && r.flexibleRateEnabled
-                  ? r.nonRefundableDiscount
-                  : undefined,
-              currency: r.currency || currency,
-              images: r.images,
-              amenities: r.amenities,
-              features: r.features,
-              operatingPeriods: r.operatingPeriods,
-              seasons: r.seasons,
-              weekendSurcharge: r.weekendSurcharge,
-              minimumAdvanceDays: r.minimumAdvanceDays ?? 0,
-              mealPlans: r.mealPlans ?? [],
-              cancellationPolicy: r.cancellationPolicy,
-              flexibleRateEnabled: r.flexibleRateEnabled,
-              flexibleCancellationType: r.flexibleCancellationType,
-              partialRefundTiers:
-                r.flexibleCancellationType === "partial_refund" ? r.partialRefundTiers : [],
-              nonRefundableCancellationPolicy: r.nonRefundableCancellationPolicy,
-              ratePaymentMethods: r.ratePaymentMethods ?? null,
-            });
-          } catch {
-            failedRooms.push(r.name);
-          }
-        }
-
-        if (failedRooms.length > 0) {
-          console.warn("Some rooms failed to create:", failedRooms);
-        }
+        if (rooms.length > 0) failedRooms.push(...rooms.map((room) => room.name));
       }
 
       // 8. Save benefits

@@ -6,7 +6,7 @@ import { enforceRoutePolicy } from "./policy.js";
 
 const MODULE_ENTITLEMENT_PREFIX = "module:";
 const MODULE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const PMS_MODULE_IDS = ["financials", "inbox"] as const;
+const PMS_MODULE_IDS = ["financials", "inbox", "affiliates"] as const;
 const PMS_MODULE_ID_SET = new Set<string>(PMS_MODULE_IDS);
 
 export type PmsModuleActivation = {

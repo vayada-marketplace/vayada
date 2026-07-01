@@ -70,14 +70,13 @@ describe("dashboardService target route adapter", () => {
     });
   });
 
-  it("returns valid empty page-view windows until the target route exists", async () => {
-    const timeline = await dashboardService.getPageViewsTimeline();
-
-    expect(timeline.window_start).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(timeline.window_end).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(timeline.previous_window_start).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(timeline.previous_window_end).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(timeline.buckets).toEqual([]);
+  it("fails explicitly for dashboard routes that do not have a target contract yet", async () => {
+    await expect(dashboardService.getConversionFunnel()).rejects.toThrow(
+      "conversion funnel is not available",
+    );
+    await expect(dashboardService.getPageViewsTimeline()).rejects.toThrow(
+      "page views are not available",
+    );
   });
 });
 

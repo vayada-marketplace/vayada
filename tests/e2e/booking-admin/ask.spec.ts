@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { BOOKING_ADMIN_HOTEL_ID, mockBookingAdminShellRoutes } from "../support/bookingAdminMocks";
+import {
+  BOOKING_ADMIN_HOTEL_ID,
+  BOOKING_ADMIN_ORGANIZATION_ID,
+  mockBookingAdminAuthenticatedSession,
+  mockBookingAdminShellRoutes,
+} from "../support/bookingAdminMocks";
 import { watchNoLegacyCalls } from "../support/noLegacyCalls";
 import { watchPageHealth } from "../support/pageHealth";
 
@@ -8,24 +13,7 @@ test.describe("booking-admin Ask Intelligence", () => {
     const assertHealthy = watchPageHealth(page, testInfo);
     const assertNoLegacyCalls = watchNoLegacyCalls(page, testInfo, "booking-admin-ask");
 
-    await page.addInitScript(
-      ({ hotelId, token }) => {
-        window.localStorage.setItem("access_token", token);
-        window.localStorage.setItem("token_expires_at", String(Date.now() + 60 * 60 * 1000));
-        window.localStorage.setItem("isLoggedIn", "true");
-        window.localStorage.setItem("userType", "hotel");
-        window.localStorage.setItem("isSuperAdmin", "false");
-        window.localStorage.setItem("selectedHotelId", hotelId);
-        window.localStorage.setItem(
-          "user",
-          JSON.stringify({ id: "user_1", email: "owner@example.com", type: "hotel" }),
-        );
-      },
-      {
-        token: fakeJwt({ org: "org_hotel_group" }),
-        hotelId: BOOKING_ADMIN_HOTEL_ID,
-      },
-    );
+    await mockBookingAdminAuthenticatedSession(page);
     await mockBookingAdminShellRoutes(page);
 
     await page.route("**/api/ai/ask", async (route) => {
@@ -34,7 +22,7 @@ test.describe("booking-admin Ask Intelligence", () => {
       expect(route.request().postDataJSON()).toMatchObject({
         question: "Why did direct share change?",
         scope: {
-          organizationId: "org_hotel_group",
+          organizationId: BOOKING_ADMIN_ORGANIZATION_ID,
           bookingHotelId: BOOKING_ADMIN_HOTEL_ID,
         },
       });
@@ -101,7 +89,3 @@ test.describe("booking-admin Ask Intelligence", () => {
     await assertHealthy();
   });
 });
-
-function fakeJwt(payload: Record<string, unknown>): string {
-  return `header.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.signature`;
-}

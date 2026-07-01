@@ -110,8 +110,8 @@ describe("settingsService next-stack bootstrap data", () => {
       },
     ]);
     await expect(settingsService.getSetupStatus()).resolves.toMatchObject({
-      setup_complete: false,
-      missing_fields: ["property_settings"],
+      setup_complete: true,
+      missing_fields: [],
     });
     await expect(settingsService.getPropertySettings()).resolves.toMatchObject({
       id: "booking_hotel_alpenrose",

@@ -72,7 +72,6 @@ function formatShortDate(iso: string, locale: string): string {
 
 export default function DashboardPage() {
   const { t, locale } = useTranslation();
-  const [propertyName, setPropertyName] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("today");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [sources, setSources] = useState<BookingsBySource | null>(null);
@@ -86,27 +85,25 @@ export default function DashboardPage() {
     settingsService
       .getPropertySettings()
       .then((settings: PropertySettings) => {
-        setPropertyName(settings.property_name);
         if (settings.default_currency) setCurrency(settings.default_currency);
       })
-      .catch(() => {
-        setPropertyName("My Property");
-      });
+      .catch(() => {});
   }, []);
 
   const fetchData = useCallback(async (range: TimeRange) => {
     setLoading(true);
     try {
-      const [statsData, sourcesData, funnelData, sparklinesData] = await Promise.all([
+      const [statsData, sourcesData, funnelData, sparklinesData] = await Promise.allSettled([
         dashboardService.getStats(range),
         dashboardService.getBookingsBySource(range),
         dashboardService.getConversionFunnel(range),
         dashboardService.getSparklines(range),
       ]);
-      setStats(statsData);
-      setSources(sourcesData);
-      setFunnel(funnelData);
-      setSparklines(sparklinesData);
+      if (statsData.status === "fulfilled") setStats(statsData.value);
+      if (sourcesData.status === "fulfilled") setSources(sourcesData.value);
+      if (funnelData.status === "fulfilled") setFunnel(funnelData.value);
+      else setFunnel(null);
+      if (sparklinesData.status === "fulfilled") setSparklines(sparklinesData.value);
     } catch {
       // Keep existing data on error
     } finally {
