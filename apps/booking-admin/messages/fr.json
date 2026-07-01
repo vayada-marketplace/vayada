@@ -381,6 +381,8 @@
   "bookingFlow.guestForm.recommended": "Recommandé",
   "bookingFlow.guestForm.estimatedArrivalTime": "Heure d'arrivée estimée",
   "bookingFlow.guestForm.numberOfGuests": "Nombre de clients",
+  "bookingFlow.guestForm.phoneNumber": "Numéro de téléphone",
+  "bookingFlow.guestForm.phoneDescription": "Exigez que les clients saisissent un numéro de téléphone lors du paiement.",
   "bookingFlow.guestForm.children": "Children",
   "bookingFlow.guestForm.childrenDescription": "Allow guests to add children to bookings.",
   "bookingFlow.guestForm.adultAgeThreshold": "Adult age threshold",

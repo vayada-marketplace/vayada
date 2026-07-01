@@ -142,6 +142,7 @@
     "lastName": "Nama Belakang",
     "emailAddress": "Alamat Email",
     "phoneNumber": "Nomor Telepon",
+    "optional": "(opsional)",
     "phoneCountryCode": "Kode negara",
     "selectCountryCode": "Kode negara",
     "searchCountryCode": "Cari negara atau kode",

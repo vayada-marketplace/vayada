@@ -63,6 +63,7 @@ type BookingGuestFormSettings = {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  phoneRequired: boolean;
   adultAgeThreshold: number;
   childrenEnabled: boolean;
 };
@@ -75,6 +76,7 @@ Behavior:
 | `specialRequestsEnabled` | Whether the guest form should ask for free-text special requests. |
 | `arrivalTimeEnabled`     | Whether the guest form should ask for estimated arrival time.     |
 | `guestCountEnabled`      | Whether the guest form should ask for explicit guest count.       |
+| `phoneRequired`          | Whether checkout requires a non-empty guest phone number.         |
 | `adultAgeThreshold`      | Minimum age counted as an adult in guest-facing selectors.        |
 | `childrenEnabled`        | Whether guest-facing selectors expose a children count.           |
 
@@ -92,6 +94,7 @@ Rows with `NULL`/missing legacy values default to:
   "specialRequestsEnabled": true,
   "arrivalTimeEnabled": false,
   "guestCountEnabled": false,
+  "phoneRequired": true,
   "adultAgeThreshold": 18,
   "childrenEnabled": true
 }
@@ -172,6 +175,7 @@ Legacy Booking source fields:
 | `special_requests_enabled` | `specialRequestsEnabled` | `true`  |
 | `arrival_time_enabled`     | `arrivalTimeEnabled`     | `false` |
 | `guest_count_enabled`      | `guestCountEnabled`      | `false` |
+| `phone_required`           | `phoneRequired`          | `true`  |
 | n/a                        | `adultAgeThreshold`      | `18`    |
 | n/a                        | `childrenEnabled`        | `true`  |
 

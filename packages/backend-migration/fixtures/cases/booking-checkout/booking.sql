@@ -288,6 +288,7 @@ VALUES
       "specialRequestsEnabled": true,
       "arrivalTimeEnabled": true,
       "guestCountEnabled": false,
+      "phoneRequired": false,
       "adultAgeThreshold": 21,
       "childrenEnabled": false,
       "benefits": ["Free breakfast", "Late checkout"],

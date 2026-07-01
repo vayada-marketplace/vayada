@@ -157,7 +157,13 @@ function BookPageContent() {
     specialRequestsEnabled: boolean;
     arrivalTimeEnabled: boolean;
     guestCountEnabled: boolean;
-  }>({ specialRequestsEnabled: true, arrivalTimeEnabled: false, guestCountEnabled: false });
+    phoneRequired: boolean;
+  }>({
+    specialRequestsEnabled: true,
+    arrivalTimeEnabled: false,
+    guestCountEnabled: false,
+    phoneRequired: true,
+  });
 
   useEffect(() => {
     if (!slug) return;
@@ -166,6 +172,7 @@ function BookPageContent() {
         specialRequestsEnabled: settings.specialRequestsEnabled ?? true,
         arrivalTimeEnabled: settings.arrivalTimeEnabled ?? false,
         guestCountEnabled: settings.guestCountEnabled ?? false,
+        phoneRequired: settings.phoneRequired ?? true,
       });
     });
   }, [slug]);
@@ -176,7 +183,7 @@ function BookPageContent() {
     if (!lastName.trim()) errors.lastName = t("errorRequired");
     if (!email.trim()) errors.email = t("errorRequired");
     else if (!EMAIL_RE.test(email)) errors.email = t("errorInvalidEmail");
-    if (!phone.trim()) errors.phone = t("errorRequired");
+    if (guestFormSettings.phoneRequired && !phone.trim()) errors.phone = t("errorRequired");
     return errors;
   };
 
@@ -224,7 +231,11 @@ function BookPageContent() {
       // Strip national trunk prefix (leading 0) before prepending the dial code.
       const dialEntry = COUNTRY_DIAL_CODES.find((c) => c.iso2 === phoneCountryIso);
       const localPart = phone.replace(/[^0-9]/g, "").replace(/^0+/, "");
-      const composedPhone = dialEntry ? `+${dialEntry.dial} ${localPart}` : phone;
+      const composedPhone = phone.trim()
+        ? dialEntry
+          ? `+${dialEntry.dial} ${localPart}`
+          : phone
+        : "";
 
       saveGuestDetails({
         roomTypeId: room.id,
@@ -508,7 +519,12 @@ function BookPageContent() {
                       htmlFor="phone"
                       className="block text-sm font-semibold text-gray-900 mb-1.5"
                     >
-                      {t("phoneNumber")} <span className="text-red-500">*</span>
+                      {t("phoneNumber")}{" "}
+                      {guestFormSettings.phoneRequired ? (
+                        <span className="text-red-500">*</span>
+                      ) : (
+                        <span className="font-normal text-gray-500">{t("optional")}</span>
+                      )}
                     </label>
                     <div
                       ref={phoneRef}
@@ -528,6 +544,7 @@ function BookPageContent() {
                             setFieldErrors((prev) => ({ ...prev, phone: undefined }));
                         }}
                         onBlur={() => handleBlur("phone")}
+                        required={guestFormSettings.phoneRequired}
                         placeholder={t("phoneLocalPlaceholder")}
                         aria-invalid={!!fieldErrors.phone}
                         aria-describedby={fieldErrors.phone ? "phone-error" : undefined}

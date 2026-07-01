@@ -142,6 +142,7 @@
     "lastName": "Last Name",
     "emailAddress": "Email Address",
     "phoneNumber": "Phone Number",
+    "optional": "(optional)",
     "phoneCountryCode": "Country code",
     "selectCountryCode": "Country code",
     "searchCountryCode": "Search country or code",

@@ -21,6 +21,7 @@ export interface BookingGuestFormSettings {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  phoneRequired: boolean;
   adultAgeThreshold: number;
   childrenEnabled: boolean;
 }

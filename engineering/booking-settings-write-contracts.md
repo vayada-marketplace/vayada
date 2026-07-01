@@ -176,6 +176,7 @@ type UpdateBookingGuestFormSettingsRequest = {
     specialRequestsEnabled: boolean;
     arrivalTimeEnabled: boolean;
     guestCountEnabled: boolean;
+    phoneRequired: boolean;
     adultAgeThreshold: number;
     childrenEnabled: boolean;
   };
@@ -185,6 +186,7 @@ type BookingGuestFormSettings = {
   specialRequestsEnabled: boolean;
   arrivalTimeEnabled: boolean;
   guestCountEnabled: boolean;
+  phoneRequired: boolean;
   adultAgeThreshold: number;
   childrenEnabled: boolean;
 };
@@ -192,11 +194,14 @@ type BookingGuestFormSettings = {
 
 Validation and behavior:
 
-- All five fields are required. Partial updates are not accepted by the typed
-  route.
+- Typed clients send all six fields. During the migration window, legacy
+  five-field guest-form saves may omit `phoneRequired`; the write path preserves
+  the stored value. Other partial updates are not accepted by the typed route.
 - `adultAgeThreshold` must be an integer from `1` through `120`. Children age
   labels are derived as `0` through `adultAgeThreshold - 1`; there are no
   separate child age range fields.
+- `phoneRequired` controls whether Booking Web requires a non-empty guest phone
+  number during checkout.
 - `childrenEnabled` controls whether Booking Web exposes a children selector.
 - The Booking write is authoritative for this contract.
 - Until the PMS guest-facing flow reads these flags from a Booking-owned or

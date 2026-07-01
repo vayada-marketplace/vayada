@@ -10,6 +10,8 @@ interface GuestFormTabProps {
   setArrivalTimeEnabled: (enabled: boolean) => void;
   guestCountEnabled: boolean;
   setGuestCountEnabled: (enabled: boolean) => void;
+  phoneRequired: boolean;
+  setPhoneRequired: (enabled: boolean) => void;
   adultAgeThreshold: number;
   setAdultAgeThreshold: (value: number) => void;
   childrenEnabled: boolean;
@@ -25,6 +27,8 @@ export default function GuestFormTab({
   setArrivalTimeEnabled,
   guestCountEnabled,
   setGuestCountEnabled,
+  phoneRequired,
+  setPhoneRequired,
   adultAgeThreshold,
   setAdultAgeThreshold,
   childrenEnabled,
@@ -79,6 +83,23 @@ export default function GuestFormTab({
             label={t("bookingFlow.guestForm.numberOfGuests")}
             enabled={guestCountEnabled}
             onClick={() => setGuestCountEnabled(!guestCountEnabled)}
+          />
+        </div>
+        <div
+          className={`flex items-center justify-between gap-4 p-3 rounded-lg border transition-all ${phoneRequired ? "border-primary-500 bg-primary-50/30" : "border-gray-200"}`}
+        >
+          <div>
+            <span className="text-[13px] font-medium text-gray-900">
+              {t("bookingFlow.guestForm.phoneNumber")}
+            </span>
+            <p className="mt-0.5 text-[11px] text-gray-500">
+              {t("bookingFlow.guestForm.phoneDescription")}
+            </p>
+          </div>
+          <SwitchButton
+            label={t("bookingFlow.guestForm.phoneNumber")}
+            enabled={phoneRequired}
+            onClick={() => setPhoneRequired(!phoneRequired)}
           />
         </div>
         <div

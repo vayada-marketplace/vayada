@@ -563,6 +563,7 @@ const bookingSettingsRepository: BookingSettingsReadRepository = {
       specialRequestsEnabled: false,
       arrivalTimeEnabled: true,
       guestCountEnabled: true,
+      phoneRequired: false,
       adultAgeThreshold: 21,
       childrenEnabled: false,
     };
@@ -3928,6 +3929,7 @@ describe("vayada-api", () => {
       specialRequestsEnabled: false,
       arrivalTimeEnabled: true,
       guestCountEnabled: true,
+      phoneRequired: false,
       adultAgeThreshold: 21,
       childrenEnabled: false,
     });
@@ -4054,6 +4056,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        phoneRequired: false,
         adultAgeThreshold: 21,
         childrenEnabled: false,
       },
@@ -4061,6 +4064,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        phoneRequired: false,
         adultAgeThreshold: 21,
         childrenEnabled: false,
       },
@@ -4163,6 +4167,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: boolean;
         arrivalTimeEnabled: boolean;
         guestCountEnabled: boolean;
+        phoneRequired: boolean;
         adultAgeThreshold: number;
         childrenEnabled: boolean;
       };
@@ -4187,6 +4192,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: true,
         guestCountEnabled: false,
+        phoneRequired: false,
         adultAgeThreshold: 18,
         childrenEnabled: true,
       },
@@ -4197,6 +4203,7 @@ describe("vayada-api", () => {
       specialRequestsEnabled: true,
       arrivalTimeEnabled: true,
       guestCountEnabled: false,
+      phoneRequired: false,
       adultAgeThreshold: 18,
       childrenEnabled: true,
     });
@@ -4208,11 +4215,98 @@ describe("vayada-api", () => {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: true,
           guestCountEnabled: false,
+          phoneRequired: false,
           adultAgeThreshold: 18,
           childrenEnabled: true,
         },
       },
     ]);
+  });
+
+  it("preserves guest-form phoneRequired when older clients save five-field payloads", async () => {
+    let written: unknown;
+    app = buildAuthenticatedApp({
+      settingsWriteRepository: {
+        ...bookingSettingsWriteRepository,
+        async updateGuestFormSettingsByHotelId(hotelId, settings) {
+          expect(hotelId).toBe("booking_hotel_alpenrose");
+          written = settings;
+          return { ...settings, phoneRequired: false };
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(written).toEqual({
+      specialRequestsEnabled: true,
+      arrivalTimeEnabled: false,
+      guestCountEnabled: true,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
+    });
+    expect(response.body).toEqual({
+      specialRequestsEnabled: true,
+      arrivalTimeEnabled: false,
+      guestCountEnabled: true,
+      phoneRequired: false,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
+    });
+  });
+
+  it("saves guest-form phoneRequired without reading current settings", async () => {
+    let written: unknown;
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        ...bookingSettingsRepository,
+        async findGuestFormSettingsByHotelId() {
+          throw new Error("read repository should not be used for guest-form writes");
+        },
+      },
+      settingsWriteRepository: {
+        ...bookingSettingsWriteRepository,
+        async updateGuestFormSettingsByHotelId(hotelId, settings) {
+          expect(hotelId).toBe("booking_hotel_alpenrose");
+          written = settings;
+          return settings;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+        phoneRequired: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(written).toMatchObject({ phoneRequired: true });
+    expect(response.body).toMatchObject({ phoneRequired: true });
   });
 
   it("keeps guest-form writes successful when PMS compatibility sync fails", async () => {
@@ -4234,6 +4328,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: false,
         arrivalTimeEnabled: true,
         guestCountEnabled: true,
+        phoneRequired: true,
         adultAgeThreshold: 18,
         childrenEnabled: true,
       },
@@ -4244,6 +4339,7 @@ describe("vayada-api", () => {
       specialRequestsEnabled: false,
       arrivalTimeEnabled: true,
       guestCountEnabled: true,
+      phoneRequired: true,
       adultAgeThreshold: 18,
       childrenEnabled: true,
     });
@@ -4264,6 +4360,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        phoneRequired: true,
         adultAgeThreshold: 18,
         childrenEnabled: true,
         legacyField: true,
@@ -4276,6 +4373,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        phoneRequired: true,
         adultAgeThreshold: 0,
         childrenEnabled: "yes",
       },
@@ -5849,6 +5947,79 @@ describe("vayada-api", () => {
     );
   });
 
+  it("round-trips phoneRequired in the legacy booking settings repository", async () => {
+    const queries: { text: string; values?: readonly unknown[] }[] = [];
+    let poolClosed = false;
+    const state = {
+      special_requests_enabled: false,
+      arrival_time_enabled: true,
+      guest_count_enabled: true,
+      phone_required: false,
+    };
+    const pool: BookingSettingsPool = {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        values?: readonly unknown[],
+      ): Promise<Pick<QueryResult<T>, "rows">> {
+        queries.push({ text, values });
+        if (text.includes("UPDATE booking_hotels")) {
+          state.special_requests_enabled = values?.[1] as boolean;
+          state.arrival_time_enabled = values?.[2] as boolean;
+          state.guest_count_enabled = values?.[3] as boolean;
+          if (values?.[4] !== null) state.phone_required = values?.[4] as boolean;
+        }
+
+        return { rows: [{ ...state }] as unknown as T[] };
+      },
+      async end() {
+        poolClosed = true;
+      },
+    };
+    const repository = createPgBookingSettingsReadRepository({
+      connectionString: "postgresql://booking-db",
+      pool,
+    });
+
+    await expect(
+      repository.findGuestFormSettingsByHotelId("booking_hotel_alpenrose"),
+    ).resolves.toEqual({
+      specialRequestsEnabled: false,
+      arrivalTimeEnabled: true,
+      guestCountEnabled: true,
+      phoneRequired: false,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
+    });
+    await expect(
+      repository.updateGuestFormSettingsByHotelId("booking_hotel_alpenrose", {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+        phoneRequired: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
+      }),
+    ).resolves.toMatchObject({ phoneRequired: true });
+    await expect(
+      repository.updateGuestFormSettingsByHotelId("booking_hotel_alpenrose", {
+        specialRequestsEnabled: false,
+        arrivalTimeEnabled: true,
+        guestCountEnabled: false,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
+      }),
+    ).resolves.toMatchObject({ phoneRequired: true });
+
+    expect(queries[0]?.text).toContain("phone_required");
+    expect(queries[1]?.text).toContain("phone_required = COALESCE($5, phone_required)");
+    expect(queries[1]?.text).toContain("RETURNING special_requests_enabled");
+    expect(queries[1]?.values).toEqual(["booking_hotel_alpenrose", true, false, true, true]);
+    expect(queries[2]?.values).toEqual(["booking_hotel_alpenrose", false, true, false, null]);
+
+    await repository.close?.();
+    expect(poolClosed).toBe(true);
+  });
+
   it("does not close injected public hotel profile pools", async () => {
     let legacyPoolClosed = false;
     let targetPoolClosed = false;
@@ -6577,6 +6748,7 @@ describe("vayada-api", () => {
       special_requests_enabled: boolean;
       arrival_time_enabled: boolean;
       guest_count_enabled: boolean;
+      phone_required: boolean;
       adult_age_threshold: number;
       children_enabled: boolean;
       benefits: string[];
@@ -6603,6 +6775,7 @@ describe("vayada-api", () => {
       special_requests_enabled: false,
       arrival_time_enabled: true,
       guest_count_enabled: true,
+      phone_required: true,
       adult_age_threshold: 18,
       children_enabled: true,
       benefits: ["Free breakfast"],
@@ -6721,8 +6894,9 @@ describe("vayada-api", () => {
           state.special_requests_enabled = values?.[1] as boolean;
           state.arrival_time_enabled = values?.[2] as boolean;
           state.guest_count_enabled = values?.[3] as boolean;
-          state.adult_age_threshold = values?.[4] as number;
-          state.children_enabled = values?.[5] as boolean;
+          state.phone_required = values?.[4] as boolean;
+          state.adult_age_threshold = values?.[5] as number;
+          state.children_enabled = values?.[6] as boolean;
         } else if (text.includes("benefits = $2::jsonb")) {
           state.benefits = JSON.parse(values?.[1] as string) as string[];
         } else if (text.includes("default_currency = $2")) {
@@ -6863,6 +7037,7 @@ describe("vayada-api", () => {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: false,
           guestCountEnabled: false,
+          phoneRequired: false,
           adultAgeThreshold: 21,
           childrenEnabled: false,
         },
@@ -6870,6 +7045,7 @@ describe("vayada-api", () => {
           specialRequestsEnabled: true,
           arrivalTimeEnabled: false,
           guestCountEnabled: false,
+          phoneRequired: false,
           adultAgeThreshold: 21,
           childrenEnabled: false,
         },
@@ -7219,6 +7395,7 @@ describe("vayada-api", () => {
         specialRequestsEnabled: true,
         arrivalTimeEnabled: false,
         guestCountEnabled: true,
+        phoneRequired: true,
         adultAgeThreshold: 18,
         childrenEnabled: true,
       },
@@ -7313,6 +7490,7 @@ describe("vayada-api", () => {
       specialRequestsEnabled: true,
       arrivalTimeEnabled: false,
       guestCountEnabled: false,
+      phoneRequired: true,
       adultAgeThreshold: 18,
       childrenEnabled: true,
     });

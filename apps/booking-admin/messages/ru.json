@@ -381,6 +381,8 @@
   "bookingFlow.guestForm.recommended": "Рекомендуется",
   "bookingFlow.guestForm.estimatedArrivalTime": "Ожидаемое время прибытия",
   "bookingFlow.guestForm.numberOfGuests": "Количество гостей",
+  "bookingFlow.guestForm.phoneNumber": "Номер телефона",
+  "bookingFlow.guestForm.phoneDescription": "Требуйте, чтобы гости вводили номер телефона при оформлении бронирования.",
   "bookingFlow.guestForm.children": "Children",
   "bookingFlow.guestForm.childrenDescription": "Allow guests to add children to bookings.",
   "bookingFlow.guestForm.adultAgeThreshold": "Adult age threshold",
