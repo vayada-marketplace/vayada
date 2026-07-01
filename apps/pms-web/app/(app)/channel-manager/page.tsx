@@ -35,6 +35,7 @@ export default function ChannelManagerPage() {
   // Mappings
   const [roomMappings, setRoomMappings] = useState<ChannexRoomTypeMapping[]>([]);
   const [rateMappings, setRateMappings] = useState<ChannexRatePlanMapping[]>([]);
+  const [mappingsError, setMappingsError] = useState("");
 
   // Sync
   const [syncingAri, setSyncingAri] = useState(false);
@@ -49,6 +50,7 @@ export default function ChannelManagerPage() {
   // UI (not here) — see VAY-408 — so only Airbnb is editable.
   const [airbnbMarkup, setAirbnbMarkup] = useState("0");
   const [savingMarkups, setSavingMarkups] = useState(false);
+  const [markupsError, setMarkupsError] = useState("");
 
   const isEnabled = status?.isConnected && status?.channexPropertyId;
 
@@ -82,6 +84,12 @@ export default function ChannelManagerPage() {
     ]);
     if (rooms.status === "fulfilled") setRoomMappings(rooms.value);
     if (rates.status === "fulfilled") setRateMappings(rates.value);
+    const rejected = [rooms, rates].find((result) => result.status === "rejected");
+    setMappingsError(
+      rejected && rejected.status === "rejected"
+        ? getErrorMessage(rejected.reason, "Channex mappings are unavailable.")
+        : "",
+    );
   };
 
   const loadMarkups = async () => {
@@ -89,8 +97,9 @@ export default function ChannelManagerPage() {
       const { markups } = await channexService.getMarkups();
       const abb = markups.find((m) => m.channel === "airbnb");
       setAirbnbMarkup(abb ? String(abb.markupPct) : "0");
-    } catch {
-      // ignore — card still renders with defaults
+      setMarkupsError("");
+    } catch (err: unknown) {
+      setMarkupsError(getErrorMessage(err, "Channel markups are unavailable."));
     }
   };
 
@@ -429,6 +438,11 @@ export default function ChannelManagerPage() {
                 </div>
               </div>
               <p className="text-xs text-gray-500 mb-4">{t("channels.markupHint")}</p>
+              {markupsError && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                  {markupsError}
+                </p>
+              )}
               <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
                 {t("channels.remapHint")}
               </p>
@@ -442,6 +456,11 @@ export default function ChannelManagerPage() {
             </div>
 
             {/* Provisioned room types */}
+            {mappingsError && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                {mappingsError}
+              </div>
+            )}
             {roomMappings.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-xl p-4 md:p-6">
                 <h2 className="text-sm font-semibold text-gray-900 mb-4">

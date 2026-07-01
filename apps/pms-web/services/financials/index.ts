@@ -1,5 +1,7 @@
-import { pmsClient } from "../api/pmsClient";
-import { buildQueryString } from "@/lib/utils/queryString";
+import {
+  throwUnsupportedPmsNextStackFeature,
+  unsupportedPmsNextStackFeature,
+} from "../api/unsupported";
 
 export type InvoiceStatus = "draft" | "sent" | "paid" | "partial" | "overdue" | "voided";
 
@@ -113,33 +115,29 @@ export interface RecordPaymentRequest {
 }
 
 export const financialsService = {
-  summary: () => pmsClient.get<FinancialsSummary>("/admin/financials/summary"),
+  summary: () => unsupportedPmsNextStackFeature<FinancialsSummary>("Financials summary"),
 
-  listInvoices: (params?: {
+  listInvoices: (_params?: {
     status?: InvoiceStatus;
     search?: string;
     sort?: "date" | "guest" | "amount";
     limit?: number;
     offset?: number;
   }) => {
-    const qs = buildQueryString(params);
-    return pmsClient.get<InvoiceListResponse>(`/admin/financials/invoices${qs}`);
+    return unsupportedPmsNextStackFeature<InvoiceListResponse>("Financial invoices");
   },
 
-  getInvoice: (bookingId: string) =>
-    pmsClient.get<InvoiceDetail>(`/admin/financials/invoices/${bookingId}`),
+  getInvoice: (_bookingId: string) =>
+    unsupportedPmsNextStackFeature<InvoiceDetail>("Financial invoice details"),
 
-  recordPayment: (bookingId: string, data: RecordPaymentRequest) =>
-    pmsClient.post<InvoiceDetail>(`/admin/financials/invoices/${bookingId}/payments`, data),
+  recordPayment: (_bookingId: string, _data: RecordPaymentRequest) =>
+    unsupportedPmsNextStackFeature<InvoiceDetail>("Manual payment recording"),
 
-  listPayments: (params?: { limit?: number; offset?: number }) => {
-    const qs = buildQueryString(params);
-    return pmsClient.get<PaymentLedgerResponse>(`/admin/financials/payments${qs}`);
+  listPayments: (_params?: { limit?: number; offset?: number }) => {
+    return unsupportedPmsNextStackFeature<PaymentLedgerResponse>("Payment ledger");
   },
 
-  exportCsvUrl: (params?: { status?: InvoiceStatus; search?: string }) => {
-    const qs = buildQueryString(params);
-    const base = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
-    return `${base}/admin/financials/invoices/export.csv${qs}`;
+  exportCsvUrl: (_params?: { status?: InvoiceStatus; search?: string }) => {
+    return throwUnsupportedPmsNextStackFeature("Financial invoice CSV export");
   },
 };

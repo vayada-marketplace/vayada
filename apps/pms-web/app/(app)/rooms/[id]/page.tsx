@@ -1,29 +1,24 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
-import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, TrashIcon } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import { roomsService, RoomType, RoomTypeUpdate } from "@/services/rooms";
-import { bookingsService } from "@/services/bookings";
-import { channexService } from "@/services/channex";
 import RoomTypeForm from "@/components/rooms/RoomTypeForm";
 import ConfirmDialog from "@/components/ConfirmDialog";
 
+const ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE =
+  "Room type updates and deletion are not available on PMS next-stack yet.";
+
 export default function EditRoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const router = useRouter();
   const [room, setRoom] = useState<RoomType | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
   const [form, setForm] = useState<RoomTypeUpdate>({});
-  const [initialCurrency, setInitialCurrency] = useState("EUR");
-  const [channexConnected, setChannexConnected] = useState(false);
 
   useEffect(() => {
     roomsService
@@ -73,79 +68,17 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-
-    // Override currency from payment settings (authoritative source)
-    bookingsService
-      .getPaymentSettings()
-      .then((res) => {
-        const c = res.paymentSettings.defaultCurrency;
-        if (c) {
-          setInitialCurrency(c);
-          setForm((prev) => ({ ...prev, currency: c }));
-        }
-      })
-      .catch(console.error);
-
-    // Tells the save toast whether to mention OTAs (VAY-391). Failures
-    // here are non-fatal — worst case the toast falls back to the
-    // local-only message.
-    channexService
-      .getStatus()
-      .then((status) => setChannexConnected(status.isConnected))
-      .catch(() => setChannexConnected(false));
   }, [id]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.seasons?.length || !form.seasons.some((s) => s.rate && Number(s.rate) > 0)) {
-      setError("At least one season with a rate greater than 0 is required");
-      return;
-    }
-    if (form.seasons.some((s) => s.from && s.to && (!s.rate || Number(s.rate) <= 0))) {
-      setError("Every season must have a rate greater than 0");
-      return;
-    }
-    if (
-      form.seasons.some(
-        (s) => s.maxStay != null && Number(s.maxStay) > 0 && Number(s.maxStay) < (s.minStay || 1),
-      )
-    ) {
-      setError("Max stay cannot be less than min stay.");
-      return;
-    }
-    setSaving(true);
-    setError("");
+    setError(ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE);
     setSuccess("");
-    try {
-      if (form.currency && form.currency !== initialCurrency) {
-        await bookingsService.updatePaymentSettings({ defaultCurrency: form.currency });
-      }
-      await roomsService.update(id, form);
-      // VAY-391: backend now auto-pushes ARI to Channex on rate-affecting
-      // saves, so reflect that in the toast when a channel manager is
-      // wired up. Hotels without Channex see the original message.
-      setSuccess(
-        channexConnected
-          ? "Changes saved. Updating Booking.com & Airbnb in the background…"
-          : "Room type updated successfully",
-      );
-    } catch (err: any) {
-      setError(err.message || "Failed to update");
-    } finally {
-      setSaving(false);
-    }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     setShowDeleteConfirm(false);
-    setDeleting(true);
-    try {
-      await roomsService.delete(id);
-      router.push("/rooms");
-    } catch (err: any) {
-      setError(err.message || "Cannot delete — room type may have bookings");
-      setDeleting(false);
-    }
+    setError(ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE);
   };
 
   if (loading) {
@@ -178,11 +111,12 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         </div>
         <button
           onClick={() => setShowDeleteConfirm(true)}
-          disabled={deleting}
+          disabled
+          title={ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE}
           className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 shrink-0"
         >
           <TrashIcon className="w-4 h-4" />
-          <span className="hidden md:inline">{deleting ? "Deleting..." : "Delete"}</span>
+          <span className="hidden md:inline">Delete</span>
         </button>
       </div>
 
@@ -190,7 +124,7 @@ export default function EditRoomPage({ params }: { params: Promise<{ id: string 
         form={form}
         onChange={setForm}
         onSubmit={handleSubmit}
-        saving={saving}
+        saving={false}
         error={error}
         success={success}
         submitLabel="Save Changes"

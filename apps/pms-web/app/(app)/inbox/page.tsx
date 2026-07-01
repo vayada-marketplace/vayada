@@ -91,10 +91,12 @@ export default function InboxPage() {
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [statusFilter, setStatusFilter] = useState<ThreadStatus>("open");
   const [loadingList, setLoadingList] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [thread, setThread] = useState<MessageThread | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
   const [composerBody, setComposerBody] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -106,8 +108,10 @@ export default function InboxPage() {
     try {
       const res = await messagingService.listThreads({ status: statusFilter, limit: 100 });
       setThreads(res.threads);
+      setListError(null);
     } catch (e) {
-      console.error("Failed to load threads", e);
+      setThreads([]);
+      setListError(e instanceof Error ? e.message : "Messaging threads are unavailable.");
     } finally {
       setLoadingList(false);
     }
@@ -119,13 +123,16 @@ export default function InboxPage() {
       const res = await messagingService.getThread(id);
       setThread(res.thread);
       setMessages(res.messages);
+      setDetailError(null);
       if (opts.markRead && res.thread.unreadCount > 0) {
         await messagingService.markRead(id).catch(console.error);
         // Optimistically reflect in the list
         setThreads((prev) => prev.map((t) => (t.id === id ? { ...t, unreadCount: 0 } : t)));
       }
     } catch (e) {
-      console.error("Failed to load thread", e);
+      setThread(null);
+      setMessages([]);
+      setDetailError(e instanceof Error ? e.message : "Messaging thread details are unavailable.");
     } finally {
       setLoadingDetail(false);
     }
@@ -213,9 +220,7 @@ export default function InboxPage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div
-        className={`bg-white px-5 pt-4 flex flex-col ${selectedId ? "hidden md:flex" : "flex"}`}
-      >
+      <div className={`bg-white px-5 pt-4 flex flex-col ${selectedId ? "hidden md:flex" : "flex"}`}>
         <div className="mb-4 md:mb-5">
           <h1 className="text-2xl md:text-xl font-bold text-gray-900">{t("inbox.title")}</h1>
           <p className="text-sm text-gray-500 mt-1">{t("inbox.subtitle")}</p>
@@ -232,9 +237,7 @@ export default function InboxPage() {
                     setSelectedId(null);
                   }}
                   className={`relative shrink-0 whitespace-nowrap px-3 py-2.5 text-sm transition-colors ${
-                    isActive
-                      ? "text-gray-900 font-semibold"
-                      : "text-gray-400 hover:text-gray-600"
+                    isActive ? "text-gray-900 font-semibold" : "text-gray-400 hover:text-gray-600"
                   }`}
                 >
                   {tab.label}
@@ -257,6 +260,10 @@ export default function InboxPage() {
         >
           {loadingList ? (
             <div className="p-6 text-sm text-gray-500">Loading…</div>
+          ) : listError ? (
+            <div className="m-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              {listError}
+            </div>
           ) : threads.length === 0 ? (
             <div className="p-6 text-sm text-gray-500">No conversations.</div>
           ) : (
@@ -306,9 +313,7 @@ export default function InboxPage() {
 
         {/* Thread detail */}
         <section
-          className={`flex-1 flex-col bg-gray-50 min-w-0 ${
-            selectedId ? "flex" : "hidden md:flex"
-          }`}
+          className={`flex-1 flex-col bg-gray-50 min-w-0 ${selectedId ? "flex" : "hidden md:flex"}`}
         >
           {!selectedId ? (
             <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
@@ -317,6 +322,12 @@ export default function InboxPage() {
           ) : loadingDetail && !thread ? (
             <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
               Loading…
+            </div>
+          ) : detailError ? (
+            <div className="flex-1 flex items-center justify-center p-6">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {detailError}
+              </div>
             </div>
           ) : thread ? (
             <>

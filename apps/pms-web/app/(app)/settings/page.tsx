@@ -11,7 +11,6 @@ import {
 } from "@heroicons/react/24/outline";
 import { bookingsService } from "@/services/bookings";
 import { channexService } from "@/services/channex";
-import { apiClient } from "@/services/api/client";
 import {
   getPmsCalendarSettings,
   getPmsPropertyProfile,
@@ -106,25 +105,6 @@ export default function SettingsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
 
-    apiClient
-      .get<{
-        check_in_from?: string;
-        check_in_until?: string;
-        check_out_from?: string;
-        check_out_until?: string;
-        check_in_time?: string;
-        check_out_time?: string;
-      }>("/admin/settings/property")
-      .then((s) => {
-        if (s.check_in_from) setCheckInFrom(s.check_in_from);
-        else if (s.check_in_time) setCheckInFrom(s.check_in_time);
-        if (s.check_in_until) setCheckInUntil(s.check_in_until);
-        if (s.check_out_from) setCheckOutFrom(s.check_out_from);
-        if (s.check_out_until) setCheckOutUntil(s.check_out_until);
-        else if (s.check_out_time) setCheckOutUntil(s.check_out_time);
-      })
-      .catch(() => {});
-
     getPmsPropertyProfile()
       .then((h) => {
         if (h.timezone) setTimezone(h.timezone);
@@ -187,15 +167,7 @@ export default function SettingsPage() {
     setError("");
     setSuccess("");
     try {
-      await apiClient.patch("/admin/settings/property", {
-        check_in_from: checkInFrom,
-        check_in_until: checkInUntil,
-        check_in_time: checkInFrom,
-        check_out_from: checkOutFrom,
-        check_out_until: checkOutUntil,
-        check_out_time: checkOutUntil,
-      });
-      setSuccess(t("settings.timesSaved"));
+      throw new Error("Check-in/out time settings are not available on PMS next-stack yet.");
     } catch (err: any) {
       setError(err.message || t("settings.failedToSaveTimes"));
     } finally {

@@ -1,8 +1,5 @@
-import { pmsClient } from "../api/pmsClient";
-import { isPmsOperationsReadModelEnabled } from "../api/pmsOperationsClient";
 import { getPmsMessagingUnreadCount } from "../api/pmsPropertyClient";
-import { getAuthBearerToken } from "../auth/sessionStore";
-import { buildQueryString } from "@/lib/utils/queryString";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 
 export type ThreadStatus = "open" | "closed" | "no_reply_needed";
 export type MessageDirection = "inbound" | "outbound";
@@ -56,65 +53,24 @@ export interface UnreadCountResponse {
 }
 
 export const messagingService = {
-  listThreads: (params?: { status?: ThreadStatus; limit?: number; before?: string }) => {
-    const qs = buildQueryString(params);
-    return pmsClient.get<ThreadListResponse>(`/admin/messaging/threads${qs}`);
-  },
+  listThreads: (_params?: { status?: ThreadStatus; limit?: number; before?: string }) =>
+    unsupportedPmsNextStackFeature<ThreadListResponse>("Messaging threads"),
 
-  getThread: (id: string) => pmsClient.get<ThreadDetailResponse>(`/admin/messaging/threads/${id}`),
+  getThread: (_id: string) =>
+    unsupportedPmsNextStackFeature<ThreadDetailResponse>("Messaging thread details"),
 
-  sendMessage: (id: string, body: string, attachmentIds: string[] = []) =>
-    pmsClient.post<Message>(`/admin/messaging/threads/${id}/messages`, {
-      body,
-      attachmentIds,
-    }),
+  sendMessage: (_id: string, _body: string, _attachmentIds: string[] = []) =>
+    unsupportedPmsNextStackFeature<Message>("Messaging replies"),
 
-  uploadAttachment: async (threadId: string, file: File): Promise<{ attachmentId: string }> => {
-    const form = new FormData();
-    form.append("file", file);
-    const token = getAuthBearerToken();
-    const hotelId = typeof window !== "undefined" ? localStorage.getItem("selectedHotelId") : null;
-    const headers: Record<string, string> = {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    if (hotelId) headers["X-Hotel-Id"] = hotelId;
-    const baseUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "https://api.pms.localhost";
-    const res = await fetch(`${baseUrl}/admin/messaging/threads/${threadId}/attachments`, {
-      method: "POST",
-      body: form,
-      headers,
-    });
-    if (!res.ok) {
-      // Backend returns FastAPI's `{ "detail": "..." }` on validation
-      // failures (415 / 413). Surface that text so the user sees the real
-      // reason ("Booking.com doesn't accept .zip files…") instead of a
-      // status code.
-      let detail = "";
-      try {
-        const parsed = await res.json();
-        detail = typeof parsed?.detail === "string" ? parsed.detail : "";
-      } catch {
-        try {
-          detail = await res.text();
-        } catch {
-          /* ignore */
-        }
-      }
-      throw new Error(detail || `Upload failed (${res.status})`);
-    }
-    return res.json();
-  },
+  uploadAttachment: (_threadId: string, _file: File) =>
+    unsupportedPmsNextStackFeature<{ attachmentId: string }>("Messaging attachments"),
 
-  markRead: (id: string) =>
-    pmsClient.post<MessageThread>(`/admin/messaging/threads/${id}/read`, {}),
+  markRead: (_id: string) => unsupportedPmsNextStackFeature<MessageThread>("Messaging read state"),
 
-  closeThread: (id: string) =>
-    pmsClient.post<MessageThread>(`/admin/messaging/threads/${id}/close`, {}),
+  closeThread: (_id: string) => unsupportedPmsNextStackFeature<MessageThread>("Messaging close"),
 
-  markNoReplyNeeded: (id: string) =>
-    pmsClient.post<MessageThread>(`/admin/messaging/threads/${id}/no-reply-needed`, {}),
+  markNoReplyNeeded: (_id: string) =>
+    unsupportedPmsNextStackFeature<MessageThread>("Messaging no-reply-needed state"),
 
-  unreadCount: () =>
-    isPmsOperationsReadModelEnabled()
-      ? getPmsMessagingUnreadCount()
-      : pmsClient.get<UnreadCountResponse>("/admin/messaging/unread-count"),
+  unreadCount: () => getPmsMessagingUnreadCount(),
 };

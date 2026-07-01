@@ -1,11 +1,10 @@
-import { pmsClient } from "../api/pmsClient";
 import {
   assertPmsOperationsReadModelEnabled,
-  isPmsOperationsReadModelEnabled,
   pmsOperationsClient,
   pmsOperationsRequestOptions,
 } from "../api/pmsOperationsClient";
 import { resolveSelectedPmsPropertyId } from "../api/pmsPropertyClient";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import type { RoomImageReference } from "../upload";
 
 export interface MonthlyRate {
@@ -371,10 +370,6 @@ function toRoomType(propertyId: string, roomType: PmsOperationsRoomType): RoomTy
 
 export const individualRoomsService = {
   list: async () => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<Room[]>("/admin/rooms");
-    }
-
     const propertyId = await resolveSelectedPmsPropertyId("loading rooms");
     const response = await pmsOperationsRoomsReadService.listRooms(propertyId);
     return response.items
@@ -382,58 +377,46 @@ export const individualRoomsService = {
       .map((room) => toRoom(response, room));
   },
 
-  create: (data: RoomCreate) => pmsClient.post<Room>("/admin/rooms", data),
+  create: (_data: RoomCreate) => unsupportedPmsNextStackFeature<Room>("Room creation"),
 
-  update: (id: string, data: Partial<RoomCreate>) =>
-    pmsClient.patch<Room>(`/admin/rooms/${id}`, data),
+  update: (_id: string, _data: Partial<RoomCreate>) =>
+    unsupportedPmsNextStackFeature<Room>("Room updates"),
 
-  delete: (id: string) => pmsClient.delete(`/admin/rooms/${id}`),
+  delete: (_id: string) => unsupportedPmsNextStackFeature<void>("Room deletion"),
 };
 
 export const benefitsService = {
-  get: () => pmsClient.get<{ benefits: string[] }>("/admin/benefits"),
+  get: () => unsupportedPmsNextStackFeature<{ benefits: string[] }>("Room benefits"),
 
-  update: (benefits: string[]) =>
-    pmsClient.put<{ benefits: string[] }>("/admin/benefits", { benefits }),
+  update: (_benefits: string[]) =>
+    unsupportedPmsNextStackFeature<{ benefits: string[] }>("Room benefits"),
 };
 
 export const roomsService = {
   list: async () => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<RoomType[]>("/admin/room-types");
-    }
-
     const propertyId = await resolveSelectedPmsPropertyId("loading room types");
     const response = await pmsOperationsRoomsReadService.listRoomTypes(propertyId);
     return response.items.map((roomType) => toRoomType(response.propertyId, roomType));
   },
 
   get: async (id: string) => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<RoomType>(`/admin/room-types/${id}`);
-    }
-
     const propertyId = await resolveSelectedPmsPropertyId("loading room type");
     const response = await pmsOperationsRoomsReadService.getRoomType(propertyId, id);
     return toRoomType(response.propertyId, response.item);
   },
 
   create: async (data: RoomTypeCreate) => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.post<RoomType>("/admin/room-types", data);
-    }
-
     const propertyId = await resolveSelectedPmsPropertyId("creating room type");
     const response = await pmsOperationsRoomsReadService.createRoomType(propertyId, data);
     return toRoomType(response.propertyId, response.item);
   },
 
-  update: (id: string, data: RoomTypeUpdate) =>
-    pmsClient.patch<RoomType>(`/admin/room-types/${id}`, data),
+  update: (_id: string, _data: RoomTypeUpdate) =>
+    unsupportedPmsNextStackFeature<RoomType>("Room type updates"),
 
-  delete: (id: string) => pmsClient.delete(`/admin/room-types/${id}`),
+  delete: (_id: string) => unsupportedPmsNextStackFeature<void>("Room type deletion"),
 
-  duplicate: (id: string) => pmsClient.post<RoomType>(`/admin/room-types/${id}/duplicate`),
+  duplicate: (_id: string) => unsupportedPmsNextStackFeature<RoomType>("Room type duplication"),
 };
 
 export const pmsOperationsRoomsReadService = {

@@ -46,7 +46,6 @@ export default function HandoffPage() {
       // Check PMS setup status before redirecting.
       // Precedence: explicit safeRedirect > choose-property (if 2+ hotels and no
       // valid selected PMS property) > setup (if incomplete) > dashboard.
-      const pmsApiUrl = process.env.NEXT_PUBLIC_PMS_API_URL || "https://pms-api.vayada.com";
       (async () => {
         let properties: PmsPropertySummary[] = [];
         let selectedPmsPropertyId: string | null = null;
@@ -71,19 +70,7 @@ export default function HandoffPage() {
           return;
         }
 
-        const setupStatusHeaders: Record<string, string> = {
-          Authorization: `Bearer ${token}`,
-        };
-        if (selectedPmsPropertyId) {
-          setupStatusHeaders["X-Hotel-Id"] = selectedPmsPropertyId;
-        }
-
-        const setupStatusResponse = await fetch(`${pmsApiUrl}/admin/setup-status`, {
-          headers: setupStatusHeaders,
-        });
-        const data = setupStatusResponse.ok ? await setupStatusResponse.json() : null;
-
-        const setupComplete = !!(data && data.setup_complete);
+        const setupComplete = properties.length > 0;
         localStorage.setItem("pmsSetupComplete", setupComplete ? "true" : "false");
 
         if (safeRedirect) {
@@ -107,9 +94,9 @@ export default function HandoffPage() {
         }
         window.location.href = "/dashboard";
       })().catch(() => {
-        localStorage.setItem("pmsSetupComplete", "true");
+        localStorage.setItem("pmsSetupComplete", "false");
         localStorage.removeItem("selectedHotelId");
-        window.location.href = safeRedirect || "/dashboard";
+        window.location.href = "/setup";
       });
     } else {
       window.location.href = "/login";

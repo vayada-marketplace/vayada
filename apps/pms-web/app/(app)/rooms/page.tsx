@@ -111,6 +111,11 @@ function formatRateRange(min: number, max: number, currency: string): string {
   return `${formatCurrency(min, currency)}–${formatCurrency(max, currency).replace(/^[^0-9]+/, "")}`;
 }
 
+const ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE =
+  "Individual room create, edit, and delete are not available on PMS next-stack yet.";
+const ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE =
+  "Room type duplicate, edit, and delete are not available on PMS next-stack yet.";
+
 function RoomTypeCard({
   room,
   rooms,
@@ -312,8 +317,9 @@ function RoomTypeCard({
             e.stopPropagation();
             onDuplicate(room.id);
           }}
-          className="flex items-center justify-center w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0"
-          title={t("rooms.duplicate")}
+          disabled
+          className="flex items-center justify-center w-8 h-8 md:w-auto md:h-auto md:px-3 md:py-1.5 text-[12px] font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={ROOM_TYPE_MUTATIONS_UNSUPPORTED_MESSAGE}
         >
           <DocumentDuplicateIcon className="w-3.5 h-3.5" />
         </button>
@@ -426,7 +432,9 @@ function RoomTypeCard({
                       <select
                         value={r.status}
                         onChange={(e) => handleStatusChange(r.id, e.target.value)}
-                        className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 ${statusStyles[r.status] || statusStyles.available}`}
+                        disabled
+                        title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
+                        className={`text-[11px] font-medium px-2.5 py-1 rounded-full border appearance-none cursor-pointer mr-2 disabled:cursor-not-allowed ${statusStyles[r.status] || statusStyles.available}`}
                       >
                         <option value="available">{t("rooms.statusAvailable")}</option>
                         <option value="maintenance">{t("rooms.statusMaintenance")}</option>
@@ -434,15 +442,17 @@ function RoomTypeCard({
                       </select>
                       <button
                         onClick={() => startRenameRoom(r.id, r.roomNumber)}
-                        className="p-1 text-gray-300 hover:text-primary-500 transition-colors"
-                        title={t("rooms.renameRoom")}
+                        disabled
+                        className="p-1 text-gray-300 hover:text-primary-500 transition-colors disabled:cursor-not-allowed"
+                        title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
                       >
                         <PencilIcon className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => handleDeleteRoom(r.id)}
-                        className="p-1 text-gray-300 hover:text-red-500 transition-colors"
-                        title={t("rooms.deleteRoom")}
+                        disabled
+                        className="p-1 text-gray-300 hover:text-red-500 transition-colors disabled:cursor-not-allowed"
+                        title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
                       >
                         <svg
                           className="w-3.5 h-3.5"
@@ -507,7 +517,9 @@ function RoomTypeCard({
           ) : (
             <button
               onClick={() => setAddingRoom(true)}
-              className="mt-2 ml-5 inline-flex items-center gap-1.5 text-[11px] text-gray-500 font-medium hover:text-primary-600 transition-colors"
+              disabled
+              title={ROOM_UNIT_COMMANDS_UNSUPPORTED_MESSAGE}
+              className="mt-2 ml-5 inline-flex items-center gap-1.5 text-[11px] text-gray-500 font-medium hover:text-primary-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
             >
               <PlusIcon className="w-3.5 h-3.5" /> {t("rooms.addRoom")}
             </button>

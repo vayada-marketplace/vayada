@@ -24,16 +24,31 @@ export default function PaymentsTab() {
   const [data, setData] = useState<PaymentLedgerResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
+  const [error, setError] = useState("");
   const limit = 25;
 
   useEffect(() => {
     setLoading(true);
     financialsService
       .listPayments({ limit, offset })
-      .then(setData)
-      .catch(console.error)
+      .then((result) => {
+        setData(result);
+        setError("");
+      })
+      .catch((err: unknown) => {
+        setData(null);
+        setError(err instanceof Error ? err.message : "Payment ledger is unavailable.");
+      })
       .finally(() => setLoading(false));
   }, [offset]);
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        {error}
+      </div>
+    );
+  }
 
   if (loading && !data) {
     return (

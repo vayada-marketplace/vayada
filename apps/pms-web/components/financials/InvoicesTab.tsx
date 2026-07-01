@@ -49,6 +49,7 @@ export default function InvoicesTab() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("date");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [error, setError] = useState("");
   const limit = 25;
 
   useEffect(() => {
@@ -61,8 +62,14 @@ export default function InvoicesTab() {
         limit,
         offset: 0,
       })
-      .then(setData)
-      .catch(console.error)
+      .then((result) => {
+        setData(result);
+        setError("");
+      })
+      .catch((err: unknown) => {
+        setData(null);
+        setError(err instanceof Error ? err.message : "Financial invoices are unavailable.");
+      })
       .finally(() => setLoading(false));
   }, [statusFilter, search, sort]);
 
@@ -82,17 +89,22 @@ export default function InvoicesTab() {
         <h2 className="text-base md:text-lg font-semibold text-gray-900">
           {t("financials.guestInvoices")}
         </h2>
-        <a
-          href={financialsService.exportCsvUrl({
-            status: statusFilter || undefined,
-            search: search.trim() || undefined,
-          })}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 text-gray-700 transition-colors"
+        <button
+          type="button"
+          disabled
+          title="Financial invoice CSV export is not available on PMS next-stack yet."
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white hover:bg-gray-50 text-gray-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ArrowDownTrayIcon className="w-4 h-4" />
           {t("financials.exportCsv")}
-        </a>
+        </button>
       </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {error}
+        </div>
+      )}
 
       {/* Search + sort */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-4">

@@ -1,10 +1,9 @@
-import { pmsClient } from "@/services/api/pmsClient";
 import {
-  isPmsOperationsReadModelEnabled,
   pmsOperationsClient,
   pmsOperationsRequestOptions,
 } from "@/services/api/pmsOperationsClient";
 import { propertyEndpoint, resolveSelectedPmsPropertyId } from "@/services/api/pmsPropertyClient";
+import { unsupportedPmsNextStackFeature } from "@/services/api/unsupported";
 
 export interface ChannexSyncStatus {
   isConnected: boolean;
@@ -66,15 +65,12 @@ export interface ConnectedChannelsResponse {
 
 export const channexService = {
   // Enable / disable
-  enable: () => pmsClient.post<ChannexEnableResult>("/admin/channex/enable"),
+  enable: () => unsupportedPmsNextStackFeature<ChannexEnableResult>("Channex enablement"),
 
-  disable: () => pmsClient.post("/admin/channex/disable"),
+  disable: () => unsupportedPmsNextStackFeature("Channex disablement"),
 
   // Status
   getStatus: async () => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<ChannexSyncStatus>("/admin/channex/status");
-    }
     const propertyId = await resolveSelectedPmsPropertyId("loading channel manager status");
     return pmsOperationsClient.get<ChannexSyncStatus>(
       propertyEndpoint(propertyId, "channex/status"),
@@ -84,39 +80,39 @@ export const channexService = {
 
   // Re-provision (after adding new room types)
   provision: () =>
-    pmsClient.post<{ channexPropertyId: string; roomsCreated: number; ratesCreated: number }>(
-      "/admin/channex/provision",
-    ),
+    unsupportedPmsNextStackFeature<{
+      channexPropertyId: string;
+      roomsCreated: number;
+      ratesCreated: number;
+    }>("Channex provisioning"),
 
   // Mappings
   listRoomTypeMappings: () =>
-    pmsClient.get<ChannexRoomTypeMapping[]>("/admin/channex/room-type-mappings"),
+    unsupportedPmsNextStackFeature<ChannexRoomTypeMapping[]>("Channex room type mappings"),
 
   listRatePlanMappings: () =>
-    pmsClient.get<ChannexRatePlanMapping[]>("/admin/channex/rate-plan-mappings"),
+    unsupportedPmsNextStackFeature<ChannexRatePlanMapping[]>("Channex rate plan mappings"),
 
   // Sync
-  syncAri: () => pmsClient.post<{ status: string }>("/admin/channex/sync-ari"),
+  syncAri: () => unsupportedPmsNextStackFeature<{ status: string }>("Channex ARI sync"),
 
-  syncBookings: () => pmsClient.post<{ status: string }>("/admin/channex/sync-bookings"),
+  syncBookings: () => unsupportedPmsNextStackFeature<{ status: string }>("Channex booking sync"),
 
   // Messaging app install (idempotent retry for the requesting hotel)
-  installMessagingApp: () => pmsClient.post<{ status: string }>("/admin/channex/messaging/install"),
+  installMessagingApp: () =>
+    unsupportedPmsNextStackFeature<{ status: string }>("Channex messaging app install"),
 
   // Channel iframe
-  getIframeUrl: () => pmsClient.post<{ iframe_url: string }>("/admin/channex/iframe-url"),
+  getIframeUrl: () => unsupportedPmsNextStackFeature<{ iframe_url: string }>("Channex iframe"),
 
   // Channel pricing markups
-  getMarkups: () => pmsClient.get<ChannelMarkupsResponse>("/admin/channex/markups"),
+  getMarkups: () => unsupportedPmsNextStackFeature<ChannelMarkupsResponse>("Channel markups"),
 
-  updateMarkups: (markups: ChannelMarkup[]) =>
-    pmsClient.put<ChannelMarkupsResponse>("/admin/channex/markups", { markups }),
+  updateMarkups: (_markups: ChannelMarkup[]) =>
+    unsupportedPmsNextStackFeature<ChannelMarkupsResponse>("Channel markups"),
 
   // Connected OTA channels
   listChannels: async () => {
-    if (!isPmsOperationsReadModelEnabled()) {
-      return pmsClient.get<ConnectedChannelsResponse>("/admin/channex/channels");
-    }
     const propertyId = await resolveSelectedPmsPropertyId("loading connected channels");
     return pmsOperationsClient.get<ConnectedChannelsResponse>(
       propertyEndpoint(propertyId, "channex/channels"),

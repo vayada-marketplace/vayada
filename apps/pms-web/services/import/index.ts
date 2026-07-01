@@ -1,4 +1,4 @@
-import { pmsClient } from "../api/pmsClient";
+import { unsupportedPmsNextStackFeature } from "../api/unsupported";
 import {
   createPlatformMediaImport,
   shouldUseLegacyMarketplaceImageUpload,
@@ -44,10 +44,11 @@ export interface ListingImportImagesResult {
 }
 
 export const importService = {
-  preview: (url: string) => pmsClient.post<ListingImportPreview>("/admin/import/preview", { url }),
+  preview: (_url: string) =>
+    unsupportedPmsNextStackFeature<ListingImportPreview>("Listing import preview"),
 
-  confirm: (roomTypes: ListingImportConfirmRoomType[]) =>
-    pmsClient.post<ListingImportResult>("/admin/import/confirm", { roomTypes }),
+  confirm: (_roomTypes: ListingImportConfirmRoomType[]) =>
+    unsupportedPmsNextStackFeature<ListingImportResult>("Listing import confirmation"),
 
   importImages: async (
     roomTypeId: string,
