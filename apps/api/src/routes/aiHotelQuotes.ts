@@ -392,6 +392,9 @@ function snapshotOfferInput(
     roomTypeId: row.roomTypeId,
     ratePlanId: row.ratePlanId,
     name: stringValue(roomSummary["name"]) ?? row.publicOfferKey,
+    locationAddress: stringValue(roomSummary["locationAddress"]),
+    latitude: numberValue(roomSummary["latitude"]),
+    longitude: numberValue(roomSummary["longitude"]),
     occupancy: {
       maxAdults: integerValue(occupancy["maxAdults"], 1),
       maxChildren: integerValue(occupancy["maxChildren"], 0),
@@ -904,6 +907,7 @@ function targetOfferFromRow(
   const roomTypeId =
     stringValue(offer["roomTypeId"]) ?? stringValue(offer["roomTypeName"]) ?? offerId;
   const ratePlanId = stringValue(offer["ratePlanId"]) ?? stringValue(offer["ratePlanName"]);
+  const roomSummary = objectValue(offer["roomSummary"]);
 
   return {
     offerId,
@@ -914,6 +918,10 @@ function targetOfferFromRow(
       stringValue(offer["roomTypeName"]) ??
       stringValue(offer["publicOfferKey"]) ??
       offerId,
+    locationAddress:
+      stringValue(offer["locationAddress"]) ?? stringValue(roomSummary["locationAddress"]),
+    latitude: numberValue(offer["latitude"]) ?? numberValue(roomSummary["latitude"]),
+    longitude: numberValue(offer["longitude"]) ?? numberValue(roomSummary["longitude"]),
     occupancy: {
       maxAdults: integerValue(objectValue(offer["occupancy"])["maxAdults"], request.adults),
       maxChildren: integerValue(objectValue(offer["occupancy"])["maxChildren"], request.children),
@@ -1271,6 +1279,9 @@ function serializeOffer(offer: PublicBookabilityOffer): PublicBookabilityOffer {
     roomTypeId: offer.roomTypeId,
     ratePlanId: offer.ratePlanId ?? null,
     name: offer.name,
+    locationAddress: offer.locationAddress ?? null,
+    latitude: offer.latitude ?? null,
+    longitude: offer.longitude ?? null,
     occupancy: {
       maxAdults: offer.occupancy.maxAdults,
       maxChildren: offer.occupancy.maxChildren,

@@ -411,8 +411,11 @@ export const roomsService = {
     return toRoomType(response.propertyId, response.item);
   },
 
-  update: (_id: string, _data: RoomTypeUpdate) =>
-    unsupportedPmsNextStackFeature<RoomType>("Room type updates"),
+  update: async (id: string, data: RoomTypeUpdate) => {
+    const propertyId = await resolveSelectedPmsPropertyId("updating room type");
+    const response = await pmsOperationsRoomsReadService.updateRoomType(propertyId, id, data);
+    return toRoomType(response.propertyId, response.item);
+  },
 
   delete: (_id: string) => unsupportedPmsNextStackFeature<void>("Room type deletion"),
 
@@ -459,7 +462,31 @@ export const pmsOperationsRoomsReadService = {
       pmsOperationsRequestOptions,
     );
   },
+
+  updateRoomType: (propertyId: string, roomTypeId: string, data: RoomTypeUpdate) => {
+    assertPmsOperationsReadModelEnabled();
+    const commandId = randomCommandId("pms-room-type-update");
+    return pmsOperationsClient.patch<PmsOperationsCommandResponse<PmsOperationsRoomType>>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types/${encodeURIComponent(
+        roomTypeId,
+      )}`,
+      {
+        ...roomTypeLocationPayload(data),
+        commandId,
+        idempotencyKey: commandId,
+      },
+      pmsOperationsRequestOptions,
+    );
+  },
 };
+
+function roomTypeLocationPayload(data: RoomTypeUpdate) {
+  const payload: Pick<RoomTypeCreate, "locationAddress" | "latitude" | "longitude"> = {};
+  if (Object.hasOwn(data, "locationAddress")) payload.locationAddress = data.locationAddress;
+  if (Object.hasOwn(data, "latitude")) payload.latitude = data.latitude ?? null;
+  if (Object.hasOwn(data, "longitude")) payload.longitude = data.longitude ?? null;
+  return payload;
+}
 
 function randomCommandId(prefix: string): string {
   return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;

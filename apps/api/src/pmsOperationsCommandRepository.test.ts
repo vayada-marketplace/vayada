@@ -18,6 +18,7 @@ import type {
   PmsPrivateNoteCreateCommand,
   PmsRoomType,
   PmsRoomTypeCreateCommand,
+  PmsRoomTypeUpdateCommand,
 } from "./routes/pmsOperations.js";
 
 describe("PMS operations command repository", () => {
@@ -322,6 +323,50 @@ describe("PMS operations command repository", () => {
     expect(outboxCalls).toHaveLength(1);
   });
 
+  it("updates PMS room-type location with replay-safe idempotency", async () => {
+    const target = targetPrivateNotesPool();
+    const readRepository: PmsOperationsReadRepository = {
+      ...unusedReadRepository,
+      async findRoomTypeById(propertyId, roomTypeId) {
+        const record = target.roomTypes.find(
+          (item) => item.propertyId === propertyId && item.roomType.roomTypeId === roomTypeId,
+        );
+        return record ? structuredClone(record.roomType) : null;
+      },
+    };
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository,
+      now: target.now,
+    });
+    const created = await repository.createRoomType(roomTypeCreateCommand());
+    if (!created.ok) throw new Error("room type create unexpectedly failed");
+    const command = roomTypeUpdateCommand(created.roomType.roomTypeId);
+
+    const updated = await repository.updateRoomTypeLocation(command);
+    const replayed = await repository.updateRoomTypeLocation(command);
+
+    expect(updated.ok).toBe(true);
+    expect(replayed.ok).toBe(true);
+    if (!updated.ok || !replayed.ok) throw new Error("room type update unexpectedly failed");
+    expect(updated.roomType.attributes).toMatchObject({
+      locationAddress: "Seestrasse 12, Innsbruck",
+      latitude: 47.2692,
+      longitude: 11.4041,
+    });
+    expect(replayed).toEqual({ ...updated, replayed: true });
+    expect(updated.commandMeta.sideEffects).toEqual(["audit_event"]);
+    expect(target.roomTypes[0]!.roomType.attributes).toMatchObject(updated.roomType.attributes);
+    expect(target.auditEvents.map((event) => event.action)).toEqual([
+      "pms.room_type.created",
+      "pms.room_type.updated",
+    ]);
+    expect(target.calls.filter((call) => call.text.includes("UPDATE pms.room_types"))).toHaveLength(
+      1,
+    );
+  });
+
   it("rejects PMS room-type creates when generated room numbers collide", async () => {
     const target = targetPrivateNotesPool({ generatedRoomConflicts: 1 });
     const repository = createTargetPmsOperationsCommandRepository({
@@ -595,6 +640,17 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
       ]);
     }
 
+    if (text.includes("UPDATE pms.room_types")) {
+      const [propertyId, roomTypeId, attributes] = values ?? [];
+      const record = roomTypes.get(String(roomTypeId));
+      if (!record || record.propertyId !== propertyId) return emptyRows<T>();
+      record.roomType.attributes = {
+        ...record.roomType.attributes,
+        ...(JSON.parse(String(attributes)) as PmsRoomType["attributes"]),
+      };
+      return { rows: [] as T[], rowCount: 1 };
+    }
+
     if (text.includes("INSERT INTO pms.rate_plans")) {
       const ratePlanId = `f6855200-0000-0000-0000-${String(ratePlanSequence).padStart(12, "0")}`;
       ratePlanSequence += 1;
@@ -755,7 +811,9 @@ function targetPrivateNotesPool(options: { generatedRoomConflicts?: number } = {
         auditKeys.add(auditKey);
         const action = text.includes("'pms.room_type.created'")
           ? "pms.room_type.created"
-          : String(values?.[1]);
+          : text.includes("'pms.room_type.updated'")
+            ? "pms.room_type.updated"
+            : String(values?.[1]);
         auditEvents.push({ auditKey, action });
       }
       return emptyRows<T>();
@@ -829,6 +887,25 @@ function roomTypeCreateCommand(
     sortOrder: 10,
     roomCount: 2,
     audit: roomTypeAudit("cmd-room-type-create", "Create room type"),
+    ...overrides,
+  };
+}
+
+function roomTypeUpdateCommand(
+  roomTypeId: string,
+  overrides: Partial<PmsRoomTypeUpdateCommand> = {},
+): PmsRoomTypeUpdateCommand {
+  return {
+    propertyId: defaultPropertyId,
+    roomTypeId,
+    commandId: "cmd-room-type-location-update",
+    idempotencyKey: "client-room-type-location-update",
+    attributes: {
+      locationAddress: "Seestrasse 12, Innsbruck",
+      latitude: 47.2692,
+      longitude: 11.4041,
+    },
+    audit: roomTypeAudit("cmd-room-type-location-update", "Update room type location"),
     ...overrides,
   };
 }

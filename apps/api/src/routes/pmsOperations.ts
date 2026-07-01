@@ -297,6 +297,15 @@ export type PmsRoomTypeCreateCommand = {
   audit: PmsOperationsCommandAudit;
 };
 
+export type PmsRoomTypeUpdateCommand = {
+  propertyId: string;
+  roomTypeId: string;
+  commandId: string;
+  idempotencyKey: string;
+  attributes: Record<string, string | number | boolean | null>;
+  audit: PmsOperationsCommandAudit;
+};
+
 export type PmsPrivateNoteCreateCommand = PmsPrivateNoteCreateRequest & {
   propertyId: string;
   guestBookingId: string;
@@ -606,6 +615,12 @@ export type PmsRoomTypeCommandResult =
     }
   | {
       ok: false;
+      statusCode: 404;
+      code: "room_type_not_found";
+      message: string;
+    }
+  | {
+      ok: false;
       statusCode: 409;
       code: "idempotency_conflict" | "room_type_conflict";
       message: string;
@@ -613,6 +628,7 @@ export type PmsRoomTypeCommandResult =
 
 export type PmsOperationsCommandRepository = {
   createRoomType(command: PmsRoomTypeCreateCommand): Promise<PmsRoomTypeCommandResult>;
+  updateRoomTypeLocation(command: PmsRoomTypeUpdateCommand): Promise<PmsRoomTypeCommandResult>;
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
     command: PmsOperationalStatusCommand,
@@ -1549,6 +1565,35 @@ export async function registerPmsOperationsRoutes(
       },
     );
 
+    app.patch<{ Params: PmsRoomTypeParams; Body: unknown }>(
+      "/properties/:propertyId/room-types/:roomTypeId",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId, roomTypeId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toRoomTypeUpdateCommand(propertyId, roomTypeId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.updateRoomTypeLocation(command.value);
+        if (!result.ok) return sendPmsRoomTypeCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          item: result.roomType,
+          commandMeta: result.commandMeta,
+        } satisfies PmsRoomTypeCommandResponse;
+      },
+    );
+
     app.get<{ Params: PmsReservationParams }>(
       "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
       async (request, reply) => {
@@ -2320,7 +2365,12 @@ function sendPmsRoomTypeCommandError(
   return sendPmsOperationsError(reply, {
     statusCode: result.statusCode,
     code: result.code,
-    category: result.statusCode === 400 ? "validation" : "conflict",
+    category:
+      result.statusCode === 400
+        ? "validation"
+        : result.statusCode === 404
+          ? "not_found"
+          : "conflict",
     message: result.message,
   });
 }
@@ -2432,6 +2482,8 @@ function toRoomTypeCreateCommand(
       ),
     };
   }
+  const locationAttributes = roomTypeLocationAttributes(raw, "Room type create");
+  if ("error" in locationAttributes) return { error: invalidBody(locationAttributes.error) };
 
   return {
     value: {
@@ -2442,7 +2494,7 @@ function toRoomTypeCreateCommand(
       description: optionalStringField(raw.description) ?? "",
       category: nullableStringField(raw.category) ?? null,
       occupancyLimits,
-      attributes: roomTypeAttributes(raw),
+      attributes: { ...roomTypeAttributes(raw), ...locationAttributes.value },
       amenities: toStringArray(raw.amenities),
       media: roomTypeMedia(raw.images),
       baseRate: { amountDecimal: baseRate, currency },
@@ -2451,6 +2503,36 @@ function toRoomTypeCreateCommand(
       sortOrder: optionalNonNegativeInteger(raw.sortOrder) ?? 0,
       roomCount,
       audit: pmsOperationsCommandAudit(request, commandId, "Create room type"),
+    },
+  };
+}
+
+function toRoomTypeUpdateCommand(
+  propertyId: string,
+  roomTypeId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsRoomTypeUpdateCommand } | { error: PmsOperationsError } {
+  const raw = objectBody(request.body);
+  if (!raw) return { error: invalidBody("Room type update body must be an object.") };
+  if (!isUuid(roomTypeId)) return { error: invalidBody("roomTypeId must be a UUID.") };
+
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  if (!commandId || !idempotencyKey) {
+    return { error: invalidBody("Room type update requires commandId and idempotencyKey.") };
+  }
+
+  const attributes = roomTypeLocationAttributes(raw, "Room type update");
+  if ("error" in attributes) return { error: invalidBody(attributes.error) };
+
+  return {
+    value: {
+      propertyId,
+      roomTypeId,
+      commandId,
+      idempotencyKey,
+      attributes: attributes.value,
+      audit: pmsOperationsCommandAudit(request, commandId, "Update room type location"),
     },
   };
 }
@@ -2493,7 +2575,6 @@ function roomTypeAttributes(
   for (const key of [
     "shortDescription",
     "bedType",
-    "locationAddress",
     "cancellationPolicy",
     "nonRefundableCancellationPolicy",
   ]) {
@@ -2504,8 +2585,6 @@ function roomTypeAttributes(
     "bedrooms",
     "bathrooms",
     "size",
-    "latitude",
-    "longitude",
     "nonRefundableRate",
     "nonRefundableDiscount",
     "minimumAdvanceDays",
@@ -2519,6 +2598,52 @@ function roomTypeAttributes(
     if (typeof raw[key] === "boolean") attributes[key] = raw[key] as boolean;
   }
   return attributes;
+}
+
+function roomTypeLocationAttributes(
+  raw: Record<string, unknown>,
+  action: string,
+): { value: Record<string, string | number | boolean | null> } | { error: string } {
+  const attributes: Record<string, string | number | boolean | null> = {};
+  if (Object.hasOwn(raw, "locationAddress")) {
+    const value = raw.locationAddress;
+    const address = nullableStringField(value);
+    if (value !== null && value !== "" && address === undefined) {
+      return { error: `${action} locationAddress must be a string or null.` };
+    }
+    attributes.locationAddress = address ?? null;
+  }
+
+  const latitude = optionalCoordinate(raw.latitude, "latitude", -90, 90, action);
+  if ("error" in latitude) return latitude;
+  if (latitude.present) attributes.latitude = latitude.value;
+
+  const longitude = optionalCoordinate(raw.longitude, "longitude", -180, 180, action);
+  if ("error" in longitude) return longitude;
+  if (longitude.present) attributes.longitude = longitude.value;
+
+  return { value: attributes };
+}
+
+function optionalCoordinate(
+  value: unknown,
+  field: "latitude" | "longitude",
+  min: number,
+  max: number,
+  action: string,
+): { present: false } | { present: true; value: number | null } | { error: string } {
+  if (value === undefined) return { present: false };
+  if (value === null || value === "") return { present: true, value: null };
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim()
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return { error: `${action} ${field} must be between ${min} and ${max}.` };
+  }
+  return { present: true, value: parsed };
 }
 
 function roomTypeMedia(value: unknown): PmsRoomType["media"] {

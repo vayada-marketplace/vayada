@@ -134,6 +134,7 @@ import type {
   PmsRoomType,
   PmsRoomTypeCommandResponse,
   PmsRoomTypeCreateCommand,
+  PmsRoomTypeUpdateCommand,
 } from "./routes/pmsOperations.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 
@@ -1314,7 +1315,9 @@ const pmsOperationsRepository: PmsOperationsReadRepository = {
   },
 };
 
-function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository & {
+function createPmsOperationsCommandRepository(
+  roomTypes: PmsRoomType[] = structuredClone(pmsRoomTypes),
+): PmsOperationsCommandRepository & {
   commands: Array<
     | PmsAssignmentCommand
     | PmsOperationalStatusCommand
@@ -1329,6 +1332,7 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   noteCreates: PmsPrivateNoteCreateCommand[];
   noteDeletes: PmsPrivateNoteDeleteCommand[];
   roomTypeCreates: PmsRoomTypeCreateCommand[];
+  roomTypeUpdates: PmsRoomTypeUpdateCommand[];
   templateUpdates: PmsOperationalTemplateUpdateCommand[];
   outboxEnqueues: string[];
   auditEvents: string[];
@@ -1347,6 +1351,7 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   const noteCreates: PmsPrivateNoteCreateCommand[] = [];
   const noteDeletes: PmsPrivateNoteDeleteCommand[] = [];
   const roomTypeCreates: PmsRoomTypeCreateCommand[] = [];
+  const roomTypeUpdates: PmsRoomTypeUpdateCommand[] = [];
   const templateUpdates: PmsOperationalTemplateUpdateCommand[] = [];
   const outboxEnqueues: string[] = [];
   const auditEvents: string[] = [];
@@ -1420,6 +1425,7 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
     noteCreates,
     noteDeletes,
     roomTypeCreates,
+    roomTypeUpdates,
     templateUpdates,
     outboxEnqueues,
     auditEvents,
@@ -1488,6 +1494,31 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
           idempotencyKey: command.idempotencyKey,
           acceptedAt: "2026-08-14T17:40:00.000Z",
           sideEffects: ["ari_changed", "audit_event"],
+        },
+      };
+    },
+    async updateRoomTypeLocation(command) {
+      roomTypeUpdates.push(command);
+      const roomType = roomTypes.find((item) => item.roomTypeId === command.roomTypeId);
+      if (!roomType) {
+        return {
+          ok: false,
+          statusCode: 404,
+          code: "room_type_not_found",
+          message: "PMS room type not found.",
+        };
+      }
+      roomType.attributes = { ...roomType.attributes, ...command.attributes };
+      auditEvents.push(`room_type_updated:${roomType.roomTypeId}`);
+      return {
+        ok: true,
+        roomType: structuredClone(roomType),
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:45:00.000Z",
+          sideEffects: ["audit_event"],
         },
       };
     },
@@ -5941,6 +5972,9 @@ describe("vayada-api", () => {
                   roomTypeId: "room_deluxe",
                   ratePlanId: "rate_flexible",
                   name: "Deluxe Double Room",
+                  locationAddress: "Seestrasse 12, Innsbruck",
+                  latitude: 47.2692,
+                  longitude: 11.4041,
                   availableRooms: 2,
                   paymentOptions: ["card", "pay_at_property"],
                   totals: {
@@ -6018,6 +6052,9 @@ describe("vayada-api", () => {
           {
             offerId: "offer_deluxe_flexible",
             roomTypeId: "room_deluxe",
+            locationAddress: "Seestrasse 12, Innsbruck",
+            latitude: 47.2692,
+            longitude: 11.4041,
             paymentOptions: ["card", "pay_at_property"],
             totals: {
               grandTotal: 594,
@@ -6049,7 +6086,12 @@ describe("vayada-api", () => {
               publicOfferKey: "rt:deluxe:flex",
               roomTypeId: "room_deluxe",
               ratePlanId: "rate_flexible",
-              roomSummary: { name: "Deluxe Double Room" },
+              roomSummary: {
+                name: "Deluxe Double Room",
+                locationAddress: "Seestrasse 12, Innsbruck",
+                latitude: 47.2692,
+                longitude: 11.4041,
+              },
               rateSummary: { refundable: true },
               occupancy: { maxAdults: 2, maxChildren: 1 },
               publicPolicy: { cancellation: "Free cancellation" },
@@ -6095,6 +6137,9 @@ describe("vayada-api", () => {
             roomTypeId: "room_deluxe",
             ratePlanId: "rate_flexible",
             name: "Deluxe Double Room",
+            locationAddress: "Seestrasse 12, Innsbruck",
+            latitude: 47.2692,
+            longitude: 11.4041,
             availableRooms: 2,
             paymentOptions: ["card", "pay_at_property"],
             totals: {
@@ -9105,6 +9150,149 @@ describe("vayada-api", () => {
     expect(commandRepository.auditEvents).toEqual([
       "room_type_created:f6855000-0000-0000-0000-000000000003",
     ]);
+  });
+
+  it("updates and reads back PMS room-type location through the target route", async () => {
+    const roomTypes = structuredClone(pmsRoomTypes);
+    const commandRepository = createPmsOperationsCommandRepository(roomTypes);
+    const readRepository: PmsOperationsReadRepository = {
+      ...pmsOperationsRepository,
+      async listRoomTypesByPropertyId(propertyId) {
+        expect(propertyId).toBe(pmsPropertyId);
+        return { items: roomTypes, sourceFreshness: { owner: "pms", status: "fresh" } };
+      },
+      async findRoomTypeById(propertyId, roomTypeId) {
+        expect(propertyId).toBe(pmsPropertyId);
+        return roomTypes.find((roomType) => roomType.roomTypeId === roomTypeId) ?? null;
+      },
+    };
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage", "pms.operations.read"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsRepository: readRepository,
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const update = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-location-update",
+        idempotencyKey: "room-type-location-update",
+        locationAddress: "Seestrasse 12, Innsbruck",
+        latitude: 47.2692,
+        longitude: 11.4041,
+        name: "Ignored by location update",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+    const readback = await injectJson(app, {
+      method: "GET",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(update.statusCode).toBe(200);
+    expect(update.body as PmsRoomTypeCommandResponse).toMatchObject({
+      item: {
+        roomTypeId: pmsRoomTypes[0].roomTypeId,
+        name: "Alpine Suite",
+        attributes: {
+          locationAddress: "Seestrasse 12, Innsbruck",
+          latitude: 47.2692,
+          longitude: 11.4041,
+        },
+      },
+      commandMeta: {
+        commandId: "cmd-room-type-location-update",
+        idempotencyKey: "room-type-location-update",
+        sideEffects: ["audit_event"],
+      },
+    });
+    expect(readback.statusCode).toBe(200);
+    expect(
+      (readback.body as PmsOperationsTestDetailResponse<PmsRoomType>).item.attributes,
+    ).toMatchObject({
+      locationAddress: "Seestrasse 12, Innsbruck",
+      latitude: 47.2692,
+      longitude: 11.4041,
+    });
+    expect(commandRepository.roomTypeUpdates).toHaveLength(1);
+    expect(commandRepository.roomTypeUpdates[0]).toMatchObject({
+      attributes: {
+        locationAddress: "Seestrasse 12, Innsbruck",
+        latitude: 47.2692,
+        longitude: 11.4041,
+      },
+    });
+  });
+
+  it("rejects invalid PMS room-type location coordinates before update", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-location-invalid",
+        idempotencyKey: "room-type-location-invalid",
+        latitude: 91,
+        longitude: 11.4041,
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type update latitude must be between -90 and 90.",
+    });
+
+    const booleanResponse = await injectJson(app, {
+      method: "PATCH",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types/${pmsRoomTypes[0].roomTypeId}`,
+      payload: {
+        commandId: "cmd-room-type-location-boolean-invalid",
+        idempotencyKey: "room-type-location-boolean-invalid",
+        latitude: true,
+        longitude: 11.4041,
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(booleanResponse.statusCode).toBe(400);
+    expect(booleanResponse.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type update latitude must be between -90 and 90.",
+    });
+    expect(commandRepository.roomTypeUpdates).toHaveLength(0);
   });
 
   it("rejects PMS room-type create payloads without command metadata", async () => {

@@ -200,6 +200,9 @@ export type PublicBookabilityOffer = {
   roomTypeId: string;
   ratePlanId?: string | null;
   name: string;
+  locationAddress?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   occupancy: {
     maxAdults: number;
     maxChildren: number;
@@ -221,6 +224,9 @@ export type PublicBookabilityAvailabilityOfferInput = {
   roomTypeId: string;
   ratePlanId?: string | null;
   name: string;
+  locationAddress?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   occupancy: {
     maxAdults: number;
     maxChildren: number;
@@ -680,6 +686,9 @@ function sanitizeOffer(
     roomTypeId: offer.roomTypeId,
     ratePlanId: offer.ratePlanId ?? null,
     name: offer.name,
+    locationAddress: offer.locationAddress ?? null,
+    latitude: offer.latitude ?? null,
+    longitude: offer.longitude ?? null,
     occupancy: {
       maxAdults: offer.occupancy.maxAdults,
       maxChildren: offer.occupancy.maxChildren,

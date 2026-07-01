@@ -37,6 +37,7 @@ import {
   type PmsRoomType,
   type PmsRoomTypeCommandResult,
   type PmsRoomTypeCreateCommand,
+  type PmsRoomTypeUpdateCommand,
 } from "../routes/pmsOperations.js";
 
 export type PmsOperationsCommandClient = {
@@ -99,7 +100,8 @@ type PmsCheckoutChargeOperation =
   | "checkout_charge_create"
   | "checkout_charge_mark_paid"
   | "checkout_charge_waive";
-type PmsRoomTypeCommandOperation = "room_type_create";
+type PmsRoomTypeCommandOperation = "room_type_create" | "room_type_location_update";
+type PmsRoomTypeCommand = PmsRoomTypeCreateCommand | PmsRoomTypeUpdateCommand;
 
 const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
   string,
@@ -274,6 +276,101 @@ export function createTargetPmsOperationsCommandRepository(
         }
         if (isPgForeignKeyViolation(error)) {
           return roomTypeInvalidBody("Room type create references a property that does not exist.");
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async updateRoomTypeLocation(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findRoomTypeCommandReplay(
+          client,
+          "room_type_location_update",
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+
+        const insertedIdempotencyKey = await recordRoomTypeCommandIdempotency(
+          client,
+          "room_type_location_update",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          const replay = await findRoomTypeCommandReplay(
+            client,
+            "room_type_location_update",
+            command,
+            keyHash,
+            requestFingerprintHash,
+          );
+          await client.query("ROLLBACK");
+          return (
+            replay ??
+            roomTypeConflict(
+              "idempotency_conflict",
+              "Room type update idempotency key could not be reserved.",
+            )
+          );
+        }
+
+        const currentRoomType = await config.readRepository.findRoomTypeById(
+          command.propertyId,
+          command.roomTypeId,
+        );
+        if (!currentRoomType) {
+          await client.query("ROLLBACK");
+          return roomTypeNotFound(command.roomTypeId);
+        }
+
+        const updated = await updateRoomTypeLocation(client, command, acceptedAt);
+        if (!updated) {
+          await client.query("ROLLBACK");
+          return roomTypeNotFound(command.roomTypeId);
+        }
+
+        const roomType = {
+          ...currentRoomType,
+          attributes: { ...currentRoomType.attributes, ...command.attributes },
+        };
+        await insertRoomTypeLocationUpdateAuditEvent(client, command, commandMeta, keyHash);
+        await completeRoomTypeCommandIdempotency(
+          client,
+          "room_type_location_update",
+          command,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          roomType,
+        );
+        await client.query("COMMIT");
+        return { ok: true, roomType, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgForeignKeyViolation(error)) {
+          return roomTypeInvalidBody("Room type update references a property that does not exist.");
         }
         throw error;
       } finally {
@@ -1257,6 +1354,22 @@ async function insertRoomType(
   return result.rows[0]!.roomTypeId;
 }
 
+async function updateRoomTypeLocation(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeUpdateCommand,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `UPDATE pms.room_types
+     SET room_attributes = COALESCE(room_attributes, '{}'::jsonb) || $3::jsonb,
+         updated_at = $4::timestamptz
+     WHERE property_id = $1::uuid
+       AND id = $2::uuid`,
+    [command.propertyId, command.roomTypeId, JSON.stringify(command.attributes), acceptedAt],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 async function insertRoomTypeRatePlans(
   client: PmsOperationsCommandClient,
   command: PmsRoomTypeCreateCommand,
@@ -1419,7 +1532,7 @@ function roomTypeFromCommand(
 async function findRoomTypeCommandReplay(
   client: PmsOperationsCommandClient,
   operation: PmsRoomTypeCommandOperation,
-  command: PmsRoomTypeCreateCommand,
+  command: PmsRoomTypeCommand,
   keyHash: string,
   requestFingerprintHash: string,
 ): Promise<PmsRoomTypeCommandResult | null> {
@@ -1463,7 +1576,7 @@ async function findRoomTypeCommandReplay(
 async function recordRoomTypeCommandIdempotency(
   client: PmsOperationsCommandClient,
   operation: PmsRoomTypeCommandOperation,
-  command: PmsRoomTypeCreateCommand,
+  command: PmsRoomTypeCommand,
   keyHash: string,
   requestFingerprintHash: string,
   acceptedAt: string,
@@ -1511,7 +1624,7 @@ async function recordRoomTypeCommandIdempotency(
 async function completeRoomTypeCommandIdempotency(
   client: PmsOperationsCommandClient,
   operation: PmsRoomTypeCommandOperation,
-  command: PmsRoomTypeCreateCommand,
+  command: PmsRoomTypeCommand,
   keyHash: string,
   commandMeta: PmsCommandMeta,
   acceptedAt: string,
@@ -1737,11 +1850,84 @@ async function insertRoomTypeAuditEvent(
   );
 }
 
-function roomTypeActorUserId(command: PmsRoomTypeCreateCommand): string | null {
+async function insertRoomTypeLocationUpdateAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeUpdateCommand,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       'pms.room_type.updated',
+       1,
+       $2::timestamptz,
+       'property',
+       $3::uuid,
+       $4::uuid,
+       $5,
+       $6::uuid,
+       'pms',
+       'room_type',
+       $7,
+       $8,
+       $9,
+       $10::jsonb,
+       $11::jsonb,
+       $12::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.room_type.updated.property.${command.propertyId}.room_type.${command.roomTypeId}.key.${keyHash}.v1`,
+      commandMeta.acceptedAt,
+      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      command.propertyId,
+      command.audit.actor.kind,
+      roomTypeActorUserId(command),
+      command.roomTypeId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        roomTypeId: command.roomTypeId,
+        changedFields: Object.keys(command.attributes),
+      }),
+      JSON.stringify({ attributes: command.attributes }),
+      JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
+    ],
+  );
+}
+
+function roomTypeActorUserId(command: PmsRoomTypeCommand): string | null {
   return command.audit.actor.kind === "user" ? command.audit.actor.userId : null;
 }
 
-function roomTypeCommandFingerprint(command: PmsRoomTypeCreateCommand): unknown {
+function roomTypeCommandFingerprint(command: PmsRoomTypeCommand): unknown {
   const { audit: _audit, ...fingerprint } = command;
   return fingerprint;
 }
@@ -4385,6 +4571,15 @@ function roomTypeConflict(
     statusCode: 409,
     code,
     message,
+  };
+}
+
+function roomTypeNotFound(roomTypeId: string): Exclude<PmsRoomTypeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 404,
+    code: "room_type_not_found",
+    message: `PMS room type ${roomTypeId} was not found.`,
   };
 }
 
