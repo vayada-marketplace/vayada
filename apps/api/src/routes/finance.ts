@@ -87,6 +87,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { enqueueBookingLifecycleEmailJob } from "../jobs/bookingEmails.js";
 import type { PublicHotelProfileRepository } from "./aiHotels.js";
 import { enforceRoutePolicy, type RouteAuthorizationPolicy } from "./policy.js";
 
@@ -2656,6 +2657,7 @@ async function recordManualPaymentInClient(
     keyHash,
     recordedAt,
   );
+  await enqueueBankTransferFinalConfirmationEmail(client, command, invoiceRow, recordedAt);
   await completeManualPaymentIdempotency(
     client,
     command,
@@ -4246,6 +4248,55 @@ async function enqueueManualPaymentJobs(
       pmsJobKey,
       outboxEventIds.pms,
     ],
+  );
+}
+
+async function enqueueBankTransferFinalConfirmationEmail(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  invoice: FinanceInvoiceRow,
+  recordedAt: string,
+): Promise<void> {
+  if (command.payload.paymentMethod !== "bank_transfer") return;
+  if (!manualPaymentSettlesInvoice(command, invoice)) return;
+
+  await enqueueBookingLifecycleEmailJob(client, {
+    kind: "final_confirmation",
+    occurredAt: recordedAt,
+    correlationId: command.audit.correlationId ?? command.audit.requestId,
+    causationId: `finance.manual_payment.record:${command.commandId}`,
+    actor:
+      command.audit.actor.kind === "user"
+        ? { type: "user", userId: command.audit.actor.userId }
+        : { type: command.audit.actor.kind },
+    source: "apps/api-finance-manual-payment",
+    booking: {
+      propertyId: command.propertyId,
+      guestBookingId: invoice.guestBookingId,
+      bookingReference: invoice.bookingReference,
+      guestEmail: invoice.guestEmail,
+      guestName: invoice.guestDisplayName,
+      checkIn: invoice.checkIn,
+      checkOut: invoice.checkOut,
+      totalAmount: invoice.totalAmount,
+      balanceAmount: invoice.balanceDue,
+      currency: invoice.currency,
+      paymentMethod: "bank_transfer",
+    },
+  });
+}
+
+function manualPaymentSettlesInvoice(
+  command: FinanceManualPaymentRecordCommand,
+  invoice: FinanceInvoiceRow,
+): boolean {
+  const amountCents = numeric15Scale2Cents(command.payload.amount);
+  const balanceCents = numeric15Scale2Cents(invoice.balanceDue, { allowZero: true });
+  return (
+    amountCents !== null &&
+    balanceCents !== null &&
+    balanceCents > 0n &&
+    amountCents === balanceCents
   );
 }
 

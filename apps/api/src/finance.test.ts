@@ -47,6 +47,7 @@ import type { QueryResultRow } from "pg";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app.js";
+import { BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE } from "./jobs/bookingEmails.js";
 import type { PublicHotelProfileRepository } from "./routes/aiHotels.js";
 import {
   createTargetFinancePropertySettingsRepository,
@@ -1318,6 +1319,63 @@ describe("finance route contracts", () => {
     expect(otherTarget.requiredCall("INSERT INTO finance.payments").values?.[3]).not.toBe(
       paymentInsert.values?.[3],
     );
+  });
+
+  it("enqueues final guest confirmation email for bank-transfer manual payments", async () => {
+    const target = targetManualPaymentPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+    });
+
+    const result = await repository.recordManualPayment!(
+      manualPaymentTargetCommand({
+        payload: {
+          amount: "850.00",
+          paymentMethod: "bank_transfer",
+          reference: "bank transfer 8812",
+        },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    const emailJob = target.calls.find(
+      (call) =>
+        call.text.includes("INSERT INTO platform.jobs") &&
+        call.values?.[2] === BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
+    );
+    expect(emailJob).toBeDefined();
+    const payload = JSON.parse(String(emailJob?.values?.[8]));
+    expect(payload).toMatchObject({
+      to: "finance.guest@example.test",
+      template: "booking_final_confirmation",
+      bookingReference: "B-FIN-686",
+    });
+    expect(payload.text).toContain("We look forward to welcoming you!");
+    expect(payload.text).not.toContain("You can look up your booking anytime");
+  });
+
+  it("does not enqueue final guest confirmation email for partial bank-transfer payments", async () => {
+    const target = targetManualPaymentPool();
+    const repository = createTargetFinancePropertySettingsRepository({
+      connectionString: "postgresql://finance-target",
+      pool: target.pool,
+    });
+
+    const result = await repository.recordManualPayment!(
+      manualPaymentTargetCommand({
+        payload: { paymentMethod: "bank_transfer", reference: "partial bank transfer 8812" },
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(
+      target.calls.some(
+        (call) =>
+          call.text.includes("INSERT INTO platform.jobs") &&
+          call.values?.[2] === BOOKING_FINAL_CONFIRMATION_EMAIL_JOB_TYPE,
+      ),
+    ).toBe(false);
   });
 
   it("returns financial summary with source freshness from the Finance read model", async () => {
@@ -2755,6 +2813,9 @@ function targetManualPaymentRows<T extends QueryResultRow>(
         outboxEventId: "fc000000-0000-0000-0000-000000000686",
       },
     ] as unknown as T[];
+  }
+  if (text.includes("INSERT INTO platform.jobs") && text.includes('"jobId", replay')) {
+    return [{ jobId: "fd000000-0000-0000-0000-000000000686", replay: false } as unknown as T];
   }
   if (text.includes("INSERT INTO platform.jobs")) return [];
   if (text.includes("INSERT INTO platform.product_audit_events")) return [];
