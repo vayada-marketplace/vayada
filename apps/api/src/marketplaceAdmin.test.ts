@@ -12,7 +12,9 @@ import type {
   MarketplaceAdminCreateHotelListingRequest,
   MarketplaceAdminDeleteHotelListingResponse,
   MarketplaceAdminHotelListing,
+  MarketplaceAdminInviteCode,
   MarketplaceAdminRepository,
+  MarketplaceAdminUserProfileUpdateResponse,
   MarketplaceCollaborationLifecycleWriteResponse,
   MarketplaceCollaborationRead,
 } from "./routes/marketplaceAdmin.js";
@@ -186,6 +188,42 @@ describe("marketplace admin routes", () => {
     expect(approve.body.command.action).toBe("approve_terms");
   });
 
+  it("manages invite codes through marketplace admin target routes", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const list = await injectJson<MarketplaceAdminInviteCode[]>(app, {
+      method: "GET",
+      url: "/api/marketplace/admin/invite-codes",
+      headers: { authorization: "Bearer platform-token" },
+    });
+
+    expect(list.statusCode).toBe(200);
+    expect(list.body[0]).toMatchObject({ code: "VAY-INVITE" });
+
+    const created = await injectJson<MarketplaceAdminInviteCode>(app, {
+      method: "POST",
+      url: "/api/marketplace/admin/invite-codes",
+      headers: { authorization: "Bearer platform-token" },
+      payload: { data: { property: { property_name: "Hotel Alpenrose" } } },
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(repository.calls.createInviteCode[0]).toMatchObject({
+      createdByUserId: "user_platform",
+      payload: { property: { property_name: "Hotel Alpenrose" } },
+    });
+
+    const deleted = await app.inject({
+      method: "DELETE",
+      url: "/api/marketplace/admin/invite-codes/invite_801",
+      headers: { authorization: "Bearer platform-token" },
+    });
+
+    expect(deleted.statusCode).toBe(204);
+    expect(repository.calls.revokeInviteCode).toEqual(["invite_801"]);
+  });
+
   it("creates, updates, and archives hotel listings for a hotel user through marketplace admin routes", async () => {
     const repository = createMemoryMarketplaceAdminRepository();
     app = buildMarketplaceAdminApp(repository);
@@ -234,6 +272,71 @@ describe("marketplace admin routes", () => {
       listingId: "listing_801",
       title: "Creator suite",
     });
+  });
+
+  it("updates creator and hotel profiles through marketplace admin target routes", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const creator = await injectJson<MarketplaceAdminUserProfileUpdateResponse>(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/user_creator/profile/creator",
+      headers: { authorization: "Bearer platform-token" },
+      payload: {
+        displayName: "Lina Travels",
+        locationText: "Vienna, Austria",
+        platforms: [
+          {
+            platform: "instagram",
+            handle: "@lina",
+            followerCount: 20000,
+            engagementRate: 4.2,
+          },
+        ],
+      },
+    });
+
+    expect(creator.statusCode).toBe(200);
+    expect(creator.body).toMatchObject({
+      contractVersion: "marketplace-admin.v1",
+      authorizationMode: "platform_organization_membership",
+      userId: "user_creator",
+      profileType: "creator",
+    });
+    expect(repository.calls.updateCreatorProfile[0]).toMatchObject({
+      userId: "user_creator",
+      request: { displayName: "Lina Travels" },
+    });
+
+    const hotel = await injectJson<MarketplaceAdminUserProfileUpdateResponse>(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/user_hotel/profile/hotel",
+      headers: { authorization: "Bearer platform-token" },
+      payload: { hostSummary: "Independent alpine hotel." },
+    });
+
+    expect(hotel.statusCode).toBe(200);
+    expect(hotel.body.profileType).toBe("hotel");
+    expect(repository.calls.updateHotelProfile[0]).toMatchObject({
+      userId: "user_hotel",
+      request: { hostSummary: "Independent alpine hotel." },
+    });
+  });
+
+  it("rejects unsupported hotel profile fields instead of dropping them", async () => {
+    const repository = createMemoryMarketplaceAdminRepository();
+    app = buildMarketplaceAdminApp(repository);
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/marketplace/admin/users/user_hotel/profile/hotel",
+      headers: { authorization: "Bearer platform-token" },
+      payload: { hostSummary: "Independent alpine hotel.", website: "https://hotel.example" },
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.body).toMatchObject({ code: "unsupported_website" });
+    expect(repository.calls.updateHotelProfile).toHaveLength(0);
   });
 
   it("rejects blank listing titles on marketplace admin updates", async () => {
@@ -369,6 +472,10 @@ function createMemoryMarketplaceAdminRepository(
     listCollaborations: [] as unknown[],
     respond: [] as unknown[],
     approve: [] as unknown[],
+    updateCreatorProfile: [] as unknown[],
+    updateHotelProfile: [] as unknown[],
+    createInviteCode: [] as unknown[],
+    revokeInviteCode: [] as unknown[],
     createListing: [] as unknown[],
     updateListing: [] as unknown[],
     deleteListing: [] as unknown[],
@@ -386,6 +493,25 @@ function createMemoryMarketplaceAdminRepository(
     async approveCollaborationAsHotel(input) {
       calls.approve.push(input);
       return lifecycleResponse(input.idempotencyKey, "approve_terms");
+    },
+    async updateCreatorProfileForUser(input) {
+      calls.updateCreatorProfile.push(input);
+      return profileUpdateResponse(input.authorizationMode, input.userId, "creator");
+    },
+    async updateHotelProfileForUser(input) {
+      calls.updateHotelProfile.push(input);
+      return profileUpdateResponse(input.authorizationMode, input.userId, "hotel");
+    },
+    async listInviteCodes() {
+      return [inviteCodeResponse()];
+    },
+    async createInviteCode(input) {
+      calls.createInviteCode.push(input);
+      return inviteCodeResponse("invite_created", "VAY-CREATED", input.payload);
+    },
+    async revokeInviteCode(inviteCodeId) {
+      calls.revokeInviteCode.push(inviteCodeId);
+      return inviteCodeId === "invite_801";
     },
     async createHotelListingForUser(input) {
       calls.createListing.push(input);
@@ -419,6 +545,37 @@ function lifecycleResponse(
     command: { action, idempotencyKey },
     collaboration,
     sideEffects: [{ type: "marketplace.collaboration.system_message_requested" }],
+  };
+}
+
+function profileUpdateResponse(
+  authorizationMode: MarketplaceAdminUserProfileUpdateResponse["authorizationMode"],
+  userId: string,
+  profileType: MarketplaceAdminUserProfileUpdateResponse["profileType"],
+): MarketplaceAdminUserProfileUpdateResponse {
+  return {
+    contractVersion: "marketplace-admin.v1",
+    authorizationMode,
+    userId,
+    profileType,
+    updatedAt: "2026-06-13T10:00:00.000Z",
+  };
+}
+
+function inviteCodeResponse(
+  id = "invite_801",
+  code = "VAY-INVITE",
+  setupData: unknown = {},
+): MarketplaceAdminInviteCode {
+  return {
+    id,
+    code,
+    status: "pending",
+    created_at: "2026-06-13T10:00:00.000Z",
+    expires_at: "2026-07-13T10:00:00.000Z",
+    hotel_name: null,
+    redeemed_at: null,
+    setup_data: setupData,
   };
 }
 

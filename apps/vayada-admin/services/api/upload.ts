@@ -2,9 +2,6 @@
  * Upload API service
  */
 
-import { ApiErrorResponse } from "./client";
-import { getAuthBearerToken } from "../auth/sessionStore";
-
 export interface UploadImageResponse {
   url: string;
   thumbnail_url?: string;
@@ -31,51 +28,11 @@ export const uploadService = {
     file: File,
     targetUserId: string,
   ): Promise<UploadImageResponse> => {
-    const formData = new FormData();
-    formData.append("file", file);
-
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
-
-    const token = getAuthBearerToken();
-
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    // Don't set Content-Type for FormData - browser will set it with boundary
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/upload/image/creator-profile?target_user_id=${targetUserId}`,
-        {
-          method: "POST",
-          headers,
-          body: formData,
-        },
-      );
-
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type");
-        const hasJsonContent = contentType && contentType.includes("application/json");
-
-        let errorData: any;
-        if (hasJsonContent) {
-          errorData = await response.json();
-        } else {
-          errorData = { detail: (await response.text()) || "Upload failed" };
-        }
-
-        throw new ApiErrorResponse(response.status, errorData);
-      }
-
-      const data: UploadImageResponse = await response.json();
-      return data;
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        throw error;
-      }
-      throw new Error("Failed to upload image");
-    }
+    void file;
+    void targetUserId;
+    throw new Error(
+      "Creator profile uploads require Platform/Admin media publication. See VAY-984.",
+    );
   },
 
   /**
@@ -88,51 +45,9 @@ export const uploadService = {
     files: File[],
     targetUserId: string,
   ): Promise<UploadListingImagesResponse> => {
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
-
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
-
-    const token = getAuthBearerToken();
-
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    // Don't set Content-Type for FormData - browser will set it with boundary
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/upload/images/listing?target_user_id=${targetUserId}`,
-        {
-          method: "POST",
-          headers,
-          body: formData,
-        },
-      );
-
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type");
-        const hasJsonContent = contentType && contentType.includes("application/json");
-
-        let errorData: any;
-        if (hasJsonContent) {
-          errorData = await response.json();
-        } else {
-          errorData = { detail: (await response.text()) || "Upload failed" };
-        }
-
-        throw new ApiErrorResponse(response.status, errorData);
-      }
-
-      const data: UploadListingImagesResponse = await response.json();
-      return data;
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        throw error;
-      }
-      throw new Error("Failed to upload listing images");
-    }
+    void files;
+    void targetUserId;
+    throw new Error("Listing uploads require Platform/Admin media publication. See VAY-984.");
   },
 
   /**
@@ -145,54 +60,8 @@ export const uploadService = {
     file: File,
     targetUserId: string,
   ): Promise<UploadImageResponse> => {
-    const formData = new FormData();
-    formData.append("files", file);
-
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.marketplace.localhost";
-
-    const token = getAuthBearerToken();
-
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    // Don't set Content-Type for FormData - browser will set it with boundary
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/upload/images?target_user_id=${targetUserId}&prefix=hotels`,
-        {
-          method: "POST",
-          headers,
-          body: formData,
-        },
-      );
-
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type");
-        const hasJsonContent = contentType && contentType.includes("application/json");
-
-        let errorData: any;
-        if (hasJsonContent) {
-          errorData = await response.json();
-        } else {
-          errorData = { detail: (await response.text()) || "Upload failed" };
-        }
-
-        throw new ApiErrorResponse(response.status, errorData);
-      }
-
-      const data: UploadListingImagesResponse = await response.json();
-      // Return the first image from the response
-      if (data.images && data.images.length > 0) {
-        return data.images[0];
-      }
-      throw new Error("No image returned from upload");
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        throw error;
-      }
-      throw new Error("Failed to upload hotel profile image");
-    }
+    void file;
+    void targetUserId;
+    throw new Error("Hotel profile uploads require Platform/Admin media publication. See VAY-984.");
   },
 };

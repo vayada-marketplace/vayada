@@ -433,6 +433,22 @@ function UserDetailContent() {
       setSaveError("");
       setSaveSuccess("");
 
+      if (userDetail.type === "hotel" && userDetail.profile) {
+        const hotelProfile = userDetail.profile as HotelProfileDetail;
+        const unsupportedHotelProfileFields = [
+          editFormData.name !== hotelProfile.name ? "name" : null,
+          editFormData.location !== hotelProfile.location ? "location" : null,
+          editFormData.email !== hotelProfile.email ? "email" : null,
+          editFormData.website !== hotelProfile.website ? "website" : null,
+          editFormData.phone !== hotelProfile.phone ? "phone" : null,
+        ].filter((field): field is string => Boolean(field));
+        if (unsupportedHotelProfileFields.length > 0) {
+          throw new Error(
+            `Hotel profile target route only supports about. Unsupported fields: ${unsupportedHotelProfileFields.join(", ")}.`,
+          );
+        }
+      }
+
       // Update account fields (status, emailVerified, email, name) for all user types
       const accountUpdateData: any = {};
       if (editFormData.status !== userDetail.status) {
@@ -540,23 +556,8 @@ function UserDetailContent() {
         const profileUpdateData: any = {};
         const hotelProfile = userDetail.profile as HotelProfileDetail;
 
-        if (editFormData.name !== hotelProfile.name) {
-          profileUpdateData.name = editFormData.name;
-        }
-        if (editFormData.location !== hotelProfile.location) {
-          profileUpdateData.location = editFormData.location || null;
-        }
-        if (editFormData.email !== hotelProfile.email) {
-          profileUpdateData.email = editFormData.email;
-        }
         if (editFormData.about !== hotelProfile.about) {
           profileUpdateData.about = editFormData.about || null;
-        }
-        if (editFormData.website !== hotelProfile.website) {
-          profileUpdateData.website = editFormData.website || null;
-        }
-        if (editFormData.phone !== hotelProfile.phone) {
-          profileUpdateData.phone = editFormData.phone || null;
         }
 
         await usersService.updateHotelProfile(userDetail.id, profileUpdateData);
@@ -584,7 +585,9 @@ function UserDetailContent() {
           setSaveError((err.data.detail as string) || "Failed to update profile");
         }
       } else {
-        setSaveError("Failed to update profile. Please try again.");
+        setSaveError(
+          err instanceof Error ? err.message : "Failed to update profile. Please try again.",
+        );
       }
     } finally {
       setSaving(false);

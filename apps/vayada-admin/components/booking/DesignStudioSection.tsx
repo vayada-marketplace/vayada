@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { PhotoIcon, XMarkIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import { bookingSettingsService } from "@/services/booking";
 import { COLOR_PRESETS, FONT_PAIRINGS } from "@/lib/constants/booking";
-import { getAuthBearerToken } from "@/services/auth/sessionStore";
+import { uploadSingleImage } from "@/lib/utils/uploadImage";
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Italiana&display=swap";
@@ -85,33 +85,15 @@ export default function DesignStudioSection({ hotelId }: { hotelId: string }) {
     // Upload to S3 via PMS API
     try {
       setUploading(true);
-      const pmsUrl = process.env.NEXT_PUBLIC_PMS_URL || "https://pms-api.vayada.com";
-      const token = getAuthBearerToken();
-      const formData = new FormData();
-      formData.append("files", file);
+      const imageUrl = await uploadSingleImage(file);
+      URL.revokeObjectURL(previewUrl);
+      setHeroImage(imageUrl);
 
-      const res = await fetch(`${pmsUrl}/upload/images`, {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error("Upload failed");
-
-      const data = await res.json();
-      if (data.images?.[0]?.url) {
-        URL.revokeObjectURL(previewUrl);
-        const s3Url = data.images[0].url;
-        setHeroImage(s3Url);
-
-        // Auto-save hero image to backend so it persists on reload
-        try {
-          await bookingSettingsService.updateDesignSettings(hotelId, { hero_image: s3Url });
-        } catch {
-          console.error("Failed to auto-save hero image");
-        }
-      } else {
-        throw new Error("No image URL returned");
+      // Auto-save hero image to backend so it persists on reload
+      try {
+        await bookingSettingsService.updateDesignSettings(hotelId, { hero_image: imageUrl });
+      } catch {
+        setFeedback({ type: "error", message: "Failed to save design settings" });
       }
     } catch (err) {
       console.error("Image upload failed:", err);
