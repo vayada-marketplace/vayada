@@ -132,6 +132,8 @@ import type {
   PmsRoom,
   PmsRoomBlockSummary,
   PmsRoomType,
+  PmsRoomTypeCommandResponse,
+  PmsRoomTypeCreateCommand,
 } from "./routes/pmsOperations.js";
 import { createTargetBookingReservationsReadRepository } from "./platform/bookingReservations.js";
 
@@ -1326,6 +1328,7 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   checkoutChargeWaives: PmsCheckoutChargeWaiveCommand[];
   noteCreates: PmsPrivateNoteCreateCommand[];
   noteDeletes: PmsPrivateNoteDeleteCommand[];
+  roomTypeCreates: PmsRoomTypeCreateCommand[];
   templateUpdates: PmsOperationalTemplateUpdateCommand[];
   outboxEnqueues: string[];
   auditEvents: string[];
@@ -1343,6 +1346,7 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
   const checkoutChargeWaives: PmsCheckoutChargeWaiveCommand[] = [];
   const noteCreates: PmsPrivateNoteCreateCommand[] = [];
   const noteDeletes: PmsPrivateNoteDeleteCommand[] = [];
+  const roomTypeCreates: PmsRoomTypeCreateCommand[] = [];
   const templateUpdates: PmsOperationalTemplateUpdateCommand[] = [];
   const outboxEnqueues: string[] = [];
   const auditEvents: string[] = [];
@@ -1415,9 +1419,78 @@ function createPmsOperationsCommandRepository(): PmsOperationsCommandRepository 
     checkoutChargeWaives,
     noteCreates,
     noteDeletes,
+    roomTypeCreates,
     templateUpdates,
     outboxEnqueues,
     auditEvents,
+    async createRoomType(command) {
+      roomTypeCreates.push(command);
+      if (command.idempotencyKey === "room-type-create-conflict") {
+        return {
+          ok: false,
+          statusCode: 409,
+          code: "idempotency_conflict",
+          message: "Room type create idempotency key was already used.",
+        };
+      }
+      const ratePlans: PmsRoomType["ratePlans"] = [
+        {
+          ratePlanId: "f6855200-0000-0000-0000-000000000003",
+          code: "FLEX",
+          name: "Flexible",
+          rateType: "flexible",
+          mealPlan: null,
+          baseRate: command.baseRate,
+          active: true,
+        },
+      ];
+      if (command.nonRefundableRate) {
+        ratePlans.push({
+          ratePlanId: "f6855200-0000-0000-0000-000000000004",
+          code: "NRF",
+          name: "Non-refundable",
+          rateType: "non_refundable",
+          mealPlan: null,
+          baseRate: command.nonRefundableRate,
+          active: true,
+        });
+      }
+      const roomType: PmsRoomType = {
+        roomTypeId: "f6855000-0000-0000-0000-000000000003",
+        name: command.name,
+        description: command.description,
+        category: command.category,
+        occupancyLimits: command.occupancyLimits,
+        attributes: command.attributes,
+        amenities: command.amenities,
+        media: command.media,
+        baseRate: command.baseRate,
+        active: command.active,
+        sortOrder: command.sortOrder,
+        ratePlans,
+        rateRulesSummary: {
+          minStayNights: null,
+          maxStayNights: null,
+          closedToArrival: false,
+          closedToDeparture: false,
+          activeRuleCount: 0,
+        },
+        roomCount: command.roomCount,
+      };
+      auditEvents.push(`room_type_created:${roomType.roomTypeId}`);
+      outboxEnqueues.push(`ari_changed:${roomType.roomTypeId}`);
+      return {
+        ok: true,
+        roomType,
+        commandMeta: {
+          contractVersion: "pms-operations.v1",
+          commandId: command.commandId,
+          idempotencyKey: command.idempotencyKey,
+          acceptedAt: "2026-08-14T17:40:00.000Z",
+          sideEffects: ["ari_changed", "audit_event"],
+        },
+      };
+    },
     async getOperationalTemplate(propertyId, templateKind) {
       expect(propertyId).toBe(pmsPropertyId);
       return structuredClone(
@@ -8935,6 +9008,315 @@ describe("vayada-api", () => {
         name: "Alpine Suite",
       },
     });
+  });
+
+  it("creates a PMS room type through the target property-scoped route", async () => {
+    const commandRepository = createPmsOperationsCommandRepository();
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: commandRepository,
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+      payload: {
+        commandId: "cmd-room-type-create-001",
+        idempotencyKey: "room-type-create-001",
+        name: "Loft Suite",
+        category: "suite",
+        description: "Top-floor suite.",
+        maxAdults: 2,
+        maxChildren: 2,
+        maxOccupancy: 4,
+        baseRate: 0,
+        currency: "eur",
+        seasons: [{ name: "Default", rate: "240", from: "01-01", to: "12-31", minStay: 1 }],
+        nonRefundableEnabled: true,
+        nonRefundableRate: 216,
+        amenities: ["wifi", "terrace"],
+        images: [
+          { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
+          "https://cdn.vayada.example/loft-balcony.jpg",
+        ],
+        totalRooms: 3,
+        sortOrder: 7,
+      },
+      headers: {
+        authorization: "Bearer valid-token",
+        "x-hotel-id": "legacy-booking-hotel-should-be-ignored",
+      },
+    });
+    const body = response.body as PmsRoomTypeCommandResponse;
+
+    expect(response.statusCode).toBe(200);
+    expect(body).toMatchObject({
+      contractVersion: "pms-operations.v1",
+      propertyId: pmsPropertyId,
+      item: {
+        name: "Loft Suite",
+        category: "suite",
+        baseRate: { amountDecimal: "240.00", currency: "EUR" },
+        ratePlans: [
+          { code: "FLEX", baseRate: { amountDecimal: "240.00", currency: "EUR" } },
+          { code: "NRF", baseRate: { amountDecimal: "216.00", currency: "EUR" } },
+        ],
+        media: [
+          { url: "https://cdn.vayada.example/loft.jpg", altText: "Loft Suite" },
+          { url: "https://cdn.vayada.example/loft-balcony.jpg" },
+        ],
+        roomCount: 3,
+      },
+      commandMeta: {
+        commandId: "cmd-room-type-create-001",
+        idempotencyKey: "room-type-create-001",
+        sideEffects: ["ari_changed", "audit_event"],
+      },
+    });
+    expect(commandRepository.roomTypeCreates).toHaveLength(1);
+    expect(commandRepository.roomTypeCreates[0]).toMatchObject({
+      propertyId: pmsPropertyId,
+      name: "Loft Suite",
+      baseRate: { amountDecimal: "240.00", currency: "EUR" },
+      nonRefundableRate: { amountDecimal: "216.00", currency: "EUR" },
+      roomCount: 3,
+      audit: {
+        actor: {
+          kind: "user",
+          userId: "user_hotel_owner",
+        },
+      },
+    });
+    expect(commandRepository.outboxEnqueues).toEqual([
+      "ari_changed:f6855000-0000-0000-0000-000000000003",
+    ]);
+    expect(commandRepository.auditEvents).toEqual([
+      "room_type_created:f6855000-0000-0000-0000-000000000003",
+    ]);
+  });
+
+  it("rejects PMS room-type create payloads without command metadata", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+      payload: { name: "Loft Suite", baseRate: 240, currency: "EUR" },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toMatchObject({
+      code: "invalid_body",
+      message: "Room type create requires commandId, idempotencyKey, and name.",
+    });
+  });
+
+  it("rejects invalid PMS room-type create numeric inputs", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+
+    const cases = [
+      {
+        patch: { totalRooms: "1.5" },
+        message: "Room type create totalRooms must be a non-negative integer.",
+      },
+      {
+        patch: { nonRefundableEnabled: true },
+        message:
+          "Room type create non-refundable rate requires a valid nonRefundableRate or nonRefundableDiscount.",
+      },
+      {
+        patch: { baseRate: "240.999" },
+        message: "Room type create requires a valid baseRate.",
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+        payload: {
+          commandId: `cmd-room-type-invalid-${index}`,
+          idempotencyKey: `room-type-invalid-${index}`,
+          name: "Loft Suite",
+          baseRate: "240.00",
+          currency: "EUR",
+          ...testCase.patch,
+        },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toMatchObject({
+        code: "invalid_body",
+        message: testCase.message,
+      });
+    }
+  });
+
+  it("returns idempotency conflicts from PMS room-type create", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+
+    const response = await injectJson(app, {
+      method: "POST",
+      url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+      payload: {
+        commandId: "cmd-room-type-create-conflict",
+        idempotencyKey: "room-type-create-conflict",
+        name: "Loft Suite",
+        baseRate: 240,
+        currency: "EUR",
+      },
+      headers: { authorization: "Bearer valid-token" },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toMatchObject({
+      code: "idempotency_conflict",
+      category: "conflict",
+    });
+  });
+
+  it("enforces the PMS room-type create authorization matrix", async () => {
+    const pmsEntitlement: ProductEntitlement = {
+      product: "pms",
+      key: "property-management",
+      status: "active",
+      resource: {
+        product: "pms",
+        resourceType: "pms_property",
+        resourceId: pmsPropertyId,
+      },
+    };
+    const payload = {
+      commandId: "cmd-room-type-auth",
+      idempotencyKey: "room-type-auth",
+      name: "Loft Suite",
+      baseRate: 240,
+      currency: "EUR",
+    };
+    const cases = [
+      {
+        name: "missing auth",
+        appOptions: { pmsOperationsCommandRepository: createPmsOperationsCommandRepository() },
+        headers: undefined,
+        status: 401,
+        code: "unauthenticated",
+      },
+      {
+        name: "invalid auth",
+        appOptions: { pmsOperationsCommandRepository: createPmsOperationsCommandRepository() },
+        headers: { authorization: "Bearer invalid-token" },
+        status: 401,
+        code: "unauthenticated",
+      },
+      {
+        name: "missing permission",
+        appOptions: {
+          permissions: [] as PermissionKey[],
+          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+        },
+        headers: { authorization: "Bearer valid-token" },
+        status: 403,
+        code: "missing_permission",
+      },
+      {
+        name: "missing entitlement",
+        appOptions: {
+          permissions: ["pms.operations.manage"] as PermissionKey[],
+          entitlements: [] as ProductEntitlement[],
+          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+        },
+        headers: { authorization: "Bearer valid-token" },
+        status: 403,
+        code: "missing_entitlement",
+      },
+      {
+        name: "inactive entitlement",
+        appOptions: {
+          permissions: ["pms.operations.manage"] as PermissionKey[],
+          entitlements: [{ ...pmsEntitlement, status: "suspended" as const }],
+          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+        },
+        headers: { authorization: "Bearer valid-token" },
+        status: 403,
+        code: "inactive_entitlement",
+      },
+      {
+        name: "missing property link",
+        appOptions: {
+          permissions: ["pms.operations.manage"] as PermissionKey[],
+          entitlements: [pmsEntitlement],
+          linkedPmsPropertyId: "f6853000-0000-0000-0000-000000000099",
+          pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+        },
+        headers: { authorization: "Bearer valid-token" },
+        status: 403,
+        code: "missing_resource_access",
+      },
+    ];
+
+    for (const testCase of cases) {
+      app = buildAuthenticatedApp(testCase.appOptions);
+      const response = await injectJson(app, {
+        method: "POST",
+        url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+        payload,
+        headers: testCase.headers,
+      });
+      await app.close();
+      app = null;
+
+      expect(response.statusCode, testCase.name).toBe(testCase.status);
+      expect((response.body as { code: string }).code, testCase.name).toBe(testCase.code);
+    }
   });
 
   it("returns PMS calendar days and room blocks using the P1b route contract fixture", async () => {

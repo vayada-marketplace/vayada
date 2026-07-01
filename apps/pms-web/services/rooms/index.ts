@@ -230,6 +230,21 @@ export interface PmsOperationsDetailResponse<T> {
   sourceFreshness: Record<string, string | number | boolean | null>;
 }
 
+export interface PmsOperationsCommandMeta {
+  contractVersion: PmsOperationsContractVersion;
+  commandId: string;
+  idempotencyKey: string;
+  acceptedAt: string;
+  sideEffects: Array<"calendar_refresh" | "ari_changed" | "audit_event">;
+}
+
+export interface PmsOperationsCommandResponse<T> {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  item: T;
+  commandMeta: PmsOperationsCommandMeta;
+}
+
 export interface RoomCreate {
   roomTypeId: string;
   roomNumber: string;
@@ -403,7 +418,15 @@ export const roomsService = {
     return toRoomType(response.propertyId, response.item);
   },
 
-  create: (data: RoomTypeCreate) => pmsClient.post<RoomType>("/admin/room-types", data),
+  create: async (data: RoomTypeCreate) => {
+    if (!isPmsOperationsReadModelEnabled()) {
+      return pmsClient.post<RoomType>("/admin/room-types", data);
+    }
+
+    const propertyId = await resolveSelectedPmsPropertyId("creating room type");
+    const response = await pmsOperationsRoomsReadService.createRoomType(propertyId, data);
+    return toRoomType(response.propertyId, response.item);
+  },
 
   update: (id: string, data: RoomTypeUpdate) =>
     pmsClient.patch<RoomType>(`/admin/room-types/${id}`, data),
@@ -439,4 +462,22 @@ export const pmsOperationsRoomsReadService = {
       pmsOperationsRequestOptions,
     );
   },
+
+  createRoomType: (propertyId: string, data: RoomTypeCreate) => {
+    assertPmsOperationsReadModelEnabled();
+    const commandId = randomCommandId("pms-room-type-create");
+    return pmsOperationsClient.post<PmsOperationsCommandResponse<PmsOperationsRoomType>>(
+      `/api/pms/properties/${encodeURIComponent(propertyId)}/room-types`,
+      {
+        ...data,
+        commandId,
+        idempotencyKey: commandId,
+      },
+      pmsOperationsRequestOptions,
+    );
+  },
 };
+
+function randomCommandId(prefix: string): string {
+  return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
+}

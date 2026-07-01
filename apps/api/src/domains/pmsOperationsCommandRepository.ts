@@ -34,6 +34,9 @@ import {
   type PmsPrivateNoteCreateCommand,
   type PmsPrivateNoteDeleteCommand,
   type PmsPrivateNoteDeleteResult,
+  type PmsRoomType,
+  type PmsRoomTypeCommandResult,
+  type PmsRoomTypeCreateCommand,
 } from "../routes/pmsOperations.js";
 
 export type PmsOperationsCommandClient = {
@@ -96,6 +99,7 @@ type PmsCheckoutChargeOperation =
   | "checkout_charge_create"
   | "checkout_charge_mark_paid"
   | "checkout_charge_waive";
+type PmsRoomTypeCommandOperation = "room_type_create";
 
 const ALLOWED_OPERATIONAL_STATUS_TRANSITIONS: ReadonlyMap<
   string,
@@ -175,6 +179,108 @@ export function createTargetPmsOperationsCommandRepository(
   const now = config.now ?? (() => new Date());
 
   return {
+    async createRoomType(command) {
+      const client = await pool.connect();
+      const acceptedAt = now().toISOString();
+      const keyHash = sha256(command.idempotencyKey);
+      const requestFingerprintHash = sha256(stableJson(roomTypeCommandFingerprint(command)));
+      const commandMeta: PmsCommandMeta = {
+        contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+        commandId: command.commandId,
+        idempotencyKey: command.idempotencyKey,
+        acceptedAt,
+        sideEffects: ["ari_changed", "audit_event"],
+      };
+
+      try {
+        await client.query("BEGIN");
+        const replay = await findRoomTypeCommandReplay(
+          client,
+          "room_type_create",
+          command,
+          keyHash,
+          requestFingerprintHash,
+        );
+        if (replay) {
+          await client.query("ROLLBACK");
+          return replay;
+        }
+
+        const insertedIdempotencyKey = await recordRoomTypeCommandIdempotency(
+          client,
+          "room_type_create",
+          command,
+          keyHash,
+          requestFingerprintHash,
+          acceptedAt,
+        );
+        if (!insertedIdempotencyKey) {
+          const replay = await findRoomTypeCommandReplay(
+            client,
+            "room_type_create",
+            command,
+            keyHash,
+            requestFingerprintHash,
+          );
+          await client.query("ROLLBACK");
+          return (
+            replay ??
+            roomTypeConflict(
+              "idempotency_conflict",
+              "Room type create idempotency key could not be reserved.",
+            )
+          );
+        }
+
+        const roomTypeId = await insertRoomType(client, command, acceptedAt);
+        const ratePlans = await insertRoomTypeRatePlans(client, command, roomTypeId, acceptedAt);
+        const insertedRoomCount = await insertInitialRooms(client, command, roomTypeId, acceptedAt);
+        if (insertedRoomCount !== command.roomCount) {
+          await client.query("ROLLBACK");
+          return roomTypeConflict(
+            "room_type_conflict",
+            "Generated room numbers conflict with existing rooms.",
+          );
+        }
+        const created = roomTypeFromCommand(command, roomTypeId, ratePlans);
+
+        await enqueueRoomTypeCreateSideEffects(
+          client,
+          command,
+          created,
+          commandMeta,
+          keyHash,
+          acceptedAt,
+        );
+        await insertRoomTypeAuditEvent(client, command, created, commandMeta, keyHash);
+        await completeRoomTypeCommandIdempotency(
+          client,
+          "room_type_create",
+          command,
+          keyHash,
+          commandMeta,
+          acceptedAt,
+          created,
+        );
+        await client.query("COMMIT");
+        return { ok: true, roomType: created, commandMeta };
+      } catch (error) {
+        await rollbackQuietly(client);
+        if (isPgUniqueViolation(error)) {
+          return roomTypeConflict(
+            "room_type_conflict",
+            "Room type create conflicts with the current property state.",
+          );
+        }
+        if (isPgForeignKeyViolation(error)) {
+          return roomTypeInvalidBody("Room type create references a property that does not exist.");
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
     async listCheckoutCharges(propertyId, guestBookingId) {
       const client = await pool.connect();
       try {
@@ -1091,6 +1197,553 @@ async function listCheckoutCharges(
     [propertyId, guestBookingId],
   );
   return result.rows.map(toPmsCheckoutCharge);
+}
+
+async function insertRoomType(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeCreateCommand,
+  acceptedAt: string,
+): Promise<string> {
+  const result = await client.query<{ roomTypeId: string }>(
+    `INSERT INTO pms.room_types (
+       property_id,
+       name,
+       description,
+       category,
+       occupancy_limits,
+       room_attributes,
+       amenities_snapshot,
+       media_snapshot,
+       base_rate_amount,
+       currency,
+       active,
+       sort_order,
+       created_at,
+       updated_at
+     )
+     VALUES (
+       $1::uuid,
+       $2,
+       $3,
+       $4,
+       $5::jsonb,
+       $6::jsonb,
+       $7::jsonb,
+       $8::jsonb,
+       $9::numeric,
+       $10,
+       $11,
+       $12::integer,
+       $13::timestamptz,
+       $13::timestamptz
+     )
+     RETURNING id::text AS "roomTypeId"`,
+    [
+      command.propertyId,
+      command.name,
+      command.description,
+      command.category,
+      JSON.stringify(command.occupancyLimits),
+      JSON.stringify(command.attributes),
+      JSON.stringify(command.amenities),
+      JSON.stringify(command.media),
+      command.baseRate.amountDecimal,
+      command.baseRate.currency,
+      command.active,
+      command.sortOrder,
+      acceptedAt,
+    ],
+  );
+  return result.rows[0]!.roomTypeId;
+}
+
+async function insertRoomTypeRatePlans(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeCreateCommand,
+  roomTypeId: string,
+  acceptedAt: string,
+): Promise<PmsRoomType["ratePlans"]> {
+  const ratePlans: PmsRoomType["ratePlans"] = [
+    await insertRoomTypeRatePlan(client, command, roomTypeId, acceptedAt, {
+      code: "FLEX",
+      name: "Flexible",
+      rateType: "flexible",
+      baseRate: command.baseRate,
+    }),
+  ];
+  if (command.nonRefundableRate) {
+    ratePlans.push(
+      await insertRoomTypeRatePlan(client, command, roomTypeId, acceptedAt, {
+        code: "NRF",
+        name: "Non-refundable",
+        rateType: "non_refundable",
+        baseRate: command.nonRefundableRate,
+      }),
+    );
+  }
+  return ratePlans;
+}
+
+async function insertRoomTypeRatePlan(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeCreateCommand,
+  roomTypeId: string,
+  acceptedAt: string,
+  ratePlan: Pick<PmsRoomType["ratePlans"][number], "code" | "name" | "rateType" | "baseRate">,
+): Promise<PmsRoomType["ratePlans"][number]> {
+  const result = await client.query<{ ratePlanId: string }>(
+    `INSERT INTO pms.rate_plans (
+       property_id,
+       room_type_id,
+       code,
+       name,
+       rate_type,
+       base_rate_amount,
+       currency,
+       active,
+       created_at,
+       updated_at
+     )
+     VALUES (
+       $1::uuid,
+       $2::uuid,
+       $3,
+       $4,
+       $5,
+       $6::numeric,
+       $7,
+       TRUE,
+       $8::timestamptz,
+       $8::timestamptz
+     )
+     ON CONFLICT (property_id, room_type_id, code) DO UPDATE
+     SET base_rate_amount = EXCLUDED.base_rate_amount,
+         currency = EXCLUDED.currency,
+         updated_at = EXCLUDED.updated_at
+     RETURNING id::text AS "ratePlanId"`,
+    [
+      command.propertyId,
+      roomTypeId,
+      ratePlan.code,
+      ratePlan.name,
+      ratePlan.rateType,
+      ratePlan.baseRate.amountDecimal,
+      ratePlan.baseRate.currency,
+      acceptedAt,
+    ],
+  );
+  return {
+    ratePlanId: result.rows[0]!.ratePlanId,
+    code: ratePlan.code,
+    name: ratePlan.name,
+    rateType: ratePlan.rateType,
+    mealPlan: null,
+    baseRate: ratePlan.baseRate,
+    active: true,
+  };
+}
+
+async function insertInitialRooms(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeCreateCommand,
+  roomTypeId: string,
+  acceptedAt: string,
+): Promise<number> {
+  if (command.roomCount === 0) return 0;
+  const result = await client.query(
+    `INSERT INTO pms.rooms (
+       property_id,
+       room_type_id,
+       room_number,
+       status,
+       sort_order,
+       room_metadata,
+       created_at,
+       updated_at
+     )
+     SELECT
+       $1::uuid,
+       $2::uuid,
+       concat($3::text, ' ', room_number_seed.max_suffix + source.n),
+       'available',
+       source.n,
+       jsonb_build_object('roomTypeName', $3::text),
+       $5::timestamptz,
+       $5::timestamptz
+     FROM (
+       SELECT COALESCE(
+         MAX(NULLIF(regexp_replace(room_number, '^.*[^0-9]', ''), '')::integer),
+         0
+       ) AS max_suffix
+       FROM pms.rooms
+       WHERE property_id = $1::uuid
+         AND left(room_number, char_length($3::text) + 1) = $3::text || ' '
+     ) room_number_seed
+     CROSS JOIN generate_series(1, $4::integer) AS source(n)
+     ON CONFLICT (property_id, room_number) DO NOTHING
+     RETURNING id`,
+    [command.propertyId, roomTypeId, command.name, command.roomCount, acceptedAt],
+  );
+  return result.rowCount ?? result.rows.length;
+}
+
+function roomTypeFromCommand(
+  command: PmsRoomTypeCreateCommand,
+  roomTypeId: string,
+  ratePlans: PmsRoomType["ratePlans"],
+): PmsRoomType {
+  return {
+    roomTypeId,
+    name: command.name,
+    description: command.description,
+    category: command.category,
+    occupancyLimits: command.occupancyLimits,
+    attributes: command.attributes,
+    amenities: command.amenities,
+    media: command.media,
+    baseRate: command.baseRate,
+    active: command.active,
+    sortOrder: command.sortOrder,
+    ratePlans,
+    rateRulesSummary: {
+      minStayNights: null,
+      maxStayNights: null,
+      closedToArrival: false,
+      closedToDeparture: false,
+      activeRuleCount: 0,
+    },
+    roomCount: command.roomCount,
+  };
+}
+
+async function findRoomTypeCommandReplay(
+  client: PmsOperationsCommandClient,
+  operation: PmsRoomTypeCommandOperation,
+  command: PmsRoomTypeCreateCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+): Promise<PmsRoomTypeCommandResult | null> {
+  const result = await client.query<PmsIdempotencyRow>(
+    `SELECT
+       status,
+       request_fingerprint_hash AS "requestFingerprintHash",
+       idempotency_metadata AS "idempotencyMetadata"
+     FROM platform.idempotency_keys
+     WHERE operation_scope = 'pms'
+       AND operation = $1
+       AND key_hash = $2
+       AND tenant_scope = 'property'
+       AND property_id = $3::uuid
+     FOR UPDATE`,
+    [operation, keyHash, command.propertyId],
+  );
+  const existing = result.rows[0];
+  if (!existing) return null;
+  if (existing.requestFingerprintHash !== requestFingerprintHash) {
+    return roomTypeConflict(
+      "idempotency_conflict",
+      "Idempotency key was used with a different room type command.",
+    );
+  }
+  if (existing.status !== "completed") {
+    return roomTypeConflict("idempotency_conflict", "Room type command is already in progress.");
+  }
+
+  const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
+  const roomType = existing.idempotencyMetadata?.["roomType"];
+  if (!isPmsCommandMeta(commandMeta) || !isPmsRoomType(roomType)) {
+    return roomTypeConflict(
+      "idempotency_conflict",
+      "Room type command replay metadata is unavailable.",
+    );
+  }
+  return { ok: true, roomType, commandMeta, replayed: true };
+}
+
+async function recordRoomTypeCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  operation: PmsRoomTypeCommandOperation,
+  command: PmsRoomTypeCreateCommand,
+  keyHash: string,
+  requestFingerprintHash: string,
+  acceptedAt: string,
+): Promise<boolean> {
+  const result = await client.query(
+    `INSERT INTO platform.idempotency_keys (
+       operation_scope,
+       operation,
+       key_hash,
+       request_fingerprint_hash,
+       status,
+       tenant_scope,
+       property_id,
+       correlation_id,
+       expires_at,
+       idempotency_metadata
+     )
+     VALUES (
+       'pms',
+       $1,
+       $2,
+       $3,
+       'in_progress',
+       'property',
+       $4::uuid,
+       $5,
+       $6::timestamptz + interval '24 hours',
+       $7::jsonb
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      operation,
+      keyHash,
+      requestFingerprintHash,
+      command.propertyId,
+      command.audit.correlationId ?? command.audit.requestId,
+      acceptedAt,
+      JSON.stringify({ commandId: command.commandId, audit: command.audit }),
+    ],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+async function completeRoomTypeCommandIdempotency(
+  client: PmsOperationsCommandClient,
+  operation: PmsRoomTypeCommandOperation,
+  command: PmsRoomTypeCreateCommand,
+  keyHash: string,
+  commandMeta: PmsCommandMeta,
+  acceptedAt: string,
+  roomType: PmsRoomType,
+): Promise<void> {
+  const idempotencyMetadata = { commandMeta, roomType };
+  await client.query(
+    `UPDATE platform.idempotency_keys
+     SET status = 'completed',
+         response_status_code = 200,
+         response_resource_product = 'pms',
+         response_resource_type = 'room_type',
+         response_resource_id = $1,
+         response_body_hash = $2,
+         completed_at = $3::timestamptz,
+         last_seen_at = $3::timestamptz,
+         idempotency_metadata = $4::jsonb
+     WHERE operation_scope = 'pms'
+       AND operation = $5
+       AND key_hash = $6
+       AND tenant_scope = 'property'
+       AND property_id = $7::uuid`,
+    [
+      roomType.roomTypeId,
+      sha256(stableJson(idempotencyMetadata)),
+      acceptedAt,
+      JSON.stringify(idempotencyMetadata),
+      operation,
+      keyHash,
+      command.propertyId,
+    ],
+  );
+}
+
+async function enqueueRoomTypeCreateSideEffects(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeCreateCommand,
+  roomType: PmsRoomType,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+  acceptedAt: string,
+): Promise<void> {
+  const domainEvent = await client.query<{ eventId: string }>(
+    `WITH inserted AS (
+       INSERT INTO platform.domain_events (
+         source_system,
+         event_key,
+         event_type,
+         event_version,
+         occurred_at,
+         tenant_scope,
+         property_id,
+         resource_product,
+         resource_type,
+         resource_id,
+         correlation_id,
+         causation_id,
+         idempotency_key_hash,
+         payload,
+         event_metadata
+       )
+       VALUES (
+         'pms',
+         $1,
+         'pms.inventory.ari_changed',
+         1,
+         $2::timestamptz,
+         'property',
+         $3::uuid,
+         'pms',
+         'room_type',
+         $4,
+         $5,
+         $6,
+         $7,
+         $8::jsonb,
+         $9::jsonb
+       )
+       ON CONFLICT (source_system, event_key) DO NOTHING
+       RETURNING id::text AS "eventId"
+     )
+     SELECT "eventId" FROM inserted
+     UNION ALL
+     SELECT id::text AS "eventId"
+     FROM platform.domain_events
+     WHERE source_system = 'pms'
+       AND event_key = $1
+     LIMIT 1`,
+    [
+      `pms.room_type.created.property.${command.propertyId}.key.${keyHash}.v1`,
+      acceptedAt,
+      command.propertyId,
+      roomType.roomTypeId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      keyHash,
+      JSON.stringify({ propertyId: command.propertyId, roomTypeId: roomType.roomTypeId }),
+      JSON.stringify({ commandMeta, contractVersion: PMS_OPERATIONS_CONTRACT_VERSION }),
+    ],
+  );
+
+  await client.query(
+    `INSERT INTO platform.outbox_events (
+       domain_event_id,
+       outbox_key,
+       destination,
+       event_type,
+       tenant_scope,
+       property_id,
+       resource_product,
+       resource_type,
+       resource_id,
+       correlation_id,
+       idempotency_key_hash,
+       payload,
+       outbox_metadata
+     )
+     VALUES (
+       $1::uuid,
+       $2,
+       'pms.channel-manager',
+       'pms.inventory.ari_changed',
+       'property',
+       $3::uuid,
+       'pms',
+       'room_type',
+       $4,
+       $5,
+       $6,
+       $7::jsonb,
+       $8::jsonb
+     )
+     ON CONFLICT (destination, outbox_key) DO NOTHING`,
+    [
+      domainEvent.rows[0]!.eventId,
+      `pms.ari_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
+      command.propertyId,
+      roomType.roomTypeId,
+      command.audit.correlationId ?? command.audit.requestId,
+      keyHash,
+      JSON.stringify({ propertyId: command.propertyId, roomTypeId: roomType.roomTypeId }),
+      JSON.stringify({ sideEffects: commandMeta.sideEffects }),
+    ],
+  );
+}
+
+async function insertRoomTypeAuditEvent(
+  client: PmsOperationsCommandClient,
+  command: PmsRoomTypeCreateCommand,
+  roomType: PmsRoomType,
+  commandMeta: PmsCommandMeta,
+  keyHash: string,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO platform.product_audit_events (
+       audit_key,
+       product,
+       action,
+       action_version,
+       occurred_at,
+       tenant_scope,
+       organization_id,
+       property_id,
+       actor_type,
+       actor_user_id,
+       target_resource_product,
+       target_resource_type,
+       target_resource_id,
+       correlation_id,
+       causation_id,
+       redacted_payload,
+       private_payload,
+       audit_metadata,
+       retention_class,
+       privacy_scope
+     )
+     VALUES (
+       $1,
+       'pms',
+       'pms.room_type.created',
+       1,
+       $2::timestamptz,
+       'property',
+       $3::uuid,
+       $4::uuid,
+       $5,
+       $6::uuid,
+       'pms',
+       'room_type',
+       $7,
+       $8,
+       $9,
+       $10::jsonb,
+       $11::jsonb,
+       $12::jsonb,
+       'standard',
+       'internal'
+     )
+     ON CONFLICT (product, audit_key) DO NOTHING`,
+    [
+      `pms.room_type.created.property.${command.propertyId}.room_type.${roomType.roomTypeId}.key.${keyHash}.v1`,
+      commandMeta.acceptedAt,
+      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
+      command.propertyId,
+      command.audit.actor.kind,
+      roomTypeActorUserId(command),
+      roomType.roomTypeId,
+      command.audit.correlationId ?? command.audit.requestId,
+      command.commandId,
+      JSON.stringify({
+        propertyId: command.propertyId,
+        roomTypeId: roomType.roomTypeId,
+        roomCount: roomType.roomCount,
+        baseRate: roomType.baseRate,
+      }),
+      JSON.stringify({
+        name: roomType.name,
+        description: roomType.description,
+        category: roomType.category,
+      }),
+      JSON.stringify({ commandMeta, idempotencyKeyHash: keyHash }),
+    ],
+  );
+}
+
+function roomTypeActorUserId(command: PmsRoomTypeCreateCommand): string | null {
+  return command.audit.actor.kind === "user" ? command.audit.actor.userId : null;
+}
+
+function roomTypeCommandFingerprint(command: PmsRoomTypeCreateCommand): unknown {
+  const { audit: _audit, ...fingerprint } = command;
+  return fingerprint;
 }
 
 async function listCheckoutChargesForUpdate(
@@ -3723,6 +4376,27 @@ function checkoutChargeConflict(
   };
 }
 
+function roomTypeConflict(
+  code: "idempotency_conflict" | "room_type_conflict",
+  message: string,
+): Exclude<PmsRoomTypeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 409,
+    code,
+    message,
+  };
+}
+
+function roomTypeInvalidBody(message: string): Exclude<PmsRoomTypeCommandResult, { ok: true }> {
+  return {
+    ok: false,
+    statusCode: 400,
+    code: "invalid_body",
+    message,
+  };
+}
+
 function checkoutChargeInvalidBody(
   message: string,
 ): Exclude<PmsCheckoutChargeCommandResult, { ok: true }> {
@@ -3878,6 +4552,24 @@ function isPmsCheckoutCharge(value: unknown): value is PmsCheckoutCharge {
     charge.operationalOwnership?.owner === "pms" &&
     charge.operationalOwnership.financeSettlementOwner === "finance" &&
     charge.operationalOwnership.providerSettlement === false
+  );
+}
+
+function isPmsRoomType(value: unknown): value is PmsRoomType {
+  if (!value || typeof value !== "object") return false;
+  const roomType = value as PmsRoomType;
+  return (
+    typeof roomType.roomTypeId === "string" &&
+    typeof roomType.name === "string" &&
+    typeof roomType.description === "string" &&
+    (roomType.category === null || typeof roomType.category === "string") &&
+    !!roomType.baseRate &&
+    typeof roomType.baseRate.amountDecimal === "string" &&
+    typeof roomType.baseRate.currency === "string" &&
+    typeof roomType.active === "boolean" &&
+    typeof roomType.sortOrder === "number" &&
+    Array.isArray(roomType.ratePlans) &&
+    typeof roomType.roomCount === "number"
   );
 }
 
