@@ -85,6 +85,7 @@ describe("shared hotel setup status route", () => {
         setupProperty(propertyId, {
           sharedProfile: {
             status: "incomplete",
+            source: "canonical",
             completionPercent: 67,
             missingFields: ["location", "media"],
           },
@@ -227,7 +228,12 @@ describe("shared hotel setup status route", () => {
     expect(response.body).toMatchObject({
       propertyId,
       displayName: "Alpenrose Munich",
-      sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+      sharedProfile: {
+        status: "complete",
+        source: "canonical",
+        completionPercent: 100,
+        missingFields: [],
+      },
     });
     expect(calls).toEqual([{ organizationId, profile: input }]);
   });
@@ -299,7 +305,12 @@ describe("shared hotel setup status route", () => {
     expect(updateResponse.body).toMatchObject({
       propertyId,
       displayName: "Alpenrose Munich Updated",
-      sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+      sharedProfile: {
+        status: "complete",
+        source: "canonical",
+        completionPercent: 100,
+        missingFields: [],
+      },
     });
     expect(profiles.get(propertyId)).toMatchObject({ displayName: "Alpenrose Munich Updated" });
   });
@@ -719,7 +730,12 @@ describe("shared hotel setup status route", () => {
       properties: [
         {
           propertyId,
-          sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+          sharedProfile: {
+            status: "complete",
+            source: "canonical",
+            completionPercent: 100,
+            missingFields: [],
+          },
           products: {
             booking: { status: "active" },
             pms: { status: "active" },
@@ -741,22 +757,267 @@ describe("shared hotel setup status route", () => {
     expect(setupSql).toContain("FROM unnest($2::uuid[])");
     expect(setupSql).toContain("hotel_catalog.properties");
     expect(setupSql).toContain("hotel_catalog.property_product_selections");
-    expect(setupSql).toContain("COALESCE(catalog_location.location, public_profile.location");
-    expect(setupSql).toContain("COALESCE(catalog_media.media, '[]'::jsonb)");
-    expect(setupSql).toContain("COALESCE(catalog_contacts.public_contacts, '[]'::jsonb)");
-    expect(setupSql).not.toContain("COALESCE(catalog_media.media, public_profile.media");
-    expect(setupSql).not.toContain(
-      "COALESCE(catalog_contacts.public_contacts, public_profile.public_contacts",
+    expect(setupSql).toContain("property_public_profile_read_model public_profile");
+    expect(setupSql).toContain("NULLIF(public_profile.display_name, '')");
+    expect(setupSql).toContain(") marketplace_prefill ON TRUE");
+    expect(setupSql).toContain("legacy_location.location");
+    expect(setupSql).toContain("legacy_description.descriptions");
+    expect(setupSql).toContain("legacy_media.items");
+    expect(setupSql).toContain("legacy_contacts.public_contacts");
+    expect(setupSql).toContain("catalog_contacts.has_website");
+    expect(setupSql).toContain(
+      "catalog_contacts.public_contacts || COALESCE(legacy_contacts.public_contacts",
     );
     expect(setupSql).toContain("AND media.source_system = 'platform'");
     expect(setupSql).toContain("AND contact.source_system = 'platform'");
     expect(setupSql).not.toContain("property_source_links");
+    expect(setupSql).not.toMatch(/\bFROM\s+booking_hotels\b/i);
+    expect(setupSql).not.toMatch(/\bFROM\s+hotels\b/i);
+    expect(setupSql).not.toMatch(/\bFROM\s+hotel_profiles\b/i);
     expect(
       setupSql.match(
         /bool_or\(\s*status = 'suspended'\s*AND \(starts_at IS NULL OR starts_at <= now\(\)\)\s*AND \(expires_at IS NULL OR expires_at > now\(\)\)\s*\) AS suspended/g,
       ),
     ).toHaveLength(3);
     expect(query.mock.calls[1]![1]).toEqual([organizationId, [propertyId]]);
+  });
+
+  it("prefills shared profile reads from target Booking public profile data", async () => {
+    const query = vi.fn(async (_text: string, _values?: readonly unknown[]) => ({
+      rows: [
+        profileRow({
+          displayName: "Booking Alpenrose",
+          profileSource: "legacy_prefill",
+          countryCode: "AT",
+          region: "Tyrol",
+          city: "Innsbruck",
+          streetAddress: null,
+          postalCode: null,
+          rawMarketplaceLocation: null,
+          timezone: "Europe/Vienna",
+          website: "https://booking-alpenrose.example",
+          phone: "+43 123",
+          shortDescription: "Booking-backed alpine hotel.",
+          media: [
+            {
+              mediaType: "hero_image",
+              url: "https://cdn.example/booking-alpenrose.jpg",
+              altText: "Booking Alpenrose",
+              sortOrder: 0,
+            },
+          ],
+        }),
+      ],
+    }));
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const profile = await repository.getPropertyProfile({ organizationId, propertyId });
+
+    expect(profile).toMatchObject({
+      displayName: "Booking Alpenrose",
+      location: { countryCode: "AT", city: "Innsbruck", timezone: "Europe/Vienna" },
+      website: "https://booking-alpenrose.example",
+      phone: "+43 123",
+      shortDescription: "Booking-backed alpine hotel.",
+      media: [{ url: "https://cdn.example/booking-alpenrose.jpg" }],
+      sharedProfile: { status: "complete", source: "legacy_prefill", missingFields: [] },
+    });
+    const sql = query.mock.calls[0]![0];
+    expect(sql).toContain("property_public_profile_read_model public_profile");
+    expect(sql).toContain("NULLIF(public_profile.display_name, '')");
+    expect(sql).toContain("COALESCE(catalog_location.country_code, legacy_location.country_code)");
+    expect(sql).toContain(
+      "COALESCE(NULLIF(profile.short_description, ''), legacy_description.short_description)",
+    );
+    expect(sql).not.toMatch(/\bFROM\s+booking_hotels\b/i);
+  });
+
+  it("uses target PMS-origin prefill when canonical shared fields are blank", async () => {
+    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
+      if (text.includes("FROM identity.organizations")) {
+        return { rows: [{ displayName: "Alpenrose Hotel Group" }] };
+      }
+      return {
+        rows: [
+          {
+            propertyId,
+            publicId: "pms-alpenrose",
+            displayName: "PMS Alpenrose",
+            profileStatus: "incomplete",
+            profileSource: "legacy_prefill",
+            location: { city: "Salzburg", countryCode: "AT" },
+            descriptions: { shortDescription: "PMS-backed city hotel." },
+            media: [{ type: "hero_image", url: "https://cdn.example/pms-alpenrose.jpg" }],
+            publicContacts: [
+              { kind: "website", value: "https://pms-alpenrose.example" },
+              { kind: "phone", value: "+43 456" },
+            ],
+            bookingSelected: false,
+            pmsSelected: true,
+            pmsEntitlementActive: false,
+            pmsEntitlementSuspended: false,
+            pmsRoomTypeCount: 0,
+            pmsRoomCount: 0,
+            pmsRatePlanCount: 0,
+            marketplaceSelected: false,
+            marketplaceEntitlementActive: false,
+            marketplaceEntitlementSuspended: false,
+            marketplaceListingCount: 0,
+            marketplaceVerifiedListingCount: 0,
+            marketplaceOfferingCount: 0,
+            marketplaceRequirementCount: 0,
+          },
+        ],
+      };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const status = await repository.getHotelSetupStatus({
+      organizationId,
+      propertyIds: [propertyId],
+    });
+
+    expect(status.properties[0]!.sharedProfile).toEqual({
+      status: "complete",
+      source: "legacy_prefill",
+      completionPercent: 100,
+      missingFields: [],
+    });
+  });
+
+  it("keeps canonical shared fields ahead of legacy prefill in conflicts", async () => {
+    const query = vi.fn(async (_text: string, _values?: readonly unknown[]) => ({
+      rows: [
+        profileRow({
+          displayName: "Canonical Alpenrose",
+          profileSource: "canonical",
+          city: "Munich",
+          website: "https://canonical.example",
+          shortDescription: "Canonical shared description.",
+        }),
+      ],
+    }));
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const profile = await repository.getPropertyProfile({ organizationId, propertyId });
+
+    expect(profile).toMatchObject({
+      displayName: "Canonical Alpenrose",
+      location: { city: "Munich" },
+      website: "https://canonical.example",
+      shortDescription: "Canonical shared description.",
+      sharedProfile: { source: "canonical" },
+    });
+    const sql = query.mock.calls[0]![0];
+    expect(sql).toMatch(
+      /COALESCE\(\s*NULLIF\(property\.display_name, ''\),\s*NULLIF\(public_profile\.display_name, ''\),\s*marketplace_prefill\.display_name\s*\) AS "displayName"/,
+    );
+    expect(sql).toContain("COALESCE(catalog_location.city, legacy_location.city) AS city");
+    expect(sql).toContain(
+      "COALESCE(NULLIF(profile.short_description, ''), legacy_description.short_description)",
+    );
+    expect(sql).toContain("COALESCE(contact.website, legacy_contact.website) AS website");
+    expect(sql).toContain("COALESCE(media.items, legacy_media.items, '[]'::jsonb) AS media");
+  });
+
+  it("scopes migrated Marketplace prefill to the selected hotel group organization", async () => {
+    const query = vi.fn(async (text: string, _values?: readonly unknown[]) => {
+      if (text.includes("FROM identity.organizations")) {
+        return { rows: [{ displayName: "Alpenrose Hotel Group" }] };
+      }
+      return {
+        rows: [
+          {
+            propertyId,
+            publicId: "marketplace-alpenrose",
+            displayName: "Marketplace Alpenrose",
+            profileStatus: "complete",
+            profileSource: "legacy_prefill",
+            location: { rawMarketplaceLocation: "Innsbruck, Austria" },
+            descriptions: { shortDescription: "Marketplace-backed creator hotel." },
+            media: [{ type: "hero_image", url: "https://cdn.example/marketplace.jpg" }],
+            publicContacts: [
+              { type: "website", value: "https://marketplace-alpenrose.example" },
+              { type: "phone", value: "+43 789" },
+            ],
+            bookingSelected: false,
+            pmsSelected: false,
+            marketplaceSelected: true,
+            marketplaceEntitlementActive: false,
+            marketplaceEntitlementSuspended: false,
+            marketplaceProfileStatus: "pending",
+            marketplaceProfileComplete: true,
+            marketplaceListingCount: 1,
+            marketplaceVerifiedListingCount: 0,
+            marketplaceOfferingCount: 0,
+            marketplaceRequirementCount: 0,
+          },
+        ],
+      };
+    });
+    const repository = createPgSharedHotelSetupStatusRepository({
+      connectionString: "postgresql://target-db",
+      pool: {
+        query: async <T extends QueryResultRow = QueryResultRow>(
+          text: string,
+          values?: readonly unknown[],
+        ) => {
+          const result = await query(text, values);
+          return { rows: result.rows as unknown as T[] };
+        },
+        end: vi.fn(async () => undefined),
+      },
+    });
+
+    const status = await repository.getHotelSetupStatus({
+      organizationId,
+      propertyIds: [propertyId],
+    });
+
+    expect(status.properties[0]!.sharedProfile.source).toBe("legacy_prefill");
+    expect(status.properties[0]!.locationSummary).toBe("Innsbruck, Austria");
+    const setupSql = query.mock.calls[1]![0];
+    expect(setupSql).toContain("WHERE profile.property_id = property.id");
+    expect(setupSql).toContain("AND profile.organization_id = $1::uuid");
+    expect(setupSql).toContain("AND organization_id = $1::uuid");
+    expect(setupSql).not.toMatch(/\bFROM\s+hotel_profiles\b/i);
+    expect(setupSql).not.toMatch(/\bFROM\s+hotel_listings\b/i);
   });
 
   it("treats public WhatsApp contacts as satisfying shared profile phone completion", async () => {
@@ -803,6 +1064,7 @@ describe("shared hotel setup status route", () => {
 
     expect(status.properties[0]!.sharedProfile).toEqual({
       status: "complete",
+      source: "canonical",
       completionPercent: 100,
       missingFields: [],
     });
@@ -1510,6 +1772,7 @@ function profileResponse(id: string, profile: SharedPropertyProfileInput): Share
     ...profile,
     sharedProfile: {
       status: missingFields.length === 0 ? "complete" : "incomplete",
+      source: "canonical",
       completionPercent:
         missingFields.length === 0 ? 100 : Math.round(((6 - missingFields.length) / 6) * 100),
       missingFields,
@@ -1570,6 +1833,7 @@ function profileRow(overrides: Record<string, unknown> = {}): Record<string, unk
         sortOrder: 0,
       },
     ],
+    profileSource: "canonical",
     updatedAt: "2026-06-30T08:00:00.000Z",
     ...overrides,
   };
@@ -1590,6 +1854,7 @@ function setupProperty(
     locationSummary: "Munich, DE",
     sharedProfile: {
       status: "complete",
+      source: "canonical",
       completionPercent: 100,
       missingFields: [],
     },

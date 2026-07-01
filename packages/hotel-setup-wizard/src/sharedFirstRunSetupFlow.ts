@@ -29,6 +29,7 @@ export type SharedPropertyProfileMissingField =
   | "phone"
   | "description"
   | "media";
+export type SharedPropertyProfileSource = "canonical" | "legacy_prefill";
 
 export type SharedProductActivation<Product extends SharedHotelSetupProduct> = {
   product: Product;
@@ -67,6 +68,7 @@ export type SharedSetupProperty = {
   locationSummary: string | null;
   sharedProfile: {
     status: "incomplete" | "complete" | "disabled" | "private";
+    source: SharedPropertyProfileSource;
     completionPercent: number;
     missingFields: SharedPropertyProfileMissingField[];
   };

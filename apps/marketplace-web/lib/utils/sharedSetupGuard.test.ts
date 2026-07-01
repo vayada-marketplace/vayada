@@ -206,6 +206,7 @@ function marketplaceActivationProperty(
     locationSummary: "Munich, DE",
     sharedProfile: {
       status: "complete",
+      source: "canonical",
       completionPercent: 100,
       missingFields: [],
     },

@@ -54,7 +54,12 @@ export function createSharedHotelSetupStatusMock(input: SharedHotelSetupStatusMo
         publicId: input.publicId,
         displayName: input.propertyDisplayName,
         locationSummary: input.locationSummary,
-        sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+        sharedProfile: {
+          status: "complete",
+          source: "canonical",
+          completionPercent: 100,
+          missingFields: [],
+        },
         products: input.products,
       },
     ],

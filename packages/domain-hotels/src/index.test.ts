@@ -113,6 +113,7 @@ describe("@vayada/domain-hotels", () => {
           locationSummary: "Bali, Indonesia",
           sharedProfile: {
             status: "complete",
+            source: "canonical",
             completionPercent: 100,
             missingFields: [],
           },

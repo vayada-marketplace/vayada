@@ -105,6 +105,7 @@ export const SHARED_PROPERTY_PROFILE_STATUSES = [
 ] as const;
 
 export type SharedPropertyProfileStatus = (typeof SHARED_PROPERTY_PROFILE_STATUSES)[number];
+export type SharedPropertyProfileSource = "canonical" | "legacy_prefill";
 
 export const SHARED_PROPERTY_PROFILE_MISSING_FIELDS = [
   "displayName",
@@ -156,6 +157,7 @@ export type SharedSetupProperty = {
   locationSummary: string | null;
   sharedProfile: {
     status: SharedPropertyProfileStatus;
+    source: SharedPropertyProfileSource;
     completionPercent: number;
     missingFields: SharedPropertyProfileMissingField[];
   };

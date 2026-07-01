@@ -98,7 +98,12 @@ function completeStatus(): SharedHotelSetupStatus {
         publicId: "prop_alpenrose",
         displayName: "Alpenrose Munich",
         locationSummary: "Munich, DE",
-        sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+        sharedProfile: {
+          status: "complete",
+          source: "canonical",
+          completionPercent: 100,
+          missingFields: [],
+        },
         products: {
           booking: product("booking", "not_selected"),
           pms: product("pms", "not_selected"),
@@ -140,7 +145,12 @@ function propertyProfile(): SharedPropertyProfile {
         sortOrder: 0,
       },
     ],
-    sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+    sharedProfile: {
+      status: "complete",
+      source: "canonical",
+      completionPercent: 100,
+      missingFields: [],
+    },
     updatedAt: "2026-06-30T00:00:00.000Z",
   };
 }
