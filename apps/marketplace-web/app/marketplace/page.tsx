@@ -58,10 +58,10 @@ export default function MarketplacePage() {
           router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
           return;
         }
-        const refreshedUserType =
-          (localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null) ?? storedUserType;
+        const sessionUserType = authService.getUserType();
+        const refreshedUserType = sessionUserType ?? storedUserType;
         setUserType(refreshedUserType);
-        if (refreshedUserType === "hotel") {
+        if (sessionUserType === "hotel") {
           const decision = await resolveMarketplaceSetupGuard(currentReturnTo(ROUTES.MARKETPLACE));
           if (cancelled) return;
           localStorage.setItem(

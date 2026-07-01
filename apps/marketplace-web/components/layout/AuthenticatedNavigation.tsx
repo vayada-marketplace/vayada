@@ -48,7 +48,7 @@ export default function AuthenticatedNavigation() {
           router.replace(loginPathForCurrentRoute(ROUTES.MARKETPLACE));
           return;
         }
-        const currentUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
+        const currentUserType = authService.getUserType();
         if (currentUserType === "hotel") {
           const returnTo =
             typeof window === "undefined"
