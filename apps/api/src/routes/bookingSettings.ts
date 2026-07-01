@@ -1302,15 +1302,18 @@ function withDefaultCode(defaultCode: string, extraCodes: readonly string[]): st
 export function createPgBookingSettingsReadRepository(config: {
   connectionString: string;
   max?: number;
+  pool?: BookingSettingsPool;
 }): BookingSettingsRepository {
   if (!config.connectionString.trim()) {
     throw new Error("Booking settings repository connectionString must not be empty");
   }
 
-  const pool = new pg.Pool({
-    connectionString: config.connectionString,
-    max: config.max,
-  });
+  const pool =
+    config.pool ??
+    new pg.Pool({
+      connectionString: config.connectionString,
+      max: config.max,
+    });
 
   return {
     async findAddonSettingsByHotelId(hotelId) {
@@ -1330,7 +1333,10 @@ export function createPgBookingSettingsReadRepository(config: {
     },
     async findGuestFormSettingsByHotelId(hotelId) {
       const result = await pool.query<BookingGuestFormSettingsRow>(
-        `SELECT special_requests_enabled, arrival_time_enabled, guest_count_enabled
+        `SELECT special_requests_enabled,
+                arrival_time_enabled,
+                guest_count_enabled,
+                phone_required
          FROM booking_hotels
          WHERE id = $1`,
         [hotelId],
@@ -1342,6 +1348,7 @@ export function createPgBookingSettingsReadRepository(config: {
         specialRequestsEnabled: row.special_requests_enabled,
         arrivalTimeEnabled: row.arrival_time_enabled,
         guestCountEnabled: row.guest_count_enabled,
+        phoneRequired: row.phone_required,
         adultAgeThreshold: 18,
         childrenEnabled: true,
       };
@@ -1430,14 +1437,19 @@ export function createPgBookingSettingsReadRepository(config: {
         `UPDATE booking_hotels
          SET special_requests_enabled = $2,
              arrival_time_enabled = $3,
-             guest_count_enabled = $4
+             guest_count_enabled = $4,
+             phone_required = COALESCE($5, phone_required)
          WHERE id = $1
-         RETURNING special_requests_enabled, arrival_time_enabled, guest_count_enabled`,
+         RETURNING special_requests_enabled,
+                   arrival_time_enabled,
+                   guest_count_enabled,
+                   phone_required`,
         [
           hotelId,
           settings.specialRequestsEnabled,
           settings.arrivalTimeEnabled,
           settings.guestCountEnabled,
+          settings.phoneRequired ?? null,
         ],
       );
       const row = result.rows[0];
@@ -1447,6 +1459,7 @@ export function createPgBookingSettingsReadRepository(config: {
         specialRequestsEnabled: row.special_requests_enabled,
         arrivalTimeEnabled: row.arrival_time_enabled,
         guestCountEnabled: row.guest_count_enabled,
+        phoneRequired: row.phone_required,
         adultAgeThreshold: 18,
         childrenEnabled: true,
       };
