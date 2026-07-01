@@ -152,8 +152,18 @@ Validation failures return field-addressable `422` responses:
 }
 ```
 
-Shared profile completion is computed from canonical catalog fields, not from
-Booking, PMS, or Marketplace product profile rows.
+Shared profile completion is computed from canonical catalog fields plus
+target-side legacy-origin prefill. The setup API must not read legacy product
+databases at runtime. Conflict precedence is deterministic:
+
+1. Explicit shared setup writes in canonical `hotel_catalog` rows win.
+2. Target public profile projections fill blank shared fields.
+3. Target Marketplace hotel/listing rows fill remaining blanks for the selected
+   hotel-group organization only.
+
+Prefill is read-only until the user saves the shared setup wizard. Saving writes
+the edited values back to canonical `hotel_catalog` rows; prefill must not
+silently overwrite user-edited canonical values.
 
 ## Authorization
 
@@ -211,6 +221,7 @@ type SharedSetupProperty = {
   locationSummary: string | null;
   sharedProfile: {
     status: "incomplete" | "complete" | "disabled" | "private";
+    source: "canonical" | "legacy_prefill";
     completionPercent: number;
     missingFields: SharedPropertyProfileMissingField[];
   };

@@ -191,7 +191,12 @@ function sharedSetupStatus(
         publicId: "alpenrose-munich",
         displayName: "Alpenrose Munich",
         locationSummary: "Munich, DE",
-        sharedProfile: { status: "complete", completionPercent: 100, missingFields: [] },
+        sharedProfile: {
+          status: "complete",
+          source: "canonical",
+          completionPercent: 100,
+          missingFields: [],
+        },
         products: {
           booking: activation("booking", "active", []),
           pms: activation("pms", "not_selected", []),

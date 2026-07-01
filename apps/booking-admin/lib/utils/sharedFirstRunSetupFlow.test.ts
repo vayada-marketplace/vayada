@@ -121,6 +121,7 @@ function property(
     locationSummary: input.locationSummary ?? "Munich, DE",
     sharedProfile: {
       status: "incomplete",
+      source: "canonical",
       completionPercent: 83,
       missingFields: ["media"],
     },

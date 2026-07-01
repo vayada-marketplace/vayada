@@ -44,6 +44,7 @@ type ProfileDraft = {
   countryCode: string;
   region: string;
   city: string;
+  rawMarketplaceLocation: string;
   streetAddress: string;
   postalCode: string;
   timezone: string;
@@ -88,6 +89,7 @@ const EMPTY_DRAFT: ProfileDraft = {
   countryCode: "",
   region: "",
   city: "",
+  rawMarketplaceLocation: "",
   streetAddress: "",
   postalCode: "",
   timezone: "",
@@ -526,6 +528,9 @@ function ProfileForm({
   const setField = (field: keyof ProfileDraft, value: string) => {
     onChange({ ...draft, [field]: value });
   };
+  const showRawLocation = Boolean(
+    draft.rawMarketplaceLocation && !draft.city.trim() && !draft.countryCode.trim(),
+  );
 
   return (
     <form
@@ -577,6 +582,16 @@ function ProfileForm({
           error={fieldErrors["location.region"]?.[0]}
           onChange={(value) => setField("region", value)}
         />
+        {showRawLocation && (
+          <div className="md:col-span-2">
+            <TextField
+              label="Location"
+              value={draft.rawMarketplaceLocation}
+              readOnly
+              onChange={() => undefined}
+            />
+          </div>
+        )}
         <TextField
           label="Street address"
           value={draft.streetAddress}
@@ -838,6 +853,7 @@ function TextField({
   error,
   placeholder,
   type = "text",
+  readOnly = false,
 }: {
   label: string;
   value: string;
@@ -845,6 +861,7 @@ function TextField({
   error?: string;
   placeholder?: string;
   type?: string;
+  readOnly?: boolean;
 }) {
   return (
     <label className="block">
@@ -853,10 +870,11 @@ function TextField({
         type={type}
         value={value}
         placeholder={placeholder}
+        readOnly={readOnly}
         onChange={(event) => onChange(event.target.value)}
         className={`mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-gray-900 ${
           error ? "border-red-300" : "border-gray-200"
-        }`}
+        } ${readOnly ? "bg-gray-50 text-gray-600" : ""}`}
       />
       {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
     </label>
@@ -909,6 +927,7 @@ function draftFromProfile(profile: SharedPropertyProfile): ProfileDraft {
     countryCode: profile.location.countryCode ?? "",
     region: profile.location.region ?? "",
     city: profile.location.city ?? "",
+    rawMarketplaceLocation: profile.location.rawMarketplaceLocation ?? "",
     streetAddress: profile.location.streetAddress ?? "",
     postalCode: profile.location.postalCode ?? "",
     timezone: profile.location.timezone ?? "",
