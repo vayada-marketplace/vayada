@@ -37,6 +37,9 @@ type LegacyRoom = {
   maxChildren?: unknown;
   baseRate?: unknown;
   currency?: unknown;
+  locationAddress?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
   remainingRooms?: unknown;
   flexibleRateEnabled?: unknown;
   cancellationPolicy?: unknown;
@@ -399,13 +402,14 @@ async function upsertTargetRows(
     await client.query(
       `INSERT INTO pms.room_types
           (id, property_id, source_system, source_room_type_id, name, description, category,
-           occupancy_limits, base_rate_amount, currency, active)
-       VALUES ($1, $2, 'pms', $3, $4, $5, $6, $7, $8, $9, true)
+           occupancy_limits, room_attributes, base_rate_amount, currency, active)
+       VALUES ($1, $2, 'pms', $3, $4, $5, $6, $7, $8::jsonb, $9, $10, true)
        ON CONFLICT (id) DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
          category = EXCLUDED.category,
          occupancy_limits = EXCLUDED.occupancy_limits,
+         room_attributes = EXCLUDED.room_attributes,
          base_rate_amount = EXCLUDED.base_rate_amount,
          currency = EXCLUDED.currency,
          active = EXCLUDED.active,
@@ -418,6 +422,7 @@ async function upsertTargetRows(
         stringValue(snapshot.room.description) ?? "",
         stringValue(snapshot.room.category),
         JSON.stringify(occupancy),
+        JSON.stringify(roomLocationSummary(snapshot.room)),
         price,
         currency,
       ],
@@ -489,6 +494,7 @@ async function upsertTargetRows(
         JSON.stringify({
           name: roomName,
           category: stringValue(snapshot.room.category),
+          ...roomLocationSummary(snapshot.room),
           amenities: [],
         }),
         JSON.stringify({
@@ -605,6 +611,17 @@ export function occupancyForLegacyRoom(room: LegacyRoom): Record<string, number>
     maxAdults: legacyMaxAdults ?? maxOccupancy,
     maxOccupancy,
     ...(maxChildren === null ? {} : { maxChildren }),
+  };
+}
+
+function roomLocationSummary(room: LegacyRoom): Record<string, string | number> {
+  const locationAddress = stringValue(room.locationAddress);
+  const latitude = numberValue(room.latitude);
+  const longitude = numberValue(room.longitude);
+  return {
+    ...(locationAddress ? { locationAddress } : {}),
+    ...(latitude !== null ? { latitude } : {}),
+    ...(longitude !== null ? { longitude } : {}),
   };
 }
 

@@ -60,6 +60,9 @@ export type BookingWebPublicOffer = {
   roomTypeId: string;
   ratePlanId: string | null;
   name: string;
+  locationAddress?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   occupancy: {
     maxAdults: number;
     maxChildren: number;
@@ -310,6 +313,9 @@ export function toLegacyRooms(
       id: roomTypeId,
       name: displayRoom?.name || roomName(flexible.name),
       category: displayRoom?.category || "",
+      locationAddress: displayRoom?.locationAddress ?? flexible.locationAddress ?? undefined,
+      latitude: displayRoom?.latitude ?? flexible.latitude ?? null,
+      longitude: displayRoom?.longitude ?? flexible.longitude ?? null,
       description: displayRoom?.description || flexible.policies.cancellation || flexible.name,
       shortDescription:
         displayRoom?.shortDescription ||

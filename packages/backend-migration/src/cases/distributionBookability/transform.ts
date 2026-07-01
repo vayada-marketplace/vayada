@@ -595,11 +595,14 @@ export async function transformDistributionBookability(client: pg.Client): Promi
       offer."discountsAmount",
       source.currency,
       source.room_occupancy_limits,
-      jsonb_build_object(
+      jsonb_strip_nulls(jsonb_build_object(
         'name', source.room_type_name,
         'category', source.room_type_category,
+        'locationAddress', source.room_attributes ->> 'locationAddress',
+        'latitude', source.room_attributes -> 'latitude',
+        'longitude', source.room_attributes -> 'longitude',
         'amenities', source.room_amenities_snapshot
-      ),
+      )),
       jsonb_build_object(
         'name', source.rate_plan_name,
         'mealPlan', source.meal_plan,
@@ -679,15 +682,18 @@ export async function transformDistributionBookability(client: pg.Client): Promi
       source.quote_read_model_status,
       '[]'::jsonb,
       jsonb_build_array(
-        jsonb_build_object(
+        jsonb_strip_nulls(jsonb_build_object(
           'publicOfferKey', offer."publicOfferKey",
           'roomTypeName', source.room_type_name,
+          'locationAddress', source.room_attributes ->> 'locationAddress',
+          'latitude', source.room_attributes -> 'latitude',
+          'longitude', source.room_attributes -> 'longitude',
           'ratePlanName', source.rate_plan_name,
           'nights', source.requested_check_out - source.requested_check_in,
           'availableRooms', offer."availableRooms",
           'amount', to_char(source.quote_room_total_amount, 'FM999999999990.00'),
           'currency', source.currency
-        )
+        ))
       ),
       jsonb_build_object(
         'currency', source.currency,
