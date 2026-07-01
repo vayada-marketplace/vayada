@@ -763,6 +763,7 @@ describe("shared hotel setup status route", () => {
     expect(setupSql).toContain("legacy_location.location");
     expect(setupSql).toContain("legacy_description.descriptions");
     expect(setupSql).toContain("legacy_media.items");
+    expect(setupSql).toContain("|| COALESCE(marketplace_media.items, '[]'::jsonb)");
     expect(setupSql).toContain("legacy_contacts.public_contacts");
     expect(setupSql).toContain("catalog_contacts.has_website");
     expect(setupSql).toContain(
@@ -803,7 +804,7 @@ describe("shared hotel setup status route", () => {
               mediaType: "hero_image",
               url: "https://cdn.example/booking-alpenrose.jpg",
               altText: "Booking Alpenrose",
-              sortOrder: 0,
+              sortOrder: "0",
             },
           ],
         }),
@@ -831,7 +832,7 @@ describe("shared hotel setup status route", () => {
       website: "https://booking-alpenrose.example",
       phone: "+43 123",
       shortDescription: "Booking-backed alpine hotel.",
-      media: [{ url: "https://cdn.example/booking-alpenrose.jpg" }],
+      media: [{ url: "https://cdn.example/booking-alpenrose.jpg", sortOrder: 0 }],
       sharedProfile: { status: "complete", source: "legacy_prefill", missingFields: [] },
     });
     const sql = query.mock.calls[0]![0];

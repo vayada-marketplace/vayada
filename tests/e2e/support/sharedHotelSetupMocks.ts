@@ -15,6 +15,7 @@ type SharedHotelSetupStatusMockInput = {
   publicId: string;
   propertyDisplayName: string;
   locationSummary: string;
+  sharedProfileSource?: "canonical" | "legacy_prefill";
   products: Record<string, SharedHotelSetupMockProduct>;
   nextAction: {
     action: string;
@@ -56,7 +57,7 @@ export function createSharedHotelSetupStatusMock(input: SharedHotelSetupStatusMo
         locationSummary: input.locationSummary,
         sharedProfile: {
           status: "complete",
-          source: "canonical",
+          source: input.sharedProfileSource ?? "canonical",
           completionPercent: 100,
           missingFields: [],
         },

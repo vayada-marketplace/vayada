@@ -619,8 +619,21 @@ function propertyProfileSql(): string {
             NULLIF(property.display_name, '') IS NULL
             AND COALESCE(NULLIF(public_profile.display_name, ''), marketplace_prefill.display_name) IS NOT NULL
           )
-          OR (COALESCE(catalog_location.has_location, FALSE) = FALSE AND legacy_location.has_location)
-          OR (COALESCE(catalog_profile.has_description, FALSE) = FALSE AND legacy_description.has_description)
+          OR (catalog_location.country_code IS NULL AND legacy_location.country_code IS NOT NULL)
+          OR (catalog_location.region IS NULL AND legacy_location.region IS NOT NULL)
+          OR (catalog_location.city IS NULL AND legacy_location.city IS NOT NULL)
+          OR (catalog_location.street_address IS NULL AND legacy_location.street_address IS NOT NULL)
+          OR (catalog_location.postal_code IS NULL AND legacy_location.postal_code IS NOT NULL)
+          OR (
+            catalog_location.raw_marketplace_location IS NULL
+            AND legacy_location.raw_marketplace_location IS NOT NULL
+          )
+          OR (catalog_location.timezone IS NULL AND legacy_location.timezone IS NOT NULL)
+          OR (catalog_location.latitude IS NULL AND legacy_location.latitude IS NOT NULL)
+          OR (catalog_location.longitude IS NULL AND legacy_location.longitude IS NOT NULL)
+          OR (catalog_location.map_display_mode IS NULL AND legacy_location.map_display_mode IS NOT NULL)
+          OR (NULLIF(profile.short_description, '') IS NULL AND legacy_description.short_description IS NOT NULL)
+          OR (NULLIF(profile.long_description, '') IS NULL AND legacy_description.long_description IS NOT NULL)
           OR (contact.website IS NULL AND legacy_contact.website IS NOT NULL)
           OR (contact.phone IS NULL AND legacy_contact.phone IS NOT NULL)
           OR (COALESCE(jsonb_array_length(media.items), 0) = 0 AND legacy_media.has_media)
@@ -907,11 +920,13 @@ function propertyProfileSql(): string {
     ) marketplace_media ON TRUE
     LEFT JOIN LATERAL (
       SELECT
-        COALESCE(public_profile_media.items, marketplace_media.items) AS items,
-        COALESCE(
-          jsonb_array_length(public_profile_media.items),
-          jsonb_array_length(marketplace_media.items),
-          0
+        (
+          COALESCE(public_profile_media.items, '[]'::jsonb)
+          || COALESCE(marketplace_media.items, '[]'::jsonb)
+        ) AS items,
+        (
+          COALESCE(jsonb_array_length(public_profile_media.items), 0)
+          + COALESCE(jsonb_array_length(marketplace_media.items), 0)
         ) > 0 AS has_media
     ) legacy_media ON TRUE
     LEFT JOIN LATERAL (
@@ -1259,21 +1274,27 @@ function sharedHotelSetupStatusSql(): string {
             NULLIF(property.display_name, '') IS NULL
             AND COALESCE(NULLIF(public_profile.display_name, ''), marketplace_prefill.display_name) IS NOT NULL
           )
-          OR (COALESCE(catalog_location.has_location, FALSE) = FALSE AND legacy_location.has_location)
-          OR (COALESCE(catalog_profile.has_description, FALSE) = FALSE AND legacy_description.has_description)
+          OR (
+            COALESCE(legacy_location.location, '{}'::jsonb)
+            - ARRAY(SELECT jsonb_object_keys(COALESCE(catalog_location.location, '{}'::jsonb)))
+          ) <> '{}'::jsonb
+          OR (
+            COALESCE(legacy_description.descriptions, '{}'::jsonb)
+            - ARRAY(SELECT jsonb_object_keys(COALESCE(catalog_profile.descriptions, '{}'::jsonb)))
+          ) <> '{}'::jsonb
           OR legacy_contacts.has_contacts
           OR (COALESCE(jsonb_array_length(catalog_media.media), 0) = 0 AND legacy_media.has_media)
           THEN 'legacy_prefill'
         ELSE 'canonical'
       END AS "profileSource",
-      CASE
-        WHEN COALESCE(catalog_location.has_location, FALSE) THEN catalog_location.location
-        ELSE COALESCE(legacy_location.location, '{}'::jsonb)
-      END AS "location",
-      CASE
-        WHEN COALESCE(catalog_profile.has_description, FALSE) THEN catalog_profile.descriptions
-        ELSE COALESCE(legacy_description.descriptions, '{}'::jsonb)
-      END AS "descriptions",
+      (
+        COALESCE(legacy_location.location, '{}'::jsonb)
+        || COALESCE(catalog_location.location, '{}'::jsonb)
+      ) AS "location",
+      (
+        COALESCE(legacy_description.descriptions, '{}'::jsonb)
+        || COALESCE(catalog_profile.descriptions, '{}'::jsonb)
+      ) AS "descriptions",
       CASE
         WHEN COALESCE(jsonb_array_length(catalog_media.media), 0) > 0 THEN catalog_media.media
         ELSE COALESCE(legacy_media.items, '[]'::jsonb)
@@ -1356,13 +1377,13 @@ function sharedHotelSetupStatusSql(): string {
     ) marketplace_prefill ON TRUE
     LEFT JOIN LATERAL (
       SELECT jsonb_strip_nulls(jsonb_build_object(
-        'countryCode', location.country_code,
-        'region', location.region,
-        'city', location.city,
-        'streetAddress', location.street_address,
-        'postalCode', location.postal_code,
-        'rawMarketplaceLocation', location.raw_marketplace_location,
-        'timezone', location.timezone,
+        'countryCode', NULLIF(location.country_code::text, ''),
+        'region', NULLIF(location.region, ''),
+        'city', NULLIF(location.city, ''),
+        'streetAddress', NULLIF(location.street_address, ''),
+        'postalCode', NULLIF(location.postal_code, ''),
+        'rawMarketplaceLocation', NULLIF(location.raw_marketplace_location, ''),
+        'timezone', NULLIF(location.timezone, ''),
         'latitude', location.latitude,
         'longitude', location.longitude,
         'addressPublic', location.address_public,
@@ -1378,8 +1399,8 @@ function sharedHotelSetupStatusSql(): string {
     ) catalog_location ON TRUE
     LEFT JOIN LATERAL (
       SELECT jsonb_strip_nulls(jsonb_build_object(
-        'shortDescription', profile.short_description,
-        'longDescription', profile.long_description
+        'shortDescription', NULLIF(profile.short_description, ''),
+        'longDescription', NULLIF(profile.long_description, '')
       )) AS descriptions,
       (
         NULLIF(profile.short_description, '') IS NOT NULL
@@ -1498,12 +1519,20 @@ function sharedHotelSetupStatusSql(): string {
           jsonb_build_object('type', contact.channel_type, 'value', contact.value)
           ORDER BY contact.channel_type, contact.value
         ) AS public_contacts,
-        count(*) FILTER (WHERE contact.channel_type = 'website') > 0 AS has_website,
-        count(*) FILTER (WHERE contact.channel_type IN ('phone', 'whatsapp')) > 0 AS has_phone
+        count(*) FILTER (
+          WHERE contact.channel_type = 'website'
+            AND NULLIF(contact.value, '') IS NOT NULL
+        ) > 0 AS has_website,
+        count(*) FILTER (
+          WHERE contact.channel_type IN ('phone', 'whatsapp')
+            AND NULLIF(contact.value, '') IS NOT NULL
+        ) > 0 AS has_phone
       FROM hotel_catalog.property_contact_channels contact
       WHERE contact.property_id = property.id
         AND contact.is_public = TRUE
         AND contact.source_system = 'platform'
+        AND contact.channel_type IN ('website', 'phone', 'whatsapp')
+        AND NULLIF(contact.value, '') IS NOT NULL
     ) catalog_contacts ON TRUE
     LEFT JOIN LATERAL (
       SELECT
@@ -1589,11 +1618,13 @@ function sharedHotelSetupStatusSql(): string {
     ) marketplace_media ON TRUE
     LEFT JOIN LATERAL (
       SELECT
-        COALESCE(public_profile_media.items, marketplace_media.items) AS items,
-        COALESCE(
-          jsonb_array_length(public_profile_media.items),
-          jsonb_array_length(marketplace_media.items),
-          0
+        (
+          COALESCE(public_profile_media.items, '[]'::jsonb)
+          || COALESCE(marketplace_media.items, '[]'::jsonb)
+        ) AS items,
+        (
+          COALESCE(jsonb_array_length(public_profile_media.items), 0)
+          + COALESCE(jsonb_array_length(marketplace_media.items), 0)
         ) > 0 AS has_media
     ) legacy_media ON TRUE
     LEFT JOIN hotel_catalog.property_product_selections booking_selection
@@ -1842,6 +1873,10 @@ function mediaItems(value: unknown): SharedPropertyProfileMedia[] {
       if (!url) return null;
       const mediaTypeValue = nonEmpty(media["mediaType"] ?? media["media_type"] ?? media["type"]);
       const sortOrderValue = media["sortOrder"] ?? media["sort_order"];
+      const parsedSortOrder =
+        typeof sortOrderValue === "number"
+          ? sortOrderValue
+          : Number.parseInt(String(sortOrderValue), 10);
       return {
         mediaType:
           mediaTypeValue === "hero" || mediaTypeValue === "hero_image"
@@ -1851,10 +1886,7 @@ function mediaItems(value: unknown): SharedPropertyProfileMedia[] {
               : "gallery_image",
         url,
         altText: nonEmpty(media["altText"] ?? media["alt_text"] ?? media["alt"]),
-        sortOrder:
-          typeof sortOrderValue === "number"
-            ? sortOrderValue
-            : Number.parseInt(String(sortOrderValue), 10) || index,
+        sortOrder: Number.isFinite(parsedSortOrder) ? parsedSortOrder : index,
       };
     })
     .filter((item): item is SharedPropertyProfileMedia => item !== null);
