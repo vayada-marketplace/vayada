@@ -294,6 +294,21 @@ describe("PMS operations command repository", () => {
       "Deluxe Double 2",
     ]);
     expect(target.auditEvents.map((event) => event.action)).toEqual(["pms.room_type.created"]);
+    const keyHash = sha256(command.idempotencyKey);
+    const domainEventCalls = target.calls.filter((call) =>
+      call.text.includes("platform.domain_events"),
+    );
+    const outboxCalls = target.calls.filter((call) => call.text.includes("platform.outbox_events"));
+    const auditCall = target.calls.find((call) =>
+      call.text.includes("INSERT INTO platform.product_audit_events"),
+    );
+    expect(domainEventCalls[0]?.values?.[0]).toBe(
+      `pms.room_type.created.property.${command.propertyId}.key.${keyHash}.v1`,
+    );
+    expect(outboxCalls[0]?.values?.[1]).toBe(
+      `pms.ari_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
+    );
+    expect(auditCall?.values?.[2]).toBe("f6852000-0000-0000-0000-000000000001");
     expect(
       target.calls.filter((call) => call.text.includes("INSERT INTO pms.room_types")),
     ).toHaveLength(1);
@@ -303,12 +318,8 @@ describe("PMS operations command repository", () => {
     expect(target.calls.filter((call) => call.text.includes("INSERT INTO pms.rooms"))).toHaveLength(
       1,
     );
-    expect(
-      target.calls.filter((call) => call.text.includes("platform.domain_events")),
-    ).toHaveLength(1);
-    expect(
-      target.calls.filter((call) => call.text.includes("platform.outbox_events")),
-    ).toHaveLength(1);
+    expect(domainEventCalls).toHaveLength(1);
+    expect(outboxCalls).toHaveLength(1);
   });
 
   it("rejects PMS room-type creates when generated room numbers collide", async () => {
@@ -330,7 +341,7 @@ describe("PMS operations command repository", () => {
     expect(result).toMatchObject({
       ok: false,
       statusCode: 409,
-      code: "idempotency_conflict",
+      code: "room_type_conflict",
     });
     expect(target.auditEvents).toHaveLength(0);
     expect(target.calls.some((call) => call.text.includes("platform.outbox_events"))).toBe(false);

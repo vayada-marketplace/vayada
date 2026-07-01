@@ -607,7 +607,7 @@ export type PmsRoomTypeCommandResult =
   | {
       ok: false;
       statusCode: 409;
-      code: "idempotency_conflict";
+      code: "idempotency_conflict" | "room_type_conflict";
       message: string;
     };
 
@@ -756,6 +756,7 @@ type PmsOperationsErrorCode =
   | "invalid_guest_pii"
   | "finance_bridge_required"
   | PmsAssignmentCommandConflictCode
+  | "room_type_conflict"
   | "read_model_unavailable"
   | "room_type_not_found"
   | "reservation_not_found"
@@ -770,24 +771,11 @@ type PmsOperationsError = {
   message: string;
 };
 
-type PmsOperationsAuthorizationErrorCode = Exclude<
-  PmsOperationsErrorCode,
-  | "unauthenticated"
-  | "invalid_token"
-  | "invalid_query"
-  | "invalid_body"
-  | "invalid_date_range"
-  | "invalid_status_transition"
-  | "invalid_guest_pii"
-  | "finance_bridge_required"
-  | PmsAssignmentCommandConflictCode
-  | "read_model_unavailable"
-  | "room_type_not_found"
-  | "reservation_not_found"
-  | "additional_guest_not_found"
-  | "note_not_found"
-  | "charge_not_found"
->;
+type PmsOperationsAuthorizationErrorCode =
+  | "missing_permission"
+  | "missing_entitlement"
+  | "inactive_entitlement"
+  | "missing_resource_access";
 
 export async function registerPmsOperationsRoutes(
   app: FastifyInstance,
@@ -2418,7 +2406,11 @@ function toRoomTypeCreateCommand(
     return { error: invalidBody("Room type create requires a three-letter currency.") };
   }
 
-  const roomCount = optionalNonNegativeInteger(raw.totalRooms) ?? 0;
+  const parsedRoomCount = optionalNonNegativeInteger(raw.totalRooms);
+  if (raw.totalRooms !== undefined && parsedRoomCount === undefined) {
+    return { error: invalidBody("Room type create totalRooms must be a non-negative integer.") };
+  }
+  const roomCount = parsedRoomCount ?? 0;
   if (roomCount > 500) {
     return { error: invalidBody("Room type create totalRooms cannot exceed 500.") };
   }
@@ -2430,6 +2422,16 @@ function toRoomTypeCreateCommand(
   if (maxAdults !== undefined) occupancyLimits.adults = maxAdults;
   if (maxChildren !== undefined) occupancyLimits.children = maxChildren;
   occupancyLimits.total = maxOccupancy ?? (maxAdults ?? 0) + (maxChildren ?? 0);
+
+  const nonRefundableRate =
+    raw.nonRefundableEnabled === true ? roomTypeNonRefundableRate(raw, baseRate, currency) : null;
+  if (raw.nonRefundableEnabled === true && !nonRefundableRate) {
+    return {
+      error: invalidBody(
+        "Room type create non-refundable rate requires a valid nonRefundableRate or nonRefundableDiscount.",
+      ),
+    };
+  }
 
   return {
     value: {
@@ -2444,10 +2446,7 @@ function toRoomTypeCreateCommand(
       amenities: toStringArray(raw.amenities),
       media: roomTypeMedia(raw.images),
       baseRate: { amountDecimal: baseRate, currency },
-      nonRefundableRate:
-        raw.nonRefundableEnabled === true
-          ? roomTypeNonRefundableRate(raw, baseRate, currency)
-          : null,
+      nonRefundableRate,
       active: typeof raw.isActive === "boolean" ? raw.isActive : true,
       sortOrder: optionalNonNegativeInteger(raw.sortOrder) ?? 0,
       roomCount,
@@ -2539,10 +2538,10 @@ function roomTypeMedia(value: unknown): PmsRoomType["media"] {
 }
 
 function moneyDecimal(value: unknown): string | undefined {
-  const numberValue =
-    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  if (!Number.isFinite(numberValue) || numberValue < 0) return undefined;
-  return numberValue.toFixed(2);
+  const raw =
+    typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+  if (!raw || !isMoneyAmount(raw)) return undefined;
+  return Number(raw).toFixed(2);
 }
 
 function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaidBody):

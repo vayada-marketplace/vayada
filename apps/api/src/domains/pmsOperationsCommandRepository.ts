@@ -224,7 +224,11 @@ export function createTargetPmsOperationsCommandRepository(
           );
           await client.query("ROLLBACK");
           return (
-            replay ?? roomTypeConflict("Room type create idempotency key could not be reserved.")
+            replay ??
+            roomTypeConflict(
+              "idempotency_conflict",
+              "Room type create idempotency key could not be reserved.",
+            )
           );
         }
 
@@ -233,7 +237,10 @@ export function createTargetPmsOperationsCommandRepository(
         const insertedRoomCount = await insertInitialRooms(client, command, roomTypeId, acceptedAt);
         if (insertedRoomCount !== command.roomCount) {
           await client.query("ROLLBACK");
-          return roomTypeConflict("Generated room numbers conflict with existing rooms.");
+          return roomTypeConflict(
+            "room_type_conflict",
+            "Generated room numbers conflict with existing rooms.",
+          );
         }
         const created = roomTypeFromCommand(command, roomTypeId, ratePlans);
 
@@ -260,7 +267,10 @@ export function createTargetPmsOperationsCommandRepository(
       } catch (error) {
         await rollbackQuietly(client);
         if (isPgUniqueViolation(error)) {
-          return roomTypeConflict("Room type create conflicts with the current property state.");
+          return roomTypeConflict(
+            "room_type_conflict",
+            "Room type create conflicts with the current property state.",
+          );
         }
         if (isPgForeignKeyViolation(error)) {
           return roomTypeInvalidBody("Room type create references a property that does not exist.");
@@ -1430,16 +1440,22 @@ async function findRoomTypeCommandReplay(
   const existing = result.rows[0];
   if (!existing) return null;
   if (existing.requestFingerprintHash !== requestFingerprintHash) {
-    return roomTypeConflict("Idempotency key was used with a different room type command.");
+    return roomTypeConflict(
+      "idempotency_conflict",
+      "Idempotency key was used with a different room type command.",
+    );
   }
   if (existing.status !== "completed") {
-    return roomTypeConflict("Room type command is already in progress.");
+    return roomTypeConflict("idempotency_conflict", "Room type command is already in progress.");
   }
 
   const commandMeta = existing.idempotencyMetadata?.["commandMeta"];
   const roomType = existing.idempotencyMetadata?.["roomType"];
   if (!isPmsCommandMeta(commandMeta) || !isPmsRoomType(roomType)) {
-    return roomTypeConflict("Room type command replay metadata is unavailable.");
+    return roomTypeConflict(
+      "idempotency_conflict",
+      "Room type command replay metadata is unavailable.",
+    );
   }
   return { ok: true, roomType, commandMeta, replayed: true };
 }
@@ -1585,7 +1601,7 @@ async function enqueueRoomTypeCreateSideEffects(
        AND event_key = $1
      LIMIT 1`,
     [
-      `pms.room_type.created.${command.idempotencyKey}.v1`,
+      `pms.room_type.created.property.${command.propertyId}.key.${keyHash}.v1`,
       acceptedAt,
       command.propertyId,
       roomType.roomTypeId,
@@ -1631,7 +1647,7 @@ async function enqueueRoomTypeCreateSideEffects(
      ON CONFLICT (destination, outbox_key) DO NOTHING`,
     [
       domainEvent.rows[0]!.eventId,
-      `pms.ari_changed.room_type.${command.idempotencyKey}.v1`,
+      `pms.ari_changed.room_type.property.${command.propertyId}.key.${keyHash}.v1`,
       command.propertyId,
       roomType.roomTypeId,
       command.audit.correlationId ?? command.audit.requestId,
@@ -1679,18 +1695,18 @@ async function insertRoomTypeAuditEvent(
        1,
        $2::timestamptz,
        'property',
-       NULL,
        $3::uuid,
-       $4,
-       $5::uuid,
+       $4::uuid,
+       $5,
+       $6::uuid,
        'pms',
        'room_type',
-       $6,
        $7,
        $8,
-       $9::jsonb,
+       $9,
        $10::jsonb,
        $11::jsonb,
+       $12::jsonb,
        'standard',
        'internal'
      )
@@ -1698,6 +1714,7 @@ async function insertRoomTypeAuditEvent(
     [
       `pms.room_type.created.property.${command.propertyId}.room_type.${roomType.roomTypeId}.key.${keyHash}.v1`,
       commandMeta.acceptedAt,
+      command.audit.actor.kind === "user" ? command.audit.actor.organizationId : null,
       command.propertyId,
       command.audit.actor.kind,
       roomTypeActorUserId(command),
@@ -4359,11 +4376,14 @@ function checkoutChargeConflict(
   };
 }
 
-function roomTypeConflict(message: string): Exclude<PmsRoomTypeCommandResult, { ok: true }> {
+function roomTypeConflict(
+  code: "idempotency_conflict" | "room_type_conflict",
+  message: string,
+): Exclude<PmsRoomTypeCommandResult, { ok: true }> {
   return {
     ok: false,
     statusCode: 409,
-    code: "idempotency_conflict",
+    code,
     message,
   };
 }

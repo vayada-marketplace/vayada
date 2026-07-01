@@ -9134,6 +9134,63 @@ describe("vayada-api", () => {
     });
   });
 
+  it("rejects invalid PMS room-type create numeric inputs", async () => {
+    app = buildAuthenticatedApp({
+      permissions: ["pms.operations.manage"],
+      entitlements: [
+        {
+          product: "pms",
+          key: "property-management",
+          status: "active",
+          resource: {
+            product: "pms",
+            resourceType: "pms_property",
+            resourceId: pmsPropertyId,
+          },
+        },
+      ],
+      pmsOperationsCommandRepository: createPmsOperationsCommandRepository(),
+    });
+
+    const cases = [
+      {
+        patch: { totalRooms: "1.5" },
+        message: "Room type create totalRooms must be a non-negative integer.",
+      },
+      {
+        patch: { nonRefundableEnabled: true },
+        message:
+          "Room type create non-refundable rate requires a valid nonRefundableRate or nonRefundableDiscount.",
+      },
+      {
+        patch: { baseRate: "240.999" },
+        message: "Room type create requires a valid baseRate.",
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const response = await injectJson(app, {
+        method: "POST",
+        url: `/api/pms/properties/${pmsPropertyId}/room-types`,
+        payload: {
+          commandId: `cmd-room-type-invalid-${index}`,
+          idempotencyKey: `room-type-invalid-${index}`,
+          name: "Loft Suite",
+          baseRate: "240.00",
+          currency: "EUR",
+          ...testCase.patch,
+        },
+        headers: { authorization: "Bearer valid-token" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toMatchObject({
+        code: "invalid_body",
+        message: testCase.message,
+      });
+    }
+  });
+
   it("returns idempotency conflicts from PMS room-type create", async () => {
     app = buildAuthenticatedApp({
       permissions: ["pms.operations.manage"],
