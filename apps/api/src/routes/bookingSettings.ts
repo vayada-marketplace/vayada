@@ -303,7 +303,12 @@ export type BookingSettingsReadRepository = {
 };
 
 export type UpdateBookingAddonSettingsBody = BookingAddonSettingsResponse;
-export type UpdateBookingGuestFormSettingsBody = BookingGuestFormSettingsResponse;
+export type UpdateBookingGuestFormSettingsBody = Omit<
+  BookingGuestFormSettingsResponse,
+  "phoneRequired"
+> & {
+  phoneRequired?: boolean;
+};
 export type UpdateBookingBenefitsSettingsBody = BookingBenefitsSettingsResponse;
 export type UpdateBookingLocalizationSettingsBody = BookingLocalizationSettingsResponse;
 export type UpdateBookingRoomFilterSettingsBody = BookingRoomFilterSettingsResponse;
@@ -1728,14 +1733,14 @@ export function createPgTargetBookingSettingsRepository(config: {
         `special_requests_enabled = $2,
          arrival_time_enabled = $3,
          guest_count_enabled = $4,
-         phone_required = $5,
+         phone_required = COALESCE($5, phone_required),
          adult_age_threshold = $6,
          children_enabled = $7`,
         [
           settings.specialRequestsEnabled,
           settings.arrivalTimeEnabled,
           settings.guestCountEnabled,
-          settings.phoneRequired,
+          settings.phoneRequired ?? null,
           settings.adultAgeThreshold,
           settings.childrenEnabled,
         ],
@@ -2200,90 +2205,31 @@ export async function registerBookingSettingsRoutes(
 
   app.put<{ Params: BookingHotelParams; Body: unknown }>(
     "/hotels/:hotelId/settings/guest-form",
-    async (request, reply) => {
-      const { hotelId } = request.params;
+    async (request, reply) =>
+      handleBookingSettingsWrite({
+        request,
+        reply,
+        parseBody: parseGuestFormSettingsWriteBody,
+        write: (hotelId, settings) =>
+          writeRepository.updateGuestFormSettingsByHotelId(hotelId, settings),
+        afterWrite: async (hotelId, _settings, stored, request) => {
+          if (!guestFormSettingsSync) return;
 
-      try {
-        enforceBookingSettingsPolicy(request, hotelId);
-      } catch (error) {
-        const contractError = toBookingSettingsAccessError(error, request, hotelId);
-        if (contractError) return sendBookingSettingsWriteError(reply, contractError);
-        throw error;
-      }
-
-      let current: BookingGuestFormSettingsReadModel | null;
-      try {
-        current = await repository.findGuestFormSettingsByHotelId(hotelId);
-      } catch (error) {
-        request.log.error({ err: error, hotelId }, "Booking guest-form settings read failed");
-        return sendBookingSettingsWriteError(reply, {
-          statusCode: 500,
-          code: "write_model_unavailable",
-          category: "write_model",
-          message: "Booking settings could not be saved.",
-        });
-      }
-      if (!current) {
-        return sendBookingSettingsWriteError(reply, {
-          statusCode: 404,
-          code: "not_found",
-          category: "write_model",
-          message: "Booking settings target not found.",
-        });
-      }
-
-      const parsed = parseGuestFormSettingsWriteBody(
-        request.body,
-        toGuestFormSettingsResponse(current).phoneRequired,
-      );
-      if (!parsed.ok) {
-        return sendBookingSettingsWriteError(reply, {
-          statusCode: 422,
-          code: "invalid_payload",
-          category: "validation",
-          message: "Booking settings payload is invalid.",
-          details: parsed.details,
-        });
-      }
-
-      let stored: BookingGuestFormSettingsReadModel | null;
-      try {
-        stored = await writeRepository.updateGuestFormSettingsByHotelId(hotelId, parsed.value);
-      } catch (error) {
-        request.log.error({ err: error, hotelId }, "Booking settings write failed");
-        return sendBookingSettingsWriteError(reply, {
-          statusCode: 500,
-          code: "write_model_unavailable",
-          category: "write_model",
-          message: "Booking settings could not be saved.",
-        });
-      }
-      if (!stored) {
-        return sendBookingSettingsWriteError(reply, {
-          statusCode: 404,
-          code: "not_found",
-          category: "write_model",
-          message: "Booking settings target not found.",
-        });
-      }
-
-      if (guestFormSettingsSync) {
-        try {
-          await guestFormSettingsSync.syncGuestFormSettingsByHotelId(
-            hotelId,
-            toGuestFormSettingsResponse(stored),
-            request.headers.authorization,
-          );
-        } catch (error) {
-          request.log.warn(
-            { err: error, hotelId },
-            "PMS guest-form settings sync failed after Booking settings write",
-          );
-        }
-      }
-
-      return toGuestFormSettingsResponse(stored);
-    },
+          try {
+            await guestFormSettingsSync.syncGuestFormSettingsByHotelId(
+              hotelId,
+              toGuestFormSettingsResponse(stored),
+              request.headers.authorization,
+            );
+          } catch (error) {
+            request.log.warn(
+              { err: error, hotelId },
+              "PMS guest-form settings sync failed after Booking settings write",
+            );
+          }
+        },
+        toResponse: toGuestFormSettingsResponse,
+      }),
   );
 
   app.put<{ Params: BookingHotelParams; Body: unknown }>(
@@ -2499,7 +2445,6 @@ function parseAddonSettingsWriteBody(
 
 function parseGuestFormSettingsWriteBody(
   body: unknown,
-  currentPhoneRequired?: boolean,
 ): ValidationResult<UpdateBookingGuestFormSettingsBody> {
   if (!isPlainRecord(body)) {
     return { ok: false, details: ["body must be an object."] };
@@ -2514,9 +2459,7 @@ function parseGuestFormSettingsWriteBody(
     "adultAgeThreshold",
     "childrenEnabled",
   ];
-  const requiredKeys = expectedKeys.filter(
-    (key) => key !== "phoneRequired" || currentPhoneRequired === undefined,
-  );
+  const requiredKeys = expectedKeys.filter((key) => key !== "phoneRequired");
   const expected = new Set(expectedKeys);
   for (const key of Object.keys(body)) {
     if (!expected.has(key)) details.push(`${key} is not allowed.`);
@@ -2531,7 +2474,7 @@ function parseGuestFormSettingsWriteBody(
   const guestCountEnabled = expectBoolean(body, "guestCountEnabled", details);
   const phoneRequired = Object.hasOwn(body, "phoneRequired")
     ? expectBoolean(body, "phoneRequired", details)
-    : (currentPhoneRequired ?? true);
+    : undefined;
   const adultAgeThreshold = expectInteger(body, "adultAgeThreshold", details, {
     min: 1,
     max: 120,
@@ -2539,17 +2482,16 @@ function parseGuestFormSettingsWriteBody(
   const childrenEnabled = expectBoolean(body, "childrenEnabled", details);
 
   if (details.length > 0) return { ok: false, details };
-  return {
-    ok: true,
-    value: {
-      specialRequestsEnabled,
-      arrivalTimeEnabled,
-      guestCountEnabled,
-      phoneRequired,
-      adultAgeThreshold,
-      childrenEnabled,
-    },
+  const value: UpdateBookingGuestFormSettingsBody = {
+    specialRequestsEnabled,
+    arrivalTimeEnabled,
+    guestCountEnabled,
+    adultAgeThreshold,
+    childrenEnabled,
   };
+  if (phoneRequired !== undefined) value.phoneRequired = phoneRequired;
+
+  return { ok: true, value };
 }
 
 function parseBenefitsSettingsWriteBody(

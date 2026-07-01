@@ -194,8 +194,9 @@ type BookingGuestFormSettings = {
 
 Validation and behavior:
 
-- All six fields are required. Partial updates are not accepted by the typed
-  route.
+- Typed clients send all six fields. During the migration window, legacy
+  five-field guest-form saves may omit `phoneRequired`; the write path preserves
+  the stored value. Other partial updates are not accepted by the typed route.
 - `adultAgeThreshold` must be an integer from `1` through `120`. Children age
   labels are derived as `0` through `adultAgeThreshold - 1`; there are no
   separate child age range fields.

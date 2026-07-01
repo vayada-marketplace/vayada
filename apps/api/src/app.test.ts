@@ -4231,7 +4231,7 @@ describe("vayada-api", () => {
         async updateGuestFormSettingsByHotelId(hotelId, settings) {
           expect(hotelId).toBe("booking_hotel_alpenrose");
           written = settings;
-          return settings;
+          return { ...settings, phoneRequired: false };
         },
       },
     });
@@ -4252,7 +4252,13 @@ describe("vayada-api", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(written).toMatchObject({ phoneRequired: false });
+    expect(written).toEqual({
+      specialRequestsEnabled: true,
+      arrivalTimeEnabled: false,
+      guestCountEnabled: true,
+      adultAgeThreshold: 18,
+      childrenEnabled: true,
+    });
     expect(response.body).toEqual({
       specialRequestsEnabled: true,
       arrivalTimeEnabled: false,
@@ -4261,6 +4267,46 @@ describe("vayada-api", () => {
       adultAgeThreshold: 18,
       childrenEnabled: true,
     });
+  });
+
+  it("saves guest-form phoneRequired without reading current settings", async () => {
+    let written: unknown;
+    app = buildAuthenticatedApp({
+      settingsRepository: {
+        ...bookingSettingsRepository,
+        async findGuestFormSettingsByHotelId() {
+          throw new Error("read repository should not be used for guest-form writes");
+        },
+      },
+      settingsWriteRepository: {
+        ...bookingSettingsWriteRepository,
+        async updateGuestFormSettingsByHotelId(hotelId, settings) {
+          expect(hotelId).toBe("booking_hotel_alpenrose");
+          written = settings;
+          return settings;
+        },
+      },
+    });
+
+    const response = await injectJson(app, {
+      method: "PUT",
+      url: "/api/booking/hotels/booking_hotel_alpenrose/settings/guest-form",
+      headers: {
+        authorization: "Bearer valid-token",
+      },
+      payload: {
+        specialRequestsEnabled: true,
+        arrivalTimeEnabled: false,
+        guestCountEnabled: true,
+        phoneRequired: true,
+        adultAgeThreshold: 18,
+        childrenEnabled: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(written).toMatchObject({ phoneRequired: true });
+    expect(response.body).toMatchObject({ phoneRequired: true });
   });
 
   it("keeps guest-form writes successful when PMS compatibility sync fails", async () => {
