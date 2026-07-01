@@ -1,4 +1,4 @@
-import { bookingApiClient, hotelHeaders } from "../api/bookingClient";
+import { apiClient } from "../api/client";
 
 export interface PropertySettings {
   slug: string;
@@ -110,79 +110,145 @@ export interface PromoCodeItem {
 }
 
 export const bookingSettingsService = {
-  listAllHotels: () => bookingApiClient.get<SuperAdminHotel[]>("/admin/superadmin/hotels"),
+  listAllHotels: async () => {
+    const dashboard = await apiClient.get<{
+      properties: Array<{
+        id: string;
+        name: string;
+        slug: string;
+        status: string;
+        createdAt: string;
+      }>;
+    }>("/api/platform/admin/growth?granularity=weekly&exclude_test_data=false");
+    return dashboard.properties.map(toSuperAdminHotel);
+  },
 
-  updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) =>
-    bookingApiClient.patch(`/admin/superadmin/hotels/${hotelId}/billing`, data),
+  updateHotelBilling: (hotelId: string, data: HotelBillingUpdate) => {
+    void data;
+    return unavailableTargetRoute(
+      `Booking billing settings target route is not available for ${hotelId}.`,
+    );
+  },
 
   listCommissionHistory: (hotelId: string) =>
-    bookingApiClient.get<CommissionRateChange[]>(
-      `/admin/superadmin/hotels/${hotelId}/commission-history`,
+    unavailableTargetRoute<CommissionRateChange[]>(
+      `Booking commission history target route is not available for ${hotelId}.`,
     ),
 
   createHotelForUser: (userId: string, name: string) =>
-    bookingApiClient.post<{ id: string; name: string; slug: string }>("/admin/superadmin/hotels", {
-      user_id: userId,
-      name,
-    }),
-
-  deleteHotel: (hotelId: string) => bookingApiClient.delete(`/admin/superadmin/hotels/${hotelId}`),
-
-  getPropertySettings: (hotelId: string) =>
-    bookingApiClient.get<PropertySettings>("/admin/settings/property", hotelHeaders(hotelId)),
-
-  updatePropertySettings: (hotelId: string, data: PropertySettingsUpdate) =>
-    bookingApiClient.patch<PropertySettings>(
-      "/admin/settings/property",
-      data,
-      hotelHeaders(hotelId),
+    unavailableTargetRoute<{ id: string; name: string; slug: string }>(
+      `Booking hotel provisioning target route is not available for ${name || userId}.`,
     ),
 
-  getDesignSettings: (hotelId: string) =>
-    bookingApiClient.get<DesignSettings>("/admin/settings/design", hotelHeaders(hotelId)),
+  deleteHotel: (hotelId: string) =>
+    unavailableTargetRoute(`Booking hotel delete target route is not available for ${hotelId}.`),
 
-  updateDesignSettings: (hotelId: string, data: DesignSettingsUpdate) =>
-    bookingApiClient.patch<DesignSettings>("/admin/settings/design", data, hotelHeaders(hotelId)),
+  getPropertySettings: (hotelId: string) =>
+    platformBookingUnavailable<PropertySettings>(hotelId, "property settings"),
+
+  updatePropertySettings: (hotelId: string, data: PropertySettingsUpdate) => {
+    void data;
+    return platformBookingUnavailable<PropertySettings>(hotelId, "property settings");
+  },
+
+  getDesignSettings: (hotelId: string) =>
+    platformBookingUnavailable<DesignSettings>(hotelId, "design settings"),
+
+  updateDesignSettings: (hotelId: string, data: DesignSettingsUpdate) => {
+    void data;
+    return platformBookingUnavailable<DesignSettings>(hotelId, "design settings");
+  },
 
   listAddons: (hotelId: string) =>
-    bookingApiClient.get<AddonItem[]>("/admin/addons", hotelHeaders(hotelId)),
+    platformBookingUnavailable<AddonItem[]>(hotelId, "add-on settings"),
 
-  createAddon: (hotelId: string, data: Omit<AddonItem, "id">) =>
-    bookingApiClient.post<AddonItem>("/admin/addons", data, hotelHeaders(hotelId)),
+  createAddon: (hotelId: string, data: Omit<AddonItem, "id">) => {
+    void data;
+    return platformBookingUnavailable<AddonItem>(hotelId, "add-on settings");
+  },
 
-  updateAddon: (hotelId: string, id: string, data: Partial<AddonItem>) =>
-    bookingApiClient.patch<AddonItem>(`/admin/addons/${id}`, data, hotelHeaders(hotelId)),
+  updateAddon: (hotelId: string, id: string, data: Partial<AddonItem>) => {
+    void id;
+    void data;
+    return platformBookingUnavailable<AddonItem>(hotelId, "add-on settings");
+  },
 
-  deleteAddon: (hotelId: string, id: string) =>
-    bookingApiClient.delete(`/admin/addons/${id}`, hotelHeaders(hotelId)),
+  deleteAddon: (hotelId: string, id: string) => {
+    void id;
+    return platformBookingUnavailable(hotelId, "add-on settings");
+  },
 
   getAddonSettings: (hotelId: string) =>
-    bookingApiClient.get<AddonSettings>("/admin/settings/addons", hotelHeaders(hotelId)),
+    platformBookingUnavailable<AddonSettings>(hotelId, "add-on settings"),
 
-  updateAddonSettings: (hotelId: string, data: Partial<AddonSettings>) =>
-    bookingApiClient.patch<AddonSettings>("/admin/settings/addons", data, hotelHeaders(hotelId)),
+  updateAddonSettings: (hotelId: string, data: Partial<AddonSettings>) => {
+    void data;
+    return platformBookingUnavailable<AddonSettings>(hotelId, "add-on settings");
+  },
 
   // Benefits
   getBenefits: (hotelId: string) =>
-    bookingApiClient.get<{ benefits: string[] }>("/admin/benefits", hotelHeaders(hotelId)),
+    platformBookingUnavailable<{ benefits: string[] }>(hotelId, "benefit settings"),
 
-  updateBenefits: (hotelId: string, benefits: string[]) =>
-    bookingApiClient.put<{ benefits: string[] }>(
-      "/admin/benefits",
-      { benefits },
-      hotelHeaders(hotelId),
-    ),
+  updateBenefits: (hotelId: string, benefits: string[]) => {
+    void benefits;
+    return platformBookingUnavailable<{ benefits: string[] }>(hotelId, "benefit settings");
+  },
 
   // Promo Codes
   listPromoCodes: (hotelId: string) =>
-    bookingApiClient.get<PromoCodeItem[]>("/admin/promo-codes", hotelHeaders(hotelId)),
+    platformBookingUnavailable<PromoCodeItem[]>(hotelId, "promo-code settings"),
 
-  createPromoCode: (hotelId: string, data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">) =>
-    bookingApiClient.post<PromoCodeItem>("/admin/promo-codes", data, hotelHeaders(hotelId)),
+  createPromoCode: (
+    hotelId: string,
+    data: Omit<PromoCodeItem, "id" | "useCount" | "createdAt">,
+  ) => {
+    void data;
+    return platformBookingUnavailable<PromoCodeItem>(hotelId, "promo-code settings");
+  },
 
-  updatePromoCode: (hotelId: string, id: string, data: Partial<PromoCodeItem>) =>
-    bookingApiClient.patch<PromoCodeItem>(`/admin/promo-codes/${id}`, data, hotelHeaders(hotelId)),
+  updatePromoCode: (hotelId: string, id: string, data: Partial<PromoCodeItem>) => {
+    void id;
+    void data;
+    return platformBookingUnavailable<PromoCodeItem>(hotelId, "promo-code settings");
+  },
 
-  deletePromoCode: (hotelId: string, id: string) =>
-    bookingApiClient.delete(`/admin/promo-codes/${id}`, hotelHeaders(hotelId)),
+  deletePromoCode: (hotelId: string, id: string) => {
+    void id;
+    return platformBookingUnavailable(hotelId, "promo-code settings");
+  },
 };
+
+function toSuperAdminHotel(property: { id: string; name: string; slug: string }): SuperAdminHotel {
+  return {
+    id: property.id,
+    name: property.name,
+    slug: property.slug,
+    location: "",
+    country: "",
+    owner_name: "",
+    owner_email: "",
+    billing_active_plan: "commission",
+    billing_pending_switch: null,
+    billing_switch_effective_date: null,
+    booking_engine_fee_pct: 5,
+    channel_manager_fee_pct: 0,
+    affiliate_platform_fee_pct: 0,
+    billing_commission_note: null,
+    fixed_base_fee: 0,
+    fixed_rooms_included: 0,
+    fixed_per_extra_room_fee: 0,
+    active_room_count: 0,
+    fixed_plan_projected_monthly_fee: 0,
+  };
+}
+
+function platformBookingUnavailable<T>(hotelId: string, feature: string): Promise<T> {
+  return unavailableTargetRoute<T>(
+    `Platform admin ${feature} target route is not available for ${hotelId}.`,
+  );
+}
+
+function unavailableTargetRoute<T = void>(message: string): Promise<T> {
+  return Promise.reject(new Error(message));
+}

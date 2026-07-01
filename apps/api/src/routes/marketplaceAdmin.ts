@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { requireAuthContext, type PermissionKey, type RequestContext } from "@vayada/backend-auth";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -23,6 +23,14 @@ export const MARKETPLACE_ADMIN_HOTEL_LISTINGS_CONTRACT = {
   owner: "marketplace",
   permission: MARKETPLACE_ADMIN_COLLABORATIONS_CONTRACT.permission,
   fallback: MARKETPLACE_ADMIN_COLLABORATIONS_CONTRACT.fallback,
+  doc: MARKETPLACE_ADMIN_COLLABORATIONS_CONTRACT.doc,
+} as const;
+
+export const MARKETPLACE_ADMIN_USER_PROFILES_CONTRACT = {
+  method: "PUT",
+  path: "/api/marketplace/admin/users/:userId/profile/:profileType",
+  owner: "marketplace",
+  permission: MARKETPLACE_ADMIN_COLLABORATIONS_CONTRACT.permission,
   doc: MARKETPLACE_ADMIN_COLLABORATIONS_CONTRACT.doc,
 } as const;
 
@@ -183,6 +191,51 @@ export type MarketplaceAdminUpdateHotelListingRequest = Partial<
   creatorRequirements?: MarketplaceHotelListingCreatorRequirementsWrite | null;
 };
 
+export type MarketplaceAdminCreatorPlatformWrite = {
+  platform: MarketplacePlatformName;
+  handle: string;
+  profileUrl?: string | null;
+  followerCount: number;
+  engagementRate: number;
+  audienceCountries?: { country: string; percentage: number }[];
+  audienceAgeGroups?: { ageRange: string; percentage: number }[];
+  audienceGenderSplit?: { male: number; female: number; other?: number } | null;
+};
+
+export type MarketplaceAdminCreatorProfileUpdateRequest = {
+  displayName?: string;
+  profilePictureUrl?: string | null;
+  locationText?: string | null;
+  shortDescription?: string | null;
+  portfolioUrl?: string | null;
+  phone?: string | null;
+  platforms?: MarketplaceAdminCreatorPlatformWrite[];
+};
+
+export type MarketplaceAdminHotelProfileUpdateRequest = {
+  hostSummary?: string | null;
+  collaborationGuidelines?: string | null;
+};
+
+export type MarketplaceAdminUserProfileUpdateResponse = {
+  contractVersion: typeof MARKETPLACE_ADMIN_CONTRACT_VERSION;
+  authorizationMode: MarketplaceAdminAuthorizationMode;
+  userId: string;
+  profileType: "creator" | "hotel";
+  updatedAt: string;
+};
+
+export type MarketplaceAdminInviteCode = {
+  id: string;
+  code: string;
+  status: "pending" | "redeemed" | "expired";
+  created_at: string;
+  expires_at: string;
+  hotel_name: string | null;
+  redeemed_at: string | null;
+  setup_data?: unknown;
+};
+
 export type MarketplaceAdminHotelListing = {
   contractVersion: typeof MARKETPLACE_ADMIN_CONTRACT_VERSION;
   authorizationMode: MarketplaceAdminAuthorizationMode;
@@ -226,6 +279,22 @@ export type MarketplaceAdminRepository = {
     collaborationId: string;
     idempotencyKey: string;
   }): Promise<MarketplaceCollaborationLifecycleWriteResponse | null>;
+  updateCreatorProfileForUser(input: {
+    userId: string;
+    request: MarketplaceAdminCreatorProfileUpdateRequest;
+    authorizationMode: MarketplaceAdminAuthorizationMode;
+  }): Promise<MarketplaceAdminUserProfileUpdateResponse | null>;
+  updateHotelProfileForUser(input: {
+    userId: string;
+    request: MarketplaceAdminHotelProfileUpdateRequest;
+    authorizationMode: MarketplaceAdminAuthorizationMode;
+  }): Promise<MarketplaceAdminUserProfileUpdateResponse | null>;
+  listInviteCodes(): Promise<MarketplaceAdminInviteCode[]>;
+  createInviteCode(input: {
+    payload: unknown;
+    createdByUserId: string;
+  }): Promise<MarketplaceAdminInviteCode>;
+  revokeInviteCode(inviteCodeId: string): Promise<boolean>;
   createHotelListingForUser(input: {
     hotelUserId: string;
     request: MarketplaceAdminCreateHotelListingRequest;
@@ -373,6 +442,134 @@ export function createPgMarketplaceAdminRepository(config: {
           return result.rows[0]?.id ?? null;
         },
       });
+    },
+    async updateCreatorProfileForUser(input) {
+      return writeListing(pool, async (client) => {
+        const profile = await resolveAdminCreatorProfile(client, input.userId);
+        if (!profile) return null;
+        const result = await client.query<{ updatedAt: Date | string }>(
+          `UPDATE marketplace.creator_profiles
+           SET display_name = CASE WHEN $3::boolean THEN $4 ELSE display_name END,
+               profile_picture_url = CASE WHEN $5::boolean THEN $6 ELSE profile_picture_url END,
+               location_text = CASE WHEN $7::boolean THEN $8 ELSE location_text END,
+               short_description = CASE WHEN $9::boolean THEN $10 ELSE short_description END,
+               portfolio_url = CASE WHEN $11::boolean THEN $12 ELSE portfolio_url END,
+               phone = CASE WHEN $13::boolean THEN $14 ELSE phone END,
+               updated_at = now()
+           WHERE id::text = $1
+             AND organization_id::text = $2
+           RETURNING updated_at AS "updatedAt"`,
+          [
+            profile.creatorProfileId,
+            profile.organizationId,
+            input.request.displayName !== undefined,
+            input.request.displayName ?? null,
+            input.request.profilePictureUrl !== undefined,
+            input.request.profilePictureUrl ?? null,
+            input.request.locationText !== undefined,
+            input.request.locationText ?? null,
+            input.request.shortDescription !== undefined,
+            input.request.shortDescription ?? null,
+            input.request.portfolioUrl !== undefined,
+            input.request.portfolioUrl ?? null,
+            input.request.phone !== undefined,
+            input.request.phone ?? null,
+          ],
+        );
+        const updatedAt = result.rows[0]?.updatedAt;
+        if (!updatedAt) return null;
+        if (input.request.platforms) {
+          await replaceCreatorPlatforms(client, {
+            creatorProfileId: profile.creatorProfileId,
+            organizationId: profile.organizationId,
+            platforms: input.request.platforms,
+          });
+        }
+        return {
+          contractVersion: MARKETPLACE_ADMIN_CONTRACT_VERSION,
+          authorizationMode: input.authorizationMode,
+          userId: input.userId,
+          profileType: "creator",
+          updatedAt: toIsoString(updatedAt),
+        };
+      });
+    },
+    async updateHotelProfileForUser(input) {
+      return writeListing(pool, async (client) => {
+        const profile = await resolveAdminHotelProfile(client, input.userId);
+        if (!profile) return null;
+        const result = await client.query<{ updatedAt: Date | string }>(
+          `UPDATE marketplace.marketplace_hotel_profiles
+           SET host_summary = CASE WHEN $3::boolean THEN $4 ELSE host_summary END,
+               collaboration_guidelines = CASE
+                 WHEN $5::boolean THEN $6
+                 ELSE collaboration_guidelines
+               END,
+               updated_at = now()
+           WHERE property_id::text = $1
+             AND organization_id::text = $2
+           RETURNING updated_at AS "updatedAt"`,
+          [
+            profile.propertyId,
+            profile.organizationId,
+            input.request.hostSummary !== undefined,
+            input.request.hostSummary ?? null,
+            input.request.collaborationGuidelines !== undefined,
+            input.request.collaborationGuidelines ?? null,
+          ],
+        );
+        const updatedAt = result.rows[0]?.updatedAt;
+        if (!updatedAt) return null;
+        return {
+          contractVersion: MARKETPLACE_ADMIN_CONTRACT_VERSION,
+          authorizationMode: input.authorizationMode,
+          userId: input.userId,
+          profileType: "hotel",
+          updatedAt: toIsoString(updatedAt),
+        };
+      });
+    },
+    async listInviteCodes() {
+      const result = await pool.query<InviteCodeRow>(
+        `${INVITE_CODE_SELECT_SQL}
+         WHERE invite.status <> 'revoked'
+         ORDER BY invite.created_at DESC, invite.id`,
+      );
+      return result.rows.map(toInviteCode);
+    },
+    async createInviteCode(input) {
+      const result = await pool.query<InviteCodeRow>(
+        `WITH invite AS (
+           INSERT INTO marketplace.invite_codes (
+             code,
+             invite_type,
+             status,
+             payload,
+             created_by_user_id,
+             expires_at
+           )
+           VALUES ($1, 'hotel', 'pending', $2::jsonb, $3::uuid, now() + interval '30 days')
+           RETURNING *
+         )
+         ${INVITE_CODE_SELECT_BODY}`,
+        [
+          `VAY-${randomUUID().slice(0, 8).toUpperCase()}`,
+          JSON.stringify(input.payload ?? {}),
+          input.createdByUserId,
+        ],
+      );
+      return toInviteCode(result.rows[0]!);
+    },
+    async revokeInviteCode(inviteCodeId) {
+      const result = await pool.query<{ id: string }>(
+        `UPDATE marketplace.invite_codes
+         SET status = 'revoked'
+         WHERE id::text = $1
+           AND status <> 'redeemed'
+         RETURNING id::text AS id`,
+        [inviteCodeId],
+      );
+      return Boolean(result.rows[0]);
     },
     async createHotelListingForUser(input) {
       return writeListing(pool, async (client) => {
@@ -546,6 +743,32 @@ export async function registerMarketplaceAdminRoutes(
     } satisfies MarketplaceAdminCollaborationsResponse;
   });
 
+  app.get("/admin/invite-codes", async (request) => {
+    await requireMarketplaceAdminAccess(request, options);
+    return repository.listInviteCodes();
+  });
+
+  app.post<{ Body: unknown }>("/admin/invite-codes", async (request, reply) => {
+    const access = await requireMarketplaceAdminAccess(request, options);
+    const payload =
+      isRecord(request.body) && "data" in request.body ? request.body.data : request.body;
+    const inviteCode = await repository.createInviteCode({
+      payload,
+      createdByUserId: access.context.actor.internalUserId,
+    });
+    return reply.status(201).send(inviteCode);
+  });
+
+  app.delete<{ Params: InviteCodeParams }>(
+    "/admin/invite-codes/:inviteCodeId",
+    async (request, reply) => {
+      await requireMarketplaceAdminAccess(request, options);
+      const revoked = await repository.revokeInviteCode(request.params.inviteCodeId);
+      if (!revoked) return sendAdminError(reply, 404, "invite_code_not_found");
+      return reply.status(204).send();
+    },
+  );
+
   app.post<{ Params: CollaborationParams; Body: RespondBody }>(
     "/admin/collaborations/:collaborationId/respond",
     async (request, reply) => {
@@ -578,6 +801,39 @@ export async function registerMarketplaceAdminRoutes(
       });
       if (!result) return sendAdminError(reply, 404, "collaboration_not_found");
       return result;
+    },
+  );
+
+  app.put<{ Params: UserProfileParams; Body: unknown }>(
+    "/admin/users/:userId/profile/:profileType",
+    async (request, reply) => {
+      const access = await requireMarketplaceAdminAccess(request, options);
+
+      if (request.params.profileType === "creator") {
+        const validation = validateCreatorProfileRequest(request.body);
+        if (typeof validation === "string") return sendAdminError(reply, 422, validation);
+        const result = await repository.updateCreatorProfileForUser({
+          userId: request.params.userId,
+          request: validation,
+          authorizationMode: access.authorizationMode,
+        });
+        if (!result) return sendAdminError(reply, 404, "creator_profile_not_found");
+        return result;
+      }
+
+      if (request.params.profileType === "hotel") {
+        const validation = validateHotelProfileRequest(request.body);
+        if (typeof validation === "string") return sendAdminError(reply, 422, validation);
+        const result = await repository.updateHotelProfileForUser({
+          userId: request.params.userId,
+          request: validation,
+          authorizationMode: access.authorizationMode,
+        });
+        if (!result) return sendAdminError(reply, 404, "hotel_profile_not_found");
+        return result;
+      }
+
+      return sendAdminError(reply, 422, "invalid_profile_type");
     },
   );
 
@@ -719,6 +975,90 @@ function validateListingChildren(
   }
   if (requirements && !Array.isArray(requirements.platforms)) return "invalid_requirements";
   return null;
+}
+
+function validateCreatorProfileRequest(
+  body: unknown,
+): MarketplaceAdminCreatorProfileUpdateRequest | string {
+  if (!isRecord(body)) return "body_required";
+  const request: MarketplaceAdminCreatorProfileUpdateRequest = {};
+  const stringFields = [
+    ["displayName", false],
+    ["profilePictureUrl", true],
+    ["locationText", true],
+    ["shortDescription", true],
+    ["portfolioUrl", true],
+    ["phone", true],
+  ] as const;
+
+  for (const [key, nullable] of stringFields) {
+    if (!(key in body)) continue;
+    const value = body[key];
+    if (value === null && nullable) {
+      request[key] = null;
+    } else if (typeof value === "string") {
+      request[key] = value.trim();
+    } else {
+      return `invalid_${key}`;
+    }
+  }
+
+  if ("platforms" in body) {
+    if (!Array.isArray(body.platforms)) return "invalid_platforms";
+    const platforms: MarketplaceAdminCreatorPlatformWrite[] = [];
+    for (const platform of body.platforms) {
+      const parsed = parseCreatorPlatform(platform);
+      if (typeof parsed === "string") return parsed;
+      platforms.push(parsed);
+    }
+    request.platforms = platforms;
+  }
+
+  return Object.keys(request).length > 0 ? request : "body_required";
+}
+
+function validateHotelProfileRequest(
+  body: unknown,
+): MarketplaceAdminHotelProfileUpdateRequest | string {
+  if (!isRecord(body)) return "body_required";
+  const request: MarketplaceAdminHotelProfileUpdateRequest = {};
+  const allowedKeys = ["hostSummary", "collaborationGuidelines"] as const;
+  for (const key of Object.keys(body)) {
+    if (!(allowedKeys as readonly string[]).includes(key)) return `unsupported_${key}`;
+  }
+  for (const key of allowedKeys) {
+    if (!(key in body)) continue;
+    const value = body[key];
+    if (value === null) {
+      request[key] = null;
+    } else if (typeof value === "string") {
+      request[key] = value.trim();
+    } else {
+      return `invalid_${key}`;
+    }
+  }
+  return Object.keys(request).length > 0 ? request : "body_required";
+}
+
+function parseCreatorPlatform(value: unknown): MarketplaceAdminCreatorPlatformWrite | string {
+  if (!isRecord(value)) return "invalid_platform";
+  const platform = toPlatformName(value.platform);
+  const handle = readNonEmptyString(value.handle);
+  const followerCount = toNonNegativeNumber(value.followerCount);
+  const engagementRate = toNonNegativeNumber(value.engagementRate);
+  if (!platform || !handle || followerCount === null || engagementRate === null) {
+    return "invalid_platform";
+  }
+  return {
+    platform,
+    handle,
+    profileUrl: optionalNullableString(value.profileUrl),
+    followerCount,
+    engagementRate,
+    audienceCountries: parseAudienceCountries(value.audienceCountries),
+    audienceAgeGroups: parseAudienceAgeGroups(value.audienceAgeGroups),
+    audienceGenderSplit: parseGenderSplit(value.audienceGenderSplit),
+  };
 }
 
 function sendAdminError(reply: FastifyReply, statusCode: 404 | 422, code: string) {
@@ -1013,6 +1353,35 @@ type AdminHotelProfile = {
   organizationId: string;
 };
 
+type AdminCreatorProfile = {
+  creatorProfileId: string;
+  organizationId: string;
+};
+
+async function resolveAdminCreatorProfile(
+  client: Pick<MarketplaceAdminPool, "query">,
+  userId: string,
+): Promise<AdminCreatorProfile | null> {
+  const result = await client.query<AdminCreatorProfile>(
+    `SELECT
+       profile.id::text AS "creatorProfileId",
+       profile.organization_id::text AS "organizationId"
+     FROM marketplace.creator_profiles profile
+     JOIN identity.organization_memberships membership
+       ON membership.organization_id = profile.organization_id
+      AND membership.user_id::text = $1
+      AND membership.status = 'active'
+     JOIN identity.organizations organization
+       ON organization.id = membership.organization_id
+      AND organization.kind = 'creator_workspace'
+      AND organization.status = 'active'
+     ORDER BY profile.updated_at DESC, profile.id ASC
+     LIMIT 1`,
+    [userId],
+  );
+  return result.rows[0] ?? null;
+}
+
 async function resolveAdminHotelProfile(
   client: Pick<MarketplaceAdminPool, "query">,
   hotelUserId: string,
@@ -1035,6 +1404,51 @@ async function resolveAdminHotelProfile(
     [hotelUserId],
   );
   return result.rows[0] ?? null;
+}
+
+async function replaceCreatorPlatforms(
+  client: Pick<MarketplaceAdminPool, "query">,
+  input: {
+    creatorProfileId: string;
+    organizationId: string;
+    platforms: MarketplaceAdminCreatorPlatformWrite[];
+  },
+): Promise<void> {
+  await client.query(`DELETE FROM marketplace.creator_platforms WHERE creator_profile_id = $1`, [
+    input.creatorProfileId,
+  ]);
+
+  for (const platform of input.platforms) {
+    await client.query(
+      `INSERT INTO marketplace.creator_platforms (
+         creator_profile_id,
+         organization_id,
+         source_system,
+         source_platform_id,
+         platform,
+         handle,
+         profile_url,
+         follower_count,
+         engagement_rate,
+         audience_countries,
+         audience_age_groups,
+         audience_gender_split
+       )
+       VALUES ($1, $2, 'marketplace', gen_random_uuid()::text, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb)`,
+      [
+        input.creatorProfileId,
+        input.organizationId,
+        platform.platform,
+        platform.handle,
+        platform.profileUrl ?? null,
+        platform.followerCount,
+        platform.engagementRate,
+        JSON.stringify(platform.audienceCountries ?? []),
+        JSON.stringify(platform.audienceAgeGroups ?? []),
+        JSON.stringify(platform.audienceGenderSplit ?? {}),
+      ],
+    );
+  }
 }
 
 async function resolveListingForProfile(
@@ -1266,6 +1680,21 @@ function mapListingRow(
   };
 }
 
+function toInviteCode(row: InviteCodeRow): MarketplaceAdminInviteCode {
+  const status =
+    row.status === "redeemed" ? "redeemed" : row.status === "expired" ? "expired" : "pending";
+  return {
+    id: row.id,
+    code: row.code,
+    status,
+    created_at: toIsoString(row.createdAt),
+    expires_at: toIsoString(row.expiresAt),
+    hotel_name: row.hotelName,
+    redeemed_at: toIsoStringOrNull(row.redeemedAt),
+    setup_data: row.payload,
+  };
+}
+
 function toOfferings(value: unknown): MarketplaceAdminHotelListing["collaborationOfferings"] {
   if (!Array.isArray(value)) return [];
   return value.filter(isRecord).map((row) => ({
@@ -1358,6 +1787,10 @@ function toPlatformArray(value: unknown): MarketplacePlatformName[] {
   });
 }
 
+function toPlatformName(value: unknown): MarketplacePlatformName | null {
+  return typeof value === "string" && toPlatformArray([value])[0] === value ? value : null;
+}
+
 function firstQueryValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -1388,6 +1821,11 @@ function toNullableNumber(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function toNonNegativeNumber(value: unknown): number | null {
+  const number = toNullableNumber(value);
+  return number !== null && number >= 0 ? number : null;
+}
+
 function toNullableDecimal(value: unknown): string | null {
   if (value === null || value === undefined || value === "") return null;
   return String(value);
@@ -1405,6 +1843,41 @@ function readString(value: unknown): string | null {
 
 function readNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function optionalNullableString(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
+function parseAudienceCountries(value: unknown): { country: string; percentage: number }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const country = readNonEmptyString(entry.country);
+    const percentage = toNonNegativeNumber(entry.percentage);
+    return country && percentage !== null ? [{ country, percentage }] : [];
+  });
+}
+
+function parseAudienceAgeGroups(value: unknown): { ageRange: string; percentage: number }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!isRecord(entry)) return [];
+    const ageRange = readNonEmptyString(entry.ageRange);
+    const percentage = toNonNegativeNumber(entry.percentage);
+    return ageRange && percentage !== null ? [{ ageRange, percentage }] : [];
+  });
+}
+
+function parseGenderSplit(value: unknown): { male: number; female: number; other?: number } | null {
+  if (!isRecord(value)) return null;
+  const male = toNonNegativeNumber(value.male);
+  const female = toNonNegativeNumber(value.female);
+  const other = toNonNegativeNumber(value.other);
+  if (male === null || female === null) return null;
+  return other === null ? { male, female } : { male, female, other };
 }
 
 function toIsoString(value: Date | string): string {
@@ -1455,8 +1928,17 @@ type CollaborationParams = {
   collaborationId: string;
 };
 
+type InviteCodeParams = {
+  inviteCodeId: string;
+};
+
 type HotelUserParams = {
   hotelUserId: string;
+};
+
+type UserProfileParams = {
+  userId: string;
+  profileType: string;
 };
 
 type ListingParams = HotelUserParams & {
@@ -1472,6 +1954,17 @@ type RespondBody = {
 
 type ApproveBody = {
   idempotencyKey?: string;
+};
+
+type InviteCodeRow = {
+  id: string;
+  code: string;
+  status: string;
+  createdAt: Date | string;
+  expiresAt: Date | string;
+  hotelName: string | null;
+  redeemedAt: Date | string | null;
+  payload: unknown;
 };
 
 type CollaborationRow = {
@@ -1527,6 +2020,28 @@ type ListingRow = {
   createdAt: Date | string;
   updatedAt: Date | string;
 };
+
+const INVITE_CODE_SELECT_BODY = `
+  SELECT
+    invite.id::text AS id,
+    invite.code,
+    invite.status,
+    invite.created_at AS "createdAt",
+    invite.expires_at AS "expiresAt",
+    property.display_name AS "hotelName",
+    invite.redeemed_at AS "redeemedAt",
+    invite.payload
+  FROM invite
+  LEFT JOIN hotel_catalog.properties property ON property.id = invite.property_id
+`;
+
+const INVITE_CODE_SELECT_SQL = `
+  WITH invite AS (
+    SELECT *
+    FROM marketplace.invite_codes invite
+  )
+  ${INVITE_CODE_SELECT_BODY}
+`;
 
 const COLLABORATION_SELECT_SQL = `
   SELECT

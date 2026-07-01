@@ -84,8 +84,8 @@ export const usersService = {
   },
 
   /**
-   * Create a new identity user. Product profile writes stay on the legacy
-   * marketplace admin route until their owning marketplace vertical migrates.
+   * Create a new identity user. Product profile writes are handled separately
+   * by their owning target admin routes.
    */
   createUser: async (data: CreateUserRequest): Promise<User> => {
     const response = await apiClient.post<IdentityCommandResponse>("/api/identity/admin/users", {
@@ -146,7 +146,36 @@ export const usersService = {
       }>;
     },
   ): Promise<any> => {
-    const response = await apiClient.put<any>(`/admin/users/${userId}/profile/creator`, data);
+    const response = await apiClient.put<any>(
+      `/api/marketplace/admin/users/${userId}/profile/creator`,
+      {
+        ...(data.name !== undefined ? { displayName: data.name } : {}),
+        ...(data.profilePicture !== undefined ? { profilePictureUrl: data.profilePicture } : {}),
+        ...(data.location !== undefined ? { locationText: data.location } : {}),
+        ...(data.shortDescription !== undefined ? { shortDescription: data.shortDescription } : {}),
+        ...(data.portfolioLink !== undefined ? { portfolioUrl: data.portfolioLink } : {}),
+        ...(data.phone !== undefined ? { phone: data.phone } : {}),
+        ...(data.platforms !== undefined
+          ? {
+              platforms: data.platforms.map((platform) => ({
+                platform: toMarketplacePlatform(platform.name),
+                handle: platform.handle,
+                followerCount: platform.followers,
+                engagementRate: platform.engagementRate,
+                audienceCountries: (platform.topCountries ?? []).map((country) => ({
+                  country: country.country,
+                  percentage: country.percentage ?? 0,
+                })),
+                audienceAgeGroups: (platform.topAgeGroups ?? []).map((ageGroup) => ({
+                  ageRange: ageGroup.ageRange,
+                  percentage: ageGroup.percentage ?? 0,
+                })),
+                audienceGenderSplit: platform.genderSplit ?? null,
+              })),
+            }
+          : {}),
+      },
+    );
     return transformSnakeToCamel(response);
   },
 
@@ -165,7 +194,21 @@ export const usersService = {
       picture?: string;
     },
   ): Promise<any> => {
-    const response = await apiClient.put<any>(`/admin/users/${userId}/profile/hotel`, data);
+    const unsupportedFields = Object.entries(data)
+      .filter(([key, value]) => key !== "about" && value !== undefined)
+      .map(([key]) => key);
+    if (unsupportedFields.length > 0) {
+      throw new Error(
+        `Hotel profile target route only supports about. Unsupported fields: ${unsupportedFields.join(", ")}.`,
+      );
+    }
+    if (data.about === undefined) return {};
+    const response = await apiClient.put<any>(
+      `/api/marketplace/admin/users/${userId}/profile/hotel`,
+      {
+        hostSummary: data.about,
+      },
+    );
     return transformSnakeToCamel(response);
   },
 

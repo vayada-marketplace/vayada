@@ -1,5 +1,3 @@
-import { pmsApiClient } from "./pmsClient";
-
 export interface AffiliatePayoutSummary {
   affiliateId: string;
   fullName: string;
@@ -88,15 +86,18 @@ export interface MarkPaidResponse {
 }
 
 export const affiliatePayoutsService = {
-  list: () =>
-    pmsApiClient.get<{ affiliates: AffiliatePayoutSummary[] }>("/super-admin/affiliate-payouts"),
+  list: () => unavailableAffiliatePayoutRoute<{ affiliates: AffiliatePayoutSummary[] }>(),
 
-  get: (affiliateId: string) =>
-    pmsApiClient.get<AffiliatePayoutDetail>(`/super-admin/affiliate-payouts/${affiliateId}`),
+  get: (affiliateId: string) => unavailableAffiliatePayoutRoute<AffiliatePayoutDetail>(affiliateId),
 
   markPaid: (affiliateId: string, body: MarkPaidRequest) =>
-    pmsApiClient.post<MarkPaidResponse>(
-      `/super-admin/affiliate-payouts/${affiliateId}/mark-paid`,
-      body,
-    ),
+    unavailableAffiliatePayoutRoute<MarkPaidResponse>(affiliateId, body),
 };
+
+function unavailableAffiliatePayoutRoute<T>(affiliateId?: string, body?: unknown): Promise<T> {
+  void body;
+  const suffix = affiliateId ? ` for affiliate ${affiliateId}` : "";
+  return Promise.reject(
+    new Error(`Platform admin affiliate payout target route is not available${suffix}.`),
+  );
+}

@@ -1,5 +1,4 @@
 import { apiClient } from "./client";
-import { pmsApiClient } from "./pmsClient";
 
 export type PlatformStatus = "live" | "demo" | "test";
 export type Granularity = "daily" | "weekly" | "monthly";
@@ -66,7 +65,8 @@ export function getGrowthDashboard(params: {
 }
 
 export function updatePropertyStatus(id: string, status: PlatformStatus) {
-  return pmsApiClient.patch<PlatformProperty>(`/platform-admin/properties/${id}/status`, {
-    status,
-  });
+  void status;
+  return Promise.reject<PlatformProperty>(
+    new Error(`Platform admin property status target route is not available for ${id}.`),
+  );
 }
