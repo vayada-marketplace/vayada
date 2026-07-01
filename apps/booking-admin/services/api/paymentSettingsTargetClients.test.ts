@@ -192,6 +192,11 @@ describe("payment settings target clients", () => {
       payAtHotelMethods: ["cash", "card"],
       onlineCardPayment: true,
       bankTransfer: true,
+      payoutAccountHolder: "Hotel Alpenrose GmbH",
+      payoutAccountType: "iban",
+      payoutIban: "DE89370400440532013000",
+      payoutBankName: "Commerzbank",
+      payoutSwift: "COBADEFFXXX",
       paymentProvider: "xendit",
       defaultCurrency: "chf",
       commandPrefix: "test-command",
@@ -206,6 +211,10 @@ describe("payment settings target clients", () => {
       defaultCurrency: "CHF",
       supportedCurrencies: ["CHF"],
       requiresManualReview: false,
+      depositPolicy: {
+        bankTransferInstructions:
+          "Account holder: Hotel Alpenrose GmbH\nIBAN: DE89370400440532013000\nBank: Commerzbank\nSWIFT/BIC: COBADEFFXXX",
+      },
     });
   });
 });

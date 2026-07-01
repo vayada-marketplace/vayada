@@ -52,6 +52,12 @@ export interface BookingAdminPaymentSettingsDraft {
   payAtHotelMethods?: string[];
   onlineCardPayment: boolean;
   bankTransfer: boolean;
+  payoutAccountHolder?: string;
+  payoutAccountType?: "iban" | "account_number";
+  payoutIban?: string;
+  payoutAccountNumber?: string;
+  payoutBankName?: string;
+  payoutSwift?: string;
   paymentProvider: Extract<FinanceRoutePaymentProvider, "stripe" | "xendit" | "vayada">;
   defaultCurrency: string;
   requiresManualReview?: boolean;
@@ -221,18 +227,23 @@ export function buildFinancePaymentSettingsBody(
   const commandId = newFinanceCommandId(draft.commandPrefix ?? "finance-payment-settings");
   const defaultCurrency = normalizeCurrencyCode(draft.defaultCurrency);
   const acceptedMethods = buildAcceptedPaymentMethods(draft);
+  const paymentSettings: FinancePaymentSettingsPatchPayload = {
+    paymentsEnabled: acceptedMethods.length > 0,
+    paymentProvider: draft.paymentProvider,
+    acceptedMethods,
+    defaultCurrency,
+    supportedCurrencies: [defaultCurrency],
+    requiresManualReview: draft.requiresManualReview ?? false,
+  };
+  const bankTransferInstructions = buildBankTransferInstructions(draft);
+  if (bankTransferInstructions) {
+    paymentSettings.depositPolicy = { bankTransferInstructions };
+  }
 
   return {
     commandId,
     idempotencyKey: commandId,
-    paymentSettings: {
-      paymentsEnabled: acceptedMethods.length > 0,
-      paymentProvider: draft.paymentProvider,
-      acceptedMethods,
-      defaultCurrency,
-      supportedCurrencies: [defaultCurrency],
-      requiresManualReview: draft.requiresManualReview ?? false,
-    },
+    paymentSettings,
   };
 }
 
@@ -268,6 +279,37 @@ function buildAcceptedPaymentMethods(
   }
   if (draft.bankTransfer) methods.add("bank_transfer");
   return Array.from(methods);
+}
+
+function buildBankTransferInstructions(draft: BookingAdminPaymentSettingsDraft): string | null {
+  if (!draft.bankTransfer) return null;
+
+  const accountHolder = trimmed(draft.payoutAccountHolder);
+  const accountType = draft.payoutAccountType ?? "iban";
+  const account =
+    accountType === "account_number"
+      ? trimmed(draft.payoutAccountNumber)
+      : trimmed(draft.payoutIban);
+  if (!accountHolder || !account) return null;
+
+  return [
+    `Account holder: ${accountHolder}`,
+    accountType === "account_number" ? `Account number: ${account}` : `IBAN: ${account}`,
+    labelValue("Bank", draft.payoutBankName),
+    labelValue("SWIFT/BIC", draft.payoutSwift),
+  ]
+    .filter((line): line is string => line !== null)
+    .join("\n");
+}
+
+function labelValue(label: string, value: string | undefined): string | null {
+  const text = trimmed(value);
+  return text ? `${label}: ${text}` : null;
+}
+
+function trimmed(value: string | undefined): string | null {
+  const text = value?.trim() ?? "";
+  return text || null;
 }
 
 function normalizeCurrencyCode(value: string): string {

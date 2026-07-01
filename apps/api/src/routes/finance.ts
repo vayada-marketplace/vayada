@@ -282,6 +282,7 @@ type FinanceInvoiceRow = {
   invoiceNumber: string;
   guestBookingId: string;
   bookingReference: string;
+  propertyName: string | null;
   guestDisplayName: string | null;
   guestEmail: string | null;
   guestPhone: string | null;
@@ -1672,6 +1673,9 @@ function mergePaymentSettings(
     ...payload,
     defaultCurrency,
     supportedCurrencies: [defaultCurrency],
+    depositPolicy: payload.depositPolicy
+      ? { ...current.depositPolicy, ...payload.depositPolicy }
+      : current.depositPolicy,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -4276,6 +4280,7 @@ async function enqueueBankTransferFinalConfirmationEmail(
       bookingReference: invoice.bookingReference,
       guestEmail: invoice.guestEmail,
       guestName: invoice.guestDisplayName,
+      propertyName: invoice.propertyName,
       checkIn: invoice.checkIn,
       checkOut: invoice.checkOut,
       totalAmount: invoice.totalAmount,
@@ -4620,6 +4625,7 @@ async function loadInvoiceRows(
          COALESCE(booking.booking_metadata ->> 'invoiceNumber', booking.public_reference) AS "invoiceNumber",
          booking.id::text AS "guestBookingId",
          booking.public_reference AS "bookingReference",
+         property.display_name AS "propertyName",
          NULLIF(concat_ws(' ', guest.first_name, guest.last_name), '') AS "guestDisplayName",
          guest.email AS "guestEmail",
          guest.phone AS "guestPhone",
@@ -4642,10 +4648,12 @@ async function loadInvoiceRows(
          booking.created_at AS "issuedAt",
          COALESCE(visibility.source_freshness, '{}'::jsonb) AS "sourceFreshness"
        FROM booking.guest_bookings booking
-       LEFT JOIN booking.booking_guests guest
-         ON guest.guest_booking_id = booking.id
-        AND guest.guest_role = 'booker'
-       LEFT JOIN pms.operational_booking_assignments assignment
+      LEFT JOIN booking.booking_guests guest
+        ON guest.guest_booking_id = booking.id
+       AND guest.guest_role = 'booker'
+      LEFT JOIN hotel_catalog.properties property
+        ON property.id = booking.property_id
+      LEFT JOIN pms.operational_booking_assignments assignment
          ON assignment.property_id = booking.property_id
         AND assignment.guest_booking_id = booking.id
         AND assignment.position = 1

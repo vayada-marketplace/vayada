@@ -1351,6 +1351,7 @@ describe("finance route contracts", () => {
       template: "booking_final_confirmation",
       bookingReference: "B-FIN-686",
     });
+    expect(payload.text).toContain("Your booking at Hotel Alpenrose is confirmed.");
     expect(payload.text).toContain("We look forward to welcoming you!");
     expect(payload.text).not.toContain("You can look up your booking anytime");
   });
@@ -2509,6 +2510,7 @@ type FinanceInvoiceRowFixture = {
   invoiceNumber: string;
   guestBookingId: string;
   bookingReference: string;
+  propertyName: string | null;
   guestDisplayName: string | null;
   guestEmail: string | null;
   guestPhone: string | null;
@@ -3029,6 +3031,7 @@ function financeInvoiceRowFixture(
     invoiceNumber: "INV-2026-0002",
     guestBookingId: invoiceDetails[0]!.guestBookingId,
     bookingReference: "B-FIN-686",
+    propertyName: "Hotel Alpenrose",
     guestDisplayName: "Fi Guest",
     guestEmail: "finance.guest@example.test",
     guestPhone: "+15555550123",

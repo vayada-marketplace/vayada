@@ -1396,7 +1396,7 @@ export function createTargetBookingWebCheckoutAdapter(
           body: {
             bankTransfer: {
               enabled: methods.includes("bank_transfer"),
-              details: objectValue(settings?.depositPolicy)["bankTransferInstructions"] ?? null,
+              details: bankTransferInstructionsFromPolicy(settings?.depositPolicy),
             },
             paypal: {
               enabled: false,
@@ -2576,6 +2576,16 @@ async function loadTargetPaymentSettings(
   return result.rows[0] ?? null;
 }
 
+function bankTransferInstructionsFromPolicy(policy: unknown): unknown | null {
+  const instructions = objectValue(policy)["bankTransferInstructions"];
+  if (typeof instructions === "string") {
+    const text = instructions.trim();
+    return text || null;
+  }
+  if (!instructions || typeof instructions !== "object" || Array.isArray(instructions)) return null;
+  return Object.keys(instructions).length > 0 ? instructions : null;
+}
+
 async function enqueueBankTransferReservedPendingPaymentEmail(
   pool: BookingWebCalendarReadPool,
   property: TargetCheckoutPropertyRow,
@@ -2589,6 +2599,8 @@ async function enqueueBankTransferReservedPendingPaymentEmail(
 
   const settings = await loadTargetPaymentSettings(pool, property.propertyId);
   if (!settings?.acceptedMethods?.includes("bank_transfer")) return;
+  const bankTransferDetails = bankTransferInstructionsFromPolicy(settings.depositPolicy);
+  if (!bankTransferDetails) return;
 
   await enqueueBookingLifecycleEmailJob(pool, {
     kind: "reserved_pending_payment",
@@ -2597,10 +2609,8 @@ async function enqueueBankTransferReservedPendingPaymentEmail(
     causationId: `booking.checkout.create:${context.idempotencyKey}`,
     actor: { type: "provider" },
     source: "apps/api-booking-web-public",
-    paymentDeadlineAt: new Date(
-      context.occurredAt.getTime() + 24 * 60 * 60 * 1000,
-    ).toISOString(),
-    bankTransferDetails: objectValue(settings.depositPolicy)["bankTransferInstructions"] ?? null,
+    paymentDeadlineAt: new Date(context.occurredAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    bankTransferDetails,
     booking: {
       propertyId: property.propertyId,
       guestBookingId: booking.guestBookingId,

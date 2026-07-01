@@ -1699,10 +1699,8 @@ describe("Booking Web public bootstrap parity", () => {
               {
                 acceptedMethods: ["bank_transfer"],
                 depositPolicy: {
-                  bankTransferInstructions: {
-                    accountHolder: "Hotel Alpenrose GmbH",
-                    iban: "DE89370400440532013000",
-                  },
+                  bankTransferInstructions:
+                    "Account holder: Hotel Alpenrose GmbH\nIBAN: DE89370400440532013000",
                 },
               },
             ],
@@ -1711,10 +1709,7 @@ describe("Booking Web public bootstrap parity", () => {
         if (text.includes("INSERT INTO platform.domain_events")) {
           return { rows: [{ eventId: "d9fccec2-eb4c-4c35-bfd3-02a748c2e951" }] };
         }
-        if (
-          text.includes("INSERT INTO platform.jobs") &&
-          text.includes("source_domain_event_id")
-        ) {
+        if (text.includes("INSERT INTO platform.jobs") && text.includes("source_domain_event_id")) {
           return {
             rows: [{ jobId: "e9fccec2-eb4c-4c35-bfd3-02a748c2e951", replay: false }],
           };
@@ -1770,10 +1765,11 @@ describe("Booking Web public bootstrap parity", () => {
       template: "booking_reserved_pending_payment",
       bookingReference: "B-BANK951",
       paymentDeadlineAt: "2026-09-02T10:00:00.000Z",
-      bankTransferDetails: { iban: "DE89370400440532013000" },
+      bankTransferDetails: "Account holder: Hotel Alpenrose GmbH\nIBAN: DE89370400440532013000",
     });
     expect(payload.text).toContain("We've reserved your room");
     expect(payload.text).toContain("Payment deadline: 2026-09-02T10:00:00.000Z");
+    expect(payload.text).toContain("IBAN: DE89370400440532013000");
   });
 
   it("reports actionable parity mismatches by fixture case and field", () => {
