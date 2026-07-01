@@ -161,6 +161,92 @@ describe("api config", () => {
     ).toBe("postgresql://target-db");
   });
 
+  it("loads next API runtime only with target sources and no legacy product envs", () => {
+    const config = loadConfig({
+      API_RUNTIME: "next",
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+      BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+      PUBLIC_BOOKABILITY_SOURCE: "target",
+      BOOKING_SETTINGS_SOURCE: "target",
+      BOOKING_RESERVATIONS_SOURCE: "target",
+      MARKETPLACE_DISCOVERY_SOURCE: "target",
+      PMS_OPERATIONS_SOURCE: "target",
+      FINANCE_SOURCE: "target",
+      BOOKING_CHECKOUT_COMMAND_SOURCE: "target",
+    });
+
+    expect(config).toMatchObject({
+      apiRuntime: "next",
+      bookingDatabaseUrl: undefined,
+      bookingReservationsReadDatabaseUrl: undefined,
+      bookingPublicApiUrl: undefined,
+      pmsApiUrl: undefined,
+      pmsPublicApiUrl: undefined,
+      publicHotelProfileSource: "target",
+      bookingDomainResolutionSource: "target",
+      publicBookabilitySource: "target",
+      bookingSettingsSource: "target",
+      bookingReservationsSource: "target",
+      marketplaceDiscoverySource: "target",
+      pmsOperationsSource: "target",
+      financeSource: "target",
+      bookingCheckoutCommandSource: "target",
+    });
+  });
+
+  it("loads next API runtime with explicit disabled target-only surfaces", () => {
+    const config = loadConfig({
+      API_RUNTIME: "next",
+      TARGET_DATABASE_URL: "postgresql://target-db",
+      PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+      BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+      PUBLIC_BOOKABILITY_SOURCE: "target",
+      BOOKING_SETTINGS_SOURCE: "target",
+      BOOKING_RESERVATIONS_SOURCE: "target",
+      MARKETPLACE_DISCOVERY_SOURCE: "disabled",
+      PMS_OPERATIONS_SOURCE: "disabled",
+      FINANCE_SOURCE: "target",
+      BOOKING_CHECKOUT_COMMAND_SOURCE: "target",
+    });
+
+    expect(config.marketplaceDiscoverySource).toBe("disabled");
+    expect(config.pmsOperationsSource).toBe("disabled");
+  });
+
+  it("rejects next API runtime when legacy product envs are present", () => {
+    expect(() =>
+      loadConfig({
+        API_RUNTIME: "next",
+        TARGET_DATABASE_URL: "postgresql://target-db",
+        PUBLIC_HOTEL_PROFILE_SOURCE: "target",
+        BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
+        PUBLIC_BOOKABILITY_SOURCE: "target",
+        BOOKING_SETTINGS_SOURCE: "target",
+        BOOKING_RESERVATIONS_SOURCE: "target",
+        MARKETPLACE_DISCOVERY_SOURCE: "target",
+        PMS_OPERATIONS_SOURCE: "target",
+        FINANCE_SOURCE: "target",
+        BOOKING_CHECKOUT_COMMAND_SOURCE: "target",
+        BOOKING_DATABASE_URL: "postgresql://booking-db",
+        PMS_PUBLIC_API_URL: "https://api.pms.localhost",
+      }),
+    ).toThrow(
+      "API_RUNTIME=next forbids legacy runtime envs: BOOKING_DATABASE_URL, PMS_PUBLIC_API_URL",
+    );
+  });
+
+  it("rejects next API runtime when source selectors would default to legacy or disabled", () => {
+    expect(() =>
+      loadConfig({
+        API_RUNTIME: "next",
+        TARGET_DATABASE_URL: "postgresql://target-db",
+      }),
+    ).toThrow(
+      "API_RUNTIME=next requires target runtime sources: PUBLIC_HOTEL_PROFILE_SOURCE=target",
+    );
+  });
+
   it("defaults provider webhook intake modes to observe-only shadow intake", () => {
     expect(loadConfig({}).providerWebhooks).toEqual({
       stripeSecret: undefined,

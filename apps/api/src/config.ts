@@ -59,6 +59,7 @@ export type PmsOperationsSource = "disabled" | "target";
 export type FinanceSource = "legacy" | "target";
 export type BookingWebEventSink = "disabled" | "target";
 export type ProviderWebhookIntakeMode = "observe_only" | "mutating" | "ack_only_with_receipt";
+export type ApiRuntime = "legacy" | "next";
 
 export type ProviderWebhookConfig = {
   stripeSecret?: string;
@@ -72,6 +73,7 @@ export type ProviderWebhookConfig = {
 export type ApiConfig = {
   host: string;
   port: number;
+  apiRuntime: ApiRuntime;
   auth?: ApiAuthConfig;
   authSession?: ApiAuthSessionConfig;
   askIntelligence: ApiAskIntelligenceConfig;
@@ -102,6 +104,20 @@ export type ApiConfig = {
   platformMediaServing?: PlatformMediaServingConfig;
   providerWebhooks: ProviderWebhookConfig;
   xenditSecretKey?: string;
+};
+
+const NEXT_API_FORBIDDEN_LEGACY_ENV_KEYS = [
+  "BOOKING_DATABASE_URL",
+  "BOOKING_RESERVATIONS_READ_DATABASE_URL",
+  "BOOKING_PUBLIC_API_URL",
+  "PMS_API_URL",
+  "PMS_PUBLIC_API_URL",
+] as const;
+
+type NextRuntimeSourceRequirement = {
+  key: string;
+  value: string;
+  allowExplicitDisabled?: boolean;
 };
 
 function readOptionalEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -308,6 +324,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     host: "0.0.0.0",
     port: 8003,
   });
+  const apiRuntime = readSourceEnv(env, "API_RUNTIME", ["legacy", "next"], "legacy");
   const targetDatabaseUrl = readOptionalPgConnectionEnv(env, "TARGET_DATABASE_URL");
   const publicHotelProfileSource = readSourceEnv(
     env,
@@ -370,8 +387,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     ["disabled", "target"],
     "disabled",
   );
+  const bookingReservationsSource = readSourceEnv(
+    env,
+    "BOOKING_RESERVATIONS_SOURCE",
+    ["legacy", "target"] as const,
+    "legacy",
+  );
+  const bookingDatabaseUrl = readOptionalPgConnectionEnv(env, "BOOKING_DATABASE_URL");
+  const bookingReservationsReadDatabaseUrl = readOptionalPgConnectionEnv(
+    env,
+    "BOOKING_RESERVATIONS_READ_DATABASE_URL",
+  );
+  const bookingPublicApiUrl = readOptionalEnv(env, "BOOKING_PUBLIC_API_URL");
+  const pmsApiUrl = readOptionalEnv(env, "PMS_API_URL");
+  const pmsPublicApiUrl = readOptionalEnv(env, "PMS_PUBLIC_API_URL");
+  const bookingWebLegacyCheckoutCommandProxyEnabled = readBooleanEnv(
+    env,
+    "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
+  );
   const auth = loadAuthConfig(env);
   const authSession = loadAuthSessionConfig(env);
+  assertNextApiRuntimeConfig(env, {
+    apiRuntime,
+    publicHotelProfileSource,
+    bookingDomainResolutionSource,
+    publicBookabilitySource,
+    bookingSettingsSource,
+    bookingReservationsSource,
+    marketplaceDiscoverySource,
+    pmsOperationsSource,
+    financeSource,
+    bookingCheckoutCommandSource,
+    bookingWebLegacyCheckoutCommandProxyEnabled,
+  });
   if (bookingSettingsSource === "target" && !targetDatabaseUrl) {
     throw new Error("TARGET_DATABASE_URL is required when BOOKING_SETTINGS_SOURCE=target");
   }
@@ -416,27 +464,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
 
   return {
     ...server,
+    apiRuntime,
     auth,
     authSession,
     askIntelligence: loadAskIntelligenceConfig(env),
     askIntelligenceEvidenceSource,
     targetDatabaseUrl,
-    bookingDatabaseUrl: readOptionalPgConnectionEnv(env, "BOOKING_DATABASE_URL"),
-    bookingReservationsSource: readSourceEnv(
-      env,
-      "BOOKING_RESERVATIONS_SOURCE",
-      ["legacy", "target"] as const,
-      "legacy",
-    ),
+    bookingDatabaseUrl,
+    bookingReservationsSource,
     publicHotelProfileSource,
     bookingDomainResolutionSource,
     publicBookabilitySource,
     bookingSettingsSource,
-    bookingReservationsReadDatabaseUrl: readOptionalPgConnectionEnv(
-      env,
-      "BOOKING_RESERVATIONS_READ_DATABASE_URL",
-    ),
-    bookingPublicApiUrl: readOptionalEnv(env, "BOOKING_PUBLIC_API_URL"),
+    bookingReservationsReadDatabaseUrl,
+    bookingPublicApiUrl,
     marketplaceDiscoverySource,
     marketplaceAdminSource,
     marketplaceAdminLegacySuperadminFallbackEnabled: readBooleanEnv(
@@ -453,17 +494,87 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
     pmsOperationsAllowedOrigins: readOptionalCsvEnv(env, "PMS_OPERATIONS_ALLOWED_ORIGINS", [
       "https://pms.localhost",
     ]),
-    pmsApiUrl: readOptionalEnv(env, "PMS_API_URL"),
-    pmsPublicApiUrl: readOptionalEnv(env, "PMS_PUBLIC_API_URL"),
+    pmsApiUrl,
+    pmsPublicApiUrl,
     bookingCheckoutCommandSource,
-    bookingWebLegacyCheckoutCommandProxyEnabled: readBooleanEnv(
-      env,
-      "BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED",
-    ),
+    bookingWebLegacyCheckoutCommandProxyEnabled,
     bookingWebEventSink,
     bookingHostBase: readOptionalEnv(env, "BOOKING_HOST_BASE"),
     platformMediaServing: loadPlatformMediaServingConfig(env),
     providerWebhooks: loadProviderWebhookConfig(env),
     xenditSecretKey: readOptionalEnv(env, "XENDIT_SECRET_KEY"),
   };
+}
+
+function assertNextApiRuntimeConfig(
+  env: NodeJS.ProcessEnv,
+  config: Pick<
+    ApiConfig,
+    | "apiRuntime"
+    | "publicHotelProfileSource"
+    | "bookingDomainResolutionSource"
+    | "publicBookabilitySource"
+    | "bookingSettingsSource"
+    | "bookingReservationsSource"
+    | "marketplaceDiscoverySource"
+    | "pmsOperationsSource"
+    | "financeSource"
+    | "bookingCheckoutCommandSource"
+    | "bookingWebLegacyCheckoutCommandProxyEnabled"
+  >,
+): void {
+  if (config.apiRuntime !== "next") return;
+
+  const forbiddenEnvKeys = NEXT_API_FORBIDDEN_LEGACY_ENV_KEYS.filter((key) =>
+    Boolean(readOptionalEnv(env, key)),
+  );
+  if (forbiddenEnvKeys.length > 0) {
+    throw new Error(`API_RUNTIME=next forbids legacy runtime envs: ${forbiddenEnvKeys.join(", ")}`);
+  }
+
+  const requiredTargetSources = [
+    { key: "PUBLIC_HOTEL_PROFILE_SOURCE", value: config.publicHotelProfileSource },
+    { key: "BOOKING_DOMAIN_RESOLUTION_SOURCE", value: config.bookingDomainResolutionSource },
+    { key: "PUBLIC_BOOKABILITY_SOURCE", value: config.publicBookabilitySource },
+    { key: "BOOKING_SETTINGS_SOURCE", value: config.bookingSettingsSource },
+    { key: "BOOKING_RESERVATIONS_SOURCE", value: config.bookingReservationsSource },
+    {
+      key: "MARKETPLACE_DISCOVERY_SOURCE",
+      value: config.marketplaceDiscoverySource,
+      allowExplicitDisabled: true,
+    },
+    {
+      key: "PMS_OPERATIONS_SOURCE",
+      value: config.pmsOperationsSource,
+      allowExplicitDisabled: true,
+    },
+    { key: "FINANCE_SOURCE", value: config.financeSource },
+    { key: "BOOKING_CHECKOUT_COMMAND_SOURCE", value: config.bookingCheckoutCommandSource },
+  ].flatMap((source) => nextRuntimeSourceRequirements(env, source));
+
+  if (config.bookingWebLegacyCheckoutCommandProxyEnabled) {
+    requiredTargetSources.push("BOOKING_WEB_LEGACY_CHECKOUT_COMMAND_PROXY_ENABLED=false");
+  }
+
+  if (requiredTargetSources.length > 0) {
+    throw new Error(
+      `API_RUNTIME=next requires target runtime sources: ${requiredTargetSources.join(", ")}`,
+    );
+  }
+}
+
+function nextRuntimeSourceRequirements(
+  env: NodeJS.ProcessEnv,
+  source: NextRuntimeSourceRequirement,
+): string[] {
+  if (source.value === "target") return [];
+  if (
+    source.allowExplicitDisabled &&
+    source.value === "disabled" &&
+    readOptionalEnv(env, source.key) === "disabled"
+  ) {
+    return [];
+  }
+  const suffix = source.allowExplicitDisabled ? "target or explicit disabled" : "target";
+  return [`${source.key}=${suffix}`];
 }

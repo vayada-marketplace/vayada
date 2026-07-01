@@ -46,6 +46,8 @@ jobs:
           file: ./${{ env.APP_DIR }}/Dockerfile
           platforms: linux/amd64
           push: true
+          build-args: |
+            API_RUNTIME=next
           tags: |
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:next-latest
             ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ github.sha }}

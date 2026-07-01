@@ -22,11 +22,17 @@ const legacyRuntimeEnvKeys = [
 ] as const;
 
 const nextApiLegacyFreeEnv: NodeJS.ProcessEnv = {
+  API_RUNTIME: "next",
   TARGET_DATABASE_URL: "postgresql://target-db",
   PUBLIC_HOTEL_PROFILE_SOURCE: "target",
   BOOKING_DOMAIN_RESOLUTION_SOURCE: "target",
   PUBLIC_BOOKABILITY_SOURCE: "target",
+  BOOKING_SETTINGS_SOURCE: "target",
+  BOOKING_RESERVATIONS_SOURCE: "target",
   MARKETPLACE_DISCOVERY_SOURCE: "target",
+  PMS_OPERATIONS_SOURCE: "target",
+  FINANCE_SOURCE: "target",
+  BOOKING_CHECKOUT_COMMAND_SOURCE: "target",
 };
 
 const publicBookabilityFixture = PUBLIC_BOOKABILITY_FIXTURES.find(
@@ -102,6 +108,7 @@ describe("next-api legacy-free runtime check", () => {
 
     const config = loadConfig(nextApiLegacyFreeEnv);
     expect(config).toMatchObject({
+      apiRuntime: "next",
       bookingDatabaseUrl: undefined,
       bookingReservationsReadDatabaseUrl: undefined,
       bookingPublicApiUrl: undefined,
@@ -110,7 +117,12 @@ describe("next-api legacy-free runtime check", () => {
       publicHotelProfileSource: "target",
       bookingDomainResolutionSource: "target",
       publicBookabilitySource: "target",
+      bookingSettingsSource: "target",
+      bookingReservationsSource: "target",
       marketplaceDiscoverySource: "target",
+      pmsOperationsSource: "target",
+      financeSource: "target",
+      bookingCheckoutCommandSource: "target",
     });
 
     const publicRuntime = createPublicRuntimeRepositories(config, {
