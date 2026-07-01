@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   SHARED_HOTEL_SETUP_PRODUCTS,
+  canOpenMarketplaceProfileTools,
   isSharedHotelSetupProductSelectable,
   resolveSharedFirstRunSetupView,
   selectedProductsForProperty,
@@ -11,6 +12,7 @@ import {
   type SharedHotelSetupEntryProduct,
   type SharedHotelSetupProduct,
   type SharedHotelSetupStatus,
+  type SharedProductActivation,
   type SharedPropertyProfile,
   type SharedPropertyProfileInput,
   type SharedSetupProperty,
@@ -21,7 +23,9 @@ type ProductLabels = Record<SharedHotelSetupProduct, string>;
 
 export type SharedFirstRunProductContinueInput = {
   product: SharedHotelSetupProduct;
+  productStatus: SharedProductActivation<SharedHotelSetupProduct>["status"] | null;
   propertyId: string;
+  missingSteps: string[];
   returnTo: string | null;
   action: "complete_product_activation" | "enter_product";
 };
@@ -54,6 +58,29 @@ const DEFAULT_PRODUCT_LABELS: ProductLabels = {
   booking: "Booking Engine",
   pms: "PMS",
   marketplace: "Creator Marketplace",
+};
+
+const MARKETPLACE_ACTIVATION_STEPS: Record<string, { title: string; description: string }> = {
+  productEntitlement: {
+    title: "Marketplace access",
+    description: "Confirm this property is enabled for Creator Marketplace.",
+  },
+  creatorPitch: {
+    title: "Creator-facing pitch",
+    description: "Add the message creators should see when evaluating this property.",
+  },
+  collaborationOffer: {
+    title: "Collaboration offer",
+    description: "Define what you offer creators, including availability and terms.",
+  },
+  creatorRequirements: {
+    title: "Creator requirements",
+    description: "Set the platforms, audience, and creator profile you want to work with.",
+  },
+  marketplaceListing: {
+    title: "Marketplace listing setup",
+    description: "Add the listing details and photos creators use for discovery.",
+  },
 };
 
 const EMPTY_DRAFT: ProfileDraft = {
@@ -237,9 +264,12 @@ export default function SharedFirstRunPropertySetupWizard({
 
   const handleContinueProduct = () => {
     if (!view.selectedPropertyId || !view.product) return;
+    const activation = view.selectedProperty?.products[view.product] ?? null;
     onProductContinue({
       product: view.product,
+      productStatus: activation?.status ?? null,
       propertyId: view.selectedPropertyId,
+      missingSteps: activation?.missingSteps ?? [],
       returnTo: status?.entry.returnTo ?? returnTo,
       action: view.screen === "enter_product" ? "enter_product" : "complete_product_activation",
     });
@@ -710,34 +740,94 @@ function ProductContinue({
   onContinue: () => void;
 }) {
   const product = view.product;
+  const isMarketplaceActivation = view.screen === "product_activation" && product === "marketplace";
+  const activation = product ? (view.selectedProperty?.products[product] ?? null) : null;
+  const missingSteps = activation?.missingSteps ?? [];
+  const isBlockedMarketplaceActivation =
+    isMarketplaceActivation &&
+    !canOpenMarketplaceProfileTools({
+      product,
+      productStatus: activation?.status ?? null,
+      missingSteps,
+    });
   return (
     <div>
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-gray-950">
-          {product ? labels[product] : "Product setup"}
+          {isBlockedMarketplaceActivation
+            ? "Marketplace activation unavailable"
+            : isMarketplaceActivation
+              ? "Activate Creator Marketplace"
+              : product
+                ? labels[product]
+                : "Product setup"}
         </h2>
         <p className="mt-1 text-sm text-gray-500">
-          {view.selectedProperty?.displayName ?? "Selected property"}
+          {isMarketplaceActivation
+            ? `Set up Marketplace for ${view.selectedProperty?.displayName ?? "this property"}.`
+            : (view.selectedProperty?.displayName ?? "Selected property")}
         </p>
       </div>
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
         <p className="text-sm text-gray-700">
-          {view.screen === "enter_product"
-            ? "This property is ready for the selected product."
-            : "The shared profile is ready. Continue into the selected product setup."}
+          {isBlockedMarketplaceActivation
+            ? marketplaceBlockedActivationCopy(activation?.status)
+            : isMarketplaceActivation
+              ? "The shared property profile is ready. Finish the Marketplace-specific setup below; you do not need to re-enter hotel name, location, website, phone, or the shared property description."
+              : view.screen === "enter_product"
+                ? "This property is ready for the selected product."
+                : "The shared profile is ready. Continue into the selected product setup."}
         </p>
+        {isMarketplaceActivation && missingSteps.length > 0 && (
+          <div className="mt-4 grid gap-3">
+            {missingSteps.map((step) => {
+              const item = marketplaceActivationStepCopy(step);
+              return (
+                <div key={step} className="rounded-lg border border-gray-200 bg-white p-3">
+                  <p className="text-sm font-medium text-gray-950">{item.title}</p>
+                  <p className="mt-1 text-xs text-gray-500">{item.description}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div className="mt-5 flex justify-end border-t border-gray-100 pt-5">
         <button
           type="button"
-          disabled={!product}
+          disabled={!product || isBlockedMarketplaceActivation}
           onClick={onContinue}
           className="rounded-lg bg-gray-950 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Continue
+          {isBlockedMarketplaceActivation
+            ? "Marketplace unavailable"
+            : isMarketplaceActivation
+              ? "Open Marketplace listing tools"
+              : "Continue"}
         </button>
       </div>
     </div>
+  );
+}
+
+function marketplaceBlockedActivationCopy(
+  status: SharedProductActivation<"marketplace">["status"] | undefined,
+): string {
+  if (status === "suspended") {
+    return "Marketplace access is currently suspended for this property. Contact support before continuing setup.";
+  }
+  if (status === "unavailable") {
+    return "Marketplace activation is not available for this property. Contact support if this looks wrong.";
+  }
+  return "Marketplace activation is not ready for this property yet.";
+}
+
+function marketplaceActivationStepCopy(step: string): { title: string; description: string } {
+  return (
+    MARKETPLACE_ACTIVATION_STEPS[step] ?? {
+      title: step,
+      description: "Complete this Marketplace activation item.",
+    }
   );
 }
 

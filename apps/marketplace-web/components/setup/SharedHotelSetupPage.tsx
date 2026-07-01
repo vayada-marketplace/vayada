@@ -12,6 +12,7 @@ import {
 } from "@vayada/hotel-setup-wizard";
 
 import { ROUTES } from "@/lib/constants";
+import { canOpenMarketplaceProfileTools } from "@/lib/utils/sharedSetupGuard";
 import { authService } from "@/services/auth";
 import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 
@@ -63,6 +64,10 @@ export function SharedHotelSetupPage({
 
   const handleProductContinue = (input: SharedFirstRunProductContinueInput) => {
     localStorage.setItem("selectedSharedPropertyId", input.propertyId);
+    if (input.action === "complete_product_activation" && canOpenMarketplaceProfileTools(input)) {
+      router.push(ROUTES.PROFILE);
+      return;
+    }
     if (isSafeSharedHotelSetupReturnTo(input.returnTo)) {
       router.push(input.returnTo);
       return;

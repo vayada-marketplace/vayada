@@ -134,7 +134,7 @@ describe("@vayada/domain-hotels", () => {
             marketplace: {
               product: "marketplace",
               status: "selected_incomplete",
-              missingSteps: ["creatorPitch"],
+              missingSteps: ["creatorPitch", "marketplaceListing"],
               statusReasons: ["marketplace_activation_incomplete"],
               updatedAt: "2026-06-30T08:00:00.000Z",
             },
@@ -145,7 +145,7 @@ describe("@vayada/domain-hotels", () => {
         action: "complete_product_activation",
         propertyId: "property_123",
         product: "marketplace",
-        missingSteps: ["creatorPitch"],
+        missingSteps: ["creatorPitch", "marketplaceListing"],
         reasonCodes: ["entry_product_activation_incomplete"],
       },
       updatedAt: "2026-06-30T08:00:00.000Z",

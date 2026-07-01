@@ -30,6 +30,10 @@ describe("resolveBookingSetupGuard", () => {
       action: "redirect_to_setup",
       propertyId: "property-1",
       redirectPath: "/setup?entryProduct=booking&returnTo=%2Fdashboard%3Ftab%3Drooms",
+      setupAction: "complete_shared_profile",
+      product: null,
+      productStatus: null,
+      missingSteps: [],
     });
   });
 

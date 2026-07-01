@@ -6,9 +6,13 @@ import { STORAGE_KEYS } from "@/lib/constants";
 
 export function ProfileWarningBanner() {
   const [isVisible, setIsVisible] = useState(false);
-  const [isDismissed, setIsDismissed] = useState(false);
+  const [isHotelUser, setIsHotelUser] = useState(false);
 
   useEffect(() => {
+    const userType =
+      typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEYS.USER_TYPE) : null;
+    setIsHotelUser(userType === "hotel");
+
     // Check if profile is complete
     const profileComplete =
       typeof window !== "undefined"
@@ -29,7 +33,6 @@ export function ProfileWarningBanner() {
 
   const handleDismiss = () => {
     setIsVisible(false);
-    setIsDismissed(true);
     if (typeof window !== "undefined") {
       sessionStorage.setItem("profileWarningDismissed", "true");
     }
@@ -51,9 +54,13 @@ export function ProfileWarningBanner() {
 
             {/* Content */}
             <div className="flex-1 min-w-0">
-              <h3 className="text-lg font-bold text-yellow-900 mb-1">Complete Your Profile</h3>
+              <h3 className="text-lg font-bold text-yellow-900 mb-1">
+                {isHotelUser ? "Activate Creator Marketplace" : "Complete Your Profile"}
+              </h3>
               <p className="text-sm text-yellow-800">
-                You need to complete your profile before you can submit collaboration requests.
+                {isHotelUser
+                  ? "Finish Marketplace-specific setup before contacting creators."
+                  : "You need to complete your profile before you can submit collaboration requests."}
               </p>
             </div>
 

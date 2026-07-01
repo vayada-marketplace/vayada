@@ -537,6 +537,7 @@ describe("shared hotel setup status route", () => {
               "creatorPitch",
               "collaborationOffer",
               "creatorRequirements",
+              "marketplaceListing",
             ]),
           },
         }),
@@ -558,7 +559,12 @@ describe("shared hotel setup status route", () => {
       action: "complete_product_activation",
       propertyId,
       product: "marketplace",
-      missingSteps: ["creatorPitch", "collaborationOffer", "creatorRequirements"],
+      missingSteps: [
+        "creatorPitch",
+        "collaborationOffer",
+        "creatorRequirements",
+        "marketplaceListing",
+      ],
       reasonCodes: ["entry_product_activation_incomplete"],
     });
   });
@@ -719,7 +725,12 @@ describe("shared hotel setup status route", () => {
             pms: { status: "active" },
             marketplace: {
               status: "selected_incomplete",
-              missingSteps: ["productEntitlement", "collaborationOffer", "creatorRequirements"],
+              missingSteps: [
+                "productEntitlement",
+                "marketplaceListing",
+                "collaborationOffer",
+                "creatorRequirements",
+              ],
             },
           },
         },
@@ -1400,6 +1411,7 @@ function statefulSelectionRepository(propertyIds: string[]): SharedHotelSetupSta
                     "creatorPitch",
                     "collaborationOffer",
                     "creatorRequirements",
+                    "marketplaceListing",
                   ])
                 : activation("marketplace", "not_selected"),
             },

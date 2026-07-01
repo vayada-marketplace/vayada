@@ -38,6 +38,28 @@ export type SharedProductActivation<Product extends SharedHotelSetupProduct> = {
   updatedAt: string | null;
 };
 
+export const MARKETPLACE_PROFILE_TOOL_STEPS = [
+  "creatorPitch",
+  "collaborationOffer",
+  "creatorRequirements",
+  "marketplaceListing",
+] as const;
+
+const MARKETPLACE_PROFILE_TOOL_STEP_SET = new Set<string>(MARKETPLACE_PROFILE_TOOL_STEPS);
+
+export function canOpenMarketplaceProfileTools(input: {
+  product: SharedHotelSetupProduct | null;
+  productStatus: SharedProductActivation<SharedHotelSetupProduct>["status"] | null;
+  missingSteps: readonly string[];
+}): boolean {
+  return (
+    input.product === "marketplace" &&
+    input.productStatus === "selected_incomplete" &&
+    input.missingSteps.length > 0 &&
+    input.missingSteps.every((step) => MARKETPLACE_PROFILE_TOOL_STEP_SET.has(step))
+  );
+}
+
 export type SharedSetupProperty = {
   propertyId: string;
   publicId: string;
@@ -221,10 +243,14 @@ export function resolveSharedFirstRunSetupView(
   }
 
   if (status.nextAction.action === "complete_product_activation") {
+    const selectedProperty = findProperty(status, status.nextAction.propertyId);
     return propertyActionView(status, status.nextAction.propertyId, {
       screen: "product_activation",
       product: status.nextAction.product,
-      title: "Continue setup",
+      title:
+        status.nextAction.product === "marketplace"
+          ? `Set up Marketplace for ${selectedProperty?.displayName ?? "selected property"}`
+          : "Continue setup",
     });
   }
 

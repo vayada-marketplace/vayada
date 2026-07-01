@@ -29,6 +29,10 @@ describe("resolvePmsSetupGuard", () => {
       action: "redirect_to_setup",
       propertyId: "property-1",
       redirectPath: "/setup?entryProduct=pms&returnTo=%2Fdashboard%3Fview%3Drooms",
+      setupAction: "select_products",
+      product: null,
+      productStatus: null,
+      missingSteps: [],
     });
   });
 

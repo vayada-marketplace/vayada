@@ -16,6 +16,7 @@ import { UserIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 import { useCreatorProfileForm } from "@/hooks/useCreatorProfileForm";
 import { useHotelProfileForm } from "@/hooks/useHotelProfileForm";
 import { formatErrorDetail } from "@/hooks/useErrorModal";
+import { marketplaceSetupRedirectPath } from "@/lib/utils/sharedSetupGuard";
 import {
   LoadingScreen,
   ProfileCompletionScreen,
@@ -49,11 +50,15 @@ export default function ProfileCompletePage() {
       const storedUserType = localStorage.getItem(STORAGE_KEYS.USER_TYPE) as UserType | null;
       setUserType(storedUserType);
 
+      if (storedUserType === "hotel") {
+        localStorage.setItem(STORAGE_KEYS.PROFILE_COMPLETE, "false");
+        router.replace(marketplaceSetupRedirectPath(ROUTES.MARKETPLACE));
+        return;
+      }
+
       const userName = localStorage.getItem(STORAGE_KEYS.USER_NAME) || "";
 
-      if (storedUserType === "hotel") {
-        hotelForm.setForm((prev) => ({ ...prev, name: userName }));
-      } else if (storedUserType === "creator") {
+      if (storedUserType === "creator") {
         creatorForm.setForm((prev) => ({ ...prev, name: userName }));
       }
 

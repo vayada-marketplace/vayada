@@ -1,4 +1,6 @@
 import {
+  buildSharedHotelSetupRedirectPath,
+  canOpenMarketplaceProfileTools,
   resolveSharedHotelSetupGuard,
   type SharedHotelSetupApi,
   type SharedHotelSetupGuardDecision,
@@ -9,6 +11,19 @@ import { sharedHotelSetupApi } from "@/services/api/sharedHotelSetupClient";
 type HotelSelectionStorage = Pick<Storage, "getItem" | "setItem">;
 
 export const SELECTED_SHARED_PROPERTY_ID_KEY = "selectedSharedPropertyId";
+export { canOpenMarketplaceProfileTools };
+
+export function marketplaceSetupRedirectPath(returnTo: string): string {
+  return buildSharedHotelSetupRedirectPath({ entryProduct: "marketplace", returnTo });
+}
+
+export function isMarketplaceActivationDecision(decision: SharedHotelSetupGuardDecision): boolean {
+  return (
+    decision.action === "redirect_to_setup" &&
+    decision.setupAction === "complete_product_activation" &&
+    canOpenMarketplaceProfileTools(decision)
+  );
+}
 
 export async function resolveMarketplaceSetupGuard(
   returnTo: string,

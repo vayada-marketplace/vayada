@@ -4,11 +4,11 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ROUTES, STORAGE_KEYS } from "@/lib/constants";
-import { Button, Input } from "@/components/ui";
 import { UserType } from "@/lib/types";
 import { authService } from "@/services/auth";
 import { ApiErrorResponse } from "@/services/api/client";
 import { checkProfileStatus } from "@/lib/utils";
+import { resolveMarketplaceSetupGuard } from "@/lib/utils/sharedSetupGuard";
 import { EyeIcon, EyeSlashIcon, ArrowLeftIcon } from "@heroicons/react/24/outline";
 
 function SignUpForm() {
@@ -131,7 +131,23 @@ function SignUpForm() {
 
       // Check profile status after registration
       const userType = response.type as UserType;
-      if (userType === "creator" || userType === "hotel") {
+      if (userType === "hotel") {
+        try {
+          const decision = await resolveMarketplaceSetupGuard(ROUTES.MARKETPLACE);
+          localStorage.setItem(
+            STORAGE_KEYS.PROFILE_COMPLETE,
+            String(decision.action === "enter_product"),
+          );
+          router.push(
+            decision.action === "enter_product" ? ROUTES.MARKETPLACE : decision.redirectPath,
+          );
+          return;
+        } catch (error) {
+          console.error("Failed to resolve Marketplace setup:", error);
+        }
+      }
+
+      if (userType === "creator") {
         try {
           const profileStatus = await checkProfileStatus(userType);
           if (profileStatus && profileStatus.profile_complete) {
