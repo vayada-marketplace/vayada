@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { enqueueBookingLifecycleEmailJob } from "../jobs/bookingEmails.js";
 import {
   serializePublicHotelQuoteProjection,
   type PublicHotelQuoteQuery,
@@ -1152,6 +1153,14 @@ export function createTargetBookingWebCheckoutAdapter(
         quote,
         guestPhone,
       );
+      await enqueueBankTransferReservedPendingPaymentEmail(
+        pool,
+        property,
+        booking,
+        quote,
+        request,
+        context,
+      );
       await enqueuePmsReservationHandoff(pool, property.propertyId, booking, context, "create");
       const body = serializeTargetBooking(booking);
       await recordTargetCheckoutCommand(pool, {
@@ -1387,7 +1396,7 @@ export function createTargetBookingWebCheckoutAdapter(
           body: {
             bankTransfer: {
               enabled: methods.includes("bank_transfer"),
-              details: objectValue(settings?.depositPolicy)["bankTransferInstructions"] ?? null,
+              details: bankTransferInstructionsFromPolicy(settings?.depositPolicy),
             },
             paypal: {
               enabled: false,
@@ -2332,7 +2341,7 @@ async function createTargetGuestBooking(
       JSON.stringify(objectValue(request["promoContext"])),
       new Date(context.occurredAt.getTime() + 30 * 60 * 1000).toISOString(),
       publicReference,
-      stringField(request, "status") === "pending" ? "pending_payment" : "confirmed",
+      lifecycleStatusFromCheckout(quote),
       paymentStatusFromRequest(request),
       quote.checkIn,
       quote.checkOut,
@@ -2565,6 +2574,61 @@ async function loadTargetPaymentSettings(
     [propertyId],
   );
   return result.rows[0] ?? null;
+}
+
+function bankTransferInstructionsFromPolicy(policy: unknown): unknown | null {
+  const instructions = objectValue(policy)["bankTransferInstructions"];
+  if (typeof instructions === "string") {
+    const text = instructions.trim();
+    return text || null;
+  }
+  if (!instructions || typeof instructions !== "object" || Array.isArray(instructions)) return null;
+  return Object.keys(instructions).length > 0 ? instructions : null;
+}
+
+async function enqueueBankTransferReservedPendingPaymentEmail(
+  pool: BookingWebCalendarReadPool,
+  property: TargetCheckoutPropertyRow,
+  booking: TargetBookingRow,
+  quote: TargetCheckoutQuoteSnapshot,
+  request: BookingWebCheckoutRequest,
+  context: BookingWebCheckoutCommandContext,
+): Promise<void> {
+  if (quote.paymentMethod !== "bank_transfer") return;
+  if (booking.lifecycleStatus !== "pending_payment" || booking.paymentStatus !== "unpaid") return;
+
+  const settings = await loadTargetPaymentSettings(pool, property.propertyId);
+  if (!settings?.acceptedMethods?.includes("bank_transfer")) return;
+  const bankTransferDetails = bankTransferInstructionsFromPolicy(settings.depositPolicy);
+  if (!bankTransferDetails) return;
+
+  await enqueueBookingLifecycleEmailJob(pool, {
+    kind: "reserved_pending_payment",
+    occurredAt: context.occurredAt.toISOString(),
+    correlationId: context.correlationId,
+    causationId: `booking.checkout.create:${context.idempotencyKey}`,
+    actor: { type: "provider" },
+    source: "apps/api-booking-web-public",
+    paymentDeadlineAt: new Date(context.occurredAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    bankTransferDetails,
+    booking: {
+      propertyId: property.propertyId,
+      guestBookingId: booking.guestBookingId,
+      bookingReference: booking.publicReference,
+      guestEmail: stringField(request, "guestEmail") ?? stringField(request, "email"),
+      guestName:
+        [stringField(request, "firstName"), stringField(request, "lastName")]
+          .filter(Boolean)
+          .join(" ") || null,
+      propertyName: property.displayName,
+      checkIn: booking.checkIn,
+      checkOut: booking.checkOut,
+      totalAmount: booking.totalAmount,
+      balanceAmount: booking.balanceAmount,
+      currency: booking.currency,
+      paymentMethod: "bank_transfer",
+    },
+  });
 }
 
 async function validateTargetPromo(
@@ -3495,6 +3559,10 @@ function paymentStatusFromRequest(record: Record<string, unknown>): string {
     return value;
   }
   return stringField(record, "paymentMethod") === "card" ? "authorized" : "unpaid";
+}
+
+function lifecycleStatusFromCheckout(quote: TargetCheckoutQuoteSnapshot): string {
+  return quote.paymentMethod === "bank_transfer" ? "pending_payment" : "confirmed";
 }
 
 function assertTargetPaymentMethodReady(record: Record<string, unknown>): void {

@@ -87,6 +87,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 
+import { enqueueBookingLifecycleEmailJob } from "../jobs/bookingEmails.js";
 import type { PublicHotelProfileRepository } from "./aiHotels.js";
 import { enforceRoutePolicy, type RouteAuthorizationPolicy } from "./policy.js";
 
@@ -281,6 +282,7 @@ type FinanceInvoiceRow = {
   invoiceNumber: string;
   guestBookingId: string;
   bookingReference: string;
+  propertyName: string | null;
   guestDisplayName: string | null;
   guestEmail: string | null;
   guestPhone: string | null;
@@ -1671,6 +1673,9 @@ function mergePaymentSettings(
     ...payload,
     defaultCurrency,
     supportedCurrencies: [defaultCurrency],
+    depositPolicy: payload.depositPolicy
+      ? { ...current.depositPolicy, ...payload.depositPolicy }
+      : current.depositPolicy,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -2656,6 +2661,7 @@ async function recordManualPaymentInClient(
     keyHash,
     recordedAt,
   );
+  await enqueueBankTransferFinalConfirmationEmail(client, command, invoiceRow, recordedAt);
   await completeManualPaymentIdempotency(
     client,
     command,
@@ -4249,6 +4255,56 @@ async function enqueueManualPaymentJobs(
   );
 }
 
+async function enqueueBankTransferFinalConfirmationEmail(
+  client: FinancePropertySettingsWriteClient,
+  command: FinanceManualPaymentRecordCommand,
+  invoice: FinanceInvoiceRow,
+  recordedAt: string,
+): Promise<void> {
+  if (command.payload.paymentMethod !== "bank_transfer") return;
+  if (!manualPaymentSettlesInvoice(command, invoice)) return;
+
+  await enqueueBookingLifecycleEmailJob(client, {
+    kind: "final_confirmation",
+    occurredAt: recordedAt,
+    correlationId: command.audit.correlationId ?? command.audit.requestId,
+    causationId: `finance.manual_payment.record:${command.commandId}`,
+    actor:
+      command.audit.actor.kind === "user"
+        ? { type: "user", userId: command.audit.actor.userId }
+        : { type: command.audit.actor.kind },
+    source: "apps/api-finance-manual-payment",
+    booking: {
+      propertyId: command.propertyId,
+      guestBookingId: invoice.guestBookingId,
+      bookingReference: invoice.bookingReference,
+      guestEmail: invoice.guestEmail,
+      guestName: invoice.guestDisplayName,
+      propertyName: invoice.propertyName,
+      checkIn: invoice.checkIn,
+      checkOut: invoice.checkOut,
+      totalAmount: invoice.totalAmount,
+      balanceAmount: invoice.balanceDue,
+      currency: invoice.currency,
+      paymentMethod: "bank_transfer",
+    },
+  });
+}
+
+function manualPaymentSettlesInvoice(
+  command: FinanceManualPaymentRecordCommand,
+  invoice: FinanceInvoiceRow,
+): boolean {
+  const amountCents = numeric15Scale2Cents(command.payload.amount);
+  const balanceCents = numeric15Scale2Cents(invoice.balanceDue, { allowZero: true });
+  return (
+    amountCents !== null &&
+    balanceCents !== null &&
+    balanceCents > 0n &&
+    amountCents === balanceCents
+  );
+}
+
 async function recordManualPaymentAuditEvent(
   client: FinancePropertySettingsWriteClient,
   command: FinanceManualPaymentRecordCommand,
@@ -4569,6 +4625,7 @@ async function loadInvoiceRows(
          COALESCE(booking.booking_metadata ->> 'invoiceNumber', booking.public_reference) AS "invoiceNumber",
          booking.id::text AS "guestBookingId",
          booking.public_reference AS "bookingReference",
+         property.display_name AS "propertyName",
          NULLIF(concat_ws(' ', guest.first_name, guest.last_name), '') AS "guestDisplayName",
          guest.email AS "guestEmail",
          guest.phone AS "guestPhone",
@@ -4591,10 +4648,12 @@ async function loadInvoiceRows(
          booking.created_at AS "issuedAt",
          COALESCE(visibility.source_freshness, '{}'::jsonb) AS "sourceFreshness"
        FROM booking.guest_bookings booking
-       LEFT JOIN booking.booking_guests guest
-         ON guest.guest_booking_id = booking.id
-        AND guest.guest_role = 'booker'
-       LEFT JOIN pms.operational_booking_assignments assignment
+      LEFT JOIN booking.booking_guests guest
+        ON guest.guest_booking_id = booking.id
+       AND guest.guest_role = 'booker'
+      LEFT JOIN hotel_catalog.properties property
+        ON property.id = booking.property_id
+      LEFT JOIN pms.operational_booking_assignments assignment
          ON assignment.property_id = booking.property_id
         AND assignment.guest_booking_id = booking.id
         AND assignment.position = 1

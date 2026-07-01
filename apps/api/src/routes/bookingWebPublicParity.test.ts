@@ -2,6 +2,7 @@ import { findForbiddenPublicBookabilityKeys } from "@vayada/domain-distribution"
 import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../app.js";
+import { BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE } from "../jobs/bookingEmails.js";
 import {
   createCompatibilityPublicHotelQuoteRepository,
   type PublicHotelQuoteRepository,
@@ -1629,6 +1630,146 @@ describe("Booking Web public bootstrap parity", () => {
     expect(() => resolveTargetCheckoutAmountSnapshot({ totalAmount: 561600 })).toThrow(
       "expectedTotalAmount is required",
     );
+  });
+
+  it("enqueues reserved-pending-payment email for target bank-transfer pending checkout", async () => {
+    const propertyId = "a9fccec2-eb4c-4c35-bfd3-02a748c2e117";
+    const guestBookingId = "b9fccec2-eb4c-4c35-bfd3-02a748c2e951";
+    const calls: Array<{ text: string; values: readonly unknown[] | undefined }> = [];
+    const pool = {
+      async query(text: string, values?: readonly unknown[]) {
+        calls.push({ text, values });
+        if (text.includes("FROM hotel_catalog.property_slugs")) {
+          return {
+            rows: [{ propertyId, displayName: "Hotel Alpenrose", defaultLocale: "en" }],
+          };
+        }
+        if (text.includes("FROM platform.idempotency_keys")) return { rows: [] };
+        if (text.includes("INSERT INTO platform.idempotency_keys")) return { rows: [] };
+        if (text.includes("FROM booking.quote_sessions")) {
+          return {
+            rows: [
+              {
+                quoteSessionId: "c9fccec2-eb4c-4c35-bfd3-02a748c2e951",
+                publicQuoteReference: "Q-BANK951",
+                requestedCheckIn: "2026-09-12",
+                requestedCheckOut: "2026-09-15",
+                adults: 2,
+                children: 0,
+                roomCount: 1,
+                currency: "EUR",
+                status: "active",
+                selectedOfferSnapshot: {
+                  roomTypeId: "room_deluxe",
+                  paymentMethod: "bank_transfer",
+                },
+                totals: { totalAmount: "600.00", balanceAmount: "600.00" },
+                policySnapshot: {},
+                expiresAt: "2026-09-01T10:15:00.000Z",
+              },
+            ],
+          };
+        }
+        if (text.includes("INSERT INTO booking.guest_bookings")) {
+          return {
+            rows: [
+              {
+                guestBookingId,
+                propertyId,
+                publicReference: "B-BANK951",
+                lifecycleStatus: "pending_payment",
+                paymentStatus: "unpaid",
+                checkIn: "2026-09-12",
+                checkOut: "2026-09-15",
+                adults: 2,
+                children: 0,
+                roomCount: 1,
+                currency: "EUR",
+                totalAmount: "600.00",
+                balanceAmount: "600.00",
+                bookingMetadata: {},
+                createdAt: "2026-09-01T10:00:00.000Z",
+              },
+            ],
+          };
+        }
+        if (text.includes('accepted_methods AS "acceptedMethods"')) {
+          return {
+            rows: [
+              {
+                acceptedMethods: ["bank_transfer"],
+                depositPolicy: {
+                  bankTransferInstructions:
+                    "Account holder: Hotel Alpenrose GmbH\nIBAN: DE89370400440532013000",
+                },
+              },
+            ],
+          };
+        }
+        if (text.includes("INSERT INTO platform.domain_events")) {
+          return { rows: [{ eventId: "d9fccec2-eb4c-4c35-bfd3-02a748c2e951" }] };
+        }
+        if (text.includes("INSERT INTO platform.jobs") && text.includes("source_domain_event_id")) {
+          return {
+            rows: [{ jobId: "e9fccec2-eb4c-4c35-bfd3-02a748c2e951", replay: false }],
+          };
+        }
+        return { rows: [] };
+      },
+      async end() {},
+    };
+    const adapter = createTargetBookingWebCheckoutAdapter({
+      connectionString: "postgres://unused",
+      pool: pool as never,
+    });
+
+    const result = await adapter.createBooking(
+      "hotel-alpenrose",
+      {
+        quoteId: "Q-BANK951",
+        roomTypeId: "room_deluxe",
+        checkIn: "2026-09-12",
+        checkOut: "2026-09-15",
+        adults: 2,
+        children: 0,
+        numberOfRooms: 1,
+        paymentMethod: "bank_transfer",
+        expectedTotalAmount: 600,
+        totalAmount: 600,
+        balanceAmount: 600,
+        guestEmail: "guest@example.test",
+        phone: "+491701234567",
+        firstName: "Ada",
+        lastName: "Guest",
+      },
+      {
+        operation: "booking-create",
+        requestId: "req-bank-951",
+        correlationId: "corr-bank-951",
+        idempotencyKey: "idem-bank-951",
+        fingerprint: "b".repeat(64),
+        occurredAt: new Date("2026-09-01T10:00:00.000Z"),
+      },
+    );
+
+    expect(result).toMatchObject({ bookingReference: "B-BANK951" });
+    const emailJob = calls.find(
+      (call) =>
+        call.text.includes("INSERT INTO platform.jobs") &&
+        call.values?.[2] === BOOKING_RESERVED_PENDING_PAYMENT_EMAIL_JOB_TYPE,
+    );
+    expect(emailJob).toBeDefined();
+    const payload = JSON.parse(String(emailJob?.values?.[8]));
+    expect(payload).toMatchObject({
+      to: "guest@example.test",
+      template: "booking_reserved_pending_payment",
+      bookingReference: "B-BANK951",
+      paymentDeadlineAt: "2026-09-02T10:00:00.000Z",
+      bankTransferDetails: "Account holder: Hotel Alpenrose GmbH\nIBAN: DE89370400440532013000",
+    });
+    expect(payload.text).toContain("We've reserved your room");
+    expect(payload.text).toContain("Payment deadline: 2026-09-02T10:00:00.000Z");
+    expect(payload.text).toContain("IBAN: DE89370400440532013000");
   });
 
   it("reports actionable parity mismatches by fixture case and field", () => {
