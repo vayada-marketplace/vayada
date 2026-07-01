@@ -41,6 +41,7 @@ test.describe("pms-web shared setup", () => {
     await expect(page.getByRole("heading", { level: 2, name: "Choose products" })).toBeVisible();
     await expect(page.getByText("Alpenrose Munich")).toBeVisible();
     await expect(page.getByLabel("PMS")).toBeChecked();
+    expect(statusRequests.length).toBeGreaterThan(0);
     expect(
       statusRequests.every(
         (url) =>
