@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { getScopedBookingHotelIds } from "@/services/auth/sessionStore";
 
 export default function HandoffPage() {
   useEffect(() => {
@@ -45,59 +46,34 @@ export default function HandoffPage() {
         }
       }
 
-      // Decide where to land based on how many hotels the user owns.
-      // Precedence: explicit safeRedirect > dashboard (if handoffHotelId)
-      // > setup (if 0 hotels) > choose-property (if 2+) > dashboard (1).
-      // Note: we intentionally do NOT look at setup-status' field-level
-      // completeness here — if the user has a hotel row, they belong in
-      // the dashboard, even if some metadata (contact_phone, address)
-      // is still empty. Blocking them over that would kick them to the
-      // setup wizard on every login which is user-hostile.
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
-      (async () => {
-        try {
-          if (safeRedirect) {
-            localStorage.setItem("setupComplete", "true");
-            window.location.href = safeRedirect;
-            return;
-          }
+      if (safeRedirect) {
+        localStorage.setItem("setupComplete", "true");
+        window.location.href = safeRedirect;
+        return;
+      }
 
-          const listRes = await fetch(`${apiUrl}/admin/hotels`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const hotels = listRes.ok ? await listRes.json() : [];
-          const hasAnyHotel = Array.isArray(hotels) && hotels.length > 0;
-          localStorage.setItem("setupComplete", hasAnyHotel ? "true" : "false");
+      if (handoffHotelId) {
+        localStorage.setItem("setupComplete", "true");
+        window.location.href = "/dashboard";
+        return;
+      }
 
-          if (!hasAnyHotel) {
-            window.location.href = "/setup";
-            return;
-          }
+      const scopedHotelIds = getScopedBookingHotelIds();
+      if (scopedHotelIds.length === 1) {
+        localStorage.setItem("selectedHotelId", scopedHotelIds[0]!);
+        localStorage.setItem("setupComplete", "true");
+        window.location.href = "/dashboard";
+        return;
+      }
+      if (scopedHotelIds.length > 1) {
+        localStorage.removeItem("selectedHotelId");
+        localStorage.setItem("setupComplete", "true");
+        window.location.href = "/choose-property";
+        return;
+      }
 
-          // If the caller already told us which hotel to land on,
-          // honor it and skip the choose-property step.
-          if (handoffHotelId) {
-            window.location.href = "/dashboard";
-            return;
-          }
-
-          // Multi-hotel users get the picker so cross-domain handoff
-          // doesn't silently drop them into an arbitrary dashboard.
-          if (hotels.length > 1) {
-            localStorage.removeItem("selectedHotelId");
-            window.location.href = "/choose-property";
-            return;
-          }
-
-          localStorage.setItem("selectedHotelId", hotels[0].id);
-          window.location.href = "/dashboard";
-        } catch {
-          // If the list call fails, fall through to dashboard —
-          // the dashboard will use its own fallback logic.
-          localStorage.setItem("setupComplete", "true");
-          window.location.href = safeRedirect || "/dashboard";
-        }
-      })();
+      localStorage.setItem("setupComplete", "false");
+      window.location.href = "/setup";
     } else {
       window.location.href = "/login";
     }

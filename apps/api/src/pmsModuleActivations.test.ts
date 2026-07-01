@@ -111,6 +111,16 @@ function createActivationRepository(): PmsModuleActivationRepository & {
         updatedAt: now,
       },
     ],
+    [
+      "affiliates",
+      {
+        moduleId: "affiliates",
+        isActive: true,
+        activatedAt: now,
+        deactivatedAt: null,
+        updatedAt: now,
+      },
+    ],
   ]);
   const updates: Array<{
     context: RequestContext;
@@ -209,9 +219,9 @@ describe("PMS module activation routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toMatchObject({
       hotelId: propertyId,
-      activeModules: ["financials"],
+      activeModules: ["financials", "affiliates"],
     });
-    expect(response.body.activations).toHaveLength(2);
+    expect(response.body.activations).toHaveLength(3);
   });
 
   it("updates a property module activation through the next-api route", async () => {
@@ -420,7 +430,7 @@ describe("PG PMS module activation repository", () => {
     expect(queries[0].values).toEqual([
       organizationId,
       propertyId,
-      ["module:financials", "module:inbox"],
+      ["module:financials", "module:inbox", "module:affiliates"],
     ]);
   });
 

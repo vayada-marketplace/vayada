@@ -1,5 +1,5 @@
-import { apiClient, isNextApiTarget } from "../api/client";
-import { getScopedBookingHotelIds, isAuthKitLoginEnabled } from "../auth/sessionStore";
+import { getSelectedBookingHotelId } from "../api/bookingHotelScope";
+import { apiClient } from "../api/client";
 
 export interface DashboardStats {
   revenue: number;
@@ -107,22 +107,7 @@ type TargetSparklinesResponse = {
 };
 
 function currentHotelId(): string | null {
-  const selectedHotelId =
-    typeof window !== "undefined" ? window.localStorage.getItem("selectedHotelId") : null;
-  if (!isAuthKitLoginEnabled() || !isNextApiTarget()) return selectedHotelId;
-
-  const scopedHotelIds = getScopedBookingHotelIds();
-  if (selectedHotelId && scopedHotelIds.includes(selectedHotelId)) return selectedHotelId;
-
-  const fallbackHotelId = scopedHotelIds[0] ?? null;
-  if (typeof window !== "undefined") {
-    if (fallbackHotelId) {
-      window.localStorage.setItem("selectedHotelId", fallbackHotelId);
-    } else {
-      window.localStorage.removeItem("selectedHotelId");
-    }
-  }
-  return fallbackHotelId;
+  return getSelectedBookingHotelId();
 }
 
 function addDays(date: Date, days: number): Date {
@@ -174,9 +159,6 @@ function requireDashboardBasePath(): string {
 
 export const dashboardService = {
   getStats: async (range: TimeRange = "today"): Promise<DashboardStats> => {
-    if (!isNextApiTarget()) {
-      return apiClient.get<DashboardStats>(`/admin/dashboard/stats?range=${range}`);
-    }
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range);
     const response = await apiClient.get<TargetDashboardStatsResponse>(
@@ -197,9 +179,6 @@ export const dashboardService = {
   },
 
   getBookingsBySource: async (range: TimeRange = "month"): Promise<BookingsBySource> => {
-    if (!isNextApiTarget()) {
-      return apiClient.get<BookingsBySource>(`/admin/dashboard/bookings-by-source?range=${range}`);
-    }
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range);
     const response = await apiClient.get<TargetSourceMixResponse>(
@@ -217,17 +196,11 @@ export const dashboardService = {
   },
 
   getConversionFunnel: async (range: TimeRange = "month"): Promise<ConversionFunnel> => {
-    if (!isNextApiTarget()) {
-      return apiClient.get<ConversionFunnel>(`/admin/dashboard/conversion-funnel?range=${range}`);
-    }
     void range;
-    return { steps: [] };
+    throw new Error("Booking dashboard conversion funnel is not available on the target API yet.");
   },
 
   getSparklines: async (range: TimeRange = "today"): Promise<Sparklines> => {
-    if (!isNextApiTarget()) {
-      return apiClient.get<Sparklines>(`/admin/dashboard/sparklines?range=${range}`);
-    }
     const basePath = requireDashboardBasePath();
     const query = rangeQuery(range);
     const response = await apiClient.get<TargetSparklinesResponse>(
@@ -242,25 +215,7 @@ export const dashboardService = {
   },
 
   getPageViewsTimeline: async (weekOffset = 0): Promise<PageViewsTimeline> => {
-    if (!isNextApiTarget()) {
-      return apiClient.get<PageViewsTimeline>(
-        `/admin/dashboard/page-views?week_offset=${weekOffset}`,
-      );
-    }
-    const windowEnd = addDays(new Date(), weekOffset * 7);
-    const windowStart = addDays(windowEnd, -6);
-    const previousWindowEnd = addDays(windowStart, -1);
-    const previousWindowStart = addDays(previousWindowEnd, -6);
-    return {
-      window_start: isoDate(windowStart),
-      window_end: isoDate(windowEnd),
-      previous_window_start: isoDate(previousWindowStart),
-      previous_window_end: isoDate(previousWindowEnd),
-      buckets: [],
-      previous_buckets: [],
-      total: 0,
-      previous_total: 0,
-      has_previous_data: false,
-    };
+    void weekOffset;
+    throw new Error("Booking dashboard page views are not available on the target API yet.");
   },
 };

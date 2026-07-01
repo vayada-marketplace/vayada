@@ -2,21 +2,16 @@
  * API client configuration
  */
 
-import {
-  clearAuthData,
-  getAuthBearerToken,
-  getLegacyAdminBearerToken,
-  isCompatibilityTokenEnabled,
-} from "../auth/sessionStore";
-import { ensureBookingCompatibilityToken } from "../auth/compatibilityToken";
+import { clearAuthData, getAuthBearerToken } from "../auth/sessionStore";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.booking.localhost";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://api.localhost";
 const OMIT_HOTEL_CONTEXT_HEADER = "X-Vayada-Omit-Hotel-Context";
+const LEGACY_BOOKING_API_HOSTS = ["api.booking.localhost", "localhost:8001"];
 
 export function isNextApiTarget(
   apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || API_BASE_URL,
 ): boolean {
-  return apiBaseUrl.includes("next-api.vayada.com");
+  return !LEGACY_BOOKING_API_HOSTS.some((host) => apiBaseUrl.includes(host));
 }
 
 export const omitHotelContext: RequestInit = {
@@ -88,37 +83,17 @@ export class ApiClient {
       "/auth/validate-token",
       "/auth/verify-email-change",
     ];
-    const legacyAdminRoute = endpoint.startsWith("/admin/") && !isNextApiTarget(this.baseURL);
-    if (
-      !publicAuthEndpoints.includes(endpoint) &&
-      legacyAdminRoute &&
-      isCompatibilityTokenEnabled()
-    ) {
-      await ensureBookingCompatibilityToken();
-    }
-    const token = publicAuthEndpoints.includes(endpoint)
-      ? null
-      : legacyAdminRoute
-        ? getLegacyAdminBearerToken()
-        : getAuthBearerToken();
+    const token = publicAuthEndpoints.includes(endpoint) ? null : getAuthBearerToken();
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
-    const omitHotelContextHeader = headers[OMIT_HOTEL_CONTEXT_HEADER] === "true";
     delete headers[OMIT_HOTEL_CONTEXT_HEADER];
 
     // Add Authorization header if token exists
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    // Legacy `/admin/*` compatibility routes still use the hotel context
-    // header. Target routes carry the resource id in the path.
-    const hotelId = typeof window !== "undefined" ? localStorage.getItem("selectedHotelId") : null;
-    if (hotelId && endpoint.startsWith("/admin/") && !omitHotelContextHeader) {
-      headers["X-Hotel-Id"] = hotelId;
     }
 
     const config: RequestInit = {
@@ -141,7 +116,7 @@ export class ApiClient {
       const contentType = response.headers.get("content-type");
       const hasJsonContent = contentType && contentType.includes("application/json");
 
-      let data: any;
+      let data: unknown;
       if (hasJsonContent) {
         const text = await response.text();
         data = text ? JSON.parse(text) : null;

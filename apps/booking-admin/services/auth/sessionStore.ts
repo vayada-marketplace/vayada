@@ -149,13 +149,6 @@ export function getAuthBearerToken(): string | null {
   return getLegacyPasswordToken();
 }
 
-export function getLegacyAdminBearerToken(): string | null {
-  const compatibilityToken = currentCompatibilityToken();
-  if (isCompatibilityTokenEnabled() && compatibilityToken) return compatibilityToken;
-  if (isCompatibilityTokenEnabled()) return null;
-  return getAuthBearerToken();
-}
-
 export function getLegacyCompatibilityToken(): string | null {
   return currentCompatibilityToken();
 }

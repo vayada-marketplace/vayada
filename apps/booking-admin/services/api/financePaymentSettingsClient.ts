@@ -1,7 +1,5 @@
 import { ApiErrorResponse, apiClient, omitHotelContext, type ApiClient } from "./client";
 
-export const FINANCE_PAYMENT_SETTINGS_PATH = "/api/finance/properties/:propertyId/payment-settings";
-
 export type FinanceRoutePaymentProvider =
   | "stripe"
   | "xendit"
@@ -20,6 +18,8 @@ export type FinanceRoutePaymentMethod =
   | "other";
 
 type FinancePaymentSettingsApiClient = Pick<ApiClient, "patch">;
+type FinancePaymentSettingsReadApiClient = Pick<ApiClient, "get">;
+type FinanceProviderAccountApiClient = Pick<ApiClient, "post">;
 
 export type FinanceJsonPolicy = Record<string, string | number | boolean | null>;
 
@@ -71,6 +71,38 @@ export interface FinancePaymentSettingsPatchResponse {
   };
 }
 
+export interface FinancePaymentSettingsResponse {
+  contractVersion: string;
+  propertyId: string;
+  paymentSettings: {
+    paymentsEnabled: boolean;
+    paymentProvider: FinanceRoutePaymentProvider;
+    acceptedMethods: FinanceRoutePaymentMethod[];
+    defaultCurrency: string;
+    supportedCurrencies: string[];
+    requiresManualReview: boolean;
+    providerAccount: {
+      providerAccountId: string | null;
+      provider: FinanceRoutePaymentProvider | null;
+      status: string;
+      onboardingStatus: string;
+      chargesEnabled: boolean;
+      payoutsEnabled: boolean;
+      capabilities: string[];
+    };
+  };
+}
+
+export interface FinanceStripeProviderAccountResponse {
+  contractVersion: string;
+  providerAccountId: string;
+  provider: "stripe";
+  providerAccountRef: string;
+  status: string;
+  onboardingStatus: string;
+  onboardingUrl: string;
+}
+
 export class FinancePaymentSettingsClientError extends Error {
   statusCode: number;
   code: string;
@@ -110,10 +142,83 @@ export async function updateFinancePaymentSettings(
   }
 }
 
+export async function getFinancePaymentSettings(
+  input: { propertyId: string },
+  client: FinancePaymentSettingsReadApiClient = apiClient,
+): Promise<FinancePaymentSettingsResponse> {
+  try {
+    return await client.get<FinancePaymentSettingsResponse>(
+      buildFinancePaymentSettingsEndpoint(input),
+      omitHotelContext,
+    );
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
+export async function createFinanceStripeProviderAccount(
+  input: {
+    propertyId: string;
+    email: string;
+    country: string;
+    commandPrefix?: string;
+  },
+  client: FinanceProviderAccountApiClient = apiClient,
+): Promise<FinanceStripeProviderAccountResponse> {
+  const commandId = newFinanceCommandId(input.commandPrefix ?? "finance-stripe-account");
+  try {
+    return await client.post<FinanceStripeProviderAccountResponse>(
+      `${buildFinancePaymentSettingsBaseEndpoint(input)}/provider-accounts/stripe`,
+      {
+        commandId,
+        idempotencyKey: commandId,
+        email: input.email,
+        country: input.country,
+      },
+      omitHotelContext,
+    );
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
+export async function issueFinanceStripeOnboardingLink(
+  input: {
+    propertyId: string;
+    providerAccountId: string;
+    commandPrefix?: string;
+  },
+  client: FinanceProviderAccountApiClient = apiClient,
+): Promise<FinanceStripeProviderAccountResponse> {
+  const providerAccountId = input.providerAccountId.trim();
+  if (!providerAccountId) {
+    throw new FinancePaymentSettingsClientError({
+      statusCode: 404,
+      code: "not_found",
+      category: "read_model",
+      detail: "Finance provider account id is required.",
+    });
+  }
+
+  const commandId = newFinanceCommandId(input.commandPrefix ?? "finance-stripe-onboarding");
+  try {
+    return await client.post<FinanceStripeProviderAccountResponse>(
+      `${buildFinancePaymentSettingsBaseEndpoint(input)}/provider-accounts/${encodeURIComponent(providerAccountId)}/onboarding-link`,
+      {
+        commandId,
+        idempotencyKey: commandId,
+      },
+      omitHotelContext,
+    );
+  } catch (error) {
+    throw toFinancePaymentSettingsClientError(error);
+  }
+}
+
 export function buildFinancePaymentSettingsBody(
   draft: BookingAdminPaymentSettingsDraft,
 ): UpdateFinancePaymentSettingsBody {
-  const commandId = newFinancePaymentSettingsCommandId(draft.commandPrefix);
+  const commandId = newFinanceCommandId(draft.commandPrefix ?? "finance-payment-settings");
   const defaultCurrency = normalizeCurrencyCode(draft.defaultCurrency);
   const acceptedMethods = buildAcceptedPaymentMethods(draft);
 
@@ -132,6 +237,10 @@ export function buildFinancePaymentSettingsBody(
 }
 
 export function buildFinancePaymentSettingsEndpoint(input: { propertyId: string }): string {
+  return `${buildFinancePaymentSettingsBaseEndpoint(input)}/payment-settings`;
+}
+
+function buildFinancePaymentSettingsBaseEndpoint(input: { propertyId: string }): string {
   const propertyId = input.propertyId.trim();
   if (!propertyId) {
     throw new FinancePaymentSettingsClientError({
@@ -142,7 +251,7 @@ export function buildFinancePaymentSettingsEndpoint(input: { propertyId: string 
     });
   }
 
-  return FINANCE_PAYMENT_SETTINGS_PATH.replace(":propertyId", encodeURIComponent(propertyId));
+  return `/api/finance/properties/${encodeURIComponent(propertyId)}`;
 }
 
 function buildAcceptedPaymentMethods(
@@ -166,7 +275,7 @@ function normalizeCurrencyCode(value: string): string {
   return /^[A-Z]{3}$/.test(normalized) ? normalized : "EUR";
 }
 
-function newFinancePaymentSettingsCommandId(prefix = "finance-payment-settings"): string {
+function newFinanceCommandId(prefix: string): string {
   const random =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()

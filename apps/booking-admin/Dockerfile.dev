@@ -19,7 +19,7 @@ EXPOSE 3003
 # Set environment variables
 ENV NODE_ENV=development
 ENV PORT=3003
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8003}
 
 # Start development server
 CMD ["npm", "run", "dev"]

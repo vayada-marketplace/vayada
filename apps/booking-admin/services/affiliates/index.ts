@@ -1,5 +1,3 @@
-import { pmsClient } from "../api/pmsClient";
-
 export interface Affiliate {
   id: string;
   hotelId: string;
@@ -44,29 +42,40 @@ export interface DefaultAffiliateCommission {
   defaultCommissionPct: number;
 }
 
+const AFFILIATE_ADMIN_UNAVAILABLE =
+  "Booking Admin affiliate management is not available on the target API yet.";
+
 export const affiliatesService = {
   list: (params?: { status?: string; limit?: number; offset?: number }) => {
-    const parts: string[] = [];
-    if (params?.status) parts.push(`status=${encodeURIComponent(params.status)}`);
-    if (params?.limit !== undefined) parts.push(`limit=${params.limit}`);
-    if (params?.offset !== undefined) parts.push(`offset=${params.offset}`);
-    const qs = parts.length > 0 ? `?${parts.join("&")}` : "";
-    return pmsClient.get<AffiliateListResponse>(`/admin/affiliates${qs}`);
+    void params;
+    return unavailableAffiliateAdmin<AffiliateListResponse>();
   },
 
-  get: (id: string) => pmsClient.get<Affiliate>(`/admin/affiliates/${id}`),
+  get: (id: string) => {
+    void id;
+    return unavailableAffiliateAdmin<Affiliate>();
+  },
 
-  updateStatus: (id: string, status: "approved" | "rejected" | "suspended") =>
-    pmsClient.patch<Affiliate>(`/admin/affiliates/${id}/status`, { status }),
+  updateStatus: (id: string, status: "approved" | "rejected" | "suspended") => {
+    void id;
+    void status;
+    return unavailableAffiliateAdmin<Affiliate>();
+  },
 
-  updateCommission: (id: string, commissionPct: number | null) =>
-    pmsClient.patch<Affiliate>(`/admin/affiliates/${id}/commission`, { commissionPct }),
+  updateCommission: (id: string, commissionPct: number | null) => {
+    void id;
+    void commissionPct;
+    return unavailableAffiliateAdmin<Affiliate>();
+  },
 
-  getDefaultCommission: () =>
-    pmsClient.get<DefaultAffiliateCommission>("/admin/affiliates/default-commission"),
+  getDefaultCommission: () => unavailableAffiliateAdmin<DefaultAffiliateCommission>(),
 
-  updateDefaultCommission: (defaultCommissionPct: number) =>
-    pmsClient.patch<DefaultAffiliateCommission>("/admin/affiliates/default-commission", {
-      defaultCommissionPct,
-    }),
+  updateDefaultCommission: (defaultCommissionPct: number) => {
+    void defaultCommissionPct;
+    return unavailableAffiliateAdmin<DefaultAffiliateCommission>();
+  },
 };
+
+function unavailableAffiliateAdmin<T>(): Promise<T> {
+  return Promise.reject(new Error(AFFILIATE_ADMIN_UNAVAILABLE));
+}

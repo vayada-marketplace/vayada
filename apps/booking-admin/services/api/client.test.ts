@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  clearAuthData,
-  setAuthKitSession,
-  setLegacyCompatibilityToken,
-  setLegacyPasswordSession,
-} from "../auth/sessionStore";
-import { ApiClient } from "./client";
+import { clearAuthData, setAuthKitSession, setLegacyPasswordSession } from "../auth/sessionStore";
+import { ApiClient, isNextApiTarget } from "./client";
 
 describe("ApiClient hotel context header", () => {
   beforeEach(() => {
@@ -45,18 +40,7 @@ describe("ApiClient hotel context header", () => {
     expect(fetchHeaders()).not.toHaveProperty("X-Hotel-Id");
   });
 
-  it("keeps sending the legacy hotel header to admin compatibility routes", async () => {
-    const client = new ApiClient("https://api.booking.localhost");
-
-    await client.get("/admin/settings/property");
-
-    expect(fetchHeaders()).toMatchObject({
-      "X-Hotel-Id": "booking_hotel_alpenrose",
-    });
-  });
-
-  it("uses compatibility bearer only for non-next legacy admin routes", async () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
+  it("uses the active session bearer for target routes", async () => {
     clearAuthData();
     setAuthKitSession({
       accessToken: "workos-token",
@@ -66,13 +50,7 @@ describe("ApiClient hotel context header", () => {
         status: "active",
       },
     });
-    setLegacyCompatibilityToken("compatibility-token", 3600);
     const client = new ApiClient("https://target-api.vayada.com");
-
-    await client.get("/admin/settings/property");
-    expect(fetchHeaders()).toMatchObject({
-      Authorization: "Bearer compatibility-token",
-    });
 
     await client.get("/api/booking/hotels/booking_hotel_alpenrose/settings/addons");
     expect(fetchHeaders()).toMatchObject({
@@ -80,40 +58,11 @@ describe("ApiClient hotel context header", () => {
     });
   });
 
-  it("mints a compatibility bearer before non-next legacy admin routes", async () => {
-    vi.stubEnv("NEXT_PUBLIC_AUTHKIT_COMPATIBILITY_TOKEN_ENABLED", "true");
-    clearAuthData();
-    setAuthKitSession({
-      accessToken: "workos-token",
-      csrfToken: "csrf-token",
-      user: {
-        id: "user_1",
-        email: "owner@example.com",
-        status: "active",
-      },
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-        const href = String(url);
-        if (href === "https://api.localhost/auth/compat/booking-admin-token") {
-          expect(new Headers(init?.headers).get("x-vayada-csrf")).toBe("csrf-token");
-          return new Response(
-            JSON.stringify({ accessToken: "fresh-compatibility-token", expiresIn: 900 }),
-            { headers: { "content-type": "application/json" } },
-          );
-        }
-        return new Response("{}", { headers: { "content-type": "application/json" } });
-      }),
-    );
-    const client = new ApiClient("https://target-api.vayada.com");
-
-    await client.get("/admin/settings/property");
-
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetchHeaders()).toMatchObject({
-      Authorization: "Bearer fresh-compatibility-token",
-    });
+  it("only treats explicit legacy booking API hosts as non-target", () => {
+    expect(isNextApiTarget("https://api.localhost")).toBe(true);
+    expect(isNextApiTarget("https://target-api.vayada.com")).toBe(true);
+    expect(isNextApiTarget("https://api.booking.localhost")).toBe(false);
+    expect(isNextApiTarget("http://localhost:8001")).toBe(false);
   });
 });
 

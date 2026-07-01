@@ -261,14 +261,6 @@ export const authService = {
   },
 
   /**
-   * Get current user
-   */
-  getCurrentUser: async () => {
-    const response = await apiClient.get<LoginResponse>("/admin/me");
-    return response;
-  },
-
-  /**
    * Check if user is logged in (has valid token)
    */
   isLoggedIn: (): boolean => {

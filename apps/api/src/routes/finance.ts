@@ -2198,7 +2198,10 @@ async function loadStripeProviderAccountById(
   owner: Parameters<FinanceStripeConnectProvider["createAccount"]>[0]["owner"],
 ): Promise<FinanceProviderAccountRow | null> {
   const ownerAccount = await loadStripeProviderAccountByOwner(client, owner);
-  return ownerAccount?.providerAccountId === providerAccountId ? ownerAccount : null;
+  return ownerAccount?.providerAccountId === providerAccountId ||
+    ownerAccount?.providerAccountRef === providerAccountId
+    ? ownerAccount
+    : null;
 }
 
 async function insertStripeProviderAccount(

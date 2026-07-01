@@ -13,7 +13,7 @@ import { useTranslation } from "@/lib/i18n";
  * instead of dropping them into an arbitrary "last-used" dashboard.
  * The page fetches the user's hotel list and lets them explicitly pick
  * one — that choice persists to localStorage as `selectedHotelId` and
- * drives the X-Hotel-Id header on subsequent API calls.
+ * drives target route resource selection on subsequent API calls.
  *
  * Edge cases handled inline:
  *   - 0 hotels → send to /setup (onboarding not yet started)

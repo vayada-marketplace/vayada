@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { apiClient, isNextApiTarget } from "@/services/api/client";
 import { getBookingHotelPropertyLink } from "@/services/api/bookingPropertyLinkClient";
 import {
   buildFinancePaymentSettingsBody,
+  createFinanceStripeProviderAccount,
+  getFinancePaymentSettings,
+  issueFinanceStripeOnboardingLink,
   updateFinancePaymentSettings,
 } from "@/services/api/financePaymentSettingsClient";
-import { pmsClient } from "@/services/api/pmsClient";
 import {
   BuildingOffice2Icon,
   CalendarDaysIcon,
@@ -60,26 +61,11 @@ type Section =
   | "billing"
   | "payments";
 
-type PmsPaymentSettingsResponse = {
-  paymentSettings: {
-    stripeConnectAccountId?: string | null;
-    stripeConnectOnboarded?: boolean;
-    paymentProvider?: "stripe" | "xendit" | "vayada";
-    xenditChannelCode?: string | null;
-    xenditAccountNumber?: string | null;
-    xenditAccountHolderName?: string | null;
-    payAtPropertyEnabled?: boolean;
-    onlineCardPayment?: boolean;
-    bankTransfer?: boolean;
-  };
-};
-
 const POI_COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#0d9488", "#db2777"];
 const PROPERTY_MAP_CENTERING_UNAVAILABLE =
   "Automatic property map centering is not available on next-api yet.";
 const BILLING_PLAN_SWITCH_UNAVAILABLE = "Billing plan switching is not available on next-api yet.";
-const PAYMENT_SETTINGS_UNAVAILABLE =
-  "Billing and payment settings are not available on next-api yet.";
+const BILLING_SETTINGS_UNAVAILABLE = "Billing settings are not available on next-api yet.";
 
 function readBookingHotelId(settings: PropertySettings): string {
   if (settings.id?.trim()) return settings.id.trim();
@@ -89,6 +75,13 @@ function readBookingHotelId(settings: PropertySettings): string {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function toSettingsPaymentProvider(
+  provider: string | null | undefined,
+): "stripe" | "xendit" | "vayada" {
+  if (provider === "xendit" || provider === "vayada") return provider;
+  return "stripe";
 }
 
 const hasValidCoordinatePair = (latitude: number, longitude: number) =>
@@ -143,14 +136,14 @@ const DEFAULT_SETTINGS: PropertySettings = {
   points_of_interest: [],
 };
 
-type NextApiSettingsUpdate =
+type TargetSettingsUpdate =
   | { ok: true; data: PropertySettingsUpdate }
   | { ok: false; message: string };
 
-function buildNextApiSettingsUpdate(
+function buildTargetSettingsUpdate(
   section: Section,
   settings: PropertySettings,
-): NextApiSettingsUpdate {
+): TargetSettingsUpdate {
   if (section === "property") {
     if ((settings.tiktok || "").trim() || (settings.youtube || "").trim()) {
       return {
@@ -197,7 +190,7 @@ function buildNextApiSettingsUpdate(
   if (section === "billing") {
     return {
       ok: false,
-      message: PAYMENT_SETTINGS_UNAVAILABLE,
+      message: BILLING_SETTINGS_UNAVAILABLE,
     };
   }
 
@@ -261,7 +254,7 @@ export default function SettingsPage() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentSettingsLoaded, setPaymentSettingsLoaded] = useState(false);
   const [selectedPoiId, setSelectedPoiId] = useState<string | null>(null);
-  const billingPlanSwitchUnavailable = isNextApiTarget();
+  const billingPlanSwitchUnavailable = true;
   const billingPlanSwitchDisabled = saving || billingPlanSwitchUnavailable;
 
   const handleChangeEmail = async () => {
@@ -339,9 +332,7 @@ export default function SettingsPage() {
         const hotelId = readBookingHotelId(property);
         if (!hotelId) return null;
         const propertyLink = await getBookingHotelPropertyLink({ hotelId });
-        return apiClient.get<PmsPaymentSettingsResponse>(
-          `/api/pms/properties/${encodeURIComponent(propertyLink.propertyId)}/payment-settings`,
-        );
+        return getFinancePaymentSettings({ propertyId: propertyLink.propertyId });
       })
       .then((res) => {
         if (!res) {
@@ -349,18 +340,25 @@ export default function SettingsPage() {
           return;
         }
         const ps = res.paymentSettings;
-        setStripeAccountId(ps.stripeConnectAccountId ?? null);
-        setStripeOnboarded(ps.stripeConnectOnboarded ?? false);
-        setPaymentProvider(ps.paymentProvider || "stripe");
-        setXenditChannelCode(ps.xenditChannelCode || "ID_BCA");
-        setXenditAccountNumber(ps.xenditAccountNumber || "");
-        setXenditAccountHolderName(ps.xenditAccountHolderName || "");
-        // Payment method toggles are authoritative from PMS
+        const providerAccount = ps.providerAccount;
+        const stripeAccountId =
+          providerAccount.provider === "stripe" ? providerAccount.providerAccountId : null;
+        setStripeAccountId(stripeAccountId);
+        setStripeOnboarded(
+          providerAccount.provider === "stripe" &&
+            (providerAccount.onboardingStatus === "completed" ||
+              (providerAccount.chargesEnabled && providerAccount.payoutsEnabled)),
+        );
+        setPaymentProvider(toSettingsPaymentProvider(ps.paymentProvider));
+        setXenditChannelCode("ID_BCA");
+        setXenditAccountNumber("");
+        setXenditAccountHolderName("");
         setSettings((prev) => ({
           ...prev,
-          pay_at_property_enabled: ps.payAtPropertyEnabled ?? false,
-          online_card_payment: ps.onlineCardPayment ?? false,
-          bank_transfer: ps.bankTransfer ?? false,
+          pay_at_property_enabled: ps.acceptedMethods.includes("pay_at_property"),
+          online_card_payment:
+            ps.acceptedMethods.includes("card") || ps.acceptedMethods.includes("xendit"),
+          bank_transfer: ps.acceptedMethods.includes("bank_transfer"),
         }));
         setPaymentSettingsLoaded(true);
       })
@@ -375,13 +373,20 @@ export default function SettingsPage() {
     setCreatingAccount(true);
     setPaymentError("");
     try {
-      const result = await pmsClient.post<{ accountId: string }>("/admin/stripe/connect-account", {
+      const hotelId = readBookingHotelId(settings);
+      if (!hotelId) {
+        setPaymentError("Select a hotel before creating a Stripe account.");
+        return;
+      }
+      const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+      const result = await createFinanceStripeProviderAccount({
+        propertyId: propertyLink.propertyId,
         email: connectEmail,
         country: connectCountry,
+        commandPrefix: `settings-stripe-account-${hotelId}`,
       });
-      setStripeAccountId(result.accountId);
-      const link = await pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link");
-      window.open(link.url, "_blank");
+      setStripeAccountId(result.providerAccountId);
+      window.open(result.onboardingUrl, "_blank");
     } catch (err: unknown) {
       const msg =
         err instanceof TypeError
@@ -395,33 +400,43 @@ export default function SettingsPage() {
 
   const handleOnboarding = async () => {
     try {
-      const link = await pmsClient.get<{ url: string }>("/admin/stripe/connect-onboarding-link");
-      window.open(link.url, "_blank");
+      const hotelId = readBookingHotelId(settings);
+      if (!hotelId || !stripeAccountId) {
+        setPaymentError("Select a hotel and create a Stripe account before onboarding.");
+        return;
+      }
+      const propertyLink = await getBookingHotelPropertyLink({ hotelId });
+      const link = await issueFinanceStripeOnboardingLink({
+        propertyId: propertyLink.propertyId,
+        providerAccountId: stripeAccountId,
+        commandPrefix: `settings-stripe-onboarding-${hotelId}`,
+      });
+      window.open(link.onboardingUrl, "_blank");
     } catch (err: unknown) {
       setPaymentError(errorMessage(err, t("settings.billing.errorOnboardingLink")));
     }
   };
 
-  const savePaymentProviderSettings = async (): Promise<boolean> => {
+  const savePaymentProviderSettings = async (showPageFeedback = false): Promise<boolean> => {
     setSavingPayment(true);
     setPaymentError("");
     setPaymentSuccess("");
+    const fail = (message: string) => {
+      setPaymentError(message);
+      if (showPageFeedback) setFeedback({ type: "error", message });
+    };
     try {
-      if (isNextApiTarget()) {
-        setPaymentError(PAYMENT_SETTINGS_UNAVAILABLE);
-        return false;
-      }
       if (!paymentSettingsLoaded) {
-        setPaymentError("Payment settings did not load. Refresh before saving payments.");
+        fail("Payment settings did not load. Refresh before saving payments.");
         return false;
       }
       if (paymentProvider === "xendit") {
-        setPaymentError("Xendit account details are not saved by this payment settings flow yet.");
+        fail("Xendit account details are not saved by this payment settings flow yet.");
         return false;
       }
       const hotelId = readBookingHotelId(settings);
       if (!hotelId) {
-        setPaymentError("Select a hotel before saving payment settings.");
+        fail("Select a hotel before saving payment settings.");
         return false;
       }
       const propertyLink = await getBookingHotelPropertyLink({ hotelId });
@@ -437,12 +452,12 @@ export default function SettingsPage() {
           commandPrefix: `settings-payment-settings-${hotelId}`,
         }),
       });
-      setPaymentSuccess(t("settings.billing.paymentSettingsSaved"));
+      const message = t("settings.billing.paymentSettingsSaved");
+      setPaymentSuccess(message);
+      if (showPageFeedback) setFeedback({ type: "success", message });
       return true;
     } catch (err: unknown) {
-      setPaymentError(
-        err instanceof Error ? err.message : t("settings.billing.errorPaymentSaveFailed"),
-      );
+      fail(err instanceof Error ? err.message : t("settings.billing.errorPaymentSaveFailed"));
       return false;
     } finally {
       setSavingPayment(false);
@@ -450,38 +465,28 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
+    if (activeSection === "billing") {
+      setFeedback(null);
+      setSaving(true);
+      try {
+        await savePaymentProviderSettings(true);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+
     const paypalEmail = (settings.paypal_email || "").trim();
     const normalizedSettings =
       paypalEmail === (settings.paypal_email || "")
         ? settings
         : { ...settings, paypal_email: paypalEmail };
-    const nextApiSettingsUpdate = isNextApiTarget()
-      ? buildNextApiSettingsUpdate(activeSection, normalizedSettings)
-      : null;
-    if (nextApiSettingsUpdate && !nextApiSettingsUpdate.ok) {
-      setFeedback({ type: "error", message: nextApiSettingsUpdate.message });
+    const targetSettingsUpdate = buildTargetSettingsUpdate(activeSection, normalizedSettings);
+    if (!targetSettingsUpdate.ok) {
+      setFeedback({ type: "error", message: targetSettingsUpdate.message });
       return;
     }
 
-    if (!nextApiSettingsUpdate && settings.paypal_enabled) {
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(paypalEmail)) {
-        setFeedback({ type: "error", message: "Enter a valid PayPal email to enable PayPal." });
-        setActiveSection("billing");
-        return;
-      }
-      if (
-        !settings.paypal_payment_window_hours ||
-        settings.paypal_payment_window_hours < 1 ||
-        settings.paypal_payment_window_hours > 168
-      ) {
-        setFeedback({
-          type: "error",
-          message: "PayPal payment window must be between 1 and 168 hours.",
-        });
-        setActiveSection("billing");
-        return;
-      }
-    }
     const pois = settings.points_of_interest || [];
     const invalidPoi = pois.find(
       (poi) =>
@@ -500,8 +505,7 @@ export default function SettingsPage() {
     try {
       setSaving(true);
       setFeedback(null);
-      const savePayload = nextApiSettingsUpdate ? nextApiSettingsUpdate.data : normalizedSettings;
-      const data = await settingsService.updatePropertySettings(savePayload);
+      const data = await settingsService.updatePropertySettings(targetSettingsUpdate.data);
       setSettings(data);
       setFeedback({ type: "success", message: t("settings.feedback.saveSuccess") });
     } catch (err: unknown) {
