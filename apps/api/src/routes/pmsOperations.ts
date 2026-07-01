@@ -278,6 +278,25 @@ export type PmsCheckOutCommand = {
   audit: PmsOperationsCommandAudit;
 };
 
+export type PmsRoomTypeCreateCommand = {
+  propertyId: string;
+  commandId: string;
+  idempotencyKey: string;
+  name: string;
+  description: string;
+  category: string | null;
+  occupancyLimits: Record<string, number>;
+  attributes: Record<string, string | number | boolean | null>;
+  amenities: string[];
+  media: PmsRoomType["media"];
+  baseRate: PmsMoney;
+  nonRefundableRate: PmsMoney | null;
+  active: boolean;
+  sortOrder: number;
+  roomCount: number;
+  audit: PmsOperationsCommandAudit;
+};
+
 export type PmsPrivateNoteCreateCommand = PmsPrivateNoteCreateRequest & {
   propertyId: string;
   guestBookingId: string;
@@ -334,6 +353,13 @@ export type PmsAssignmentCommandResponse = {
 };
 
 export type PmsOperationsCommandResponse = PmsAssignmentCommandResponse;
+
+export type PmsRoomTypeCommandResponse = {
+  contractVersion: PmsOperationsContractVersion;
+  propertyId: string;
+  item: PmsRoomType;
+  commandMeta: PmsCommandMeta;
+};
 
 export type PmsAdditionalGuestsResponse = {
   contractVersion: PmsOperationsContractVersion;
@@ -565,7 +591,28 @@ export type PmsCheckOutCommandResult =
       message: string;
     };
 
+export type PmsRoomTypeCommandResult =
+  | {
+      ok: true;
+      roomType: PmsRoomType;
+      commandMeta: PmsCommandMeta;
+      replayed?: boolean;
+    }
+  | {
+      ok: false;
+      statusCode: 400;
+      code: "invalid_body";
+      message: string;
+    }
+  | {
+      ok: false;
+      statusCode: 409;
+      code: "idempotency_conflict";
+      message: string;
+    };
+
 export type PmsOperationsCommandRepository = {
+  createRoomType(command: PmsRoomTypeCreateCommand): Promise<PmsRoomTypeCommandResult>;
   executeAssignmentCommand(command: PmsAssignmentCommand): Promise<PmsAssignmentCommandResult>;
   executeOperationalStatusCommand(
     command: PmsOperationalStatusCommand,
@@ -1485,6 +1532,35 @@ export async function registerPmsOperationsRoutes(
   );
 
   if (commandRepository) {
+    app.post<{ Params: PmsPropertyParams; Body: unknown }>(
+      "/properties/:propertyId/room-types",
+      async (request, reply) => {
+        if (!writePmsOperationsCorsHeaders(request, reply, options.allowedOrigins ?? [])) {
+          return sendPmsOperationsError(reply, {
+            statusCode: 403,
+            code: "missing_permission",
+            category: "authorization",
+            message: "PMS operations origin is not allowed.",
+          });
+        }
+        const { propertyId } = request.params;
+        if (!enforcePmsOperationsManagePolicy(request, reply, propertyId)) return reply;
+
+        const command = toRoomTypeCreateCommand(propertyId, request);
+        if ("error" in command) return sendPmsOperationsError(reply, command.error);
+
+        const result = await commandRepository.createRoomType(command.value);
+        if (!result.ok) return sendPmsRoomTypeCommandError(reply, result);
+
+        return {
+          contractVersion: PMS_OPERATIONS_CONTRACT_VERSION,
+          propertyId,
+          item: result.roomType,
+          commandMeta: result.commandMeta,
+        } satisfies PmsRoomTypeCommandResponse;
+      },
+    );
+
     app.get<{ Params: PmsReservationParams }>(
       "/properties/:propertyId/reservations/:guestBookingId/checkout-charges",
       async (request, reply) => {
@@ -2249,6 +2325,18 @@ function sendPmsCheckoutChargeCommandError(
   });
 }
 
+function sendPmsRoomTypeCommandError(
+  reply: FastifyReply,
+  result: Exclude<PmsRoomTypeCommandResult, { ok: true }>,
+): FastifyReply {
+  return sendPmsOperationsError(reply, {
+    statusCode: result.statusCode,
+    code: result.code,
+    category: result.statusCode === 400 ? "validation" : "conflict",
+    message: result.message,
+  });
+}
+
 function sendPmsCheckOutCommandError(
   reply: FastifyReply,
   result: Exclude<PmsCheckOutCommandResult, { ok: true }>,
@@ -2306,6 +2394,155 @@ function writePmsOperationsCorsHeaders(
     .header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
     .header("Vary", "Origin");
   return true;
+}
+
+function toRoomTypeCreateCommand(
+  propertyId: string,
+  request: FastifyRequest<{ Body: unknown }>,
+): { value: PmsRoomTypeCreateCommand } | { error: PmsOperationsError } {
+  const raw = objectBody(request.body);
+  if (!raw) return { error: invalidBody("Room type create body must be an object.") };
+
+  const commandId = stringField(raw.commandId);
+  const idempotencyKey = stringField(raw.idempotencyKey);
+  const name = stringField(raw.name);
+  if (!commandId || !idempotencyKey || !name) {
+    return { error: invalidBody("Room type create requires commandId, idempotencyKey, and name.") };
+  }
+
+  const baseRate = roomTypeBaseRate(raw);
+  if (!baseRate) return { error: invalidBody("Room type create requires a valid baseRate.") };
+
+  const currency = (stringField(raw.currency) ?? "EUR").toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    return { error: invalidBody("Room type create requires a three-letter currency.") };
+  }
+
+  const roomCount = optionalNonNegativeInteger(raw.totalRooms) ?? 0;
+  if (roomCount > 500) {
+    return { error: invalidBody("Room type create totalRooms cannot exceed 500.") };
+  }
+
+  const maxAdults = optionalNonNegativeInteger(raw.maxAdults);
+  const maxChildren = optionalNonNegativeInteger(raw.maxChildren);
+  const maxOccupancy = optionalNonNegativeInteger(raw.maxOccupancy);
+  const occupancyLimits: Record<string, number> = {};
+  if (maxAdults !== undefined) occupancyLimits.adults = maxAdults;
+  if (maxChildren !== undefined) occupancyLimits.children = maxChildren;
+  occupancyLimits.total = maxOccupancy ?? (maxAdults ?? 0) + (maxChildren ?? 0);
+
+  return {
+    value: {
+      propertyId,
+      commandId,
+      idempotencyKey,
+      name,
+      description: optionalStringField(raw.description) ?? "",
+      category: nullableStringField(raw.category) ?? null,
+      occupancyLimits,
+      attributes: roomTypeAttributes(raw),
+      amenities: toStringArray(raw.amenities),
+      media: roomTypeMedia(raw.images),
+      baseRate: { amountDecimal: baseRate, currency },
+      nonRefundableRate:
+        raw.nonRefundableEnabled === true
+          ? roomTypeNonRefundableRate(raw, baseRate, currency)
+          : null,
+      active: typeof raw.isActive === "boolean" ? raw.isActive : true,
+      sortOrder: optionalNonNegativeInteger(raw.sortOrder) ?? 0,
+      roomCount,
+      audit: pmsOperationsCommandAudit(request, commandId, "Create room type"),
+    },
+  };
+}
+
+function roomTypeBaseRate(raw: Record<string, unknown>): string | undefined {
+  const explicit = moneyDecimal(raw.baseRate ?? raw.rate);
+  if (explicit && explicit !== "0.00") return explicit;
+  return firstSeasonRate(raw.seasons) ?? explicit;
+}
+
+function firstSeasonRate(value: unknown): string | undefined {
+  if (!Array.isArray(value)) return undefined;
+  for (const item of value) {
+    const raw = objectBody(item);
+    if (!raw) continue;
+    const rate = moneyDecimal(raw.rate);
+    if (rate && rate !== "0.00") return rate;
+  }
+  return undefined;
+}
+
+function roomTypeNonRefundableRate(
+  raw: Record<string, unknown>,
+  baseRate: string,
+  currency: string,
+): PmsMoney | null {
+  const explicit = moneyDecimal(raw.nonRefundableRate);
+  if (explicit && explicit !== "0.00") return { amountDecimal: explicit, currency };
+
+  const discount = optionalNumber(raw.nonRefundableDiscount);
+  if (discount === undefined || discount <= 0 || discount >= 100) return null;
+  const discounted = Number(baseRate) * (1 - discount / 100);
+  return { amountDecimal: discounted.toFixed(2), currency };
+}
+
+function roomTypeAttributes(
+  raw: Record<string, unknown>,
+): Record<string, string | number | boolean | null> {
+  const attributes: Record<string, string | number | boolean | null> = {};
+  for (const key of [
+    "shortDescription",
+    "bedType",
+    "locationAddress",
+    "cancellationPolicy",
+    "nonRefundableCancellationPolicy",
+  ]) {
+    const value = optionalStringField(raw[key]);
+    if (value !== undefined) attributes[key] = value;
+  }
+  for (const key of [
+    "bedrooms",
+    "bathrooms",
+    "size",
+    "latitude",
+    "longitude",
+    "nonRefundableRate",
+    "nonRefundableDiscount",
+    "minimumAdvanceDays",
+    "partialRefundCancelWindowDays",
+    "partialRefundAmountPercent",
+  ]) {
+    const value = optionalNumber(raw[key]);
+    if (value !== undefined) attributes[key] = value;
+  }
+  for (const key of ["flexibleRateEnabled", "nonRefundableEnabled"]) {
+    if (typeof raw[key] === "boolean") attributes[key] = raw[key] as boolean;
+  }
+  return attributes;
+}
+
+function roomTypeMedia(value: unknown): PmsRoomType["media"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (typeof item === "string") {
+      const url = stringField(item);
+      return url ? [{ url }] : [];
+    }
+    const raw = objectBody(item);
+    if (!raw) return [];
+    const url = stringField(raw.url);
+    if (!url) return [];
+    const altText = nullableStringField(raw.altText);
+    return [{ url, ...(altText !== undefined ? { altText } : {}) }];
+  });
+}
+
+function moneyDecimal(value: unknown): string | undefined {
+  const numberValue =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(numberValue) || numberValue < 0) return undefined;
+  return numberValue.toFixed(2);
 }
 
 function toCheckoutChargeMarkPaidCommandMetadata(body: PmsCheckoutChargeMarkPaidBody):
@@ -3217,6 +3454,18 @@ function optionalPositiveInteger(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : undefined;
+}
+
+function optionalNonNegativeInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function toStringArray(value: unknown): string[] {
