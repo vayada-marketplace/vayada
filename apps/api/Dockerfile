@@ -19,7 +19,10 @@ COPY scripts/c1-rehearsal-replay-fixtures.mjs ./scripts/c1-rehearsal-replay-fixt
 
 FROM node:24-slim AS runtime
 
+ARG API_RUNTIME=
+
 ENV NODE_ENV=production
+ENV API_RUNTIME=${API_RUNTIME}
 ENV HOST=0.0.0.0
 ENV PORT=8003
 
