@@ -1,85 +1,31 @@
-"use client";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { firstSearchParam, safeRelativeReturnTo } from "@vayada/hotel-setup-wizard/returnTo";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { authService } from "@/services/auth";
-import { ApiErrorResponse } from "@/services/api/client";
-import { isSetupComplete } from "@/lib/utils/setupStatus";
-import RegisterForm from "@/components/auth/RegisterForm";
-import { useTranslation } from "@/lib/i18n";
+const AUTH_API_BASE_URL = process.env.NEXT_PUBLIC_AUTH_API_URL || "https://api.localhost";
 
-export default function RegisterPage() {
-  const { t } = useTranslation();
-  const router = useRouter();
-  const [submitError, setSubmitError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<{
-    name?: string;
-    email?: string;
-    password?: string;
-    confirmPassword?: string;
-  }>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
+type RegisterPageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
 
-  const handleRegister = async (data: { name: string; email: string; password: string }) => {
-    setSubmitError("");
-    setFieldErrors({});
-    setIsSubmitting(true);
+export default async function RegisterPage({ searchParams }: RegisterPageProps) {
+  const params = (await searchParams) ?? {};
+  const returnTo = safeRelativeReturnTo(params.returnTo, "/dashboard");
+  const headerList = await headers();
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host");
+  const proto = headerList.get("x-forwarded-proto") ?? "https";
+  const origin = host ? `${proto}://${host}` : "https://admin.booking.vayada.com";
 
-    try {
-      await authService.register(data);
-      const complete = await isSetupComplete();
-      if (!complete) {
-        localStorage.setItem("setupComplete", "false");
-        router.push("/setup");
-        return;
-      }
-      localStorage.setItem("setupComplete", "true");
-      router.push("/dashboard");
-    } catch (error) {
-      if (error instanceof ApiErrorResponse) {
-        if (error.status === 400) {
-          setSubmitError(t("auth.register.errorEmailExists"));
-        } else if (error.status === 422) {
-          const detail = error.data.detail;
-          if (Array.isArray(detail)) {
-            setSubmitError(detail.map((e) => e.msg).join(". "));
-          } else {
-            setSubmitError(detail || t("auth.register.errorValidation"));
-          }
-        } else {
-          setSubmitError(t("auth.register.errorUnexpected"));
-        }
-      } else {
-        setSubmitError(t("auth.register.errorUnexpected"));
-      }
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  const url = new URL(`${AUTH_API_BASE_URL}/auth/workos/signup`);
+  url.searchParams.set("surface", "booking-admin");
+  url.searchParams.set("intent", "hotel");
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-sm bg-white rounded-lg shadow-lg p-8">
-        {/* Logo / Title */}
-        <div className="mb-6 text-center">
-          <div className="inline-flex items-center justify-center w-10 h-10 bg-primary-600 rounded-lg mb-3">
-            <span className="text-white font-bold text-[16px]">B</span>
-          </div>
-          <h1 className="text-xl font-bold text-gray-900">{t("auth.register.title")}</h1>
-          <p className="text-[13px] text-gray-500 mt-1">{t("auth.register.subtitle")}</p>
-        </div>
+  const callbackUrl = new URL("/login?auth=callback", origin);
+  callbackUrl.searchParams.set("returnTo", returnTo);
+  url.searchParams.set("return_to", callbackUrl.toString());
 
-        <RegisterForm
-          onSubmit={handleRegister}
-          isSubmitting={isSubmitting}
-          submitError={submitError}
-          fieldErrors={fieldErrors}
-          onErrorClear={() => {
-            setSubmitError("");
-            setFieldErrors({});
-          }}
-        />
-      </div>
-    </div>
-  );
+  const loginHint = firstSearchParam(params.login_hint);
+  if (loginHint) url.searchParams.set("login_hint", loginHint);
+
+  redirect(url.toString());
 }
