@@ -1199,12 +1199,10 @@ type PgTargetBookingWebCheckoutAdapterConfig = {
 const TARGET_CHECKOUT_SUPPORTED_PAYMENT_METHODS = ["pay_at_property", "cash"] as const;
 
 type TargetCheckoutCommandReservation =
-  | { status: "reserved" }
-  | { status: "replay"; body: unknown };
+  { status: "reserved" } | { status: "replay"; body: unknown };
 
 type TargetBookingChangeDecisionReservation =
-  | { status: "reserved" }
-  | { status: "replay"; body: unknown };
+  { status: "reserved" } | { status: "replay"; body: unknown };
 
 async function withTargetCheckoutTransaction<T>(
   pool: pg.Pool,
@@ -2643,6 +2641,8 @@ async function createTargetGuestBooking(
            checkout_context_id,
            public_reference,
            source_system,
+           booking_channel,
+           direct_booking_source,
            lifecycle_status,
            payment_status,
            check_in,
@@ -2663,6 +2663,8 @@ async function createTargetGuestBooking(
          checkout.id,
          $9,
          'booking',
+         'direct',
+         'booking_engine',
          $10,
          $11,
          $12::date,
