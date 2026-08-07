@@ -7,6 +7,7 @@ import {
   ClockIcon,
   ClipboardDocumentCheckIcon,
   GlobeAltIcon,
+  ReceiptPercentIcon,
 } from "@heroicons/react/24/outline";
 import { HotelIcon } from "@vayada/product-onboarding";
 import { bookingsService } from "@/services/bookings";
@@ -20,6 +21,7 @@ import {
 } from "@/components/settings/layout";
 import { PropertySection } from "@/components/settings/PropertySection";
 import { LocalizationSection } from "@/components/settings/LocalizationSection";
+import { OtaCommissionSettingsSection } from "@/components/settings/OtaCommissionSettingsSection";
 import { humanizeApiError } from "@/components/settings/constants";
 import {
   pmsPropertyDetailsSaveError,
@@ -31,6 +33,7 @@ import {
 // SearchModal links from VAY-367 still scroll to the right place).
 type SectionId =
   | "property-details"
+  | "ota-commissions"
   | "booking-engine"
   | "calendar"
   | "check-in-out"
@@ -42,6 +45,7 @@ type SectionId =
 // that map onto a parent rail section.
 const ANCHOR_TO_SECTION: Record<string, SectionId> = {
   "property-details": "property-details",
+  "ota-commissions": "ota-commissions",
   "booking-engine": "booking-engine",
   calendar: "calendar",
   "check-in-out": "check-in-out",
@@ -184,6 +188,7 @@ export default function SettingsPage() {
       label: "Property",
       icon: HotelIcon,
     },
+    { id: "ota-commissions", label: "OTA commissions", icon: ReceiptPercentIcon },
     { id: "booking-engine", label: "Booking Engine", icon: BoltIcon },
     { id: "calendar", label: "Calendar", icon: CalendarDaysIcon },
     {
@@ -246,6 +251,8 @@ export default function SettingsPage() {
         onRetry={loadPropertyProfile}
         onSave={savePropertyDetails}
       />
+
+      <OtaCommissionSettingsSection />
 
       <UnavailableSettingsSection
         id="booking-engine"
