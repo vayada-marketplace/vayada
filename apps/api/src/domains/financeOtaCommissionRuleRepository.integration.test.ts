@@ -81,7 +81,7 @@ describe.skipIf(!URL)("PostgreSQL Finance OTA commission repository", () => {
       repository.setRule(command("left", PROPERTY_A, "booking_com", "20", "2026-03-01")),
       repository.setRule(command("right", PROPERTY_A, "booking_com", "25", "2026-03-01")),
     ]);
-    expect(results.map(({ status }) => status).sort()).toEqual(["applied", "conflict"]);
+    expect(results).toContainEqual({ status: "conflict", reason: "revision_conflict" });
     await expect(repository.list(PROPERTY_A)).resolves.toMatchObject([
       { percentageRate: "10.0000", effectiveTo: "2026-03-01T00:00:00.000Z", revision: 1 },
       { effectiveTo: null, revision: 2 },
@@ -118,6 +118,7 @@ function command(
     channel,
     percentageRate: normalizeFinanceOtaCommissionRate(value)!,
     effectiveFrom,
+    expectedRevision: effectiveFrom === "2026-01-01" ? 0 : 1,
     audit: {
       actor: { kind: "user", userId: actorUserId, organizationId: "org" },
       requestId: `request-${key}`,
