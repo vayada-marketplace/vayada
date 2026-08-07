@@ -69,6 +69,15 @@ test.describe("pms-web smoke", () => {
     await expect(page.getByRole("heading", { name: /settings/i })).toBeVisible();
     await expect(page.getByLabel("Timezone")).toHaveValue("Europe/Berlin");
     await expect(page.getByLabel("Country (ISO code)")).toHaveValue("DE");
+    await expect(page.getByText("Booking.com", { exact: true })).toBeVisible();
+    await expect(page.getByText("Other OTA", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not configured")).toHaveCount(4);
+    await page.getByRole("button", { name: "Configure" }).first().click();
+    await page.getByLabel("Commission percentage").fill("14.25");
+    await page.getByLabel("Effective time (your device timezone)").fill("2026-09-01T12:00");
+    await page.getByRole("button", { name: "Save commission" }).click();
+    await expect(page.getByRole("status")).toContainText("Airbnb saved at 14.25%");
+    await expect(page.getByText(/14.25%.*Revision 1/)).toBeVisible();
     await expect(page.getByText("Editing not available yet")).toBeVisible();
 
     await page.goto("/settings/feature-hub");

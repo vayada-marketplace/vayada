@@ -246,6 +246,54 @@ export async function mockPmsWebTargetRoutes(page: Page): Promise<void> {
       },
     }),
   );
+  await page.route(
+    `**/api/finance/properties/${PMS_WEB_PROPERTY_ID}/financials/ota-commission-settings**`,
+    (route) => {
+      if (route.request().method() === "PUT") {
+        const request = readJson(route);
+        const channel = new URL(route.request().url()).pathname.split("/").pop();
+        return route.fulfill({
+          status: 201,
+          json: {
+            contractVersion: "pms-financials.v1",
+            propertyId: PMS_WEB_PROPERTY_ID,
+            outcome: "created",
+            setting: {
+              channel,
+              status: "configured",
+              ruleId: `rule-${channel}`,
+              percentageRate: `${request["percentageRate"]}00`,
+              effectiveFrom: request["effectiveFrom"],
+              effectiveTo: null,
+              revision: 1,
+            },
+          },
+        });
+      }
+      return route.fulfill({
+        json: {
+          contractVersion: "pms-financials.v1",
+          propertyId: PMS_WEB_PROPERTY_ID,
+          settings: [
+            {
+              channel: "booking_com",
+              status: "configured",
+              ruleId: "rule-booking",
+              percentageRate: "15.0000",
+              effectiveFrom: "2026-08-01T10:00:00.000Z",
+              effectiveTo: null,
+              revision: 1,
+            },
+            ...["airbnb", "expedia", "agoda", "other_ota"].map((channel) => ({
+              channel,
+              status: "unconfigured",
+              reason: "not_configured",
+            })),
+          ],
+        },
+      });
+    },
+  );
 
   await page.route("**/api/pms/properties", (route) => route.fulfill({ json: [propertySummary] }));
   await page.route(`**/api/pms/properties/${PMS_WEB_PROPERTY_ID}/module-activations*`, (route) =>
