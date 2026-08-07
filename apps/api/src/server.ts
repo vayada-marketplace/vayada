@@ -12,6 +12,7 @@ import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookin
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createPgHotelCatalogStep1Repository } from "./domains/hotelCatalogStep1Repository.js";
 import { createPgMarketplaceHotelCollaborationPreferencesRepository } from "./domains/marketplaceHotelCollaborationPreferencesRepository.js";
+import { createPgFinanceOtaCommissionRuleRepository } from "./domains/financeOtaCommissionRuleRepository.js";
 import { createPgHotelMediaResolutionPort } from "./platform/hotelMediaResolver.js";
 import { createPgAskAuditRepository } from "./platform/askAuditRepository.js";
 import { createOpenAIAskModel } from "./platform/askIntelligence.js";
@@ -249,6 +250,10 @@ const financeRepository =
     ? createTargetFinancePropertySettingsRepository({
         connectionString: targetDatabaseUrl,
       })
+    : undefined;
+const financeOtaCommissionSettingsRepository =
+  config.financeSource === "target"
+    ? createPgFinanceOtaCommissionRuleRepository(targetDatabaseUrl)
     : undefined;
 
 const pmsFinanceCompatibilityRepository =
@@ -521,6 +526,7 @@ const app = buildApp({
   pmsInventoryPublicOfferProjector: routePmsInventoryPublicOfferProjector,
   bookingGuestPiiPort,
   financeRepository,
+  financeOtaCommissionSettingsRepository,
   pmsFinanceCompatibilityRepository,
   financeXenditBankValidator: xenditBankValidator,
   financePublicHotelProfileRepository,
@@ -632,6 +638,7 @@ app.addHook("onClose", async () => {
     marketplaceHotelCollaborationPreferencesRepository.close(),
     bookingDesignRepository.close(),
     bookingDesignCatalogEvidenceRepository?.close(),
+    financeOtaCommissionSettingsRepository?.close(),
     bookingDesignMediaAdapter?.close?.(),
     ...(!platformMediaRuntime ? [hotelCatalogStep1Repository.close()] : []),
   ]);
