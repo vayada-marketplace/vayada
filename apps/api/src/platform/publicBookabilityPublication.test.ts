@@ -128,15 +128,13 @@ describe("target public bookability publication", () => {
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("ELSE 'Etc/UTC'");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("'sellable_availability'");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("'payment_method'");
-    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
-      "NULLIF(BTRIM(media.item ->> 'type'), '')",
-    );
-    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
-      "NULLIF(BTRIM(media.item ->> 'mediaType'), '')",
-    );
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).not.toContain("media.item ->> 'mediaType'");
     expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain(
       "ELSE 'https://' || input.verified_hostname || '/' || input.locale",
     );
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("media.item ->> 'type' = 'gallery_image'");
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("LIMIT 10");
+    expect(PROJECT_PUBLIC_BOOKABILITY_PROFILE).toContain("'type', 'gallery_image'");
 
     expect(PROJECT_CANONICAL_PUBLIC_PROPERTY_PROFILE).toContain("candidate.public_approved = TRUE");
     expect(PROJECT_CANONICAL_PUBLIC_PROPERTY_PROFILE).not.toContain("DISTINCT ON");
