@@ -14,7 +14,7 @@ export async function readPmsRoomSelectionConflicts(
   return new Map(result.rows.map((row) => [row.roomTypeId, row.groupId]));
 }
 
-export async function pmsRoomStayRestrictionsAllow(
+export async function pmsRoomStayRestrictionReason(
   transaction: InventoryReservationTransaction,
   input: {
     propertyId: string;
@@ -23,10 +23,27 @@ export async function pmsRoomStayRestrictionsAllow(
     checkIn: string;
     checkOut: string;
   },
-): Promise<boolean> {
-  const result = await transaction.query<{ blocked: boolean }>(
-    `SELECT NOT pms.stay_restrictions_allow($1::uuid,$2::uuid,$3::uuid,$4::date,$5::date) AS blocked`,
+): Promise<
+  "stay_restricted" | "min_stay_not_met" | "max_stay_exceeded" | "unavailable_data" | null
+> {
+  const result = await transaction.query<{ closed: boolean; minimum: boolean; maximum: boolean }>(
+    `SELECT
+       COALESCE(bool_or((day::date=$4::date AND rule.closed_to_arrival)
+         OR (day::date=$5::date AND rule.closed_to_departure)
+         OR (day::date<$5::date AND rule.stop_sell)),false) AS closed,
+       COALESCE(bool_or(day::date=$4::date AND rule.min_stay_arrival>($5::date-$4::date)),false) AS minimum,
+       COALESCE(bool_or(day::date=$4::date AND rule.max_stay>0 AND rule.max_stay<($5::date-$4::date)),false) AS maximum
+     FROM generate_series($4::date,$5::date,interval '1 day') day
+     CROSS JOIN LATERAL pms.effective_stay_restrictions($1::uuid,$2::uuid,$3::uuid,day::date) rule`,
     [input.propertyId, input.roomTypeId, input.ratePlanId, input.checkIn, input.checkOut],
   );
-  return result.rows[0]?.blocked === false;
+  const row = result.rows[0];
+  if (!row) return "unavailable_data";
+  return row.closed
+    ? "stay_restricted"
+    : row.minimum
+      ? "min_stay_not_met"
+      : row.maximum
+        ? "max_stay_exceeded"
+        : null;
 }
