@@ -394,6 +394,7 @@ const bankTransferBookings = bankTransferCodec
   : undefined;
 
 const bookingWebCheckoutAdapter = createTargetBookingWebCheckoutAdapter({
+  mixedRoomSelectionsEnabled: true,
   bankTransfers: bankTransferBookings,
   connectionString: targetDatabaseUrl,
   inventoryReservationPort: createTargetPmsInventoryReservationPort(),
