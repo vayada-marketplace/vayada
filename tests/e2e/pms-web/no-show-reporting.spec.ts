@@ -155,6 +155,7 @@ test("does not deny reporting after submission succeeds but refreshed status fai
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
   let requested = false;
+  let failedRefreshRequested = false;
   await page.route(`**/api/pms/properties/${P}/reservations/${B}`, (route) =>
     route.fulfill({ json: { item: { ...pmsWebReservation, status: "no_show" } } }),
   );
@@ -172,7 +173,10 @@ test("does not deny reporting after submission succeeds but refreshed status fai
         },
       });
     }
-    if (requested) return route.fulfill({ status: 503, json: { message: "Unavailable" } });
+    if (requested) {
+      failedRefreshRequested = true;
+      return route.fulfill({ status: 503, json: { message: "Unavailable" } });
+    }
     return route.fulfill({
       json: {
         eligible: true,
@@ -192,6 +196,7 @@ test("does not deny reporting after submission succeeds but refreshed status fai
   await expect(
     page.getByText("Report pending — Booking.com reporting is not confirmed."),
   ).toBeVisible();
+  await expect.poll(() => failedRefreshRequested).toBe(true);
   await expect(page.getByText(/Booking.com has not been notified/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Report no-show to Booking.com" })).toHaveCount(0);
 });
