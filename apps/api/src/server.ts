@@ -35,7 +35,11 @@ import { type ApiConfig, loadConfig, stripeSubscriptionRuntimeEnabled } from "./
 import { createPgBookingDesignCatalogEvidenceRepository } from "./domains/bookingDesignCatalogEvidenceRepository.js";
 import { createPgBookingDesignRepository } from "./domains/bookingDesignRepository.js";
 import { createBookingGuestPolicyCatalogCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCatalogCurrentOwnerEvidence.js";
+import { createPgBookingGuestPolicyCatalogProjectionPort } from "./domains/bookingGuestPolicyCatalogProjection.js";
 import { createBookingGuestPolicyCurrentOwnerEvidenceAdapter } from "./domains/bookingGuestPolicyCurrentOwnerEvidence.js";
+import { createBookingGuestPolicyProjectionHandler } from "./domains/bookingGuestPolicyProjectionHandler.js";
+import { createBookingGuestPolicyOutboxProjector } from "./domains/bookingGuestPolicyProjectionRuntime.js";
+import { startBookingGuestPolicyProjectionWorker } from "./domains/bookingGuestPolicyProjectionWorker.js";
 import { createPgBookingGuestPolicyRepository } from "./domains/bookingGuestPolicyRepository.js";
 import { createBookingGuestPolicyProductionApplication } from "./domains/bookingGuestPolicyProductionRuntime.js";
 import { createPgBookingGuestPolicyScopeAuthorizationPort } from "./domains/bookingGuestPolicyScopeAuthorization.js";
@@ -962,6 +966,14 @@ const bookingGuestPolicyApplication = pmsRoomPublicationRuntime
       currentOwnerEvidence: bookingGuestPolicyCurrentOwnerEvidence,
     })
   : undefined;
+const bookingGuestPolicyProjectionProjector = createBookingGuestPolicyOutboxProjector({
+  pool: propertySetupOwnerPool,
+  handler: createBookingGuestPolicyProjectionHandler({
+    read: bookingGuestPolicyRepository,
+    receipts: bookingGuestPolicyRepository,
+    catalog: createPgBookingGuestPolicyCatalogProjectionPort({ pool: propertySetupOwnerPool }),
+  }),
+});
 
 const bookingPublicationRuntime = (() => {
   const dependenciesMissing =
@@ -1627,6 +1639,14 @@ const bookingPublicationWorker = config.backgroundWorkersEnabled && bookingPubli
       warn: (error, message) => app.log.warn(error, message),
     })
   : undefined;
+const bookingGuestPolicyProjectionWorker =
+  config.apiRuntime === "next" && config.backgroundWorkersEnabled
+    ? startBookingGuestPolicyProjectionWorker({
+        projector: bookingGuestPolicyProjectionProjector,
+        workerId: `booking-guest-policy-projection:${process.pid}`,
+        warn: (error, message) => app.log.warn(error, message),
+      })
+    : undefined;
 
 app.addHook("onClose", async () => {
   await creatorPlatformSyncWorker?.close();
@@ -1744,6 +1764,7 @@ const channexMessageTimer = channexMessageWorkerEnabled
   : undefined;
 
 app.addHook("onClose", async () => {
+  await bookingGuestPolicyProjectionWorker?.close();
   await Promise.all([
     pmsPricingReadModel.close(),
     financePaymentReadinessReadModel.close(),
