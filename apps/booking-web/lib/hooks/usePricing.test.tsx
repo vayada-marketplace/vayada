@@ -160,3 +160,26 @@ it("rejects a quote that omits part of the selected rooms", async () => {
   expect(latest.quoteReady).toBe(false);
   expect(latest.promoError).toContain("Room selection pricing is unavailable");
 });
+
+it("requotes an unchanged allocation when its selection lease is refreshed", async () => {
+  const originalExpiry = room.combination!.expiresAt;
+  vi.mocked(bookingService.quote).mockResolvedValue({
+    roomSelection: selection, expiresAt: originalExpiry, totalAmount: 600, currency: "EUR",
+  } as never);
+  try {
+    await act(async () => root.render(createElement(Probe, { value: input })));
+    const firstCall = vi.mocked(bookingService.quote).mock.calls[0];
+    room.combination!.expiresAt = "2027-01-01T10:30:00Z";
+    vi.mocked(bookingService.quote).mockResolvedValue({
+      roomSelection: selection, expiresAt: room.combination!.expiresAt, totalAmount: 650, currency: "EUR",
+    } as never);
+    await act(async () => root.render(createElement(Probe, { value: input })));
+    expect(bookingService.quote).toHaveBeenCalledTimes(2);
+    const secondCall = vi.mocked(bookingService.quote).mock.calls[1];
+    expect(secondCall[1]).toEqual(firstCall[1]);
+    expect(secondCall[2]).not.toBe(firstCall[2]);
+    expect(latest.grandTotal).toBe(650);
+  } finally {
+    room.combination!.expiresAt = originalExpiry;
+  }
+});

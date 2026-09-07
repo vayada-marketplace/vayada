@@ -11,8 +11,8 @@ import {
 } from "@/lib/storage/bookingDraft";
 
 /** Canonical pricing applies booking-wide discounts/add-ons once across every room. */
-export function useRoomSelectionQuote(slug: string, input: BookingCreateRequest | null) {
-  const identity = input ? JSON.stringify(input) : "";
+export function useRoomSelectionQuote(slug: string, input: BookingCreateRequest | null, lease = "") {
+  const identity = input ? JSON.stringify([input, lease]) : "";
   const [result, setResult] = useState<{
     identity: string;
     slug: string;
@@ -22,7 +22,7 @@ export function useRoomSelectionQuote(slug: string, input: BookingCreateRequest 
   useEffect(() => {
     if (!identity || !slug) return;
     let canceled = false;
-    const request: BookingCreateRequest = JSON.parse(identity);
+    const [request]: [BookingCreateRequest, string] = JSON.parse(identity);
     const key = getCheckoutIdempotencyKey("selection-price", `${slug}:${identity}`);
     void bookingService
       .quote(slug, request, key)

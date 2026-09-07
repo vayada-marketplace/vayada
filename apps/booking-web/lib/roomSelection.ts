@@ -20,7 +20,11 @@ export function resolveCheckoutRoom(
   const combination = room.combination;
   if (!id && combination) return undefined;
   if (!combination) return room.id.startsWith("selection-") ? undefined : room;
-  const allocated = combination.roomSelection.lines.flatMap((line) => line.guests);
+  const lines = combination.roomSelection?.lines;
+  if (!Array.isArray(lines) || lines.length === 0 || lines.some((line) => !Array.isArray(line?.guests)))
+    return undefined;
+  const allocated = lines.flatMap((line) => line.guests);
+  if (allocated.some((guest) => !guest)) return undefined;
   if (
     combination.checkIn !== stay.checkIn ||
     combination.checkOut !== stay.checkOut ||

@@ -128,6 +128,7 @@ export function usePricing({
           promoCode: promoCode || undefined,
         }
       : null,
+    room?.combination?.expiresAt,
   );
 
   const nights = calculateNights(checkIn, checkOut);

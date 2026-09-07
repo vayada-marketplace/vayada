@@ -42,3 +42,10 @@ describe("checkout selection resolution", () => {
     expect(resolveCheckoutRoom([inconsistent], room.id, stay, now)).toBeUndefined();
   });
 });
+
+it("rejects incomplete runtime selections without throwing", () => {
+  for (const roomSelection of [undefined, {}, { lines: [] }, { lines: [{ roomTypeId: "a" }] }, { lines: [{ guests: [null] }] }]) {
+    const incomplete = { ...room, combination: { ...room.combination, roomSelection } } as unknown as RoomType;
+    expect(resolveCheckoutRoom([incomplete], room.id, stay, now)).toBeUndefined();
+  }
+});
