@@ -189,7 +189,7 @@ async function complete(
     const jobUpdate = await client.query(
       `UPDATE platform.jobs SET status = 'succeeded', finished_at = $4::timestamptz,
          locked_at = NULL, locked_by = NULL, updated_at = $4::timestamptz,
-         job_metadata = job_metadata || jsonb_build_object('providerRequestId', $5::text)
+         job_metadata = job_metadata || jsonb_build_object('providerRequestId', $5::text, 'alertRecoveryVerified', $6::boolean)
        WHERE id = $1::uuid AND locked_by = $2 AND attempts_count = $3 AND status = 'running'`,
       [
         job.jobId,
@@ -197,6 +197,7 @@ async function complete(
         job.attemptNumber,
         input.now.toISOString(),
         result.providerRequestId,
+        result.alertRecoveryVerified === true,
       ],
     );
     assertLeaseUpdated(jobUpdate);

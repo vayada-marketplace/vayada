@@ -73,6 +73,9 @@ export type ChannexManagementActionPlan = {
     externalRatePlanId?: string;
     externalRoomTypeId?: string;
   }>;
+  recoveryChannelId?: string;
+  verifyRecovery?: boolean;
+  recoveryScopeCovered?: boolean;
   externalPropertyId?: string;
   roomTypeMappings?: ChannexRoomTypeMapping[];
   ratePlanMappings?: ChannexRatePlanMapping[];
@@ -109,6 +112,26 @@ export function createChannexManagementProvider(config: {
           error instanceof ChannexAriMappingMissingError ? "mapping_missing" : "invalid_state",
           error,
         );
+      }
+      if (plan.recoveryChannelId) {
+        await input?.onProgress?.();
+        const response = await fetcher(
+          new URL(`/api/v1/channels/${encodeURIComponent(plan.recoveryChannelId)}`, apiBaseUrl),
+          { headers: { "user-api-key": apiKey }, signal: AbortSignal.timeout(30_000) },
+        );
+        if (!response.ok) return responseFailure(response);
+        const body = (await response.json()) as { data?: Record<string, unknown> };
+        const channel = (body.data?.attributes ?? body.data) as Record<string, unknown> | undefined;
+        if (
+          !channel ||
+          channel.is_active !== true ||
+          !Array.isArray(channel.properties) ||
+          !channel.properties.includes(plan.externalPropertyId)
+        )
+          return failure(
+            "invalid_state",
+            new Error("Reconnect this channel in channel settings before retrying."),
+          );
       }
       let lastRequestId: string | undefined;
       let revisions: unknown[] = [];
@@ -158,15 +181,53 @@ export function createChannexManagementProvider(config: {
           ) {
             return await responseFailure(response, lastRequestId);
           }
+          if (
+            plan.verifyRecovery &&
+            response.status === 204 &&
+            ["/api/v1/availability", "/api/v1/restrictions"].includes(request.path)
+          )
+            return failure(
+              "provider_unavailable",
+              new Error("Channex returned no verification evidence."),
+            );
           if (response.status !== 204) {
             const responseBody = response.status === 404 ? undefined : await response.json();
-            if (request.path === "/api/v1/restrictions" && hasAriWarnings(responseBody)) {
+            if (
+              !plan.verifyRecovery &&
+              request.path === "/api/v1/restrictions" &&
+              hasAriWarnings(responseBody)
+            ) {
               return {
                 ok: false,
                 code: "provider_rejected",
                 message: "Channex rejected one or more ARI values",
                 providerRequestId: lastRequestId,
               };
+            }
+            if (
+              plan.verifyRecovery &&
+              ["/api/v1/availability", "/api/v1/restrictions"].includes(request.path)
+            ) {
+              const body = responseBody as { meta?: { warnings?: unknown[] } };
+              if (!body?.meta || !Array.isArray(body.meta.warnings) || hasAriWarnings(responseBody))
+                return failure(
+                  "invalid_payload",
+                  new Error(
+                    "Channex rejected part of the update. Review rate and availability settings.",
+                  ),
+                );
+              const verified = await verifyAriReadback(
+                fetcher,
+                apiBaseUrl,
+                apiKey,
+                request,
+                input?.onProgress,
+              );
+              if (!verified)
+                return failure(
+                  "provider_unavailable",
+                  new Error("Channex has not confirmed the submitted values yet."),
+                );
             }
             if (request.path === "/api/v1/booking_revisions/feed") {
               revisions = dataList(responseBody);
@@ -294,15 +355,20 @@ export function createChannexManagementProvider(config: {
           return failure("provider_unavailable", error);
         }
       }
-      return progress({
-        lastRequestId,
-        externalPropertyId,
-        connectionStatus,
-        messagingAppInstalled,
-        roomTypeMappings,
-        ratePlanMappings,
-        channels,
-      });
+      return {
+        ...progress({
+          lastRequestId,
+          externalPropertyId,
+          connectionStatus,
+          messagingAppInstalled,
+          roomTypeMappings,
+          ratePlanMappings,
+          channels,
+        }),
+        ...(plan.verifyRecovery
+          ? { alertRecoveryVerified: plan.recoveryScopeCovered !== false }
+          : {}),
+      };
     },
   };
 }
@@ -709,4 +775,63 @@ function hasAriWarnings(value: unknown): boolean {
         (typeof item !== "object" || Object.keys(item).length > 0)) ||
       hasAriWarnings(item),
   );
+}
+
+async function verifyAriReadback(
+  fetcher: typeof fetch,
+  base: string,
+  apiKey: string,
+  request: ChannexRequest,
+  progress?: () => Promise<void>,
+) {
+  const values = (request.body as { values?: Record<string, unknown>[] } | undefined)?.values;
+  if (!values?.length) return false;
+  const dates = values.flatMap((value) => [String(value.date_from), String(value.date_to)]).sort();
+  const url = new URL(request.path, base);
+  url.searchParams.set("filter[property_id]", String(values[0]!.property_id));
+  url.searchParams.set("filter[date][gte]", dates[0]!);
+  url.searchParams.set("filter[date][lte]", dates.at(-1)!);
+  const availability = request.path.endsWith("availability");
+  const fields = availability
+    ? ["availability"]
+    : [
+        ...new Set(
+          values.flatMap((value) =>
+            Object.keys(value).filter(
+              (key) => !["property_id", "rate_plan_id", "date_from", "date_to"].includes(key),
+            ),
+          ),
+        ),
+      ];
+  if (!fields.length) return false;
+  if (!availability) url.searchParams.set("filter[restrictions]", fields.join(","));
+  await progress?.();
+  const response = await fetcher(url, {
+    headers: { "user-api-key": apiKey },
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) return false;
+  const body = (await response.json()) as { data?: Record<string, Record<string, unknown>> };
+  return values.every((value) => {
+    if (value.date_from !== value.date_to) return false;
+    const actual =
+      body.data?.[String(value[availability ? "room_type_id" : "rate_plan_id"])]?.[
+        String(value.date_from)
+      ];
+    return fields
+      .filter((field) => field in value)
+      .every((field) => {
+        const read = availability
+          ? actual
+          : (actual as Record<string, unknown> | undefined)?.[field];
+        const expected = value[field];
+        return typeof expected === "boolean"
+          ? read === expected
+          : read !== null &&
+              read !== undefined &&
+              typeof read !== "boolean" &&
+              Number.isFinite(Number(read)) &&
+              Number(read) === Number(expected);
+      });
+  });
 }
