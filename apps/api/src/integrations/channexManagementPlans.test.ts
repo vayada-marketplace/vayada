@@ -113,7 +113,27 @@ describe("target Channex management plans", () => {
     }).plan(job("sync_ari"));
     expect(
       plan.requests.find((request) => request.path === "/api/v1/restrictions")?.body,
-    ).toMatchObject({ values: [{ rate: 132 }] });
+    ).toMatchObject({ values: [{ rate: "132.00" }] });
+  });
+
+  it("sends only restrictions when canonical pricing is unavailable", async () => {
+    const db = new FakePool("ari", { restrictions: { min_stay_arrival: 3 } });
+    const query = db.query.bind(db);
+    vi.spyOn(db, "query").mockImplementation((text) => {
+      if (text.includes("WITH pricing_currency")) throw new Error("Pricing unavailable");
+      return query(text);
+    });
+    const input = job("sync_ari");
+    input.input.restrictionsOnly = true;
+    const plan = await createPgChannexManagementPlanPort({
+      connectionString: "postgresql://target",
+      pool: db,
+      bookingRevisionHandoff: vi.fn(),
+    }).plan(input);
+    expect(plan.requests).toHaveLength(1);
+    expect(plan.requests[0]?.body).toMatchObject({ values: [{ min_stay_arrival: 3 }] });
+    expect(JSON.stringify(plan.requests)).not.toContain('"rate":');
+    expect(db.sql()).not.toContain("WITH pricing_currency");
   });
 
   it("reconciles mapped plans in place and rejects unsupported local meals", async () => {
@@ -222,7 +242,7 @@ describe("target Channex management plans", () => {
       property: { settings: { cut_off_time: "18:00:00", cut_off_days: 0 } },
     });
     expect(ari.requests[1]?.body).toMatchObject({ values: [{ availability: 0 }] });
-    expect(ari.requests[2]?.body).toMatchObject({ values: [{ rate: 120 }] });
+    expect(ari.requests[2]?.body).toMatchObject({ values: [{ rate: "120.00" }] });
     expect(db.sql()).toContain("rate_mapping.connection_id = connection.id");
     expect(db.sql()).toContain("connection.provider = 'channex'");
     expect(db.sql()).toContain("COALESCE(inventory.rate_gate_open, TRUE)");
@@ -332,7 +352,40 @@ class FakePool {
           },
         ];
       else rows = [{ externalPropertyId: null, claimExternalPropertyId: null, claimState: null }];
-    } else if (text.includes("hotel_catalog.properties"))
+    } else if (text.includes("WITH pricing_currency"))
+      rows = [
+        {
+          pricingCurrency: {
+            propertyId: pricingPropertyId,
+            currency: "EUR",
+            pricingCurrencyRevision: 1,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          },
+          flexibleRatePlans: [
+            {
+              propertyId: pricingPropertyId,
+              roomTypeId: pricingRoomId,
+              flexibleRatePlanId: pricingPlanId,
+              flexibleRatePlanRevision: 1,
+              sourceRoomFactsRevision: 1,
+              amountDecimal: Number(this.rateOverrides.rate ?? 100).toFixed(2),
+              currency: "EUR",
+              cancellationTerms: {
+                type: "free_until_days_before_arrival",
+                freeCancellationDeadlineDays: 1,
+                afterDeadlinePenalty: "full_booking_amount",
+                noShowPenalty: "full_booking_amount",
+              },
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            },
+          ],
+        },
+      ];
+    else if (text.includes("FROM pms.property_pricing_settings"))
+      rows = [{ currency: "EUR", pricingCurrencyRevision: 1, optionalPricingAggregateRevision: 0 }];
+    else if (text.includes("hotel_catalog.properties"))
       rows = text.includes("same_day_booking_policies")
         ? [
             {
@@ -393,7 +446,11 @@ class FakePool {
           available: this.mode === "ari_rate_gated" ? 0 : 2,
           externalRoomTypeId: "external-room",
           externalRatePlanId: "external-rate",
-          rate: 100,
+          roomTypeId: pricingRoomId,
+          ratePlanId: pricingPlanId,
+          roomFactsRevision: 1,
+          planActive: true,
+          datePrice: null,
           channel: "airbnb",
           markupPercent: 10,
           ...this.rateOverrides,
@@ -406,10 +463,17 @@ class FakePool {
 function job(operationType: ChannexManagementJob["input"]["operationType"]): ChannexManagementJob {
   return {
     jobId: "job-1",
-    propertyId: "property-1",
+    propertyId: ["sync_ari", "update_markups"].includes(operationType)
+      ? pricingPropertyId
+      : "property-1",
     correlationId: null,
     attemptNumber: 1,
     maxAttempts: 5,
     input: { commandId: "command-1", idempotencyKey: "key-1", operationType },
   };
 }
+
+const pricingPropertyId = "15270000-0000-4000-8000-000000000001";
+const pricingRoomId = "15270000-0000-4000-8000-000000000002";
+const pricingPlanId = "15270000-0000-4000-8000-000000000003";
+const timestamp = "2026-08-14T10:00:00Z";

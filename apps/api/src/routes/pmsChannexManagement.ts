@@ -81,12 +81,10 @@ export async function registerPmsChannexManagementRoutes(
     if (!options.datePrices) return reply.code(503).send({ code: "date_prices_unavailable" });
     return (
       (await options.datePrices.put(context, { ...scope.data, ...body.data })) ??
-      reply
-        .code(409)
-        .send({
-          code: "date_price_conflict",
-          message: "Refresh the date price and canonical rate plan before retrying.",
-        })
+      reply.code(409).send({
+        code: "date_price_conflict",
+        message: "Refresh the date price and canonical rate plan before retrying.",
+      })
     );
   });
 
@@ -366,6 +364,7 @@ function parseMarkups(body: unknown) {
     const markup = item as Record<string, unknown>;
     return (markup.channel === "booking_com" || markup.channel === "airbnb") &&
       typeof markup.markupPercent === "number" &&
+      /^-?\d+(?:\.\d{1,4})?$/.test(String(markup.markupPercent)) &&
       markup.markupPercent >= -50 &&
       markup.markupPercent <= 200
       ? { channel: markup.channel, markupPercent: markup.markupPercent }

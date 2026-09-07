@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { RequestContext } from "@vayada/backend-auth";
 import pg from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createPgChannelDatePrices } from "../domains/pmsChannelDatePrices.js";
+
+import { createPgChannexManagementPlanPort } from "./channexManagementPlans.js";
+import { createChannexManagementProvider } from "./channexManagement.js";
 
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("saved Channex pricing", () => {
@@ -40,6 +43,62 @@ describe.skipIf(!url)("saved Channex pricing", () => {
       VALUES ($1,$2,$3,'flexible','Flexible','flexible',100,'EUR','pms-pricing.v1',1,1,1,
       '{"type":"free_until_days_before_arrival","freeCancellationDeadlineDays":1,"afterDeadlinePenalty":"full_booking_amount","noShowPenalty":"full_booking_amount"}')`,
       [ratePlanId, propertyId, roomTypeId],
+    );
+  });
+  const dates = [
+    "2026-12-27",
+    "2026-12-28",
+    "2026-12-29",
+    "2026-12-30",
+    "2026-12-31",
+    "2027-01-01",
+    "2027-01-02",
+    "2027-01-03",
+    "2027-01-09",
+  ];
+  const seasonId = randomUUID(),
+    weekendId = randomUUID(),
+    connectionId = randomUUID();
+  beforeAll(async () => {
+    await pool.query(
+      `INSERT INTO hotel_catalog.property_locations(property_id,timezone) VALUES ($1,'Asia/Taipei')`,
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO pms.channel_binding_claims(property_id,provider,external_property_id,claim_state,claim_source) VALUES ($1,'channex',$2,'active','enable')`,
+      [propertyId, propertyId],
+    );
+    await pool.query(
+      `INSERT INTO pms.channel_connections(id,property_id,provider,external_property_id,connection_status) VALUES ($1::uuid,$2::uuid,'channex',$2::text,'connected')`,
+      [connectionId, propertyId],
+    );
+    await pool.query(
+      `INSERT INTO pms.channel_room_type_mappings(property_id,connection_id,room_type_id,external_room_type_id) VALUES ($1::uuid,$2::uuid,$3::uuid,$3::text)`,
+      [propertyId, connectionId, roomTypeId],
+    );
+    await pool.query(
+      `INSERT INTO pms.channel_rate_plan_mappings(property_id,connection_id,room_type_id,rate_plan_id,channel,external_room_type_id,external_rate_plan_id,markup_percent)
+      SELECT $1::uuid,$2::uuid,$3::uuid,$4::uuid,channel,$3::text,$4::text||channel,markup FROM (VALUES ('direct',0),('booking_com',10)) channels(channel,markup)`,
+      [propertyId, connectionId, roomTypeId, ratePlanId],
+    );
+    await pool.query(
+      `INSERT INTO pms.inventory_days(property_id,room_type_id,stay_date,total_count,available_count) SELECT $1,$2,day,1,1 FROM unnest($3::date[]) day`,
+      [propertyId, roomTypeId, dates],
+    );
+    await pool.query(
+      `UPDATE pms.property_pricing_settings SET optional_pricing_aggregate_revision=2 WHERE property_id=$1`,
+      [propertyId],
+    );
+    await pool.query(
+      `INSERT INTO pms.recurring_pricing_sources(id,property_id,source_kind,source_revision,configured_state,validation_state,validation_revision,validated_at,invalid_reasons,currency,source_pricing_currency_revision,season_name,season_start_month,season_start_day,season_end_month,season_end_day,weekend_days)
+      VALUES ($1,$3,'season',1,'active','valid',1,now(),'[]','EUR',1,'Peak',12,30,1,2,NULL),
+      ($2,$3,'weekend_surcharge',1,'active','valid',1,now(),'[]','EUR',1,NULL,NULL,NULL,NULL,NULL,ARRAY['saturday','sunday'])`,
+      [seasonId, weekendId, propertyId],
+    );
+    await pool.query(
+      `INSERT INTO pms.recurring_pricing_source_room_values(source_id,property_id,source_kind,room_type_id,source_room_facts_revision,flexible_rate_plan_id,flexible_pricing_contract_version,source_flexible_plan_revision,currency,source_pricing_currency_revision,seasonal_nightly_amount,weekend_surcharge_amount)
+      VALUES ($1,$3,'season',$4,1,$5,'pms-pricing.v1',1,'EUR',1,180,NULL),($2,$3,'weekend_surcharge',$4,1,$5,'pms-pricing.v1',1,'EUR',1,NULL,40)`,
+      [seasonId, weekendId, propertyId, roomTypeId, ratePlanId],
     );
   });
   afterAll(async () => {
@@ -118,5 +177,107 @@ describe.skipIf(!url)("saved Channex pricing", () => {
       currency: "EUR",
       revision: 4,
     });
+  });
+  it("sends saved canonical dates to the provider with one markup and decimal rounding", async () => {
+    const plans = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      now: () => new Date("2026-12-27T16:30:00Z"),
+      bookingRevisionHandoff: async () => {},
+    });
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () => new Response(JSON.stringify({}), { status: 200 }));
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "local-test",
+      plans,
+      fetch: fetcher,
+    });
+    const job = {
+      jobId: randomUUID(),
+      propertyId,
+      correlationId: null,
+      attemptNumber: 1,
+      maxAttempts: 5,
+      input: {
+        commandId: randomUUID(),
+        idempotencyKey: randomUUID(),
+        operationType: "sync_ari" as const,
+      },
+    };
+    const sent = async () => {
+      fetcher.mockClear();
+      const result = await provider.execute(job);
+      if (!result.ok) throw new Error(JSON.stringify(result));
+      const call = fetcher.mock.calls.find(([url]) => String(url).endsWith("/restrictions"))!;
+      return JSON.parse(call[1]!.body as string).values as {
+        rate_plan_id: string;
+        date_from: string;
+        rate: string;
+      }[];
+    };
+    try {
+      const values = await sent();
+      const rate = (day: string, channel = "booking_com") =>
+        values.find((item) => item.date_from === day && item.rate_plan_id === ratePlanId + channel)
+          ?.rate;
+      expect(rate("2026-12-27")).toBeUndefined(); // UTC date is yesterday at the property.
+      expect([rate("2026-12-28"), rate("2027-01-09"), rate("2026-12-30")]).toEqual([
+        "110.00",
+        "154.00",
+        "198.00",
+      ]);
+      expect([
+        rate("2026-12-28", "direct"),
+        rate("2027-01-09", "direct"),
+        rate("2026-12-30", "direct"),
+      ]).toEqual(["100.00", "140.00", "180.00"]);
+      expect(rate("2026-12-31")).toBe("88.06");
+      expect(rate("2027-01-01")).toBe("198.00");
+      expect(rate("2027-01-02")).toBe("242.00");
+      const current = (await prices.get(scope))!;
+      await prices.put(context, {
+        ...scope,
+        commandId: randomUUID(),
+        expectedRevision: current.revision,
+        currency: "EUR",
+        amountDecimal: null,
+      });
+      await pool.query(
+        `UPDATE pms.recurring_pricing_source_room_values SET seasonal_nightly_amount=190 WHERE source_id=$1`,
+        [seasonId],
+      );
+      let updated = await sent();
+      expect(
+        updated.find(
+          (item) => item.date_from === scope.stayDate && item.rate_plan_id.endsWith("booking_com"),
+        )?.rate,
+      ).toBe("209.00");
+      await pool.query(
+        `UPDATE pms.recurring_pricing_sources SET configured_state='disabled',source_revision=2 WHERE id=$1`,
+        [seasonId],
+      );
+      updated = await sent();
+      expect(
+        updated.find(
+          (item) => item.date_from === scope.stayDate && item.rate_plan_id.endsWith("booking_com"),
+        )?.rate,
+      ).toBe("110.00");
+      expect(
+        updated.find(
+          (item) => item.date_from === "2027-01-09" && item.rate_plan_id.endsWith("booking_com"),
+        )?.rate,
+      ).toBe("154.00");
+      await pool.query(`UPDATE pms.room_types SET room_facts_revision=2 WHERE id=$1`, [roomTypeId]);
+      fetcher.mockClear();
+      expect(await provider.execute(job)).toMatchObject({
+        ok: false,
+        code: "invalid_state",
+        message: expect.stringMatching(/stale/),
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      await plans.close();
+    }
   });
 });
