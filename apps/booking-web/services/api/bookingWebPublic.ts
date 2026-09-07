@@ -342,7 +342,15 @@ export function toLegacyRooms(
   const legacyRooms = Array.from(grouped.entries()).flatMap(([roomTypeId, roomOffers]) => {
     const firstOffer = roomOffers[0];
     if (!firstOffer) return [];
-    const flexible = roomOffers.find((offer) => offer.refundable) || firstOffer;
+    const flexible =
+      roomOffers.find(
+        (offer) =>
+          offer.refundable &&
+          offer.ratePlanId &&
+          offer.offerId === `${roomTypeId}:onb15-flex-${offer.ratePlanId}`,
+      ) ||
+      roomOffers.find((offer) => offer.refundable) ||
+      firstOffer;
     const nonRefundable = roomOffers.find((offer) => !offer.refundable) || null;
     const displayRoom = displayRoomById.get(roomTypeId);
     const nights = Math.max(data.request.nights || 1, 1);

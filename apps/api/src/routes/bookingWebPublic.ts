@@ -3198,7 +3198,11 @@ export async function loadTargetCheckoutOffer(
           END
         ) >= $7::int
 
-     ORDER BY SUM(offer.base_price_amount), offer.public_offer_key
+     ORDER BY CASE
+       WHEN $9 IN ('', 'flexible') AND $16::text IS NULL AND $14::int = 0
+         AND offer.public_offer_key = offer.room_type_id::text || ':onb15-flex-' || offer.rate_plan_id::text
+       THEN 0 ELSE 1 END,
+       SUM(offer.base_price_amount), offer.public_offer_key
      LIMIT 1`,
     [
       input.propertyId,

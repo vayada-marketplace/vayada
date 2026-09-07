@@ -201,7 +201,7 @@ const addons = [
   },
 ];
 
-const publicOffers = {
+export const publicOffers = {
   contractVersion: "public-bookability.v1",
   generatedAt: "2026-06-06T11:00:00.000Z",
   publicVisibility: "public_safe",

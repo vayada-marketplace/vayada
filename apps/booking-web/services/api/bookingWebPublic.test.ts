@@ -5,6 +5,7 @@ import {
   toLegacyRooms,
   type BookingWebPublicHotelResponse,
   type BookingWebPublicOffersResponse,
+  type BookingWebPublicOffer,
 } from "./bookingWebPublic";
 
 function publicHotelResponse(
@@ -150,6 +151,44 @@ describe("Booking Web public hotel adapter", () => {
     expect(toLegacyRooms(response)[0]?.rateMealDescriptions?.flexible).toBe("Room only");
     response.quote.offers[0].amenities = [];
     expect(toLegacyRooms(response)[0]?.amenities).toEqual([]);
+
+    const original = response.quote.offers[0];
+    const legacy: BookingWebPublicOffer = { ...original, mealPlan: null };
+    const canonical: BookingWebPublicOffer = {
+      ...original,
+      offerId: "room-alpine:onb15-flex-rate-canonical",
+      ratePlanId: "rate-canonical",
+      totals: { ...original.totals, roomTotal: 480, grandTotal: 480 },
+    };
+    const nonrefundable: BookingWebPublicOffer = {
+      ...legacy,
+      offerId: "room-alpine:nrf",
+      refundable: false,
+      totals: { ...original.totals, roomTotal: 300, grandTotal: 300 },
+    };
+    for (const mealPlan of ["breakfast", "room_only"]) {
+      canonical.mealPlan = mealPlan;
+      for (const offers of [
+        [legacy, canonical, nonrefundable],
+        [canonical, nonrefundable, legacy],
+      ]) {
+        expect(toLegacyRooms({ ...response, quote: { offers } })[0]).toMatchObject({
+          baseRate: 240,
+          nonRefundableRate: 150,
+          rateMealDescriptions: {
+            flexible: mealPlan === "breakfast" ? "Breakfast included" : "Room only",
+            nonrefundable: null,
+          },
+        });
+      }
+    }
+    expect(
+      toLegacyRooms({ ...response, quote: { offers: [legacy, nonrefundable] } })[0],
+    ).toMatchObject({
+      baseRate: 200,
+      nonRefundableRate: 150,
+      rateMealDescriptions: { flexible: null, nonrefundable: null },
+    });
   });
 
   it("maps public contacts and uses only public city/region/country for the address", () => {
