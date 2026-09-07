@@ -30,8 +30,19 @@ VAY-1528 retains 0166/0167. A fresh PostgreSQL 17 database applied all 167
 available migrations (0001–0166 and 0168); all 53 focused database tests passed.
 The full workspace build and a final Booking Web build passed. Integration
 preserves authenticated editing and adds canonical breakfast/room-only text to
-every selection line; all three card tests passed. Browser review and final
-workspace typecheck are tracked separately from these completed checks.
+every selection line; all three card tests passed. Final workspace typecheck and Booking Web lint also passed. Independent browser
+review rendered the actual component in a temporary harness with mocked currency:
+1280px and 390px widths showed both per-line meal labels, the EUR600 total, no
+horizontal overflow and selection of all three rooms. This was component browser
+coverage, not a new end-to-end deployed smoke.
+
+The final pending adoption migration is 0170: subsequently merged pricing and
+ARI migrations own 0168/0169. An inventory of all other open PR files found no
+pending migration claims before this allocation; the coordinator was notified.
+Only the filename changed (100% identical SQL). A fresh database applied the
+exact migration set from main `393bf7194` plus our 0170 (0001–0170), and the same
+53 focused tests passed against it. PR #1685's fresh CI verifies integration
+with current main; the remaining application stack stays gated until released.
 
 ## Evidence
 
