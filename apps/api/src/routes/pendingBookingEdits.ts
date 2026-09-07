@@ -20,6 +20,7 @@ import {
   assertTargetCheckoutConfigMatchesQuote,
   createHttpError,
   createTargetCheckoutQuote,
+  canonicalTargetCheckoutRateType,
   createTargetGuestBooking,
   enqueuePmsReservationHandoff,
   issueTargetBookingConfirmationToken,
@@ -142,6 +143,12 @@ export async function pendingBookingEdit(
         bookingId: booking.guestBookingId,
         revision: booking.editRevision,
         availabilityCredit: credit,
+        exactPublicOfferKey:
+          input["roomTypeId"] === selected["roomTypeId"] &&
+          canonicalTargetCheckoutRateType(stringValue(input["rateType"])) ===
+            canonicalTargetCheckoutRateType(stringValue(selected["rateType"]))
+            ? (stringValue(selected["publicOfferKey"]) ?? undefined)
+            : undefined,
       };
       const quote =
         input["roomSelection"] !== undefined

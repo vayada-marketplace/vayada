@@ -45,6 +45,13 @@ transaction. Failed availability checks roll back the entire replacement.
 Preserve the original host response deadline; editing must not extend the
 hotel's review window or turn a request into an instant booking.
 
+If the sole projected setup failure is `sellable_availability`, a verified
+reservation credit may satisfy that readiness check for an existing edit.
+Every other setup, publication, freshness, policy, and inventory check remains
+required. Prepare/save revalidate the live receipt; replacement inventory may
+use only the original receipt released by that save transaction. Unchanged room
+and rate selections retain their exact public offer identity.
+
 Save the quote association, stay, guest counts, room count, totals, selected
 offer, guest requests, payment configuration, and public summary together.
 Reconcile promo redemption under its existing lock, without counting the same

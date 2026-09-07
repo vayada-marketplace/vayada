@@ -2707,6 +2707,7 @@ export async function createTargetCheckoutQuote(
     bookingId: string;
     revision: number;
     availabilityCredit?: { checkIn: string; checkOut: string; roomCount: number };
+    exactPublicOfferKey?: string;
   },
   mixed?: Awaited<ReturnType<typeof quoteTargetRoomSelection>>,
 ): Promise<TargetCheckoutQuoteSnapshot> {
@@ -2756,6 +2757,7 @@ export async function createTargetCheckoutQuote(
         rateType,
         requestedAt,
         availabilityCredit: edit?.availabilityCredit,
+        exactPublicOfferKey: edit?.exactPublicOfferKey,
       });
   const addonRequest = parseTargetCheckoutAddonRequest(request);
   const addonPurchases = await resolveTargetCheckoutAddonPurchases(pool, {
@@ -3078,6 +3080,8 @@ export async function loadTargetCheckoutOffer(
       checkOut: string;
       roomCount: number;
     };
+    /** Server-verified receipt released for this replacement; does not add inventory. */
+    releasedSetupCredit?: boolean;
   },
 ): Promise<TargetCheckoutQuoteOfferRow> {
   const result = await pool.query<TargetCheckoutQuoteOfferRow>(
@@ -3120,7 +3124,10 @@ export async function loadTargetCheckoutOffer(
        AND profile.public_visibility = 'public_safe'
        AND profile.profile_status = 'public'
        AND profile.freshness_status = 'fresh'
-       AND profile.public_setup_completeness ->> 'status' = 'ready'
+       AND (profile.public_setup_completeness ->> 'status' = 'ready'
+         OR (($14::int > 0 OR $17::boolean)
+           AND profile.public_setup_completeness ->> 'status' = 'incomplete'
+           AND profile.public_setup_completeness -> 'missing' = '["sellable_availability"]'::jsonb))
        AND (profile.expires_at IS NULL OR profile.expires_at > $10::timestamptz)
        AND offer.public_visibility = 'public_safe'
        AND offer.stay_date >= $2::date
@@ -3205,6 +3212,7 @@ export async function loadTargetCheckoutOffer(
       input.availabilityCredit?.roomCount ?? 0,
       input.maximumRoomGuests ?? null,
       input.exactPublicOfferKey ?? null,
+      input.releasedSetupCredit ?? false,
     ],
   );
   const offer = result.rows[0];
@@ -3307,7 +3315,17 @@ export async function loadTargetCheckoutQuoteSnapshot(
            AND profile.public_visibility = 'public_safe'
            AND profile.profile_status = 'public'
            AND profile.freshness_status = 'fresh'
-           AND profile.public_setup_completeness ->> 'status' = 'ready'
+           AND (profile.public_setup_completeness ->> 'status' = 'ready'
+             OR (profile.public_setup_completeness ->> 'status' = 'incomplete'
+               AND profile.public_setup_completeness -> 'missing' = '["sellable_availability"]'::jsonb
+               AND EXISTS (
+                 SELECT 1 FROM pms.pending_booking_edit_receipts credit
+                 WHERE credit.property_id = booking.quote_sessions.property_id
+                   AND credit.guest_booking_id::text = booking.quote_sessions.selected_offer_snapshot ->> 'editBookingId'
+                   AND credit.room_type_id::text = booking.quote_sessions.selected_offer_snapshot ->> 'roomTypeId'
+                   AND credit.public_offer_key = booking.quote_sessions.selected_offer_snapshot ->> 'publicOfferKey'
+                   AND credit.room_count > 0
+               )))
            AND (profile.expires_at IS NULL OR profile.expires_at > $3::timestamptz)
            AND profile.default_currency = booking.quote_sessions.currency
            AND profile.capabilities -> 'paymentMethods' ?
@@ -3595,6 +3613,7 @@ export async function createTargetGuestBooking(
           property,
           quote,
           context.occurredAt,
+          existing ? inventoryReservationReceiptFromBookingMetadata(existing.bookingMetadata, property.propertyId) ?? undefined : undefined,
         )
       : await inventoryReservationPort.reserve({
           transaction: pool,
@@ -3607,6 +3626,9 @@ export async function createTargetGuestBooking(
           roomCount: quote.roomCount,
           currency: quote.currency,
           occurredAt: context.occurredAt,
+          replacingReservation: existing
+            ? inventoryReservationReceiptFromBookingMetadata(existing.bookingMetadata, property.propertyId) ?? undefined
+            : undefined,
         });
   if (!inventoryReservation) {
     throw createHttpError(409, "Checkout quote inventory is no longer available. Please refresh.");
@@ -7105,7 +7127,7 @@ function assertTargetSameDayBookingOpen(
   }
 }
 
-function canonicalTargetCheckoutRateType(value: string | null | undefined): string {
+export function canonicalTargetCheckoutRateType(value: string | null | undefined): string {
   const normalized = (value ?? "flexible").trim().toLowerCase();
   if (
     normalized === "nonrefundable" ||

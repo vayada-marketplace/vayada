@@ -1132,6 +1132,31 @@ describe.skipIf(!url)("mixed room inventory transactions", () => {
     expect(second.booking.roomSelection).toEqual(selection);
     expect(second.booking.hostResponseDeadline).toBe(first.booking.hostResponseDeadline);
     expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query(
+      `UPDATE distribution.public_hotel_bookability_profiles SET public_setup_completeness=
+        '{"status":"incomplete","missing":["sellable_availability"]}' WHERE property_id=$1`,
+      [propertyId],
+    );
+    const retained = await edit("details", {});
+    const retainedInput = { ...retained.input, revision: retained.revision };
+    const retainedQuote = await edit("quote", retainedInput);
+    const retainedAttempt = await edit("prepare", {
+      ...retainedInput,
+      quoteId: retainedQuote.quoteId,
+      expectedTotalAmount: retainedQuote.totalAmount,
+    });
+    const retainedSave = await edit("save", {
+      revision: retained.revision,
+      attemptId: retainedAttempt.attemptId,
+    });
+    expect(retainedSave.booking.roomSelection).toEqual(selection);
+    expect(retainedSave.booking.bookingReference).toBe(original.booking.publicReference);
+    expect(retainedSave.booking.hostResponseDeadline).toBe(first.booking.hostResponseDeadline);
+    expect(await inventory()).toEqual([0, 0, 1, 1]);
+    await pool.query(
+      `UPDATE distribution.public_hotel_bookability_profiles SET public_setup_completeness='{"status":"ready"}' WHERE property_id=$1`,
+      [propertyId],
+    );
     const final = await loadTargetBooking(
       pool,
       propertyId,
