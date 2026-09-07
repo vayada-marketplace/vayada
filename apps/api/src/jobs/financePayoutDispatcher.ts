@@ -7,7 +7,6 @@ import type {
 import pg from "pg";
 
 export const FINANCE_PROPERTY_PAYOUT_DISPATCH_QUEUE = "finance-property-payout-dispatch";
-export const FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE = "finance-affiliate-payout-dispatch";
 export const DEFAULT_FINANCE_PROPERTY_PAYOUT_DISPATCH_LIMIT = 100;
 
 export type FinancePropertyPayoutDispatchCandidate = {
@@ -31,26 +30,6 @@ export type FinancePropertyPayoutDispatchContext = {
   workerId: string;
   correlationId: string;
 };
-
-export type FinanceAffiliatePayoutDispatchCandidate = {
-  payoutId: string;
-  affiliateId: string;
-  organizationId: string;
-  amount: string;
-  currency: string;
-  provider: FinanceAffiliatePayoutProvider;
-  providerAccountId: string | null;
-  retryCount: number;
-  maxAttempts: number;
-  scheduledAt: string;
-  payoutSchedule: "manual" | "monthly" | "threshold";
-  affiliateResourceLinked: boolean;
-  legacySchedulerFrozen: boolean;
-  notificationAuditReady: boolean;
-  providerPayoutId: string | null;
-};
-
-export type FinanceAffiliatePayoutDispatchContext = FinancePropertyPayoutDispatchContext;
 
 export type FinancePayoutProviderSuccess = {
   ok: true;
@@ -106,14 +85,6 @@ export type FinancePayoutProviderAttemptRecord = {
 export type FinancePropertyPayoutDispatchMutationResult = {
   payoutId: string;
   propertyId: string;
-  status: "dispatched" | "retry_scheduled" | "failed";
-  providerPayoutId: string | null;
-};
-
-export type FinanceAffiliatePayoutDispatchMutationResult = {
-  payoutId: string;
-  affiliateId: string;
-  organizationId: string;
   status: "dispatched" | "retry_scheduled" | "failed";
   providerPayoutId: string | null;
 };
@@ -318,13 +289,6 @@ export function buildPropertyPayoutDispatchJobKey(input: {
   payoutId: string;
 }): string {
   return `finance.dispatch-property-payout:property:${input.propertyId}:payout:${input.payoutId}:v1`;
-}
-
-export function buildAffiliatePayoutDispatchJobKey(input: {
-  affiliateId: string;
-  payoutId: string;
-}): string {
-  return `finance.dispatch-affiliate-payout:affiliate:${input.affiliateId}:payout:${input.payoutId}:v1`;
 }
 
 async function providerPayoutResultFromDispatch(
@@ -609,137 +573,6 @@ async function markPropertyPayoutDispatchFailed(
   };
 }
 
-async function claimAffiliatePayoutDispatch(
-  db: Queryable,
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-  context: FinanceAffiliatePayoutDispatchContext,
-): Promise<boolean> {
-  const result = await db.query(
-    `UPDATE finance.payouts
-     SET payout_status = 'processing',
-         updated_at = $1::timestamptz,
-         payout_metadata = payout_metadata || $2::jsonb
-     WHERE id = $3::uuid
-       AND organization_id = $4::uuid
-       AND owner_scope = 'organization'
-       AND provider_payout_id IS NULL
-       AND payout_status IN ('pending', 'scheduled', 'failed')
-     RETURNING id`,
-    [
-      context.now.toISOString(),
-      JSON.stringify({
-        affiliateDispatchClaimedAt: context.now.toISOString(),
-        affiliateDispatchWorkerId: context.workerId,
-        affiliateDispatchJobKey: buildAffiliatePayoutDispatchJobKey(candidate),
-      }),
-      candidate.payoutId,
-      candidate.organizationId,
-    ],
-  );
-  return (result.rowCount ?? 0) > 0;
-}
-
-async function markAffiliatePayoutDispatched(
-  db: Queryable,
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-  result: FinancePayoutProviderSuccess,
-  attempt: FinancePayoutProviderAttemptRecord,
-  context: FinanceAffiliatePayoutDispatchContext,
-): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
-  const update = await db.query(
-    `UPDATE finance.payouts
-     SET payout_status = $1,
-         provider_payout_id = $2,
-         retry_count = GREATEST(retry_count, $3),
-         updated_at = $4::timestamptz,
-         payout_metadata = payout_metadata || $5::jsonb
-     WHERE id = $6::uuid
-       AND organization_id = $7::uuid
-       AND owner_scope = 'organization'
-       AND provider_payout_id IS NULL`,
-    [
-      result.status,
-      result.providerPayoutId,
-      attempt.attemptNumber,
-      context.now.toISOString(),
-      JSON.stringify({
-        lastAffiliateDispatchAttemptAt: attempt.recordedAt,
-        lastAffiliateDispatchWorkerId: context.workerId,
-        providerRequestId: result.providerRequestId,
-        notificationAuditRecordedAt: context.now.toISOString(),
-      }),
-      candidate.payoutId,
-      candidate.organizationId,
-    ],
-  );
-  assertSinglePayoutMutation(
-    update.rowCount,
-    "mark affiliate payout dispatched",
-    candidate.payoutId,
-  );
-  await recordAffiliatePayoutNotificationAudit(db, candidate, result, context);
-  await markAffiliateDispatchJobFinished(db, candidate, "succeeded", context);
-  return {
-    payoutId: candidate.payoutId,
-    affiliateId: candidate.affiliateId,
-    organizationId: candidate.organizationId,
-    status: "dispatched",
-    providerPayoutId: result.providerPayoutId,
-  };
-}
-
-async function markAffiliatePayoutDispatchFailed(
-  db: Queryable,
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-  result: FinancePayoutProviderFailure,
-  attempt: FinancePayoutProviderAttemptRecord,
-  context: FinanceAffiliatePayoutDispatchContext,
-): Promise<FinanceAffiliatePayoutDispatchMutationResult> {
-  const exhausted = !result.retryable || attempt.attemptNumber >= candidate.maxAttempts;
-  const update = await db.query(
-    `UPDATE finance.payouts
-     SET payout_status = $1,
-         retry_count = GREATEST(retry_count, $2),
-         failure_code = $3,
-         failed_at = CASE WHEN $1 = 'failed' THEN $4::timestamptz ELSE failed_at END,
-         updated_at = $4::timestamptz,
-         payout_metadata = payout_metadata || $5::jsonb
-     WHERE id = $6::uuid
-       AND organization_id = $7::uuid
-       AND owner_scope = 'organization'
-       AND provider_payout_id IS NULL`,
-    [
-      exhausted ? "failed" : "scheduled",
-      attempt.attemptNumber,
-      result.errorCategory,
-      context.now.toISOString(),
-      JSON.stringify({
-        lastAffiliateDispatchAttemptAt: attempt.recordedAt,
-        lastAffiliateDispatchWorkerId: context.workerId,
-        providerRequestId: result.providerRequestId ?? null,
-        retryable: result.retryable,
-        rollbackRule:
-          "No affiliate provider payout id was recorded; legacy may only be re-enabled for the next approved monthly window after reconciliation confirms no successful target transfer.",
-      }),
-      candidate.payoutId,
-      candidate.organizationId,
-    ],
-  );
-  assertSinglePayoutMutation(
-    update.rowCount,
-    "mark affiliate payout dispatch failed",
-    candidate.payoutId,
-  );
-  await markAffiliateDispatchJobFinished(db, candidate, exhausted ? "failed" : "pending", context);
-  return {
-    payoutId: candidate.payoutId,
-    affiliateId: candidate.affiliateId,
-    organizationId: candidate.organizationId,
-    status: exhausted ? "failed" : "retry_scheduled",
-    providerPayoutId: null,
-  };
-}
-
 async function markDispatchJobFinished(
   db: Queryable,
   candidate: FinancePropertyPayoutDispatchCandidate,
@@ -769,35 +602,6 @@ async function markDispatchJobFinished(
   );
 }
 
-async function markAffiliateDispatchJobFinished(
-  db: Queryable,
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-  status: "succeeded" | "failed" | "pending",
-  context: FinanceAffiliatePayoutDispatchContext,
-): Promise<void> {
-  const update = await db.query(
-    `UPDATE platform.jobs
-     SET status = $1,
-         attempts_count = attempts_count + 1,
-         run_after = CASE WHEN $1 = 'pending' THEN $2::timestamptz + interval '15 minutes' ELSE run_after END,
-         finished_at = CASE WHEN $1 IN ('succeeded', 'failed') THEN $2::timestamptz ELSE NULL END,
-         updated_at = $2::timestamptz
-     WHERE queue_name = $3
-       AND job_key = $4`,
-    [
-      status,
-      context.now.toISOString(),
-      FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE,
-      buildAffiliatePayoutDispatchJobKey(candidate),
-    ],
-  );
-  assertSinglePayoutMutation(
-    update.rowCount,
-    "mark affiliate payout dispatch job",
-    candidate.payoutId,
-  );
-}
-
 function assertSinglePayoutMutation(
   rowCount: number | null | undefined,
   action: string,
@@ -806,79 +610,6 @@ function assertSinglePayoutMutation(
   if (rowCount !== 1) {
     throw new Error(`${action} expected to update one row for payout ${payoutId}.`);
   }
-}
-
-async function recordAffiliatePayoutNotificationAudit(
-  db: Queryable,
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-  result: FinancePayoutProviderSuccess,
-  context: FinanceAffiliatePayoutDispatchContext,
-): Promise<void> {
-  await db.query(
-    `INSERT INTO platform.product_audit_events (
-       audit_key,
-       product,
-       action,
-       action_version,
-       occurred_at,
-       tenant_scope,
-       organization_id,
-       property_id,
-       actor_type,
-       actor_user_id,
-       target_resource_product,
-       target_resource_type,
-       target_resource_id,
-       correlation_id,
-       causation_id,
-       redacted_payload,
-       private_payload,
-       audit_metadata,
-       retention_class,
-       privacy_scope
-     )
-     VALUES (
-       $1,
-       'finance',
-       'finance.affiliate_payout.notification_audited',
-       1,
-       $2::timestamptz,
-       'organization',
-       $3::uuid,
-       NULL,
-       'system',
-       NULL,
-       'finance',
-       'payout',
-       $4,
-       $5,
-       $6,
-       $7::jsonb,
-       '{}'::jsonb,
-       $8::jsonb,
-       'financial',
-       'confidential'
-     )
-     ON CONFLICT (product, audit_key) DO NOTHING`,
-    [
-      `finance.affiliate-payout.notification-audit.affiliate.${candidate.affiliateId}.payout.${candidate.payoutId}.v1`,
-      context.now.toISOString(),
-      candidate.organizationId,
-      candidate.payoutId,
-      context.correlationId,
-      buildAffiliatePayoutDispatchJobKey(candidate),
-      JSON.stringify({
-        affiliateId: candidate.affiliateId,
-        payoutId: candidate.payoutId,
-        provider: candidate.provider,
-        providerPayoutId: result.providerPayoutId,
-      }),
-      JSON.stringify({
-        notificationAuditReadyAt: context.now.toISOString(),
-        monthlyBatch: true,
-      }),
-    ],
-  );
 }
 
 function buildProviderAttempt(

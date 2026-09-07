@@ -197,3 +197,10 @@ The next slice removes the unused affiliate PostgreSQL store factory, candidate
 query and exclusive store/row types and normalizers. No application callers remain.
 Its private mutation helpers are removed separately; shared property SQL, platform
 payout read/mark-paid paths and stored evidence remain unchanged.
+
+The final dispatcher slice removes private affiliate claim/success/failure and
+notification-audit writers, their job-update helper and exclusive candidate/context/
+mutation types and job-key exports. Shared property dispatch and provider-attempt
+evidence encoding remain intact, including nullable historical affiliate metadata.
+Platform manual mark-paid still checks the historical affiliate queue directly;
+this cleanup neither deletes queued records nor releases in-flight payment guards.
