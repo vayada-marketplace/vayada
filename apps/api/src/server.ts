@@ -1,3 +1,5 @@
+import { createNoShowReportingStore } from "./domains/pmsNoShowReporting.js";
+import { runNoShowReport } from "./jobs/pmsNoShowReporting.js";
 import { withPmsHostDateCredit } from "./domains/pmsHostDateAmendment.js";
 import { createFinanceHostBookingPayments } from "./domains/financeHostBookingPayments.js";
 import { createBookingHostActions } from "./domains/bookingHostActions.js";
@@ -410,6 +412,12 @@ const pmsChannexManagementRepository = pmsOperationsRepository
 const channexCommandsMutating = Object.entries(config.channexManagement.capabilityModes).some(
   ([capability, mode]) => capability !== "iframe" && mode === "mutating",
 );
+const noShowReportPool = pmsOperationsRepository
+  ? new pg.Pool({ connectionString: targetDatabaseUrl, max: 3 })
+  : undefined;
+const noShowReportingEnabled =
+  config.channexManagement.capabilityModes.bookingSync === "mutating" &&
+  config.channexManagement.workerEnabled;
 const pmsChannexManagementCommandPort = channexCommandsMutating
   ? createPgPmsChannexManagementCommandPort({ connectionString: targetDatabaseUrl })
   : undefined;
@@ -1267,6 +1275,8 @@ const app = buildApp({
   pmsChannexManagement: pmsChannexManagementRepository
     ? {
         repository: pmsChannexManagementRepository,
+        noShowReports: noShowReportPool ? createNoShowReportingStore(noShowReportPool) : undefined,
+        noShowReportingEnabled,
         capabilityModes: config.channexManagement.capabilityModes,
         commandPort: pmsChannexManagementCommandPort,
         iframeSessionPort: pmsChannexIframeSessionPort,
@@ -1793,6 +1803,34 @@ app.addHook("onClose", async () => {
     channexManagementPlans?.close(),
     channexBookingRevisionStore?.close?.(),
   ]);
+});
+
+let activeNoShowRun: Promise<void> | undefined;
+const noShowTimer =
+  noShowReportPool && noShowReportingEnabled
+    ? setInterval(() => {
+        if (!config.backgroundWorkersEnabled || activeNoShowRun) return;
+        activeNoShowRun = runNoShowReport(
+          noShowReportPool,
+          {
+            apiBaseUrl: config.channexManagement.apiBaseUrl!,
+            apiKey: config.channexManagement.apiKey!,
+          },
+          `no-show:${process.pid}`,
+        )
+          .catch((error: unknown) =>
+            app.log.warn({ err: error }, "No-show reporting worker failed"),
+          )
+          .finally(() => {
+            activeNoShowRun = undefined;
+          });
+      }, 2_000)
+    : undefined;
+noShowTimer?.unref();
+app.addHook("onClose", async () => {
+  if (noShowTimer) clearInterval(noShowTimer);
+  await activeNoShowRun;
+  await noShowReportPool?.end();
 });
 
 let activeCalendarAutoOpenRun: Promise<void> | undefined;

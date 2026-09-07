@@ -1,4 +1,8 @@
 import {
+  NoShowReportingConflict,
+  type NoShowReportingStore,
+} from "../domains/pmsNoShowReporting.js";
+import {
   CHANNEX_MANAGEMENT_OPERATION_TYPES,
   type ChannexManagementCapabilityModes,
   type ChannexManagementOperationType,
@@ -12,6 +16,8 @@ import { enforceRoutePolicy } from "./policy.js";
 
 export type PmsChannexManagementRoutesOptions = {
   repository: PmsChannexManagementReadRepository;
+  noShowReports?: NoShowReportingStore;
+  noShowReportingEnabled?: boolean;
   capabilityModes: ChannexManagementCapabilityModes;
   commandPort?: PmsChannexManagementCommandPort;
   iframeSessionPort?: PmsChannexIframeSessionPort;
@@ -25,6 +31,57 @@ export async function registerPmsChannexManagementRoutes(
     await options.repository.close?.();
     await options.commandPort?.close?.();
     await options.iframeSessionPort?.close?.();
+  });
+
+  const reportPath = "/properties/:propertyId/reservations/:bookingId/no-show-report";
+  type ReportParams = { propertyId: string; bookingId: string };
+  app.get<{ Params: ReportParams }>(reportPath, async (request, reply) => {
+    const { propertyId, bookingId } = request.params;
+    enforcePmsChannexPolicy(request, propertyId, "pms.operations.read");
+    if (!options.noShowReports)
+      return reply.code(503).send({ message: "Reporting is unavailable." });
+    const result = await options.noShowReports.get(propertyId, bookingId);
+    if (!result) return reply.code(404).send({ message: "Reservation not found." });
+    return options.noShowReportingEnabled
+      ? result
+      : {
+          ...result,
+          eligible: false,
+          retryable: false,
+          reason: "Booking.com reporting is disabled in this environment. Use the extranet.",
+        };
+  });
+  app.post<{ Params: ReportParams; Body: unknown }>(reportPath, async (request, reply) => {
+    const { propertyId, bookingId } = request.params;
+    const context = enforcePmsChannexPolicy(request, propertyId, "pms.operations.manage");
+    if (!options.noShowReportingEnabled || !options.noShowReports)
+      return reply
+        .code(409)
+        .send({ message: "Booking.com reporting is disabled in this environment." });
+    const body = request.body as Record<string, unknown> | null;
+    if (
+      !body ||
+      typeof body.waivedFees !== "boolean" ||
+      typeof body.retry !== "boolean" ||
+      Object.keys(body).some((key) => !["waivedFees", "retry"].includes(key))
+    )
+      return reply.code(400).send({ message: "Choose whether to waive the no-show fee." });
+    try {
+      const result = await options.noShowReports.submit(
+        context,
+        propertyId,
+        bookingId,
+        body.waivedFees,
+        body.retry,
+      );
+      return result
+        ? reply.code(202).send(result)
+        : reply.code(404).send({ message: "Reservation not found." });
+    } catch (error) {
+      if (error instanceof NoShowReportingConflict)
+        return reply.code(409).send({ message: error.message });
+      throw error;
+    }
   });
 
   app.get<{ Params: { propertyId: string } }>(
