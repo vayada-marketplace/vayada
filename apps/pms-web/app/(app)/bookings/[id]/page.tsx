@@ -2006,7 +2006,6 @@ export default function BookingDetailPage({ params }: { params: Promise<{ id: st
       )}
 
       {(booking.status === "confirmed" ||
-        booking.status === "no_show" ||
         ["booking_com", "channex", "booking.com"].includes(booking.channel.toLowerCase())) && (
         <NoShowReporting
           key={booking.id}

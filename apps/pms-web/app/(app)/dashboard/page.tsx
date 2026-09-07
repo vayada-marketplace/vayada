@@ -832,7 +832,7 @@ function ArrivalQuickView({
                     href={`/bookings/${booking.id}`}
                     className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
                   >
-                    {t("dashboard.markNoShow")}
+                    {t("dashboard.reviewNoShow")}
                   </Link>
                 </>
               ) : (

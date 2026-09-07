@@ -46,7 +46,7 @@ function NotCheckedInPage({ booking }: { booking: Booking }) {
               href={`/bookings/${booking.id}`}
               className="flex h-11 items-center justify-center rounded-lg border border-red-200 px-5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
             >
-              {t("checkOut.markNoShow")}
+              {t("checkOut.reviewNoShow")}
             </Link>
           )}
           <Link

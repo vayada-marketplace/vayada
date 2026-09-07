@@ -51,6 +51,11 @@ export function NoShowReporting({
   }, [bookingId]);
   async function submit(retry = false) {
     if ((report || retry) && !state) return;
+    const waivedFees = retry ? current.waivedFees : fee === "waive";
+    if (retry && waivedFees === null) {
+      setError("The previous fee choice is unavailable. Refresh before retrying.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -59,20 +64,14 @@ export function NoShowReporting({
         setLocalRecorded(true);
         setState({ ...current, localNoShow: true });
       }
-      if (report || retry) {
+      if ((report || retry) && waivedFees !== null) {
         setState({
           ...current,
           localNoShow: true,
           status: "pending",
           reason: "Submission outcome is not yet known. Refresh before taking further action.",
         });
-        setState(
-          await bookingsService.reportNoShow(
-            bookingId,
-            retry ? current.waivedFees! : fee === "waive",
-            retry,
-          ),
-        );
+        setState(await bookingsService.reportNoShow(bookingId, waivedFees, retry));
       }
       try {
         setState(await bookingsService.getNoShowReport(bookingId));
@@ -198,7 +197,7 @@ export function NoShowReporting({
           </div>
         </div>
       )}
-      {state?.retryable && (
+      {state?.retryable && state.waivedFees !== null && (
         <button
           type="button"
           disabled={busy}
