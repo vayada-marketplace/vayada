@@ -175,3 +175,7 @@ VAY-1500 follow-up removes the obsolete commission writer integration suite and
 exclusive affiliate-scope/clock wiring. Retirement tests retain throwing read/write
 probes; shared Finance and dispatcher tests remain. The route now depends only on
 Booking Finance access and pool cleanup. Writer removal follows separately.
+
+The unused commission reader/writer and its command/view/result exports are now
+removed. The remaining repository only reads Booking Finance access and closes
+its pool; it cannot change commission rules, balances, audit or payment evidence.
