@@ -1,5 +1,6 @@
 import {
   applyBookingPriceMarkup,
+  roundBookingPriceDecimalToMinorUnits,
   createBookingNightlyRoomPriceResolver,
   evaluateSameDayBooking,
   propertyLocalClock,
@@ -91,6 +92,8 @@ type BindingRow = {
   externalPropertyId: string | null;
   claimExternalPropertyId: string | null;
   claimState: string | null;
+  connectionId?: string | null;
+  pricingStrategy?: string | null;
 };
 
 export type ChannexBookingRevisionHandoff = (input: {
@@ -126,7 +129,9 @@ async function basePlan(
   if (job.input.operationType === "enable") {
     if (!externalPropertyId && binding?.claimExternalPropertyId)
       throw new Error("A retained Channex binding claim requires audited repair");
-    return externalPropertyId ? { externalPropertyId, requests: [] } : enablePlan(pool, job);
+    return externalPropertyId
+      ? { externalPropertyId, requests: [] }
+      : enablePlan(pool, job, !binding?.connectionId);
   }
   if (job.input.operationType === "disable") {
     return externalPropertyId
@@ -139,8 +144,15 @@ async function basePlan(
   }
   if (!externalPropertyId) throw new Error("Channex connection is not enabled");
   if (job.input.operationType === "provision") {
-    return provisioningPlan(pool, job, externalPropertyId);
+    return provisioningPlan(
+      pool,
+      job,
+      externalPropertyId,
+      binding?.pricingStrategy === "shared_base",
+    );
   }
+  if (job.input.operationType === "update_markups" && binding?.pricingStrategy === "shared_base")
+    throw new Error("Manage channel price adjustments in Channex channel settings.");
   if (job.input.operationType === "sync_ari" || job.input.operationType === "update_markups") {
     const client = await pool.connect();
     try {
@@ -176,6 +188,7 @@ async function basePlan(
 async function enablePlan(
   pool: Pool,
   job: ChannexManagementJob,
+  isNewConnection: boolean,
 ): Promise<ChannexManagementActionPlan> {
   const result = await pool.query<PropertyRow>(
     `SELECT property.display_name AS title, COALESCE(room.currency, 'EUR') AS currency,
@@ -193,7 +206,16 @@ async function enablePlan(
   const property = result.rows[0];
   if (!property) throw new Error("Target property was not found");
   const providerPropertyTitle = providerTitle(property.title, job.propertyId);
+  const intent = isNewConnection
+    ? await pool.query<{ shared: boolean }>(
+        `SELECT job_metadata->>'sharedBaseCreationIntent' = 'true' AS shared
+     FROM platform.jobs WHERE id=$1::uuid AND property_id=$2::uuid`,
+        [job.jobId, job.propertyId],
+      )
+    : { rows: [] };
   return {
+    newConnectionPricingStrategy: isNewConnection ? "shared_base" : undefined,
+    recoverSharedBaseCreation: intent.rows[0]?.shared === true,
     requests: [
       channexRequests.findProperty(providerPropertyTitle),
       channexRequests.createProperty(
@@ -220,6 +242,7 @@ async function provisioningPlan(
   pool: Pool,
   job: ChannexManagementJob,
   externalPropertyId: string,
+  sharedBase: boolean,
 ): Promise<ChannexManagementActionPlan> {
   const [rooms, rates] = await Promise.all([
     pool.query<RoomRow>(
@@ -271,11 +294,13 @@ async function provisioningPlan(
     ),
   ]);
   const roomIds = new Set(rooms.rows.map(({ roomTypeId }) => roomTypeId));
-  const plannedRates = rates.rows.map((rate) => ({
-    ...rate,
-    providerTitle: providerRateTitle(rate),
-    mealType: canonicalMeal(rate),
-  }));
+  const plannedRates = rates.rows
+    .filter((rate) => !sharedBase || rate.channel === "direct")
+    .map((rate) => ({
+      ...rate,
+      providerTitle: providerRateTitle(rate),
+      mealType: canonicalMeal(rate),
+    }));
   return {
     externalPropertyId,
     meals: plannedRates.flatMap((rate) =>
@@ -344,7 +369,16 @@ async function provisioningPlan(
               rate_mode: "manual",
               currency: rate.currency,
               options: [
-                { occupancy: rate.defaultOccupancy, is_primary: true, rate: rate.baseRate },
+                {
+                  occupancy: rate.defaultOccupancy,
+                  is_primary: true,
+                  rate: sharedBase
+                    ? applyBookingPriceMarkup(
+                        roundBookingPriceDecimalToMinorUnits(String(rate.baseRate))!,
+                        0,
+                      )
+                    : rate.baseRate,
+                },
               ],
               ...(rate.mealType ? { meal_type: rate.mealType } : {}),
             },
@@ -550,7 +584,8 @@ function providerRateTitle(rate: RateRow) {
 
 async function connectionBinding(pool: Pool, propertyId: string): Promise<BindingRow | null> {
   const result = await pool.query<BindingRow>(
-    `SELECT connection.external_property_id AS "externalPropertyId",
+    `SELECT connection.id::text AS "connectionId", connection.connection_metadata->>'pricingStrategy' AS "pricingStrategy",
+       connection.external_property_id AS "externalPropertyId",
        claim.external_property_id AS "claimExternalPropertyId", claim.claim_state AS "claimState"
      FROM hotel_catalog.properties property
      LEFT JOIN pms.channel_connections connection

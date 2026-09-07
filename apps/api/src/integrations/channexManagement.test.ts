@@ -170,6 +170,80 @@ describe("Channex management provider", () => {
     });
   });
 
+  it.each([false, true])(
+    "sets shared pricing only when a new provider property is created (%s)",
+    async (adopted) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          response(200, {
+            data: adopted ? [{ id: "existing", attributes: { title: "Hotel" } }] : [],
+          }),
+        )
+        .mockResolvedValueOnce(response(200, { data: { id: "new" } }));
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        fetch: fetcher,
+        plans: {
+          plan: async () => ({
+            newConnectionPricingStrategy: "shared_base",
+            requests: [
+              channexRequests.findProperty("Hotel"),
+              channexRequests.createProperty({ title: "Hotel" }),
+            ],
+          }),
+        },
+      });
+      const result = await provider.execute(job("enable"));
+      expect(result).toMatchObject({
+        ok: true,
+        pricingStrategy: adopted ? undefined : "shared_base",
+      });
+      expect(fetcher).toHaveBeenCalledTimes(adopted ? 1 : 2);
+    },
+  );
+
+  it("recovers shared creation after its provider write outlives a failed checkpoint", async () => {
+    let intent = false;
+    let exists = false;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (_, options) => {
+      if (options?.method === "POST") {
+        exists = true;
+        return response(200, { data: { id: "new" } });
+      }
+      return response(200, { data: exists ? [{ id: "new", attributes: { title: "Hotel" } }] : [] });
+    });
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      fetch: fetcher,
+      plans: {
+        plan: async () => ({
+          newConnectionPricingStrategy: "shared_base",
+          recoverSharedBaseCreation: intent,
+          requests: [
+            channexRequests.findProperty("Hotel"),
+            channexRequests.createProperty({ title: "Hotel" }),
+          ],
+          checkpoint: async (progress) => {
+            if (progress.sharedBaseCreationIntent) intent = true;
+            if (progress.externalPropertyId && fetcher.mock.calls.length === 2)
+              throw new Error("Checkpoint failed");
+          },
+        }),
+      },
+    });
+    expect(await provider.execute(job("enable"))).toMatchObject({ ok: false });
+    expect(intent).toBe(true);
+    expect(await provider.execute(job("enable"))).toMatchObject({
+      ok: true,
+      pricingStrategy: "shared_base",
+      externalPropertyId: "new",
+    });
+    expect(fetcher.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(1);
+  });
+
   it("normalizes connected channels for the target read model", async () => {
     const provider = createChannexManagementProvider({
       apiBaseUrl: "https://staging.channex.io",

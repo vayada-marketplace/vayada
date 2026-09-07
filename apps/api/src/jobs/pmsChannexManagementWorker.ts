@@ -18,6 +18,8 @@ export type ChannexManagementJob = {
 
 export type ChannexManagementProviderSuccess = {
   ok: true;
+  pricingStrategy?: "shared_base";
+  sharedBaseCreationIntent?: boolean;
   alertRecoveryVerified?: boolean;
   providerRequestId?: string;
   externalPropertyId?: string;

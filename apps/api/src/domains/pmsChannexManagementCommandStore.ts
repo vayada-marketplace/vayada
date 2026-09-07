@@ -62,6 +62,21 @@ async function enqueue(
   });
   try {
     if (!transactionClient) await client.query("BEGIN");
+    if (input.operationType === "update_markups") {
+      const native = await client.query(
+        `SELECT id FROM pms.channel_connections WHERE property_id=$1::uuid AND provider='channex'
+         AND connection_metadata->>'pricingStrategy'='shared_base' FOR SHARE`,
+        [propertyId],
+      );
+      if (native.rows[0]) {
+        if (!transactionClient) await client.query("ROLLBACK");
+        return {
+          ok: false,
+          code: "native_markup_required",
+          message: "Manage channel price adjustments in channel settings.",
+        };
+      }
+    }
     if (requiresConnection(input.operationType) && !(await hasConnection(client, propertyId))) {
       if (!transactionClient) await client.query("ROLLBACK");
       return { ok: false, code: "connection_required", message: "Enable Channex first." };
