@@ -9,7 +9,6 @@ import pg from "pg";
 export const FINANCE_PROPERTY_PAYOUT_DISPATCH_QUEUE = "finance-property-payout-dispatch";
 export const FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE = "finance-affiliate-payout-dispatch";
 export const DEFAULT_FINANCE_PROPERTY_PAYOUT_DISPATCH_LIMIT = 100;
-export const DEFAULT_FINANCE_AFFILIATE_PAYOUT_DISPATCH_LIMIT = 100;
 
 export type FinancePropertyPayoutDispatchCandidate = {
   payoutId: string;
@@ -81,13 +80,6 @@ export type FinancePayoutProvider = {
   dispatchPropertyPayout(
     candidate: FinancePropertyPayoutDispatchCandidate,
     context: FinancePropertyPayoutDispatchContext,
-  ): Promise<FinancePayoutProviderResult>;
-};
-
-export type FinanceAffiliatePayoutProviderClient = {
-  dispatchAffiliatePayout(
-    candidate: FinanceAffiliatePayoutDispatchCandidate,
-    context: FinanceAffiliatePayoutDispatchContext,
   ): Promise<FinancePayoutProviderResult>;
 };
 
@@ -243,29 +235,6 @@ export type FinancePropertyPayoutDispatcherResult = {
   attempts: FinancePayoutProviderAttemptRecord[];
 };
 
-export type FinanceAffiliatePayoutDispatcherSkipReason =
-  | "affiliate_resource_not_linked"
-  | "non_monthly_schedule"
-  | "legacy_scheduler_not_frozen"
-  | "notification_audit_not_ready"
-  | "payout_already_dispatched"
-  | "dispatch_claim_conflict";
-
-export type FinanceAffiliatePayoutDispatcherSkipped = {
-  payoutId: string;
-  affiliateId: string;
-  reason: FinanceAffiliatePayoutDispatcherSkipReason;
-};
-
-export type FinanceAffiliatePayoutDispatcherResult = {
-  scanned: number;
-  dispatched: number;
-  retryScheduled: number;
-  failed: number;
-  skipped: FinanceAffiliatePayoutDispatcherSkipped[];
-  attempts: FinancePayoutProviderAttemptRecord[];
-};
-
 export async function runFinancePropertyPayoutDispatcher(
   store: FinancePropertyPayoutDispatcherStore,
   provider: FinancePayoutProvider,
@@ -327,86 +296,6 @@ export async function runFinancePropertyPayoutDispatcher(
     }
 
     const mutation = await store.markPropertyPayoutDispatchFailed(
-      candidate,
-      providerResult,
-      attempt,
-      context,
-    );
-    if (mutation.status === "retry_scheduled") retryScheduled += 1;
-    if (mutation.status === "failed") failed += 1;
-  }
-
-  return {
-    scanned: candidates.length,
-    dispatched,
-    retryScheduled,
-    failed,
-    skipped,
-    attempts,
-  };
-}
-
-export async function runFinanceAffiliatePayoutDispatcher(
-  store: FinanceAffiliatePayoutDispatcherStore,
-  provider: FinanceAffiliatePayoutProviderClient,
-  options: FinancePropertyPayoutDispatcherOptions = {},
-): Promise<FinanceAffiliatePayoutDispatcherResult> {
-  const now = options.now ?? new Date();
-  const context: FinanceAffiliatePayoutDispatchContext = {
-    now,
-    workerId: options.workerId ?? "finance-affiliate-payout-dispatcher",
-    correlationId: `finance.dispatch-affiliate-payout:${now.toISOString()}`,
-  };
-  const candidates = await store.findDueAffiliatePayoutDispatchCandidates(
-    now,
-    options.limit ?? DEFAULT_FINANCE_AFFILIATE_PAYOUT_DISPATCH_LIMIT,
-  );
-  const skipped: FinanceAffiliatePayoutDispatcherSkipped[] = [];
-  const attempts: FinancePayoutProviderAttemptRecord[] = [];
-  let dispatched = 0;
-  let retryScheduled = 0;
-  let failed = 0;
-
-  for (const candidate of candidates) {
-    const skipReason = affiliatePayoutDispatchBlocker(candidate);
-    if (skipReason) {
-      skipped.push({
-        payoutId: candidate.payoutId,
-        affiliateId: candidate.affiliateId,
-        reason: skipReason,
-      });
-      continue;
-    }
-
-    const claimed = await store.claimAffiliatePayoutDispatch(candidate, context);
-    if (!claimed) {
-      skipped.push({
-        payoutId: candidate.payoutId,
-        affiliateId: candidate.affiliateId,
-        reason: "dispatch_claim_conflict",
-      });
-      continue;
-    }
-
-    const providerResult = await providerPayoutResultFromDispatch(() =>
-      provider.dispatchAffiliatePayout(candidate, context),
-    );
-    const attempt = buildAffiliateProviderAttempt(candidate, providerResult, context);
-    attempts.push(attempt);
-    await store.recordProviderAttempt(attempt);
-
-    if (providerResult.ok) {
-      const mutation = await store.markAffiliatePayoutDispatched(
-        candidate,
-        providerResult,
-        attempt,
-        context,
-      );
-      if (mutation.status === "dispatched") dispatched += 1;
-      continue;
-    }
-
-    const mutation = await store.markAffiliatePayoutDispatchFailed(
       candidate,
       providerResult,
       attempt,
@@ -492,17 +381,6 @@ export function propertyPayoutDispatchBlocker(
   if (!candidate.reconciliationReady) return "reconciliation_not_ready";
   if (!candidate.legacySchedulerFrozen) return "legacy_scheduler_not_frozen";
   if (candidate.activeLegacyTransferWindow) return "active_legacy_transfer_window";
-  if (candidate.providerPayoutId) return "payout_already_dispatched";
-  return null;
-}
-
-export function affiliatePayoutDispatchBlocker(
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-): FinanceAffiliatePayoutDispatcherSkipReason | null {
-  if (!candidate.affiliateResourceLinked) return "affiliate_resource_not_linked";
-  if (candidate.payoutSchedule !== "monthly") return "non_monthly_schedule";
-  if (!candidate.legacySchedulerFrozen) return "legacy_scheduler_not_frozen";
-  if (!candidate.notificationAuditReady) return "notification_audit_not_ready";
   if (candidate.providerPayoutId) return "payout_already_dispatched";
   return null;
 }
@@ -1165,41 +1043,6 @@ function buildProviderAttempt(
     requestPayloadHash: sha256(
       stableJson({
         payoutId: candidate.payoutId,
-        amount: candidate.amount,
-        currency: candidate.currency,
-        provider: candidate.provider,
-        providerAccountId: candidate.providerAccountId,
-      }),
-    ),
-    status: result.ok ? "succeeded" : "failed",
-    providerPayoutId: result.ok ? result.providerPayoutId : null,
-    providerRequestId: result.providerRequestId ?? null,
-    errorCategory: result.ok ? null : result.errorCategory,
-    errorMessage: result.ok ? null : result.message,
-    retryable: result.ok ? false : result.retryable,
-    recordedAt: context.now.toISOString(),
-    workerId: context.workerId,
-  };
-}
-
-function buildAffiliateProviderAttempt(
-  candidate: FinanceAffiliatePayoutDispatchCandidate,
-  result: FinancePayoutProviderResult,
-  context: FinanceAffiliatePayoutDispatchContext,
-): FinancePayoutProviderAttemptRecord {
-  return {
-    payoutId: candidate.payoutId,
-    propertyId: null,
-    affiliateId: candidate.affiliateId,
-    organizationId: candidate.organizationId,
-    provider: candidate.provider,
-    attemptNumber: candidate.retryCount + 1,
-    idempotencyKey: buildAffiliatePayoutDispatchJobKey(candidate),
-    queueName: FINANCE_AFFILIATE_PAYOUT_DISPATCH_QUEUE,
-    requestPayloadHash: sha256(
-      stableJson({
-        payoutId: candidate.payoutId,
-        affiliateId: candidate.affiliateId,
         amount: candidate.amount,
         currency: candidate.currency,
         provider: candidate.provider,

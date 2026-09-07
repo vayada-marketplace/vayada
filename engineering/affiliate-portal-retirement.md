@@ -179,3 +179,16 @@ Booking Finance access and pool cleanup. Writer removal follows separately.
 The unused commission reader/writer and its command/view/result exports are now
 removed. The remaining repository only reads Booking Finance access and closes
 its pool; it cannot change commission rules, balances, audit or payment evidence.
+
+## VAY-1500 affiliate dispatch retirement
+
+The unused affiliate payout runner and its exclusive provider port, result types
+and unit-test fixtures are removed. A source search across apps, packages, scripts
+and workflows found no application caller; the removed tests were its only callers.
+This follows the user's authorization to clean up the customer-free TypeScript
+system. It does not establish the absence of external jobs or stored obligations.
+
+The PostgreSQL affiliate store remains for a separate cleanup slice. Shared property
+dispatch, provider attempts, historical queue keys, platform payout operations and
+manual mark-paid guards remain unchanged. No job is replayed, record deleted or
+provider ownership changed.
