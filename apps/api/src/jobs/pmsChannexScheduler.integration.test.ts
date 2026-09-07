@@ -1,3 +1,4 @@
+import { applyPmsChannexManagementProgress } from "./pmsChannexManagementTargetState.js";
 import { randomUUID } from "node:crypto";
 
 import pg from "pg";
@@ -444,6 +445,27 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       );
     }
     expect((await readSnapshot()).sync.ari).toMatchObject({ status: "ok", lastErrorCode: null });
+    for (let refresh = 0; refresh < 2; refresh++) {
+      await applyPmsChannexManagementProgress(
+        admin,
+        forceResyncJob,
+        {
+          ok: true,
+          channels: [
+            {
+              key: "expedia",
+              application: "Expedia",
+              title: null,
+              isActive: true,
+              externalChannelId: "new-channel",
+            },
+          ],
+        },
+        now,
+      );
+      expect((await readSnapshot()).sync.ari).toMatchObject({ status: "ok", lastErrorCode: null });
+    }
+
     await admin.query(
       "DELETE FROM pms.channel_rate_plan_mappings WHERE connection_id=$1::uuid AND channel='airbnb'",
       [connectionId],
@@ -456,6 +478,27 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
       status: "failed",
       lastErrorCode: "mapping_missing",
     });
+
+    await admin.query(
+      `UPDATE pms.channel_connections SET connection_metadata =
+        jsonb_set(connection_metadata, '{managedRateChannels}', '[]'::jsonb) WHERE id=$1::uuid`,
+      [connectionId],
+    );
+    await applyPmsChannexManagementProgress(
+      admin,
+      forceResyncJob,
+      {
+        ok: true,
+        channels: [{ key: "agoda", application: "Agoda", title: null, isActive: true }],
+      },
+      now,
+    );
+    expect((await readSnapshot()).sync.ari).toMatchObject({ status: "ok", lastErrorCode: null });
+    await admin.query(
+      `UPDATE pms.channel_connections SET connection_metadata =
+        jsonb_set(connection_metadata, '{managedRateChannels}', '["booking_com","airbnb"]'::jsonb) WHERE id=$1::uuid`,
+      [connectionId],
+    );
 
     const beforeReprice = (
       await admin.query<{

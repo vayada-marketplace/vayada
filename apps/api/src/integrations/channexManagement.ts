@@ -1,3 +1,4 @@
+import { readChannexChannels } from "./channexChannels.js";
 import {
   ChannexMealSyncError,
   reconcileChannexMeals,
@@ -194,6 +195,8 @@ export function createChannexManagementProvider(config: {
               "provider_unavailable",
               new Error("Channex returned no verification evidence."),
             );
+          if (response.status === 204 && request.capture?.kind === "channels")
+            throw new Error("Missing Channex channel listing");
           if (response.status !== 204) {
             const responseBody = response.status === 404 ? undefined : await response.json();
             if (
@@ -237,9 +240,26 @@ export function createChannexManagementProvider(config: {
               revisions = dataList(responseBody);
             }
             if (request.capture?.kind === "channels") {
-              channels = dataList(responseBody)
-                .map(channelFromProvider)
-                .filter((channel): channel is ChannexConnectedChannel => channel !== null);
+              channels = await readChannexChannels(
+                responseBody,
+                request.query!["filter[property_id]"]!,
+                async (page) => {
+                  await input?.onProgress?.();
+                  const response = await fetcher(
+                    requestUrl(apiBaseUrl, {
+                      ...request,
+                      query: { ...request.query, "pagination[page]": String(page) },
+                    }),
+                    {
+                      headers: { "user-api-key": apiKey },
+                      signal: AbortSignal.timeout(30_000),
+                    },
+                  );
+                  lastRequestId = response.headers.get("x-request-id") ?? lastRequestId;
+                  if (!response.ok) throw response;
+                  return response.json();
+                },
+              );
             }
             const externalId = capturesSingleId(request.capture) ? dataId(responseBody) : undefined;
             if (request.capture?.kind === "property") {
@@ -317,6 +337,7 @@ export function createChannexManagementProvider(config: {
             }),
           );
         } catch (error) {
+          if (error instanceof Response) return responseFailure(error, lastRequestId);
           return failure(isTimeout(error) ? "timeout" : "provider_unavailable", error);
         }
       }
@@ -577,29 +598,6 @@ function progress(input: {
   };
 }
 
-function channelFromProvider(value: unknown): ChannexConnectedChannel | null {
-  if (!value || typeof value !== "object") return null;
-  const item = value as Record<string, unknown>;
-  const attributes =
-    item.attributes && typeof item.attributes === "object"
-      ? (item.attributes as Record<string, unknown>)
-      : item;
-  if (typeof attributes.application !== "string") return null;
-  return {
-    key: canonicalChannel(attributes.application),
-    application: attributes.application,
-    title: typeof attributes.title === "string" ? attributes.title : null,
-    isActive: attributes.is_active === true,
-  };
-}
-
-function canonicalChannel(application: string) {
-  const key = application.toLowerCase().replaceAll(/[^a-z0-9]/g, "");
-  if (key.includes("booking")) return "booking_com";
-  if (key.includes("airbnb") || key.includes("abnb")) return "airbnb";
-  return key || "other";
-}
-
 function isTimeout(error: unknown): boolean {
   return error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name);
 }
@@ -765,7 +763,11 @@ export const channexRequests = {
   listChannels: (externalPropertyId: string): ChannexRequest => ({
     method: "GET",
     path: "/api/v1/channels",
-    query: { "filter[property_id]": externalPropertyId, "pagination[limit]": "100" },
+    query: {
+      "filter[property_id]": externalPropertyId,
+      "pagination[limit]": "100",
+      "pagination[page]": "1",
+    },
     capture: { kind: "channels" },
   }),
 };

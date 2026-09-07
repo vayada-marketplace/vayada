@@ -65,6 +65,8 @@ export type ChannexRatePlanMapping = {
 };
 
 export type ChannexConnectedChannel = {
+  externalChannelId?: string;
+  providerCode?: string;
   key: string;
   application: string;
   title: string | null;
