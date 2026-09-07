@@ -35,3 +35,22 @@ function record(value: unknown): Record<string, unknown> {
     ? (value as Record<string, unknown>)
     : {};
 }
+
+// Only purchased evidence: never look up today's rate plan for historical terms.
+export function bookedMealDescription(value: unknown): string | null {
+  const snapshot = record(value);
+  if (Array.isArray(snapshot["roomLines"])) {
+    return (
+      snapshot["roomLines"]
+        .map((line) => {
+          const offer = record(record(line)["offer"]);
+          const meal = bookedMealDescription(offer);
+          return meal ? String(record(offer["roomSummary"])["name"] ?? "Room") + ": " + meal : null;
+        })
+        .filter(Boolean)
+        .join("; ") || null
+    );
+  }
+  const meal = record(snapshot["rateSummary"])["mealPlan"];
+  return meal === "breakfast" ? "Breakfast included" : meal === "room_only" ? "Room only" : null;
+}

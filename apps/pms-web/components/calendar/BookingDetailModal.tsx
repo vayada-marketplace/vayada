@@ -1354,6 +1354,9 @@ export default function BookingDetailModal({
                 <p className="text-sm font-medium text-gray-900">
                   {booking.numberOfRooms > 1 && `${booking.numberOfRooms}× `}
                   {booking.roomName}
+                  {booking.mealDescription && (
+                    <span className="block text-sm text-gray-600">{booking.mealDescription}</span>
+                  )}
                 </p>
                 {/* VAY-403: list every assigned room, not just the first.
                       A multi-room booking with fewer assigned rooms than its

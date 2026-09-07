@@ -1721,6 +1721,7 @@ describe("Booking Web public bootstrap parity", () => {
                   currency: "EUR",
                   status: "active",
                   selectedOfferSnapshot: {
+                    rateSummary: { mealPlan: "breakfast" },
                     roomTypeId: "room_deluxe",
                     publicOfferKey: "room_deluxe:flexible",
                     paymentMethod: "pay_at_property",
@@ -2106,6 +2107,9 @@ describe("Booking Web public bootstrap parity", () => {
     await expect(
       automaticBooking.adapter.createBooking("hotel-alpenrose", request, context),
     ).resolves.toMatchObject({ bookingReference: "B-OPTIONAL" });
+    expect(
+      JSON.parse(String(automaticBooking.bookingWriteValues?.[18])).selectedOffer.rateSummary,
+    ).toEqual({ mealPlan: "breakfast" });
     expect(
       JSON.parse(String(automaticBooking.bookingWriteValues?.[18])).selectedOffer.promotion,
     ).toMatchObject({ name: "Early bird", discountAmount: 20 });

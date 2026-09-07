@@ -35,6 +35,7 @@ export interface BookingStay {
 }
 
 export interface Booking {
+  mealDescription?: string | null;
   id: string;
   bookingReference: string;
   roomTypeId: string;
@@ -315,6 +316,7 @@ type PmsOperationalReservation = {
   }>;
   checkin: { completedAt: string | null; pendingFlags: string[] };
   checkout: { completedAt: string | null; pendingFlags: string[] };
+  mealDescription?: string | null;
   bookedOffer?: { roomTypeId: string; roomName: string };
   roomCount?: number;
   pricing?: { totalAmount: PmsOperationsMoney; balanceAmount: PmsOperationsMoney };
@@ -1086,6 +1088,7 @@ function toBooking(
     bookingReference: reservation.bookingReference,
     roomTypeId,
     roomName: roomType?.name || reservation.bookedOffer?.roomName || "",
+    mealDescription: reservation.mealDescription,
     roomMaxOccupancy: maxOccupancy(roomType),
     totalRoomCapacity,
     guestFirstName,

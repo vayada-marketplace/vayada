@@ -605,6 +605,9 @@ export default function BookingConfirmationPageClient({
                     : "—"}
                 </span>
               </div>
+              {booking?.mealDescription && (
+                <p className="py-3 text-sm text-gray-700">{booking.mealDescription}</p>
+              )}
               {booking?.unitNames && booking.unitNames.length > 0 && (
                 <div className="flex justify-between py-3">
                   <span className="text-gray-600">{t("unit")}</span>

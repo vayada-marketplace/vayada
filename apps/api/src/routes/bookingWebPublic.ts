@@ -1,5 +1,8 @@
 import { lockPmsInventoryMutationScope } from "../domains/pmsInventoryMutationLock.js";
-import { projectBookingRoomSelection } from "../domains/bookingRoomSelectionProjection.js";
+import {
+  bookedMealDescription,
+  projectBookingRoomSelection,
+} from "../domains/bookingRoomSelectionProjection.js";
 import { reserveTargetMixedBooking } from "./bookingWebMixedReservation.js";
 import { pendingBookingEdit } from "./pendingBookingEdits.js";
 import { quoteTargetRoomSelection } from "./bookingWebMixedQuote.js";
@@ -4490,6 +4493,7 @@ export function serializeTargetBooking(booking: TargetBookingRow): Record<string
   const totalAmount = Number(decimalString(booking.totalAmount));
   return {
     ...projectBookingRoomSelection(selectedOffer),
+    mealDescription: bookedMealDescription(selectedOffer),
     canEditRequest: booking.canEditRequest ?? false,
     id: booking.guestBookingId,
     guestBookingId: booking.guestBookingId,

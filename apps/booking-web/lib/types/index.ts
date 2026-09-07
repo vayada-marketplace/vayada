@@ -72,6 +72,7 @@ export interface Hotel {
 }
 
 export interface RoomType {
+  rateMealDescriptions?: { flexible: string | null; nonrefundable: string | null };
   id: string;
   name: string;
   category?: string;
@@ -125,6 +126,7 @@ export interface SearchParams {
 }
 
 export interface Booking {
+  mealDescription?: string | null;
   canEditRequest?: boolean;
   id: string;
   bookingReference: string;
