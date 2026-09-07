@@ -1,3 +1,4 @@
+from app.config import settings
 from app.database import Database
 
 
@@ -132,7 +133,10 @@ class PayoutRepository:
     @staticmethod
     async def claim_for_processing(payout_id: str) -> dict | None:
         pool = await Database.get_pool()
-        async with pool.acquire() as conn, conn.transaction():
+        async with (
+            pool.acquire(timeout=settings.DATABASE_COMMAND_TIMEOUT) as conn,
+            conn.transaction(),
+        ):
             payout = await conn.fetchrow("SELECT booking_id FROM payouts WHERE id = $1", payout_id)
             if not payout:
                 return None
