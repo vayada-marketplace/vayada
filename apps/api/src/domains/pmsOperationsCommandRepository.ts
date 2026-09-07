@@ -1,3 +1,4 @@
+import { DEFAULT_FLEXIBLE_CANCELLATION_POLICY } from "./pmsDefaultCancellationPolicy.js";
 import { createHash } from "node:crypto";
 import pg, { type QueryResult, type QueryResultRow } from "pg";
 import {
@@ -2220,14 +2221,8 @@ async function insertRoomTypeRatePlans(
       name: "Flexible",
       rateType: "flexible",
       baseRate: command.baseRate,
-      cancellationPolicySnapshot: command.flexibleCancellationPolicy ?? {
-        kind: "flexible",
-        text: "Free until 7 days before",
-        flexibleCancellationType: "free",
-        partialRefundCancelWindowDays: 30,
-        partialRefundAmountPercent: 50,
-        partialRefundTiers: [],
-      },
+      cancellationPolicySnapshot:
+        command.flexibleCancellationPolicy ?? DEFAULT_FLEXIBLE_CANCELLATION_POLICY,
     }),
   ];
   if (command.nonRefundableRate) {

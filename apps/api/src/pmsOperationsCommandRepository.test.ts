@@ -1,3 +1,4 @@
+import { hostPolicyImpact } from "./domains/bookingHostPolicyImpact.js";
 import { createHash } from "node:crypto";
 import type { QueryResultRow } from "pg";
 import { describe, expect, it } from "vitest";
@@ -288,6 +289,46 @@ describe("PMS operations command repository", () => {
     expect(
       target.calls.filter((call) => call.text.includes("INSERT INTO pms.booking_checkout_charges")),
     ).toHaveLength(1);
+  });
+
+  it("persists a previewable default cancellation policy when room creation omits it", async () => {
+    const target = targetPrivateNotesPool();
+    const repository = createTargetPmsOperationsCommandRepository({
+      connectionString: "postgresql://pms-target",
+      pool: target.pool,
+      readRepository: unusedReadRepository,
+      now: target.now,
+    });
+    const command = roomTypeCreateCommand();
+    delete command.flexibleCancellationPolicy;
+    const result = await repository.createRoomType(command);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("room creation failed");
+    const policy = result.roomType.ratePlans[0]!.cancellationPolicySnapshot!;
+    expect(
+      hostPolicyImpact(
+        policy,
+        { rateType: "flexible" },
+        "2026-09-21",
+        "2026-09-22",
+        "Europe/Berlin",
+      ),
+    ).toMatchObject({
+      type: "flexible",
+      previousDeadline: "2026-09-14",
+      newDeadline: "2026-09-15",
+      afterDeadlinePenalty: "full_booking_amount",
+      noShowPenalty: "full_booking_amount",
+    });
+    const inserts = target.calls.filter((call) => call.text.includes("INSERT INTO pms.rate_plans"));
+    expect(
+      inserts.some((call) =>
+        call.values?.some(
+          (value) =>
+            typeof value === "string" && value.includes('"freeCancellationDeadlineDays":7'),
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("creates PMS room types with replay-safe inventory and distribution side effects", async () => {
