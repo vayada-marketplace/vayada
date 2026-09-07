@@ -126,6 +126,7 @@ function parseCommand(body: unknown) {
   if (
     typeof value.operationType !== "string" ||
     value.operationType === "update_markups" ||
+    value.operationType === "update_inventory_rules" ||
     !CHANNEX_MANAGEMENT_OPERATION_TYPES.includes(
       value.operationType as ChannexManagementOperationType,
     )
@@ -181,6 +182,7 @@ function isMutating(modes: ChannexManagementCapabilityModes, type: ChannexManage
     sync_bookings: "bookingSync",
     update_markups: "markups",
     install_messaging: "messaging",
+    update_inventory_rules: "ariSync",
   }[type] as keyof ChannexManagementCapabilityModes;
   return modes[capability] === "mutating";
 }
