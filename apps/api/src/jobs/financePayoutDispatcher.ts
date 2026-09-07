@@ -142,30 +142,6 @@ export type FinancePropertyPayoutDispatcherStore = {
   ): Promise<FinancePropertyPayoutDispatchMutationResult>;
 };
 
-export type FinanceAffiliatePayoutDispatcherStore = {
-  findDueAffiliatePayoutDispatchCandidates(
-    now: Date,
-    limit: number,
-  ): Promise<FinanceAffiliatePayoutDispatchCandidate[]>;
-  claimAffiliatePayoutDispatch(
-    candidate: FinanceAffiliatePayoutDispatchCandidate,
-    context: FinanceAffiliatePayoutDispatchContext,
-  ): Promise<boolean>;
-  recordProviderAttempt(attempt: FinancePayoutProviderAttemptRecord): Promise<void>;
-  markAffiliatePayoutDispatched(
-    candidate: FinanceAffiliatePayoutDispatchCandidate,
-    result: FinancePayoutProviderSuccess,
-    attempt: FinancePayoutProviderAttemptRecord,
-    context: FinanceAffiliatePayoutDispatchContext,
-  ): Promise<FinanceAffiliatePayoutDispatchMutationResult>;
-  markAffiliatePayoutDispatchFailed(
-    candidate: FinanceAffiliatePayoutDispatchCandidate,
-    result: FinancePayoutProviderFailure,
-    attempt: FinancePayoutProviderAttemptRecord,
-    context: FinanceAffiliatePayoutDispatchContext,
-  ): Promise<FinanceAffiliatePayoutDispatchMutationResult>;
-};
-
 export type FinancePropertyPayoutDispatcherOptions = {
   now?: Date;
   workerId?: string;
@@ -192,24 +168,6 @@ type PropertyPayoutCandidateRow = {
   reconciliationReady: boolean | null;
   legacySchedulerFrozen: boolean | null;
   activeLegacyTransferWindow: boolean | null;
-  providerPayoutId: string | null;
-};
-
-type AffiliatePayoutCandidateRow = {
-  payoutId: string;
-  affiliateId: string | null;
-  organizationId: string;
-  amount: string;
-  currency: string;
-  provider: FinanceAffiliatePayoutProvider | "bank" | "bank_account" | null;
-  providerAccountId: string | null;
-  retryCount: number;
-  maxAttempts: number | null;
-  scheduledAt: Date | string;
-  payoutSchedule: string | null;
-  affiliateResourceLinked: boolean | null;
-  legacySchedulerFrozen: boolean | null;
-  notificationAuditReady: boolean | null;
   providerPayoutId: string | null;
 };
 
@@ -345,36 +303,6 @@ export function createPgFinancePropertyPayoutDispatcherStore(
   };
 }
 
-export function createPgFinanceAffiliatePayoutDispatcherStore(
-  config: PgFinancePropertyPayoutDispatcherStoreConfig,
-): FinanceAffiliatePayoutDispatcherStore & { close(): Promise<void> } {
-  const pool = new pg.Pool({
-    connectionString: config.connectionString,
-    max: config.max,
-  });
-
-  return {
-    async findDueAffiliatePayoutDispatchCandidates(now, limit) {
-      return selectDueAffiliatePayoutDispatchCandidates(pool, now, limit);
-    },
-    async claimAffiliatePayoutDispatch(candidate, context) {
-      return claimAffiliatePayoutDispatch(pool, candidate, context);
-    },
-    async recordProviderAttempt(attempt) {
-      await insertProviderAttempt(pool, attempt);
-    },
-    async markAffiliatePayoutDispatched(candidate, result, attempt, context) {
-      return markAffiliatePayoutDispatched(pool, candidate, result, attempt, context);
-    },
-    async markAffiliatePayoutDispatchFailed(candidate, result, attempt, context) {
-      return markAffiliatePayoutDispatchFailed(pool, candidate, result, attempt, context);
-    },
-    async close() {
-      await pool.end();
-    },
-  };
-}
-
 export function propertyPayoutDispatchBlocker(
   candidate: FinancePropertyPayoutDispatchCandidate,
 ): FinancePropertyPayoutDispatcherSkipReason | null {
@@ -489,81 +417,6 @@ async function selectDuePropertyPayoutDispatchCandidates(
     reconciliationReady: Boolean(row.reconciliationReady),
     legacySchedulerFrozen: Boolean(row.legacySchedulerFrozen),
     activeLegacyTransferWindow: Boolean(row.activeLegacyTransferWindow),
-    providerPayoutId: row.providerPayoutId,
-  }));
-}
-
-async function selectDueAffiliatePayoutDispatchCandidates(
-  db: Queryable,
-  now: Date,
-  limit: number,
-): Promise<FinanceAffiliatePayoutDispatchCandidate[]> {
-  const result = await db.query<AffiliatePayoutCandidateRow>(
-    `SELECT
-       payout.id::text AS "payoutId",
-       COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId') AS "affiliateId",
-       payout.organization_id::text AS "organizationId",
-       payout.amount::text,
-       payout.currency,
-       COALESCE(account.provider, settings.payout_method, 'manual') AS provider,
-       account.provider_account_id AS "providerAccountId",
-       payout.retry_count AS "retryCount",
-       COALESCE((payout.payout_metadata ->> 'maxDispatchAttempts')::int, 3) AS "maxAttempts",
-       COALESCE(payout.scheduled_at, payout.created_at) AS "scheduledAt",
-       COALESCE(settings.schedule ->> 'type', 'monthly') AS "payoutSchedule",
-       link.id IS NOT NULL AS "affiliateResourceLinked",
-       (payout.payout_metadata ? 'legacyAffiliatePayoutSchedulerFrozenAt')
-         AS "legacySchedulerFrozen",
-       (payout.payout_metadata ? 'notificationAuditReadyAt')
-         AS "notificationAuditReady",
-       payout.provider_payout_id AS "providerPayoutId"
-     FROM finance.payouts payout
-     LEFT JOIN finance.payout_settings settings
-       ON settings.id = payout.payout_setting_id
-      AND settings.organization_id = payout.organization_id
-      AND settings.owner_scope = 'organization'
-     LEFT JOIN identity.organization_resource_links link
-       ON link.organization_id = payout.organization_id
-      AND link.product = 'affiliate'
-      AND link.resource_type = 'affiliate'
-      AND link.resource_id = COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId')
-      AND link.status = 'active'
-     JOIN platform.jobs dispatch_job
-       ON dispatch_job.queue_name = 'finance-affiliate-payout-dispatch'
-      AND dispatch_job.job_key = 'finance.dispatch-affiliate-payout:affiliate:' || COALESCE(payout.payout_metadata ->> 'affiliateId', settings.payout_preferences ->> 'affiliateId') || ':payout:' || payout.id::text || ':v1'
-      AND dispatch_job.status = 'pending'
-      AND dispatch_job.run_after <= $1::timestamptz
-     LEFT JOIN finance.payment_provider_accounts account
-       ON account.id = payout.organization_provider_account_id
-      AND account.organization_id = payout.organization_id
-      AND account.account_scope = 'organization'
-      AND account.status = 'active'
-      AND account.payouts_enabled = TRUE
-     WHERE payout.owner_scope = 'organization'
-       AND payout.payout_status IN ('pending', 'scheduled', 'failed')
-       AND payout.provider_payout_id IS NULL
-       AND COALESCE(payout.scheduled_at, payout.created_at) <= $1::timestamptz
-       AND payout.retry_count < COALESCE((payout.payout_metadata ->> 'maxDispatchAttempts')::int, 3)
-       AND COALESCE(settings.schedule ->> 'type', 'monthly') = 'monthly'
-     ORDER BY COALESCE(payout.scheduled_at, payout.created_at), payout.id
-     LIMIT $2`,
-    [now.toISOString(), limit],
-  );
-  return result.rows.map((row) => ({
-    payoutId: row.payoutId,
-    affiliateId: row.affiliateId ?? "unlinked",
-    organizationId: row.organizationId,
-    amount: row.amount,
-    currency: row.currency,
-    provider: affiliatePayoutProvider(row.provider),
-    providerAccountId: row.providerAccountId,
-    retryCount: row.retryCount,
-    maxAttempts: row.maxAttempts ?? 3,
-    scheduledAt: dateString(row.scheduledAt),
-    payoutSchedule: affiliatePayoutSchedule(row.payoutSchedule),
-    affiliateResourceLinked: Boolean(row.affiliateResourceLinked && row.affiliateId),
-    legacySchedulerFrozen: Boolean(row.legacySchedulerFrozen),
-    notificationAuditReady: Boolean(row.notificationAuditReady),
     providerPayoutId: row.providerPayoutId,
   }));
 }
@@ -1080,17 +933,4 @@ function sha256(value: string): string {
 
 function dateString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
-
-function affiliatePayoutProvider(value: unknown): FinanceAffiliatePayoutProvider {
-  if (value === "stripe" || value === "manual" || value === "bank_transfer") return value;
-  if (value === "bank" || value === "bank_account") return "bank_transfer";
-  return "manual";
-}
-
-function affiliatePayoutSchedule(
-  value: unknown,
-): FinanceAffiliatePayoutDispatchCandidate["payoutSchedule"] {
-  if (value === "manual" || value === "monthly" || value === "threshold") return value;
-  return "monthly";
 }

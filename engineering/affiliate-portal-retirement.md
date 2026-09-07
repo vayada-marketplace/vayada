@@ -192,3 +192,8 @@ The PostgreSQL affiliate store remains for a separate cleanup slice. Shared prop
 dispatch, provider attempts, historical queue keys, platform payout operations and
 manual mark-paid guards remain unchanged. No job is replayed, record deleted or
 provider ownership changed.
+
+The next slice removes the unused affiliate PostgreSQL store factory, candidate
+query and exclusive store/row types and normalizers. No application callers remain.
+Its private mutation helpers are removed separately; shared property SQL, platform
+payout read/mark-paid paths and stored evidence remain unchanged.
