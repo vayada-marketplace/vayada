@@ -420,3 +420,55 @@ it("refuses to verify empty successful responses or incident scope outside submi
   ).toBe(false);
   expect(coversAlertScope(plan, {})).toBe(false);
 });
+
+describe("recovery after canonical stay-rule synchronization", () => {
+  it.each([false, true])("verifies stay restrictions as well as price (%s)", async (matches) => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ meta: { warnings: [] } }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            rate: {
+              "2026-09-10": {
+                rate: "120.00",
+                min_stay_arrival: matches ? 3 : 1,
+                stop_sell: false,
+              },
+            },
+          },
+        }),
+      );
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      fetch: fetcher,
+      plans: {
+        plan: async () => ({
+          verifyRecovery: true,
+          requests: [
+            channexRequests.restrictions([
+              {
+                property_id: "property",
+                rate_plan_id: "rate",
+                date_from: "2026-09-10",
+                date_to: "2026-09-10",
+                rate: 120,
+                min_stay_arrival: 3,
+                stop_sell: false,
+              },
+            ]),
+          ],
+        }),
+      },
+    });
+    expect(await provider.execute(job("sync_ari"))).toMatchObject(
+      matches
+        ? { ok: true, alertRecoveryVerified: true }
+        : { ok: false, code: "provider_unavailable" },
+    );
+    expect(
+      new URL(String(fetcher.mock.calls[1]![0])).searchParams.get("filter[restrictions]"),
+    ).toBe("rate,min_stay_arrival,stop_sell");
+  });
+});
