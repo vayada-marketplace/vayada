@@ -25,6 +25,8 @@ export default function HandoffPage() {
         : null;
 
     if (token && expiresAt) {
+      localStorage.removeItem("selectedHotelId");
+      localStorage.removeItem("pmsSetupComplete");
       localStorage.setItem("access_token", token);
       localStorage.setItem("token_expires_at", expiresAt);
       if (handoffHotelId) {
@@ -60,9 +62,13 @@ export default function HandoffPage() {
       fetch(`${pmsApiUrl}/admin/setup-status`, {
         headers: setupStatusHeaders,
       })
-        .then((res) => (res.ok ? res.json() : null))
+        .then((res) => {
+          if (!res.ok) throw new Error("Unable to check PMS setup");
+          return res.json();
+        })
         .then(async (data) => {
-          const setupComplete = !!(data && data.setup_complete);
+          if (!data) throw new Error("Missing PMS setup status");
+          const setupComplete = !!data.setup_complete;
           localStorage.setItem("pmsSetupComplete", setupComplete ? "true" : "false");
 
           if (safeRedirect) {
@@ -102,8 +108,8 @@ export default function HandoffPage() {
           window.location.href = "/dashboard";
         })
         .catch(() => {
-          localStorage.setItem("pmsSetupComplete", "true");
-          window.location.href = safeRedirect || "/dashboard";
+          localStorage.removeItem("pmsSetupComplete");
+          window.location.href = "/login";
         });
     } else {
       window.location.href = "/login";
