@@ -213,6 +213,13 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
 
+      - name: Verify canonical setup payment readiness
+        run: >-
+          npm --workspace vayada-api run test --
+          src/sharedHotelSetupProfile.integration.test.ts -t 'evaluates payment readiness'
+        env:
+          TEST_DATABASE_URL: postgresql://vayada_test:vayada_test@localhost:5432/vayada_api_test
+
       - name: Verify Booking add-on economics migration
         run: >-
           npm --workspace @vayada/backend-migration run test --
