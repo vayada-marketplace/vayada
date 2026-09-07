@@ -1,9 +1,13 @@
 import {
+  applyBookingPriceMarkup,
+  createBookingNightlyRoomPriceResolver,
   evaluateSameDayBooking,
   propertyLocalClock,
   SAME_DAY_BOOKING_POLICY_DEFAULTS,
 } from "@vayada/domain-booking";
 import pg from "pg";
+import { loadPmsPricingSourceSnapshot } from "../domains/pmsPricingReadModel.js";
+import { loadPmsRecurringPricingBookingEvidence } from "../domains/pmsRecurringPricingReadModel.js";
 import {
   CHANNEX_ARI_ACTIVE_ROOM_SQL,
   CHANNEX_ARI_MAPPING_MISSING_SQL,
@@ -70,7 +74,11 @@ type AriRow = {
   available: number;
   externalRoomTypeId: string;
   externalRatePlanId: string;
-  rate: number;
+  roomTypeId: string;
+  ratePlanId: string;
+  roomFactsRevision: number;
+  planActive: boolean;
+  datePrice: { amountDecimal: string; currency: string } | null;
   channel: string;
   markupPercent: number;
 };
@@ -134,7 +142,18 @@ async function basePlan(
     return provisioningPlan(pool, job, externalPropertyId);
   }
   if (job.input.operationType === "sync_ari" || job.input.operationType === "update_markups") {
-    return ariPlan(pool, job, externalPropertyId, now);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      const result = await ariPlan(client, job, externalPropertyId, now);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   if (job.input.operationType === "sync_bookings") {
     return {
@@ -337,7 +356,7 @@ async function provisioningPlan(
 }
 
 async function ariPlan(
-  pool: Pool,
+  pool: Pick<Pool, "query">,
   job: ChannexManagementJob,
   externalPropertyId: string,
   now: Date,
@@ -366,10 +385,15 @@ async function ariPlan(
          THEN inventory.available_count ELSE 0 END AS available,
        room_mapping.external_room_type_id AS "externalRoomTypeId",
        rate_mapping.external_rate_plan_id AS "externalRatePlanId",
-       plan.base_rate_amount::float8 AS rate, rate_mapping.channel,
+       inventory.room_type_id::text AS "roomTypeId", plan.id::text AS "ratePlanId",
+       room.room_facts_revision::int AS "roomFactsRevision", plan.active AS "planActive",
+       CASE WHEN date_price.amount IS NOT NULL THEN jsonb_build_object(
+         'amountDecimal',date_price.amount::text,'currency',date_price.currency::text) END AS "datePrice",
+       rate_mapping.channel,
        rate_mapping.markup_percent::float8 AS "markupPercent",
        to_jsonb(restrictions) AS restrictions
      FROM pms.inventory_days inventory
+     JOIN pms.room_types room ON room.id=inventory.room_type_id AND room.property_id=inventory.property_id
      JOIN pms.channel_connections connection
        ON connection.property_id = inventory.property_id AND connection.provider = 'channex'
      LEFT JOIN pms.channel_room_type_mappings room_mapping
@@ -379,7 +403,10 @@ async function ariPlan(
        ON rate_mapping.connection_id = connection.id AND rate_mapping.room_type_id = inventory.room_type_id
        AND rate_mapping.status = 'active'
      LEFT JOIN pms.rate_plans plan ON plan.id = rate_mapping.rate_plan_id
-       AND plan.property_id = inventory.property_id AND plan.room_type_id = inventory.room_type_id
+       AND plan.property_id=inventory.property_id AND plan.room_type_id=inventory.room_type_id
+     LEFT JOIN pms.channel_date_prices date_price ON date_price.property_id=inventory.property_id
+       AND date_price.room_type_id=inventory.room_type_id AND date_price.rate_plan_id=plan.id
+       AND date_price.stay_date=inventory.stay_date
      LEFT JOIN LATERAL pms.effective_stay_restrictions(
        inventory.property_id, inventory.room_type_id, plan.id, inventory.stay_date
      ) restrictions ON TRUE
@@ -390,6 +417,38 @@ async function ariPlan(
     [job.propertyId, from],
   );
   if (result.rows.some((row) => row.mappingMissing)) throw new ChannexAriMappingMissingError();
+  const queryable = {
+    async query<T extends pg.QueryResultRow>(sql: string, values?: readonly unknown[]) {
+      const result = await pool.query<T>(sql, values ? [...values] : undefined);
+      return { ...result, rowCount: result.rows.length };
+    },
+  };
+  const resolvers = new Map<string, ReturnType<typeof createBookingNightlyRoomPriceResolver>>();
+  if (!job.input.restrictionsOnly) {
+    const pricing = await loadPmsPricingSourceSnapshot(queryable, job.propertyId, now);
+    const recurringPricing = await loadPmsRecurringPricingBookingEvidence(
+      queryable,
+      job.propertyId,
+      now,
+    );
+    if (!pricing || !recurringPricing)
+      throw new Error("Channex pricing unavailable: configure canonical PMS pricing first.");
+    for (const row of result.rows) {
+      if (!row.planActive)
+        throw new Error(`Channex rate plan ${row.ratePlanId} is inactive or missing.`);
+      if (!resolvers.has(row.ratePlanId))
+        resolvers.set(
+          row.ratePlanId,
+          createBookingNightlyRoomPriceResolver({
+            pricing,
+            recurringPricing,
+            roomTypeId: row.roomTypeId,
+            flexibleRatePlanId: row.ratePlanId,
+            roomFactsRevision: row.roomFactsRevision,
+          }),
+        );
+    }
+  }
   const overrides = new Map(
     (job.input.markups ?? []).map((item) => [item.channel, item.markupPercent]),
   );
@@ -439,8 +498,9 @@ async function ariPlan(
           ...(job.input.restrictionsOnly
             ? {}
             : {
-                rate: roundCurrency(
-                  row.rate * (1 + (overrides.get(row.channel) ?? row.markupPercent) / 100),
+                rate: applyBookingPriceMarkup(
+                  resolvers.get(row.ratePlanId)!(row.stayDate, row.datePrice ?? undefined),
+                  overrides.get(row.channel) ?? row.markupPercent,
                 ),
               }),
         })),
@@ -517,9 +577,6 @@ function compact(value: Record<string, unknown>) {
   );
 }
 
-function roundCurrency(value: number) {
-  return Math.round(value * 100) / 100;
-}
 function required(value: string) {
   if (!value.trim()) throw new Error("Channex connectionString must not be empty");
   return value;
