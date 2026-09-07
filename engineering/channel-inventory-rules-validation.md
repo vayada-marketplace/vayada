@@ -6,6 +6,8 @@ Local verification on 2026-09-07, based on main
 ## Passed
 
 - Root `npm run build` and `npm run typecheck`.
+- Standalone `npm run build:pms-web` with the shared Channex package's compiled
+  output removed first; PMS prebuild compiles that dependency successfully.
 - PMS `npm run lint:pms-web`: no errors; 60 pre-existing warnings.
 - 43 `@vayada/domain-pms-channex` tests, including invalid inputs and inclusive
   date/weekday overlap boundaries.
