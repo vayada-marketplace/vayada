@@ -2080,5 +2080,15 @@
   "hostActions.voidImpact": "Die Kartenautorisierung wird aufgehoben, bevor die Anfrage abgelehnt und die Verfügbarkeit freigegeben wird. Es wird keine Zahlung eingezogen.",
   "hostActions.nonRefundable": "Nicht erstattbarer Tarif",
   "hostActions.freeCancellationUntil": "Kostenlose Stornierung bis",
-  "hostActions.policyPenalty": "Nach der Frist oder bei Nichtanreise wird der volle Buchungsbetrag berechnet."
+  "hostActions.policyPenalty": "Nach der Frist oder bei Nichtanreise wird der volle Buchungsbetrag berechnet.",
+  "inbox.providerClose": "In Channex schließen",
+  "inbox.providerClosure": "Channex-Abschluss",
+  "inbox.providerNoReply": "Booking.com: Keine Antwort nötig",
+  "inbox.providerConfirmed": "Vom Anbieter bestätigt",
+  "inbox.providerPending": "Bestätigung des Anbieters ausstehend",
+  "inbox.providerRetrying": "Anbieteranfrage wird erneut versucht",
+  "inbox.providerUncertain": "Ergebnis unklar. Vor weiteren Aktionen in Channex prüfen.",
+  "inbox.providerFailed": "Nicht abgeschlossen. Aktualisieren, das Problem beheben und im Aktionsmenü erneut versuchen.",
+  "inbox.providerChanged": "Die Unterhaltung hat sich seit dieser Aktion geändert.",
+  "inbox.providerLocalOnly": "Erledigt und Wieder öffnen gelten nur für deinen Posteingang."
 }
