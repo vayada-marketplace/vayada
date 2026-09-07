@@ -7,7 +7,14 @@ import {
   pmsWebReservation as baseReservation,
 } from "../support/pmsWebMocks";
 
-const pmsWebReservation = { ...baseReservation, source: "booking_com" };
+const pmsWebReservation = {
+  ...baseReservation,
+  source: "channel",
+  assignments: baseReservation.assignments.map((assignment) => ({
+    ...assignment,
+    channel: "booking_com",
+  })),
+};
 
 for (const report of [false, true]) {
   test(`records a no-show with ${report ? "explicit reporting and fee choice" : "local-only choice"}`, async ({
@@ -192,6 +199,9 @@ test("does not deny reporting after submission succeeds but refreshed status fai
 test("blocks a retry when the persisted fee choice is unavailable", async ({ page }) => {
   await mockPmsWebAuthenticatedSession(page);
   await mockPmsWebTargetRoutes(page);
+  await page.route(`**/api/pms/properties/${P}/reservations/${B}`, (route) =>
+    route.fulfill({ json: { item: pmsWebReservation } }),
+  );
   await page.route(`**/api/pms/properties/${P}/reservations/${B}/no-show-report`, (route) =>
     route.fulfill({
       json: {
