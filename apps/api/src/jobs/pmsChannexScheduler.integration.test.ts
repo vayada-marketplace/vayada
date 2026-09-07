@@ -434,8 +434,13 @@ describe.skipIf(!TEST_DATABASE_URL)("PMS calendar auto-open candidate selection"
         jobId: randomUUID(),
         input: { ...forceResyncJob.input, operationType },
       };
-      for (let retry = 0; retry < 2; retry++)
-        await setup.succeed(admin, setupJob, { ok: true }, now);
+      const setupClient = await admin.connect();
+      try {
+        for (let retry = 0; retry < 2; retry++)
+          await setup.succeed(setupClient, setupJob, { ok: true }, now);
+      } finally {
+        setupClient.release();
+      }
       const next = operationType === "enable" ? "provision" : "sync_ari";
       expect(
         (
