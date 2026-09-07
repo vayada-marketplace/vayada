@@ -5,6 +5,13 @@ per-room cancellation decision: [mixed-room contract](mixed-room-booking-contrac
 The activation change is last in the dependency stack; merge/deployment and human
 acceptance remain separate gates.
 
+Release integration on 2026-09-07: main's meal-inclusion migration uses 0164,
+so the still-unmerged changed-bundle adoption migration was renamed to 0165
+without changing its SQL. A fresh isolated PostgreSQL 17 database applied
+0001–0165 through the official runner; 45 bundle, pending-edit and nightly-revenue
+database tests passed on that schema. The earlier local evidence below retains
+its original migration numbering.
+
 ## Evidence
 
 | Check                                                      | Result                                                                                    |
