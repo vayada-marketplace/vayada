@@ -2068,5 +2068,15 @@
   "hostActions.voidImpact": "The card authorization will be released before the request is rejected and inventory is released. No payment is captured.",
   "hostActions.nonRefundable": "Non-refundable rate",
   "hostActions.freeCancellationUntil": "Free cancellation through",
-  "hostActions.policyPenalty": "After the deadline or for a no-show: the full booking amount is charged."
+  "hostActions.policyPenalty": "After the deadline or for a no-show: the full booking amount is charged.",
+  "inbox.providerClose": "Close in Channex",
+  "inbox.providerClosure": "Channex closure",
+  "inbox.providerNoReply": "Booking.com no reply needed",
+  "inbox.providerConfirmed": "Confirmed by provider",
+  "inbox.providerPending": "Pending provider confirmation",
+  "inbox.providerRetrying": "Retrying provider request",
+  "inbox.providerUncertain": "Outcome uncertain. Check Channex before taking further action.",
+  "inbox.providerFailed": "Not completed. Refresh, resolve the issue, then retry from the actions menu.",
+  "inbox.providerChanged": "Conversation changed since this action.",
+  "inbox.providerLocalOnly": "Local Done and Reopen only affect your Inbox."
 }
