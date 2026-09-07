@@ -83,7 +83,8 @@ export async function configureSender(client, input, expectedHash) {
        JOIN identity.organizations o ON o.id = r.organization_id
          AND o.kind = 'hotel_group' AND o.status = 'active'
        JOIN identity.organization_memberships m ON m.organization_id = o.id
-         AND m.id = $2::uuid AND m.status = 'active' AND m.role_key = 'owner'
+         AND m.id = $2::uuid AND m.status = 'active'
+         AND m.role_key IN ('hotel_owner', 'owner')
          AND m.property_access_mode = 'all'
        JOIN identity.users u ON u.id = m.user_id AND u.status = 'active'
        WHERE p.id = $1::uuid AND p.lifecycle_status = 'active'

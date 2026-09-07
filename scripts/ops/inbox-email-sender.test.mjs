@@ -19,7 +19,7 @@ before(async () => {
 });
 after(() => client.end());
 
-async function fixture() {
+async function fixture(roleKey = "hotel_owner") {
   const [propertyId, membershipId, organization, actor] = Array.from({ length: 4 }, randomUUID);
   await client.query("INSERT INTO identity.users(id,email) VALUES ($1,'operator@example.test')", [
     actor,
@@ -33,8 +33,8 @@ async function fixture() {
     [propertyId],
   );
   await client.query(
-    "INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin) VALUES ($1,$2,$3,'owner','all','agency')",
-    [membershipId, organization, actor],
+    "INSERT INTO identity.organization_memberships(id,organization_id,user_id,role_key,property_access_mode,access_origin) VALUES ($1,$2,$3,$4,'all','agency')",
+    [membershipId, organization, actor, roleKey],
   );
   await client.query(
     "INSERT INTO identity.organization_resource_links(organization_id,product,resource_type,resource_id,relationship) VALUES ($1,'pms','pms_property',$2,'owner')",
@@ -106,6 +106,25 @@ test("rejects wrong database, property, membership, domain and header injection"
   ])
     await assert.rejects(preview({ ...input, ...patch }), error);
   assert.equal(await route(input), null);
+});
+
+test("accepts legacy owner and rejects a same-organization non-owner", async () => {
+  const legacyOwner = await fixture("owner");
+  assert.equal((await preview(legacyOwner)).status, "preview");
+  assert.equal(await route(legacyOwner), null);
+
+  const nonOwner = await fixture("hotel_manager");
+  await assert.rejects(preview(nonOwner), /active_property_owner_required/);
+  assert.equal(await route(nonOwner), null);
+  assert.equal(
+    (
+      await client.query(
+        "SELECT count(*)::int AS count FROM platform.product_audit_events WHERE property_id=$1",
+        [nonOwner.propertyId],
+      )
+    ).rows[0].count,
+    0,
+  );
 });
 
 test("revoked membership and changed preview fail closed", async () => {
