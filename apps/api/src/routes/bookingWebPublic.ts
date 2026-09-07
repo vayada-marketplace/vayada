@@ -1442,6 +1442,8 @@ type TargetChangeRequestRow = QueryResultRow & {
 };
 
 export type PgTargetBookingWebCheckoutAdapterConfig = {
+  /** Enable only after all mixed selection consumers have passed cutover validation. */
+  mixedRoomSelectionsEnabled?: boolean;
   bankTransfers?: BankTransferBookingOperations;
   connectionString: string;
   inventoryReservationPort: DirectBookingInventoryReservationPort;
