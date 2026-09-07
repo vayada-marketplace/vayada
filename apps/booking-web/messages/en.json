@@ -417,6 +417,8 @@
     "retry": "Retry"
   },
   "roomSelection": {
+    "breakfastIncluded": "Breakfast included",
+    "roomOnly": "Room only",
     "accommodation": "Accommodation for {count} guests",
     "perRoomTerms": "Cancellation terms apply to each room.",
     "roomNumber": "Room {number}",

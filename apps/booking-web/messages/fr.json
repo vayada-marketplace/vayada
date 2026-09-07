@@ -413,6 +413,8 @@
     "retry": "Réessayer"
   },
   "roomSelection": {
+    "breakfastIncluded": "Petit-déjeuner inclus",
+    "roomOnly": "Chambre seule",
     "accommodation": "Hébergement pour {count} personnes",
     "perRoomTerms": "Les conditions d’annulation s’appliquent à chaque chambre.",
     "roomNumber": "Chambre {number}",

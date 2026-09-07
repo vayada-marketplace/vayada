@@ -413,6 +413,8 @@
     "retry": "Coba Lagi"
   },
   "roomSelection": {
+    "breakfastIncluded": "Termasuk sarapan",
+    "roomOnly": "Kamar saja",
     "accommodation": "Akomodasi untuk {count} tamu",
     "perRoomTerms": "Ketentuan pembatalan berlaku untuk setiap kamar.",
     "roomNumber": "Kamar {number}",

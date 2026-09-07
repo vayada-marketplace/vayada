@@ -413,6 +413,8 @@
     "retry": "Reintentar"
   },
   "roomSelection": {
+    "breakfastIncluded": "Desayuno incluido",
+    "roomOnly": "Solo alojamiento",
     "accommodation": "Alojamiento para {count} huéspedes",
     "perRoomTerms": "Las condiciones de cancelación se aplican a cada habitación.",
     "roomNumber": "Habitación {number}",
