@@ -83,6 +83,33 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     }
   });
 
+  it("preserves inclusive total, stable identity and omitted meals; removes breakfast explicitly", async () => {
+    await repository.upsertPropertyPricingCurrency(currencyCommand("meal-currency", 0, "EUR"));
+    await seedRoomType(roomTypeId, "Meal Suite");
+    const input = { ...planCommand("meal-create", roomTypeId, 0, "120.00"), mealPlan: "breakfast" as const };
+    const created = await repository.upsertFlexibleRatePlan(input);
+    expect(created).toMatchObject({ ok: true, response: { flexibleRatePlan: {
+      flexibleRatePlanId: planId, mealPlan: "breakfast", baseAmount: { amountDecimal: "120.00", currency: "EUR" }
+    } } });
+    expect(await repository.upsertFlexibleRatePlan(input)).toEqual(created);
+    expect(await repository.upsertFlexibleRatePlan({ ...input, mealPlan: "room_only" }))
+      .toMatchObject({ ok: false, error: { code: "idempotency_key_conflict" } });
+    await repository.upsertFlexibleRatePlan(planCommand("meal-unrelated", roomTypeId, 1, "120.00"));
+    const read = createPgPmsPricingReadModel({ connectionString: TEST_DATABASE_URL! });
+    try {
+      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
+        flexibleRatePlanId: planId, mealPlan: "breakfast", flexibleRatePlanRevision: 2
+      });
+      await expect(admin.query("UPDATE pms.rate_plans SET meal_plan='half_board' WHERE id=$1", [planId])).rejects.toThrow();
+      await repository.upsertFlexibleRatePlan({ ...planCommand("meal-remove", roomTypeId, 2, "120.00"), mealPlan: "room_only" });
+      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({
+        flexibleRatePlanId: planId, mealPlan: "room_only", baseAmount: { amountDecimal: "120.00" }
+      });
+      await admin.query("UPDATE pms.rate_plans SET meal_plan=NULL WHERE id=$1", [planId]);
+      expect(await read.getFlexibleRatePlan(propertyId, roomTypeId)).toMatchObject({ mealPlan: "room_only" });
+    } finally { await read.close(); }
+  });
+
   it("creates exact currency/plan sources, replays once, and updates the stable plan by CAS", async () => {
     const createCurrency = currencyCommand("currency-create", 0, "EUR");
     const createdCurrency = await repository.upsertPropertyPricingCurrency(createCurrency);
@@ -396,7 +423,7 @@ describe.skipIf(!TEST_DATABASE_URL)("PostgreSQL PMS pricing command repository",
     });
     await expect(readPlan(planId)).resolves.toMatchObject({
       amountDecimal: "150.25",
-      mealPlan: null,
+      mealPlan: "room_only",
       paymentPolicy: {},
       depositPolicy: {},
       contractVersion: "pms-pricing.v1",
