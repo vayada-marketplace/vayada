@@ -7,6 +7,11 @@ import { createPgChannelDatePrices } from "../domains/pmsChannelDatePrices.js";
 import { createPgChannexManagementPlanPort } from "./channexManagementPlans.js";
 import { createChannexManagementProvider } from "./channexManagement.js";
 
+import { createPgChannexAriSchedule } from "../jobs/pmsChannexAriSchedule.js";
+
+import { createPgPmsChannexManagementWorkerStore } from "../jobs/pmsChannexManagementWorkerStore.js";
+import { createPmsChannexManagementTargetState } from "../jobs/pmsChannexManagementTargetState.js";
+
 const url = process.env["TEST_DATABASE_URL"];
 describe.skipIf(!url)("saved Channex pricing", () => {
   const pool = new pg.Pool({ connectionString: url });
@@ -277,6 +282,105 @@ describe.skipIf(!url)("saved Channex pricing", () => {
       });
       expect(fetcher).not.toHaveBeenCalled();
     } finally {
+      await plans.close();
+    }
+  });
+  it("schedules each source transition once and shares manual pricing and cutover protection", async () => {
+    const schedule = createPgChannexAriSchedule(url!);
+    const otherSchedule = createPgChannexAriSchedule(url!);
+    const now = new Date("2026-12-27T16:30:00Z");
+    const plans = createPgChannexManagementPlanPort({
+      connectionString: url!,
+      now: () => now,
+      bookingRevisionHandoff: async () => {},
+    });
+    const jobs = async () =>
+      (
+        await pool.query(
+          `SELECT id AS "jobId",property_id AS "propertyId",payload AS input,
+      correlation_id AS "correlationId",1 AS "attemptNumber",5 AS "maxAttempts" FROM platform.jobs
+      WHERE property_id=$1 AND job_metadata->>'source'='channex-ari-schedule' ORDER BY created_at,id`,
+          [propertyId],
+        )
+      ).rows;
+    try {
+      await pool.query(`UPDATE pms.room_types SET room_facts_revision=1 WHERE id=$1`, [roomTypeId]);
+      await Promise.all([schedule.enqueue(now), otherSchedule.enqueue(now)]);
+      let saved = await jobs();
+      expect(saved).toHaveLength(1);
+      const scheduled = await plans.plan(saved[0]);
+      const manual = await plans.plan({
+        ...saved[0],
+        input: { ...saved[0].input, idempotencyKey: randomUUID(), commandId: randomUUID() },
+      });
+      expect(scheduled.requests).toEqual(manual.requests);
+      await pool.query(
+        `UPDATE pms.channel_connections SET last_ari_sync_at=now(),updated_at=now() WHERE id=$1`,
+        [connectionId],
+      );
+      await schedule.enqueue(now);
+      expect(await jobs()).toHaveLength(1);
+      const previous = (await prices.get(scope))!;
+      await prices.put(context, {
+        ...scope,
+        currency: "EUR",
+        amountDecimal: "77.00",
+        expectedRevision: previous.revision,
+        commandId: randomUUID(),
+      });
+      await schedule.enqueue(now);
+      expect(await jobs()).toHaveLength(2);
+      await prices.put(context, {
+        ...scope,
+        currency: "EUR",
+        amountDecimal: null,
+        expectedRevision: previous.revision + 1,
+        commandId: randomUUID(),
+      });
+      await schedule.enqueue(now);
+      expect(await jobs()).toHaveLength(3);
+      await schedule.enqueue(new Date("2026-12-28T16:30:00Z"));
+      saved = await jobs();
+      expect(saved).toHaveLength(4);
+      const fetcher = vi.fn<typeof fetch>();
+      const guarded = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "local-test",
+        plans,
+        fetch: fetcher,
+        canSyncAri: false,
+      });
+      expect(await guarded.execute(saved[0])).toMatchObject({ ok: false, code: "invalid_state" });
+      expect(fetcher).not.toHaveBeenCalled();
+      const store = createPgPmsChannexManagementWorkerStore({
+        connectionString: url!,
+        targetState: createPmsChannexManagementTargetState(),
+      });
+      try {
+        await pool.query(
+          `UPDATE platform.jobs SET priority=(SELECT COALESCE(MAX(priority),0)+1 FROM platform.jobs) WHERE property_id=$1`,
+          [propertyId],
+        );
+        const claims = await Promise.all([
+          store.claim({ workerId: "first", now }),
+          store.claim({ workerId: "second", now }),
+        ]);
+        const owned = claims.filter((job) => job?.propertyId === propertyId);
+        expect(owned).toHaveLength(1);
+        const index = claims.indexOf(owned[0]!);
+        await store.succeed(
+          owned[0]!,
+          { ok: true },
+          { workerId: index === 0 ? "first" : "second", now },
+        );
+        await schedule.enqueue(new Date("2026-12-28T16:30:00Z"));
+        expect(await jobs()).toHaveLength(4);
+      } finally {
+        await store.close?.();
+      }
+    } finally {
+      await schedule.close();
+      await otherSchedule.close();
       await plans.close();
     }
   });
