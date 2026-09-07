@@ -1,3 +1,4 @@
+import { coversAlertScope } from "./channexManagementPlans.js";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannexManagementJob } from "../jobs/pmsChannexManagementWorker.js";
@@ -293,3 +294,129 @@ function response(status: number, body?: unknown): Response {
     headers: { "content-type": "application/json", "x-request-id": "request-1" },
   });
 }
+
+describe("alert recovery provider evidence", () => {
+  it.each(["warning", "mismatch", "verified"])(
+    "requires warning-free acceptance and readback: %s",
+    async (outcome) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          Response.json({ meta: { warnings: outcome === "warning" ? ["rejected"] : [] } }),
+        )
+        .mockResolvedValueOnce(
+          Response.json({ data: { room: { "2026-09-10": outcome === "mismatch" ? 1 : 3 } } }),
+        );
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        fetch: fetcher,
+        plans: {
+          plan: async () => ({
+            verifyRecovery: true,
+            requests: [
+              channexRequests.availability([
+                {
+                  property_id: "property",
+                  room_type_id: "room",
+                  date_from: "2026-09-10",
+                  date_to: "2026-09-10",
+                  availability: 3,
+                },
+              ]),
+            ],
+          }),
+        },
+      });
+      expect(await provider.execute(job("sync_ari"))).toMatchObject(
+        outcome === "verified"
+          ? { ok: true, alertRecoveryVerified: true }
+          : { ok: false, code: outcome === "warning" ? "invalid_payload" : "provider_unavailable" },
+      );
+    },
+  );
+  it.each([false, true])(
+    "requires provider-confirmed reconnection before sync (%s)",
+    async (active) => {
+      const handoff = vi.fn();
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          Response.json({ data: { id: "channel", properties: ["property"], is_active: active } }),
+        )
+        .mockResolvedValueOnce(Response.json({ data: [] }));
+      const provider = createChannexManagementProvider({
+        apiBaseUrl: "https://staging.channex.io",
+        apiKey: "synthetic",
+        fetch: fetcher,
+        plans: {
+          plan: async () => ({
+            verifyRecovery: true,
+            recoveryChannelId: "channel",
+            externalPropertyId: "property",
+            requests: [channexRequests.bookingRevisionFeed("property")],
+            bookingRevisionHandoff: handoff,
+          }),
+        },
+      });
+      expect(await provider.execute(job("sync_bookings"))).toMatchObject(
+        active ? { ok: true, alertRecoveryVerified: true } : { ok: false, code: "invalid_state" },
+      );
+      expect(handoff).toHaveBeenCalledTimes(active ? 1 : 0);
+    },
+  );
+  it("does not verify a booking feed handoff with unfinished ingestion", async () => {
+    const provider = createChannexManagementProvider({
+      apiBaseUrl: "https://staging.channex.io",
+      apiKey: "synthetic",
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "revision" }] })),
+      plans: {
+        plan: async () => ({
+          verifyRecovery: true,
+          requests: [channexRequests.bookingRevisionFeed("property")],
+          bookingRevisionHandoff: async () => {
+            throw new Error("Revision processing pending");
+          },
+        }),
+      },
+    });
+    expect(await provider.execute(job("sync_bookings"))).toMatchObject({
+      ok: false,
+      code: "provider_unavailable",
+    });
+  });
+});
+
+it("refuses to verify empty successful responses or incident scope outside submitted dates", async () => {
+  const plan = {
+    verifyRecovery: true,
+    requests: [
+      channexRequests.availability([
+        {
+          property_id: "property",
+          room_type_id: "room",
+          date_from: "2026-09-10",
+          date_to: "2026-09-10",
+          availability: 3,
+        },
+      ]),
+    ],
+  };
+  const provider = createChannexManagementProvider({
+    apiBaseUrl: "https://staging.channex.io",
+    apiKey: "synthetic",
+    fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 })),
+    plans: { plan: async () => plan },
+  });
+  expect(await provider.execute(job("sync_ari"))).toMatchObject({ ok: false });
+  expect(
+    coversAlertScope(plan, { roomTypeId: "room", dateFrom: "2026-09-10", dateTo: "2026-09-10" }),
+  ).toBe(true);
+  expect(
+    coversAlertScope(plan, { roomTypeId: "room", dateFrom: "2026-09-10", dateTo: "2026-09-11" }),
+  ).toBe(false);
+  expect(
+    coversAlertScope(plan, { roomTypeId: "other", dateFrom: "2026-09-10", dateTo: "2026-09-10" }),
+  ).toBe(false);
+  expect(coversAlertScope(plan, {})).toBe(false);
+});
